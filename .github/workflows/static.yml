@@ -33,7 +33,7 @@ jobs:
         run: npm install
         working-directory: painel_web
       
-      - name: Build (skip typecheck)
+      - name: Build
         run: npx vite build
         working-directory: painel_web
       
