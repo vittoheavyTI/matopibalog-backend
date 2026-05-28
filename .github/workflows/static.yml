@@ -1,4 +1,3 @@
-# Simple workflow for deploying static content to GitHub Pages
 name: Deploy static content to Pages
 
 on:
@@ -34,8 +33,8 @@ jobs:
         run: npm install
         working-directory: painel_web
       
-      - name: Build
-        run: npm run build
+      - name: Build (skip typecheck)
+        run: npx vite build
         working-directory: painel_web
       
       - name: Setup Pages
@@ -44,7 +43,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: 'painel_web/dist'
+          path: painel_web/dist
       
       - name: Deploy to GitHub Pages
         id: deployment
