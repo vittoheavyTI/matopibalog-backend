@@ -70,6 +70,8 @@ router.post('/planos', async (req, res) => {
   const { data, error } = await supabase.from('planos').insert({
     nome: req.body.nome,
     preco_mensal: Number(req.body.preco_mensal) || 0,
+    descricao: req.body.descricao || '',
+    recursos: req.body.recursos || '',
     limite_motoristas: Number(req.body.limite_motoristas) || 5,
     dias_trial: Number(req.body.dias_trial) || 7,
     ativo: true
@@ -82,6 +84,8 @@ router.put('/planos/:id', async (req, res) => {
   const upd = {};
   if (req.body.nome !== undefined) upd.nome = req.body.nome;
   if (req.body.preco_mensal !== undefined) upd.preco_mensal = Number(req.body.preco_mensal);
+  if (req.body.descricao !== undefined) upd.descricao = req.body.descricao;
+  if (req.body.recursos !== undefined) upd.recursos = req.body.recursos;
   if (req.body.limite_motoristas !== undefined) upd.limite_motoristas = Number(req.body.limite_motoristas);
   if (req.body.dias_trial !== undefined) upd.dias_trial = Number(req.body.dias_trial);
   if (req.body.status !== undefined) upd.ativo = req.body.status === 'ativo';
