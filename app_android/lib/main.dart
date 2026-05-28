@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:workmanager/workmanager.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'providers/auth_provider.dart';
+import 'providers/finance_provider.dart';
 import 'screens/login_screen.dart';
 import 'screens/home_screen.dart';
 import 'services/offline_sync.dart';
@@ -8,42 +10,31 @@ import 'services/offline_sync.dart';
 @pragma('vm:entry-point')
 void callbackDispatcher() {
   Workmanager().executeTask((task, inputData) async {
-    // Tenta sincronizar dados pendentes quando houver internet
     await OfflineSync.syncPendingTasks();
     return Future.value(true);
   });
 }
 
 void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
   try {
-    WidgetsFlutterBinding.ensureInitialized();
-    
-    // Inicializa Workmanager (pode falhar na Web ou se não configurado)
-    await Workmanager().initialize(callbackDispatcher, isInDebugMode: true);
+    await Workmanager().initialize(callbackDispatcher, isInDebugMode: false);
+  } catch (_) {}
 
-    final prefs = await SharedPreferences.getInstance();
-    final String? token = prefs.getString('token');
-
-    runApp(ChoferLogApp(isLoggedIn: token != null));
-  } catch (e, stackTrace) {
-    runApp(MaterialApp(
-      home: Scaffold(
-        body: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(20),
-            child: Text('Erro fatal na inicialização:\n$e\n\n$stackTrace', 
-              style: const TextStyle(color: Colors.red)),
-          ),
-        ),
-      ),
-    ));
-  }
+  runApp(
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => AuthProvider()),
+        ChangeNotifierProvider(create: (_) => FinanceProvider()),
+      ],
+      child: const ChoferLogApp(),
+    ),
+  );
 }
 
 class ChoferLogApp extends StatelessWidget {
-  final bool isLoggedIn;
-  
-  const ChoferLogApp({super.key, required this.isLoggedIn});
+  const ChoferLogApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -51,16 +42,74 @@ class ChoferLogApp extends StatelessWidget {
       title: 'Chofer Log',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        primarySwatch: Colors.blue,
+        colorSchemeSeed: Colors.blue,
         useMaterial3: true,
-        elevatedButtonTheme: ElevatedButtonThemeData(
-          style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.blue,
-            foregroundColor: Colors.white,
-          ),
+        brightness: Brightness.light,
+      ),
+      home: const SplashScreen(),
+    );
+  }
+}
+
+class SplashScreen extends StatefulWidget {
+  const SplashScreen({super.key});
+
+  @override
+  State<SplashScreen> createState() => _SplashScreenState();
+}
+
+class _SplashScreenState extends State<SplashScreen> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<AuthProvider>().tryAutoLogin();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<AuthProvider>(
+      builder: (context, auth, _) {
+        switch (auth.status) {
+          case AuthStatus.authenticated:
+            return const HomeScreen();
+          case AuthStatus.unauthenticated:
+            return const LoginScreen();
+          case AuthStatus.loading:
+          case AuthStatus.initial:
+            return const _SplashBody();
+          case AuthStatus.error:
+            return const LoginScreen();
+        }
+      },
+    );
+  }
+}
+
+class _SplashBody extends StatelessWidget {
+  const _SplashBody();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.local_shipping, size: 80, color: Colors.blue),
+            const SizedBox(height: 24),
+            Text(
+              'CHOFER LOG',
+              style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 32),
+            const CircularProgressIndicator(),
+          ],
         ),
       ),
-      home: isLoggedIn ? const HomeScreen() : const LoginScreen(),
     );
   }
 }

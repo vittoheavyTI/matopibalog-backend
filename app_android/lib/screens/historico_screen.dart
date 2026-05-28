@@ -12,6 +12,7 @@ class HistoricoScreen extends StatefulWidget {
 class _HistoricoScreenState extends State<HistoricoScreen> {
   List<dynamic> _items = [];
   bool _loading = true;
+  String _error = '';
   String _tipoFiltro = 'fretes';
 
   @override
@@ -21,13 +22,26 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
   }
 
   Future<void> _fetchData() async {
-    setState(() => _loading = true);
-    final data = await ApiService.getList(_tipoFiltro);
-    if (mounted) {
-      setState(() {
-        _items = data;
-        _loading = false;
-      });
+    setState(() {
+      _loading = true;
+      _error = '';
+    });
+
+    try {
+      final data = await ApiService.getList(_tipoFiltro);
+      if (mounted) {
+        setState(() {
+          _items = data;
+          _loading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = 'Erro ao carregar dados. Verifique sua conexão.';
+          _loading = false;
+        });
+      }
     }
   }
 
@@ -40,6 +54,7 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
           preferredSize: const Size.fromHeight(50),
           child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
             child: Row(
               children: [
                 _filterBtn('fretes', 'Fretes'),
@@ -51,22 +66,65 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
           ),
         ),
       ),
-      body: _loading 
-        ? const Center(child: CircularProgressIndicator())
-        : _items.isEmpty
-          ? const Center(child: Text('Nenhum registro encontrado.'))
-          : ListView.builder(
-              itemCount: _items.length,
-              itemBuilder: (context, index) {
-                final item = _items[index];
-                return ListTile(
-                  leading: Icon(_getIcon()),
-                  title: Text(_getTitle(item)),
-                  subtitle: Text(DateFormat('dd/MM/yyyy HH:mm').format(DateTime.parse(item['data']))),
-                  trailing: Text('R\$ ${(_getValue(item)).toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
-                );
-              },
+      body: _buildBody(),
+    );
+  }
+
+  Widget _buildBody() {
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_error.isNotEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.cloud_off, size: 64, color: Colors.grey.shade400),
+              const SizedBox(height: 16),
+              Text(
+                _error,
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.grey.shade600, fontSize: 16),
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton.icon(
+                onPressed: _fetchData,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Tentar novamente'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (_items.isEmpty) {
+      return const Center(child: Text('Nenhum registro encontrado.'));
+    }
+
+    return RefreshIndicator(
+      onRefresh: _fetchData,
+      child: ListView.builder(
+        itemCount: _items.length,
+        itemBuilder: (context, index) {
+          final item = _items[index];
+          return ListTile(
+            leading: Icon(_getIcon()),
+            title: Text(_getTitle(item)),
+            subtitle: Text(
+              DateFormat('dd/MM/yyyy HH:mm')
+                  .format(DateTime.parse(item['data'])),
             ),
+            trailing: Text(
+              'R\$ ${(_getValue(item)).toStringAsFixed(2)}',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+          );
+        },
+      ),
     );
   }
 
@@ -104,6 +162,8 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
   }
 
   double _getValue(dynamic item) {
-    return double.tryParse((item['valor_frete'] ?? item['valor'] ?? item['valor_total'] ?? 0).toString()) ?? 0.0;
+    return double.tryParse(
+      (item['valor_frete'] ?? item['valor'] ?? item['valor_total'] ?? 0).toString(),
+    ) ?? 0.0;
   }
 }
