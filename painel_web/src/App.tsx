@@ -1,0 +1,93 @@
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { ProtectedRoute } from './components/ProtectedRoute';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { Layout } from './components/Layout';
+import { Login } from './pages/Login';
+import { Dashboard } from './pages/Dashboard';
+import { Motoristas } from './pages/Motoristas';
+import { Relatorios } from './pages/Relatorios';
+import { GerenciamentoViagens } from './pages/GerenciamentoViagens';
+import { ResumoMotorista } from './pages/ResumoMotorista';
+import { Usuarios } from './pages/Usuarios';
+import { Configuracoes } from './pages/Configuracoes';
+import { Integracoes } from './pages/Integracoes';
+import { PainelVisaoGeral } from './pages/PainelVisaoGeral';
+import { PainelEmpresas } from './pages/PainelEmpresas';
+import { PainelPlanos } from './pages/PainelPlanos';
+import { PainelAssinaturas } from './pages/PainelAssinaturas';
+import { PainelUsuarios } from './pages/PainelUsuarios';
+import { PainelMotoristas } from './pages/PainelMotoristas';
+import { PainelRelatorios } from './pages/PainelRelatorios';
+import { PainelFinanceiro } from './pages/PainelFinanceiro';
+import { PainelConfigSistema } from './pages/PainelConfigSistema';
+import { PainelNotificacoes } from './pages/PainelNotificacoes';
+import { PlanosPublicos } from './pages/PlanosPublicos';
+import { CadastroPublico } from './pages/CadastroPublico';
+import { Faturas } from './pages/Faturas';
+
+const AppRoutes = () => {
+  const { loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
+
+  return (
+    <Routes>
+      <Route path="/login" element={<Login />} />
+      <Route path="/planos" element={<PlanosPublicos />} />
+      <Route path="/cadastro" element={<CadastroPublico />} />
+      
+      <Route path="/" element={
+        <ProtectedRoute>
+          <Layout />
+        </ProtectedRoute>
+      }>
+        <Route index element={<Dashboard />} />
+        <Route path="motoristas" element={<Motoristas />} />
+        <Route path="relatorios" element={<Relatorios />} />
+        <Route path="relatorios/viagens" element={<GerenciamentoViagens />} />
+        <Route path="relatorios/resumo" element={<ResumoMotorista />} />
+        <Route path="admins" element={<Usuarios />} />
+        <Route path="painel-administrativo">
+          <Route index element={<Navigate to="visao-geral" replace />} />
+          <Route path="visao-geral" element={<ProtectedRoute><PainelVisaoGeral /></ProtectedRoute>} />
+          <Route path="empresas" element={<ProtectedRoute><PainelEmpresas /></ProtectedRoute>} />
+          <Route path="planos" element={<ProtectedRoute><ErrorBoundary><PainelPlanos /></ErrorBoundary></ProtectedRoute>} />
+          <Route path="assinaturas" element={<ProtectedRoute><PainelAssinaturas /></ProtectedRoute>} />
+          <Route path="usuarios" element={<ProtectedRoute><PainelUsuarios /></ProtectedRoute>} />
+          <Route path="motoristas" element={<ProtectedRoute><PainelMotoristas /></ProtectedRoute>} />
+          <Route path="relatorios" element={<ProtectedRoute><PainelRelatorios /></ProtectedRoute>} />
+          <Route path="financeiro" element={<ProtectedRoute><PainelFinanceiro /></ProtectedRoute>} />
+          <Route path="configuracoes" element={<ProtectedRoute><PainelConfigSistema /></ProtectedRoute>} />
+          <Route path="notificacoes" element={<ProtectedRoute><PainelNotificacoes /></ProtectedRoute>} />
+          <Route path="faturas" element={<ProtectedRoute><Faturas /></ProtectedRoute>} />
+        </Route>
+        <Route path="integracoes" element={<ProtectedRoute><Integracoes /></ProtectedRoute>} />
+        <Route path="configuracoes" element={<Configuracoes />} />
+      </Route>
+
+      <Route path="/viagens" element={<Navigate to="/relatorios/viagens" replace />} />
+      <Route path="/resumo" element={<Navigate to="/relatorios/resumo" replace />} />
+
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  );
+};
+
+function App() {
+  return (
+    <AuthProvider>
+      <Router>
+        <AppRoutes />
+      </Router>
+    </AuthProvider>
+  );
+}
+
+export default App;

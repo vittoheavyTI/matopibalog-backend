@@ -1,0 +1,30 @@
+name: chofer_log
+description: A new Flutter project for CHOFER LOG drivers.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.1.0
+  provider: ^6.1.1
+  shared_preferences: ^2.2.2
+  image_picker: ^1.0.4
+  uuid: ^4.3.3
+  intl: ^0.18.1
+  connectivity_plus: ^5.0.2
+  workmanager: ^0.9.0
+  sqflite: ^2.3.0
+  path_provider: ^2.1.2
+  path: ^1.9.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^2.0.0
+
+flutter:
+  uses-material-design: true

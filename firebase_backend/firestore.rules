@@ -1,0 +1,51 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Função para verificar se é admin
+    function isAdmin() {
+      return request.auth != null && request.auth.token.admin == true;
+    }
+    
+    // Função para verificar se o usuário está acessando seu próprio dado
+    function isOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    match /usuarios/{uid} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow write: if isAdmin();
+      // Motoristas não podem alterar seus próprios dados de usuário para evitar escalação
+    }
+
+    match /motoristas/{uid} {
+      allow read: if isOwner(uid) || isAdmin();
+      // Motorista pode criar e atualizar os próprios dados básicos, mas não pode alterar comissão nem status
+      allow create: if isOwner(uid) 
+                    && request.resource.data.percentualComissao == 12 
+                    && request.resource.data.statusCadastro == 'pendente';
+      allow update: if isAdmin() || (
+        isOwner(uid) 
+        && request.resource.data.percentualComissao == resource.data.percentualComissao
+        && request.resource.data.statusCadastro == resource.data.statusCadastro
+      );
+      allow delete: if isAdmin();
+    }
+
+    match /fretes/{freteId} {
+      allow read, write: if isAdmin() || isOwner(resource.data.motoristaUid) || isOwner(request.resource.data.motoristaUid);
+    }
+
+    match /despesas/{despesaId} {
+      allow read, write: if isAdmin() || isOwner(resource.data.motoristaUid) || isOwner(request.resource.data.motoristaUid);
+    }
+
+    match /abastecimentos/{abastId} {
+      allow read, write: if isAdmin() || isOwner(resource.data.motoristaUid) || isOwner(request.resource.data.motoristaUid);
+    }
+
+    match /vales/{valeId} {
+      allow read, write: if isAdmin() || isOwner(resource.data.motoristaUid) || isOwner(request.resource.data.motoristaUid);
+    }
+  }
+}
