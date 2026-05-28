@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { font-family: Arial, sans-serif; font-size: 12pt; line-height: 1.6; color: #333; max-width: 800px; margin: 40px auto; padding: 20px; }
+    h1 { text-align: center; font-size: 18pt; margin-bottom: 30px; }
+    h2 { font-size: 14pt; margin-top: 25px; border-bottom: 1px solid #ccc; padding-bottom: 5px; }
+    p { text-align: justify; }
+    .destaque { background: #f3f4f6; padding: 15px; border-radius: 8px; margin: 20px 0; }
+    .assinaturas { margin-top: 50px; display: flex; justify-content: space-between; }
+    .assinatura { text-align: center; width: 45%; }
+    .linha { border-top: 1px solid #333; margin-top: 60px; padding-top: 10px; }
+  </style>
+</head>
+<body>
+  <h1>CONTRATO DE PRESTAÇÃO DE SERVIÇOS</h1>
+  <p><strong>CONTRATANTE:</strong> {{NOME_EMPRESA}}, CNPJ {{CNPJ}}, com sede na {{ENDERECO}}, doravante denominado CONTRATANTE.</p>
+  <p><strong>CONTRATADA:</strong> Matopiba Log Tecnologia Ltda, CNPJ 00.000.000/0001-00, com sede na Rua Exemplo, 123, doravante denominada CONTRATADA.</p>
+
+  <h2>CLÁUSULA PRIMEIRA — OBJETO</h2>
+  <p>O presente contrato tem por objeto a prestação de serviços de software de gestão logística, incluindo funcionalidades de gerenciamento de fretes, motoristas, despesas, abastecimentos e relatórios, conforme o plano contratado: <strong>{{PLANO_NOME}}</strong>.</p>
+
+  <h2>CLÁUSULA SEGUNDA — VIGÊNCIA</h2>
+  <p>O contrato vigorará pelo prazo de 12 (doze) meses, contados a partir da data de assinatura, renovando-se automaticamente por igual período, salvo manifestação contrária de qualquer das partes com antecedência mínima de 30 (trinta) dias.</p>
+
+  <h2>CLÁUSULA TERCEIRA — VALOR E FORMA DE PAGAMENTO</h2>
+  <p>O CONTRATANTE pagará à CONTRATADA o valor mensal de <strong>R$ {{VALOR}}</strong>, referente ao plano {{PLANO_NOME}}, com vencimento todo dia {{DIA_VENCIMENTO}} de cada mês.</p>
+  <p>O pagamento será efetuado por meio de PIX, boleto bancário ou cartão de crédito, conforme opção do CONTRATANTE.</p>
+
+  <h2>CLÁUSULA QUARTA — OBRIGAÇÕES DA CONTRATADA</h2>
+  <p>A CONTRATADA se obriga a:</p>
+  <p>a) Disponibilizar o sistema de gestão logística com as funcionalidades contratadas;<br>
+  b) Garantir a disponibilidade do sistema com uptime mínimo de 99,5%;<br>
+  c) Prestar suporte técnico durante o horário comercial;<br>
+  d) Manter a segurança e integridade dos dados armazenados.</p>
+
+  <h2>CLÁUSULA QUINTA — OBRIGAÇÕES DO CONTRATANTE</h2>
+  <p>O CONTRATANTE se obriga a:</p>
+  <p>a) Efetuar o pagamento pontual das mensalidades;<br>
+  b) Fornecer informações verídicas para cadastro;<br>
+  c) Não ceder ou compartilhar credenciais de acesso;<br>
+  d) Utilizar o sistema de acordo com a legislação vigente.</p>
+
+  <h2>CLÁUSULA SEXTA — SIGILO E PROTEÇÃO DE DADOS</h2>
+  <p>As partes se comprometem a manter sigilo absoluto sobre todas as informações confidenciais compartilhadas, em conformidade com a Lei Geral de Proteção de Dados (LGPD - Lei nº 13.709/2018).</p>
+
+  <h2>CLÁUSULA SÉTIMA — RESCISÃO</h2>
+  <p>O presente contrato poderá ser rescindido:</p>
+  <p>a) Por acordo entre as partes;<br>
+  b) Por inadimplemento de qualquer cláusula contratual;<br>
+  c) Mediante aviso prévio de 30 (trinta) dias.</p>
+  <p>Em caso de rescisão por inadimplemento do CONTRATANTE, este responderá pelas mensalidades vincendas até o final do período de vigência.</p>
+
+  <h2>CLÁUSULA OITAVA — FORO</h2>
+  <p>Fica eleito o foro da comarca de {{CIDADE}} para dirimir quaisquer controvérsias oriundas deste contrato, com renúncia expressa a qualquer outro, por mais privilegiado que seja.</p>
+
+  <p>E, por estarem justas e contratadas, as partes assinam o presente instrumento em 2 (duas) vias de igual teor e forma.</p>
+
+  <p style="text-align: center; margin-top: 40px;">{{CIDADE}}, {{DATA_EXTENSO}}</p>
+
+  <div class="assinaturas">
+    <div class="assinatura">
+      <p class="linha"><strong>CONTRATANTE</strong></p>
+      <p style="font-size: 10pt;">{{NOME_EMPRESA}}</p>
+    </div>
+    <div class="assinatura">
+      <p class="linha"><strong>CONTRATADA</strong></p>
+      <p style="font-size: 10pt;">Matopiba Log Tecnologia Ltda</p>
+    </div>
+  </div>
+</body>
+</html>
