@@ -6,10 +6,11 @@
     <title>Matopiba Log</title>
     <script>
       sessionStorage.redirect = location.pathname + location.search + location.hash
-      location.href = '/matopibalog-backend/'
+      var basePath = '/'
+      location.replace(basePath)
     </script>
   </head>
   <body>
-    <a href="/matopibalog-backend/">Ir para o Matopiba Log</a>
+    <a href="/">Ir para o Matopiba Log</a>
   </body>
 </html>

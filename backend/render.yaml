@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: matopibalog-api
+    env: node
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: SUPABASE_URL
+        value: https://rjahjogidyndphdxevom.supabase.co
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: FRONTEND_URL
+        value: https://matopibalog.com.br
+      - key: NODE_ENV
+        value: production
