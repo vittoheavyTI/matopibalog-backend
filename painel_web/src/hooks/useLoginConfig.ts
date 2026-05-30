@@ -80,65 +80,108 @@ export function useLoginConfig() {
       .then((response) => {
         const d = response.data;
         if (d && Object.keys(d).length > 0) {
-          if (d.loginLogo !== undefined) {
-            if (d.loginLogo) localStorage.setItem('choferlog_login_logo', d.loginLogo);
-            else localStorage.removeItem('choferlog_login_logo');
-          }
-          if (d.loginLogoScale !== undefined) localStorage.setItem('choferlog_login_logo_scale', d.loginLogoScale.toString());
-          if (d.loginLogoY !== undefined) localStorage.setItem('choferlog_login_logo_y', d.loginLogoY.toString());
-          
-          if (d.loginBg !== undefined) {
-            if (d.loginBg) localStorage.setItem('choferlog_login_bg', d.loginBg);
-            else localStorage.removeItem('choferlog_login_bg');
-          }
-          if (d.loginBgScale !== undefined) localStorage.setItem('choferlog_login_bg_scale', d.loginBgScale.toString());
-          if (d.loginBgY !== undefined) localStorage.setItem('choferlog_login_bg_y', d.loginBgY.toString());
-          
-          if (d.cardScale !== undefined) localStorage.setItem('choferlog_card_scale', d.cardScale.toString());
-          if (d.cardX !== undefined) localStorage.setItem('choferlog_card_x', d.cardX.toString());
-          if (d.cardY !== undefined) localStorage.setItem('choferlog_card_y', d.cardY.toString());
-          if (d.cardColor !== undefined) localStorage.setItem('choferlog_card_color', d.cardColor);
-          if (d.cardOpacity !== undefined) localStorage.setItem('choferlog_card_opacity', d.cardOpacity.toString());
-          
-          if (d.footerText !== undefined) localStorage.setItem('choferlog_login_footer', d.footerText);
-          if (d.contactPhone !== undefined) localStorage.setItem('choferlog_contact_phone', d.contactPhone);
-          if (d.contactEmail !== undefined) localStorage.setItem('choferlog_contact_email', d.contactEmail);
-          if (d.footerColor !== undefined) localStorage.setItem('choferlog_footer_color', d.footerColor);
-          if (d.footerOpacity !== undefined) localStorage.setItem('choferlog_footer_opacity', d.footerOpacity.toString());
-          if (d.footerFontSize !== undefined) localStorage.setItem('choferlog_footer_font_size', d.footerFontSize.toString());
-          if (d.footerBold !== undefined) localStorage.setItem('choferlog_footer_bold', d.footerBold.toString());
-          if (d.footerFontFamily !== undefined) localStorage.setItem('choferlog_footer_font_family', d.footerFontFamily);
-          if (d.footerWidth !== undefined) localStorage.setItem('choferlog_footer_width', d.footerWidth.toString());
-          if (d.footerHeight !== undefined) localStorage.setItem('choferlog_footer_height', d.footerHeight.toString());
-          
-          if (d.inputBgColor !== undefined) localStorage.setItem('choferlog_input_bg', d.inputBgColor);
-          if (d.inputBorderColor !== undefined) localStorage.setItem('choferlog_input_border', d.inputBorderColor);
+          const changed: Record<string, any> = {};
 
-          setConfig({
-            loginLogo: d.loginLogo || null,
-            loginLogoScale: Number(d.loginLogoScale) || 100,
-            loginLogoY: Number(d.loginLogoY) || 0,
-            loginBg: d.loginBg || null,
-            loginBgScale: Number(d.loginBgScale) || 100,
-            loginBgY: Number(d.loginBgY) || 0,
-            cardScale: Number(d.cardScale) || 100,
-            cardX: Number(d.cardX) || 0,
-            cardY: Number(d.cardY) || 0,
-            cardColor: d.cardColor || '#ffffff',
-            cardOpacity: Number(d.cardOpacity) || 100,
-            footerText: d.footerText || '',
-            contactPhone: d.contactPhone || '',
-            contactEmail: d.contactEmail || '',
-            footerColor: d.footerColor || '#ffffff',
-            footerOpacity: Number(d.footerOpacity) || 70,
-            footerFontSize: Number(d.footerFontSize) || 14,
-            footerBold: d.footerBold === true || d.footerBold === 'true',
-            footerFontFamily: d.footerFontFamily || 'Arial',
-            footerWidth: Number(d.footerWidth) || 80,
-            footerHeight: Number(d.footerHeight) || 60,
-            inputBgColor: d.inputBgColor || '#ffffff',
-            inputBorderColor: d.inputBorderColor || '#e5e7eb',
-          });
+          if (d.loginLogo !== undefined && !localStorage.getItem('choferlog_login_logo')) {
+            localStorage.setItem('choferlog_login_logo', d.loginLogo);
+            changed.loginLogo = d.loginLogo;
+          }
+          if (d.loginLogoScale !== undefined && !localStorage.getItem('choferlog_login_logo_scale')) {
+            localStorage.setItem('choferlog_login_logo_scale', d.loginLogoScale.toString());
+            changed.loginLogoScale = d.loginLogoScale;
+          }
+          if (d.loginLogoY !== undefined && !localStorage.getItem('choferlog_login_logo_y')) {
+            localStorage.setItem('choferlog_login_logo_y', d.loginLogoY.toString());
+            changed.loginLogoY = d.loginLogoY;
+          }
+
+          if (d.loginBg !== undefined && !localStorage.getItem('choferlog_login_bg')) {
+            localStorage.setItem('choferlog_login_bg', d.loginBg);
+            changed.loginBg = d.loginBg;
+          }
+          if (d.loginBgScale !== undefined && !localStorage.getItem('choferlog_login_bg_scale')) {
+            localStorage.setItem('choferlog_login_bg_scale', d.loginBgScale.toString());
+            changed.loginBgScale = d.loginBgScale;
+          }
+          if (d.loginBgY !== undefined && !localStorage.getItem('choferlog_login_bg_y')) {
+            localStorage.setItem('choferlog_login_bg_y', d.loginBgY.toString());
+            changed.loginBgY = d.loginBgY;
+          }
+
+          if (d.cardScale !== undefined && !localStorage.getItem('choferlog_card_scale')) {
+            localStorage.setItem('choferlog_card_scale', d.cardScale.toString());
+            changed.cardScale = d.cardScale;
+          }
+          if (d.cardX !== undefined && !localStorage.getItem('choferlog_card_x')) {
+            localStorage.setItem('choferlog_card_x', d.cardX.toString());
+            changed.cardX = d.cardX;
+          }
+          if (d.cardY !== undefined && !localStorage.getItem('choferlog_card_y')) {
+            localStorage.setItem('choferlog_card_y', d.cardY.toString());
+            changed.cardY = d.cardY;
+          }
+          if (d.cardColor !== undefined && !localStorage.getItem('choferlog_card_color')) {
+            localStorage.setItem('choferlog_card_color', d.cardColor);
+            changed.cardColor = d.cardColor;
+          }
+          if (d.cardOpacity !== undefined && !localStorage.getItem('choferlog_card_opacity')) {
+            localStorage.setItem('choferlog_card_opacity', d.cardOpacity.toString());
+            changed.cardOpacity = d.cardOpacity;
+          }
+
+          if (d.footerText !== undefined && !localStorage.getItem('choferlog_login_footer')) {
+            localStorage.setItem('choferlog_login_footer', d.footerText);
+            changed.footerText = d.footerText;
+          }
+          if (d.contactPhone !== undefined && !localStorage.getItem('choferlog_contact_phone')) {
+            localStorage.setItem('choferlog_contact_phone', d.contactPhone);
+            changed.contactPhone = d.contactPhone;
+          }
+          if (d.contactEmail !== undefined && !localStorage.getItem('choferlog_contact_email')) {
+            localStorage.setItem('choferlog_contact_email', d.contactEmail);
+            changed.contactEmail = d.contactEmail;
+          }
+          if (d.footerColor !== undefined && !localStorage.getItem('choferlog_footer_color')) {
+            localStorage.setItem('choferlog_footer_color', d.footerColor);
+            changed.footerColor = d.footerColor;
+          }
+          if (d.footerOpacity !== undefined && !localStorage.getItem('choferlog_footer_opacity')) {
+            localStorage.setItem('choferlog_footer_opacity', d.footerOpacity.toString());
+            changed.footerOpacity = d.footerOpacity;
+          }
+          if (d.footerFontSize !== undefined && !localStorage.getItem('choferlog_footer_font_size')) {
+            localStorage.setItem('choferlog_footer_font_size', d.footerFontSize.toString());
+            changed.footerFontSize = d.footerFontSize;
+          }
+          if (d.footerBold !== undefined && !localStorage.getItem('choferlog_footer_bold')) {
+            localStorage.setItem('choferlog_footer_bold', d.footerBold.toString());
+            changed.footerBold = d.footerBold;
+          }
+          if (d.footerFontFamily !== undefined && !localStorage.getItem('choferlog_footer_font_family')) {
+            localStorage.setItem('choferlog_footer_font_family', d.footerFontFamily);
+            changed.footerFontFamily = d.footerFontFamily;
+          }
+          if (d.footerWidth !== undefined && !localStorage.getItem('choferlog_footer_width')) {
+            localStorage.setItem('choferlog_footer_width', d.footerWidth.toString());
+            changed.footerWidth = d.footerWidth;
+          }
+          if (d.footerHeight !== undefined && !localStorage.getItem('choferlog_footer_height')) {
+            localStorage.setItem('choferlog_footer_height', d.footerHeight.toString());
+            changed.footerHeight = d.footerHeight;
+          }
+
+          if (d.inputBgColor !== undefined && !localStorage.getItem('choferlog_input_bg')) {
+            localStorage.setItem('choferlog_input_bg', d.inputBgColor);
+            changed.inputBgColor = d.inputBgColor;
+          }
+          if (d.inputBorderColor !== undefined && !localStorage.getItem('choferlog_input_border')) {
+            localStorage.setItem('choferlog_input_border', d.inputBorderColor);
+            changed.inputBorderColor = d.inputBorderColor;
+          }
+
+          if (Object.keys(changed).length > 0) {
+            setConfig(prev => ({ ...prev, ...changed }));
+          }
         }
       })
       .catch((err) => {
