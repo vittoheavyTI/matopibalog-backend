@@ -358,28 +358,6 @@ export const Configuracoes: React.FC = () => {
           if (d.footerHeight !== undefined) setFooterHeight(d.footerHeight);
           if (d.inputBgColor) setInputBgColor(d.inputBgColor);
           if (d.inputBorderColor) setInputBorderColor(d.inputBorderColor);
-          // Restore localStorage keys from API data
-          localStorage.setItem('choferlog_company', JSON.stringify(d.company || {}));
-          localStorage.setItem('choferlog_printers', JSON.stringify(d.printers || []));
-          if (d.loginLogo) localStorage.setItem('choferlog_login_logo', d.loginLogo);
-          if (d.loginBg) localStorage.setItem('choferlog_login_bg', d.loginBg);
-          if (d.footerText) localStorage.setItem('choferlog_login_footer', d.footerText);
-          if (d.cardScale) localStorage.setItem('choferlog_card_scale', d.cardScale.toString());
-          if (d.cardX !== undefined) localStorage.setItem('choferlog_card_x', d.cardX.toString());
-          if (d.cardY !== undefined) localStorage.setItem('choferlog_card_y', d.cardY.toString());
-          if (d.cardColor) localStorage.setItem('choferlog_card_color', d.cardColor);
-          if (d.cardOpacity !== undefined) localStorage.setItem('choferlog_card_opacity', d.cardOpacity.toString());
-          if (d.contactPhone) localStorage.setItem('choferlog_contact_phone', d.contactPhone);
-          if (d.contactEmail) localStorage.setItem('choferlog_contact_email', d.contactEmail);
-          if (d.footerColor) localStorage.setItem('choferlog_footer_color', d.footerColor);
-          if (d.footerOpacity !== undefined) localStorage.setItem('choferlog_footer_opacity', d.footerOpacity.toString());
-          if (d.footerFontSize !== undefined) localStorage.setItem('choferlog_footer_font_size', d.footerFontSize.toString());
-          if (d.footerBold !== undefined) localStorage.setItem('choferlog_footer_bold', d.footerBold.toString());
-          if (d.footerFontFamily) localStorage.setItem('choferlog_footer_font_family', d.footerFontFamily);
-          if (d.footerWidth !== undefined) localStorage.setItem('choferlog_footer_width', d.footerWidth.toString());
-          if (d.footerHeight !== undefined) localStorage.setItem('choferlog_footer_height', d.footerHeight.toString());
-          if (d.inputBgColor) localStorage.setItem('choferlog_input_bg', d.inputBgColor);
-          if (d.inputBorderColor) localStorage.setItem('choferlog_input_border', d.inputBorderColor);
         }
       })
       .catch(() => {});
@@ -936,7 +914,7 @@ export const Configuracoes: React.FC = () => {
                   <input
                     type="color"
                     value={footerColor}
-                    onChange={e => setFooterColor(e.target.value)}
+                    onChange={e => { const v = e.target.value; setFooterColor(v); localStorage.setItem('choferlog_footer_color', v); }}
                     className="w-12 h-12 rounded-lg border border-gray-200 cursor-pointer"
                   />
                   <span className="text-sm text-gray-500 font-mono">{footerColor}</span>
@@ -947,7 +925,7 @@ export const Configuracoes: React.FC = () => {
                   <span className="font-medium text-gray-700">Transparência</span>
                   <span className="text-gray-500">{footerOpacity}%</span>
                 </div>
-                <input type="range" min="0" max="100" value={footerOpacity} onChange={e => setFooterOpacity(Number(e.target.value))} className="w-full accent-blue-600" />
+                <input type="range" min="0" max="100" value={footerOpacity} onChange={e => { const v = Number(e.target.value); setFooterOpacity(v); localStorage.setItem('choferlog_footer_opacity', v.toString()); }} className="w-full accent-blue-600" />
               </div>
             </div>
 

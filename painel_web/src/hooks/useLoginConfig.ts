@@ -30,6 +30,21 @@ export function useLoginConfig() {
   const [config, setConfig] = useState(defaultConfig);
 
   useEffect(() => {
+    if (!localStorage.getItem('choferlog_card_scale')) localStorage.setItem('choferlog_card_scale', '100');
+    if (!localStorage.getItem('choferlog_card_x')) localStorage.setItem('choferlog_card_x', '0');
+    if (!localStorage.getItem('choferlog_card_y')) localStorage.setItem('choferlog_card_y', '0');
+    if (!localStorage.getItem('choferlog_card_color')) localStorage.setItem('choferlog_card_color', '#ffffff');
+    if (!localStorage.getItem('choferlog_card_opacity')) localStorage.setItem('choferlog_card_opacity', '100');
+    if (!localStorage.getItem('choferlog_footer_color')) localStorage.setItem('choferlog_footer_color', '#ffffff');
+    if (!localStorage.getItem('choferlog_footer_opacity')) localStorage.setItem('choferlog_footer_opacity', '70');
+    if (!localStorage.getItem('choferlog_footer_font_size')) localStorage.setItem('choferlog_footer_font_size', '14');
+    if (!localStorage.getItem('choferlog_footer_bold')) localStorage.setItem('choferlog_footer_bold', 'false');
+    if (!localStorage.getItem('choferlog_footer_font_family')) localStorage.setItem('choferlog_footer_font_family', 'Arial');
+    if (!localStorage.getItem('choferlog_footer_width')) localStorage.setItem('choferlog_footer_width', '80');
+    if (!localStorage.getItem('choferlog_footer_height')) localStorage.setItem('choferlog_footer_height', '60');
+    if (!localStorage.getItem('choferlog_input_bg')) localStorage.setItem('choferlog_input_bg', '#ffffff');
+    if (!localStorage.getItem('choferlog_input_border')) localStorage.setItem('choferlog_input_border', '#e5e7eb');
+
     const savedConfig = {
       loginLogo: localStorage.getItem('choferlog_login_logo'),
       loginLogoScale: Number(localStorage.getItem('choferlog_login_logo_scale')) || 100,
