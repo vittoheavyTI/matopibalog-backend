@@ -157,19 +157,15 @@ export const Login: React.FC = () => {
       @keyframes spin {
         to { transform: rotate(360deg); }
       }
-      @media (max-width: 480px) {
-        .login-card { padding: 1rem !important; }
-        .login-footer { display: none !important; }
-      }
     `}</style>
     <div style={{
-      minHeight: '100dvh',
-      width: '100%',
+      minHeight: '100vh',
+      height: '100vh',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      background: loginBg ? `url(${loginBg}) center/cover no-repeat` : 'linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)',
-      overflow: 'auto',
+      background: loginBg ? `url(${loginBg}) center/cover no-repeat` : '#1a1a2e',
+      overflow: 'hidden',
       padding: '16px',
       boxSizing: 'border-box'
     }}>
@@ -193,26 +189,21 @@ export const Login: React.FC = () => {
         </div>
       ) : (
       <div className="login-card" style={{
-        transform: cardScale !== 100 || cardX !== 0 || cardY !== 0
-          ? `translateX(${cardX}px) translateY(${cardY}px) scale(${Math.min(cardScale, 150) / 100})`
-          : 'none',
+        transform: `translateX(${cardX}px) translateY(${cardY}px) scale(${cardScale / 100})`,
         backgroundColor: `rgba(${parseInt(cardColor.replace('#','').substring(0,2),16)}, ${parseInt(cardColor.replace('#','').substring(2,4),16)}, ${parseInt(cardColor.replace('#','').substring(4,6),16)}, ${cardOpacity / 100})`,
         width: '100%',
         maxWidth: '380px',
         borderRadius: '1rem',
         boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
         padding: '1.5rem',
-        maxHeight: '90dvh',
-        overflowY: 'auto',
         boxSizing: 'border-box'
       }}>
         <div className="flex flex-col items-center mb-6">
           {loginLogo ? (
             <img src={loginLogo} alt="Logo" className="object-contain" style={{
-              transform: `scale(${Math.min(loginLogoScale, 200) / 100}) translateY(${loginLogoY}px)`,
+              transform: `scale(${loginLogoScale / 100}) translateY(${loginLogoY}px)`,
               transformOrigin: 'center',
-              maxWidth: '100%',
-              maxHeight: '200px'
+              maxWidth: '100%'
             }} />
           ) : (
             <div className="bg-blue-600 p-3 rounded-full flex items-center justify-center">
@@ -305,6 +296,11 @@ export const Login: React.FC = () => {
             {loadingLocal ? 'Entrando...' : 'Entrar'}
           </button>
 
+          <div style={{ display: 'flex', justifyContent: 'center', gap: '16px', marginTop: '8px' }}>
+            <a href="#" style={{ color: '#3b82f6', fontSize: '14px', fontFamily: 'Arial, sans-serif', textDecoration: 'none' }} onClick={(e) => { e.preventDefault(); /* navigate to criar conta */ }}>Criar conta</a>
+            <a href="#" style={{ color: '#3b82f6', fontSize: '14px', fontFamily: 'Arial, sans-serif', textDecoration: 'none' }} onClick={(e) => { e.preventDefault(); /* navigate to esqueceu senha */ }}>Esqueceu a senha?</a>
+          </div>
+
           <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', marginTop: '16px' }}>
             <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: '14px', fontFamily: 'Arial, sans-serif' }}>Matopiba Log — Painel Administrativo</span>
           </div>
@@ -337,7 +333,7 @@ export const Login: React.FC = () => {
             alignItems: 'center',
             justifyContent: 'center',
             gap: '12px',
-            flexWrap: 'wrap',
+            flexWrap: 'nowrap',
             fontSize: `${footerFontSize}px`,
             fontWeight: footerBold ? 'bold' : 'normal',
             fontFamily: footerFontFamily,
@@ -345,9 +341,9 @@ export const Login: React.FC = () => {
             textShadow: '0 1px 3px rgba(0,0,0,0.3)',
             height: '100%'
           }}>
-            {contactPhone && <span>📞 {contactPhone}</span>}
-            {contactEmail && <span>📧 {contactEmail}</span>}
-            {footerText && <span>| {footerText}</span>}
+            {contactPhone && <span style={{ whiteSpace: 'nowrap' }}>{contactPhone}</span>}
+            {contactEmail && <span style={{ whiteSpace: 'nowrap' }}>{contactEmail}</span>}
+            {footerText && <span style={{ whiteSpace: 'nowrap' }}>{footerText}</span>}
           </div>
 
           <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '8px', cursor: 'ew-resize', zIndex: 10 }}
