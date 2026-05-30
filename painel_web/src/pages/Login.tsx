@@ -44,71 +44,57 @@ export const Login: React.FC = () => {
   }, [user, navigate]);
 
   useEffect(() => {
-    const savedLogo = localStorage.getItem('choferlog_login_logo');
-    if (savedLogo) setLoginLogo(savedLogo);
+    const loadLocal = (key: string) => localStorage.getItem(key);
+    const loadNum = (key: string, def: number) => { const v = loadLocal(key); return v ? Number(v) : def; };
 
-    const savedLogoScale = localStorage.getItem('choferlog_login_logo_scale');
-    if (savedLogoScale) setLoginLogoScale(Number(savedLogoScale));
-
-    const savedLogoY = localStorage.getItem('choferlog_login_logo_y');
-    if (savedLogoY) setLoginLogoY(Number(savedLogoY));
-
-    const savedBg = localStorage.getItem('choferlog_login_bg');
-    if (savedBg) setLoginBg(savedBg);
-
-
-
-    const savedFooter = localStorage.getItem('choferlog_login_footer');
-    if (savedFooter) setFooterText(savedFooter);
-
-    const savedCardScale = localStorage.getItem('choferlog_card_scale');
-    if (savedCardScale) setCardScale(Number(savedCardScale));
-
-    const savedCardX = localStorage.getItem('choferlog_card_x');
-    if (savedCardX) setCardX(Number(savedCardX));
-
-    const savedCardY = localStorage.getItem('choferlog_card_y');
-    if (savedCardY) setCardY(Number(savedCardY));
-
-    const savedCardColor = localStorage.getItem('choferlog_card_color');
-    if (savedCardColor) setCardColor(savedCardColor);
-
-    const savedCardOpacity = localStorage.getItem('choferlog_card_opacity');
-    if (savedCardOpacity) setCardOpacity(Number(savedCardOpacity));
-
-    const savedPhone = localStorage.getItem('choferlog_contact_phone');
-    if (savedPhone) setContactPhone(savedPhone);
-
-    const savedEmail = localStorage.getItem('choferlog_contact_email');
-    if (savedEmail) setContactEmail(savedEmail);
-
-    const savedFooterColor = localStorage.getItem('choferlog_footer_color');
-    if (savedFooterColor) setFooterColor(savedFooterColor);
-
-    const savedFooterOpacity = localStorage.getItem('choferlog_footer_opacity');
-    if (savedFooterOpacity) setFooterOpacity(Number(savedFooterOpacity));
-
-    const savedFooterFontSize = localStorage.getItem('choferlog_footer_font_size');
-    if (savedFooterFontSize) setFooterFontSize(Number(savedFooterFontSize));
-
-    const savedFooterBold = localStorage.getItem('choferlog_footer_bold');
-    if (savedFooterBold) setFooterBold(savedFooterBold === 'true');
-
-    const savedFooterFontFamily = localStorage.getItem('choferlog_footer_font_family');
-    if (savedFooterFontFamily) setFooterFontFamily(savedFooterFontFamily);
-
-    const savedFooterWidth = localStorage.getItem('choferlog_footer_width');
-    if (savedFooterWidth) setFooterWidth(Number(savedFooterWidth));
-
-    const savedFooterHeight = localStorage.getItem('choferlog_footer_height');
-    if (savedFooterHeight) setFooterHeight(Number(savedFooterHeight));
-
-    const savedInputBg = localStorage.getItem('choferlog_input_bg');
-    if (savedInputBg) setInputBgColor(savedInputBg);
-
-    const savedInputBorder = localStorage.getItem('choferlog_input_border');
-    if (savedInputBorder) setInputBorderColor(savedInputBorder);
+    setLoginLogo(loadLocal('choferlog_login_logo'));
+    setLoginLogoScale(loadNum('choferlog_login_logo_scale', 100));
+    setLoginLogoY(loadNum('choferlog_login_logo_y', 0));
+    setLoginBg(loadLocal('choferlog_login_bg'));
+    setFooterText(loadLocal('choferlog_login_footer') || '');
+    setCardScale(loadNum('choferlog_card_scale', 100));
+    setCardX(loadNum('choferlog_card_x', 0));
+    setCardY(loadNum('choferlog_card_y', 0));
+    setCardColor(loadLocal('choferlog_card_color') || '#ffffff');
+    setCardOpacity(loadNum('choferlog_card_opacity', 100));
+    setContactPhone(loadLocal('choferlog_contact_phone') || '');
+    setContactEmail(loadLocal('choferlog_contact_email') || '');
+    setFooterColor(loadLocal('choferlog_footer_color') || '#ffffff');
+    setFooterOpacity(loadNum('choferlog_footer_opacity', 70));
+    setFooterFontSize(loadNum('choferlog_footer_font_size', 14));
+    setFooterBold(loadLocal('choferlog_footer_bold') === 'true');
+    setFooterFontFamily(loadLocal('choferlog_footer_font_family') || 'Arial');
+    setFooterWidth(loadNum('choferlog_footer_width', 80));
+    setFooterHeight(loadNum('choferlog_footer_height', 60));
+    setInputBgColor(loadLocal('choferlog_input_bg') || '#ffffff');
+    setInputBorderColor(loadLocal('choferlog_input_border') || '#e5e7eb');
     setConfigLoaded(true);
+
+    api.get('/configuracoes/public').then((response) => {
+      const d = response.data;
+      if (!d || !d.loginLogo) return;
+      if (d.loginLogo) setLoginLogo(d.loginLogo);
+      if (d.loginLogoScale != null) setLoginLogoScale(Number(d.loginLogoScale));
+      if (d.loginLogoY != null) setLoginLogoY(Number(d.loginLogoY));
+      if (d.loginBg) setLoginBg(d.loginBg);
+      if (d.footerText != null) setFooterText(d.footerText);
+      if (d.contactPhone != null) setContactPhone(d.contactPhone);
+      if (d.contactEmail != null) setContactEmail(d.contactEmail);
+      if (d.cardScale != null) setCardScale(Number(d.cardScale));
+      if (d.cardX != null) setCardX(Number(d.cardX));
+      if (d.cardY != null) setCardY(Number(d.cardY));
+      if (d.cardColor) setCardColor(d.cardColor);
+      if (d.cardOpacity != null) setCardOpacity(Number(d.cardOpacity));
+      if (d.footerColor) setFooterColor(d.footerColor);
+      if (d.footerOpacity != null) setFooterOpacity(Number(d.footerOpacity));
+      if (d.footerFontSize != null) setFooterFontSize(Number(d.footerFontSize));
+      if (d.footerBold != null) setFooterBold(Boolean(d.footerBold));
+      if (d.footerFontFamily) setFooterFontFamily(d.footerFontFamily);
+      if (d.footerWidth != null) setFooterWidth(Number(d.footerWidth));
+      if (d.footerHeight != null) setFooterHeight(Number(d.footerHeight));
+      if (d.inputBgColor) setInputBgColor(d.inputBgColor);
+      if (d.inputBorderColor) setInputBorderColor(d.inputBorderColor);
+    }).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -171,15 +157,19 @@ export const Login: React.FC = () => {
       @keyframes spin {
         to { transform: rotate(360deg); }
       }
+      @media (max-width: 480px) {
+        .login-card { padding: 1rem !important; }
+        .login-footer { display: none !important; }
+      }
     `}</style>
     <div style={{
-      minHeight: '100vh',
-      height: '100vh',
+      minHeight: '100dvh',
+      width: '100%',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      background: loginBg ? `url(${loginBg}) center/cover no-repeat` : '#1a1a2e',
-      overflow: 'hidden',
+      background: loginBg ? `url(${loginBg}) center/cover no-repeat` : 'linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)',
+      overflow: 'auto',
       padding: '16px',
       boxSizing: 'border-box'
     }}>
@@ -202,21 +192,27 @@ export const Login: React.FC = () => {
           }} />
         </div>
       ) : (
-      <div style={{
-        transform: `translateX(${cardX}px) translateY(${cardY}px) scale(${cardScale / 100})`,
+      <div className="login-card" style={{
+        transform: cardScale !== 100 || cardX !== 0 || cardY !== 0
+          ? `translateX(${cardX}px) translateY(${cardY}px) scale(${Math.min(cardScale, 150) / 100})`
+          : 'none',
         backgroundColor: `rgba(${parseInt(cardColor.replace('#','').substring(0,2),16)}, ${parseInt(cardColor.replace('#','').substring(2,4),16)}, ${parseInt(cardColor.replace('#','').substring(4,6),16)}, ${cardOpacity / 100})`,
         width: '100%',
         maxWidth: '380px',
         borderRadius: '1rem',
         boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
-        padding: '1.5rem'
+        padding: '1.5rem',
+        maxHeight: '90dvh',
+        overflowY: 'auto',
+        boxSizing: 'border-box'
       }}>
         <div className="flex flex-col items-center mb-6">
           {loginLogo ? (
             <img src={loginLogo} alt="Logo" className="object-contain" style={{
-              transform: `scale(${loginLogoScale / 100}) translateY(${loginLogoY}px)`,
+              transform: `scale(${Math.min(loginLogoScale, 200) / 100}) translateY(${loginLogoY}px)`,
               transformOrigin: 'center',
-              maxWidth: '100%'
+              maxWidth: '100%',
+              maxHeight: '200px'
             }} />
           ) : (
             <div className="bg-blue-600 p-3 rounded-full flex items-center justify-center">
@@ -318,12 +314,13 @@ export const Login: React.FC = () => {
 
 
 
-      <div style={{
-        position: 'absolute',
+      <div className="login-footer" style={{
+        position: 'fixed',
         bottom: '16px',
         left: '50%',
         transform: 'translateX(-50%)',
         width: `${footerWidth}%`,
+        maxWidth: '600px',
         maxHeight: `${footerHeight}px`,
         background: footerColor + Math.round(footerOpacity * 2.55).toString(16).padStart(2, '0'),
         borderRadius: '8px',
@@ -331,7 +328,8 @@ export const Login: React.FC = () => {
         textAlign: 'center',
         overflow: 'hidden',
         cursor: isResizingFooter ? 'grabbing' : 'default',
-        transition: isResizingFooter ? 'none' : 'width 0.1s, maxHeight 0.1s'
+        transition: isResizingFooter ? 'none' : 'width 0.1s, maxHeight 0.1s',
+        zIndex: 50
       }}>
         <div style={{ position: 'relative', width: '100%', height: '100%' }}>
           <div style={{

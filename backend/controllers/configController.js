@@ -15,6 +15,23 @@ exports.get = async (req, res) => {
   }
 };
 
+exports.getPublic = async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('configuracoes')
+      .select('dados')
+      .eq('id', 1)
+      .single();
+
+    if (error) {
+      return res.status(200).json({});
+    }
+    res.json(data?.dados || {});
+  } catch (err) {
+    res.status(200).json({});
+  }
+};
+
 exports.update = async (req, res) => {
   try {
     const { error } = await supabase
