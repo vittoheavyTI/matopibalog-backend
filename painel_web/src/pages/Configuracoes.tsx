@@ -87,6 +87,15 @@ export const Configuracoes: React.FC = () => {
     setCardScale(config.cardScale);
     setCardX(config.cardX);
     setCardY(config.cardY);
+
+  // Salvar valores padrão no localStorage se estiverem vazios
+  if (!localStorage.getItem('choferlog_card_scale')) localStorage.setItem('choferlog_card_scale', '100');
+  if (!localStorage.getItem('choferlog_card_x')) localStorage.setItem('choferlog_card_x', '0');
+  if (!localStorage.getItem('choferlog_card_y')) localStorage.setItem('choferlog_card_y', '0');
+  if (!localStorage.getItem('choferlog_card_color')) localStorage.setItem('choferlog_card_color', '#ffffff');
+  if (!localStorage.getItem('choferlog_card_opacity')) localStorage.setItem('choferlog_card_opacity', '100');
+  if (!localStorage.getItem('choferlog_footer_color')) localStorage.setItem('choferlog_footer_color', '#ffffff');
+  if (!localStorage.getItem('choferlog_footer_opacity')) localStorage.setItem('choferlog_footer_opacity', '70');
     setCardColor(config.cardColor);
     setCardOpacity(config.cardOpacity);
     setContactPhone(config.contactPhone);
