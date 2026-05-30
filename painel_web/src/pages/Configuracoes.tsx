@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Settings, Building2, Printer, Save, Check, Image, Palette, X, Upload, Trash2, Truck, Search, Plus } from 'lucide-react';
 import { maskPhone, maskCNPJ, maskCEP } from '../utils/masks';
 import api from '../api';
+import { useLoginConfig } from '../hooks/useLoginConfig';
 
 interface CompanyData {
   nome: string;
@@ -71,6 +72,7 @@ export const Configuracoes: React.FC = () => {
   const [inputBgColor, setInputBgColor] = useState('#ffffff');
   const [inputBorderColor, setInputBorderColor] = useState('#e5e7eb');
   const [showPasswordPreview, setShowPasswordPreview] = useState(false);
+  const config = useLoginConfig();
 
   useEffect(() => {
     const savedCompany = localStorage.getItem('choferlog_company');
@@ -79,74 +81,25 @@ export const Configuracoes: React.FC = () => {
     const savedPrinters = localStorage.getItem('choferlog_printers');
     if (savedPrinters) setPrinters(JSON.parse(savedPrinters));
 
-    const savedLogo = localStorage.getItem('choferlog_login_logo');
-    if (savedLogo) setLoginLogo(savedLogo);
-
-    const savedBg = localStorage.getItem('choferlog_login_bg');
-    if (savedBg) setLoginBg(savedBg);
-
-    const savedFooter = localStorage.getItem('choferlog_login_footer');
-    if (savedFooter) setFooterText(savedFooter);
-
-    const savedCardScale = localStorage.getItem('choferlog_card_scale');
-    if (savedCardScale) {
-      const v = Number(savedCardScale);
-      if (v >= 50 && v <= 200) setCardScale(v);
-      else setCardScale(100);
-    }
-
-    const savedCardX = localStorage.getItem('choferlog_card_x');
-    if (savedCardX) {
-      const v = Number(savedCardX);
-      if (v >= -1000 && v <= 1000) setCardX(v);
-      else setCardX(0);
-    }
-
-    const savedCardY = localStorage.getItem('choferlog_card_y');
-    if (savedCardY) {
-      const v = Number(savedCardY);
-      if (v >= -1000 && v <= 1000) setCardY(v);
-      else setCardY(0);
-    }
-
-    const savedCardColor = localStorage.getItem('choferlog_card_color');
-    if (savedCardColor) setCardColor(savedCardColor);
-
-    const savedCardOpacity = localStorage.getItem('choferlog_card_opacity');
-    if (savedCardOpacity) setCardOpacity(Number(savedCardOpacity));
-
-    const savedPhone = localStorage.getItem('choferlog_contact_phone');
-    if (savedPhone) setContactPhone(savedPhone);
-
-    const savedEmail = localStorage.getItem('choferlog_contact_email');
-    if (savedEmail) setContactEmail(savedEmail);
-
-    const savedFooterColor = localStorage.getItem('choferlog_footer_color');
-    if (savedFooterColor) setFooterColor(savedFooterColor);
-
-    const savedFooterOpacity = localStorage.getItem('choferlog_footer_opacity');
-    if (savedFooterOpacity) setFooterOpacity(Number(savedFooterOpacity));
-
-    const savedFooterFontSize = localStorage.getItem('choferlog_footer_font_size');
-    if (savedFooterFontSize) setFooterFontSize(Number(savedFooterFontSize));
-
-    const savedFooterBold = localStorage.getItem('choferlog_footer_bold');
-    if (savedFooterBold) setFooterBold(savedFooterBold === 'true');
-
-    const savedFooterFontFamily = localStorage.getItem('choferlog_footer_font_family');
-    if (savedFooterFontFamily) setFooterFontFamily(savedFooterFontFamily);
-
-    const savedFooterWidth = localStorage.getItem('choferlog_footer_width');
-    if (savedFooterWidth) setFooterWidth(Number(savedFooterWidth));
-
-    const savedFooterHeight = localStorage.getItem('choferlog_footer_height');
-    if (savedFooterHeight) setFooterHeight(Number(savedFooterHeight));
-
-    const savedInputBg = localStorage.getItem('choferlog_input_bg');
-    if (savedInputBg) setInputBgColor(savedInputBg);
-
-    const savedInputBorder = localStorage.getItem('choferlog_input_border');
-    if (savedInputBorder) setInputBorderColor(savedInputBorder);
+    if (config.loginLogo) setLoginLogo(config.loginLogo);
+    if (config.loginBg) setLoginBg(config.loginBg);
+    setFooterText(config.footerText);
+    setCardScale(config.cardScale);
+    setCardX(config.cardX);
+    setCardY(config.cardY);
+    setCardColor(config.cardColor);
+    setCardOpacity(config.cardOpacity);
+    setContactPhone(config.contactPhone);
+    setContactEmail(config.contactEmail);
+    setFooterColor(config.footerColor);
+    setFooterOpacity(config.footerOpacity);
+    setFooterFontSize(config.footerFontSize);
+    setFooterBold(config.footerBold);
+    setFooterFontFamily(config.footerFontFamily);
+    setFooterWidth(config.footerWidth);
+    setFooterHeight(config.footerHeight);
+    setInputBgColor(config.inputBgColor);
+    setInputBorderColor(config.inputBorderColor);
 
     loadConfigFromApi();
   }, []);
