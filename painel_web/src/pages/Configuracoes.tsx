@@ -73,7 +73,7 @@ export const Configuracoes: React.FC = () => {
   const [inputBorderColor, setInputBorderColor] = useState('#e5e7eb');
   const [showPasswordPreview, setShowPasswordPreview] = useState(false);
   const config = useLoginConfig();
-  const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const syncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const savedCompany = localStorage.getItem('choferlog_company');
@@ -362,51 +362,6 @@ export const Configuracoes: React.FC = () => {
     syncTimeoutRef.current = setTimeout(() => {
       syncConfigToServer();
     }, 1000);
-  };
-
-  const loadConfigFromApi = () => {
-    api.get('/configuracoes')
-      .then((response) => {
-        const data = response.data;
-        if (data && Object.keys(data).length > 0) {
-          const d = data;
-          // Atualiza estado React E localStorage ao mesmo tempo para sincronizar Login ↔ Aparência
-          if (d.company) setCompany(d.company);
-          if (d.printers) setPrinters(d.printers);
-
-          if (d.loginLogo !== undefined) {
-            if (d.loginLogo) { setLoginLogo(d.loginLogo); localStorage.setItem('choferlog_login_logo', d.loginLogo); }
-            else { setLoginLogo(null); localStorage.removeItem('choferlog_login_logo'); }
-          }
-          if (d.loginBg !== undefined) {
-            if (d.loginBg) { setLoginBg(d.loginBg); localStorage.setItem('choferlog_login_bg', d.loginBg); }
-            else { setLoginBg(null); localStorage.removeItem('choferlog_login_bg'); }
-          }
-          if (d.loginLogoScale !== undefined) localStorage.setItem('choferlog_login_logo_scale', d.loginLogoScale.toString());
-          if (d.loginLogoY !== undefined) localStorage.setItem('choferlog_login_logo_y', d.loginLogoY.toString());
-          if (d.loginBgScale !== undefined) localStorage.setItem('choferlog_login_bg_scale', d.loginBgScale.toString());
-          if (d.loginBgY !== undefined) localStorage.setItem('choferlog_login_bg_y', d.loginBgY.toString());
-
-          if (d.footerText !== undefined) { setFooterText(d.footerText); localStorage.setItem('choferlog_login_footer', d.footerText); }
-          if (d.cardScale !== undefined) { setCardScale(d.cardScale); localStorage.setItem('choferlog_card_scale', d.cardScale.toString()); }
-          if (d.cardX !== undefined) { setCardX(d.cardX); localStorage.setItem('choferlog_card_x', d.cardX.toString()); }
-          if (d.cardY !== undefined) { setCardY(d.cardY); localStorage.setItem('choferlog_card_y', d.cardY.toString()); }
-          if (d.cardColor) { setCardColor(d.cardColor); localStorage.setItem('choferlog_card_color', d.cardColor); }
-          if (d.cardOpacity !== undefined) { setCardOpacity(d.cardOpacity); localStorage.setItem('choferlog_card_opacity', d.cardOpacity.toString()); }
-          if (d.contactPhone !== undefined) { setContactPhone(d.contactPhone); localStorage.setItem('choferlog_contact_phone', d.contactPhone); }
-          if (d.contactEmail !== undefined) { setContactEmail(d.contactEmail); localStorage.setItem('choferlog_contact_email', d.contactEmail); }
-          if (d.footerColor) { setFooterColor(d.footerColor); localStorage.setItem('choferlog_footer_color', d.footerColor); }
-          if (d.footerOpacity !== undefined) { setFooterOpacity(d.footerOpacity); localStorage.setItem('choferlog_footer_opacity', d.footerOpacity.toString()); }
-          if (d.footerFontSize !== undefined) { setFooterFontSize(d.footerFontSize); localStorage.setItem('choferlog_footer_font_size', d.footerFontSize.toString()); }
-          if (d.footerBold !== undefined) { setFooterBold(d.footerBold); localStorage.setItem('choferlog_footer_bold', d.footerBold.toString()); }
-          if (d.footerFontFamily) { setFooterFontFamily(d.footerFontFamily); localStorage.setItem('choferlog_footer_font_family', d.footerFontFamily); }
-          if (d.footerWidth !== undefined) { setFooterWidth(d.footerWidth); localStorage.setItem('choferlog_footer_width', d.footerWidth.toString()); }
-          if (d.footerHeight !== undefined) { setFooterHeight(d.footerHeight); localStorage.setItem('choferlog_footer_height', d.footerHeight.toString()); }
-          if (d.inputBgColor) { setInputBgColor(d.inputBgColor); localStorage.setItem('choferlog_input_bg', d.inputBgColor); }
-          if (d.inputBorderColor) { setInputBorderColor(d.inputBorderColor); localStorage.setItem('choferlog_input_border', d.inputBorderColor); }
-        }
-      })
-      .catch(() => {});
   };
 
   return (
