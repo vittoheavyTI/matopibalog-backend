@@ -73,6 +73,7 @@ export const Configuracoes: React.FC = () => {
   const [inputBorderColor, setInputBorderColor] = useState('#e5e7eb');
   const [showPasswordPreview, setShowPasswordPreview] = useState(false);
   const config = useLoginConfig();
+  const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     const savedCompany = localStorage.getItem('choferlog_company');
@@ -101,7 +102,7 @@ export const Configuracoes: React.FC = () => {
     setInputBgColor(config.inputBgColor);
     setInputBorderColor(config.inputBorderColor);
 
-    // loadConfigFromApi removido - hook useLoginConfig � a fonte �nica
+    // loadConfigFromApi removido - hook useLoginConfig é a fonte única
   }, []);
 
   useEffect(() => {
@@ -160,20 +161,27 @@ export const Configuracoes: React.FC = () => {
       }
     };
     const handleMouseUp = () => {
+      let needsSync = false;
       if (isDragging) {
         localStorage.setItem('choferlog_card_x', cardX.toString());
         localStorage.setItem('choferlog_card_y', cardY.toString());
+        needsSync = true;
       }
       if (isResizing) {
         localStorage.setItem('choferlog_card_scale', cardScale.toString());
+        needsSync = true;
       }
       if (isResizingFooter) {
         localStorage.setItem('choferlog_footer_width', footerWidth.toString());
         localStorage.setItem('choferlog_footer_height', footerHeight.toString());
         setIsResizingFooter(false);
+        needsSync = true;
       }
       setIsDragging(false);
       setIsResizing(false);
+      if (needsSync) {
+        syncConfigToServer();
+      }
     };
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('mouseup', handleMouseUp);
@@ -309,12 +317,26 @@ export const Configuracoes: React.FC = () => {
   };
 
   const collectAllConfig = () => ({
-    company, printers, loginLogo, loginBg, footerText,
-    contactPhone, contactEmail, footerColor, footerOpacity,
-    footerFontSize, footerBold, footerFontFamily,
-    footerWidth, footerHeight,
-    inputBgColor, inputBorderColor,
-    cardScale, cardX, cardY, cardColor, cardOpacity,
+    company, printers,
+    loginLogo: localStorage.getItem('choferlog_login_logo'),
+    loginBg: localStorage.getItem('choferlog_login_bg'),
+    footerText: localStorage.getItem('choferlog_login_footer') || '',
+    contactPhone: localStorage.getItem('choferlog_contact_phone') || '',
+    contactEmail: localStorage.getItem('choferlog_contact_email') || '',
+    footerColor: localStorage.getItem('choferlog_footer_color') || '#ffffff',
+    footerOpacity: Number(localStorage.getItem('choferlog_footer_opacity')) || 70,
+    footerFontSize: Number(localStorage.getItem('choferlog_footer_font_size')) || 14,
+    footerBold: localStorage.getItem('choferlog_footer_bold') === 'true',
+    footerFontFamily: localStorage.getItem('choferlog_footer_font_family') || 'Arial',
+    footerWidth: Number(localStorage.getItem('choferlog_footer_width')) || 80,
+    footerHeight: Number(localStorage.getItem('choferlog_footer_height')) || 60,
+    inputBgColor: localStorage.getItem('choferlog_input_bg') || '#ffffff',
+    inputBorderColor: localStorage.getItem('choferlog_input_border') || '#e5e7eb',
+    cardScale: Number(localStorage.getItem('choferlog_card_scale')) || 100,
+    cardX: Number(localStorage.getItem('choferlog_card_x')) || 0,
+    cardY: Number(localStorage.getItem('choferlog_card_y')) || 0,
+    cardColor: localStorage.getItem('choferlog_card_color') || '#ffffff',
+    cardOpacity: Number(localStorage.getItem('choferlog_card_opacity')) || 100,
     loginLogoScale: Number(localStorage.getItem('choferlog_login_logo_scale')) || 100,
     loginLogoY: Number(localStorage.getItem('choferlog_login_logo_y')) || 0,
     loginBgScale: Number(localStorage.getItem('choferlog_login_bg_scale')) || 100,
@@ -324,40 +346,64 @@ export const Configuracoes: React.FC = () => {
   const syncConfigToServer = () => {
     const dados = collectAllConfig();
     localStorage.setItem('chofer_config', JSON.stringify(dados));
-    try {
-      api.put('/configuracoes', dados);
-    } catch (err) {
-      console.log('Erro ao sincronizar com servidor');
+    api.put('/configuracoes', dados).catch(() => {
+      fetch('https://matopibalog-api.onrender.com/configuracoes/public', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(dados)
+      }).catch(() => console.log('Erro ao sincronizar'));
+    });
+  };
+
+  const debouncedSyncConfigToServer = () => {
+    if (syncTimeoutRef.current) {
+      clearTimeout(syncTimeoutRef.current);
     }
+    syncTimeoutRef.current = setTimeout(() => {
+      syncConfigToServer();
+    }, 1000);
   };
 
   const loadConfigFromApi = () => {
     api.get('/configuracoes')
       .then((response) => {
         const data = response.data;
-        if (data) {
+        if (data && Object.keys(data).length > 0) {
           const d = data;
+          // Atualiza estado React E localStorage ao mesmo tempo para sincronizar Login ↔ Aparência
           if (d.company) setCompany(d.company);
           if (d.printers) setPrinters(d.printers);
-          if (d.loginLogo) setLoginLogo(d.loginLogo);
-          if (d.loginBg) setLoginBg(d.loginBg);
-          if (d.footerText !== undefined) setFooterText(d.footerText);
-          if (d.cardScale) setCardScale(d.cardScale);
-          if (d.cardX !== undefined) setCardX(d.cardX);
-          if (d.cardY !== undefined) setCardY(d.cardY);
-          if (d.cardColor) setCardColor(d.cardColor);
-          if (d.cardOpacity !== undefined) setCardOpacity(d.cardOpacity);
-          if (d.contactPhone !== undefined) setContactPhone(d.contactPhone);
-          if (d.contactEmail !== undefined) setContactEmail(d.contactEmail);
-          if (d.footerColor) setFooterColor(d.footerColor);
-          if (d.footerOpacity !== undefined) setFooterOpacity(d.footerOpacity);
-          if (d.footerFontSize !== undefined) setFooterFontSize(d.footerFontSize);
-          if (d.footerBold !== undefined) setFooterBold(d.footerBold);
-          if (d.footerFontFamily) setFooterFontFamily(d.footerFontFamily);
-          if (d.footerWidth !== undefined) setFooterWidth(d.footerWidth);
-          if (d.footerHeight !== undefined) setFooterHeight(d.footerHeight);
-          if (d.inputBgColor) setInputBgColor(d.inputBgColor);
-          if (d.inputBorderColor) setInputBorderColor(d.inputBorderColor);
+
+          if (d.loginLogo !== undefined) {
+            if (d.loginLogo) { setLoginLogo(d.loginLogo); localStorage.setItem('choferlog_login_logo', d.loginLogo); }
+            else { setLoginLogo(null); localStorage.removeItem('choferlog_login_logo'); }
+          }
+          if (d.loginBg !== undefined) {
+            if (d.loginBg) { setLoginBg(d.loginBg); localStorage.setItem('choferlog_login_bg', d.loginBg); }
+            else { setLoginBg(null); localStorage.removeItem('choferlog_login_bg'); }
+          }
+          if (d.loginLogoScale !== undefined) localStorage.setItem('choferlog_login_logo_scale', d.loginLogoScale.toString());
+          if (d.loginLogoY !== undefined) localStorage.setItem('choferlog_login_logo_y', d.loginLogoY.toString());
+          if (d.loginBgScale !== undefined) localStorage.setItem('choferlog_login_bg_scale', d.loginBgScale.toString());
+          if (d.loginBgY !== undefined) localStorage.setItem('choferlog_login_bg_y', d.loginBgY.toString());
+
+          if (d.footerText !== undefined) { setFooterText(d.footerText); localStorage.setItem('choferlog_login_footer', d.footerText); }
+          if (d.cardScale !== undefined) { setCardScale(d.cardScale); localStorage.setItem('choferlog_card_scale', d.cardScale.toString()); }
+          if (d.cardX !== undefined) { setCardX(d.cardX); localStorage.setItem('choferlog_card_x', d.cardX.toString()); }
+          if (d.cardY !== undefined) { setCardY(d.cardY); localStorage.setItem('choferlog_card_y', d.cardY.toString()); }
+          if (d.cardColor) { setCardColor(d.cardColor); localStorage.setItem('choferlog_card_color', d.cardColor); }
+          if (d.cardOpacity !== undefined) { setCardOpacity(d.cardOpacity); localStorage.setItem('choferlog_card_opacity', d.cardOpacity.toString()); }
+          if (d.contactPhone !== undefined) { setContactPhone(d.contactPhone); localStorage.setItem('choferlog_contact_phone', d.contactPhone); }
+          if (d.contactEmail !== undefined) { setContactEmail(d.contactEmail); localStorage.setItem('choferlog_contact_email', d.contactEmail); }
+          if (d.footerColor) { setFooterColor(d.footerColor); localStorage.setItem('choferlog_footer_color', d.footerColor); }
+          if (d.footerOpacity !== undefined) { setFooterOpacity(d.footerOpacity); localStorage.setItem('choferlog_footer_opacity', d.footerOpacity.toString()); }
+          if (d.footerFontSize !== undefined) { setFooterFontSize(d.footerFontSize); localStorage.setItem('choferlog_footer_font_size', d.footerFontSize.toString()); }
+          if (d.footerBold !== undefined) { setFooterBold(d.footerBold); localStorage.setItem('choferlog_footer_bold', d.footerBold.toString()); }
+          if (d.footerFontFamily) { setFooterFontFamily(d.footerFontFamily); localStorage.setItem('choferlog_footer_font_family', d.footerFontFamily); }
+          if (d.footerWidth !== undefined) { setFooterWidth(d.footerWidth); localStorage.setItem('choferlog_footer_width', d.footerWidth.toString()); }
+          if (d.footerHeight !== undefined) { setFooterHeight(d.footerHeight); localStorage.setItem('choferlog_footer_height', d.footerHeight.toString()); }
+          if (d.inputBgColor) { setInputBgColor(d.inputBgColor); localStorage.setItem('choferlog_input_bg', d.inputBgColor); }
+          if (d.inputBorderColor) { setInputBorderColor(d.inputBorderColor); localStorage.setItem('choferlog_input_border', d.inputBorderColor); }
         }
       })
       .catch(() => {});
@@ -862,7 +908,7 @@ export const Configuracoes: React.FC = () => {
                   <input
                     type="color"
                     value={cardColor}
-                    onChange={e => { const v = e.target.value; setCardColor(v); localStorage.setItem('choferlog_card_color', v); }}
+                    onChange={e => { const v = e.target.value; setCardColor(v); localStorage.setItem('choferlog_card_color', v); debouncedSyncConfigToServer(); }}
                     className="w-12 h-12 rounded-lg border border-gray-200 cursor-pointer"
                   />
                   <span className="text-sm text-gray-500 font-mono">{cardColor}</span>
@@ -873,7 +919,7 @@ export const Configuracoes: React.FC = () => {
                   <span className="font-medium text-gray-700">Transparência</span>
                   <span className="text-gray-500">{cardOpacity}%</span>
                 </div>
-                <input type="range" min="0" max="100" value={cardOpacity} onChange={e => { const v = Number(e.target.value); setCardOpacity(v); localStorage.setItem('choferlog_card_opacity', v.toString()); }} className="w-full accent-blue-600" />
+                <input type="range" min="0" max="100" value={cardOpacity} onChange={e => { const v = Number(e.target.value); setCardOpacity(v); localStorage.setItem('choferlog_card_opacity', v.toString()); debouncedSyncConfigToServer(); }} className="w-full accent-blue-600" />
               </div>
             </div>
           </div>
@@ -886,7 +932,7 @@ export const Configuracoes: React.FC = () => {
                   <span className="font-medium text-gray-700">Cor de Fundo</span>
                 </div>
                 <div className="flex items-center space-x-3">
-                  <input type="color" value={inputBgColor} onChange={e => { const v = e.target.value; setInputBgColor(v); localStorage.setItem('choferlog_input_bg', v); }} className="w-12 h-12 rounded-lg border border-gray-200 cursor-pointer" />
+                  <input type="color" value={inputBgColor} onChange={e => { const v = e.target.value; setInputBgColor(v); localStorage.setItem('choferlog_input_bg', v); debouncedSyncConfigToServer(); }} className="w-12 h-12 rounded-lg border border-gray-200 cursor-pointer" />
                   <span className="text-sm text-gray-500 font-mono">{inputBgColor}</span>
                 </div>
               </div>
@@ -895,7 +941,7 @@ export const Configuracoes: React.FC = () => {
                   <span className="font-medium text-gray-700">Cor da Borda</span>
                 </div>
                 <div className="flex items-center space-x-3">
-                  <input type="color" value={inputBorderColor} onChange={e => { const v = e.target.value; setInputBorderColor(v); localStorage.setItem('choferlog_input_border', v); }} className="w-12 h-12 rounded-lg border border-gray-200 cursor-pointer" />
+                  <input type="color" value={inputBorderColor} onChange={e => { const v = e.target.value; setInputBorderColor(v); localStorage.setItem('choferlog_input_border', v); debouncedSyncConfigToServer(); }} className="w-12 h-12 rounded-lg border border-gray-200 cursor-pointer" />
                   <span className="text-sm text-gray-500 font-mono">{inputBorderColor}</span>
                 </div>
               </div>
@@ -914,7 +960,7 @@ export const Configuracoes: React.FC = () => {
                   <input
                     type="color"
                     value={footerColor}
-                    onChange={e => { const v = e.target.value; setFooterColor(v); localStorage.setItem('choferlog_footer_color', v); }}
+                    onChange={e => { const v = e.target.value; setFooterColor(v); localStorage.setItem('choferlog_footer_color', v); debouncedSyncConfigToServer(); }}
                     className="w-12 h-12 rounded-lg border border-gray-200 cursor-pointer"
                   />
                   <span className="text-sm text-gray-500 font-mono">{footerColor}</span>
@@ -925,7 +971,7 @@ export const Configuracoes: React.FC = () => {
                   <span className="font-medium text-gray-700">Transparência</span>
                   <span className="text-gray-500">{footerOpacity}%</span>
                 </div>
-                <input type="range" min="0" max="100" value={footerOpacity} onChange={e => { const v = Number(e.target.value); setFooterOpacity(v); localStorage.setItem('choferlog_footer_opacity', v.toString()); }} className="w-full accent-blue-600" />
+                <input type="range" min="0" max="100" value={footerOpacity} onChange={e => { const v = Number(e.target.value); setFooterOpacity(v); localStorage.setItem('choferlog_footer_opacity', v.toString()); debouncedSyncConfigToServer(); }} className="w-full accent-blue-600" />
               </div>
             </div>
 
@@ -944,6 +990,7 @@ export const Configuracoes: React.FC = () => {
                     const v = Number(e.target.value);
                     setFooterFontSize(v);
                     localStorage.setItem('choferlog_footer_font_size', v.toString());
+                    debouncedSyncConfigToServer();
                   }}
                   className="w-full accent-blue-600"
                 />
@@ -958,6 +1005,7 @@ export const Configuracoes: React.FC = () => {
                     const v = e.target.value;
                     setFooterFontFamily(v);
                     localStorage.setItem('choferlog_footer_font_family', v);
+                    debouncedSyncConfigToServer();
                   }}
                   className="w-full border-2 border-gray-50 rounded-xl p-2.5 outline-none focus:border-blue-500 bg-gray-50/50 text-sm"
                 >
@@ -977,6 +1025,7 @@ export const Configuracoes: React.FC = () => {
                     const v = !footerBold;
                     setFooterBold(v);
                     localStorage.setItem('choferlog_footer_bold', v.toString());
+                    debouncedSyncConfigToServer();
                   }}
                   style={{
                     width: '100%',

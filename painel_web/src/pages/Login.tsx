@@ -87,11 +87,12 @@ export const Login: React.FC = () => {
 
         <form onSubmit={handleLogin} className="flex flex-col gap-4">
           <div>
-            <label style={{ display: 'block', fontSize: '16px', fontWeight: '500', fontFamily: 'Arial, sans-serif', lineHeight: '1.5', color: '#ffffff', marginBottom: '8px' }}>E-mail</label>
+            <label style={{ display: 'block', fontSize: '14px', fontWeight: '600', fontFamily: 'Arial, sans-serif', lineHeight: '1.5', color: '#6b7280', marginBottom: '6px' }}>E-mail</label>
             <input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              autoComplete="email"
               style={{
                 width: '100%',
                 height: '48px',
@@ -105,7 +106,10 @@ export const Login: React.FC = () => {
                 backgroundColor: config.inputBgColor,
                 outline: 'none',
                 boxSizing: 'border-box',
-                color: '#333'
+                color: '#1f2937',
+                pointerEvents: 'all',
+                position: 'relative',
+                zIndex: 10,
               }}
               required
             />

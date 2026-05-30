@@ -64,7 +64,22 @@ try { $r = Invoke-WebRequest -Uri "http://localhost:5173/" -UseBasicParsing -Tim
 - **Fix**: Added 2 rows of info cards — row 1: Data, Placa, Valor Frete, Status, Quem Recebeu; row 2: KM Inicial, KM Final, Distância, Média Consumo
 - **Files touched**: `src/pages/Relatorios.tsx`
 
+### Session 30/05/2026 — Login Config Sync + 3 Bug Fixes
+- **Problem**: Login page desconfigurada, localStorage vazio, footer não salvava, API overwrite
+- **Root cause 1**: `loadConfigFromApi()` sobrescrevia localStorage com dados do servidor após login
+- **Root cause 2**: Footer Color/Opacity sliders não chamavam `localStorage.setItem` no onChange
+- **Root cause 3**: Hook `useLoginConfig` não escrevia defaults no localStorage
+- **Fixes** (commit `45e3d0c`):
+  1. `Configuracoes.tsx:334-364` — removidos TODOS `localStorage.setItem` de `loadConfigFromApi` (agora só setState)
+  2. `Configuracoes.tsx:917,928` — adicionado `localStorage.setItem` nos onChanges de footer color/opacity
+  3. `useLoginConfig.ts:33-46` — hook agora escreve valores padrão se chave não existir
+- **Hook criado**: `useLoginConfig.ts` (commit `780d9dd`) — lê as 25 chaves de config do localStorage
+- **Login.tsx refatorado**: removidos ~40 linhas de estado+useEffect, agora usa hook
+- **Configuracoes refatorado**: useEffect inicial usa hook em vez de leituras manuais
+- **Arquivos tocados**: `Login.tsx`, `Configuracoes.tsx`, `useLoginConfig.ts` (novo), `AuthContext.tsx`
+- **MEMORIA.md**: Arquivo completo (`MEMORIA.md`) com toda a memória do projeto para transferência via rede (192.168.1.8)
+
 ### Pending Tasks
 - Rename project folder from `app-chofer log` to `APP-MATOPIBALOG`
 - Update VS Code
-- Create "DEVOPS + GITHUB ACTIONS + TROUBLESHOOTING SPECIALIST" skill (DONE)
+- Connect GitHub repo to Render for backend deploy (rootDir=backend, start=node server.js)
