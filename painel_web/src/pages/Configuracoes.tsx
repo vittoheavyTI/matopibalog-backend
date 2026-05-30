@@ -1295,7 +1295,7 @@ export const Configuracoes: React.FC = () => {
                             id: Date.now().toString(),
                             nome: printer.nome,
                             tipo: printer.tipo,
-                            status: 'online',
+                            status: 'online' as const,
                             localizacao: printer.origem || printer.localizacao || 'local',
                             ip: printer.ip,
                             porta: printer.porta,

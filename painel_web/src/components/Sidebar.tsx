@@ -1,10 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Users, FileText, ChevronLeft, ChevronRight, Upload, X, Check, Trash2, Settings, UserCircle, Truck, BarChart3, Plug, Shield, ChevronDown } from 'lucide-react';
-import { useAuth } from '../contexts/AuthContext';
+import { LayoutDashboard, Users, FileText, ChevronLeft, ChevronRight, Upload, X, Check, Trash2, Settings, UserCircle, Plug, Shield, ChevronDown } from 'lucide-react';
 
 export const Sidebar: React.FC = () => {
-  const { user } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
   const [painelOpen, setPainelOpen] = useState(false);
   const [logoBase64, setLogoBase64] = useState<string | null>(null);

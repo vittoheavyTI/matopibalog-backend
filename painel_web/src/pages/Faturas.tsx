@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import api from '../api';
-import { CreditCard, Download, Search, ChevronDown } from 'lucide-react';
+import { CreditCard, Download, Search } from 'lucide-react';
 
 interface Fatura {
   id: string;

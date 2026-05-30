@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { format, startOfMonth, endOfMonth } from 'date-fns';
 import { formatCurrency } from '../utils';
-import { Calendar, Users, User, Download, Truck, MapPin, DollarSign, Gauge, ChevronLeft, ChevronRight, Fuel, FileText, TrendingUp, Printer } from 'lucide-react';
+import { Calendar, Users, User, Download, Truck, DollarSign, ChevronLeft, ChevronRight, Fuel, FileText, TrendingUp, Printer } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import api from '../api';
@@ -150,9 +150,9 @@ export const ResumoMotorista: React.FC = () => {
       }));
 
       if (selectedMot !== 'todos') {
-        setDespesasDet(despesas.filter(d => d.motoristaUid === selectedMot));
-        setAbastecimentosDet(abastecimentos.filter(a => a.motoristaUid === selectedMot));
-        setValesDet(vales.filter(v => v.motoristaUid === selectedMot));
+        setDespesasDet(despesas.filter((d: any) => d.motoristaUid === selectedMot));
+        setAbastecimentosDet(abastecimentos.filter((a: any) => a.motoristaUid === selectedMot));
+        setValesDet(vales.filter((v: any) => v.motoristaUid === selectedMot));
       } else {
         setDespesasDet([]);
         setAbastecimentosDet([]);
@@ -162,19 +162,19 @@ export const ResumoMotorista: React.FC = () => {
       const targetMots = motoristas.filter(m => selectedMot === 'todos' || m.uid === selectedMot);
 
       const rawStats = targetMots.map(m => {
-        const mFretes = fretes.filter(f => f.motoristaUid === m.uid);
-        const mDesp = despesas.filter(d => d.motoristaUid === m.uid);
-        const mAbs = abastecimentos.filter(a => a.motoristaUid === m.uid);
-        const mVal = vales.filter(v => v.motoristaUid === m.uid);
+        const mFretes = fretes.filter((f: any) => f.motoristaUid === m.uid);
+        const mDesp = despesas.filter((d: any) => d.motoristaUid === m.uid);
+        const mAbs = abastecimentos.filter((a: any) => a.motoristaUid === m.uid);
+        const mVal = vales.filter((v: any) => v.motoristaUid === m.uid);
 
-        const totalFrete = mFretes.reduce((s, f) => s + f.valorFrete, 0);
+        const totalFrete = mFretes.reduce((s: number, f: any) => s + f.valorFrete, 0);
         const comissao = totalFrete * ((m.percentualComissao || 0) / 100);
-        const totalGastos = mDesp.reduce((s, d) => s + d.valor, 0) +
-          mAbs.reduce((s, a) => s + a.valorTotal, 0) +
-          mVal.reduce((s, v) => s + v.valor, 0);
+        const totalGastos = mDesp.reduce((s: number, d: any) => s + d.valor, 0) +
+          mAbs.reduce((s: number, a: any) => s + a.valorTotal, 0) +
+          mVal.reduce((s: number, v: any) => s + v.valor, 0);
         const saldoLiq = comissao - totalGastos;
-        const totalKm = mFretes.reduce((s, f) => s + (f.km_final && f.km_inicial ? f.km_final - f.km_inicial : 0), 0);
-        const totalLitros = mAbs.reduce((s, a) => s + a.litros, 0);
+        const totalKm = mFretes.reduce((s: number, f: any) => s + (f.km_final && f.km_inicial ? f.km_final - f.km_inicial : 0), 0);
+        const totalLitros = mAbs.reduce((s: number, a: any) => s + a.litros, 0);
         const media = totalLitros > 0 ? (totalKm / totalLitros).toFixed(2) : '0.00';
 
         return {
@@ -486,7 +486,6 @@ export const ResumoMotorista: React.FC = () => {
         }
       });
 
-      const motoristaNome = motoristas.find(m => m.uid === selectedMot)?.nomeCompleto || 'Motorista';
       doc.save(`Viagem_${trip.origem}_${trip.destino}_${safeFmt(trip.data, 'ddMMyyyy')}.pdf`);
     } catch (error) {
       console.error('Erro ao gerar PDF:', error);

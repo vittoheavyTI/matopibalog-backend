@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Truck, ArrowLeft, User, Building2, Mail, Lock, Phone } from 'lucide-react';
+import { useNavigate, Link } from 'react-router-dom';
+import { Truck, User, Building2, Mail, Lock, Phone } from 'lucide-react';
 import api from '../api';
 
 interface FormData {
@@ -14,6 +15,7 @@ interface FormData {
 }
 
 export const CadastroPublico: React.FC = () => {
+  const navigate = useNavigate();
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -94,7 +96,7 @@ export const CadastroPublico: React.FC = () => {
             <div className="bg-green-50 text-green-700 p-4 rounded-lg text-sm mb-4">
               <p className="font-semibold mb-1">✅ {success}</p>
               <p className="text-green-600">Você será redirecionado para o login em instantes...</p>
-              {setTimeout(() => { window.location.href = '/login'; }, 4000)}
+              {setTimeout(() => { navigate('/login'); }, 4000)}
             </div>
           )}
 
@@ -153,7 +155,7 @@ export const CadastroPublico: React.FC = () => {
           )}
 
           <div className="text-center mt-6">
-            <a href="/login" className="text-sm text-gray-500 hover:text-blue-600">Já tem conta? Fazer login</a>
+            <Link to="/login" className="text-sm text-gray-500 hover:text-blue-600">Já tem conta? Fazer login</Link>
           </div>
         </div>
       </div>

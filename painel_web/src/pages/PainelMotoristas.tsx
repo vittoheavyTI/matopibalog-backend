@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Search, CheckCircle, XCircle, Users, FileWarning } from 'lucide-react';
+import { Shield, Search, CheckCircle, XCircle, FileWarning } from 'lucide-react';
 import api from '../api';
 
 export const PainelMotoristas: React.FC = () => {

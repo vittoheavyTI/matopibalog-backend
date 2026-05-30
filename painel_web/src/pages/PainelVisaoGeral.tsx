@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Building2, Users, Truck, DollarSign, BarChart3, AlertTriangle, Clock, Activity } from 'lucide-react';
+import { Shield, Building2, Users, Truck, DollarSign, BarChart3, AlertTriangle, Clock } from 'lucide-react';
 import api from '../api';
 
 export const PainelVisaoGeral: React.FC = () => {
@@ -17,7 +17,7 @@ export const PainelVisaoGeral: React.FC = () => {
         api.get('/painel-admin/dashboard'),
         api.get('/painel-admin/empresas'),
       ]);
-      const { totalEmpresas, totalMotoristas, totalFretes, empresasAtivas, empresasTrial } = dashboardRes.data;
+      const { totalMotoristas, totalFretes } = dashboardRes.data;
       const empresasData = empresasRes.data;
       setEmpresas(empresasData || []);
       const ativas = (empresasData || []).filter((e: any) => e.status === 'ativa').length;

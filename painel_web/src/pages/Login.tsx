@@ -13,8 +13,6 @@ export const Login: React.FC = () => {
   const [loginLogoScale, setLoginLogoScale] = useState(100);
   const [loginLogoY, setLoginLogoY] = useState(0);
   const [loginBg, setLoginBg] = useState<string | null>(null);
-  const [loginBgScale, setLoginBgScale] = useState(100);
-  const [loginBgY, setLoginBgY] = useState(0);
   const [cardScale, setCardScale] = useState(100);
   const [cardX, setCardX] = useState(0);
   const [cardY, setCardY] = useState(0);
@@ -58,11 +56,7 @@ export const Login: React.FC = () => {
     const savedBg = localStorage.getItem('choferlog_login_bg');
     if (savedBg) setLoginBg(savedBg);
 
-    const savedBgScale = localStorage.getItem('choferlog_login_bg_scale');
-    if (savedBgScale) setLoginBgScale(Number(savedBgScale));
 
-    const savedBgY = localStorage.getItem('choferlog_login_bg_y');
-    if (savedBgY) setLoginBgY(Number(savedBgY));
 
     const savedFooter = localStorage.getItem('choferlog_login_footer');
     if (savedFooter) setFooterText(savedFooter);

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, DollarSign, TrendingUp, CreditCard, AlertTriangle, Search } from 'lucide-react';
+import { Shield, DollarSign, CreditCard, AlertTriangle } from 'lucide-react';
 import api from '../api';
 
 export const PainelFinanceiro: React.FC = () => {

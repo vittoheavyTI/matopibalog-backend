@@ -539,14 +539,14 @@ export const GerenciamentoViagens: React.FC = () => {
                   <div className="flex-1">
                     {editingItem?.id === f.id ? (
                       <div className="grid grid-cols-3 gap-2 pr-4">
-                        <input className="border rounded px-2 py-1 text-sm" placeholder="Origem" value={editingItem.data.origem}
+                        <input className="border rounded px-2 py-1 text-sm" placeholder="Origem" value={editingItem?.data.origem || ''}
                           onChange={e => setEditingItem(prev => prev ? {...prev, data: {...prev.data, origem: e.target.value}} : prev)} />
-                        <input className="border rounded px-2 py-1 text-sm" placeholder="Destino" value={editingItem.data.destino}
+                        <input className="border rounded px-2 py-1 text-sm" placeholder="Destino" value={editingItem?.data.destino || ''}
                           onChange={e => setEditingItem(prev => prev ? {...prev, data: {...prev.data, destino: e.target.value}} : prev)} />
                         <div className="flex space-x-1">
-                          <input type="number" className="border rounded px-2 py-1 text-sm w-1/2" placeholder="KM Ini" value={editingItem.data.kmInicial || ''}
+                          <input type="number" className="border rounded px-2 py-1 text-sm w-1/2" placeholder="KM Ini" value={editingItem?.data.kmInicial || ''}
                             onChange={e => setEditingItem(prev => prev ? {...prev, data: {...prev.data, kmInicial: Number(e.target.value)}} : prev)} />
-                          <input type="number" className="border rounded px-2 py-1 text-sm w-1/2" placeholder="KM Fim" value={editingItem.data.kmFinal || ''}
+                          <input type="number" className="border rounded px-2 py-1 text-sm w-1/2" placeholder="KM Fim" value={editingItem?.data.kmFinal || ''}
                             onChange={e => setEditingItem(prev => prev ? {...prev, data: {...prev.data, kmFinal: Number(e.target.value)}} : prev)} />
                         </div>
                       </div>

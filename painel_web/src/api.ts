@@ -20,7 +20,7 @@ api.interceptors.response.use((response) => {
   if (error.response && error.response.status === 401) {
     localStorage.removeItem('choferlog_token');
     localStorage.removeItem('choferlog_user');
-    window.location.href = '/login';
+    window.dispatchEvent(new Event('auth:unauthorized'));
   }
   return Promise.reject(error);
 });

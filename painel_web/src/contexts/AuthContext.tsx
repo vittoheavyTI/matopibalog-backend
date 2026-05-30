@@ -47,6 +47,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setLoading(false);
   }, []);
 
+  useEffect(() => {
+    const handleUnauthorized = () => {
+      setToken(null);
+      setUser(null);
+    };
+    window.addEventListener('auth:unauthorized', handleUnauthorized);
+    return () => window.removeEventListener('auth:unauthorized', handleUnauthorized);
+  }, []);
+
   const login = (token: string, user: User) => {
     localStorage.setItem('choferlog_token', token);
     localStorage.setItem('choferlog_user', JSON.stringify(user));
@@ -59,7 +68,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.removeItem('choferlog_user');
     setToken(null);
     setUser(null);
-    window.location.href = '/login';
   };
 
   return (

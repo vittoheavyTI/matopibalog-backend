@@ -1,16 +1,18 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Outlet } from 'react-router-dom';
+import { Outlet, useNavigate } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { useAuth } from '../contexts/AuthContext';
 import { LogOut, User as UserIcon, ChevronDown } from 'lucide-react';
 
 export const Layout: React.FC = () => {
   const { user, logout } = useAuth();
+  const navigate = useNavigate();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const handleLogout = () => {
     logout();
+    navigate('/login', { replace: true });
   };
 
   // Fecha o dropdown se clicar fora dele

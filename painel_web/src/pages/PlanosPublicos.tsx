@@ -1,4 +1,5 @@
 import React from 'react';
+import { useNavigate, Link } from 'react-router-dom';
 import { Check, Truck } from 'lucide-react';
 
 const planos = [
@@ -27,6 +28,7 @@ const planos = [
 ];
 
 export const PlanosPublicos: React.FC = () => {
+  const navigate = useNavigate();
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50">
       <div className="max-w-7xl mx-auto px-4 py-16">
@@ -69,7 +71,7 @@ export const PlanosPublicos: React.FC = () => {
                 className={`w-full py-3 rounded-xl text-white font-semibold transition-colors ${
                   plano.destaque ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-800 hover:bg-gray-900'
                 }`}
-                onClick={() => window.location.href = '/cadastro?plano=' + plano.nome.toLowerCase()}
+                onClick={() => navigate('/cadastro?plano=' + plano.nome.toLowerCase())}
               >
                 Começar Agora
               </button>
@@ -80,7 +82,7 @@ export const PlanosPublicos: React.FC = () => {
         <div className="text-center mt-12">
           <p className="text-gray-500">
             Já tem cadastro?{' '}
-            <a href="/login" className="text-blue-600 hover:underline font-medium">Fazer Login</a>
+            <Link to="/login" className="text-blue-600 hover:underline font-medium">Fazer Login</Link>
           </p>
         </div>
       </div>
