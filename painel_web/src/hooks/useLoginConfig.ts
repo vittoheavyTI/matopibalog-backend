@@ -80,108 +80,104 @@ export function useLoginConfig() {
       .then((response) => {
         const d = response.data;
         if (d && Object.keys(d).length > 0) {
-          const changed: Record<string, any> = {};
+          const merged: Record<string, any> = {};
 
-          if (d.loginLogo !== undefined && !localStorage.getItem('choferlog_login_logo')) {
-            localStorage.setItem('choferlog_login_logo', d.loginLogo);
-            changed.loginLogo = d.loginLogo;
+          if (d.loginLogo !== undefined) {
+            if (d.loginLogo) localStorage.setItem('choferlog_login_logo', d.loginLogo);
+            else localStorage.removeItem('choferlog_login_logo');
+            merged.loginLogo = d.loginLogo;
           }
-          if (d.loginLogoScale !== undefined && !localStorage.getItem('choferlog_login_logo_scale')) {
+          if (d.loginLogoScale !== undefined) {
             localStorage.setItem('choferlog_login_logo_scale', d.loginLogoScale.toString());
-            changed.loginLogoScale = d.loginLogoScale;
+            merged.loginLogoScale = d.loginLogoScale;
           }
-          if (d.loginLogoY !== undefined && !localStorage.getItem('choferlog_login_logo_y')) {
+          if (d.loginLogoY !== undefined) {
             localStorage.setItem('choferlog_login_logo_y', d.loginLogoY.toString());
-            changed.loginLogoY = d.loginLogoY;
+            merged.loginLogoY = d.loginLogoY;
           }
-
-          if (d.loginBg !== undefined && !localStorage.getItem('choferlog_login_bg')) {
-            localStorage.setItem('choferlog_login_bg', d.loginBg);
-            changed.loginBg = d.loginBg;
+          if (d.loginBg !== undefined) {
+            if (d.loginBg) localStorage.setItem('choferlog_login_bg', d.loginBg);
+            else localStorage.removeItem('choferlog_login_bg');
+            merged.loginBg = d.loginBg;
           }
-          if (d.loginBgScale !== undefined && !localStorage.getItem('choferlog_login_bg_scale')) {
+          if (d.loginBgScale !== undefined) {
             localStorage.setItem('choferlog_login_bg_scale', d.loginBgScale.toString());
-            changed.loginBgScale = d.loginBgScale;
+            merged.loginBgScale = d.loginBgScale;
           }
-          if (d.loginBgY !== undefined && !localStorage.getItem('choferlog_login_bg_y')) {
+          if (d.loginBgY !== undefined) {
             localStorage.setItem('choferlog_login_bg_y', d.loginBgY.toString());
-            changed.loginBgY = d.loginBgY;
+            merged.loginBgY = d.loginBgY;
           }
-
-          if (d.cardScale !== undefined && !localStorage.getItem('choferlog_card_scale')) {
+          if (d.cardScale !== undefined) {
             localStorage.setItem('choferlog_card_scale', d.cardScale.toString());
-            changed.cardScale = d.cardScale;
+            merged.cardScale = d.cardScale;
           }
-          if (d.cardX !== undefined && !localStorage.getItem('choferlog_card_x')) {
+          if (d.cardX !== undefined) {
             localStorage.setItem('choferlog_card_x', d.cardX.toString());
-            changed.cardX = d.cardX;
+            merged.cardX = d.cardX;
           }
-          if (d.cardY !== undefined && !localStorage.getItem('choferlog_card_y')) {
+          if (d.cardY !== undefined) {
             localStorage.setItem('choferlog_card_y', d.cardY.toString());
-            changed.cardY = d.cardY;
+            merged.cardY = d.cardY;
           }
-          if (d.cardColor !== undefined && !localStorage.getItem('choferlog_card_color')) {
+          if (d.cardColor !== undefined) {
             localStorage.setItem('choferlog_card_color', d.cardColor);
-            changed.cardColor = d.cardColor;
+            merged.cardColor = d.cardColor;
           }
-          if (d.cardOpacity !== undefined && !localStorage.getItem('choferlog_card_opacity')) {
+          if (d.cardOpacity !== undefined) {
             localStorage.setItem('choferlog_card_opacity', d.cardOpacity.toString());
-            changed.cardOpacity = d.cardOpacity;
+            merged.cardOpacity = d.cardOpacity;
           }
-
-          if (d.footerText !== undefined && !localStorage.getItem('choferlog_login_footer')) {
+          if (d.footerText !== undefined) {
             localStorage.setItem('choferlog_login_footer', d.footerText);
-            changed.footerText = d.footerText;
+            merged.footerText = d.footerText;
           }
-          if (d.contactPhone !== undefined && !localStorage.getItem('choferlog_contact_phone')) {
+          if (d.contactPhone !== undefined) {
             localStorage.setItem('choferlog_contact_phone', d.contactPhone);
-            changed.contactPhone = d.contactPhone;
+            merged.contactPhone = d.contactPhone;
           }
-          if (d.contactEmail !== undefined && !localStorage.getItem('choferlog_contact_email')) {
+          if (d.contactEmail !== undefined) {
             localStorage.setItem('choferlog_contact_email', d.contactEmail);
-            changed.contactEmail = d.contactEmail;
+            merged.contactEmail = d.contactEmail;
           }
-          if (d.footerColor !== undefined && !localStorage.getItem('choferlog_footer_color')) {
+          if (d.footerColor !== undefined) {
             localStorage.setItem('choferlog_footer_color', d.footerColor);
-            changed.footerColor = d.footerColor;
+            merged.footerColor = d.footerColor;
           }
-          if (d.footerOpacity !== undefined && !localStorage.getItem('choferlog_footer_opacity')) {
+          if (d.footerOpacity !== undefined) {
             localStorage.setItem('choferlog_footer_opacity', d.footerOpacity.toString());
-            changed.footerOpacity = d.footerOpacity;
+            merged.footerOpacity = d.footerOpacity;
           }
-          if (d.footerFontSize !== undefined && !localStorage.getItem('choferlog_footer_font_size')) {
+          if (d.footerFontSize !== undefined) {
             localStorage.setItem('choferlog_footer_font_size', d.footerFontSize.toString());
-            changed.footerFontSize = d.footerFontSize;
+            merged.footerFontSize = d.footerFontSize;
           }
-          if (d.footerBold !== undefined && !localStorage.getItem('choferlog_footer_bold')) {
+          if (d.footerBold !== undefined) {
             localStorage.setItem('choferlog_footer_bold', d.footerBold.toString());
-            changed.footerBold = d.footerBold;
+            merged.footerBold = d.footerBold;
           }
-          if (d.footerFontFamily !== undefined && !localStorage.getItem('choferlog_footer_font_family')) {
+          if (d.footerFontFamily !== undefined) {
             localStorage.setItem('choferlog_footer_font_family', d.footerFontFamily);
-            changed.footerFontFamily = d.footerFontFamily;
+            merged.footerFontFamily = d.footerFontFamily;
           }
-          if (d.footerWidth !== undefined && !localStorage.getItem('choferlog_footer_width')) {
+          if (d.footerWidth !== undefined) {
             localStorage.setItem('choferlog_footer_width', d.footerWidth.toString());
-            changed.footerWidth = d.footerWidth;
+            merged.footerWidth = d.footerWidth;
           }
-          if (d.footerHeight !== undefined && !localStorage.getItem('choferlog_footer_height')) {
+          if (d.footerHeight !== undefined) {
             localStorage.setItem('choferlog_footer_height', d.footerHeight.toString());
-            changed.footerHeight = d.footerHeight;
+            merged.footerHeight = d.footerHeight;
           }
-
-          if (d.inputBgColor !== undefined && !localStorage.getItem('choferlog_input_bg')) {
+          if (d.inputBgColor !== undefined) {
             localStorage.setItem('choferlog_input_bg', d.inputBgColor);
-            changed.inputBgColor = d.inputBgColor;
+            merged.inputBgColor = d.inputBgColor;
           }
-          if (d.inputBorderColor !== undefined && !localStorage.getItem('choferlog_input_border')) {
+          if (d.inputBorderColor !== undefined) {
             localStorage.setItem('choferlog_input_border', d.inputBorderColor);
-            changed.inputBorderColor = d.inputBorderColor;
+            merged.inputBorderColor = d.inputBorderColor;
           }
 
-          if (Object.keys(changed).length > 0) {
-            setConfig(prev => ({ ...prev, ...changed }));
-          }
+          setConfig(prev => ({ ...prev, ...merged }));
         }
       })
       .catch((err) => {
