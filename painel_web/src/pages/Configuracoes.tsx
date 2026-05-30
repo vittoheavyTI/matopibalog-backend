@@ -101,7 +101,7 @@ export const Configuracoes: React.FC = () => {
     setInputBgColor(config.inputBgColor);
     setInputBorderColor(config.inputBorderColor);
 
-    loadConfigFromApi();
+    // loadConfigFromApi removido - hook useLoginConfig é a fonte única
   }, []);
 
   useEffect(() => {
@@ -1263,3 +1263,4 @@ export const Configuracoes: React.FC = () => {
     </div>
   );
 };
+
