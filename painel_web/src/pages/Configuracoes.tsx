@@ -52,15 +52,6 @@ export const Configuracoes: React.FC = () => {
   const [cardScale, setCardScale] = useState(100);
   const [cardX, setCardX] = useState(0);
   const [cardY, setCardY] = useState(0);
-  const [cardFontSize, setCardFontSize] = useState(
-    Number(localStorage.getItem('choferlog_card_font_size')) || 16
-  );
-  const [cardFontColor, setCardFontColor] = useState(
-    localStorage.getItem('choferlog_card_font_color') || '#333333'
-  );
-  const [cardWidth, setCardWidth] = useState(
-    Number(localStorage.getItem('choferlog_card_width')) || 380
-  );
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const dragRef = useRef({ startX: 0, startY: 0, startCardX: 0, startCardY: 0 });
@@ -80,9 +71,11 @@ export const Configuracoes: React.FC = () => {
   const footerResizeRef = useRef({ startX: 0, startY: 0, startWidth: 80, startHeight: 60, edge: '' });
   const [inputBgColor, setInputBgColor] = useState('#ffffff');
   const [inputBorderColor, setInputBorderColor] = useState('#e5e7eb');
+  const [cardFontSize, setCardFontSize] = useState(Number(localStorage.getItem('choferlog_card_font_size')) || 16);
+  const [cardFontColor, setCardFontColor] = useState(localStorage.getItem('choferlog_card_font_color') || '#333333');
+  const [cardWidth, setCardWidth] = useState(Number(localStorage.getItem('choferlog_card_width')) || 380);
   const [showPasswordPreview, setShowPasswordPreview] = useState(false);
   const config = useLoginConfig();
-  const syncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const savedCompany = localStorage.getItem('choferlog_company');
@@ -90,6 +83,12 @@ export const Configuracoes: React.FC = () => {
 
     const savedPrinters = localStorage.getItem('choferlog_printers');
     if (savedPrinters) setPrinters(JSON.parse(savedPrinters));
+    const savedCardFontSize = localStorage.getItem('choferlog_card_font_size');
+    if (savedCardFontSize) setCardFontSize(Number(savedCardFontSize));
+    const savedCardFontColor = localStorage.getItem('choferlog_card_font_color');
+    if (savedCardFontColor) setCardFontColor(savedCardFontColor);
+    const savedCardWidth = localStorage.getItem('choferlog_card_width');
+    if (savedCardWidth) setCardWidth(Number(savedCardWidth));
 
     if (config.loginLogo) setLoginLogo(config.loginLogo);
     if (config.loginBg) setLoginBg(config.loginBg);
@@ -111,86 +110,21 @@ export const Configuracoes: React.FC = () => {
     setInputBgColor(config.inputBgColor);
     setInputBorderColor(config.inputBorderColor);
 
-    // loadConfigFromApi removido - hook useLoginConfig é a fonte única
-  }, []);
-
-  useEffect(() => {
-    const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setShowPrinterSearch(false);
-    };
-    window.addEventListener('keydown', handleEsc);
-    return () => window.removeEventListener('keydown', handleEsc);
-  }, []);
-
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (isDragging) {
-        const deltaX = e.clientX - dragRef.current.startX;
-        const deltaY = e.clientY - dragRef.current.startY;
-        const newX = dragRef.current.startCardX + deltaX;
-        const newY = dragRef.current.startCardY + deltaY;
-        setCardX(Math.round(newX));
-        setCardY(Math.round(newY));
-      }
-      if (isResizing) {
-        const deltaX = e.clientX - resizeRef.current.startX;
-        const deltaY = e.clientY - resizeRef.current.startY;
-        const { edges } = resizeRef.current;
-
-        let newScale = resizeRef.current.startScale;
-
-        if (edges.right || edges.left) {
-          newScale = Math.min(200, Math.max(50, resizeRef.current.startScale + deltaX * 0.3));
-        }
-        if (edges.bottom || edges.top) {
-          newScale = Math.min(200, Math.max(50, resizeRef.current.startScale + deltaY * 0.3));
-        }
-
-        setCardScale(Math.round(newScale));
-      }
-      if (isResizingFooter) {
-        const deltaX = e.clientX - footerResizeRef.current.startX;
-        const deltaY = e.clientY - footerResizeRef.current.startY;
-
-        let newWidth = footerResizeRef.current.startWidth;
-        let newHeight = footerResizeRef.current.startHeight;
-
-        if (footerResizeRef.current.edge === 'right' || footerResizeRef.current.edge === 'corner') {
-          const previewEl = document.querySelector('.preview-container');
-          const previewWidth = previewEl?.clientWidth || 800;
-          newWidth = Math.min(95, Math.max(30, footerResizeRef.current.startWidth + (deltaX / previewWidth) * 100));
-        }
-
-        if (footerResizeRef.current.edge === 'bottom' || footerResizeRef.current.edge === 'corner') {
-          newHeight = Math.min(150, Math.max(30, footerResizeRef.current.startHeight + deltaY));
-        }
-
-        setFooterWidth(Math.round(newWidth));
-        setFooterHeight(Math.round(newHeight));
-      }
-    };
     const handleMouseUp = () => {
-      let needsSync = false;
       if (isDragging) {
         localStorage.setItem('choferlog_card_x', cardX.toString());
         localStorage.setItem('choferlog_card_y', cardY.toString());
-        needsSync = true;
       }
       if (isResizing) {
         localStorage.setItem('choferlog_card_scale', cardScale.toString());
-        needsSync = true;
       }
       if (isResizingFooter) {
         localStorage.setItem('choferlog_footer_width', footerWidth.toString());
         localStorage.setItem('choferlog_footer_height', footerHeight.toString());
         setIsResizingFooter(false);
-        needsSync = true;
       }
       setIsDragging(false);
       setIsResizing(false);
-      if (needsSync) {
-        syncConfigToServer();
-      }
     };
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('mouseup', handleMouseUp);
@@ -326,26 +260,12 @@ export const Configuracoes: React.FC = () => {
   };
 
   const collectAllConfig = () => ({
-    company, printers,
-    loginLogo: localStorage.getItem('choferlog_login_logo'),
-    loginBg: localStorage.getItem('choferlog_login_bg'),
-    footerText: localStorage.getItem('choferlog_login_footer') || '',
-    contactPhone: localStorage.getItem('choferlog_contact_phone') || '',
-    contactEmail: localStorage.getItem('choferlog_contact_email') || '',
-    footerColor: localStorage.getItem('choferlog_footer_color') || '#ffffff',
-    footerOpacity: Number(localStorage.getItem('choferlog_footer_opacity')) || 70,
-    footerFontSize: Number(localStorage.getItem('choferlog_footer_font_size')) || 14,
-    footerBold: localStorage.getItem('choferlog_footer_bold') === 'true',
-    footerFontFamily: localStorage.getItem('choferlog_footer_font_family') || 'Arial',
-    footerWidth: Number(localStorage.getItem('choferlog_footer_width')) || 80,
-    footerHeight: Number(localStorage.getItem('choferlog_footer_height')) || 60,
-    inputBgColor: localStorage.getItem('choferlog_input_bg') || '#ffffff',
-    inputBorderColor: localStorage.getItem('choferlog_input_border') || '#e5e7eb',
-    cardScale: Number(localStorage.getItem('choferlog_card_scale')) || 100,
-    cardX: Number(localStorage.getItem('choferlog_card_x')) || 0,
-    cardY: Number(localStorage.getItem('choferlog_card_y')) || 0,
-    cardColor: localStorage.getItem('choferlog_card_color') || '#ffffff',
-    cardOpacity: Number(localStorage.getItem('choferlog_card_opacity')) || 100,
+    company, printers, loginLogo, loginBg, footerText,
+    contactPhone, contactEmail, footerColor, footerOpacity,
+    footerFontSize, footerBold, footerFontFamily,
+    footerWidth, footerHeight,
+    inputBgColor, inputBorderColor,
+    cardScale, cardX, cardY, cardColor, cardOpacity,
     loginLogoScale: Number(localStorage.getItem('choferlog_login_logo_scale')) || 100,
     loginLogoY: Number(localStorage.getItem('choferlog_login_logo_y')) || 0,
     loginBgScale: Number(localStorage.getItem('choferlog_login_bg_scale')) || 100,
@@ -355,22 +275,43 @@ export const Configuracoes: React.FC = () => {
   const syncConfigToServer = () => {
     const dados = collectAllConfig();
     localStorage.setItem('chofer_config', JSON.stringify(dados));
-    api.put('/configuracoes', dados).catch(() => {
-      fetch('https://matopibalog-api.onrender.com/configuracoes/public', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(dados)
-      }).catch(() => console.log('Erro ao sincronizar'));
-    });
+    try {
+      api.put('/configuracoes', dados);
+    } catch (err) {
+      console.log('Erro ao sincronizar com servidor');
+    }
   };
 
-  const debouncedSyncConfigToServer = () => {
-    if (syncTimeoutRef.current) {
-      clearTimeout(syncTimeoutRef.current);
-    }
-    syncTimeoutRef.current = setTimeout(() => {
-      syncConfigToServer();
-    }, 1000);
+  const loadConfigFromApi = () => {
+    api.get('/configuracoes')
+      .then((response) => {
+        const data = response.data;
+        if (data) {
+          const d = data;
+          if (d.company) setCompany(d.company);
+          if (d.printers) setPrinters(d.printers);
+          if (d.loginLogo) setLoginLogo(d.loginLogo);
+          if (d.loginBg) setLoginBg(d.loginBg);
+          if (d.footerText !== undefined) setFooterText(d.footerText);
+          if (d.cardScale) setCardScale(d.cardScale);
+          if (d.cardX !== undefined) setCardX(d.cardX);
+          if (d.cardY !== undefined) setCardY(d.cardY);
+          if (d.cardColor) setCardColor(d.cardColor);
+          if (d.cardOpacity !== undefined) setCardOpacity(d.cardOpacity);
+          if (d.contactPhone !== undefined) setContactPhone(d.contactPhone);
+          if (d.contactEmail !== undefined) setContactEmail(d.contactEmail);
+          if (d.footerColor) setFooterColor(d.footerColor);
+          if (d.footerOpacity !== undefined) setFooterOpacity(d.footerOpacity);
+          if (d.footerFontSize !== undefined) setFooterFontSize(d.footerFontSize);
+          if (d.footerBold !== undefined) setFooterBold(d.footerBold);
+          if (d.footerFontFamily) setFooterFontFamily(d.footerFontFamily);
+          if (d.footerWidth !== undefined) setFooterWidth(d.footerWidth);
+          if (d.footerHeight !== undefined) setFooterHeight(d.footerHeight);
+          if (d.inputBgColor) setInputBgColor(d.inputBgColor);
+          if (d.inputBorderColor) setInputBorderColor(d.inputBorderColor);
+        }
+      })
+      .catch(() => { });
   };
 
   return (
@@ -575,8 +516,8 @@ export const Configuracoes: React.FC = () => {
                       onClick={() => handleTestPrinter(p)}
                       disabled={testingPrinter === p.id}
                       className={`flex items-center px-3 py-2 rounded-lg text-xs font-medium transition-all ${testingPrinter === p.id
-                          ? 'bg-gray-100 text-gray-400 cursor-wait'
-                          : 'bg-green-50 text-green-700 hover:bg-green-100'
+                        ? 'bg-gray-100 text-gray-400 cursor-wait'
+                        : 'bg-green-50 text-green-700 hover:bg-green-100'
                         }`}
                     >
                       {testingPrinter === p.id ? (
@@ -870,7 +811,7 @@ export const Configuracoes: React.FC = () => {
                   <input
                     type="color"
                     value={cardColor}
-                    onChange={e => { const v = e.target.value; setCardColor(v); localStorage.setItem('choferlog_card_color', v); debouncedSyncConfigToServer(); }}
+                    onChange={e => { const v = e.target.value; setCardColor(v); localStorage.setItem('choferlog_card_color', v); }}
                     className="w-12 h-12 rounded-lg border border-gray-200 cursor-pointer"
                   />
                   <span className="text-sm text-gray-500 font-mono">{cardColor}</span>
@@ -881,8 +822,31 @@ export const Configuracoes: React.FC = () => {
                   <span className="font-medium text-gray-700">Transparência</span>
                   <span className="text-gray-500">{cardOpacity}%</span>
                 </div>
-                <input type="range" min="0" max="100" value={cardOpacity} onChange={e => { const v = Number(e.target.value); setCardOpacity(v); localStorage.setItem('choferlog_card_opacity', v.toString()); debouncedSyncConfigToServer(); }} className="w-full accent-blue-600" />
+                <input type="range" min="0" max="100" value={cardOpacity} onChange={e => { const v = Number(e.target.value); setCardOpacity(v); localStorage.setItem('choferlog_card_opacity', v.toString()); }} className="w-full accent-blue-600" />
               </div>
+            </div>
+            <div className="mt-4">
+              <div className="flex justify-between text-sm mb-1">
+                <span className="font-medium text-gray-700">Tamanho da Fonte</span>
+                <span className="text-gray-500">{cardFontSize}px</span>
+              </div>
+              <input type="range" min="12" max="24" value={cardFontSize} onChange={e => { const v = Number(e.target.value); setCardFontSize(v); localStorage.setItem('choferlog_card_font_size', v.toString()); }} className="w-full accent-blue-600" />
+            </div>
+            <div className="mt-4">
+              <div className="flex justify-between text-sm mb-1">
+                <span className="font-medium text-gray-700">Cor da Fonte</span>
+              </div>
+              <div className="flex items-center space-x-3">
+                <input type="color" value={cardFontColor} onChange={e => { const v = e.target.value; setCardFontColor(v); localStorage.setItem('choferlog_card_font_color', v); }} className="w-12 h-12 rounded-lg border border-gray-200 cursor-pointer" />
+                <span className="text-sm text-gray-500 font-mono">{cardFontColor}</span>
+              </div>
+            </div>
+            <div className="mt-4">
+              <div className="flex justify-between text-sm mb-1">
+                <span className="font-medium text-gray-700">Largura do Card</span>
+                <span className="text-gray-500">{cardWidth}px</span>
+              </div>
+              <input type="range" min="300" max="550" value={cardWidth} onChange={e => { const v = Number(e.target.value); setCardWidth(v); localStorage.setItem('choferlog_card_width', v.toString()); }} className="w-full accent-blue-600" />
             </div>
           </div>
 
@@ -894,7 +858,7 @@ export const Configuracoes: React.FC = () => {
                   <span className="font-medium text-gray-700">Cor de Fundo</span>
                 </div>
                 <div className="flex items-center space-x-3">
-                  <input type="color" value={inputBgColor} onChange={e => { const v = e.target.value; setInputBgColor(v); localStorage.setItem('choferlog_input_bg', v); debouncedSyncConfigToServer(); }} className="w-12 h-12 rounded-lg border border-gray-200 cursor-pointer" />
+                  <input type="color" value={inputBgColor} onChange={e => { const v = e.target.value; setInputBgColor(v); localStorage.setItem('choferlog_input_bg', v); }} className="w-12 h-12 rounded-lg border border-gray-200 cursor-pointer" />
                   <span className="text-sm text-gray-500 font-mono">{inputBgColor}</span>
                 </div>
               </div>
@@ -903,7 +867,7 @@ export const Configuracoes: React.FC = () => {
                   <span className="font-medium text-gray-700">Cor da Borda</span>
                 </div>
                 <div className="flex items-center space-x-3">
-                  <input type="color" value={inputBorderColor} onChange={e => { const v = e.target.value; setInputBorderColor(v); localStorage.setItem('choferlog_input_border', v); debouncedSyncConfigToServer(); }} className="w-12 h-12 rounded-lg border border-gray-200 cursor-pointer" />
+                  <input type="color" value={inputBorderColor} onChange={e => { const v = e.target.value; setInputBorderColor(v); localStorage.setItem('choferlog_input_border', v); }} className="w-12 h-12 rounded-lg border border-gray-200 cursor-pointer" />
                   <span className="text-sm text-gray-500 font-mono">{inputBorderColor}</span>
                 </div>
               </div>
@@ -922,7 +886,7 @@ export const Configuracoes: React.FC = () => {
                   <input
                     type="color"
                     value={footerColor}
-                    onChange={e => { const v = e.target.value; setFooterColor(v); localStorage.setItem('choferlog_footer_color', v); debouncedSyncConfigToServer(); }}
+                    onChange={e => { const v = e.target.value; setFooterColor(v); localStorage.setItem('choferlog_footer_color', v); }}
                     className="w-12 h-12 rounded-lg border border-gray-200 cursor-pointer"
                   />
                   <span className="text-sm text-gray-500 font-mono">{footerColor}</span>
@@ -933,7 +897,7 @@ export const Configuracoes: React.FC = () => {
                   <span className="font-medium text-gray-700">Transparência</span>
                   <span className="text-gray-500">{footerOpacity}%</span>
                 </div>
-                <input type="range" min="0" max="100" value={footerOpacity} onChange={e => { const v = Number(e.target.value); setFooterOpacity(v); localStorage.setItem('choferlog_footer_opacity', v.toString()); debouncedSyncConfigToServer(); }} className="w-full accent-blue-600" />
+                <input type="range" min="0" max="100" value={footerOpacity} onChange={e => { const v = Number(e.target.value); setFooterOpacity(v); localStorage.setItem('choferlog_footer_opacity', v.toString()); }} className="w-full accent-blue-600" />
               </div>
             </div>
 
@@ -952,7 +916,6 @@ export const Configuracoes: React.FC = () => {
                     const v = Number(e.target.value);
                     setFooterFontSize(v);
                     localStorage.setItem('choferlog_footer_font_size', v.toString());
-                    debouncedSyncConfigToServer();
                   }}
                   className="w-full accent-blue-600"
                 />
@@ -967,7 +930,6 @@ export const Configuracoes: React.FC = () => {
                     const v = e.target.value;
                     setFooterFontFamily(v);
                     localStorage.setItem('choferlog_footer_font_family', v);
-                    debouncedSyncConfigToServer();
                   }}
                   className="w-full border-2 border-gray-50 rounded-xl p-2.5 outline-none focus:border-blue-500 bg-gray-50/50 text-sm"
                 >
@@ -987,7 +949,6 @@ export const Configuracoes: React.FC = () => {
                     const v = !footerBold;
                     setFooterBold(v);
                     localStorage.setItem('choferlog_footer_bold', v.toString());
-                    debouncedSyncConfigToServer();
                   }}
                   style={{
                     width: '100%',
@@ -1159,8 +1120,8 @@ export const Configuracoes: React.FC = () => {
                   onClick={handleSearchByName}
                   disabled={!searchTerm.trim() || isSearching}
                   className={`px-5 py-3 rounded-xl font-bold text-sm transition-all ${searchTerm.trim() && !isSearching
-                      ? 'bg-blue-600 text-white hover:bg-blue-700'
-                      : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                    ? 'bg-blue-600 text-white hover:bg-blue-700'
+                    : 'bg-gray-200 text-gray-400 cursor-not-allowed'
                     }`}
                 >
                   Buscar
@@ -1195,8 +1156,8 @@ export const Configuracoes: React.FC = () => {
                     >
                       <div className="flex items-center space-x-4">
                         <div className={`p-2.5 rounded-lg ${printer.tipo === 'fiscal' ? 'bg-purple-50 text-purple-600' :
-                            printer.tipo === 'termica' ? 'bg-blue-50 text-blue-600' :
-                              'bg-gray-100 text-gray-600'
+                          printer.tipo === 'termica' ? 'bg-blue-50 text-blue-600' :
+                            'bg-gray-100 text-gray-600'
                           }`}>
                           <Printer size={22} />
                         </div>
@@ -1204,9 +1165,9 @@ export const Configuracoes: React.FC = () => {
                           <p className="font-bold text-gray-800">{printer.nome}</p>
                           <div className="flex flex-wrap gap-1.5 mt-1">
                             <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${printer.via === 'wifi' ? 'bg-green-100 text-green-700' :
-                                printer.via === 'rede' ? 'bg-purple-100 text-purple-700' :
-                                  printer.via === 'usb' ? 'bg-blue-100 text-blue-700' :
-                                    'bg-gray-100 text-gray-600'
+                              printer.via === 'rede' ? 'bg-purple-100 text-purple-700' :
+                                printer.via === 'usb' ? 'bg-blue-100 text-blue-700' :
+                                  'bg-gray-100 text-gray-600'
                               }`}>
                               {printer.via === 'wifi' ? '📶 Wi-Fi (WSD)' :
                                 printer.via === 'rede' ? '🌐 Rede' :
@@ -1271,4 +1232,3 @@ export const Configuracoes: React.FC = () => {
     </div>
   );
 };
-
