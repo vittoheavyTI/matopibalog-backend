@@ -109,30 +109,7 @@ export const Configuracoes: React.FC = () => {
     setFooterHeight(config.footerHeight);
     setInputBgColor(config.inputBgColor);
     setInputBorderColor(config.inputBorderColor);
-
-    const handleMouseUp = () => {
-      if (isDragging) {
-        localStorage.setItem('choferlog_card_x', cardX.toString());
-        localStorage.setItem('choferlog_card_y', cardY.toString());
-      }
-      if (isResizing) {
-        localStorage.setItem('choferlog_card_scale', cardScale.toString());
-      }
-      if (isResizingFooter) {
-        localStorage.setItem('choferlog_footer_width', footerWidth.toString());
-        localStorage.setItem('choferlog_footer_height', footerHeight.toString());
-        setIsResizingFooter(false);
-      }
-      setIsDragging(false);
-      setIsResizing(false);
-    };
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [isDragging, isResizing, isResizingFooter, cardX, cardY, cardScale, footerWidth, footerHeight]);
+  }, []);
 
   const handleSaveCompany = () => {
     localStorage.setItem('choferlog_company', JSON.stringify(company));
