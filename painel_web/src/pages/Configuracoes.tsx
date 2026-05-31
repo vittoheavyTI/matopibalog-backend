@@ -52,6 +52,15 @@ export const Configuracoes: React.FC = () => {
   const [cardScale, setCardScale] = useState(100);
   const [cardX, setCardX] = useState(0);
   const [cardY, setCardY] = useState(0);
+  const [cardFontSize, setCardFontSize] = useState(
+    Number(localStorage.getItem('choferlog_card_font_size')) || 16
+  );
+  const [cardFontColor, setCardFontColor] = useState(
+    localStorage.getItem('choferlog_card_font_color') || '#333333'
+  );
+  const [cardWidth, setCardWidth] = useState(
+    Number(localStorage.getItem('choferlog_card_width')) || 380
+  );
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const dragRef = useRef({ startX: 0, startY: 0, startCardX: 0, startCardY: 0 });
@@ -374,19 +383,19 @@ export const Configuracoes: React.FC = () => {
       </div>
 
       <div className="flex space-x-1 bg-gray-100 p-1 rounded-xl w-fit">
-        <button 
+        <button
           onClick={() => setActiveTab('empresa')}
           className={`flex items-center px-6 py-2.5 rounded-lg font-bold text-sm transition-all ${activeTab === 'empresa' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
         >
           <Building2 size={18} className="mr-2" /> Dados da Empresa
         </button>
-        <button 
+        <button
           onClick={() => setActiveTab('impressora')}
           className={`flex items-center px-6 py-2.5 rounded-lg font-bold text-sm transition-all ${activeTab === 'impressora' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
         >
           <Printer size={18} className="mr-2" /> Impressoras
         </button>
-        <button 
+        <button
           onClick={() => setActiveTab('aparencia')}
           className={`flex items-center px-6 py-2.5 rounded-lg font-bold text-sm transition-all ${activeTab === 'aparencia' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
         >
@@ -400,41 +409,41 @@ export const Configuracoes: React.FC = () => {
             <div className="space-y-4">
               <div>
                 <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Razão Social / Nome Fantasia</label>
-                <input 
-                  type="text" 
-                  className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" 
+                <input
+                  type="text"
+                  className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50"
                   value={company.nome}
-                  onChange={(e) => setCompany({...company, nome: e.target.value})}
+                  onChange={(e) => setCompany({ ...company, nome: e.target.value })}
                   placeholder="Nome da sua transportadora"
                 />
               </div>
               <div>
                 <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">CNPJ</label>
-                <input 
-                  type="text" 
-                  className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" 
+                <input
+                  type="text"
+                  className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50"
                   value={company.cnpj}
-                  onChange={(e) => setCompany({...company, cnpj: maskCNPJ(e.target.value)})}
+                  onChange={(e) => setCompany({ ...company, cnpj: maskCNPJ(e.target.value) })}
                   placeholder="00.000.000/0000-00"
                 />
               </div>
               <div>
                 <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Telefone de Contato</label>
-                <input 
-                  type="text" 
-                  className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" 
+                <input
+                  type="text"
+                  className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50"
                   value={company.telefone}
-                  onChange={(e) => setCompany({...company, telefone: maskPhone(e.target.value)})}
+                  onChange={(e) => setCompany({ ...company, telefone: maskPhone(e.target.value) })}
                   placeholder="(00) 0 0000-0000"
                 />
               </div>
               <div>
                 <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Email Corporativo</label>
-                <input 
-                  type="email" 
-                  className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" 
+                <input
+                  type="email"
+                  className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50"
                   value={company.email}
-                  onChange={(e) => setCompany({...company, email: e.target.value})}
+                  onChange={(e) => setCompany({ ...company, email: e.target.value })}
                   placeholder="contato@empresa.com"
                 />
               </div>
@@ -444,21 +453,21 @@ export const Configuracoes: React.FC = () => {
               <div className="grid grid-cols-3 gap-4">
                 <div className="col-span-2">
                   <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Endereço (Rua, Nº, Bairro)</label>
-                  <input 
-                    type="text" 
-                    className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" 
+                  <input
+                    type="text"
+                    className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50"
                     value={company.endereco}
-                    onChange={(e) => setCompany({...company, endereco: e.target.value})}
+                    onChange={(e) => setCompany({ ...company, endereco: e.target.value })}
                     placeholder="Av. Brasil, 1000 - Centro"
                   />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">CEP</label>
-                  <input 
-                    type="text" 
-                    className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" 
+                  <input
+                    type="text"
+                    className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50"
                     value={company.cep}
-                    onChange={(e) => setCompany({...company, cep: maskCEP(e.target.value)})}
+                    onChange={(e) => setCompany({ ...company, cep: maskCEP(e.target.value) })}
                     placeholder="00000-000"
                   />
                 </div>
@@ -467,44 +476,44 @@ export const Configuracoes: React.FC = () => {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Complemento</label>
-                  <input 
-                    type="text" 
-                    className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" 
+                  <input
+                    type="text"
+                    className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50"
                     value={company.complemento}
-                    onChange={(e) => setCompany({...company, complemento: e.target.value})}
+                    onChange={(e) => setCompany({ ...company, complemento: e.target.value })}
                     placeholder="Ex: Sala 201"
                   />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Ponto de Referência</label>
-                  <input 
-                    type="text" 
-                    className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" 
+                  <input
+                    type="text"
+                    className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50"
                     value={company.pontoReferencia}
-                    onChange={(e) => setCompany({...company, pontoReferencia: e.target.value})}
+                    onChange={(e) => setCompany({ ...company, pontoReferencia: e.target.value })}
                     placeholder="Próximo a..."
                   />
                 </div>
               </div>
-              
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Cidade</label>
-                  <input 
-                    type="text" 
-                    className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" 
+                  <input
+                    type="text"
+                    className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50"
                     value={company.cidade}
-                    onChange={(e) => setCompany({...company, cidade: e.target.value})}
+                    onChange={(e) => setCompany({ ...company, cidade: e.target.value })}
                   />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Estado (UF)</label>
-                  <input 
-                    type="text" 
-                    className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" 
+                  <input
+                    type="text"
+                    className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50"
                     value={company.estado}
                     maxLength={2}
-                    onChange={(e) => setCompany({...company, estado: e.target.value.toUpperCase()})}
+                    onChange={(e) => setCompany({ ...company, estado: e.target.value.toUpperCase() })}
                     placeholder="BA"
                   />
                 </div>
@@ -513,7 +522,7 @@ export const Configuracoes: React.FC = () => {
           </div>
 
           <div className="flex justify-end pt-4 border-t border-gray-50">
-            <button 
+            <button
               onClick={handleSaveCompany}
               className="flex items-center px-8 py-3 bg-blue-600 text-white rounded-xl font-bold shadow-lg shadow-blue-100 hover:bg-blue-700 transition-all active:scale-95"
             >
@@ -548,15 +557,14 @@ export const Configuracoes: React.FC = () => {
               {printers.map(p => (
                 <div key={p.id} className="flex items-center justify-between p-4 border border-gray-100 rounded-xl bg-gray-50/50">
                   <div className="flex items-center space-x-3">
-                    <div className={`p-2 rounded-lg ${
-                      p.tipo === 'fiscal' ? 'bg-purple-50 text-purple-600' : 'bg-gray-100 text-gray-600'
-                    }`}>
+                    <div className={`p-2 rounded-lg ${p.tipo === 'fiscal' ? 'bg-purple-50 text-purple-600' : 'bg-gray-100 text-gray-600'
+                      }`}>
                       <Printer size={20} />
                     </div>
                     <div>
                       <p className="font-bold text-gray-800">{p.nome}</p>
                       <p className="text-xs text-gray-500">
-                        {p.tipo === 'fiscal' ? 'Fiscal' : p.tipo} 
+                        {p.tipo === 'fiscal' ? 'Fiscal' : p.tipo}
                         {p.localizacao === 'rede' && ` • Rede`}
                         {p.localizacao === 'local' && ` • USB`}
                       </p>
@@ -566,11 +574,10 @@ export const Configuracoes: React.FC = () => {
                     <button
                       onClick={() => handleTestPrinter(p)}
                       disabled={testingPrinter === p.id}
-                      className={`flex items-center px-3 py-2 rounded-lg text-xs font-medium transition-all ${
-                        testingPrinter === p.id
+                      className={`flex items-center px-3 py-2 rounded-lg text-xs font-medium transition-all ${testingPrinter === p.id
                           ? 'bg-gray-100 text-gray-400 cursor-wait'
                           : 'bg-green-50 text-green-700 hover:bg-green-100'
-                      }`}
+                        }`}
                     >
                       {testingPrinter === p.id ? (
                         <span className="w-3 h-3 border-2 border-gray-400 border-t-transparent rounded-full animate-spin mr-1.5" />
@@ -579,7 +586,7 @@ export const Configuracoes: React.FC = () => {
                       )}
                       Testar
                     </button>
-                    <button 
+                    <button
                       onClick={() => handleRemovePrinter(p.id)}
                       className="text-gray-400 hover:text-red-600 p-2 hover:bg-red-50 rounded-lg transition-colors"
                     >
@@ -670,13 +677,13 @@ export const Configuracoes: React.FC = () => {
           <div>
             <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Pré-visualização da Tela de Login</label>
             <div className="w-full rounded-xl border border-gray-200 preview-container"
-                 style={{
-                   height: '420px',
-                   maxWidth: '100%',
-                   background: loginBg ? `url(${loginBg}) center/cover no-repeat` : '#1a1a2e',
-                   overflow: 'hidden',
-                   position: 'relative'
-                 }}>
+              style={{
+                height: '420px',
+                maxWidth: '100%',
+                background: loginBg ? `url(${loginBg}) center/cover no-repeat` : '#1a1a2e',
+                overflow: 'hidden',
+                position: 'relative'
+              }}>
               <div style={{
                 transform: 'scale(0.7)',
                 transformOrigin: 'top left',
@@ -686,168 +693,168 @@ export const Configuracoes: React.FC = () => {
                 top: 0,
                 left: 0
               }}>
-                  <div className="w-full h-full flex items-center justify-center relative"
-                       style={loginBg ? { backgroundImage: `url(${loginBg})`, backgroundSize: 'cover', backgroundPosition: 'center' } : { backgroundColor: '#f3f4f6' }}>
-                    <div style={{ position: 'relative', display: 'inline-block' }}>
-                      <div className="w-full relative z-10"
+                <div className="w-full h-full flex items-center justify-center relative"
+                  style={loginBg ? { backgroundImage: `url(${loginBg})`, backgroundSize: 'cover', backgroundPosition: 'center' } : { backgroundColor: '#f3f4f6' }}>
+                  <div style={{ position: 'relative', display: 'inline-block' }}>
+                    <div className="w-full relative z-10"
+                      style={{
+                        backgroundColor: `rgba(${parseInt(cardColor.replace('#', '').substring(0, 2), 16)}, ${parseInt(cardColor.replace('#', '').substring(2, 4), 16)}, ${parseInt(cardColor.replace('#', '').substring(4, 6), 16)}, ${cardOpacity / 100})`,
+                        transform: `translateX(${cardX}px) translateY(${cardY}px) scale(${cardScale / 100})`,
+                        width: '100%',
+                        maxWidth: '380px',
+                        borderRadius: '1rem',
+                        boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
+                        padding: '1.5rem',
+                        userSelect: isDragging || isResizing ? 'none' : undefined
+                      }}
+                      onMouseMove={(e) => {
+                        if (isDragging || isResizing) return;
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        const edge = 12;
+                        const top = e.clientY - rect.top < edge;
+                        const bottom = rect.bottom - e.clientY < edge;
+                        const left = e.clientX - rect.left < edge;
+                        const right = rect.right - e.clientX < edge;
+
+                        let cursor = 'default';
+                        if ((top && left) || (bottom && right)) cursor = 'nwse-resize';
+                        else if ((top && right) || (bottom && left)) cursor = 'nesw-resize';
+                        else if (top || bottom) cursor = 'ns-resize';
+                        else if (left || right) cursor = 'ew-resize';
+
+                        e.currentTarget.style.cursor = cursor;
+                      }}
+                      onMouseDown={(e) => {
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        const edge = 12;
+                        const top = e.clientY - rect.top < edge;
+                        const bottom = rect.bottom - e.clientY < edge;
+                        const left = e.clientX - rect.left < edge;
+                        const right = rect.right - e.clientX < edge;
+
+                        if (top || bottom || left || right) {
+                          e.stopPropagation();
+                          setIsResizing(true);
+                          resizeRef.current = {
+                            startX: e.clientX,
+                            startY: e.clientY,
+                            startScale: cardScale,
+                            startCardX: cardX,
+                            startCardY: cardY,
+                            edges: { top, bottom, left, right }
+                          };
+                        } else {
+                          setIsDragging(true);
+                          dragRef.current = { startX: e.clientX, startY: e.clientY, startCardX: cardX, startCardY: cardY };
+                        }
+                      }}
+                    >
+                      {/* Barra de arrasto */}
+                      <div
                         style={{
-                          backgroundColor: `rgba(${parseInt(cardColor.replace('#','').substring(0,2),16)}, ${parseInt(cardColor.replace('#','').substring(2,4),16)}, ${parseInt(cardColor.replace('#','').substring(4,6),16)}, ${cardOpacity / 100})`,
-                          transform: `translateX(${cardX}px) translateY(${cardY}px) scale(${cardScale / 100})`,
-                          width: '100%',
-                          maxWidth: '380px',
-                          borderRadius: '1rem',
-                          boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
-                          padding: '1.5rem',
-                          userSelect: isDragging || isResizing ? 'none' : undefined
-                        }}
-                        onMouseMove={(e) => {
-                          if (isDragging || isResizing) return;
-                          const rect = e.currentTarget.getBoundingClientRect();
-                          const edge = 12;
-                          const top = e.clientY - rect.top < edge;
-                          const bottom = rect.bottom - e.clientY < edge;
-                          const left = e.clientX - rect.left < edge;
-                          const right = rect.right - e.clientX < edge;
-
-                          let cursor = 'default';
-                          if ((top && left) || (bottom && right)) cursor = 'nwse-resize';
-                          else if ((top && right) || (bottom && left)) cursor = 'nesw-resize';
-                          else if (top || bottom) cursor = 'ns-resize';
-                          else if (left || right) cursor = 'ew-resize';
-
-                          e.currentTarget.style.cursor = cursor;
+                          cursor: 'grab',
+                          height: '24px',
+                          background: 'rgba(0,0,0,0.05)',
+                          borderRadius: '4px 4px 0 0',
+                          marginBottom: '12px',
+                          marginLeft: '-2rem',
+                          marginRight: '-2rem',
+                          marginTop: '-2rem',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center'
                         }}
                         onMouseDown={(e) => {
-                          const rect = e.currentTarget.getBoundingClientRect();
-                          const edge = 12;
-                          const top = e.clientY - rect.top < edge;
-                          const bottom = rect.bottom - e.clientY < edge;
-                          const left = e.clientX - rect.left < edge;
-                          const right = rect.right - e.clientX < edge;
-
-                          if (top || bottom || left || right) {
-                            e.stopPropagation();
-                            setIsResizing(true);
-                            resizeRef.current = {
-                              startX: e.clientX,
-                              startY: e.clientY,
-                              startScale: cardScale,
-                              startCardX: cardX,
-                              startCardY: cardY,
-                              edges: { top, bottom, left, right }
-                            };
-                          } else {
-                            setIsDragging(true);
-                            dragRef.current = { startX: e.clientX, startY: e.clientY, startCardX: cardX, startCardY: cardY };
-                          }
+                          e.stopPropagation();
+                          setIsDragging(true);
+                          dragRef.current = { startX: e.clientX, startY: e.clientY, startCardX: cardX, startCardY: cardY };
                         }}
                       >
-                        {/* Barra de arrasto */}
-                        <div
-                          style={{
-                            cursor: 'grab',
-                            height: '24px',
-                            background: 'rgba(0,0,0,0.05)',
-                            borderRadius: '4px 4px 0 0',
-                            marginBottom: '12px',
-                            marginLeft: '-2rem',
-                            marginRight: '-2rem',
-                            marginTop: '-2rem',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center'
-                          }}
-                          onMouseDown={(e) => {
-                            e.stopPropagation();
-                            setIsDragging(true);
-                            dragRef.current = { startX: e.clientX, startY: e.clientY, startCardX: cardX, startCardY: cardY };
-                          }}
-                        >
-                          <div style={{ display: 'flex', gap: '3px' }}>
-                            <div style={{ width: '4px', height: '4px', borderRadius: '50%', background: '#ccc' }}></div>
-                            <div style={{ width: '4px', height: '4px', borderRadius: '50%', background: '#ccc' }}></div>
-                            <div style={{ width: '4px', height: '4px', borderRadius: '50%', background: '#ccc' }}></div>
-                          </div>
+                        <div style={{ display: 'flex', gap: '3px' }}>
+                          <div style={{ width: '4px', height: '4px', borderRadius: '50%', background: '#ccc' }}></div>
+                          <div style={{ width: '4px', height: '4px', borderRadius: '50%', background: '#ccc' }}></div>
+                          <div style={{ width: '4px', height: '4px', borderRadius: '50%', background: '#ccc' }}></div>
                         </div>
-
-                        <div className="flex flex-col items-center mb-6">
-                          {loginLogo ? (
-                            <img src={loginLogo} alt="Logo" className="object-contain" style={{ maxWidth: '100%' }} />
-                          ) : (
-                            <div className="bg-blue-600 p-3 rounded-full flex items-center justify-center">
-                              <Truck size={32} className="text-white" />
-                            </div>
-                          )}
-                        </div>
-
-                        <form className="flex flex-col gap-4">
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">E-mail</label>
-                            <input type="email" value="" readOnly style={{ width: '100%', padding: '14px', fontSize: '15px', borderRadius: '10px', border: `2px solid ${inputBorderColor}`, backgroundColor: inputBgColor, outline: 'none', boxSizing: 'border-box' }} />
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Senha</label>
-                            <div style={{ position: 'relative', width: '100%' }}>
-                              <input type={showPasswordPreview ? 'text' : 'password'} value="" readOnly style={{ width: '100%', padding: '14px 40px 14px 14px', fontSize: '15px', borderRadius: '10px', border: `2px solid ${inputBorderColor}`, backgroundColor: inputBgColor, outline: 'none', boxSizing: 'border-box' }} />
-                              <button type="button" onClick={() => setShowPasswordPreview(!showPasswordPreview)} style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', fontSize: '16px', padding: '4px' }}>
-                                {showPasswordPreview ? '🙈' : '👁️'}
-                              </button>
-                            </div>
-                          </div>
-                          <button type="button" disabled style={{ width: '100%', padding: '14px', fontSize: '16px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'default', opacity: 0.7 }}>Entrar</button>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '16px', fontSize: '14px' }}>
-                            <span style={{ color: '#3b82f6', cursor: 'default', fontWeight: '500' }}>Criar conta</span>
-                            <span style={{ color: '#6b7280', cursor: 'default', fontWeight: '400' }}>Esqueceu a senha?</span>
-                          </div>
-                        </form>
-                      </div>
-                    </div>
-                  </div>
-                  <div style={{
-                    position: 'absolute',
-                    bottom: '16px',
-                    left: '50%',
-                    transform: 'translateX(-50%)',
-                    width: `${footerWidth}%`,
-                    maxHeight: `${footerHeight}px`,
-                    background: footerColor + Math.round(footerOpacity * 2.55).toString(16).padStart(2, '0'),
-                    borderRadius: '8px',
-                    padding: '8px 16px',
-                    textAlign: 'center',
-                    overflow: 'hidden',
-                    cursor: isResizingFooter ? 'grabbing' : 'default',
-                    transition: isResizingFooter ? 'none' : 'width 0.1s, maxHeight 0.1s'
-                  }}>
-                    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-                      <div style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '12px',
-                        flexWrap: 'wrap',
-                        fontSize: `${footerFontSize}px`,
-                        fontWeight: footerBold ? 'bold' : 'normal',
-                        fontFamily: footerFontFamily,
-                        color: '#ffffff',
-                        textShadow: '0 1px 3px rgba(0,0,0,0.3)',
-                        height: '100%'
-                      }}>
-                        {contactPhone && <span>📞 {contactPhone}</span>}
-                        {contactEmail && <span>📧 {contactEmail}</span>}
-                        {footerText && <span>| {footerText}</span>}
                       </div>
 
-                      <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '8px', cursor: 'ew-resize', zIndex: 10 }}
-                        onMouseDown={(e) => { e.stopPropagation(); setIsResizingFooter(true); footerResizeRef.current = { startX: e.clientX, startY: e.clientY, startWidth: footerWidth, startHeight: footerHeight, edge: 'right' }; }}
-                      />
-                      <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '8px', cursor: 'ns-resize', zIndex: 10 }}
-                        onMouseDown={(e) => { e.stopPropagation(); setIsResizingFooter(true); footerResizeRef.current = { startX: e.clientX, startY: e.clientY, startWidth: footerWidth, startHeight: footerHeight, edge: 'bottom' }; }}
-                      />
-                      <div style={{ position: 'absolute', right: 0, bottom: 0, width: '12px', height: '12px', cursor: 'nwse-resize', zIndex: 10 }}
-                        onMouseDown={(e) => { e.stopPropagation(); setIsResizingFooter(true); footerResizeRef.current = { startX: e.clientX, startY: e.clientY, startWidth: footerWidth, startHeight: footerHeight, edge: 'corner' }; }}
-                      />
+                      <div className="flex flex-col items-center mb-6">
+                        {loginLogo ? (
+                          <img src={loginLogo} alt="Logo" className="object-contain" style={{ maxWidth: '100%' }} />
+                        ) : (
+                          <div className="bg-blue-600 p-3 rounded-full flex items-center justify-center">
+                            <Truck size={32} className="text-white" />
+                          </div>
+                        )}
+                      </div>
+
+                      <form className="flex flex-col gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">E-mail</label>
+                          <input type="email" value="" readOnly style={{ width: '100%', padding: '14px', fontSize: '15px', borderRadius: '10px', border: `2px solid ${inputBorderColor}`, backgroundColor: inputBgColor, outline: 'none', boxSizing: 'border-box' }} />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Senha</label>
+                          <div style={{ position: 'relative', width: '100%' }}>
+                            <input type={showPasswordPreview ? 'text' : 'password'} value="" readOnly style={{ width: '100%', padding: '14px 40px 14px 14px', fontSize: '15px', borderRadius: '10px', border: `2px solid ${inputBorderColor}`, backgroundColor: inputBgColor, outline: 'none', boxSizing: 'border-box' }} />
+                            <button type="button" onClick={() => setShowPasswordPreview(!showPasswordPreview)} style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', fontSize: '16px', padding: '4px' }}>
+                              {showPasswordPreview ? '🙈' : '👁️'}
+                            </button>
+                          </div>
+                        </div>
+                        <button type="button" disabled style={{ width: '100%', padding: '14px', fontSize: '16px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'default', opacity: 0.7 }}>Entrar</button>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '16px', fontSize: '14px' }}>
+                          <span style={{ color: '#3b82f6', cursor: 'default', fontWeight: '500' }}>Criar conta</span>
+                          <span style={{ color: '#6b7280', cursor: 'default', fontWeight: '400' }}>Esqueceu a senha?</span>
+                        </div>
+                      </form>
                     </div>
                   </div>
+                </div>
+                <div style={{
+                  position: 'absolute',
+                  bottom: '16px',
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  width: `${footerWidth}%`,
+                  maxHeight: `${footerHeight}px`,
+                  background: footerColor + Math.round(footerOpacity * 2.55).toString(16).padStart(2, '0'),
+                  borderRadius: '8px',
+                  padding: '8px 16px',
+                  textAlign: 'center',
+                  overflow: 'hidden',
+                  cursor: isResizingFooter ? 'grabbing' : 'default',
+                  transition: isResizingFooter ? 'none' : 'width 0.1s, maxHeight 0.1s'
+                }}>
+                  <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '12px',
+                      flexWrap: 'wrap',
+                      fontSize: `${footerFontSize}px`,
+                      fontWeight: footerBold ? 'bold' : 'normal',
+                      fontFamily: footerFontFamily,
+                      color: '#ffffff',
+                      textShadow: '0 1px 3px rgba(0,0,0,0.3)',
+                      height: '100%'
+                    }}>
+                      {contactPhone && <span>📞 {contactPhone}</span>}
+                      {contactEmail && <span>📧 {contactEmail}</span>}
+                      {footerText && <span>| {footerText}</span>}
+                    </div>
+
+                    <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '8px', cursor: 'ew-resize', zIndex: 10 }}
+                      onMouseDown={(e) => { e.stopPropagation(); setIsResizingFooter(true); footerResizeRef.current = { startX: e.clientX, startY: e.clientY, startWidth: footerWidth, startHeight: footerHeight, edge: 'right' }; }}
+                    />
+                    <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '8px', cursor: 'ns-resize', zIndex: 10 }}
+                      onMouseDown={(e) => { e.stopPropagation(); setIsResizingFooter(true); footerResizeRef.current = { startX: e.clientX, startY: e.clientY, startWidth: footerWidth, startHeight: footerHeight, edge: 'bottom' }; }}
+                    />
+                    <div style={{ position: 'absolute', right: 0, bottom: 0, width: '12px', height: '12px', cursor: 'nwse-resize', zIndex: 10 }}
+                      onMouseDown={(e) => { e.stopPropagation(); setIsResizingFooter(true); footerResizeRef.current = { startX: e.clientX, startY: e.clientY, startWidth: footerWidth, startHeight: footerHeight, edge: 'corner' }; }}
+                    />
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -1053,7 +1060,7 @@ export const Configuracoes: React.FC = () => {
                 <X size={20} className="text-gray-500" />
               </button>
             </div>
-            
+
             <div className="p-6 space-y-6">
               <div className="text-center">
                 <p className="text-sm text-gray-500 mb-2 font-medium">Pré-visualização</p>
@@ -1124,7 +1131,7 @@ export const Configuracoes: React.FC = () => {
       )}
 
       {showPrinterSearch && (
-        <div 
+        <div
           className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-fade-in"
           onClick={(e) => {
             if (e.target === e.currentTarget) setShowPrinterSearch(false);
@@ -1151,11 +1158,10 @@ export const Configuracoes: React.FC = () => {
                 <button
                   onClick={handleSearchByName}
                   disabled={!searchTerm.trim() || isSearching}
-                  className={`px-5 py-3 rounded-xl font-bold text-sm transition-all ${
-                    searchTerm.trim() && !isSearching
+                  className={`px-5 py-3 rounded-xl font-bold text-sm transition-all ${searchTerm.trim() && !isSearching
                       ? 'bg-blue-600 text-white hover:bg-blue-700'
                       : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                  }`}
+                    }`}
                 >
                   Buscar
                 </button>
@@ -1183,30 +1189,28 @@ export const Configuracoes: React.FC = () => {
               ) : (
                 <div className="space-y-3 max-h-72 overflow-y-auto">
                   {foundPrinters.map((printer, idx) => (
-                    <div 
+                    <div
                       key={idx}
                       className="flex items-center justify-between p-4 border border-gray-100 rounded-xl hover:border-blue-200 hover:bg-blue-50/30 transition-all"
                     >
                       <div className="flex items-center space-x-4">
-                        <div className={`p-2.5 rounded-lg ${
-                          printer.tipo === 'fiscal' ? 'bg-purple-50 text-purple-600' : 
-                          printer.tipo === 'termica' ? 'bg-blue-50 text-blue-600' : 
-                          'bg-gray-100 text-gray-600'
-                        }`}>
+                        <div className={`p-2.5 rounded-lg ${printer.tipo === 'fiscal' ? 'bg-purple-50 text-purple-600' :
+                            printer.tipo === 'termica' ? 'bg-blue-50 text-blue-600' :
+                              'bg-gray-100 text-gray-600'
+                          }`}>
                           <Printer size={22} />
                         </div>
                         <div>
                           <p className="font-bold text-gray-800">{printer.nome}</p>
                           <div className="flex flex-wrap gap-1.5 mt-1">
-                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
-                              printer.via === 'wifi' ? 'bg-green-100 text-green-700' :
-                              printer.via === 'rede' ? 'bg-purple-100 text-purple-700' :
-                              printer.via === 'usb' ? 'bg-blue-100 text-blue-700' :
-                              'bg-gray-100 text-gray-600'
-                            }`}>
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${printer.via === 'wifi' ? 'bg-green-100 text-green-700' :
+                                printer.via === 'rede' ? 'bg-purple-100 text-purple-700' :
+                                  printer.via === 'usb' ? 'bg-blue-100 text-blue-700' :
+                                    'bg-gray-100 text-gray-600'
+                              }`}>
                               {printer.via === 'wifi' ? '📶 Wi-Fi (WSD)' :
-                               printer.via === 'rede' ? '🌐 Rede' :
-                               printer.via === 'usb' ? '🔌 USB' : '💻 Local'}
+                                printer.via === 'rede' ? '🌐 Rede' :
+                                  printer.via === 'usb' ? '🔌 USB' : '💻 Local'}
                             </span>
                             <span className="text-[10px] text-gray-400">
                               {printer.tipo === 'fiscal' ? 'Fiscal' : printer.tipo === 'termica' ? 'Térmica' : printer.tipo}
