@@ -74,6 +74,7 @@ export const Configuracoes: React.FC = () => {
   const [cardFontSize, setCardFontSize] = useState(Number(localStorage.getItem('choferlog_card_font_size')) || 16);
   const [cardFontColor, setCardFontColor] = useState(localStorage.getItem('choferlog_card_font_color') || '#333333');
   const [cardWidth, setCardWidth] = useState(Number(localStorage.getItem('choferlog_card_width')) || 380);
+  const [cardHeight, setCardHeight] = useState(400);
   const [showPasswordPreview, setShowPasswordPreview] = useState(false);
   const config = useLoginConfig();
 
@@ -89,6 +90,8 @@ export const Configuracoes: React.FC = () => {
     if (savedCardFontColor) setCardFontColor(savedCardFontColor);
     const savedCardWidth = localStorage.getItem('choferlog_card_width');
     if (savedCardWidth) setCardWidth(Number(savedCardWidth));
+    const savedCardHeight = localStorage.getItem('choferlog_card_height');
+    if (savedCardHeight) setCardHeight(Number(savedCardHeight));
 
     if (config.loginLogo) setLoginLogo(config.loginLogo);
     if (config.loginBg) setLoginBg(config.loginBg);
@@ -123,10 +126,19 @@ export const Configuracoes: React.FC = () => {
         const deltaX = e.clientX - resizeRef.current.startX;
         const deltaY = e.clientY - resizeRef.current.startY;
         const { edges } = resizeRef.current;
-        let newScale = resizeRef.current.startScale;
-        if (edges.right || edges.left) newScale = Math.min(200, Math.max(50, resizeRef.current.startScale + deltaX * 0.3));
-        if (edges.bottom || edges.top) newScale = Math.min(200, Math.max(50, resizeRef.current.startScale + deltaY * 0.3));
-        setCardScale(Math.round(newScale));
+
+        if (edges.right) {
+          setCardWidth(Math.min(550, Math.max(300, resizeRef.current.startWidth + deltaX)));
+        }
+        if (edges.left) {
+          setCardWidth(Math.min(550, Math.max(300, resizeRef.current.startWidth - deltaX)));
+        }
+        if (edges.bottom) {
+          setCardHeight(Math.min(800, Math.max(300, resizeRef.current.startHeight + deltaY)));
+        }
+        if (edges.top) {
+          setCardHeight(Math.min(800, Math.max(300, resizeRef.current.startHeight - deltaY)));
+        }
       }
       if (isResizingFooter) {
         const deltaX = e.clientX - footerResizeRef.current.startX;
@@ -152,7 +164,8 @@ export const Configuracoes: React.FC = () => {
         localStorage.setItem('choferlog_card_y', cardY.toString());
       }
       if (isResizing) {
-        localStorage.setItem('choferlog_card_scale', cardScale.toString());
+        localStorage.setItem('choferlog_card_width', cardWidth.toString());
+        localStorage.setItem('choferlog_card_height', cardHeight.toString());
       }
       if (isResizingFooter) {
         localStorage.setItem('choferlog_footer_width', footerWidth.toString());
@@ -169,7 +182,7 @@ export const Configuracoes: React.FC = () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isDragging, isResizing, isResizingFooter, cardX, cardY, cardScale, footerWidth, footerHeight]);
+  }, [isDragging, isResizing, isResizingFooter, cardX, cardY, cardWidth, cardHeight, footerWidth, footerHeight]);
 
   const handleSaveCompany = () => {
     localStorage.setItem('choferlog_company', JSON.stringify(company));
@@ -677,9 +690,11 @@ export const Configuracoes: React.FC = () => {
                     <div className="w-full relative z-10"
                       style={{
                         backgroundColor: `rgba(${parseInt(cardColor.replace('#', '').substring(0, 2), 16)}, ${parseInt(cardColor.replace('#', '').substring(2, 4), 16)}, ${parseInt(cardColor.replace('#', '').substring(4, 6), 16)}, ${cardOpacity / 100})`,
-                        transform: `translateX(${cardX}px) translateY(${cardY}px) scale(${cardScale / 100})`,
+                        transform: `translateX(${cardX}px) translateY(${cardY}px)`,
                         width: '100%',
-                        maxWidth: '380px',
+                        maxWidth: `${cardWidth}px`,
+                        height: `${cardHeight}px`,
+                        maxHeight: `${cardHeight}px`,
                         borderRadius: '1rem',
                         boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
                         padding: '1.5rem',
@@ -716,9 +731,8 @@ export const Configuracoes: React.FC = () => {
                           resizeRef.current = {
                             startX: e.clientX,
                             startY: e.clientY,
-                            startScale: cardScale,
-                            startCardX: cardX,
-                            startCardY: cardY,
+                            startWidth: cardWidth,
+                            startHeight: cardHeight,
                             edges: { top, bottom, left, right }
                           };
                         } else {
@@ -884,6 +898,13 @@ export const Configuracoes: React.FC = () => {
                 <span className="text-gray-500">{cardWidth}px</span>
               </div>
               <input type="range" min="300" max="550" value={cardWidth} onChange={e => { const v = Number(e.target.value); setCardWidth(v); localStorage.setItem('choferlog_card_width', v.toString()); }} className="w-full accent-blue-600" />
+            </div>
+            <div className="mt-4">
+              <div className="flex justify-between text-sm mb-1">
+                <span className="font-medium text-gray-700">Altura do Card</span>
+                <span className="text-gray-500">{cardHeight}px</span>
+              </div>
+              <input type="range" min="300" max="800" value={cardHeight} onChange={e => { const v = Number(e.target.value); setCardHeight(v); localStorage.setItem('choferlog_card_height', v.toString()); }} className="w-full accent-blue-600" />
             </div>
           </div>
 
