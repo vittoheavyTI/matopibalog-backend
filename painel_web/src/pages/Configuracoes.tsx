@@ -957,7 +957,10 @@ export const Configuracoes: React.FC = () => {
                 <span className="font-medium text-gray-700">Distância entre Logomarca e Campos</span>
                 <span className="text-gray-500">{formLogoGap}px</span>
               </div>
-              <input type="range" min="0" max="60" value={formLogoGap} onChange={e => { const v = Number(e.target.value); setFormLogoGap(v); localStorage.setItem('choferlog_form_logo_gap', v.toString()); }} className="w-full accent-blue-600" />
+              <div className="flex items-center space-x-3">
+                <input type="range" min="0" max="60" value={formLogoGap} onChange={e => { const v = Number(e.target.value); setFormLogoGap(v); localStorage.setItem('choferlog_form_logo_gap', v.toString()); }} className="flex-1 accent-blue-600" />
+                <input type="number" min="0" max="60" value={formLogoGap} onChange={e => { const v = Math.min(60, Math.max(0, Number(e.target.value))); setFormLogoGap(v); localStorage.setItem('choferlog_form_logo_gap', v.toString()); }} className="w-16 text-center border border-gray-200 rounded-lg p-1 text-sm" />
+              </div>
             </div>
           </div>
 
@@ -1086,7 +1089,7 @@ export const Configuracoes: React.FC = () => {
                   className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50"
                   placeholder="(11) 99999-9999"
                   value={contactPhone}
-                  onChange={e => setContactPhone(e.target.value)}
+                  onChange={e => { setContactPhone(e.target.value); localStorage.setItem('choferlog_contact_phone', e.target.value); }}
                 />
               </div>
               <div>
@@ -1096,7 +1099,7 @@ export const Configuracoes: React.FC = () => {
                   className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50"
                   placeholder="contato@transportadora.com"
                   value={contactEmail}
-                  onChange={e => setContactEmail(e.target.value)}
+                  onChange={e => { setContactEmail(e.target.value); localStorage.setItem('choferlog_contact_email', e.target.value); }}
                 />
               </div>
             </div>
@@ -1106,9 +1109,9 @@ export const Configuracoes: React.FC = () => {
               <input
                 type="text"
                 className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50"
-                placeholder='Ex: © 2026 Minha Transportadora. Todos os direitos reservados.'
-                value={footerText}
-                onChange={e => setFooterText(e.target.value)}
+                  placeholder='Ex: © 2026 Minha Transportadora. Todos os direitos reservados.'
+                  value={footerText}
+                  onChange={e => { setFooterText(e.target.value); localStorage.setItem('choferlog_login_footer', e.target.value); }}
               />
             </div>
 
