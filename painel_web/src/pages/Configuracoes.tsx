@@ -55,7 +55,7 @@ export const Configuracoes: React.FC = () => {
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const dragRef = useRef({ startX: 0, startY: 0, startCardX: 0, startCardY: 0 });
-  const resizeRef = useRef({ startX: 0, startY: 0, startWidth: 380, startHeight: 400, edges: { top: false, bottom: false, left: false, right: false } });
+  const resizeRef = useRef({ startX: 0, startY: 0, startWidth: 380, startHeight: 400, startCardX: 0, startCardY: 0, edges: { top: false, bottom: false, left: false, right: false } });
   const [cardColor, setCardColor] = useState('#ffffff');
   const [cardOpacity, setCardOpacity] = useState(100);
   const [contactPhone, setContactPhone] = useState('');
@@ -129,13 +129,17 @@ export const Configuracoes: React.FC = () => {
           setCardWidth(Math.min(550, Math.max(280, resizeRef.current.startWidth + deltaX)));
         }
         if (edges.left) {
-          setCardWidth(Math.min(550, Math.max(280, resizeRef.current.startWidth - deltaX)));
+          const newW = Math.min(550, Math.max(280, resizeRef.current.startWidth - deltaX));
+          setCardWidth(newW);
+          setCardX(resizeRef.current.startCardX - (newW - resizeRef.current.startWidth));
         }
         if (edges.bottom) {
           setCardHeight(Math.min(800, Math.max(200, resizeRef.current.startHeight + deltaY)));
         }
         if (edges.top) {
-          setCardHeight(Math.min(800, Math.max(200, resizeRef.current.startHeight - deltaY)));
+          const newH = Math.min(800, Math.max(200, resizeRef.current.startHeight - deltaY));
+          setCardHeight(newH);
+          setCardY(resizeRef.current.startCardY + (resizeRef.current.startHeight - newH));
         }
       }
       if (isResizingFooter) {
@@ -731,6 +735,8 @@ export const Configuracoes: React.FC = () => {
                             startY: e.clientY,
                             startWidth: cardWidth,
                             startHeight: cardHeight,
+                            startCardX: cardX,
+                            startCardY: cardY,
                             edges: { top, bottom, left, right }
                           };
                         } else {
