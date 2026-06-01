@@ -14,6 +14,12 @@ export const Login: React.FC = () => {
   const navigate = useNavigate();
   const { user, login } = useAuth();
   const config = useLoginConfig();
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    const t = setTimeout(() => setReady(true), 10);
+    return () => clearTimeout(t);
+  }, []);
 
   useEffect(() => {
     if (user && user.role === 'admin') {
@@ -55,11 +61,14 @@ export const Login: React.FC = () => {
       padding: '16px',
       boxSizing: 'border-box'
     }}>
+      {!ready ? (
+        <div style={{ width: '100%', maxWidth: '380px', minHeight: '400px' }} />
+      ) : (
       <div className="login-card" style={{
-        transform: `translateX(${config.cardX}px) translateY(${config.cardY}px) scale(${config.cardScale / 100})`,
+        transform: `translateX(${config.cardX}px) translateY(${config.cardY}px)`,
         backgroundColor: `rgba(${parseInt(config.cardColor.replace('#','').substring(0,2),16)}, ${parseInt(config.cardColor.replace('#','').substring(2,4),16)}, ${parseInt(config.cardColor.replace('#','').substring(4,6),16)}, ${config.cardOpacity / 100})`,
-        width: '100%',
-        maxWidth: '380px',
+        width: `${config.cardWidth}px`,
+        maxWidth: '100%',
         borderRadius: '1rem',
         boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
         padding: '1.5rem',
@@ -85,9 +94,9 @@ export const Login: React.FC = () => {
           </div>
         )}
 
-        <form onSubmit={handleLogin} className="flex flex-col gap-4">
+        <form onSubmit={handleLogin} className="flex flex-col gap-4" style={{ fontFamily: config.cardFontFamily }}>
           <div>
-            <label style={{ display: 'block', fontSize: '14px', fontWeight: '600', fontFamily: 'Arial, sans-serif', lineHeight: '1.5', color: '#6b7280', marginBottom: '6px' }}>E-mail</label>
+            <label style={{ display: 'block', fontSize: `${config.cardFontSize}px`, fontWeight: '600', lineHeight: '1.5', color: config.cardFontColor, marginBottom: '6px' }}>E-mail</label>
             <input
               type="email"
               value={email}
@@ -97,16 +106,15 @@ export const Login: React.FC = () => {
                 width: '100%',
                 height: '48px',
                 padding: '12px 16px',
-                fontSize: '16px',
+                fontSize: `${config.cardFontSize}px`,
                 fontWeight: '400',
-                fontFamily: 'Arial, sans-serif',
                 lineHeight: '1.5',
                 borderRadius: '10px',
                 border: `2px solid ${config.inputBorderColor}`,
                 backgroundColor: config.inputBgColor,
                 outline: 'none',
                 boxSizing: 'border-box',
-                color: '#1f2937',
+                color: config.cardFontColor,
                 pointerEvents: 'all',
                 position: 'relative',
                 zIndex: 10,
@@ -116,7 +124,7 @@ export const Login: React.FC = () => {
           </div>
 
           <div>
-            <label style={{ display: 'block', fontSize: '16px', fontWeight: '500', fontFamily: 'Arial, sans-serif', lineHeight: '1.5', color: '#ffffff', marginBottom: '8px' }}>Senha</label>
+            <label style={{ display: 'block', fontSize: `${config.cardFontSize}px`, fontWeight: '500', lineHeight: '1.5', color: config.cardFontColor, marginBottom: '8px' }}>Senha</label>
             <div style={{ position: 'relative', width: '100%' }}>
               <input
                 type={showPassword ? 'text' : 'password'}
@@ -126,16 +134,15 @@ export const Login: React.FC = () => {
                   width: '100%',
                   height: '48px',
                   padding: '12px 16px',
-                  fontSize: '16px',
+                  fontSize: `${config.cardFontSize}px`,
                   fontWeight: '400',
-                  fontFamily: 'Arial, sans-serif',
                   lineHeight: '1.5',
                   borderRadius: '10px',
                   border: `2px solid ${config.inputBorderColor}`,
                   backgroundColor: config.inputBgColor,
                   outline: 'none',
                   boxSizing: 'border-box',
-                  color: '#333'
+                  color: config.cardFontColor
                 }}
                 required
               />
@@ -152,9 +159,8 @@ export const Login: React.FC = () => {
               width: '100%',
               height: '48px',
               padding: '12px 16px',
-              fontSize: '16px',
+              fontSize: `${config.cardFontSize}px`,
               fontWeight: '600',
-              fontFamily: 'Arial, sans-serif',
               lineHeight: '1.5',
               background: '#3b82f6',
               color: 'white',
@@ -168,15 +174,16 @@ export const Login: React.FC = () => {
           </button>
 
           <div style={{ display: 'flex', justifyContent: 'center', gap: '16px', marginTop: '8px' }}>
-            <a href="#" style={{ color: '#3b82f6', fontSize: '14px', fontFamily: 'Arial, sans-serif', textDecoration: 'none' }} onClick={(e) => { e.preventDefault(); }}>Criar conta</a>
-            <a href="#" style={{ color: '#3b82f6', fontSize: '14px', fontFamily: 'Arial, sans-serif', textDecoration: 'none' }} onClick={(e) => { e.preventDefault(); }}>Esqueceu a senha?</a>
+            <a href="#" style={{ color: '#3b82f6', fontSize: `${config.cardFontSize}px`, textDecoration: 'none' }} onClick={(e) => { e.preventDefault(); }}>Criar conta</a>
+            <a href="#" style={{ color: '#3b82f6', fontSize: `${config.cardFontSize}px`, textDecoration: 'none' }} onClick={(e) => { e.preventDefault(); }}>Esqueceu a senha?</a>
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', marginTop: '16px' }}>
-            <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: '14px', fontFamily: 'Arial, sans-serif' }}>Matopiba Log — Painel Administrativo</span>
+            <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: `${config.cardFontSize}px` }}>Matopiba Log — Painel Administrativo</span>
           </div>
         </form>
       </div>
+      )}
 
       <div className="login-footer" style={{
         position: 'fixed',
@@ -185,12 +192,12 @@ export const Login: React.FC = () => {
         transform: 'translateX(-50%)',
         width: `${config.footerWidth}%`,
         maxWidth: '600px',
-        maxHeight: `${config.footerHeight}px`,
+        height: 'auto',
+        minHeight: '30px',
         background: config.footerColor + Math.round(config.footerOpacity * 2.55).toString(16).padStart(2, '0'),
         borderRadius: '8px',
         padding: '8px 16px',
         textAlign: 'center',
-        overflow: 'hidden',
         zIndex: 50
       }}>
         <div style={{
