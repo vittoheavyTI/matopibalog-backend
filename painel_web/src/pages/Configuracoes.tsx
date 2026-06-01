@@ -76,6 +76,10 @@ export const Configuracoes: React.FC = () => {
   const [cardWidth, setCardWidth] = useState(Number(localStorage.getItem('choferlog_card_width')) || 380);
   const [cardHeight, setCardHeight] = useState(Number(localStorage.getItem('choferlog_card_height')) || 400);
   const [showPasswordPreview, setShowPasswordPreview] = useState(false);
+  const [formX, setFormX] = useState(Number(localStorage.getItem('choferlog_form_x')) || 0);
+  const [formY, setFormY] = useState(Number(localStorage.getItem('choferlog_form_y')) || 0);
+  const [isDraggingForm, setIsDraggingForm] = useState(false);
+  const formDragRef = useRef({ startX: 0, startY: 0, startFormX: 0, startFormY: 0 });
   const config = useLoginConfig();
 
   useEffect(() => {
@@ -142,6 +146,12 @@ export const Configuracoes: React.FC = () => {
           setCardY(resizeRef.current.startCardY + (resizeRef.current.startHeight - newH));
         }
       }
+      if (isDraggingForm) {
+        const deltaX = e.clientX - formDragRef.current.startX;
+        const deltaY = e.clientY - formDragRef.current.startY;
+        setFormX(Math.round(formDragRef.current.startFormX + deltaX));
+        setFormY(Math.round(formDragRef.current.startFormY + deltaY));
+      }
       if (isResizingFooter) {
         const deltaX = e.clientX - footerResizeRef.current.startX;
         const deltaY = e.clientY - footerResizeRef.current.startY;
@@ -169,6 +179,10 @@ export const Configuracoes: React.FC = () => {
         localStorage.setItem('choferlog_card_width', cardWidth.toString());
         localStorage.setItem('choferlog_card_height', cardHeight.toString());
       }
+      if (isDraggingForm) {
+        localStorage.setItem('choferlog_form_x', formX.toString());
+        localStorage.setItem('choferlog_form_y', formY.toString());
+      }
       if (isResizingFooter) {
         localStorage.setItem('choferlog_footer_width', footerWidth.toString());
         localStorage.setItem('choferlog_footer_height', footerHeight.toString());
@@ -176,6 +190,7 @@ export const Configuracoes: React.FC = () => {
       setIsDragging(false);
       setIsResizing(false);
       setIsResizingFooter(false);
+      setIsDraggingForm(false);
     };
 
     window.addEventListener('mousemove', handleMouseMove);
@@ -184,7 +199,7 @@ export const Configuracoes: React.FC = () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isDragging, isResizing, isResizingFooter, cardX, cardY, cardWidth, cardHeight, footerWidth, footerHeight]);
+  }, [isDragging, isResizing, isResizingFooter, isDraggingForm, cardX, cardY, cardWidth, cardHeight, formX, formY, footerWidth, footerHeight]);
 
   const handleSaveCompany = () => {
     localStorage.setItem('choferlog_company', JSON.stringify(company));
@@ -783,26 +798,40 @@ export const Configuracoes: React.FC = () => {
                         )}
                       </div>
 
-                      <form className="flex flex-col gap-4">
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">E-mail</label>
-                          <input type="email" value="" readOnly style={{ width: '100%', padding: '14px', fontSize: '15px', borderRadius: '10px', border: `2px solid ${inputBorderColor}`, backgroundColor: inputBgColor, outline: 'none', boxSizing: 'border-box' }} />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Senha</label>
-                          <div style={{ position: 'relative', width: '100%' }}>
-                            <input type={showPasswordPreview ? 'text' : 'password'} value="" readOnly style={{ width: '100%', padding: '14px 40px 14px 14px', fontSize: '15px', borderRadius: '10px', border: `2px solid ${inputBorderColor}`, backgroundColor: inputBgColor, outline: 'none', boxSizing: 'border-box' }} />
-                            <button type="button" onClick={() => setShowPasswordPreview(!showPasswordPreview)} style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', fontSize: '16px', padding: '4px' }}>
-                              {showPasswordPreview ? '🙈' : '👁️'}
-                            </button>
+                      <div
+                        style={{
+                          transform: `translate(${formX}px, ${formY}px)`,
+                          cursor: isDraggingForm ? 'grabbing' : 'grab',
+                          userSelect: isDraggingForm ? 'none' : undefined
+                        }}
+                        onMouseDown={(e) => {
+                          e.stopPropagation();
+                          setIsDraggingForm(true);
+                          formDragRef.current = { startX: e.clientX, startY: e.clientY, startFormX: formX, startFormY: formY };
+                        }}
+                      >
+                        <div style={{ textAlign: 'center', fontSize: '10px', color: '#999', marginBottom: '4px', cursor: 'grab' }}>⋯ campos</div>
+                        <form className="flex flex-col gap-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">E-mail</label>
+                            <input type="email" value="" readOnly style={{ width: '100%', padding: '14px', fontSize: '15px', borderRadius: '10px', border: `2px solid ${inputBorderColor}`, backgroundColor: inputBgColor, outline: 'none', boxSizing: 'border-box' }} />
                           </div>
-                        </div>
-                        <button type="button" disabled style={{ width: '100%', padding: '14px', fontSize: '16px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'default', opacity: 0.7 }}>Entrar</button>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '16px', fontSize: '14px' }}>
-                          <span style={{ color: '#3b82f6', cursor: 'default', fontWeight: '500' }}>Criar conta</span>
-                          <span style={{ color: '#6b7280', cursor: 'default', fontWeight: '400' }}>Esqueceu a senha?</span>
-                        </div>
-                      </form>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Senha</label>
+                            <div style={{ position: 'relative', width: '100%' }}>
+                              <input type={showPasswordPreview ? 'text' : 'password'} value="" readOnly style={{ width: '100%', padding: '14px 40px 14px 14px', fontSize: '15px', borderRadius: '10px', border: `2px solid ${inputBorderColor}`, backgroundColor: inputBgColor, outline: 'none', boxSizing: 'border-box' }} />
+                              <button type="button" onClick={() => setShowPasswordPreview(!showPasswordPreview)} style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', fontSize: '16px', padding: '4px' }}>
+                                {showPasswordPreview ? '🙈' : '👁️'}
+                              </button>
+                            </div>
+                          </div>
+                          <button type="button" disabled style={{ width: '100%', padding: '14px', fontSize: '16px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'default', opacity: 0.7 }}>Entrar</button>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '16px', fontSize: '14px' }}>
+                            <span style={{ color: '#3b82f6', cursor: 'default', fontWeight: '500' }}>Criar conta</span>
+                            <span style={{ color: '#6b7280', cursor: 'default', fontWeight: '400' }}>Esqueceu a senha?</span>
+                          </div>
+                        </form>
+                      </div>
                     </div>
                   </div>
                 </div>
