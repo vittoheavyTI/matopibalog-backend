@@ -849,8 +849,7 @@ export const Configuracoes: React.FC = () => {
                   padding: '8px 16px',
                   textAlign: 'center',
                   overflow: 'hidden',
-                  cursor: isResizingFooter ? 'grabbing' : 'default',
-                  transition: isResizingFooter ? 'none' : 'width 0.1s, maxHeight 0.1s'
+                  position: 'relative'
                 }}>
                   <div style={{ position: 'relative', width: '100%', height: '100%' }}>
                     <div style={{
@@ -870,16 +869,6 @@ export const Configuracoes: React.FC = () => {
                       {contactEmail && <span>📧 {contactEmail}</span>}
                       {footerText && <span>| {footerText}</span>}
                     </div>
-
-                    <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: '8px', cursor: 'ew-resize', zIndex: 10 }}
-                      onMouseDown={(e) => { e.stopPropagation(); setIsResizingFooter(true); footerResizeRef.current = { startX: e.clientX, startY: e.clientY, startWidth: footerWidth, startHeight: footerHeight, edge: 'right' }; }}
-                    />
-                    <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '8px', cursor: 'ns-resize', zIndex: 10 }}
-                      onMouseDown={(e) => { e.stopPropagation(); setIsResizingFooter(true); footerResizeRef.current = { startX: e.clientX, startY: e.clientY, startWidth: footerWidth, startHeight: footerHeight, edge: 'bottom' }; }}
-                    />
-                    <div style={{ position: 'absolute', right: 0, bottom: 0, width: '12px', height: '12px', cursor: 'nwse-resize', zIndex: 10 }}
-                      onMouseDown={(e) => { e.stopPropagation(); setIsResizingFooter(true); footerResizeRef.current = { startX: e.clientX, startY: e.clientY, startWidth: footerWidth, startHeight: footerHeight, edge: 'corner' }; }}
-                    />
                   </div>
                 </div>
               </div>

@@ -196,9 +196,6 @@ export const Login: React.FC = () => {
         maxWidth: '600px',
         height: 'auto',
         minHeight: '30px',
-        background: config.footerColor + Math.round(config.footerOpacity * 2.55).toString(16).padStart(2, '0'),
-        borderRadius: '8px',
-        padding: '8px 16px',
         textAlign: 'center',
         zIndex: 50
       }}>
