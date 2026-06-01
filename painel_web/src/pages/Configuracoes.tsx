@@ -55,7 +55,7 @@ export const Configuracoes: React.FC = () => {
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const dragRef = useRef({ startX: 0, startY: 0, startCardX: 0, startCardY: 0 });
-  const resizeRef = useRef({ startX: 0, startY: 0, startWidth: 380 });
+  const resizeRef = useRef({ startX: 0, startY: 0, startWidth: 380, startHeight: 400, edges: { top: false, bottom: false, left: false, right: false } });
   const [cardColor, setCardColor] = useState('#ffffff');
   const [cardOpacity, setCardOpacity] = useState(100);
   const [contactPhone, setContactPhone] = useState('');
@@ -74,6 +74,7 @@ export const Configuracoes: React.FC = () => {
   const [cardFontSize, setCardFontSize] = useState(Number(localStorage.getItem('choferlog_card_font_size')) || 16);
   const [cardFontColor, setCardFontColor] = useState(localStorage.getItem('choferlog_card_font_color') || '#333333');
   const [cardWidth, setCardWidth] = useState(Number(localStorage.getItem('choferlog_card_width')) || 380);
+  const [cardHeight, setCardHeight] = useState(Number(localStorage.getItem('choferlog_card_height')) || 400);
   const [showPasswordPreview, setShowPasswordPreview] = useState(false);
   const config = useLoginConfig();
 
@@ -121,9 +122,21 @@ export const Configuracoes: React.FC = () => {
       }
       if (isResizing) {
         const deltaX = e.clientX - resizeRef.current.startX;
-        let newWidth = resizeRef.current.startWidth + deltaX;
-        newWidth = Math.min(550, Math.max(280, newWidth));
-        setCardWidth(Math.round(newWidth));
+        const deltaY = e.clientY - resizeRef.current.startY;
+        const { edges } = resizeRef.current;
+
+        if (edges.right) {
+          setCardWidth(Math.min(550, Math.max(280, resizeRef.current.startWidth + deltaX)));
+        }
+        if (edges.left) {
+          setCardWidth(Math.min(550, Math.max(280, resizeRef.current.startWidth - deltaX)));
+        }
+        if (edges.bottom) {
+          setCardHeight(Math.min(800, Math.max(200, resizeRef.current.startHeight + deltaY)));
+        }
+        if (edges.top) {
+          setCardHeight(Math.min(800, Math.max(200, resizeRef.current.startHeight - deltaY)));
+        }
       }
       if (isResizingFooter) {
         const deltaX = e.clientX - footerResizeRef.current.startX;
@@ -150,6 +163,7 @@ export const Configuracoes: React.FC = () => {
       }
       if (isResizing) {
         localStorage.setItem('choferlog_card_width', cardWidth.toString());
+        localStorage.setItem('choferlog_card_height', cardHeight.toString());
       }
       if (isResizingFooter) {
         localStorage.setItem('choferlog_footer_width', footerWidth.toString());
@@ -166,7 +180,7 @@ export const Configuracoes: React.FC = () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isDragging, isResizing, isResizingFooter, cardX, cardY, cardWidth, footerWidth, footerHeight]);
+  }, [isDragging, isResizing, isResizingFooter, cardX, cardY, cardWidth, cardHeight, footerWidth, footerHeight]);
 
   const handleSaveCompany = () => {
     localStorage.setItem('choferlog_company', JSON.stringify(company));
@@ -677,6 +691,8 @@ export const Configuracoes: React.FC = () => {
                         transform: `translateX(${cardX}px) translateY(${cardY}px)`,
                         width: '100%',
                         maxWidth: `${cardWidth}px`,
+                        height: `${cardHeight}px`,
+                        maxHeight: `${cardHeight}px`,
                         borderRadius: '1rem',
                         boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
                         padding: '1.5rem',
@@ -713,7 +729,9 @@ export const Configuracoes: React.FC = () => {
                           resizeRef.current = {
                             startX: e.clientX,
                             startY: e.clientY,
-                            startWidth: cardWidth
+                            startWidth: cardWidth,
+                            startHeight: cardHeight,
+                            edges: { top, bottom, left, right }
                           };
                         } else {
                           setIsDragging(true);
@@ -878,6 +896,13 @@ export const Configuracoes: React.FC = () => {
                 <span className="text-gray-500">{cardWidth}px</span>
               </div>
               <input type="range" min="300" max="550" value={cardWidth} onChange={e => { const v = Number(e.target.value); setCardWidth(v); localStorage.setItem('choferlog_card_width', v.toString()); }} className="w-full accent-blue-600" />
+            </div>
+            <div className="mt-4">
+              <div className="flex justify-between text-sm mb-1">
+                <span className="font-medium text-gray-700">Altura do Card</span>
+                <span className="text-gray-500">{cardHeight}px</span>
+              </div>
+              <input type="range" min="200" max="800" value={cardHeight} onChange={e => { const v = Number(e.target.value); setCardHeight(v); localStorage.setItem('choferlog_card_height', v.toString()); }} className="w-full accent-blue-600" />
             </div>
           </div>
 
