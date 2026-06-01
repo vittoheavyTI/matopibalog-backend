@@ -80,6 +80,8 @@ export const Configuracoes: React.FC = () => {
   const [formY, setFormY] = useState(Number(localStorage.getItem('choferlog_form_y')) || 0);
   const [isDraggingForm, setIsDraggingForm] = useState(false);
   const formDragRef = useRef({ startX: 0, startY: 0, startFormX: 0, startFormY: 0 });
+  const [formScale, setFormScale] = useState(Number(localStorage.getItem('choferlog_form_scale')) || 100);
+  const [formLogoGap, setFormLogoGap] = useState(Number(localStorage.getItem('choferlog_form_logo_gap')) || 24);
   const config = useLoginConfig();
 
   useEffect(() => {
@@ -790,7 +792,8 @@ export const Configuracoes: React.FC = () => {
 
                       <div
                         style={{
-                          transform: `translate(${formX}px, ${formY}px)`,
+                          transform: `translate(${formX}px, ${formY}px) scale(${formScale / 100})`,
+                          transformOrigin: 'top center',
                           cursor: isDraggingForm ? 'grabbing' : 'grab',
                           userSelect: isDraggingForm ? 'none' : undefined
                         }}
@@ -801,7 +804,7 @@ export const Configuracoes: React.FC = () => {
                         }}
                       >
                         <div style={{ textAlign: 'center', fontSize: '10px', color: '#999', marginBottom: '4px', cursor: 'grab' }}>⋯ mover</div>
-                        <div className="flex flex-col items-center mb-6">
+                        <div className="flex flex-col items-center" style={{ marginBottom: formLogoGap }}>
                           {loginLogo ? (
                             <img src={loginLogo} alt="Logo" className="object-contain" style={{ maxWidth: '100%' }} />
                           ) : (
@@ -937,6 +940,24 @@ export const Configuracoes: React.FC = () => {
                 <span className="text-gray-500">{cardHeight}px</span>
               </div>
               <input type="range" min="200" max="800" value={cardHeight} onChange={e => { const v = Number(e.target.value); setCardHeight(v); localStorage.setItem('choferlog_card_height', v.toString()); }} className="w-full accent-blue-600" />
+            </div>
+          </div>
+
+          <div className="border-t border-gray-100 pt-6">
+            <label className="block text-xs font-bold text-gray-400 uppercase mb-3 ml-1">Zoom e Distância dos Campos + Logomarca</label>
+            <div className="mt-4">
+              <div className="flex justify-between text-sm mb-1">
+                <span className="font-medium text-gray-700">Zoom (Aproximar / Afastar)</span>
+                <span className="text-gray-500">{formScale}%</span>
+              </div>
+              <input type="range" min="50" max="200" value={formScale} onChange={e => { const v = Number(e.target.value); setFormScale(v); localStorage.setItem('choferlog_form_scale', v.toString()); }} className="w-full accent-blue-600" />
+            </div>
+            <div className="mt-4">
+              <div className="flex justify-between text-sm mb-1">
+                <span className="font-medium text-gray-700">Distância entre Logomarca e Campos</span>
+                <span className="text-gray-500">{formLogoGap}px</span>
+              </div>
+              <input type="range" min="0" max="60" value={formLogoGap} onChange={e => { const v = Number(e.target.value); setFormLogoGap(v); localStorage.setItem('choferlog_form_logo_gap', v.toString()); }} className="w-full accent-blue-600" />
             </div>
           </div>
 

@@ -31,6 +31,8 @@ export function useLoginConfig() {
       footerHeight: Number(localStorage.getItem('choferlog_footer_height')) || 60,
       inputBgColor: localStorage.getItem('choferlog_input_bg') || '#ffffff',
       inputBorderColor: localStorage.getItem('choferlog_input_border') || '#e5e7eb',
+      formScale: Number(localStorage.getItem('choferlog_form_scale')) || 100,
+      formLogoGap: Number(localStorage.getItem('choferlog_form_logo_gap')) || 24,
     };
   });
 

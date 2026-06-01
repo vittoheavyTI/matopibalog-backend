@@ -74,27 +74,28 @@ export const Login: React.FC = () => {
         padding: '1.5rem',
         boxSizing: 'border-box'
       }}>
-        <div className="flex flex-col items-center mb-6">
-          {config.loginLogo ? (
-            <img src={config.loginLogo} alt="Logo" className="object-contain" style={{
-              transform: `scale(${config.loginLogoScale / 100}) translateY(${config.loginLogoY}px)`,
-              transformOrigin: 'center',
-              maxWidth: '100%'
-            }} />
-          ) : (
-            <div className="bg-blue-600 p-3 rounded-full flex items-center justify-center">
-              <Truck size={32} className="text-white" />
+        <div style={{ transform: `scale(${config.formScale / 100})`, transformOrigin: 'top center' }}>
+          <div className="flex flex-col items-center" style={{ marginBottom: config.formLogoGap }}>
+            {config.loginLogo ? (
+              <img src={config.loginLogo} alt="Logo" className="object-contain" style={{
+                transform: `scale(${config.loginLogoScale / 100}) translateY(${config.loginLogoY}px)`,
+                transformOrigin: 'center',
+                maxWidth: '100%'
+              }} />
+            ) : (
+              <div className="bg-blue-600 p-3 rounded-full flex items-center justify-center">
+                <Truck size={32} className="text-white" />
+              </div>
+            )}
+          </div>
+
+          {error && (
+              <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm text-center mb-4">
+              {error}
             </div>
           )}
-        </div>
 
-        {error && (
-            <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm text-center mb-4">
-            {error}
-          </div>
-        )}
-
-        <form onSubmit={handleLogin} className="flex flex-col gap-4" style={{ fontFamily: config.cardFontFamily }}>
+          <form onSubmit={handleLogin} className="flex flex-col gap-4" style={{ fontFamily: config.cardFontFamily }}>
           <div>
             <label style={{ display: 'block', fontSize: `${config.cardFontSize}px`, fontWeight: '600', lineHeight: '1.5', color: config.cardFontColor, marginBottom: '6px' }}>E-mail</label>
             <input
@@ -182,6 +183,7 @@ export const Login: React.FC = () => {
             <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: `${config.cardFontSize}px` }}>Matopiba Log — Painel Administrativo</span>
           </div>
         </form>
+        </div>
       </div>
       )}
 
