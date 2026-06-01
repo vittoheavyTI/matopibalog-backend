@@ -79,6 +79,16 @@ try { $r = Invoke-WebRequest -Uri "http://localhost:5173/" -UseBasicParsing -Tim
 - **Arquivos tocados**: `Login.tsx`, `Configuracoes.tsx`, `useLoginConfig.ts` (novo), `AuthContext.tsx`
 - **MEMORIA.md**: Arquivo completo (`MEMORIA.md`) com toda a memória do projeto para transferência via rede (192.168.1.8)
 
+### Session 30/05/2026 (part 2) — Card Font Controls + Largura Fixa + Footer Auto-Altura
+- **Problem**: Card size usava `transform: scale()` que distorcia campos internos; footer tinha `maxHeight` fixo; não havia controle de fonte dos campos
+- **What changed**:
+  1. **cardScale → cardWidth**: removido `transform: scale()` do card de login; agora usa `width: cardWidth px` com controle slider (250–550px) em "Ajuste do Card". Os campos internos (inputs, botões, labels) não escalam mais.
+  2. **Footer auto-height**: `maxHeight: footerHeight` + `overflow: hidden` → `height: auto` + `minHeight: 30px` para crescer proporcional ao texto.
+  3. **Card font controls**: adicionados `cardFontFamily` (select), `cardFontSize` (range 10–24px), `cardFontColor` (color picker) na seção "Aparência dos Campos". Aplicados a todos os elementos do formulário de preview (labels, inputs, botão, links).
+  4. **useLoginConfig.sync**: hook agora sempre sobrescreve localStorage e estado com dados da API (efeito colateral p/ SPA routing).
+  5. **Chaves novas localStorage**: `choferlog_card_width`, `choferlog_card_font_family`, `choferlog_card_font_size`, `choferlog_card_font_color`.
+- **Files touched**: `src/pages/Configuracoes.tsx`, `src/pages/Login.tsx`, `src/hooks/useLoginConfig.ts`
+
 ### Pending Tasks
 - Rename project folder from `app-chofer log` to `APP-MATOPIBALOG`
 - Update VS Code

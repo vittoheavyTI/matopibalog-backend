@@ -788,16 +788,6 @@ export const Configuracoes: React.FC = () => {
                         </div>
                       </div>
 
-                      <div className="flex flex-col items-center mb-6">
-                        {loginLogo ? (
-                          <img src={loginLogo} alt="Logo" className="object-contain" style={{ maxWidth: '100%' }} />
-                        ) : (
-                          <div className="bg-blue-600 p-3 rounded-full flex items-center justify-center">
-                            <Truck size={32} className="text-white" />
-                          </div>
-                        )}
-                      </div>
-
                       <div
                         style={{
                           transform: `translate(${formX}px, ${formY}px)`,
@@ -810,7 +800,16 @@ export const Configuracoes: React.FC = () => {
                           formDragRef.current = { startX: e.clientX, startY: e.clientY, startFormX: formX, startFormY: formY };
                         }}
                       >
-                        <div style={{ textAlign: 'center', fontSize: '10px', color: '#999', marginBottom: '4px', cursor: 'grab' }}>⋯ campos</div>
+                        <div style={{ textAlign: 'center', fontSize: '10px', color: '#999', marginBottom: '4px', cursor: 'grab' }}>⋯ mover</div>
+                        <div className="flex flex-col items-center mb-6">
+                          {loginLogo ? (
+                            <img src={loginLogo} alt="Logo" className="object-contain" style={{ maxWidth: '100%' }} />
+                          ) : (
+                            <div className="bg-blue-600 p-3 rounded-full flex items-center justify-center">
+                              <Truck size={32} className="text-white" />
+                            </div>
+                          )}
+                        </div>
                         <form className="flex flex-col gap-4">
                           <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">E-mail</label>
@@ -1143,23 +1142,6 @@ export const Configuracoes: React.FC = () => {
                 <button onClick={() => document.getElementById('modalFileInput')?.click()} className="w-full px-4 py-2 border-2 border-dashed border-gray-300 rounded-lg text-gray-500 hover:border-blue-400 hover:text-blue-600 transition-colors text-sm font-medium">
                   <Upload size={16} className="inline mr-1" /> Selecionar outra imagem
                 </button>
-              </div>
-
-              <div className="space-y-4">
-                <div>
-                  <div className="flex justify-between text-sm mb-1">
-                    <span className="font-medium text-gray-700">Tamanho (Zoom)</span>
-                    <span className="text-gray-500">{tempScale}%</span>
-                  </div>
-                  <input type="range" min="50" max="500" value={tempScale} onChange={e => setTempScale(Number(e.target.value))} className="w-full accent-blue-600" />
-                </div>
-                <div>
-                  <div className="flex justify-between text-sm mb-1">
-                    <span className="font-medium text-gray-700">Posição Vertical</span>
-                    <span className="text-gray-500">{tempY}px</span>
-                  </div>
-                  <input type="range" min="-50" max="50" value={tempY} onChange={e => setTempY(Number(e.target.value))} className="w-full accent-blue-600" />
-                </div>
               </div>
             </div>
 
