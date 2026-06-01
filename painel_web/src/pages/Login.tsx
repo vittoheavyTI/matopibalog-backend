@@ -5,6 +5,65 @@ import { useLoginConfig } from '../hooks/useLoginConfig';
 import api from '../api';
 import { Truck } from 'lucide-react';
 
+const LOGIN_TEMPLATES = [
+  {
+    id: 'classico',
+    nome: 'Clássico',
+    descricao: 'Card centralizado com sombra',
+    cardWidth: 380,
+    cardPosition: 'center',
+    fontSize: 14,
+    fontColor: '#333333',
+    cardBackground: '#ffffff',
+    cardShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
+    cardBorder: 'none',
+    cardBorderRadius: '1rem',
+    buttonColor: '#3b82f6',
+  },
+  {
+    id: 'moderno',
+    nome: 'Moderno',
+    descricao: 'Card à esquerda com gradiente',
+    cardWidth: 420,
+    cardPosition: 'left',
+    fontSize: 15,
+    fontColor: '#1f2937',
+    cardBackground: 'rgba(255,255,255,0.95)',
+    cardShadow: '0 10px 40px rgba(0,0,0,0.15)',
+    cardBorder: 'none',
+    cardBorderRadius: '1.5rem',
+    buttonColor: '#6366f1',
+  },
+  {
+    id: 'minimalista',
+    nome: 'Minimalista',
+    descricao: 'Limpo, sem sombra, fundo suave',
+    cardWidth: 360,
+    cardPosition: 'center',
+    fontSize: 14,
+    fontColor: '#4b5563',
+    cardBackground: '#f9fafb',
+    cardShadow: 'none',
+    cardBorder: '1px solid #e5e7eb',
+    cardBorderRadius: '0.75rem',
+    buttonColor: '#10b981',
+  },
+  {
+    id: 'bold',
+    nome: 'Bold',
+    descricao: 'Card com borda grossa e destaque',
+    cardWidth: 400,
+    cardPosition: 'center',
+    fontSize: 16,
+    fontColor: '#111827',
+    cardBackground: '#ffffff',
+    cardShadow: '0 0 0 4px #3b82f6',
+    cardBorder: '2px solid #3b82f6',
+    cardBorderRadius: '1rem',
+    buttonColor: '#ef4444',
+  },
+];
+
 export const Login: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -15,6 +74,8 @@ export const Login: React.FC = () => {
   const { user, login } = useAuth();
   const config = useLoginConfig();
   const [ready, setReady] = useState(false);
+
+  const tmpl = LOGIN_TEMPLATES.find(t => t.id === config.loginTemplate) || LOGIN_TEMPLATES[0];
 
   useEffect(() => {
     const t = setTimeout(() => setReady(true), 10);
@@ -60,22 +121,22 @@ export const Login: React.FC = () => {
       overflow: 'hidden',
       padding: '16px',
       boxSizing: 'border-box'
-    }}>
-      {!ready ? (
-        <div style={{ width: '100%', maxWidth: '380px', minHeight: '400px' }} />
-      ) : (
-      <div className="login-card" style={{
-        transform: `translateX(${config.cardX}px) translateY(${config.cardY}px)`,
-        backgroundColor: `rgba(${parseInt(config.cardColor.replace('#','').substring(0,2),16)}, ${parseInt(config.cardColor.replace('#','').substring(2,4),16)}, ${parseInt(config.cardColor.replace('#','').substring(4,6),16)}, ${config.cardOpacity / 100})`,
-        width: `${config.cardWidth}px`,
-        maxWidth: '100%',
-        borderRadius: '1rem',
-        boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
-        padding: '1.5rem',
-        boxSizing: 'border-box'
       }}>
-        <div style={{ transform: `translate(${config.formX}px, ${config.formY}px)`, width: `${config.formWidth}px`, transformOrigin: 'top center' }}>
-          <div className="flex flex-col items-center" style={{ marginBottom: config.formLogoGap }}>
+        {!ready ? (
+          <div style={{ width: '100%', maxWidth: '380px', minHeight: '400px' }} />
+        ) : (
+        <div className="login-card" style={{
+          backgroundColor: tmpl.cardBackground,
+          width: '100%',
+          maxWidth: `${tmpl.cardWidth}px`,
+          borderRadius: tmpl.cardBorderRadius,
+          boxShadow: tmpl.cardShadow,
+          border: tmpl.cardBorder,
+          padding: '1.5rem',
+          boxSizing: 'border-box',
+          margin: tmpl.cardPosition === 'left' ? '0' : '0 auto'
+        }}>
+          <div className="flex flex-col items-center" style={{ marginBottom: '24px' }}>
             {config.loginLogo ? (
               <img src={config.loginLogo} alt="Logo" className="object-contain" style={{
                 transform: `scale(${config.loginLogoScale / 100}) translateY(${config.loginLogoY}px)`,
@@ -95,9 +156,9 @@ export const Login: React.FC = () => {
             </div>
           )}
 
-          <form onSubmit={handleLogin} className="flex flex-col gap-4" style={{ fontFamily: config.cardFontFamily }}>
+          <form onSubmit={handleLogin} className="flex flex-col gap-4">
           <div>
-            <label style={{ display: 'block', fontSize: `${config.cardFontSize}px`, fontWeight: '600', lineHeight: '1.5', color: config.cardFontColor, marginBottom: '6px' }}>E-mail</label>
+            <label style={{ display: 'block', fontSize: `${tmpl.fontSize}px`, fontWeight: '600', lineHeight: '1.5', color: tmpl.fontColor, marginBottom: '6px' }}>E-mail</label>
             <input
               type="email"
               value={email}
@@ -107,7 +168,7 @@ export const Login: React.FC = () => {
                 width: '100%',
                 height: '48px',
                 padding: '12px 16px',
-                fontSize: `${config.cardFontSize}px`,
+                fontSize: `${tmpl.fontSize}px`,
                 fontWeight: '400',
                 lineHeight: '1.5',
                 borderRadius: '10px',
@@ -115,7 +176,7 @@ export const Login: React.FC = () => {
                 backgroundColor: config.inputBgColor,
                 outline: 'none',
                 boxSizing: 'border-box',
-                color: config.cardFontColor,
+                color: tmpl.fontColor,
                 pointerEvents: 'all',
                 position: 'relative',
                 zIndex: 10,
@@ -125,7 +186,7 @@ export const Login: React.FC = () => {
           </div>
 
           <div>
-            <label style={{ display: 'block', fontSize: `${config.cardFontSize}px`, fontWeight: '500', lineHeight: '1.5', color: config.cardFontColor, marginBottom: '8px' }}>Senha</label>
+            <label style={{ display: 'block', fontSize: `${tmpl.fontSize}px`, fontWeight: '500', lineHeight: '1.5', color: tmpl.fontColor, marginBottom: '8px' }}>Senha</label>
             <div style={{ position: 'relative', width: '100%' }}>
               <input
                 type={showPassword ? 'text' : 'password'}
@@ -135,7 +196,7 @@ export const Login: React.FC = () => {
                   width: '100%',
                   height: '48px',
                   padding: '12px 16px',
-                  fontSize: `${config.cardFontSize}px`,
+                  fontSize: `${tmpl.fontSize}px`,
                   fontWeight: '400',
                   lineHeight: '1.5',
                   borderRadius: '10px',
@@ -143,7 +204,7 @@ export const Login: React.FC = () => {
                   backgroundColor: config.inputBgColor,
                   outline: 'none',
                   boxSizing: 'border-box',
-                  color: config.cardFontColor
+                  color: tmpl.fontColor
                 }}
                 required
               />
@@ -160,10 +221,10 @@ export const Login: React.FC = () => {
               width: '100%',
               height: '48px',
               padding: '12px 16px',
-              fontSize: `${config.cardFontSize}px`,
+              fontSize: `${tmpl.fontSize}px`,
               fontWeight: '600',
               lineHeight: '1.5',
-              background: '#3b82f6',
+              background: tmpl.buttonColor,
               color: 'white',
               border: 'none',
               borderRadius: '10px',
@@ -175,16 +236,15 @@ export const Login: React.FC = () => {
           </button>
 
           <div style={{ display: 'flex', justifyContent: 'center', gap: '16px', marginTop: '8px' }}>
-            <a href="#" style={{ color: '#3b82f6', fontSize: `${config.cardFontSize}px`, textDecoration: 'none' }} onClick={(e) => { e.preventDefault(); }}>Criar conta</a>
-            <a href="#" style={{ color: '#3b82f6', fontSize: `${config.cardFontSize}px`, textDecoration: 'none' }} onClick={(e) => { e.preventDefault(); }}>Esqueceu a senha?</a>
+            <a href="#" style={{ color: '#3b82f6', fontSize: `${tmpl.fontSize}px`, textDecoration: 'none' }} onClick={(e) => { e.preventDefault(); }}>Criar conta</a>
+            <a href="#" style={{ color: '#3b82f6', fontSize: `${tmpl.fontSize}px`, textDecoration: 'none' }} onClick={(e) => { e.preventDefault(); }}>Esqueceu a senha?</a>
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', marginTop: '16px' }}>
-            <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: `${config.cardFontSize}px` }}>Matopiba Log — Painel Administrativo</span>
+            <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: `${tmpl.fontSize}px` }}>Matopiba Log — Painel Administrativo</span>
           </div>
         </form>
         </div>
-      </div>
       )}
 
       <div className="login-footer" style={{

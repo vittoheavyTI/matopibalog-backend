@@ -4,6 +4,65 @@ import { maskPhone, maskCNPJ, maskCEP } from '../utils/masks';
 import api from '../api';
 import { useLoginConfig } from '../hooks/useLoginConfig';
 
+const LOGIN_TEMPLATES = [
+  {
+    id: 'classico',
+    nome: 'Clássico',
+    descricao: 'Card centralizado com sombra',
+    cardWidth: 380,
+    cardPosition: 'center',
+    fontSize: 14,
+    fontColor: '#333333',
+    cardBackground: '#ffffff',
+    cardShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
+    cardBorder: 'none',
+    cardBorderRadius: '1rem',
+    buttonColor: '#3b82f6',
+  },
+  {
+    id: 'moderno',
+    nome: 'Moderno',
+    descricao: 'Card à esquerda com gradiente',
+    cardWidth: 420,
+    cardPosition: 'left',
+    fontSize: 15,
+    fontColor: '#1f2937',
+    cardBackground: 'rgba(255,255,255,0.95)',
+    cardShadow: '0 10px 40px rgba(0,0,0,0.15)',
+    cardBorder: 'none',
+    cardBorderRadius: '1.5rem',
+    buttonColor: '#6366f1',
+  },
+  {
+    id: 'minimalista',
+    nome: 'Minimalista',
+    descricao: 'Limpo, sem sombra, fundo suave',
+    cardWidth: 360,
+    cardPosition: 'center',
+    fontSize: 14,
+    fontColor: '#4b5563',
+    cardBackground: '#f9fafb',
+    cardShadow: 'none',
+    cardBorder: '1px solid #e5e7eb',
+    cardBorderRadius: '0.75rem',
+    buttonColor: '#10b981',
+  },
+  {
+    id: 'bold',
+    nome: 'Bold',
+    descricao: 'Card com borda grossa e destaque',
+    cardWidth: 400,
+    cardPosition: 'center',
+    fontSize: 16,
+    fontColor: '#111827',
+    cardBackground: '#ffffff',
+    cardShadow: '0 0 0 4px #3b82f6',
+    cardBorder: '2px solid #3b82f6',
+    cardBorderRadius: '1rem',
+    buttonColor: '#ef4444',
+  },
+];
+
 interface CompanyData {
   nome: string;
   cnpj: string;
@@ -49,15 +108,10 @@ export const Configuracoes: React.FC = () => {
   const [tempScale, setTempScale] = useState(100);
   const [tempY, setTempY] = useState(0);
 
-  const [cardScale, setCardScale] = useState(100);
-  const [cardX, setCardX] = useState(0);
-  const [cardY, setCardY] = useState(0);
-  const [isDragging, setIsDragging] = useState(false);
-  const [isResizing, setIsResizing] = useState(false);
-  const dragRef = useRef({ startX: 0, startY: 0, startCardX: 0, startCardY: 0 });
-  const resizeRef = useRef({ startX: 0, startY: 0, startWidth: 380, startHeight: 400, startCardX: 0, startCardY: 0, edges: { top: false, bottom: false, left: false, right: false } });
-  const [cardColor, setCardColor] = useState('#ffffff');
-  const [cardOpacity, setCardOpacity] = useState(100);
+  const [selectedTemplate, setSelectedTemplate] = useState(
+    localStorage.getItem('choferlog_login_template') || 'classico'
+  );
+  const [showPasswordPreview, setShowPasswordPreview] = useState(false);
   const [contactPhone, setContactPhone] = useState('');
   const [contactEmail, setContactEmail] = useState('');
   const [footerColor, setFooterColor] = useState('#ffffff');
@@ -71,17 +125,6 @@ export const Configuracoes: React.FC = () => {
   const footerResizeRef = useRef({ startX: 0, startY: 0, startWidth: 80, startHeight: 60, edge: '' });
   const [inputBgColor, setInputBgColor] = useState('#ffffff');
   const [inputBorderColor, setInputBorderColor] = useState('#e5e7eb');
-  const [cardFontSize, setCardFontSize] = useState(Number(localStorage.getItem('choferlog_card_font_size')) || 16);
-  const [cardFontColor, setCardFontColor] = useState(localStorage.getItem('choferlog_card_font_color') || '#333333');
-  const [cardWidth, setCardWidth] = useState(Number(localStorage.getItem('choferlog_card_width')) || 380);
-  const [cardHeight, setCardHeight] = useState(Number(localStorage.getItem('choferlog_card_height')) || 400);
-  const [showPasswordPreview, setShowPasswordPreview] = useState(false);
-  const [formX, setFormX] = useState(Number(localStorage.getItem('choferlog_form_x')) || 0);
-  const [formY, setFormY] = useState(Number(localStorage.getItem('choferlog_form_y')) || 0);
-  const [isDraggingForm, setIsDraggingForm] = useState(false);
-  const formDragRef = useRef({ startX: 0, startY: 0, startFormX: 0, startFormY: 0 });
-  const [formWidth, setFormWidth] = useState(Number(localStorage.getItem('choferlog_form_width')) || 300);
-  const [formLogoGap, setFormLogoGap] = useState(Number(localStorage.getItem('choferlog_form_logo_gap')) || 24);
   const config = useLoginConfig();
 
   useEffect(() => {
@@ -90,21 +133,10 @@ export const Configuracoes: React.FC = () => {
 
     const savedPrinters = localStorage.getItem('choferlog_printers');
     if (savedPrinters) setPrinters(JSON.parse(savedPrinters));
-    const savedCardFontSize = localStorage.getItem('choferlog_card_font_size');
-    if (savedCardFontSize) setCardFontSize(Number(savedCardFontSize));
-    const savedCardFontColor = localStorage.getItem('choferlog_card_font_color');
-    if (savedCardFontColor) setCardFontColor(savedCardFontColor);
-    const savedCardWidth = localStorage.getItem('choferlog_card_width');
-    if (savedCardWidth) setCardWidth(Number(savedCardWidth));
 
     if (config.loginLogo) setLoginLogo(config.loginLogo);
     if (config.loginBg) setLoginBg(config.loginBg);
     setFooterText(config.footerText);
-    setCardScale(config.cardScale);
-    setCardX(config.cardX);
-    setCardY(config.cardY);
-    setCardColor(config.cardColor);
-    setCardOpacity(config.cardOpacity);
     setContactPhone(config.contactPhone);
     setContactEmail(config.contactEmail);
     setFooterColor(config.footerColor);
@@ -117,91 +149,6 @@ export const Configuracoes: React.FC = () => {
     setInputBgColor(config.inputBgColor);
     setInputBorderColor(config.inputBorderColor);
   }, []);
-
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (isDragging) {
-        const deltaX = e.clientX - dragRef.current.startX;
-        const deltaY = e.clientY - dragRef.current.startY;
-        setCardX(Math.round(dragRef.current.startCardX + deltaX));
-        setCardY(Math.round(dragRef.current.startCardY + deltaY));
-      }
-      if (isResizing) {
-        const deltaX = e.clientX - resizeRef.current.startX;
-        const deltaY = e.clientY - resizeRef.current.startY;
-        const { edges } = resizeRef.current;
-
-        if (edges.right) {
-          setCardWidth(Math.min(550, Math.max(280, resizeRef.current.startWidth + deltaX)));
-        }
-        if (edges.left) {
-          const newW = Math.min(550, Math.max(280, resizeRef.current.startWidth - deltaX));
-          setCardWidth(newW);
-          setCardX(resizeRef.current.startCardX - (newW - resizeRef.current.startWidth));
-        }
-        if (edges.bottom) {
-          setCardHeight(Math.min(800, Math.max(200, resizeRef.current.startHeight + deltaY)));
-        }
-        if (edges.top) {
-          const newH = Math.min(800, Math.max(200, resizeRef.current.startHeight - deltaY));
-          setCardHeight(newH);
-          setCardY(resizeRef.current.startCardY + (resizeRef.current.startHeight - newH));
-        }
-      }
-      if (isDraggingForm) {
-        const deltaX = e.clientX - formDragRef.current.startX;
-        const deltaY = e.clientY - formDragRef.current.startY;
-        setFormX(Math.round(formDragRef.current.startFormX + deltaX));
-        setFormY(Math.round(formDragRef.current.startFormY + deltaY));
-      }
-      if (isResizingFooter) {
-        const deltaX = e.clientX - footerResizeRef.current.startX;
-        const deltaY = e.clientY - footerResizeRef.current.startY;
-        let newWidth = footerResizeRef.current.startWidth;
-        let newHeight = footerResizeRef.current.startHeight;
-        if (footerResizeRef.current.edge === 'right' || footerResizeRef.current.edge === 'corner') {
-          const previewEl = document.querySelector('.preview-container');
-          const previewWidth = previewEl?.clientWidth || 800;
-          newWidth = Math.min(95, Math.max(30, footerResizeRef.current.startWidth + (deltaX / previewWidth) * 100));
-        }
-        if (footerResizeRef.current.edge === 'bottom' || footerResizeRef.current.edge === 'corner') {
-          newHeight = Math.min(150, Math.max(30, footerResizeRef.current.startHeight + deltaY));
-        }
-        setFooterWidth(Math.round(newWidth));
-        setFooterHeight(Math.round(newHeight));
-      }
-    };
-
-    const handleMouseUp = () => {
-      if (isDragging) {
-        localStorage.setItem('choferlog_card_x', cardX.toString());
-        localStorage.setItem('choferlog_card_y', cardY.toString());
-      }
-      if (isResizing) {
-        localStorage.setItem('choferlog_card_width', cardWidth.toString());
-        localStorage.setItem('choferlog_card_height', cardHeight.toString());
-      }
-      if (isDraggingForm) {
-        localStorage.setItem('choferlog_form_x', formX.toString());
-        localStorage.setItem('choferlog_form_y', formY.toString());
-      }
-      if (isResizingFooter) {
-        localStorage.setItem('choferlog_footer_width', footerWidth.toString());
-        localStorage.setItem('choferlog_footer_height', footerHeight.toString());
-      }
-      setIsDragging(false);
-      setIsResizing(false);
-      setIsResizingFooter(false);
-      setIsDraggingForm(false);
-    };
-
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [isDragging, isResizing, isResizingFooter, isDraggingForm, cardX, cardY, cardWidth, cardHeight, formX, formY, footerWidth, footerHeight]);
 
   const handleSaveCompany = () => {
     localStorage.setItem('choferlog_company', JSON.stringify(company));
@@ -334,7 +281,7 @@ export const Configuracoes: React.FC = () => {
     footerFontSize, footerBold, footerFontFamily,
     footerWidth, footerHeight,
     inputBgColor, inputBorderColor,
-    cardScale, cardX, cardY, cardColor, cardOpacity,
+    loginTemplate: localStorage.getItem('choferlog_login_template') || 'classico',
     loginLogoScale: Number(localStorage.getItem('choferlog_login_logo_scale')) || 100,
     loginLogoY: Number(localStorage.getItem('choferlog_login_logo_y')) || 0,
     loginBgScale: Number(localStorage.getItem('choferlog_login_bg_scale')) || 100,
@@ -362,11 +309,6 @@ export const Configuracoes: React.FC = () => {
           if (d.loginLogo) setLoginLogo(d.loginLogo);
           if (d.loginBg) setLoginBg(d.loginBg);
           if (d.footerText !== undefined) setFooterText(d.footerText);
-          if (d.cardScale) setCardScale(d.cardScale);
-          if (d.cardX !== undefined) setCardX(d.cardX);
-          if (d.cardY !== undefined) setCardY(d.cardY);
-          if (d.cardColor) setCardColor(d.cardColor);
-          if (d.cardOpacity !== undefined) setCardOpacity(d.cardOpacity);
           if (d.contactPhone !== undefined) setContactPhone(d.contactPhone);
           if (d.contactEmail !== undefined) setContactEmail(d.contactEmail);
           if (d.footerColor) setFooterColor(d.footerColor);
@@ -378,6 +320,8 @@ export const Configuracoes: React.FC = () => {
           if (d.footerHeight !== undefined) setFooterHeight(d.footerHeight);
           if (d.inputBgColor) setInputBgColor(d.inputBgColor);
           if (d.inputBorderColor) setInputBorderColor(d.inputBorderColor);
+          if (d.loginTemplate) { localStorage.setItem('choferlog_login_template', d.loginTemplate); setSelectedTemplate(d.loginTemplate); }
+
         }
       })
       .catch(() => { });
@@ -706,135 +650,46 @@ export const Configuracoes: React.FC = () => {
                 <div className="w-full h-full flex items-center justify-center relative"
                   style={loginBg ? { backgroundImage: `url(${loginBg})`, backgroundSize: 'cover', backgroundPosition: 'center' } : { backgroundColor: '#f3f4f6' }}>
                   <div style={{ position: 'relative', display: 'inline-block' }}>
-                    <div className="w-full relative z-10"
-                      style={{
-                        backgroundColor: `rgba(${parseInt(cardColor.replace('#', '').substring(0, 2), 16)}, ${parseInt(cardColor.replace('#', '').substring(2, 4), 16)}, ${parseInt(cardColor.replace('#', '').substring(4, 6), 16)}, ${cardOpacity / 100})`,
-                        transform: `translateX(${cardX}px) translateY(${cardY}px)`,
-                        width: '100%',
-                        maxWidth: `${cardWidth}px`,
-                        height: `${cardHeight}px`,
-                        maxHeight: `${cardHeight}px`,
-                        borderRadius: '1rem',
-                        boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
-                        padding: '1.5rem',
-                        userSelect: isDragging || isResizing ? 'none' : undefined
-                      }}
-                      onMouseMove={(e) => {
-                        if (isDragging || isResizing) return;
-                        const rect = e.currentTarget.getBoundingClientRect();
-                        const edge = 12;
-                        const top = e.clientY - rect.top < edge;
-                        const bottom = rect.bottom - e.clientY < edge;
-                        const left = e.clientX - rect.left < edge;
-                        const right = rect.right - e.clientX < edge;
-
-                        let cursor = 'default';
-                        if ((top && left) || (bottom && right)) cursor = 'nwse-resize';
-                        else if ((top && right) || (bottom && left)) cursor = 'nesw-resize';
-                        else if (top || bottom) cursor = 'ns-resize';
-                        else if (left || right) cursor = 'ew-resize';
-
-                        e.currentTarget.style.cursor = cursor;
-                      }}
-                      onMouseDown={(e) => {
-                        const rect = e.currentTarget.getBoundingClientRect();
-                        const edge = 12;
-                        const top = e.clientY - rect.top < edge;
-                        const bottom = rect.bottom - e.clientY < edge;
-                        const left = e.clientX - rect.left < edge;
-                        const right = rect.right - e.clientX < edge;
-
-                        if (top || bottom || left || right) {
-                          e.stopPropagation();
-                          setIsResizing(true);
-                          resizeRef.current = {
-                            startX: e.clientX,
-                            startY: e.clientY,
-                            startWidth: cardWidth,
-                            startHeight: cardHeight,
-                            startCardX: cardX,
-                            startCardY: cardY,
-                            edges: { top, bottom, left, right }
-                          };
-                        } else {
-                          setIsDragging(true);
-                          dragRef.current = { startX: e.clientX, startY: e.clientY, startCardX: cardX, startCardY: cardY };
-                        }
-                      }}
-                    >
-                      {/* Barra de arrasto */}
-                      <div
-                        style={{
-                          cursor: 'grab',
-                          height: '24px',
-                          background: 'rgba(0,0,0,0.05)',
-                          borderRadius: '4px 4px 0 0',
-                          marginBottom: '12px',
-                          marginLeft: '-2rem',
-                          marginRight: '-2rem',
-                          marginTop: '-2rem',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center'
-                        }}
-                        onMouseDown={(e) => {
-                          e.stopPropagation();
-                          setIsDragging(true);
-                          dragRef.current = { startX: e.clientX, startY: e.clientY, startCardX: cardX, startCardY: cardY };
-                        }}
-                      >
-                        <div style={{ display: 'flex', gap: '3px' }}>
-                          <div style={{ width: '4px', height: '4px', borderRadius: '50%', background: '#ccc' }}></div>
-                          <div style={{ width: '4px', height: '4px', borderRadius: '50%', background: '#ccc' }}></div>
-                          <div style={{ width: '4px', height: '4px', borderRadius: '50%', background: '#ccc' }}></div>
-                        </div>
-                      </div>
-
-                      <div
-                        style={{
-                          transform: `translate(${formX}px, ${formY}px)`,
-                          width: `${formWidth}px`,
-                          cursor: isDraggingForm ? 'grabbing' : 'grab',
-                          userSelect: isDraggingForm ? 'none' : undefined
-                        }}
-                        onMouseDown={(e) => {
-                          e.stopPropagation();
-                          setIsDraggingForm(true);
-                          formDragRef.current = { startX: e.clientX, startY: e.clientY, startFormX: formX, startFormY: formY };
-                        }}
-                      >
-                        <div style={{ textAlign: 'center', fontSize: '10px', color: '#999', marginBottom: '4px', cursor: 'grab' }}>⋯ mover</div>
-                        <div className="flex flex-col items-center" style={{ marginBottom: formLogoGap }}>
-                          {loginLogo ? (
-                            <img src={loginLogo} alt="Logo" className="object-contain" style={{ maxWidth: '100%' }} />
-                          ) : (
-                            <div className="bg-blue-600 p-3 rounded-full flex items-center justify-center">
-                              <Truck size={32} className="text-white" />
-                            </div>
-                          )}
-                        </div>
-                        <form className="flex flex-col gap-4">
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">E-mail</label>
-                            <input type="email" value="" readOnly style={{ width: '100%', padding: '14px', fontSize: '15px', borderRadius: '10px', border: `2px solid ${inputBorderColor}`, backgroundColor: inputBgColor, outline: 'none', boxSizing: 'border-box' }} />
+                    {(() => {
+                      const tmpl = LOGIN_TEMPLATES.find(t => t.id === selectedTemplate) || LOGIN_TEMPLATES[0];
+                      return (
+                        <div style={{
+                          backgroundColor: tmpl.cardBackground,
+                          width: '100%',
+                          maxWidth: `${tmpl.cardWidth}px`,
+                          borderRadius: tmpl.cardBorderRadius,
+                          boxShadow: tmpl.cardShadow,
+                          border: tmpl.cardBorder,
+                          padding: '1.5rem',
+                          margin: tmpl.cardPosition === 'left' ? '0' : '0 auto',
+                        }}>
+                          <div className="flex flex-col items-center" style={{ marginBottom: '24px' }}>
+                            {loginLogo ? (
+                              <img src={loginLogo} alt="Logo" style={{ maxWidth: '100%', maxHeight: '80px', objectFit: 'contain' }} />
+                            ) : (
+                              <div className="bg-blue-600 p-3 rounded-full">
+                                <Truck size={32} className="text-white" />
+                              </div>
+                            )}
                           </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Senha</label>
-                            <div style={{ position: 'relative', width: '100%' }}>
-                              <input type={showPasswordPreview ? 'text' : 'password'} value="" readOnly style={{ width: '100%', padding: '14px 40px 14px 14px', fontSize: '15px', borderRadius: '10px', border: `2px solid ${inputBorderColor}`, backgroundColor: inputBgColor, outline: 'none', boxSizing: 'border-box' }} />
-                              <button type="button" onClick={() => setShowPasswordPreview(!showPasswordPreview)} style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', fontSize: '16px', padding: '4px' }}>
-                                {showPasswordPreview ? '🙈' : '👁️'}
-                              </button>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                            <div>
+                              <label style={{ fontSize: `${tmpl.fontSize}px`, color: tmpl.fontColor, fontWeight: '500', display: 'block', marginBottom: '6px' }}>E-mail</label>
+                              <input type="email" readOnly style={{ width: '100%', padding: '12px', fontSize: `${tmpl.fontSize}px`, borderRadius: '8px', border: `2px solid ${inputBorderColor}`, backgroundColor: inputBgColor, outline: 'none', boxSizing: 'border-box' }} />
+                            </div>
+                            <div>
+                              <label style={{ fontSize: `${tmpl.fontSize}px`, color: tmpl.fontColor, fontWeight: '500', display: 'block', marginBottom: '6px' }}>Senha</label>
+                              <input type="password" readOnly style={{ width: '100%', padding: '12px', fontSize: `${tmpl.fontSize}px`, borderRadius: '8px', border: `2px solid ${inputBorderColor}`, backgroundColor: inputBgColor, outline: 'none', boxSizing: 'border-box' }} />
+                            </div>
+                            <button disabled style={{ width: '100%', padding: '12px', fontSize: `${tmpl.fontSize}px`, background: tmpl.buttonColor, color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'default', opacity: 0.8 }}>Entrar</button>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: `${tmpl.fontSize}px`, color: tmpl.fontColor }}>
+                              <span style={{ cursor: 'default', opacity: 0.7 }}>Criar conta</span>
+                              <span style={{ cursor: 'default', opacity: 0.7 }}>Esqueceu a senha?</span>
                             </div>
                           </div>
-                          <button type="button" disabled style={{ width: '100%', padding: '14px', fontSize: '16px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '10px', fontWeight: 'bold', cursor: 'default', opacity: 0.7 }}>Entrar</button>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '16px', fontSize: '14px' }}>
-                            <span style={{ color: '#3b82f6', cursor: 'default', fontWeight: '500' }}>Criar conta</span>
-                            <span style={{ color: '#6b7280', cursor: 'default', fontWeight: '400' }}>Esqueceu a senha?</span>
-                          </div>
-                        </form>
-                      </div>
-                    </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
                 <div style={{
@@ -876,73 +731,44 @@ export const Configuracoes: React.FC = () => {
           </div>
 
           <div className="border-t border-gray-100 pt-6">
-            <label className="block text-xs font-bold text-gray-400 uppercase mb-3 ml-1">Ajuste do Card de Login</label>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <div className="flex justify-between text-sm mb-2">
-                  <span className="font-medium text-gray-700">Cor de Fundo</span>
+            <label className="block text-xs font-bold text-gray-400 uppercase mb-3 ml-1">Template do Card de Login</label>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {LOGIN_TEMPLATES.map(template => (
+                <div
+                  key={template.id}
+                  onClick={() => {
+                    setSelectedTemplate(template.id);
+                    localStorage.setItem('choferlog_login_template', template.id);
+                    syncConfigToServer();
+                  }}
+                  className={`cursor-pointer rounded-xl p-4 border-2 transition-all text-center ${
+                    selectedTemplate === template.id
+                      ? 'border-blue-500 bg-blue-50 shadow-md'
+                      : 'border-gray-200 bg-white hover:border-gray-300'
+                  }`}
+                >
+                  <div
+                    style={{
+                      width: '60px',
+                      height: '80px',
+                      margin: '0 auto 8px',
+                      borderRadius: template.cardBorderRadius,
+                      background: template.cardBackground,
+                      boxShadow: template.cardShadow,
+                      border: template.cardBorder,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '10px',
+                      color: template.fontColor,
+                    }}
+                  >
+                    Login
+                  </div>
+                  <p className="font-bold text-sm text-gray-800">{template.nome}</p>
+                  <p className="text-xs text-gray-500 mt-1">{template.descricao}</p>
                 </div>
-                <div className="flex items-center space-x-3">
-                  <input
-                    type="color"
-                    value={cardColor}
-                    onChange={e => { const v = e.target.value; setCardColor(v); localStorage.setItem('choferlog_card_color', v); }}
-                    className="w-12 h-12 rounded-lg border border-gray-200 cursor-pointer"
-                  />
-                  <span className="text-sm text-gray-500 font-mono">{cardColor}</span>
-                </div>
-              </div>
-              <div>
-                <div className="flex justify-between text-sm mb-1">
-                  <span className="font-medium text-gray-700">Transparência</span>
-                  <span className="text-gray-500">{cardOpacity}%</span>
-                </div>
-                <input type="range" min="0" max="100" value={cardOpacity} onChange={e => { const v = Number(e.target.value); setCardOpacity(v); localStorage.setItem('choferlog_card_opacity', v.toString()); }} className="w-full accent-blue-600" />
-              </div>
-            </div>
-            <div className="mt-4">
-              <div className="flex justify-between text-sm mb-1">
-                <span className="font-medium text-gray-700">Tamanho da Fonte</span>
-                <span className="text-gray-500">{cardFontSize}px</span>
-              </div>
-              <input type="range" min="12" max="24" value={cardFontSize} onChange={e => { const v = Number(e.target.value); setCardFontSize(v); localStorage.setItem('choferlog_card_font_size', v.toString()); }} className="w-full accent-blue-600" />
-            </div>
-            <div className="mt-4">
-              <div className="flex justify-between text-sm mb-1">
-                <span className="font-medium text-gray-700">Cor da Fonte</span>
-              </div>
-              <div className="flex items-center space-x-3">
-                <input type="color" value={cardFontColor} onChange={e => { const v = e.target.value; setCardFontColor(v); localStorage.setItem('choferlog_card_font_color', v); }} className="w-12 h-12 rounded-lg border border-gray-200 cursor-pointer" />
-                <span className="text-sm text-gray-500 font-mono">{cardFontColor}</span>
-              </div>
-            </div>
-            <div className="mt-4">
-              <div className="flex justify-between text-sm mb-1">
-                <span className="font-medium text-gray-700">Largura do Card</span>
-                <span className="text-gray-500">{cardWidth}px</span>
-              </div>
-              <input type="range" min="300" max="550" value={cardWidth} onChange={e => { const v = Number(e.target.value); setCardWidth(v); localStorage.setItem('choferlog_card_width', v.toString()); }} className="w-full accent-blue-600" />
-            </div>
-            <div className="mt-4">
-              <div className="flex justify-between text-sm mb-1">
-                <span className="font-medium text-gray-700">Altura do Card</span>
-                <span className="text-gray-500">{cardHeight}px</span>
-              </div>
-              <input type="range" min="200" max="800" value={cardHeight} onChange={e => { const v = Number(e.target.value); setCardHeight(v); localStorage.setItem('choferlog_card_height', v.toString()); }} className="w-full accent-blue-600" />
-            </div>
-          </div>
-
-          <div className="border-t border-gray-100 pt-6">
-            <label className="block text-xs font-bold text-gray-400 uppercase mb-3 ml-1">Posição e Largura dos Campos + Logomarca</label>
-            <div className="mt-4">
-              <div className="flex justify-between text-sm mb-1">
-                <span className="font-medium text-gray-700">Largura dos Campos</span>
-                <span className="text-gray-500">{formWidth}px</span>
-              </div>
-              <div className="flex items-center space-x-3">
-                <input type="range" min="200" max="500" value={formWidth} onChange={e => { const v = Number(e.target.value); setFormWidth(v); localStorage.setItem('choferlog_form_width', v.toString()); }} className="flex-1 accent-blue-600" />
-                <input type="number" min="200" max="500" value={formWidth} onChange={e => { const v = Math.min(500, Math.max(200, Number(e.target.value))); setFormWidth(v); localStorage.setItem('choferlog_form_width', v.toString()); }} className="w-16 text-center border border-gray-200 rounded-lg p-1 text-sm" />
-              </div>
+              ))}
             </div>
           </div>
 
