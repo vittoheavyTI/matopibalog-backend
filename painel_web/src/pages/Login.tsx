@@ -74,7 +74,7 @@ export const Login: React.FC = () => {
         padding: '1.5rem',
         boxSizing: 'border-box'
       }}>
-        <div style={{ transform: `translate(${config.formX}px, ${config.formY}px)`, transformOrigin: 'top center' }}>
+        <div style={{ transform: `translate(${config.formX}px, ${config.formY}px)`, width: `${config.formWidth}px`, transformOrigin: 'top center' }}>
           <div className="flex flex-col items-center" style={{ marginBottom: config.formLogoGap }}>
             {config.loginLogo ? (
               <img src={config.loginLogo} alt="Logo" className="object-contain" style={{

@@ -80,7 +80,7 @@ export const Configuracoes: React.FC = () => {
   const [formY, setFormY] = useState(Number(localStorage.getItem('choferlog_form_y')) || 0);
   const [isDraggingForm, setIsDraggingForm] = useState(false);
   const formDragRef = useRef({ startX: 0, startY: 0, startFormX: 0, startFormY: 0 });
-  const [formScale, setFormScale] = useState(Number(localStorage.getItem('choferlog_form_scale')) || 100);
+  const [formWidth, setFormWidth] = useState(Number(localStorage.getItem('choferlog_form_width')) || 300);
   const [formLogoGap, setFormLogoGap] = useState(Number(localStorage.getItem('choferlog_form_logo_gap')) || 24);
   const config = useLoginConfig();
 
@@ -792,8 +792,8 @@ export const Configuracoes: React.FC = () => {
 
                       <div
                         style={{
-                          transform: `translate(${formX}px, ${formY}px) scale(${formScale / 100})`,
-                          transformOrigin: 'top center',
+                          transform: `translate(${formX}px, ${formY}px)`,
+                          width: `${formWidth}px`,
                           cursor: isDraggingForm ? 'grabbing' : 'grab',
                           userSelect: isDraggingForm ? 'none' : undefined
                         }}
@@ -944,22 +944,15 @@ export const Configuracoes: React.FC = () => {
           </div>
 
           <div className="border-t border-gray-100 pt-6">
-            <label className="block text-xs font-bold text-gray-400 uppercase mb-3 ml-1">Zoom e Distância dos Campos + Logomarca</label>
+            <label className="block text-xs font-bold text-gray-400 uppercase mb-3 ml-1">Posição e Largura dos Campos + Logomarca</label>
             <div className="mt-4">
               <div className="flex justify-between text-sm mb-1">
-                <span className="font-medium text-gray-700">Zoom (Aproximar / Afastar)</span>
-                <span className="text-gray-500">{formScale}%</span>
-              </div>
-              <input type="range" min="50" max="200" value={formScale} onChange={e => { const v = Number(e.target.value); setFormScale(v); localStorage.setItem('choferlog_form_scale', v.toString()); }} className="w-full accent-blue-600" />
-            </div>
-            <div className="mt-4">
-              <div className="flex justify-between text-sm mb-1">
-                <span className="font-medium text-gray-700">Distância entre Logomarca e Campos</span>
-                <span className="text-gray-500">{formLogoGap}px</span>
+                <span className="font-medium text-gray-700">Largura dos Campos</span>
+                <span className="text-gray-500">{formWidth}px</span>
               </div>
               <div className="flex items-center space-x-3">
-                <input type="range" min="0" max="60" value={formLogoGap} onChange={e => { const v = Number(e.target.value); setFormLogoGap(v); localStorage.setItem('choferlog_form_logo_gap', v.toString()); }} className="flex-1 accent-blue-600" />
-                <input type="number" min="0" max="60" value={formLogoGap} onChange={e => { const v = Math.min(60, Math.max(0, Number(e.target.value))); setFormLogoGap(v); localStorage.setItem('choferlog_form_logo_gap', v.toString()); }} className="w-16 text-center border border-gray-200 rounded-lg p-1 text-sm" />
+                <input type="range" min="200" max="500" value={formWidth} onChange={e => { const v = Number(e.target.value); setFormWidth(v); localStorage.setItem('choferlog_form_width', v.toString()); }} className="flex-1 accent-blue-600" />
+                <input type="number" min="200" max="500" value={formWidth} onChange={e => { const v = Math.min(500, Math.max(200, Number(e.target.value))); setFormWidth(v); localStorage.setItem('choferlog_form_width', v.toString()); }} className="w-16 text-center border border-gray-200 rounded-lg p-1 text-sm" />
               </div>
             </div>
           </div>
