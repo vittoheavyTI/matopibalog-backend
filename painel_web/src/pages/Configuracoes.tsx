@@ -111,6 +111,66 @@ export const Configuracoes: React.FC = () => {
     setInputBorderColor(config.inputBorderColor);
   }, []);
 
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (isDragging) {
+        const deltaX = e.clientX - dragRef.current.startX;
+        const deltaY = e.clientY - dragRef.current.startY;
+        setCardX(Math.round(dragRef.current.startCardX + deltaX));
+        setCardY(Math.round(dragRef.current.startCardY + deltaY));
+      }
+      if (isResizing) {
+        const deltaX = e.clientX - resizeRef.current.startX;
+        const deltaY = e.clientY - resizeRef.current.startY;
+        const { edges } = resizeRef.current;
+        let newScale = resizeRef.current.startScale;
+        if (edges.right || edges.left) newScale = Math.min(200, Math.max(50, resizeRef.current.startScale + deltaX * 0.3));
+        if (edges.bottom || edges.top) newScale = Math.min(200, Math.max(50, resizeRef.current.startScale + deltaY * 0.3));
+        setCardScale(Math.round(newScale));
+      }
+      if (isResizingFooter) {
+        const deltaX = e.clientX - footerResizeRef.current.startX;
+        const deltaY = e.clientY - footerResizeRef.current.startY;
+        let newWidth = footerResizeRef.current.startWidth;
+        let newHeight = footerResizeRef.current.startHeight;
+        if (footerResizeRef.current.edge === 'right' || footerResizeRef.current.edge === 'corner') {
+          const previewEl = document.querySelector('.preview-container');
+          const previewWidth = previewEl?.clientWidth || 800;
+          newWidth = Math.min(95, Math.max(30, footerResizeRef.current.startWidth + (deltaX / previewWidth) * 100));
+        }
+        if (footerResizeRef.current.edge === 'bottom' || footerResizeRef.current.edge === 'corner') {
+          newHeight = Math.min(150, Math.max(30, footerResizeRef.current.startHeight + deltaY));
+        }
+        setFooterWidth(Math.round(newWidth));
+        setFooterHeight(Math.round(newHeight));
+      }
+    };
+
+    const handleMouseUp = () => {
+      if (isDragging) {
+        localStorage.setItem('choferlog_card_x', cardX.toString());
+        localStorage.setItem('choferlog_card_y', cardY.toString());
+      }
+      if (isResizing) {
+        localStorage.setItem('choferlog_card_scale', cardScale.toString());
+      }
+      if (isResizingFooter) {
+        localStorage.setItem('choferlog_footer_width', footerWidth.toString());
+        localStorage.setItem('choferlog_footer_height', footerHeight.toString());
+      }
+      setIsDragging(false);
+      setIsResizing(false);
+      setIsResizingFooter(false);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDragging, isResizing, isResizingFooter, cardX, cardY, cardScale, footerWidth, footerHeight]);
+
   const handleSaveCompany = () => {
     localStorage.setItem('choferlog_company', JSON.stringify(company));
     setShowSaved(true);
