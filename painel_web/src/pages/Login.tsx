@@ -116,7 +116,7 @@ export const Login: React.FC = () => {
       height: '100vh',
       display: 'flex',
       alignItems: 'center',
-      justifyContent: 'center',
+      justifyContent: tmpl.cardPosition === 'left' ? 'flex-start' : 'center',
       background: config.loginBg ? `url(${config.loginBg}) center/cover no-repeat` : '#1a1a2e',
       overflow: 'hidden',
       padding: '16px',
@@ -134,8 +134,7 @@ export const Login: React.FC = () => {
           border: tmpl.cardBorder,
           padding: '1.5rem',
           boxSizing: 'border-box',
-          margin: tmpl.cardPosition === 'left' ? '0' : '0 auto',
-          alignSelf: tmpl.cardPosition === 'left' ? 'flex-start' : 'center'
+          margin: tmpl.cardPosition === 'left' ? '0 auto 0 0' : '0 auto',
         }}>
           <div className="flex flex-col items-center" style={{ marginBottom: '24px' }}>
             {config.loginLogo ? (
