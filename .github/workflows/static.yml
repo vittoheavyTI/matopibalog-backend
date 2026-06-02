@@ -38,6 +38,8 @@ jobs:
       - name: Build
         run: npx vite build
         working-directory: painel_web
+        env:
+          VITE_API_URL: ${{ secrets.VITE_API_URL }}
 
       - name: Add .nojekyll
         run: touch painel_web/dist/.nojekyll
