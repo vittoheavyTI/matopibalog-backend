@@ -75,15 +75,15 @@ exports.login = async (req, res) => {
       { expiresIn: '7d' } // Token expira em 7 dias
     );
 
-    // 4. Salvar o token em um cookie seguro (Correção de Segurança)
+    // 4. Salvar o token em um cookie seguro (MUDANÇA FEITA AQUI!)
     res.cookie('token', token, {
-      httpOnly: true, // Inacessível via JavaScript (Protege contra XSS)
-      secure: process.env.NODE_ENV === 'production', // true em produção (exige HTTPS)
-      sameSite: 'strict', // Protege contra ataques CSRF
-      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 dias em milissegundos (mesmo tempo do token)
+      httpOnly: true,
+      secure: true, // Obriga o uso de HTTPS (necessário para o sameSite 'none')
+      sameSite: 'none', // Permite o cookie viajar do seu Netlify/Hostinger para o Render
+      maxAge: 7 * 24 * 60 * 60 * 1000
     });
 
-    // 5. Retorna os dados do usuário (o token foi removido daqui)
+    // 5. Retorna os dados do usuário
     res.status(200).json({
       user: {
         uid: userData.id,
@@ -100,12 +100,12 @@ exports.login = async (req, res) => {
   }
 };
 
-// NOVA FUNÇÃO: Logout para apagar o cookie do computador do usuário
+// NOVA FUNÇÃO: Logout para apagar o cookie (MUDANÇA FEITA AQUI!)
 exports.logout = async (req, res) => {
   res.clearCookie('token', {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict'
+    secure: true, // Obriga o uso de HTTPS
+    sameSite: 'none' // Permite apagar o cookie cross-domain
   });
   return res.status(200).json({ message: 'Logout realizado com sucesso' });
 };
