@@ -1,8 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Settings, Building2, Printer, Save, Check, Image, Palette, X, Upload, Trash2, Truck, Search, Plus } from 'lucide-react';
+import {
+  Settings, Building2, Printer, Save, Check, Image,
+  Palette, X, Upload, Trash2, Truck, Search, Plus, Move
+} from 'lucide-react';
 import { maskPhone, maskCNPJ, maskCEP } from '../utils/masks';
 import api from '../api';
-import { useLoginConfig } from '../hooks/useLoginConfig';
+import { useLoginConfig, writeToLS, readFromLS } from '../hooks/useLoginConfig';
+
+const PREFIX = 'matopibalog_';
 
 const LOGIN_TEMPLATES = [
   {
@@ -64,31 +69,30 @@ const LOGIN_TEMPLATES = [
 ];
 
 interface CompanyData {
-  nome: string;
-  cnpj: string;
-  endereco: string;
-  cep: string;
-  complemento: string;
-  pontoReferencia: string;
-  cidade: string;
-  estado: string;
-  telefone: string;
-  email: string;
+  nome: string; cnpj: string; endereco: string; cep: string;
+  complemento: string; pontoReferencia: string; cidade: string;
+  estado: string; telefone: string; email: string;
 }
 
 interface PrinterData {
-  id: string;
-  nome: string;
-  tipo: string;
-  status: 'online' | 'offline';
-  localizacao?: string;
-  data_instalacao?: string;
+  id: string; nome: string; tipo: string;
+  status: 'online' | 'offline'; localizacao?: string; data_instalacao?: string;
+}
+
+function getContrastTextColor(hexColor: string): string {
+  const hex = hexColor.replace('#', '');
+  const r = parseInt(hex.substring(0, 2), 16);
+  const g = parseInt(hex.substring(2, 4), 16);
+  const b = parseInt(hex.substring(4, 6), 16);
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.5 ? '#1f2937' : '#ffffff';
 }
 
 export const Configuracoes: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'empresa' | 'impressora' | 'aparencia'>('empresa');
   const [company, setCompany] = useState<CompanyData>({
-    nome: '', cnpj: '', endereco: '', cep: '', complemento: '', pontoReferencia: '', cidade: '', estado: '', telefone: '', email: '',
+    nome: '', cnpj: '', endereco: '', cep: '',
+    complemento: '', pontoReferencia: '', cidade: '', estado: '', telefone: '', email: '',
   });
 
   const [printers, setPrinters] = useState<PrinterData[]>([]);
@@ -99,68 +103,123 @@ export const Configuracoes: React.FC = () => {
   const [testingPrinter, setTestingPrinter] = useState<string | null>(null);
   const [showSaved, setShowSaved] = useState(false);
 
-  const [loginLogo, setLoginLogo] = useState<string | null>(null);
-  const [loginBg, setLoginBg] = useState<string | null>(null);
-  const [footerText, setFooterText] = useState('');
+  // Estados de aparência — inicializados do localStorage diretamente
+  const [loginLogo, setLoginLogo] = useState<string | null>(() => localStorage.getItem(`${PREFIX}login_logo`) || null);
+  const [loginBg, setLoginBg] = useState<string | null>(() => localStorage.getItem(`${PREFIX}login_bg`) || null);
+  const [selectedTemplate, setSelectedTemplate] = useState(() => localStorage.getItem(`${PREFIX}login_template`) || 'classico');
+  const [footerText, setFooterText] = useState(() => localStorage.getItem(`${PREFIX}login_footer`) || '');
+  const [contactPhone, setContactPhone] = useState(() => localStorage.getItem(`${PREFIX}contact_phone`) || '');
+  const [contactEmail, setContactEmail] = useState(() => localStorage.getItem(`${PREFIX}contact_email`) || '');
+  const [footerColor, setFooterColor] = useState(() => localStorage.getItem(`${PREFIX}footer_color`) || '#ffffff');
+  const [footerOpacity, setFooterOpacity] = useState(() => Number(localStorage.getItem(`${PREFIX}footer_opacity`)) || 70);
+  const [footerFontSize, setFooterFontSize] = useState(() => Number(localStorage.getItem(`${PREFIX}footer_font_size`)) || 14);
+  const [footerBold, setFooterBold] = useState(() => localStorage.getItem(`${PREFIX}footer_bold`) === 'true');
+  const [footerFontFamily, setFooterFontFamily] = useState(() => localStorage.getItem(`${PREFIX}footer_font_family`) || 'Arial');
+  const [footerWidth, setFooterWidth] = useState(() => Number(localStorage.getItem(`${PREFIX}footer_width`)) || 80);
+  const [inputBgColor, setInputBgColor] = useState(() => localStorage.getItem(`${PREFIX}input_bg`) || '#ffffff');
+  const [inputBorderColor, setInputBorderColor] = useState(() => localStorage.getItem(`${PREFIX}input_border`) || '#e5e7eb');
 
+  // Posição customizada do card
+  const [cardOffsetX, setCardOffsetX] = useState(() => Number(localStorage.getItem(`${PREFIX}card_offset_x`)) || 0);
+  const [cardOffsetY, setCardOffsetY] = useState(() => Number(localStorage.getItem(`${PREFIX}card_offset_y`)) || 0);
+
+  // Modal de edição de imagem
   const [editingTarget, setEditingTarget] = useState<'logo' | 'bg' | null>(null);
   const [tempImg, setTempImg] = useState<string | null>(null);
   const [tempScale, setTempScale] = useState(100);
   const [tempY, setTempY] = useState(0);
 
-  const [selectedTemplate, setSelectedTemplate] = useState(
-    localStorage.getItem('choferlog_login_template') || 'classico'
-  );
-  const [showPasswordPreview, setShowPasswordPreview] = useState(false);
-  const [contactPhone, setContactPhone] = useState('');
-  const [contactEmail, setContactEmail] = useState('');
-  const [footerColor, setFooterColor] = useState('#ffffff');
-  const [footerOpacity, setFooterOpacity] = useState(70);
-  const [footerFontSize, setFooterFontSize] = useState(14);
-  const [footerBold, setFooterBold] = useState(false);
-  const [footerFontFamily, setFooterFontFamily] = useState('Arial');
-  const [footerWidth, setFooterWidth] = useState(80);
-  const [footerHeight, setFooterHeight] = useState(60);
-  const [isResizingFooter, setIsResizingFooter] = useState(false);
-  const footerResizeRef = useRef({ startX: 0, startY: 0, startWidth: 80, startHeight: 60, edge: '' });
-  const [inputBgColor, setInputBgColor] = useState('#ffffff');
-  const [inputBorderColor, setInputBorderColor] = useState('#e5e7eb');
-  const config = useLoginConfig();
+  const logoFileRef = useRef<HTMLInputElement>(null);
+  const bgFileRef = useRef<HTMLInputElement>(null);
 
+  // Carrega dados da empresa e impressoras do localStorage
   useEffect(() => {
-    const savedCompany = localStorage.getItem('choferlog_company');
-    if (savedCompany) setCompany(JSON.parse(savedCompany));
-
-    const savedPrinters = localStorage.getItem('choferlog_printers');
-    if (savedPrinters) setPrinters(JSON.parse(savedPrinters));
-
-    if (config.loginLogo) setLoginLogo(config.loginLogo);
-    if (config.loginBg) setLoginBg(config.loginBg);
-    setFooterText(config.footerText);
-    setContactPhone(config.contactPhone);
-    setContactEmail(config.contactEmail);
-    setFooterColor(config.footerColor);
-    setFooterOpacity(config.footerOpacity);
-    setFooterFontSize(config.footerFontSize);
-    setFooterBold(config.footerBold);
-    setFooterFontFamily(config.footerFontFamily);
-    setFooterWidth(config.footerWidth);
-    setFooterHeight(config.footerHeight);
-    setInputBgColor(config.inputBgColor);
-    setInputBorderColor(config.inputBorderColor);
+    const savedCompany = localStorage.getItem(`${PREFIX}company`);
+    if (savedCompany) {
+      try { setCompany(JSON.parse(savedCompany)); } catch { }
+    }
+    const savedPrinters = localStorage.getItem(`${PREFIX}printers`);
+    if (savedPrinters) {
+      try { setPrinters(JSON.parse(savedPrinters)); } catch { }
+    }
   }, []);
 
-  const handleSaveCompany = () => {
-    localStorage.setItem('choferlog_company', JSON.stringify(company));
+  // Busca configurações do servidor e aplica nos estados
+  useEffect(() => {
+    api.get('/configuracoes')
+      .then((response) => {
+        const d = response.data;
+        if (!d) return;
+        if (d.company) setCompany(d.company);
+        if (d.printers) setPrinters(d.printers);
+        if (d.loginLogo !== undefined) setLoginLogo(d.loginLogo);
+        if (d.loginBg !== undefined) setLoginBg(d.loginBg);
+        if (d.footerText !== undefined) setFooterText(d.footerText);
+        if (d.contactPhone !== undefined) setContactPhone(d.contactPhone);
+        if (d.contactEmail !== undefined) setContactEmail(d.contactEmail);
+        if (d.footerColor) setFooterColor(d.footerColor);
+        if (d.footerOpacity !== undefined) setFooterOpacity(d.footerOpacity);
+        if (d.footerFontSize !== undefined) setFooterFontSize(d.footerFontSize);
+        if (d.footerBold !== undefined) setFooterBold(d.footerBold);
+        if (d.footerFontFamily) setFooterFontFamily(d.footerFontFamily);
+        if (d.footerWidth !== undefined) setFooterWidth(d.footerWidth);
+        if (d.inputBgColor) setInputBgColor(d.inputBgColor);
+        if (d.inputBorderColor) setInputBorderColor(d.inputBorderColor);
+        if (d.loginTemplate) setSelectedTemplate(d.loginTemplate);
+        // Escreve no localStorage para manter consistência
+        writeToLS(d);
+      })
+      .catch(() => { });
+  }, []);
+
+  const syncConfigToServer = async () => {
+    const dados = {
+      company,
+      printers,
+      loginLogo,
+      loginBg,
+      footerText,
+      contactPhone,
+      contactEmail,
+      footerColor,
+      footerOpacity,
+      footerFontSize,
+      footerBold,
+      footerFontFamily,
+      footerWidth,
+      inputBgColor,
+      inputBorderColor,
+      loginTemplate: selectedTemplate,
+      cardOffsetX,
+      cardOffsetY,
+      loginLogoScale: Number(localStorage.getItem(`${PREFIX}login_logo_scale`)) || 100,
+      loginLogoY: Number(localStorage.getItem(`${PREFIX}login_logo_y`)) || 0,
+      loginBgScale: Number(localStorage.getItem(`${PREFIX}login_bg_scale`)) || 100,
+      loginBgY: Number(localStorage.getItem(`${PREFIX}login_bg_y`)) || 0,
+    };
+    writeToLS(dados); // dispara evento para Login.tsx atualizar em tempo real
+    try {
+      await api.put('/configuracoes', dados);
+    } catch (err) {
+      console.error('Erro ao sincronizar com servidor:', err);
+    }
+  };
+
+  const showSavedFeedback = () => {
     setShowSaved(true);
-    syncConfigToServer();
     setTimeout(() => setShowSaved(false), 3000);
+  };
+
+  const handleSaveCompany = async () => {
+    localStorage.setItem(`${PREFIX}company`, JSON.stringify(company));
+    await syncConfigToServer();
+    showSavedFeedback();
   };
 
   const handleRemovePrinter = (id: string) => {
     const updated = printers.filter(p => p.id !== id);
     setPrinters(updated);
-    localStorage.setItem('choferlog_printers', JSON.stringify(updated));
+    localStorage.setItem(`${PREFIX}printers`, JSON.stringify(updated));
   };
 
   const handleBuscarImpressoras = async () => {
@@ -168,7 +227,6 @@ export const Configuracoes: React.FC = () => {
     setIsSearching(true);
     setFoundPrinters([]);
     setSearchTerm('');
-
     try {
       const response = await api.get('/impressoras/todas');
       setFoundPrinters(response.data || []);
@@ -181,7 +239,6 @@ export const Configuracoes: React.FC = () => {
   const handleSearchByName = async () => {
     if (!searchTerm.trim()) return;
     setIsSearching(true);
-
     try {
       const response = await api.get('/impressoras/todas?nome=' + encodeURIComponent(searchTerm));
       setFoundPrinters(response.data || []);
@@ -210,276 +267,158 @@ export const Configuracoes: React.FC = () => {
     const reader = new FileReader();
     reader.onload = (event) => {
       setTempImg(event.target?.result as string);
-      setTempScale(100);
-      setTempY(0);
+      setTempScale(Number(localStorage.getItem(`${PREFIX}login_${target}_scale`)) || 100);
+      setTempY(Number(localStorage.getItem(`${PREFIX}login_${target}_y`)) || 0);
       setEditingTarget(target);
     };
     reader.readAsDataURL(file);
   };
 
-  const openEditor = (target: 'logo' | 'bg') => {
+  const handleImageAreaClick = (target: 'logo' | 'bg') => {
     const current = target === 'logo' ? loginLogo : loginBg;
     if (current) {
+      // Já tem imagem → abre modal de ajuste
       setTempImg(current);
-      setTempScale(Number(localStorage.getItem(`choferlog_login_${target}_scale`)) || 100);
-      setTempY(Number(localStorage.getItem(`choferlog_login_${target}_y`)) || 0);
+      setTempScale(Number(localStorage.getItem(`${PREFIX}login_${target}_scale`)) || 100);
+      setTempY(Number(localStorage.getItem(`${PREFIX}login_${target}_y`)) || 0);
+      setEditingTarget(target);
     } else {
-      setTempImg(null);
-      setTempScale(100);
-      setTempY(0);
+      // Sem imagem → abre seletor de arquivo diretamente
+      if (target === 'logo') logoFileRef.current?.click();
+      else bgFileRef.current?.click();
     }
-    setEditingTarget(target);
   };
 
-  const saveImageSettings = () => {
-    if (!editingTarget) return;
-    const prefix = `choferlog_login_${editingTarget}`;
-    if (tempImg) {
-      localStorage.setItem(prefix, tempImg);
-      localStorage.setItem(`${prefix}_scale`, tempScale.toString());
-      localStorage.setItem(`${prefix}_y`, tempY.toString());
-      if (editingTarget === 'logo') setLoginLogo(tempImg);
-      else setLoginBg(tempImg);
-    }
+  const saveImageSettings = async () => {
+    if (!editingTarget || !tempImg) return;
+    const prefix = `${PREFIX}login_${editingTarget}`;
+    localStorage.setItem(prefix, tempImg);
+    localStorage.setItem(`${prefix}_scale`, tempScale.toString());
+    localStorage.setItem(`${prefix}_y`, tempY.toString());
+    if (editingTarget === 'logo') setLoginLogo(tempImg);
+    else setLoginBg(tempImg);
     setEditingTarget(null);
-    syncConfigToServer();
+    await syncConfigToServer();
   };
 
-  const removeImage = () => {
+  const removeImage = async () => {
     if (!editingTarget) return;
-    const prefix = `choferlog_login_${editingTarget}`;
+    const prefix = `${PREFIX}login_${editingTarget}`;
     localStorage.removeItem(prefix);
     localStorage.removeItem(`${prefix}_scale`);
     localStorage.removeItem(`${prefix}_y`);
     if (editingTarget === 'logo') setLoginLogo(null);
     else setLoginBg(null);
     setEditingTarget(null);
-    syncConfigToServer();
+    await syncConfigToServer();
   };
 
-  const handleSaveFooter = () => {
-    localStorage.setItem('choferlog_login_footer', footerText);
-    localStorage.setItem('choferlog_contact_phone', contactPhone);
-    localStorage.setItem('choferlog_contact_email', contactEmail);
-    localStorage.setItem('choferlog_footer_color', footerColor);
-    localStorage.setItem('choferlog_footer_opacity', footerOpacity.toString());
-    localStorage.setItem('choferlog_footer_font_size', footerFontSize.toString());
-    localStorage.setItem('choferlog_footer_bold', footerBold.toString());
-    localStorage.setItem('choferlog_footer_font_family', footerFontFamily);
-    localStorage.setItem('choferlog_footer_width', footerWidth.toString());
-    localStorage.setItem('choferlog_footer_height', footerHeight.toString());
-    localStorage.setItem('choferlog_input_bg', inputBgColor);
-    localStorage.setItem('choferlog_input_border', inputBorderColor);
-    setShowSaved(true);
-    syncConfigToServer();
-    setTimeout(() => setShowSaved(false), 3000);
+  const handleSaveFooter = async () => {
+    localStorage.setItem(`${PREFIX}login_footer`, footerText);
+    localStorage.setItem(`${PREFIX}contact_phone`, contactPhone);
+    localStorage.setItem(`${PREFIX}contact_email`, contactEmail);
+    localStorage.setItem(`${PREFIX}footer_color`, footerColor);
+    localStorage.setItem(`${PREFIX}footer_opacity`, footerOpacity.toString());
+    localStorage.setItem(`${PREFIX}footer_font_size`, footerFontSize.toString());
+    localStorage.setItem(`${PREFIX}footer_bold`, footerBold.toString());
+    localStorage.setItem(`${PREFIX}footer_font_family`, footerFontFamily);
+    localStorage.setItem(`${PREFIX}footer_width`, footerWidth.toString());
+    localStorage.setItem(`${PREFIX}input_bg`, inputBgColor);
+    localStorage.setItem(`${PREFIX}input_border`, inputBorderColor);
+    localStorage.setItem(`${PREFIX}card_offset_x`, cardOffsetX.toString());
+    localStorage.setItem(`${PREFIX}card_offset_y`, cardOffsetY.toString());
+    await syncConfigToServer();
+    showSavedFeedback();
   };
 
-  const collectAllConfig = () => ({
-    company, printers, loginLogo, loginBg, footerText,
-    contactPhone, contactEmail, footerColor, footerOpacity,
-    footerFontSize, footerBold, footerFontFamily,
-    footerWidth, footerHeight,
-    inputBgColor, inputBorderColor,
-    loginTemplate: localStorage.getItem('choferlog_login_template') || 'classico',
-    loginLogoScale: Number(localStorage.getItem('choferlog_login_logo_scale')) || 100,
-    loginLogoY: Number(localStorage.getItem('choferlog_login_logo_y')) || 0,
-    loginBgScale: Number(localStorage.getItem('choferlog_login_bg_scale')) || 100,
-    loginBgY: Number(localStorage.getItem('choferlog_login_bg_y')) || 0,
-  });
-
-  const syncConfigToServer = () => {
-    const dados = collectAllConfig();
-    localStorage.setItem('chofer_config', JSON.stringify(dados));
-    try {
-      api.put('/configuracoes', dados);
-    } catch (err) {
-      console.log('Erro ao sincronizar com servidor');
-    }
-  };
-
-  const loadConfigFromApi = () => {
-    api.get('/configuracoes')
-      .then((response) => {
-        const data = response.data;
-        if (data) {
-          const d = data;
-          if (d.company) setCompany(d.company);
-          if (d.printers) setPrinters(d.printers);
-          if (d.loginLogo) setLoginLogo(d.loginLogo);
-          if (d.loginBg) setLoginBg(d.loginBg);
-          if (d.footerText !== undefined) setFooterText(d.footerText);
-          if (d.contactPhone !== undefined) setContactPhone(d.contactPhone);
-          if (d.contactEmail !== undefined) setContactEmail(d.contactEmail);
-          if (d.footerColor) setFooterColor(d.footerColor);
-          if (d.footerOpacity !== undefined) setFooterOpacity(d.footerOpacity);
-          if (d.footerFontSize !== undefined) setFooterFontSize(d.footerFontSize);
-          if (d.footerBold !== undefined) setFooterBold(d.footerBold);
-          if (d.footerFontFamily) setFooterFontFamily(d.footerFontFamily);
-          if (d.footerWidth !== undefined) setFooterWidth(d.footerWidth);
-          if (d.footerHeight !== undefined) setFooterHeight(d.footerHeight);
-          if (d.inputBgColor) setInputBgColor(d.inputBgColor);
-          if (d.inputBorderColor) setInputBorderColor(d.inputBorderColor);
-          if (d.loginTemplate) { localStorage.setItem('choferlog_login_template', d.loginTemplate); setSelectedTemplate(d.loginTemplate); }
-
-        }
-      })
-      .catch(() => { });
-  };
+  // Derivados para o preview
+  const tmplPreview = LOGIN_TEMPLATES.find(t => t.id === selectedTemplate) || LOGIN_TEMPLATES[0];
+  const footerTextColor = getContrastTextColor(footerColor);
+  const footerBgWithOpacity = footerColor + Math.round(footerOpacity * 2.55).toString(16).padStart(2, '0');
 
   return (
     <div className="space-y-6 pb-20">
+      {/* Inputs de arquivo ocultos */}
+      <input ref={logoFileRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) processFile(f, 'logo'); e.target.value = ''; }} />
+      <input ref={bgFileRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) processFile(f, 'bg'); e.target.value = ''; }} />
+
       <div className="flex items-center space-x-3 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-        <div className="bg-gray-800 p-2 rounded-lg text-white">
-          <Settings size={24} />
-        </div>
+        <div className="bg-gray-800 p-2 rounded-lg text-white"><Settings size={24} /></div>
         <h1 className="text-2xl font-bold text-gray-800">Configurações do Sistema</h1>
       </div>
 
       <div className="flex space-x-1 bg-gray-100 p-1 rounded-xl w-fit">
-        <button
-          onClick={() => setActiveTab('empresa')}
-          className={`flex items-center px-6 py-2.5 rounded-lg font-bold text-sm transition-all ${activeTab === 'empresa' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-        >
-          <Building2 size={18} className="mr-2" /> Dados da Empresa
-        </button>
-        <button
-          onClick={() => setActiveTab('impressora')}
-          className={`flex items-center px-6 py-2.5 rounded-lg font-bold text-sm transition-all ${activeTab === 'impressora' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-        >
-          <Printer size={18} className="mr-2" /> Impressoras
-        </button>
-        <button
-          onClick={() => setActiveTab('aparencia')}
-          className={`flex items-center px-6 py-2.5 rounded-lg font-bold text-sm transition-all ${activeTab === 'aparencia' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-        >
-          <Palette size={18} className="mr-2" /> Aparência
-        </button>
+        {(['empresa', 'impressora', 'aparencia'] as const).map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={`flex items-center px-6 py-2.5 rounded-lg font-bold text-sm transition-all ${activeTab === tab ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            {tab === 'empresa' && <><Building2 size={18} className="mr-2" />Dados da Empresa</>}
+            {tab === 'impressora' && <><Printer size={18} className="mr-2" />Impressoras</>}
+            {tab === 'aparencia' && <><Palette size={18} className="mr-2" />Aparência</>}
+          </button>
+        ))}
       </div>
 
+      {/* ── ABA EMPRESA ── */}
       {activeTab === 'empresa' && (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 space-y-6 animate-fade-in">
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Razão Social / Nome Fantasia</label>
-                <input
-                  type="text"
-                  className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50"
-                  value={company.nome}
-                  onChange={(e) => setCompany({ ...company, nome: e.target.value })}
-                  placeholder="Nome da sua transportadora"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">CNPJ</label>
-                <input
-                  type="text"
-                  className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50"
-                  value={company.cnpj}
-                  onChange={(e) => setCompany({ ...company, cnpj: maskCNPJ(e.target.value) })}
-                  placeholder="00.000.000/0000-00"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Telefone de Contato</label>
-                <input
-                  type="text"
-                  className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50"
-                  value={company.telefone}
-                  onChange={(e) => setCompany({ ...company, telefone: maskPhone(e.target.value) })}
-                  placeholder="(00) 0 0000-0000"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Email Corporativo</label>
-                <input
-                  type="email"
-                  className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50"
-                  value={company.email}
-                  onChange={(e) => setCompany({ ...company, email: e.target.value })}
-                  placeholder="contato@empresa.com"
-                />
-              </div>
+              {[
+                { label: 'Razão Social / Nome Fantasia', field: 'nome', placeholder: 'Nome da sua transportadora', type: 'text' },
+                { label: 'CNPJ', field: 'cnpj', placeholder: '00.000.000/0000-00', type: 'text', mask: maskCNPJ },
+                { label: 'Telefone de Contato', field: 'telefone', placeholder: '(00) 0 0000-0000', type: 'text', mask: maskPhone },
+                { label: 'Email Corporativo', field: 'email', placeholder: 'contato@empresa.com', type: 'email' },
+              ].map(({ label, field, placeholder, type, mask }) => (
+                <div key={field}>
+                  <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">{label}</label>
+                  <input
+                    type={type}
+                    className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50"
+                    value={(company as any)[field]}
+                    onChange={(e) => setCompany({ ...company, [field]: mask ? mask(e.target.value) : e.target.value })}
+                    placeholder={placeholder}
+                  />
+                </div>
+              ))}
             </div>
-
             <div className="space-y-4">
               <div className="grid grid-cols-3 gap-4">
                 <div className="col-span-2">
-                  <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Endereço (Rua, Nº, Bairro)</label>
-                  <input
-                    type="text"
-                    className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50"
-                    value={company.endereco}
-                    onChange={(e) => setCompany({ ...company, endereco: e.target.value })}
-                    placeholder="Av. Brasil, 1000 - Centro"
-                  />
+                  <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Endereço</label>
+                  <input type="text" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" value={company.endereco} onChange={(e) => setCompany({ ...company, endereco: e.target.value })} placeholder="Av. Brasil, 1000 - Centro" />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">CEP</label>
-                  <input
-                    type="text"
-                    className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50"
-                    value={company.cep}
-                    onChange={(e) => setCompany({ ...company, cep: maskCEP(e.target.value) })}
-                    placeholder="00000-000"
-                  />
+                  <input type="text" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" value={company.cep} onChange={(e) => setCompany({ ...company, cep: maskCEP(e.target.value) })} placeholder="00000-000" />
                 </div>
               </div>
-
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Complemento</label>
-                  <input
-                    type="text"
-                    className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50"
-                    value={company.complemento}
-                    onChange={(e) => setCompany({ ...company, complemento: e.target.value })}
-                    placeholder="Ex: Sala 201"
-                  />
+                  <input type="text" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" value={company.complemento} onChange={(e) => setCompany({ ...company, complemento: e.target.value })} placeholder="Sala 201" />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Ponto de Referência</label>
-                  <input
-                    type="text"
-                    className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50"
-                    value={company.pontoReferencia}
-                    onChange={(e) => setCompany({ ...company, pontoReferencia: e.target.value })}
-                    placeholder="Próximo a..."
-                  />
+                  <input type="text" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" value={company.pontoReferencia} onChange={(e) => setCompany({ ...company, pontoReferencia: e.target.value })} placeholder="Próximo a..." />
                 </div>
               </div>
-
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Cidade</label>
-                  <input
-                    type="text"
-                    className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50"
-                    value={company.cidade}
-                    onChange={(e) => setCompany({ ...company, cidade: e.target.value })}
-                  />
+                  <input type="text" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" value={company.cidade} onChange={(e) => setCompany({ ...company, cidade: e.target.value })} />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Estado (UF)</label>
-                  <input
-                    type="text"
-                    className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50"
-                    value={company.estado}
-                    maxLength={2}
-                    onChange={(e) => setCompany({ ...company, estado: e.target.value.toUpperCase() })}
-                    placeholder="BA"
-                  />
+                  <input type="text" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" value={company.estado} maxLength={2} onChange={(e) => setCompany({ ...company, estado: e.target.value.toUpperCase() })} placeholder="BA" />
                 </div>
               </div>
             </div>
           </div>
-
           <div className="flex justify-end pt-4 border-t border-gray-50">
-            <button
-              onClick={handleSaveCompany}
-              className="flex items-center px-8 py-3 bg-blue-600 text-white rounded-xl font-bold shadow-lg shadow-blue-100 hover:bg-blue-700 transition-all active:scale-95"
-            >
+            <button onClick={handleSaveCompany} className="flex items-center px-8 py-3 bg-blue-600 text-white rounded-xl font-bold shadow-lg shadow-blue-100 hover:bg-blue-700 transition-all active:scale-95">
               {showSaved ? <Check size={20} className="mr-2" /> : <Save size={20} className="mr-2" />}
               {showSaved ? 'Salvo!' : 'Salvar Configurações'}
             </button>
@@ -487,63 +426,37 @@ export const Configuracoes: React.FC = () => {
         </div>
       )}
 
+      {/* ── ABA IMPRESSORAS ── */}
       {activeTab === 'impressora' && (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 space-y-6 animate-fade-in">
-          <h3 className="text-lg font-bold text-gray-800 flex items-center">
-            <Printer size={20} className="mr-2" /> Impressoras
-          </h3>
-
-          <button
-            onClick={handleBuscarImpressoras}
-            className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-xl font-medium text-sm hover:bg-blue-700 transition-colors"
-          >
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 space-y-6">
+          <h3 className="text-lg font-bold text-gray-800 flex items-center"><Printer size={20} className="mr-2" /> Impressoras</h3>
+          <button onClick={handleBuscarImpressoras} className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-xl font-medium text-sm hover:bg-blue-700 transition-colors">
             <Search size={16} className="mr-1" /> Buscar Impressoras
           </button>
-
           {printers.length === 0 ? (
             <div className="text-center py-12 bg-gray-50 rounded-2xl border-2 border-dashed border-gray-200">
               <Printer size={48} className="mx-auto text-gray-300 mb-3" />
               <p className="text-gray-500 font-medium">Nenhuma impressora configurada.</p>
-              <p className="text-gray-400 text-sm mt-1">Adicione manualmente ou conecte via USB.</p>
             </div>
           ) : (
             <div className="space-y-3">
               {printers.map(p => (
                 <div key={p.id} className="flex items-center justify-between p-4 border border-gray-100 rounded-xl bg-gray-50/50">
                   <div className="flex items-center space-x-3">
-                    <div className={`p-2 rounded-lg ${p.tipo === 'fiscal' ? 'bg-purple-50 text-purple-600' : 'bg-gray-100 text-gray-600'
-                      }`}>
+                    <div className={`p-2 rounded-lg ${p.tipo === 'fiscal' ? 'bg-purple-50 text-purple-600' : 'bg-gray-100 text-gray-600'}`}>
                       <Printer size={20} />
                     </div>
                     <div>
                       <p className="font-bold text-gray-800">{p.nome}</p>
-                      <p className="text-xs text-gray-500">
-                        {p.tipo === 'fiscal' ? 'Fiscal' : p.tipo}
-                        {p.localizacao === 'rede' && ` • Rede`}
-                        {p.localizacao === 'local' && ` • USB`}
-                      </p>
+                      <p className="text-xs text-gray-500">{p.tipo === 'fiscal' ? 'Fiscal' : p.tipo}{p.localizacao === 'rede' ? ' • Rede' : p.localizacao === 'local' ? ' • USB' : ''}</p>
                     </div>
                   </div>
                   <div className="flex items-center space-x-2">
-                    <button
-                      onClick={() => handleTestPrinter(p)}
-                      disabled={testingPrinter === p.id}
-                      className={`flex items-center px-3 py-2 rounded-lg text-xs font-medium transition-all ${testingPrinter === p.id
-                        ? 'bg-gray-100 text-gray-400 cursor-wait'
-                        : 'bg-green-50 text-green-700 hover:bg-green-100'
-                        }`}
-                    >
-                      {testingPrinter === p.id ? (
-                        <span className="w-3 h-3 border-2 border-gray-400 border-t-transparent rounded-full animate-spin mr-1.5" />
-                      ) : (
-                        <span className="mr-1.5">▶</span>
-                      )}
+                    <button onClick={() => handleTestPrinter(p)} disabled={testingPrinter === p.id} className={`flex items-center px-3 py-2 rounded-lg text-xs font-medium transition-all ${testingPrinter === p.id ? 'bg-gray-100 text-gray-400 cursor-wait' : 'bg-green-50 text-green-700 hover:bg-green-100'}`}>
+                      {testingPrinter === p.id ? <span className="w-3 h-3 border-2 border-gray-400 border-t-transparent rounded-full animate-spin mr-1.5" /> : <span className="mr-1.5">▶</span>}
                       Testar
                     </button>
-                    <button
-                      onClick={() => handleRemovePrinter(p.id)}
-                      className="text-gray-400 hover:text-red-600 p-2 hover:bg-red-50 rounded-lg transition-colors"
-                    >
+                    <button onClick={() => handleRemovePrinter(p.id)} className="text-gray-400 hover:text-red-600 p-2 hover:bg-red-50 rounded-lg transition-colors">
                       <Trash2 size={16} />
                     </button>
                   </div>
@@ -554,182 +467,142 @@ export const Configuracoes: React.FC = () => {
         </div>
       )}
 
+      {/* ── ABA APARÊNCIA ── */}
       {activeTab === 'aparencia' && (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 space-y-8 animate-fade-in">
-          <h3 className="text-lg font-bold text-gray-800 flex items-center">
-            <Palette size={20} className="mr-2" /> Personalizar Tela de Login
-          </h3>
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 space-y-8">
+          <h3 className="text-lg font-bold text-gray-800 flex items-center"><Palette size={20} className="mr-2" /> Personalizar Tela de Login</h3>
 
+          {/* Upload de imagens */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Logomarca da Página de Login</label>
-              <div
-                onClick={() => openEditor('logo')}
-                onDoubleClick={() => openEditor('logo')}
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) processFile(f, 'logo'); }}
-                className="relative w-full h-40 border-2 border-dashed border-gray-200 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:border-blue-400 hover:bg-blue-50/30 transition-all overflow-hidden"
-              >
-                {loginLogo ? (
-                  <img src={loginLogo} alt="Login Logo" className="max-w-full max-h-full object-contain p-4" />
-                ) : (
-                  <div className="text-center text-gray-400">
-                    <Upload size={32} className="mx-auto mb-2" />
-                    <p className="text-sm font-medium">Clique para adicionar</p>
-                    <p className="text-xs">ou arraste uma imagem</p>
+            {(['logo', 'bg'] as const).map((target) => {
+              const current = target === 'logo' ? loginLogo : loginBg;
+              const label = target === 'logo' ? 'Logomarca' : 'Imagem de Fundo';
+              return (
+                <div key={target}>
+                  <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">{label} da Página de Login</label>
+                  <div
+                    onClick={() => handleImageAreaClick(target)}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) processFile(f, target); }}
+                    className="relative w-full h-40 border-2 border-dashed border-gray-200 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:border-blue-400 hover:bg-blue-50/30 transition-all overflow-hidden"
+                  >
+                    {current ? (
+                      <img src={current} alt={label} className={target === 'logo' ? 'max-w-full max-h-full object-contain p-4' : 'w-full h-full object-cover'} />
+                    ) : (
+                      <div className="text-center text-gray-400 pointer-events-none">
+                        <Upload size={32} className="mx-auto mb-2" />
+                        <p className="text-sm font-medium">Clique para adicionar</p>
+                        <p className="text-xs">ou arraste uma imagem</p>
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-              <div className="flex space-x-2 mt-2">
-                {loginLogo && (
-                  <>
-                    <button onClick={() => openEditor('logo')} className="text-xs px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 font-medium transition-colors">
-                      <Image size={14} className="inline mr-1" />Ajustar
-                    </button>
-                    <button onClick={() => { setLoginLogo(null); localStorage.removeItem('choferlog_login_logo'); localStorage.removeItem('choferlog_login_logo_scale'); localStorage.removeItem('choferlog_login_logo_y'); syncConfigToServer(); }} className="text-xs px-3 py-1.5 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 font-medium transition-colors">
-                      <Trash2 size={14} className="inline mr-1" />Remover
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Imagem de Fundo da Página de Login</label>
-              <div
-                onClick={() => openEditor('bg')}
-                onDoubleClick={() => openEditor('bg')}
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) processFile(f, 'bg'); }}
-                className="relative w-full h-40 border-2 border-dashed border-gray-200 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:border-blue-400 hover:bg-blue-50/30 transition-all overflow-hidden"
-              >
-                {loginBg ? (
-                  <img src={loginBg} alt="Login Background" className="w-full h-full object-cover" />
-                ) : (
-                  <div className="text-center text-gray-400">
-                    <Upload size={32} className="mx-auto mb-2" />
-                    <p className="text-sm font-medium">Clique para adicionar</p>
-                    <p className="text-xs">ou arraste uma imagem</p>
-                  </div>
-                )}
-              </div>
-              <div className="flex space-x-2 mt-2">
-                {loginBg && (
-                  <>
-                    <button onClick={() => openEditor('bg')} className="text-xs px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 font-medium transition-colors">
-                      <Image size={14} className="inline mr-1" />Ajustar
-                    </button>
-                    <button onClick={() => { setLoginBg(null); localStorage.removeItem('choferlog_login_bg'); localStorage.removeItem('choferlog_login_bg_scale'); localStorage.removeItem('choferlog_login_bg_y'); syncConfigToServer(); }} className="text-xs px-3 py-1.5 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 font-medium transition-colors">
-                      <Trash2 size={14} className="inline mr-1" />Remover
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
+                  {current && (
+                    <div className="flex space-x-2 mt-2">
+                      <button onClick={() => handleImageAreaClick(target)} className="text-xs px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 font-medium transition-colors">
+                        <Image size={14} className="inline mr-1" />Ajustar
+                      </button>
+                      <button onClick={async () => {
+                        localStorage.removeItem(`${PREFIX}login_${target}`);
+                        localStorage.removeItem(`${PREFIX}login_${target}_scale`);
+                        localStorage.removeItem(`${PREFIX}login_${target}_y`);
+                        if (target === 'logo') setLoginLogo(null); else setLoginBg(null);
+                        await syncConfigToServer();
+                      }} className="text-xs px-3 py-1.5 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 font-medium transition-colors">
+                        <Trash2 size={14} className="inline mr-1" />Remover
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
 
+          {/* Preview em tempo real */}
           <div>
-            <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Pré-visualização da Tela de Login</label>
-            <div className="w-full rounded-xl border border-gray-200 preview-container"
-              style={{
-                height: '420px',
-                maxWidth: '100%',
-                background: loginBg ? `url(${loginBg}) center/cover no-repeat` : '#1a1a2e',
-                overflow: 'hidden',
-                position: 'relative'
-              }}>
+            <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Pré-visualização em tempo real</label>
+            <div style={{
+              height: '420px',
+              background: loginBg ? `url(${loginBg}) center/cover no-repeat` : '#1a1a2e',
+              borderRadius: '12px',
+              border: '1px solid #e5e7eb',
+              overflow: 'hidden',
+              position: 'relative',
+            }}>
+              {/* Card */}
               <div style={{
-                transform: 'scale(0.7)',
-                transformOrigin: 'top left',
-                width: '142.86%',
-                height: '142.86%',
                 position: 'absolute',
-                top: 0,
-                left: 0
+                inset: 0,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: tmplPreview.cardPosition === 'left' ? 'flex-start' : 'center',
+                padding: '16px',
               }}>
-                <div className="w-full h-full flex items-center justify-center relative"
-                  style={loginBg ? { backgroundImage: `url(${loginBg})`, backgroundSize: 'cover', backgroundPosition: 'center' } : { backgroundColor: '#f3f4f6' }}>
-                  <div style={{ position: 'relative', display: 'inline-block' }}>
-                    {(() => {
-                      const tmpl = LOGIN_TEMPLATES.find(t => t.id === selectedTemplate) || LOGIN_TEMPLATES[0];
-                      return (
-                        <div style={{
-                          backgroundColor: tmpl.cardBackground,
-                          width: '100%',
-                          maxWidth: `${tmpl.cardWidth}px`,
-                          borderRadius: tmpl.cardBorderRadius,
-                          boxShadow: tmpl.cardShadow,
-                          border: tmpl.cardBorder,
-                          padding: '1.5rem',
-                          margin: tmpl.cardPosition === 'left' ? '0' : '0 auto',
-                        }}>
-                          <div className="flex flex-col items-center" style={{ marginBottom: '24px' }}>
-                            {loginLogo ? (
-                              <img src={loginLogo} alt="Logo" style={{ maxWidth: '100%', maxHeight: '80px', objectFit: 'contain' }} />
-                            ) : (
-                              <div className="bg-blue-600 p-3 rounded-full">
-                                <Truck size={32} className="text-white" />
-                              </div>
-                            )}
-                          </div>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                            <div>
-                              <label style={{ fontSize: `${tmpl.fontSize}px`, color: tmpl.fontColor, fontWeight: '500', display: 'block', marginBottom: '6px' }}>E-mail</label>
-                              <input type="email" readOnly style={{ width: '100%', padding: '12px', fontSize: `${tmpl.fontSize}px`, borderRadius: '8px', border: `2px solid ${inputBorderColor}`, backgroundColor: inputBgColor, outline: 'none', boxSizing: 'border-box' }} />
-                            </div>
-                            <div>
-                              <label style={{ fontSize: `${tmpl.fontSize}px`, color: tmpl.fontColor, fontWeight: '500', display: 'block', marginBottom: '6px' }}>Senha</label>
-                              <input type="password" readOnly style={{ width: '100%', padding: '12px', fontSize: `${tmpl.fontSize}px`, borderRadius: '8px', border: `2px solid ${inputBorderColor}`, backgroundColor: inputBgColor, outline: 'none', boxSizing: 'border-box' }} />
-                            </div>
-                            <button disabled style={{ width: '100%', padding: '12px', fontSize: `${tmpl.fontSize}px`, background: tmpl.buttonColor, color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'default', opacity: 0.8 }}>Entrar</button>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: `${tmpl.fontSize}px`, color: tmpl.fontColor }}>
-                              <span style={{ cursor: 'default', opacity: 0.7 }}>Criar conta</span>
-                              <span style={{ cursor: 'default', opacity: 0.7 }}>Esqueceu a senha?</span>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })()}
-                  </div>
-                </div>
                 <div style={{
-                  position: 'absolute',
-                  bottom: '16px',
-                  left: '50%',
-                  transform: 'translateX(-50%)',
-                  width: `${footerWidth}%`,
-                  maxHeight: `${footerHeight}px`,
-                  background: footerColor + Math.round(footerOpacity * 2.55).toString(16).padStart(2, '0'),
-                  borderRadius: '8px',
-                  padding: '8px 16px',
-                  textAlign: 'center',
-                  overflow: 'hidden',
-                  position: 'relative'
+                  backgroundColor: tmplPreview.cardBackground,
+                  width: '100%',
+                  maxWidth: `${Math.round(tmplPreview.cardWidth * 0.72)}px`,
+                  borderRadius: tmplPreview.cardBorderRadius,
+                  boxShadow: tmplPreview.cardShadow,
+                  border: tmplPreview.cardBorder,
+                  padding: '20px',
+                  margin: tmplPreview.cardPosition === 'left' ? `${cardOffsetY}px 0 0 ${48 + cardOffsetX}px` : `${cardOffsetY}px auto 0`,
+                  boxSizing: 'border-box',
+                  transition: 'all 0.2s',
                 }}>
-                  <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-                    <div style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '12px',
-                      flexWrap: 'wrap',
-                      fontSize: `${footerFontSize}px`,
-                      fontWeight: footerBold ? 'bold' : 'normal',
-                      fontFamily: footerFontFamily,
-                      color: '#ffffff',
-                      textShadow: '0 1px 3px rgba(0,0,0,0.3)',
-                      height: '100%'
-                    }}>
-                      {contactPhone && <span>📞 {contactPhone}</span>}
-                      {contactEmail && <span>📧 {contactEmail}</span>}
-                      {footerText && <span>| {footerText}</span>}
+                  <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
+                    {loginLogo ? (
+                      <img src={loginLogo} alt="Logo" style={{ maxHeight: '48px', objectFit: 'contain' }} />
+                    ) : (
+                      <div style={{ background: tmplPreview.buttonColor, padding: '8px', borderRadius: '50%', display: 'flex' }}>
+                        <Truck size={20} color="#fff" />
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {['E-mail', 'Senha'].map((lbl) => (
+                      <div key={lbl}>
+                        <div style={{ fontSize: `${Math.round(tmplPreview.fontSize * 0.85)}px`, color: tmplPreview.fontColor, fontWeight: '500', marginBottom: '4px' }}>{lbl}</div>
+                        <div style={{ height: '32px', borderRadius: '6px', border: `2px solid ${inputBorderColor}`, background: inputBgColor }} />
+                      </div>
+                    ))}
+                    <div style={{ height: '32px', background: tmplPreview.buttonColor, borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <span style={{ color: '#fff', fontSize: `${Math.round(tmplPreview.fontSize * 0.85)}px`, fontWeight: '600' }}>Entrar</span>
                     </div>
                   </div>
                 </div>
               </div>
+
+              {/* Rodapé do preview */}
+              {(contactPhone || contactEmail || footerText) && (
+                <div style={{
+                  position: 'absolute',
+                  bottom: '10px',
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  width: `${footerWidth}%`,
+                  background: footerBgWithOpacity,
+                  borderRadius: '6px',
+                  padding: '6px 12px',
+                  textAlign: 'center',
+                }}>
+                  <div style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    gap: '10px', flexWrap: 'wrap',
+                    fontSize: `${Math.round(footerFontSize * 0.85)}px`,
+                    fontWeight: footerBold ? 'bold' : 'normal',
+                    fontFamily: footerFontFamily,
+                    color: footerTextColor,
+                  }}>
+                    {contactPhone && <span>{contactPhone}</span>}
+                    {contactEmail && <span>{contactEmail}</span>}
+                    {footerText && <span>{footerText}</span>}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
+          {/* Templates */}
           <div className="border-t border-gray-100 pt-6">
             <label className="block text-xs font-bold text-gray-400 uppercase mb-3 ml-1">Template do Card de Login</label>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -738,33 +611,20 @@ export const Configuracoes: React.FC = () => {
                   key={template.id}
                   onClick={() => {
                     setSelectedTemplate(template.id);
-                    localStorage.setItem('choferlog_login_template', template.id);
+                    localStorage.setItem(`${PREFIX}login_template`, template.id);
                     syncConfigToServer();
                   }}
-                  className={`cursor-pointer rounded-xl p-4 border-2 transition-all text-center ${
-                    selectedTemplate === template.id
-                      ? 'border-blue-500 bg-blue-50 shadow-md'
-                      : 'border-gray-200 bg-white hover:border-gray-300'
-                  }`}
+                  className={`cursor-pointer rounded-xl p-4 border-2 transition-all text-center ${selectedTemplate === template.id ? 'border-blue-500 bg-blue-50 shadow-md' : 'border-gray-200 bg-white hover:border-gray-300'}`}
                 >
-                  <div
-                    style={{
-                      width: '60px',
-                      height: '80px',
-                      margin: '0 auto 8px',
-                      borderRadius: template.cardBorderRadius,
-                      background: template.cardBackground,
-                      boxShadow: template.cardShadow,
-                      border: template.cardBorder,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: '10px',
-                      color: template.fontColor,
-                    }}
-                  >
-                    Login
-                  </div>
+                  <div style={{
+                    width: '60px', height: '80px', margin: '0 auto 8px',
+                    borderRadius: template.cardBorderRadius,
+                    background: template.cardBackground,
+                    boxShadow: template.cardShadow,
+                    border: template.cardBorder,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: '10px', color: template.fontColor,
+                  }}>Login</div>
                   <p className="font-bold text-sm text-gray-800">{template.nome}</p>
                   <p className="text-xs text-gray-500 mt-1">{template.descricao}</p>
                 </div>
@@ -772,223 +632,160 @@ export const Configuracoes: React.FC = () => {
             </div>
           </div>
 
+          {/* Posição do card */}
+          <div className="border-t border-gray-100 pt-6">
+            <label className="block text-xs font-bold text-gray-400 uppercase mb-3 ml-1 flex items-center gap-2">
+              <Move size={14} /> Posição do Card
+            </label>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <div className="flex justify-between text-sm mb-1">
+                  <span className="font-medium text-gray-700">Deslocamento Horizontal (X)</span>
+                  <span className="text-gray-500">{cardOffsetX}px</span>
+                </div>
+                <input type="range" min="-200" max="200" value={cardOffsetX} onChange={e => { const v = Number(e.target.value); setCardOffsetX(v); localStorage.setItem(`${PREFIX}card_offset_x`, v.toString()); }} className="w-full accent-blue-600" />
+              </div>
+              <div>
+                <div className="flex justify-between text-sm mb-1">
+                  <span className="font-medium text-gray-700">Deslocamento Vertical (Y)</span>
+                  <span className="text-gray-500">{cardOffsetY}px</span>
+                </div>
+                <input type="range" min="-150" max="150" value={cardOffsetY} onChange={e => { const v = Number(e.target.value); setCardOffsetY(v); localStorage.setItem(`${PREFIX}card_offset_y`, v.toString()); }} className="w-full accent-blue-600" />
+              </div>
+            </div>
+          </div>
+
+          {/* Campos */}
           <div className="border-t border-gray-100 pt-6">
             <label className="block text-xs font-bold text-gray-400 uppercase mb-3 ml-1">Aparência dos Campos</label>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
-                <div className="flex justify-between text-sm mb-1">
-                  <span className="font-medium text-gray-700">Cor de Fundo</span>
-                </div>
+                <div className="flex justify-between text-sm mb-1"><span className="font-medium text-gray-700">Cor de Fundo</span></div>
                 <div className="flex items-center space-x-3">
-                  <input type="color" value={inputBgColor} onChange={e => { const v = e.target.value; setInputBgColor(v); localStorage.setItem('choferlog_input_bg', v); }} className="w-12 h-12 rounded-lg border border-gray-200 cursor-pointer" />
+                  <input type="color" value={inputBgColor} onChange={e => { setInputBgColor(e.target.value); localStorage.setItem(`${PREFIX}input_bg`, e.target.value); }} className="w-12 h-12 rounded-lg border border-gray-200 cursor-pointer" />
                   <span className="text-sm text-gray-500 font-mono">{inputBgColor}</span>
                 </div>
               </div>
               <div>
-                <div className="flex justify-between text-sm mb-1">
-                  <span className="font-medium text-gray-700">Cor da Borda</span>
-                </div>
+                <div className="flex justify-between text-sm mb-1"><span className="font-medium text-gray-700">Cor da Borda</span></div>
                 <div className="flex items-center space-x-3">
-                  <input type="color" value={inputBorderColor} onChange={e => { const v = e.target.value; setInputBorderColor(v); localStorage.setItem('choferlog_input_border', v); }} className="w-12 h-12 rounded-lg border border-gray-200 cursor-pointer" />
+                  <input type="color" value={inputBorderColor} onChange={e => { setInputBorderColor(e.target.value); localStorage.setItem(`${PREFIX}input_border`, e.target.value); }} className="w-12 h-12 rounded-lg border border-gray-200 cursor-pointer" />
                   <span className="text-sm text-gray-500 font-mono">{inputBorderColor}</span>
                 </div>
               </div>
             </div>
           </div>
 
-          <div className="border-t border-gray-100 pt-6">
+          {/* Rodapé */}
+          <div className="border-t border-gray-100 pt-6 space-y-6">
             <label className="block text-xs font-bold text-gray-400 uppercase mb-3 ml-1">Rodapé da Tela de Login</label>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
-                <div className="flex justify-between text-sm mb-2">
-                  <span className="font-medium text-gray-700">Cor do Fundo</span>
-                </div>
+                <div className="flex justify-between text-sm mb-2"><span className="font-medium text-gray-700">Cor do Fundo</span></div>
                 <div className="flex items-center space-x-3">
-                  <input
-                    type="color"
-                    value={footerColor}
-                    onChange={e => { const v = e.target.value; setFooterColor(v); localStorage.setItem('choferlog_footer_color', v); }}
-                    className="w-12 h-12 rounded-lg border border-gray-200 cursor-pointer"
-                  />
+                  <input type="color" value={footerColor} onChange={e => { setFooterColor(e.target.value); localStorage.setItem(`${PREFIX}footer_color`, e.target.value); }} className="w-12 h-12 rounded-lg border border-gray-200 cursor-pointer" />
                   <span className="text-sm text-gray-500 font-mono">{footerColor}</span>
                 </div>
               </div>
               <div>
-                <div className="flex justify-between text-sm mb-1">
-                  <span className="font-medium text-gray-700">Transparência</span>
-                  <span className="text-gray-500">{footerOpacity}%</span>
-                </div>
-                <input type="range" min="0" max="100" value={footerOpacity} onChange={e => { const v = Number(e.target.value); setFooterOpacity(v); localStorage.setItem('choferlog_footer_opacity', v.toString()); }} className="w-full accent-blue-600" />
+                <div className="flex justify-between text-sm mb-1"><span className="font-medium text-gray-700">Transparência</span><span className="text-gray-500">{footerOpacity}%</span></div>
+                <input type="range" min="0" max="100" value={footerOpacity} onChange={e => { const v = Number(e.target.value); setFooterOpacity(v); localStorage.setItem(`${PREFIX}footer_opacity`, v.toString()); }} className="w-full accent-blue-600" />
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
-                <div className="flex justify-between text-sm mb-1">
-                  <span className="font-medium text-gray-700">Tamanho da Fonte</span>
-                  <span className="text-gray-500">{footerFontSize}px</span>
-                </div>
-                <input
-                  type="range"
-                  min="10"
-                  max="24"
-                  value={footerFontSize}
-                  onChange={e => {
-                    const v = Number(e.target.value);
-                    setFooterFontSize(v);
-                    localStorage.setItem('choferlog_footer_font_size', v.toString());
-                  }}
-                  className="w-full accent-blue-600"
-                />
+                <div className="flex justify-between text-sm mb-1"><span className="font-medium text-gray-700">Tamanho da Fonte</span><span className="text-gray-500">{footerFontSize}px</span></div>
+                <input type="range" min="10" max="24" value={footerFontSize} onChange={e => { const v = Number(e.target.value); setFooterFontSize(v); localStorage.setItem(`${PREFIX}footer_font_size`, v.toString()); }} className="w-full accent-blue-600" />
               </div>
               <div>
-                <div className="flex justify-between text-sm mb-1">
-                  <span className="font-medium text-gray-700">Fonte</span>
-                </div>
-                <select
-                  value={footerFontFamily}
-                  onChange={e => {
-                    const v = e.target.value;
-                    setFooterFontFamily(v);
-                    localStorage.setItem('choferlog_footer_font_family', v);
-                  }}
-                  className="w-full border-2 border-gray-50 rounded-xl p-2.5 outline-none focus:border-blue-500 bg-gray-50/50 text-sm"
-                >
-                  <option value="Arial">Arial</option>
-                  <option value="Times New Roman">Times New Roman</option>
-                  <option value="Georgia">Georgia</option>
-                  <option value="Verdana">Verdana</option>
-                  <option value="Courier New">Courier New</option>
+                <div className="text-sm mb-1"><span className="font-medium text-gray-700">Fonte</span></div>
+                <select value={footerFontFamily} onChange={e => { setFooterFontFamily(e.target.value); localStorage.setItem(`${PREFIX}footer_font_family`, e.target.value); }} className="w-full border-2 border-gray-50 rounded-xl p-2.5 outline-none focus:border-blue-500 bg-gray-50/50 text-sm">
+                  {['Arial', 'Times New Roman', 'Georgia', 'Verdana', 'Courier New'].map(f => <option key={f} value={f}>{f}</option>)}
                 </select>
               </div>
               <div>
-                <div className="flex justify-between text-sm mb-1">
-                  <span className="font-medium text-gray-700">Negrito</span>
-                </div>
-                <button
-                  onClick={() => {
-                    const v = !footerBold;
-                    setFooterBold(v);
-                    localStorage.setItem('choferlog_footer_bold', v.toString());
-                  }}
-                  style={{
-                    width: '100%',
-                    padding: '10px',
-                    borderRadius: '12px',
-                    border: footerBold ? '2px solid #3b82f6' : '2px solid #e5e7eb',
-                    background: footerBold ? '#eff6ff' : '#f9fafb',
-                    fontWeight: footerBold ? 'bold' : 'normal',
-                    color: footerBold ? '#3b82f6' : '#6b7280',
-                    cursor: 'pointer',
-                    fontSize: '14px'
-                  }}
-                >
+                <div className="text-sm mb-1"><span className="font-medium text-gray-700">Negrito</span></div>
+                <button onClick={() => { const v = !footerBold; setFooterBold(v); localStorage.setItem(`${PREFIX}footer_bold`, v.toString()); }}
+                  style={{ width: '100%', padding: '10px', borderRadius: '12px', border: footerBold ? '2px solid #3b82f6' : '2px solid #e5e7eb', background: footerBold ? '#eff6ff' : '#f9fafb', fontWeight: footerBold ? 'bold' : 'normal', color: footerBold ? '#3b82f6' : '#6b7280', cursor: 'pointer', fontSize: '14px' }}>
                   {footerBold ? '✓ Negrito' : 'Normal'}
                 </button>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            <div>
+              <div className="flex justify-between text-sm mb-1"><span className="font-medium text-gray-700">Largura do Rodapé</span><span className="text-gray-500">{footerWidth}%</span></div>
+              <input type="range" min="20" max="100" value={footerWidth} onChange={e => { const v = Number(e.target.value); setFooterWidth(v); localStorage.setItem(`${PREFIX}footer_width`, v.toString()); }} className="w-full accent-blue-600" />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Telefone</label>
-                <input
-                  type="text"
-                  className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50"
-                  placeholder="(11) 99999-9999"
-                  value={contactPhone}
-                  onChange={e => { setContactPhone(e.target.value); localStorage.setItem('choferlog_contact_phone', e.target.value); }}
-                />
+                <input type="text" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" placeholder="(11) 99999-9999" value={contactPhone} onChange={e => { setContactPhone(e.target.value); localStorage.setItem(`${PREFIX}contact_phone`, e.target.value); }} />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">E-mail</label>
-                <input
-                  type="text"
-                  className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50"
-                  placeholder="contato@transportadora.com"
-                  value={contactEmail}
-                  onChange={e => { setContactEmail(e.target.value); localStorage.setItem('choferlog_contact_email', e.target.value); }}
-                />
+                <input type="text" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" placeholder="contato@transportadora.com" value={contactEmail} onChange={e => { setContactEmail(e.target.value); localStorage.setItem(`${PREFIX}contact_email`, e.target.value); }} />
               </div>
             </div>
 
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Texto do Rodapé (Direitos Autorais)</label>
-              <input
-                type="text"
-                className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50"
-                  placeholder='Ex: © 2026 Minha Transportadora. Todos os direitos reservados.'
-                  value={footerText}
-                  onChange={e => { setFooterText(e.target.value); localStorage.setItem('choferlog_login_footer', e.target.value); }}
-              />
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Texto do Rodapé</label>
+              <input type="text" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" placeholder="© 2026 Minha Transportadora. Todos os direitos reservados." value={footerText} onChange={e => { setFooterText(e.target.value); localStorage.setItem(`${PREFIX}login_footer`, e.target.value); }} />
             </div>
 
-            <button
-              onClick={handleSaveFooter}
-              className={`flex items-center px-6 py-3 rounded-xl font-bold transition-all ${showSaved ? 'bg-green-600 text-white' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
-            >
+            <button onClick={handleSaveFooter} className={`flex items-center px-6 py-3 rounded-xl font-bold transition-all ${showSaved ? 'bg-green-600 text-white' : 'bg-blue-600 text-white hover:bg-blue-700'}`}>
               {showSaved ? <Check size={18} className="mr-1" /> : <Save size={18} className="mr-1" />}
-              {showSaved ? 'Salvo' : 'Salvar'}
+              {showSaved ? 'Salvo!' : 'Salvar Aparência'}
             </button>
           </div>
         </div>
       )}
 
+      {/* Modal de ajuste de imagem */}
       {editingTarget && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-fade-in-down">
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={(e) => { if (e.target === e.currentTarget) setEditingTarget(null); }}>
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden text-gray-800">
             <div className="flex justify-between items-center p-4 border-b border-gray-100">
               <h3 className="font-bold text-lg">Ajustar {editingTarget === 'logo' ? 'Logomarca' : 'Imagem de Fundo'}</h3>
-              <button onClick={() => setEditingTarget(null)} className="p-1 hover:bg-gray-100 rounded">
-                <X size={20} className="text-gray-500" />
-              </button>
+              <button onClick={() => setEditingTarget(null)} className="p-1 hover:bg-gray-100 rounded"><X size={20} className="text-gray-500" /></button>
             </div>
+            <div className="p-6 space-y-4">
+              <div className="bg-gray-100 rounded-lg w-full h-48 flex items-center justify-center overflow-hidden border-2 border-dashed border-gray-300">
+                {tempImg ? (
+                  <img src={tempImg} alt="Preview" style={{ transform: `scale(${tempScale / 100}) translateY(${tempY}px)`, transformOrigin: 'center' }} className={editingTarget === 'logo' ? 'max-w-full max-h-full object-contain' : 'w-full h-full object-cover'} />
+                ) : (
+                  <div className="text-center text-gray-400"><Upload size={32} className="mx-auto mb-2" /><p className="text-sm">Selecione uma imagem</p></div>
+                )}
+              </div>
 
-            <div className="p-6 space-y-6">
-              <div className="text-center">
-                <p className="text-sm text-gray-500 mb-2 font-medium">Pré-visualização</p>
-                <div className="bg-gray-100 rounded-lg w-full h-64 mx-auto flex items-center justify-center overflow-hidden border-2 border-dashed border-gray-300 relative">
-                  {tempImg && (
-                    <img
-                      src={tempImg}
-                      alt="Preview"
-                      style={{ transform: `scale(${tempScale / 100}) translateY(${tempY}px)`, transformOrigin: 'center' }}
-                      className={editingTarget === 'logo' ? 'max-w-full max-h-full object-contain' : 'w-full h-full object-cover'}
-                    />
-                  )}
-                  {!tempImg && (
-                    <div className="text-center text-gray-400">
-                      <Upload size={32} className="mx-auto mb-2" />
-                      <p className="text-sm">Selecione uma imagem</p>
-                    </div>
-                  )}
+              {tempImg && (
+                <div className="space-y-3">
+                  <div>
+                    <div className="flex justify-between text-sm mb-1"><span className="font-medium text-gray-700">Escala</span><span className="text-gray-500">{tempScale}%</span></div>
+                    <input type="range" min="10" max="200" value={tempScale} onChange={e => setTempScale(Number(e.target.value))} className="w-full accent-blue-600" />
+                  </div>
+                  <div>
+                    <div className="flex justify-between text-sm mb-1"><span className="font-medium text-gray-700">Posição vertical</span><span className="text-gray-500">{tempY}px</span></div>
+                    <input type="range" min="-100" max="100" value={tempY} onChange={e => setTempY(Number(e.target.value))} className="w-full accent-blue-600" />
+                  </div>
                 </div>
-              </div>
+              )}
 
-              <div>
-                <input type="file" accept="image/*" className="hidden" id="modalFileInput" onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file && editingTarget) processFile(file, editingTarget);
-                  e.target.value = '';
-                }} />
-                <button onClick={() => document.getElementById('modalFileInput')?.click()} className="w-full px-4 py-2 border-2 border-dashed border-gray-300 rounded-lg text-gray-500 hover:border-blue-400 hover:text-blue-600 transition-colors text-sm font-medium">
-                  <Upload size={16} className="inline mr-1" /> Selecionar outra imagem
-                </button>
-              </div>
+              <input type="file" accept="image/*" className="hidden" id="modalFileInput" onChange={(e) => { const file = e.target.files?.[0]; if (file && editingTarget) processFile(file, editingTarget); e.target.value = ''; }} />
+              <button onClick={() => document.getElementById('modalFileInput')?.click()} className="w-full px-4 py-2 border-2 border-dashed border-gray-300 rounded-lg text-gray-500 hover:border-blue-400 hover:text-blue-600 transition-colors text-sm font-medium">
+                <Upload size={16} className="inline mr-1" /> Selecionar outra imagem
+              </button>
             </div>
 
             <div className="p-4 bg-gray-50 border-t border-gray-100 flex justify-between items-center">
               <button onClick={removeImage} className="flex items-center space-x-2 px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors text-sm font-medium">
-                <Trash2 size={16} />
-                <span>Excluir</span>
+                <Trash2 size={16} /><span>Excluir imagem</span>
               </button>
               <div className="flex space-x-2">
-                <button onClick={() => setEditingTarget(null)} className="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded-lg transition-colors text-sm font-medium">
-                  Cancelar
-                </button>
-                <button onClick={saveImageSettings} className="flex items-center space-x-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-sm font-medium">
-                  <Check size={16} />
-                  <span>Salvar</span>
+                <button onClick={() => setEditingTarget(null)} className="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded-lg transition-colors text-sm font-medium">Cancelar</button>
+                <button onClick={saveImageSettings} disabled={!tempImg} className="flex items-center space-x-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 text-white rounded-lg transition-colors text-sm font-medium">
+                  <Check size={16} /><span>Salvar</span>
                 </button>
               </div>
             </div>
@@ -996,125 +793,51 @@ export const Configuracoes: React.FC = () => {
         </div>
       )}
 
+      {/* Modal de busca de impressoras */}
       {showPrinterSearch && (
-        <div
-          className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-fade-in"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setShowPrinterSearch(false);
-          }}
-        >
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={(e) => { if (e.target === e.currentTarget) setShowPrinterSearch(false); }}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden">
             <div className="flex justify-between items-center p-6 border-b border-gray-100">
               <div>
-                <h3 className="font-bold text-lg text-gray-800">🔍 Buscar Impressoras</h3>
-                <p className="text-sm text-gray-500 mt-0.5">Digite o nome para buscar na rede ou veja os resultados abaixo</p>
+                <h3 className="font-bold text-lg text-gray-800">Buscar Impressoras</h3>
+                <p className="text-sm text-gray-500 mt-0.5">Digite o nome ou veja os resultados abaixo</p>
               </div>
+              <button onClick={() => setShowPrinterSearch(false)} className="p-1 hover:bg-gray-100 rounded"><X size={20} className="text-gray-500" /></button>
             </div>
-
             <div className="p-6 space-y-4">
               <div className="flex space-x-2">
-                <input
-                  type="text"
-                  placeholder="Nome da impressora (ex: Térmica Balcão)"
-                  className="flex-1 border-2 border-gray-200 rounded-xl p-3 text-sm outline-none focus:border-blue-500"
-                  value={searchTerm}
-                  onChange={e => setSearchTerm(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') handleSearchByName(); }}
-                />
-                <button
-                  onClick={handleSearchByName}
-                  disabled={!searchTerm.trim() || isSearching}
-                  className={`px-5 py-3 rounded-xl font-bold text-sm transition-all ${searchTerm.trim() && !isSearching
-                    ? 'bg-blue-600 text-white hover:bg-blue-700'
-                    : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                    }`}
-                >
-                  Buscar
-                </button>
+                <input type="text" placeholder="Nome da impressora" className="flex-1 border-2 border-gray-200 rounded-xl p-3 text-sm outline-none focus:border-blue-500" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleSearchByName(); }} />
+                <button onClick={handleSearchByName} disabled={!searchTerm.trim() || isSearching} className={`px-5 py-3 rounded-xl font-bold text-sm transition-all ${searchTerm.trim() && !isSearching ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}>Buscar</button>
               </div>
-
               {isSearching ? (
                 <div className="flex flex-col items-center justify-center py-8 space-y-3">
                   <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
                   <p className="text-gray-500 text-sm font-medium">Buscando impressoras...</p>
                 </div>
               ) : foundPrinters.length === 0 ? (
-                <div className="text-center py-8 space-y-3">
-                  <div className="w-14 h-14 bg-gray-100 rounded-full flex items-center justify-center mx-auto">
-                    <Printer size={28} className="text-gray-400" />
-                  </div>
-                  <p className="text-gray-500 text-sm">Nenhuma impressora encontrada</p>
-                  <p className="text-xs text-gray-400">Tente digitar o nome exato ou verifique se a impressora está na rede</p>
-                  <button
-                    onClick={() => window.print()}
-                    className="px-4 py-2 bg-blue-50 text-blue-700 rounded-lg text-sm font-medium hover:bg-blue-100 transition-colors"
-                  >
-                    Abrir Diálogo de Impressão do Sistema
-                  </button>
-                </div>
+                <div className="text-center py-8"><Printer size={40} className="mx-auto text-gray-300 mb-3" /><p className="text-gray-500 text-sm">Nenhuma impressora encontrada</p></div>
               ) : (
                 <div className="space-y-3 max-h-72 overflow-y-auto">
                   {foundPrinters.map((printer, idx) => (
-                    <div
-                      key={idx}
-                      className="flex items-center justify-between p-4 border border-gray-100 rounded-xl hover:border-blue-200 hover:bg-blue-50/30 transition-all"
-                    >
+                    <div key={idx} className="flex items-center justify-between p-4 border border-gray-100 rounded-xl hover:border-blue-200 hover:bg-blue-50/30 transition-all">
                       <div className="flex items-center space-x-4">
-                        <div className={`p-2.5 rounded-lg ${printer.tipo === 'fiscal' ? 'bg-purple-50 text-purple-600' :
-                          printer.tipo === 'termica' ? 'bg-blue-50 text-blue-600' :
-                            'bg-gray-100 text-gray-600'
-                          }`}>
+                        <div className={`p-2.5 rounded-lg ${printer.tipo === 'fiscal' ? 'bg-purple-50 text-purple-600' : printer.tipo === 'termica' ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-600'}`}>
                           <Printer size={22} />
                         </div>
                         <div>
                           <p className="font-bold text-gray-800">{printer.nome}</p>
-                          <div className="flex flex-wrap gap-1.5 mt-1">
-                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${printer.via === 'wifi' ? 'bg-green-100 text-green-700' :
-                              printer.via === 'rede' ? 'bg-purple-100 text-purple-700' :
-                                printer.via === 'usb' ? 'bg-blue-100 text-blue-700' :
-                                  'bg-gray-100 text-gray-600'
-                              }`}>
-                              {printer.via === 'wifi' ? '📶 Wi-Fi (WSD)' :
-                                printer.via === 'rede' ? '🌐 Rede' :
-                                  printer.via === 'usb' ? '🔌 USB' : '💻 Local'}
-                            </span>
-                            <span className="text-[10px] text-gray-400">
-                              {printer.tipo === 'fiscal' ? 'Fiscal' : printer.tipo === 'termica' ? 'Térmica' : printer.tipo}
-                            </span>
-                            {printer.ip && (
-                              <span className="text-[10px] text-gray-400">{printer.ip}:{printer.porta || '9100'}</span>
-                            )}
-                            {printer.jaCadastrada && (
-                              <span className="text-[10px] text-gray-400">Já cadastrada</span>
-                            )}
-                          </div>
+                          <p className="text-xs text-gray-500">{printer.tipo} {printer.ip && `• ${printer.ip}`}</p>
                         </div>
                       </div>
-                      <button
-                        onClick={() => {
-                          if (printer.jaCadastrada) {
-                            alert('Esta impressora já está cadastrada.');
-                            return;
-                          }
-                          const newPrinter = {
-                            id: Date.now().toString(),
-                            nome: printer.nome,
-                            tipo: printer.tipo,
-                            status: 'online' as const,
-                            localizacao: printer.origem || printer.localizacao || 'local',
-                            ip: printer.ip,
-                            porta: printer.porta,
-                            fabricante: printer.fabricante,
-                            data_instalacao: new Date().toISOString().split('T')[0]
-                          };
-                          const updated = [...printers, newPrinter];
-                          setPrinters(updated);
-                          localStorage.setItem('choferlog_printers', JSON.stringify(updated));
-                          syncConfigToServer();
-                          setFoundPrinters(foundPrinters.filter((_, i) => i !== idx));
-                        }}
-                        className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg font-medium text-sm hover:bg-blue-700 transition-colors"
-                      >
+                      <button onClick={() => {
+                        if (printer.jaCadastrada) { alert('Esta impressora já está cadastrada.'); return; }
+                        const newPrinter = { id: Date.now().toString(), nome: printer.nome, tipo: printer.tipo, status: 'online' as const, localizacao: printer.origem || 'local', data_instalacao: new Date().toISOString().split('T')[0] };
+                        const updated = [...printers, newPrinter];
+                        setPrinters(updated);
+                        localStorage.setItem(`${PREFIX}printers`, JSON.stringify(updated));
+                        syncConfigToServer();
+                        setFoundPrinters(foundPrinters.filter((_, i) => i !== idx));
+                      }} className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg font-medium text-sm hover:bg-blue-700 transition-colors">
                         <Plus size={16} className="mr-1" /> Adicionar
                       </button>
                     </div>
@@ -1122,14 +845,9 @@ export const Configuracoes: React.FC = () => {
                 </div>
               )}
             </div>
-
             <div className="p-4 bg-gray-50 border-t border-gray-100 flex justify-between items-center">
-              <p className="text-xs text-gray-400">
-                {isSearching ? 'Buscando...' : `${foundPrinters.length} impressora(s) encontrada(s)`}
-              </p>
-              <p className="text-xs text-gray-300">
-                Clique fora para fechar
-              </p>
+              <p className="text-xs text-gray-400">{isSearching ? 'Buscando...' : `${foundPrinters.length} impressora(s) encontrada(s)`}</p>
+              <p className="text-xs text-gray-300">Clique fora para fechar</p>
             </div>
           </div>
         </div>

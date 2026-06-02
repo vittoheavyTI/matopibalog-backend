@@ -1,3 +1,6 @@
+const cookieParser = require('cookie-parser');
+const rateLimit = require('express-rate-limit');
+
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -25,27 +28,26 @@ const allowedOrigins = [
   FRONTEND_URL,
 ].filter(Boolean);
 
+// 1. Configuração do CORS corrigida (permitindo sua lista de origens e os cookies)
 app.use(cors({
-  origin: (origin, callback) => {
-    // Permite requisições sem origin (ex: Postman, curl, mobile app)
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) return callback(null, true);
-    return callback(new Error(`Origem bloqueada pelo CORS: ${origin}`));
-  },
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true
+  origin: allowedOrigins,
+  credentials: true 
 }));
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// Rota de Health Check
-app.get('/health', (req, res) => {
-  res.status(200).json({ 
-    status: 'UP', 
-    timestamp: new Date().toISOString()
-  });
+app.use(express.json());
+
+// 2. Avisa o Express para ler os cookies
+app.use(cookieParser());
+
+// 3. Cria a proteção contra ataques (Rate Limit)
+const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutos
+  max: 100, // Limita a 100 requisições por IP a cada 15 min
+  message: { error: 'Muitas requisições deste IP, tente novamente mais tarde.' }
 });
+
+// Aplica a proteção em todas as requisições que chegarem ao servidor
+app.use(generalLimiter);
 
 // Registro de Rotas
 app.use('/auth', authRoutes);

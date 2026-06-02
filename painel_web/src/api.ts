@@ -1,25 +1,17 @@
 import axios from 'axios';
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:3000',
+  // Tente adicionar o /api no final do baseURL se suas rotas do backend usam /api
+  baseURL: import.meta.env.VITE_API_URL || 'http://matopibalog.com.br/api',
+  withCredentials: true, // ESSENCIAL: Isso faz o navegador enviar o Cookie HTTPOnly
 });
 
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('choferlog_token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-}, (error) => {
-  return Promise.reject(error);
-});
-
+// Mantemos apenas o interceptor de resposta para avisar o sistema caso o login expire (Erro 401)
 api.interceptors.response.use((response) => {
   return response;
 }, (error) => {
   if (error.response && error.response.status === 401) {
-    localStorage.removeItem('choferlog_token');
-    localStorage.removeItem('choferlog_user');
+    // Se o backend disser que o cookie expirou, avisamos o React para voltar pra tela de login
     window.dispatchEvent(new Event('auth:unauthorized'));
   }
   return Promise.reject(error);

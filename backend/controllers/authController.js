@@ -72,11 +72,19 @@ exports.login = async (req, res) => {
     const token = jwt.sign(
       { uid: userData.id, email: userData.email, role: userData.tipo },
       process.env.JWT_SECRET,
-      { expiresIn: '7d' }
+      { expiresIn: '7d' } // Token expira em 7 dias
     );
 
+    // 4. Salvar o token em um cookie seguro (Correção de Segurança)
+    res.cookie('token', token, {
+      httpOnly: true, // Inacessível via JavaScript (Protege contra XSS)
+      secure: process.env.NODE_ENV === 'production', // true em produção (exige HTTPS)
+      sameSite: 'strict', // Protege contra ataques CSRF
+      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 dias em milissegundos (mesmo tempo do token)
+    });
+
+    // 5. Retorna os dados do usuário (o token foi removido daqui)
     res.status(200).json({
-      token,
       user: {
         uid: userData.id,
         nome: userData.nome,
@@ -90,6 +98,16 @@ exports.login = async (req, res) => {
     console.error('Erro no login:', error);
     res.status(500).json({ message: 'Erro ao realizar login.' });
   }
+};
+
+// NOVA FUNÇÃO: Logout para apagar o cookie do computador do usuário
+exports.logout = async (req, res) => {
+  res.clearCookie('token', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict'
+  });
+  return res.status(200).json({ message: 'Logout realizado com sucesso' });
 };
 
 exports.getMe = async (req, res) => {
@@ -185,7 +203,7 @@ exports.registerEmpresa = async (req, res) => {
       });
 
     if (userError) {
-      await supabase.auth.admin.deleteUser(authData.user.id).catch(() => {});
+      await supabase.auth.admin.deleteUser(authData.user.id).catch(() => { });
       await supabase.from('empresas').delete().eq('id', empresaData.id);
       return res.status(500).json({ message: 'Erro ao salvar dados do usuário.' });
     }
