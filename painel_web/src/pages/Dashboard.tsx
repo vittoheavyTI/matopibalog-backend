@@ -20,6 +20,14 @@ export const Dashboard: React.FC = () => {
   const [selectedMot, setSelectedMot] = useState<any | null>(null);
   const [editingItem, setEditingItem] = useState<{ id: string, type: 'despesa' | 'manutencao' | 'abastecimento' | 'vale' | 'frete', data: any } | null>(null);
 
+  const [showAddFreteModal, setShowAddFreteModal] = useState(false);
+  const [newFrete, setNewFrete] = useState({ motorista_id: '', origem: '', destino: '', valor_frete: '', km_inicial: '' });
+  const [savingFrete, setSavingFrete] = useState(false);
+
+  const [showAddDespesaModal, setShowAddDespesaModal] = useState(false);
+  const [newDespesa, setNewDespesa] = useState({ tipo: 'despesa', descricao: '', valor: '', quem_pagou: 'proprietario', posto: '', litros: '', valor_total: '', data: '' });
+  const [savingDespesa, setSavingDespesa] = useState(false);
+
   const loadDashboardData = async () => {
     try {
       // 1. Busca os motoristas (com tratamento de erro individual)
@@ -219,6 +227,50 @@ export const Dashboard: React.FC = () => {
     }
   };
 
+  const handleSubmitFrete = async () => {
+    if (!newFrete.motorista_id || !newFrete.origem || !newFrete.destino || !newFrete.valor_frete) {
+      alert('Preencha motorista, origem, destino e valor.'); return;
+    }
+    setSavingFrete(true);
+    try {
+      await api.post('/fretes', {
+        motorista_id: newFrete.motorista_id,
+        origem: newFrete.origem,
+        destino: newFrete.destino,
+        valor_frete: Number(newFrete.valor_frete),
+        ...(newFrete.km_inicial ? { km_inicial: Number(newFrete.km_inicial) } : {}),
+      });
+      setShowAddFreteModal(false);
+      setNewFrete({ motorista_id: '', origem: '', destino: '', valor_frete: '', km_inicial: '' });
+      loadDashboardData();
+    } catch (err: any) {
+      alert(err.response?.data?.message || 'Erro ao adicionar frete.');
+    } finally { setSavingFrete(false); }
+  };
+
+  const handleSubmitDespesa = async () => {
+    if (!selectedMot) return;
+    const tipo = newDespesa.tipo;
+    if (tipo === 'despesa' && (!newDespesa.descricao || !newDespesa.valor)) { alert('Preencha descrição e valor.'); return; }
+    if (tipo === 'abastecimento' && (!newDespesa.posto || !newDespesa.litros || !newDespesa.valor_total)) { alert('Preencha posto, litros e valor total.'); return; }
+    if (tipo === 'vale' && !newDespesa.valor) { alert('Preencha o valor do vale.'); return; }
+    setSavingDespesa(true);
+    try {
+      if (tipo === 'abastecimento') {
+        await api.post('/abastecimentos', { motorista_id: selectedMot.uid, posto: newDespesa.posto, litros: Number(newDespesa.litros), valor_total: Number(newDespesa.valor_total), quem_pagou: newDespesa.quem_pagou, data: newDespesa.data });
+      } else if (tipo === 'vale') {
+        await api.post('/vales', { motorista_id: selectedMot.uid, descricao: newDespesa.descricao || 'Vale/Adiantamento', valor: Number(newDespesa.valor), quem_pagou: 'proprietario', data: newDespesa.data });
+      } else {
+        await api.post('/despesas', { motorista_id: selectedMot.uid, descricao: newDespesa.descricao, valor: Number(newDespesa.valor), quem_pagou: newDespesa.quem_pagou, data: newDespesa.data });
+      }
+      setShowAddDespesaModal(false);
+      setNewDespesa({ tipo: 'despesa', descricao: '', valor: '', quem_pagou: 'proprietario', posto: '', litros: '', valor_total: '', data: '' });
+      loadMotoristaData(selectedMot.uid);
+    } catch (err: any) {
+      alert(err.response?.data?.message || 'Erro ao adicionar lançamento.');
+    } finally { setSavingDespesa(false); }
+  };
+
 
   const [summaryPage, setSummaryPage] = useState(1);
   const [summaryPageSize, setSummaryPageSize] = useState(5);
@@ -326,7 +378,7 @@ export const Dashboard: React.FC = () => {
               <DollarSign size={20} className="mr-2 text-green-600" /> Gerenciamento de Viagens
             </button>
             <button
-              onClick={() => {}}
+              onClick={() => { setShowAddFreteModal(true); setNewFrete({ motorista_id: '', origem: '', destino: '', valor_frete: '', km_inicial: '' }); }}
               className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all shadow-md active:scale-95 font-bold text-sm"
             >
               <Plus size={18} className="mr-1" /> Adicionar Frete
@@ -367,7 +419,7 @@ export const Dashboard: React.FC = () => {
                   <div className="bg-gray-50 p-4 border-b border-gray-100 font-bold text-gray-700 flex items-center justify-between">
                     <span className="flex items-center"><FileText className="mr-2" size={18} /> Lançamentos</span>
                     <button
-                      onClick={() => {}}
+                      onClick={() => { setShowAddDespesaModal(true); setNewDespesa({ tipo: 'despesa', descricao: '', valor: '', quem_pagou: 'proprietario', posto: '', litros: '', valor_total: '', data: new Date().toISOString().split('T')[0] }); }}
                       className="flex items-center px-3 py-1.5 bg-blue-100 text-blue-600 rounded-lg hover:bg-blue-200 transition-colors font-bold text-xs shadow-sm"
                     >
                       <Plus size={14} className="mr-1" /> Nova Despesa
@@ -651,7 +703,144 @@ export const Dashboard: React.FC = () => {
         </div>
       )}
 
-      {/* Modais omitidos para poupar espaço... Mas o seu código deles está mantido! */}
+      {showAddFreteModal && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={e => { if (e.target === e.currentTarget) setShowAddFreteModal(false); }}>
+          <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl">
+            <div className="p-5 border-b border-gray-100 flex justify-between items-center">
+              <h3 className="text-lg font-bold text-gray-800">Adicionar Frete</h3>
+              <button onClick={() => setShowAddFreteModal(false)} className="p-2 hover:bg-gray-100 rounded-lg transition-colors"><X size={18} /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Motorista *</label>
+                <select value={newFrete.motorista_id} onChange={e => setNewFrete(p => ({ ...p, motorista_id: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500">
+                  <option value="">Selecione o motorista</option>
+                  {motoristasEmViagem.map(m => <option key={m.uid} value={m.uid}>{m.nomeCompleto} — {m.placaVeiculo}</option>)}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Origem *</label>
+                  <input value={newFrete.origem} onChange={e => setNewFrete(p => ({ ...p, origem: e.target.value }))} placeholder="Ex: São Paulo" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Destino *</label>
+                  <input value={newFrete.destino} onChange={e => setNewFrete(p => ({ ...p, destino: e.target.value }))} placeholder="Ex: Brasília" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Valor do Frete (R$) *</label>
+                  <input type="number" min="0" step="0.01" value={newFrete.valor_frete} onChange={e => setNewFrete(p => ({ ...p, valor_frete: e.target.value }))} placeholder="0,00" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">KM Inicial</label>
+                  <input type="number" min="0" value={newFrete.km_inicial} onChange={e => setNewFrete(p => ({ ...p, km_inicial: e.target.value }))} placeholder="Opcional" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" />
+                </div>
+              </div>
+            </div>
+            <div className="p-5 pt-0 flex justify-end gap-3">
+              <button onClick={() => setShowAddFreteModal(false)} className="px-4 py-2 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">Cancelar</button>
+              <button onClick={handleSubmitFrete} disabled={savingFrete} className="px-4 py-2 text-sm font-bold bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50">
+                {savingFrete ? 'Salvando...' : 'Adicionar Frete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAddDespesaModal && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={e => { if (e.target === e.currentTarget) setShowAddDespesaModal(false); }}>
+          <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl">
+            <div className="p-5 border-b border-gray-100 flex justify-between items-center">
+              <h3 className="text-lg font-bold text-gray-800">Novo Lançamento — {selectedMot?.nomeCompleto}</h3>
+              <button onClick={() => setShowAddDespesaModal(false)} className="p-2 hover:bg-gray-100 rounded-lg transition-colors"><X size={18} /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-gray-600 mb-2 uppercase">Tipo</label>
+                <div className="flex gap-2">
+                  {(['despesa', 'abastecimento', 'vale'] as const).map(t => (
+                    <button key={t} onClick={() => setNewDespesa(p => ({ ...p, tipo: t }))}
+                      className={`flex-1 py-2 text-xs font-bold rounded-lg border transition-colors ${newDespesa.tipo === t ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200 hover:border-blue-400'}`}>
+                      {t === 'despesa' ? 'Despesa' : t === 'abastecimento' ? 'Abastecimento' : 'Vale'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {newDespesa.tipo === 'despesa' && (<>
+                <div>
+                  <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Descrição *</label>
+                  <input value={newDespesa.descricao} onChange={e => setNewDespesa(p => ({ ...p, descricao: e.target.value }))} placeholder="Ex: Pedágio, manutenção..." className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Valor (R$) *</label>
+                    <input type="number" min="0" step="0.01" value={newDespesa.valor} onChange={e => setNewDespesa(p => ({ ...p, valor: e.target.value }))} placeholder="0,00" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Pago por</label>
+                    <select value={newDespesa.quem_pagou} onChange={e => setNewDespesa(p => ({ ...p, quem_pagou: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500">
+                      <option value="proprietario">Proprietário</option>
+                      <option value="motorista">Motorista</option>
+                    </select>
+                  </div>
+                </div>
+              </>)}
+
+              {newDespesa.tipo === 'abastecimento' && (<>
+                <div>
+                  <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Posto *</label>
+                  <input value={newDespesa.posto} onChange={e => setNewDespesa(p => ({ ...p, posto: e.target.value }))} placeholder="Nome do posto" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" />
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Litros *</label>
+                    <input type="number" min="0" step="0.01" value={newDespesa.litros} onChange={e => setNewDespesa(p => ({ ...p, litros: e.target.value }))} placeholder="0,00" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Total (R$) *</label>
+                    <input type="number" min="0" step="0.01" value={newDespesa.valor_total} onChange={e => setNewDespesa(p => ({ ...p, valor_total: e.target.value }))} placeholder="0,00" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Pago por</label>
+                    <select value={newDespesa.quem_pagou} onChange={e => setNewDespesa(p => ({ ...p, quem_pagou: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500">
+                      <option value="proprietario">Proprietário</option>
+                      <option value="motorista">Motorista</option>
+                    </select>
+                  </div>
+                </div>
+              </>)}
+
+              {newDespesa.tipo === 'vale' && (<>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Valor (R$) *</label>
+                    <input type="number" min="0" step="0.01" value={newDespesa.valor} onChange={e => setNewDespesa(p => ({ ...p, valor: e.target.value }))} placeholder="0,00" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Descrição</label>
+                    <input value={newDespesa.descricao} onChange={e => setNewDespesa(p => ({ ...p, descricao: e.target.value }))} placeholder="Opcional" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" />
+                  </div>
+                </div>
+                <p className="text-xs text-gray-400 italic">Vales são sempre debitados do proprietário.</p>
+              </>)}
+
+              <div>
+                <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Data</label>
+                <input type="date" value={newDespesa.data} onChange={e => setNewDespesa(p => ({ ...p, data: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" />
+              </div>
+            </div>
+            <div className="p-5 pt-0 flex justify-end gap-3">
+              <button onClick={() => setShowAddDespesaModal(false)} className="px-4 py-2 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">Cancelar</button>
+              <button onClick={handleSubmitDespesa} disabled={savingDespesa} className="px-4 py-2 text-sm font-bold bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50">
+                {savingDespesa ? 'Salvando...' : 'Adicionar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* (O restante do arquivo continua igualzinho) */}
     </div>
   );
