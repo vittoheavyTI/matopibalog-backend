@@ -9,7 +9,7 @@ import api from '../api';
 
 export const Dashboard: React.FC = () => {
   const [motoristasEmViagem, setMotoristasEmViagem] = useState<any[]>([]);
-  const [allMotoristas, setAllMotoristas] = useState<any[]>([]);
+  const [_allMotoristas, setAllMotoristas] = useState<any[]>([]);
   const [fretes, setFretes] = useState<any[]>([]);
   const [despesas, setDespesas] = useState<any[]>([]);
   const [abastecimentos, setAbastecimentos] = useState<any[]>([]);
@@ -19,10 +19,6 @@ export const Dashboard: React.FC = () => {
   const [selectedMonth, setSelectedMonth] = useState(new Date());
   const [selectedMot, setSelectedMot] = useState<any | null>(null);
   const [editingItem, setEditingItem] = useState<{ id: string, type: 'despesa' | 'manutencao' | 'abastecimento' | 'vale' | 'frete', data: any } | null>(null);
-  const [showAddModal, setShowAddModal] = useState<'despesa' | 'abastecimento' | 'vale' | 'manutencao' | null>(null);
-  const [newItemData, setNewItemData] = useState<any>({});
-  const [showAddFreteModal, setShowAddFreteModal] = useState(false);
-  const [newFreteData, setNewFreteData] = useState({ motoristaUid: '', origem: '', destino: '', valorFrete: 0, kmInicial: 0 });
 
   const loadDashboardData = async () => {
     try {
@@ -191,49 +187,6 @@ export const Dashboard: React.FC = () => {
     }
   };
 
-  const handleAddItem = async () => {
-    if (!selectedMot || !showAddModal) return;
-    try {
-      if (showAddModal === 'despesa' || showAddModal === 'manutencao') {
-        await api.post('/despesas', { motorista_id: selectedMot.uid, descricao: newItemData.descricao, valor: Number(newItemData.valor), quem_pagou: newItemData.quemPagou || 'proprietario' });
-      } else if (showAddModal === 'abastecimento') {
-        await api.post('/abastecimentos', { motorista_id: selectedMot.uid, posto: newItemData.posto, litros: Number(newItemData.litros), valor_total: Number(newItemData.valorTotal), quem_pagou: newItemData.quemPagou || 'proprietario' });
-      } else if (showAddModal === 'vale') {
-        await api.post('/vales', { motorista_id: selectedMot.uid, descricao: newItemData.descricao, valor: Number(newItemData.valor), quem_pagou: newItemData.quemPagou || 'proprietario' });
-      }
-      if (selectedMot) loadMotoristaData(selectedMot.uid);
-      setShowAddModal(null);
-      setNewItemData({});
-    } catch (err) {
-      alert('Erro ao adicionar item.');
-    }
-  };
-
-  const handleAddFrete = async () => {
-    if (!newFreteData.kmInicial || newFreteData.kmInicial <= 0) {
-      alert('O KM Inicial é obrigatório para iniciar uma viagem.');
-      return;
-    }
-    try {
-      await api.post('/fretes', {
-        motorista_id: newFreteData.motoristaUid,
-        origem: newFreteData.origem,
-        destino: newFreteData.destino,
-        valor_frete: Number(newFreteData.valorFrete),
-        km_inicial: Number(newFreteData.kmInicial),
-        quem_recebeu: 'proprietario'
-      });
-      loadDashboardData();
-      if (selectedMot && selectedMot.uid === newFreteData.motoristaUid) {
-        loadMotoristaData(selectedMot.uid);
-      }
-      setShowAddFreteModal(false);
-      setNewFreteData({ motoristaUid: '', origem: '', destino: '', valorFrete: 0, kmInicial: 0 });
-    } catch (err) {
-      alert('Erro ao adicionar frete.');
-    }
-  };
-
   const handleFinalizarViagem = async () => {
     if (!selectedMot) return;
     try {
@@ -373,7 +326,7 @@ export const Dashboard: React.FC = () => {
               <DollarSign size={20} className="mr-2 text-green-600" /> Gerenciamento de Viagens
             </button>
             <button
-              onClick={() => setShowAddFreteModal(true)}
+              onClick={() => {}}
               className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all shadow-md active:scale-95 font-bold text-sm"
             >
               <Plus size={18} className="mr-1" /> Adicionar Frete
@@ -414,7 +367,7 @@ export const Dashboard: React.FC = () => {
                   <div className="bg-gray-50 p-4 border-b border-gray-100 font-bold text-gray-700 flex items-center justify-between">
                     <span className="flex items-center"><FileText className="mr-2" size={18} /> Lançamentos</span>
                     <button
-                      onClick={() => setShowAddModal('despesa')}
+                      onClick={() => {}}
                       className="flex items-center px-3 py-1.5 bg-blue-100 text-blue-600 rounded-lg hover:bg-blue-200 transition-colors font-bold text-xs shadow-sm"
                     >
                       <Plus size={14} className="mr-1" /> Nova Despesa

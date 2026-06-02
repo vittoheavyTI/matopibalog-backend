@@ -3,8 +3,12 @@ import { UserPlus, Search, Shield, Phone, MapPin, Camera, X, Check, Trash2, Aler
 import api from '../api';
 import { maskPhone, maskCEP } from '../utils/masks';
 import axios from 'axios';
+import { useAuth } from '../contexts/AuthContext';
 
 export const Usuarios: React.FC = () => {
+  const { user: currentUser } = useAuth();
+  const currentUserId = currentUser?.uid || 'admin';
+
   const [usuarios, setUsuarios] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -15,17 +19,6 @@ export const Usuarios: React.FC = () => {
   const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isFetchingCep, setIsFetchingCep] = useState(false);
-
-  const currentUserId = (() => {
-    try {
-      const token = localStorage.getItem('choferlog_token');
-      if (token) {
-        const payload = JSON.parse(atob(token.split('.')[1]));
-        return payload.id || 'admin';
-      }
-    } catch {}
-    return 'admin';
-  })();
 
   const [newUser, setNewUser] = useState({
     nome: '',

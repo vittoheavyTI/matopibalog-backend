@@ -114,8 +114,8 @@ export const Login: React.FC = () => {
     setError('');
     try {
       const response = await api.post('/auth/login', { email, senha: password });
-      const { token, user: userData } = response.data;
-      login(token, userData);
+      const { user: rawUser } = response.data;
+      login({ ...rawUser, fotoUrl: rawUser.foto_url });
       navigate('/');
     } catch (err: any) {
       setError(err.response?.data?.error || err.message || 'Credenciais inválidas.');

@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { maskPhone, maskCNPJ, maskCEP } from '../utils/masks';
 import api from '../api';
-import { useLoginConfig, writeToLS, readFromLS } from '../hooks/useLoginConfig';
+import { writeToLS } from '../hooks/useLoginConfig';
 
 const PREFIX = 'matopibalog_';
 

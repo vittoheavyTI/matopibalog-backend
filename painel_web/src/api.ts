@@ -2,7 +2,7 @@ import axios from 'axios';
 
 const api = axios.create({
   // Tente adicionar o /api no final do baseURL se suas rotas do backend usam /api
-  baseURL: import.meta.env.VITE_API_URL || 'http://matopibalog.com.br/api',
+  baseURL: import.meta.env.VITE_API_URL || 'https://matopibalog-api.onrender.com',
   withCredentials: true, // ESSENCIAL: Isso faz o navegador enviar o Cookie HTTPOnly
 });
 

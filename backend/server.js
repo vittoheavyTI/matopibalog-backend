@@ -16,7 +16,7 @@ const configRoutes = require('./routes/config');
 
 const app = express();
 
-const FRONTEND_URL = process.env.FRONTEND_URL || 'https://matopibalog.netlify.app';
+const FRONTEND_URL = process.env.FRONTEND_URL || 'https://matopibalog.com.br';
 const allowedOrigins = [
   'https://matopibalog.com.br',
   'http://matopibalog.com.br',
