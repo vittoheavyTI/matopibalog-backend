@@ -132,11 +132,22 @@ exports.esqueceuSenha = async (req, res) => {
     const redirectTo = `${process.env.FRONTEND_URL || 'https://matopibalog.com.br'}/reset-password`;
     const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
 
-    if (error) throw error;
+    if (error) {
+      console.error('[esqueceuSenha] Supabase error:', error.status, error.message);
+      return res.status(500).json({
+        message: 'Erro ao enviar link de recuperação.',
+        codigo: error.status,
+        detalhe: error.message,
+      });
+    }
 
     res.json({ message: 'Link de recuperação enviado.' });
   } catch (err) {
-    res.status(500).json({ message: 'Erro ao enviar link de recuperação.' });
+    console.error('[esqueceuSenha] Exceção:', err.message || err);
+    res.status(500).json({
+      message: 'Erro ao enviar link de recuperação.',
+      detalhe: err.message || 'Erro desconhecido',
+    });
   }
 };
 

@@ -128,7 +128,9 @@ export const Login: React.FC = () => {
       await api.post('/auth/esqueceu-senha', { email: forgotEmail });
       setForgotMessage('Se este e-mail estiver cadastrado, você receberá as instruções em breve.');
     } catch (err: any) {
-      setForgotError(err.response?.data?.error || 'Erro ao enviar. Tente novamente.');
+      const detalhe = err.response?.data?.detalhe;
+      const base = 'Erro ao enviar. Tente novamente.';
+      setForgotError(detalhe ? `${base} (${detalhe})` : base);
     } finally {
       setForgotLoading(false);
     }
