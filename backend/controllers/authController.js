@@ -129,7 +129,8 @@ exports.esqueceuSenha = async (req, res) => {
   const { email } = req.body;
 
   try {
-    const { error } = await supabase.auth.resetPasswordForEmail(email);
+    const redirectTo = `${process.env.FRONTEND_URL || 'https://matopibalog.com.br'}/reset-password`;
+    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
 
     if (error) throw error;
 

@@ -41,6 +41,7 @@ const loginLimiter = rateLimit({
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
+  skipSuccessfulRequests: true,
   message: { message: 'Muitas tentativas de login. Tente novamente em 15 minutos.' },
 });
 

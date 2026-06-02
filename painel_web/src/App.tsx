@@ -25,6 +25,7 @@ import { PainelNotificacoes } from './pages/PainelNotificacoes';
 import { PlanosPublicos } from './pages/PlanosPublicos';
 import { CadastroPublico } from './pages/CadastroPublico';
 import { Faturas } from './pages/Faturas';
+import { RedefinirSenha } from './pages/RedefinirSenha';
 
 const AppRoutes = () => {
   const { loading } = useAuth();
@@ -40,6 +41,7 @@ const AppRoutes = () => {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route path="/reset-password" element={<RedefinirSenha />} />
       <Route path="/planos" element={<PlanosPublicos />} />
       <Route path="/cadastro" element={<CadastroPublico />} />
       
