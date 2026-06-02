@@ -21,11 +21,17 @@ export const RedefinirSenha: React.FC = () => {
     const accessToken = params.get('access_token');
 
     if (type === 'recovery' && accessToken) {
-      // Injeta a sessão manualmente a partir dos tokens da URL
       supabase.auth.setSession({
         access_token: accessToken,
         refresh_token: params.get('refresh_token') || '',
-      }).then(() => setSessionReady(true));
+      }).then(({ error }) => {
+        if (error) {
+          setError('Link expirado ou inválido. Solicite um novo e-mail de recuperação.');
+          setSessionReady(true);
+        } else {
+          setSessionReady(true);
+        }
+      });
       return;
     }
 
@@ -110,7 +116,17 @@ export const RedefinirSenha: React.FC = () => {
           </div>
         )}
 
-        {!message && (
+        {error && (
+          <button
+            type="button"
+            onClick={() => navigate('/login')}
+            style={{ background: 'none', border: 'none', color: '#3b82f6', fontSize: '14px', cursor: 'pointer', padding: '4px 0', textAlign: 'center', textDecoration: 'underline' }}
+          >
+            Voltar ao login
+          </button>
+        )}
+
+        {!message && !error && (
           <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             <div>
               <label style={{ display: 'block', fontSize: '14px', fontWeight: '600', color: '#374151', marginBottom: '6px' }}>

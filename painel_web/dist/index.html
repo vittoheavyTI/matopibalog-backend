@@ -9,12 +9,18 @@
       (function() {
         var redirect = sessionStorage.redirect;
         delete sessionStorage.redirect;
-        if (redirect && redirect !== location.pathname) {
-          history.replaceState(null, null, redirect);
+        if (redirect) {
+          try {
+            var url = new URL(redirect);
+            var target = url.pathname + url.search + url.hash;
+            if (target !== '/' && target !== location.pathname + location.search + location.hash) {
+              history.replaceState(null, null, target);
+            }
+          } catch(e) {}
         }
       })();
     </script>
-    <script type="module" crossorigin src="/assets/index-B3blWL6Y.js"></script>
+    <script type="module" crossorigin src="/assets/index-DndZI-sR.js"></script>
     <link rel="stylesheet" crossorigin href="/assets/index-Do2ZxQTg.css">
   </head>
   <body class="bg-gray-50 text-gray-900">
