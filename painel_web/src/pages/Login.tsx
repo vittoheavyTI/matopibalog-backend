@@ -80,7 +80,6 @@ export const Login: React.FC = () => {
   const [error, setError] = useState('');
   const [loadingLocal, setLoadingLocal] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [ready, setReady] = useState(false);
 
   // Modal esqueceu a senha
   const [showForgotModal, setShowForgotModal] = useState(false);
@@ -91,16 +90,11 @@ export const Login: React.FC = () => {
 
   const navigate = useNavigate();
   const { user, login } = useAuth();
-  const config = useLoginConfig();
+  const { configLoading, ...config } = useLoginConfig();
 
   const tmpl = LOGIN_TEMPLATES.find(t => t.id === config.loginTemplate) || LOGIN_TEMPLATES[0];
   const footerTextColor = getContrastTextColor(config.footerColor);
   const footerBgWithOpacity = config.footerColor + Math.round(config.footerOpacity * 2.55).toString(16).padStart(2, '0');
-
-  useEffect(() => {
-    const t = setTimeout(() => setReady(true), 10);
-    return () => clearTimeout(t);
-  }, []);
 
   useEffect(() => {
     if (user && user.role === 'admin') {
@@ -164,7 +158,7 @@ export const Login: React.FC = () => {
         padding: '16px',
         boxSizing: 'border-box',
       }}>
-        {!ready ? (
+        {configLoading ? (
           <div style={{ width: '100%', maxWidth: '380px', minHeight: '400px' }} />
         ) : (
           <div className="login-card" style={{

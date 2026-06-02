@@ -122,8 +122,13 @@ export function writeToLS(data: Record<string, any>) {
   window.dispatchEvent(new CustomEvent('matopibalog:config-changed'));
 }
 
-export function useLoginConfig(): LoginConfig {
+export interface LoginConfigResult extends LoginConfig {
+  configLoading: boolean;
+}
+
+export function useLoginConfig(): LoginConfigResult {
   const [config, setConfig] = useState<LoginConfig>(readFromLS);
+  const [configLoading, setConfigLoading] = useState(true);
 
   // Reage a mudanças na mesma aba (evento customizado)
   useEffect(() => {
@@ -143,7 +148,7 @@ export function useLoginConfig(): LoginConfig {
     return () => window.removeEventListener('storage', handleStorageEvent);
   }, []);
 
-  // Busca configurações do servidor uma vez na montagem
+  // Busca configurações do servidor uma vez na montagem — só mostra login após retorno
   useEffect(() => {
     api.get('/configuracoes/public')
       .then((response) => {
@@ -153,8 +158,9 @@ export function useLoginConfig(): LoginConfig {
           setConfig(readFromLS());
         }
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setConfigLoading(false));
   }, []);
 
-  return config;
+  return { ...config, configLoading };
 }
