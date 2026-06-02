@@ -1,12 +1,15 @@
 import React from 'react';
-import { Shield, FileText, Download, Filter } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Shield, FileText, TrendingUp, Users, Building2, ArrowRight } from 'lucide-react';
 
 export const PainelRelatorios: React.FC = () => {
+  const navigate = useNavigate();
+
   const relatorios = [
-    { nome: 'Relatório de Fretes', desc: 'Fretes realizados por período', cor: 'text-blue-600 bg-blue-50' },
-    { nome: 'Relatório Financeiro', desc: 'Receitas, despesas e balanço', cor: 'text-green-600 bg-green-50' },
-    { nome: 'Relatório de Motoristas', desc: 'Atividades dos motoristas', cor: 'text-purple-600 bg-purple-50' },
-    { nome: 'Relatório por Empresa', desc: 'Dados consolidados por empresa', cor: 'text-amber-600 bg-amber-50' },
+    { nome: 'Relatório de Fretes', desc: 'Fretes por período com comissão, despesas e balanço completo', cor: 'text-blue-600 bg-blue-50', icon: FileText, rota: '/relatorios' },
+    { nome: 'Relatório Financeiro', desc: 'Resumo consolidado de receitas, despesas e resultado por motorista', cor: 'text-green-600 bg-green-50', icon: TrendingUp, rota: '/relatorios' },
+    { nome: 'Relatório de Motoristas', desc: 'Histórico detalhado de viagens e desempenho por motorista', cor: 'text-purple-600 bg-purple-50', icon: Users, rota: '/relatorios/resumo' },
+    { nome: 'Relatório por Empresa', desc: 'Dados consolidados de fretes e despesas por período', cor: 'text-amber-600 bg-amber-50', icon: Building2, rota: '/relatorios' },
   ];
 
   return (
@@ -21,14 +24,18 @@ export const PainelRelatorios: React.FC = () => {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {relatorios.map(r => (
-          <div key={r.nome} className="bg-white rounded-2xl border border-gray-100 p-6 hover:shadow-md transition-all cursor-pointer">
+          <div key={r.nome} onClick={() => navigate(r.rota)} className="bg-white rounded-2xl border border-gray-100 p-6 hover:shadow-md hover:border-blue-200 transition-all cursor-pointer group">
             <div className="flex items-start justify-between">
-              <div className={`p-3 rounded-xl ${r.cor}`}><FileText size={24} /></div>
-              <span className="p-2 hover:bg-gray-100 rounded-lg"><Download size={18} className="text-gray-400" /></span>
+              <div className={`p-3 rounded-xl ${r.cor}`}><r.icon size={24} /></div>
+              <span className="p-2 bg-gray-50 group-hover:bg-blue-50 rounded-lg transition-colors">
+                <ArrowRight size={18} className="text-gray-400 group-hover:text-blue-500 transition-colors" />
+              </span>
             </div>
             <h3 className="text-lg font-bold text-gray-800 mt-3">{r.nome}</h3>
             <p className="text-sm text-gray-500 mt-1">{r.desc}</p>
-            <div className="mt-3 flex items-center text-xs text-gray-400"><Filter size={12} className="mr-1" />Filtrar por período</div>
+            <div className="mt-4 flex items-center text-xs font-bold text-blue-500 group-hover:text-blue-600 transition-colors">
+              <ArrowRight size={12} className="mr-1" /> Abrir relatório
+            </div>
           </div>
         ))}
       </div>

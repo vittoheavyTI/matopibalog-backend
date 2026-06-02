@@ -464,7 +464,13 @@ export const Relatorios: React.FC = () => {
 
     const pdfBlob = doc.output('blob');
     const pdfUrl = URL.createObjectURL(pdfBlob);
-    window.open(pdfUrl);
+    const a = document.createElement('a');
+    a.href = pdfUrl;
+    a.download = `relatorio-matopiba-${new Date().toISOString().split('T')[0]}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(pdfUrl);
     } catch (error) {
       console.error("Erro ao gerar PDF:", error);
       alert("Ocorreu um erro ao gerar o relatório.");
@@ -785,7 +791,13 @@ export const Relatorios: React.FC = () => {
 
     const pdfBlob = doc.output('blob');
     const pdfUrl = URL.createObjectURL(pdfBlob);
-    window.open(pdfUrl);
+    const a = document.createElement('a');
+    a.href = pdfUrl;
+    a.download = `relatorio-matopiba-${new Date().toISOString().split('T')[0]}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(pdfUrl);
     } catch (error) {
       console.error("Erro ao gerar PDF selecionado:", error);
       alert("Ocorreu um erro ao gerar o relatório.");

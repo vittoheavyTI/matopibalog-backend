@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Building2, Users, Truck, DollarSign, BarChart3, AlertTriangle, Clock } from 'lucide-react';
+import { Shield, Building2, Users, Truck, DollarSign, AlertTriangle, Clock } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import api from '../api';
 
 export const PainelVisaoGeral: React.FC = () => {
@@ -59,10 +60,37 @@ export const PainelVisaoGeral: React.FC = () => {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 bg-white rounded-2xl border border-gray-100 p-6">
-          <h3 className="font-bold text-gray-800 mb-4">Receita Mensal</h3>
-          <div className="h-64 flex items-center justify-center bg-gray-50 rounded-xl border border-dashed border-gray-200">
-            <div className="text-center text-gray-400"><BarChart3 size={48} className="mx-auto mb-2" /><p className="text-sm font-medium">Gráfico de receita</p></div>
-          </div>
+          <h3 className="font-bold text-gray-800 mb-1">Receita por Empresa</h3>
+          <p className="text-xs text-gray-400 mb-4">Valor mensal das assinaturas ativas</p>
+          {(() => {
+            const chartData = empresas
+              .filter((e: any) => e.status === 'ativo' && parseFloat(e.planos?.preco_mensal || 0) > 0)
+              .map((e: any) => ({
+                nome: e.nome && e.nome.length > 12 ? e.nome.substring(0, 12) + '…' : (e.nome || '?'),
+                receita: parseFloat(e.planos?.preco_mensal || 0),
+              }))
+              .slice(0, 10);
+            if (chartData.length === 0) {
+              return (
+                <div className="h-56 flex items-center justify-center bg-gray-50 rounded-xl border border-dashed border-gray-200">
+                  <p className="text-sm text-gray-400">Nenhuma empresa ativa com plano pago</p>
+                </div>
+              );
+            }
+            return (
+              <div className="h-56">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 4 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
+                    <XAxis dataKey="nome" tick={{ fontSize: 11, fill: '#6b7280' }} />
+                    <YAxis tick={{ fontSize: 11, fill: '#6b7280' }} tickFormatter={(v: number) => `R$${v}`} width={60} />
+                    <Tooltip formatter={(v: any) => [`R$ ${Number(v).toFixed(2)}`, 'Receita mensal']} labelStyle={{ fontWeight: 700 }} />
+                    <Bar dataKey="receita" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            );
+          })()}
         </div>
         <div className="space-y-4">
           <div className="bg-white rounded-2xl border border-gray-100 p-6">

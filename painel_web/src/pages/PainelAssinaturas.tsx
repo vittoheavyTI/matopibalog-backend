@@ -17,8 +17,8 @@ export const PainelAssinaturas: React.FC = () => {
         plano: e.planos?.nome || 'Sem plano',
         valor: e.planos?.preco_mensal || 0,
         status: e.status || 'inativo',
-        inicio: e.created_at,
-        vencimento: e.created_at,
+        inicio: e.trial_started_at || e.created_at,
+        vencimento: e.trial_ends_at || null,
       }));
       setAssinaturas(lista);
     }
@@ -58,7 +58,7 @@ export const PainelAssinaturas: React.FC = () => {
         <table className="w-full text-left">
           <thead>
             <tr className="bg-gray-50 text-gray-600 text-xs font-bold uppercase tracking-wider">
-              <th className="p-4 border-b">Empresa</th><th className="p-4 border-b">Plano</th><th className="p-4 border-b">Valor</th><th className="p-4 border-b">Status</th>
+              <th className="p-4 border-b">Empresa</th><th className="p-4 border-b">Plano</th><th className="p-4 border-b">Valor</th><th className="p-4 border-b">Início</th><th className="p-4 border-b">Vencimento</th><th className="p-4 border-b">Status</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-50">
@@ -67,10 +67,12 @@ export const PainelAssinaturas: React.FC = () => {
                 <td className="p-4"><div><p className="font-bold text-gray-800">{a.empresa}</p><p className="text-xs text-gray-400">{a.cnpj}</p></div></td>
                 <td className="p-4"><span className="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase bg-purple-50 text-purple-700"><CreditCard size={12} className="inline mr-1" />{a.plano}</span></td>
                 <td className="p-4 font-bold text-gray-800">R$ {parseFloat(String(a.valor)).toFixed(2)}</td>
+                <td className="p-4 text-sm text-gray-500">{a.inicio ? new Date(a.inicio).toLocaleDateString('pt-BR') : '-'}</td>
+                <td className="p-4 text-sm text-gray-500">{a.vencimento ? new Date(a.vencimento).toLocaleDateString('pt-BR') : '-'}</td>
                 <td className="p-4">{a.status === 'ativo' ? <span className="flex items-center text-green-600 text-sm font-bold"><CheckCircle size={14} className="mr-1" />Ativo</span> : a.status === 'trial' ? <span className="flex items-center text-amber-600 text-sm font-bold"><Clock size={14} className="mr-1" />Trial</span> : <span className="flex items-center text-red-600 text-sm font-bold"><XCircle size={14} className="mr-1" />Inativo</span>}</td>
               </tr>
             ))}
-            {filtered.length === 0 && <tr><td colSpan={4} className="p-8 text-center text-gray-400">Nenhuma assinatura</td></tr>}
+            {filtered.length === 0 && <tr><td colSpan={6} className="p-8 text-center text-gray-400">Nenhuma assinatura</td></tr>}
           </tbody>
         </table>
       </div>
