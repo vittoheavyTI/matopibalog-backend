@@ -14,6 +14,22 @@ export const RedefinirSenha: React.FC = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
+    // Detecta tokens diretamente no hash da URL (fluxo Supabase recovery)
+    const hash = window.location.hash;
+    const params = new URLSearchParams(hash.replace('#', ''));
+    const type = params.get('type');
+    const accessToken = params.get('access_token');
+
+    if (type === 'recovery' && accessToken) {
+      // Injeta a sessão manualmente a partir dos tokens da URL
+      supabase.auth.setSession({
+        access_token: accessToken,
+        refresh_token: params.get('refresh_token') || '',
+      }).then(() => setSessionReady(true));
+      return;
+    }
+
+    // Fallback: aguarda evento do Supabase (caso já tenha sessão ativa)
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) setSessionReady(true);
     });

@@ -396,7 +396,7 @@ export const Login: React.FC = () => {
                 onClick={() => setShowForgotModal(false)}
                 style={{ background: 'none', border: 'none', color: '#6b7280', fontSize: '13px', cursor: 'pointer', padding: '4px 0', textAlign: 'center' }}
               >
-                Cancelar
+                {forgotMessage ? 'Fechar' : 'Cancelar'}
               </button>
             </form>
           </div>
