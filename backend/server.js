@@ -16,6 +16,9 @@ const configRoutes = require('./routes/config');
 
 const app = express();
 
+// Necessário para o Railway (proxy reverso) — corrige o express-rate-limit
+app.set('trust proxy', 1);
+
 const FRONTEND_URL = process.env.FRONTEND_URL || 'https://matopibalog.com.br';
 const allowedOrigins = [
   'https://matopibalog.com.br',

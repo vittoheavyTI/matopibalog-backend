@@ -17,13 +17,19 @@ exports.register = async (req, res) => {
 
     if (authError) return res.status(400).json({ message: authError.message });
 
-    await supabase.from('usuarios').insert({
+    const { error: insertError } = await supabase.from('usuarios').insert({
       id: authData.user.id,
       nome,
       email,
       tipo: tipo || 'proprietario',
       status: 'pendente'
     });
+
+    if (insertError) {
+      console.error('[register] Falha ao inserir em usuarios, revertendo Auth:', insertError.message);
+      await supabase.auth.admin.deleteUser(authData.user.id).catch(() => {});
+      return res.status(500).json({ message: 'Erro ao criar perfil. Tente novamente.' });
+    }
 
     if (tipo === 'motorista') {
       await supabase.from('motoristas').insert({
@@ -62,7 +68,12 @@ exports.login = async (req, res) => {
       .eq('id', uid)
       .single();
 
-    if (userError || !userData) throw userError || new Error('Perfil não encontrado');
+    if (userError || !userData) {
+      console.error(`[login] Perfil ausente na tabela usuarios para uid ${uid}:`, userError);
+      return res.status(409).json({
+        message: 'Perfil incompleto. Entre em contato com o suporte.'
+      });
+    }
 
     if (userData.status === 'bloqueado') {
       return res.status(403).json({ message: 'Sua conta está bloqueada. Entre em contato com o suporte.' });
