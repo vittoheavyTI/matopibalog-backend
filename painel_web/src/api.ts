@@ -11,8 +11,10 @@ api.interceptors.response.use((response) => {
   return response;
 }, (error) => {
   if (error.response && error.response.status === 401) {
-    // Se o backend disser que o cookie expirou, avisamos o React para voltar pra tela de login
-    window.dispatchEvent(new Event('auth:unauthorized'));
+    const url: string = error.config?.url ?? '';
+    if (!url.includes('/auth/me') && !url.includes('/auth/login')) {
+      window.dispatchEvent(new Event('auth:unauthorized'));
+    }
   }
   return Promise.reject(error);
 });

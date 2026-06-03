@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import api from '../api';
 
 export interface User {
@@ -29,6 +29,7 @@ export const useAuth = () => useContext(AuthContext);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const loadingRef = useRef(true);
 
   // Verifica o cookie na montagem para restaurar a sessão
   useEffect(() => {
@@ -48,13 +49,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setUser(null);
       })
       .finally(() => {
+        loadingRef.current = false;
         setLoading(false);
       });
   }, []);
 
   // Reage a expiração de cookie detectada pelo interceptor do axios
   useEffect(() => {
-    const handleUnauthorized = () => setUser(null);
+    const handleUnauthorized = () => {
+      if (!loadingRef.current) setUser(null);
+    };
     window.addEventListener('auth:unauthorized', handleUnauthorized);
     return () => window.removeEventListener('auth:unauthorized', handleUnauthorized);
   }, []);

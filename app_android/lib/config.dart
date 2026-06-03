@@ -1,3 +1,3 @@
 class Config {
-  static const String apiBaseUrl = 'https://matopibalog-api.onrender.com';
+  static const String apiBaseUrl = 'https://matopibalog-backend-production.up.railway.app';
 }

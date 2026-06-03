@@ -83,8 +83,9 @@ exports.login = async (req, res) => {
       maxAge: 7 * 24 * 60 * 60 * 1000
     });
 
-    // 5. Retorna os dados do usuário
+    // 5. Retorna os dados do usuário (token incluso para o app Flutter)
     res.status(200).json({
+      token,
       user: {
         uid: userData.id,
         nome: userData.nome,

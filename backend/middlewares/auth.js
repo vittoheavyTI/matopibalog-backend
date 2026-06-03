@@ -2,7 +2,12 @@ const jwt = require('jsonwebtoken');
 
 // Middleware 1: Verifica se o usuário está logado olhando o Cookie
 const verifyToken = (req, res, next) => {
-  const token = req.cookies ? req.cookies.token : null;
+  const tokenFromCookie = req.cookies ? req.cookies.token : null;
+  const authHeader = req.headers['authorization'];
+  const tokenFromHeader = authHeader && authHeader.startsWith('Bearer ')
+    ? authHeader.slice(7)
+    : null;
+  const token = tokenFromCookie || tokenFromHeader;
 
   if (!token) {
     return res.status(401).json({ error: 'Acesso negado. Token não fornecido.' });
