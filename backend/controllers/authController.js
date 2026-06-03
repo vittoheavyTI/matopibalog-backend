@@ -21,7 +21,7 @@ exports.register = async (req, res) => {
       id: authData.user.id,
       nome,
       email,
-      tipo: tipo || 'proprietario',
+      tipo: tipo || 'motorista',
       status: 'pendente'
     });
 
