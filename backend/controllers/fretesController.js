@@ -43,7 +43,9 @@ exports.getAll = async (req, res) => {
 
 exports.create = async (req, res) => {
   const { origem, destino, km_inicial, valor_frete, quem_recebeu } = req.body;
-  const motorista_id = req.user.uid;
+  const motorista_id = req.user.role === 'admin'
+    ? (req.body.motorista_id || req.user.uid)
+    : req.user.uid;
 
   try {
     // 1. Validar status

@@ -65,8 +65,8 @@ exports.create = async (req, res) => {
       return res.status(404).json({ message: 'Motorista não encontrado.' });
     }
 
-    if (userData.status !== 'ativo') {
-      return res.status(403).json({ message: 'Motorista não aprovado ou bloqueado.' });
+    if (!userData || userData.status === 'bloqueado') {
+      return res.status(403).json({ message: 'Motorista bloqueado. Entre em contato com o administrador.' });
     }
 
     // Gravar no banco

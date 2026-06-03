@@ -39,7 +39,7 @@ exports.create = async (req, res) => {
 
   try {
     const { data: userData } = await supabase.from('usuarios').select('status').eq('id', motorista_id_final).single();
-    if (userData.status !== 'ativo') return res.status(403).json({ message: 'Motorista não aprovado.' });
+    if (!userData || userData.status === 'bloqueado') return res.status(403).json({ message: 'Motorista bloqueado. Entre em contato com o administrador.' });
 
     const { data, error } = await supabase
       .from('abastecimentos')

@@ -3,7 +3,7 @@ const { z } = require('zod');
 const createFreteSchema = z.object({
   origem: z.string().min(2, 'Origem é obrigatória.').max(200),
   destino: z.string().min(2, 'Destino é obrigatório.').max(200),
-  km_inicial: z.coerce.number({ invalid_type_error: 'KM inicial deve ser um número.' }).positive('KM inicial deve ser maior que zero.'),
+  km_inicial: z.coerce.number({ invalid_type_error: 'KM inicial deve ser um número.' }).positive('KM inicial deve ser maior que zero.').optional(),
   valor_frete: z.coerce.number({ invalid_type_error: 'Valor do frete deve ser um número.' }).nonnegative('Valor do frete não pode ser negativo.'),
   quem_recebeu: z.enum(['proprietario', 'motorista']).optional(),
   motorista_id: z.string().uuid('ID do motorista inválido.').optional(),
