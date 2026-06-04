@@ -32,8 +32,18 @@ const isAdmin = (req, res, next) => {
   }
 };
 
-// Exporta as duas funções para serem usadas nas rotas
-module.exports = { 
-  verifyToken, 
-  isAdmin 
+// Middleware 3: Verifica se o usuário é super-admin (poder global sobre todas as empresas)
+const isSuperAdmin = (req, res, next) => {
+  if (req.user && req.user.is_super_admin === true) {
+    next();
+  } else {
+    return res.status(403).json({ message: 'Acesso restrito ao administrador do sistema.' });
+  }
+};
+
+// Exporta as funções para serem usadas nas rotas
+module.exports = {
+  verifyToken,
+  isAdmin,
+  isSuperAdmin
 };

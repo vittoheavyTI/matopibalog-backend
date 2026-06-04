@@ -1,9 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const supabase = require('../config/supabase');
-const { verifyToken, isAdmin } = require('../middlewares/auth');
+const { verifyToken, isAdmin, isSuperAdmin } = require('../middlewares/auth');
 
-router.use(verifyToken, isAdmin);
+router.use(verifyToken, isAdmin, isSuperAdmin);
 
 // DASHBOARD
 router.get('/dashboard', async (req, res) => {
