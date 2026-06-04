@@ -348,7 +348,7 @@ export const Login: React.FC = () => {
       {showForgotModal && (
         <div
           className="modal-overlay"
-          onClick={(e) => { if (e.target === e.currentTarget) setShowForgotModal(false); }}
+          onMouseDown={(e) => { if (e.target === e.currentTarget) setShowForgotModal(false); }}
           style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}
         >
           <div style={{ background: '#ffffff', borderRadius: '16px', width: '100%', maxWidth: '400px', overflow: 'hidden', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
