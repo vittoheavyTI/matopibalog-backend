@@ -318,7 +318,6 @@ export const Login: React.FC = () => {
             left: '50%',
             transform: 'translateX(-50%)',
             width: `${config.footerWidth}%`,
-            maxWidth: '600px',
             background: footerBgWithOpacity,
             borderRadius: '8px',
             padding: '8px 16px',
@@ -329,16 +328,16 @@ export const Login: React.FC = () => {
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              gap: '16px',
+              gap: '10px',
               flexWrap: 'wrap',
               fontSize: `${config.footerFontSize}px`,
               fontWeight: config.footerBold ? 'bold' : 'normal',
               fontFamily: config.footerFontFamily,
               color: footerTextColor,
             }}>
-              {config.contactPhone && <span>{config.contactPhone}</span>}
-              {config.contactEmail && <span>{config.contactEmail}</span>}
-              {config.footerText && <span>{config.footerText}</span>}
+              {config.contactPhone && <span style={{ whiteSpace: 'nowrap' }}>{config.contactPhone}</span>}
+              {config.contactEmail && <span style={{ whiteSpace: 'nowrap' }}>{config.contactEmail}</span>}
+              {config.footerText && <span style={{ whiteSpace: 'nowrap' }}>{config.footerText}</span>}
             </div>
           </div>
         )}

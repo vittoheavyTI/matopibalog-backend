@@ -644,9 +644,9 @@ export const Configuracoes: React.FC = () => {
                     fontFamily: footerFontFamily,
                     color: footerTextColor,
                   }}>
-                    {contactPhone && <span>{contactPhone}</span>}
-                    {contactEmail && <span>{contactEmail}</span>}
-                    {footerText && <span>{footerText}</span>}
+                    {contactPhone && <span style={{ whiteSpace: 'nowrap' }}>{contactPhone}</span>}
+                    {contactEmail && <span style={{ whiteSpace: 'nowrap' }}>{contactEmail}</span>}
+                    {footerText && <span style={{ whiteSpace: 'nowrap' }}>{footerText}</span>}
                   </div>
                 </div>
               )}
