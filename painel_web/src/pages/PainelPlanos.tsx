@@ -12,6 +12,14 @@ export const PainelPlanos: React.FC = () => {
 
   useEffect(() => { carregar(); }, []);
 
+  // Normaliza recursos — pode vir como string, array JSONB ou objeto do banco
+  function recursosToString(r: any): string {
+    if (!r) return '';
+    if (typeof r === 'string') return r;
+    if (Array.isArray(r)) return r.join(', ');
+    try { return JSON.stringify(r); } catch { return String(r); }
+  }
+
   async function carregar() {
     try {
       const response = await api.get('/painel-admin/planos');
@@ -70,9 +78,9 @@ export const PainelPlanos: React.FC = () => {
               <span className="text-xl font-black text-blue-600">R$ {parseFloat(p.preco_mensal || '0').toFixed(2)}</span>
             </div>
             <p className="text-sm text-gray-500 mb-4">{p.descricao || 'Sem descrição'}</p>
-            {p.recursos && <p className="text-xs text-gray-400 bg-gray-50 p-3 rounded-xl break-words">{p.recursos}</p>}
+            {p.recursos && <p className="text-xs text-gray-400 bg-gray-50 p-3 rounded-xl break-words">{recursosToString(p.recursos)}</p>}
             <div className="flex gap-2 mt-4 pt-3 border-t">
-              <button onClick={() => { setEditing(p); setForm({ nome: p.nome, preco_mensal: String(p.preco_mensal || ''), descricao: p.descricao || '', recursos: p.recursos || '' }); setShowModal(true); }} className="flex-1 py-2 text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-xl"><Eye size={14} className="inline mr-1" />Editar</button>
+              <button onClick={() => { setEditing(p); setForm({ nome: p.nome, preco_mensal: String(p.preco_mensal || ''), descricao: p.descricao || '', recursos: recursosToString(p.recursos) }); setShowModal(true); }} className="flex-1 py-2 text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-xl"><Eye size={14} className="inline mr-1" />Editar</button>
               <button onClick={() => setDeleteTarget(p)} className="py-2 px-3 text-xs font-bold text-red-500 bg-red-50 hover:bg-red-100 rounded-xl"><Trash2 size={14} /></button>
             </div>
           </div>
