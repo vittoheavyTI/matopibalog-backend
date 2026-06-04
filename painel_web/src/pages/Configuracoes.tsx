@@ -356,6 +356,7 @@ export const Configuracoes: React.FC = () => {
   // Derivados para o preview
   const tmplPreview = LOGIN_TEMPLATES.find(t => t.id === selectedTemplate) || LOGIN_TEMPLATES[0];
   const footerTextColor = getContrastTextColor(footerColor);
+  const footerPaddingHorizontal = Math.round(8 + (footerWidth - 20) * 52 / 80);
   const footerBgWithOpacity = footerColor + Math.round(footerOpacity * 2.55).toString(16).padStart(2, '0');
 
   return (
@@ -630,16 +631,17 @@ export const Configuracoes: React.FC = () => {
                   bottom: '10px',
                   left: '50%',
                   transform: 'translateX(-50%)',
-                  width: `${footerWidth}%`,
+                  width: 'fit-content',
+                  maxWidth: '90%',
                   background: footerBgWithOpacity,
-                  borderRadius: '6px',
-                  padding: '6px 12px',
+                  borderRadius: '8px',
+                  padding: `8px ${footerPaddingHorizontal}px`,
                   textAlign: 'center',
                 }}>
                   <div style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     gap: '10px', flexWrap: 'wrap',
-                    fontSize: `${Math.round(footerFontSize * 0.85)}px`,
+                    fontSize: `${footerFontSize}px`,
                     fontWeight: footerBold ? 'bold' : 'normal',
                     fontFamily: footerFontFamily,
                     color: footerTextColor,
@@ -765,7 +767,8 @@ export const Configuracoes: React.FC = () => {
             </div>
 
             <div>
-              <div className="flex justify-between text-sm mb-1"><span className="font-medium text-gray-700">Largura do Rodapé</span><span className="text-gray-500">{footerWidth}%</span></div>
+              <div className="flex justify-between text-sm mb-1"><span className="font-medium text-gray-700">Respiro do Rodapé</span><span className="text-gray-500">{footerWidth}</span></div>
+              <p className="text-xs text-gray-500 mb-2">Controla o espaço entre o texto e a borda do rodapé.</p>
               <input type="range" min="20" max="100" value={footerWidth} onChange={e => { const v = Number(e.target.value); setFooterWidth(v); localStorage.setItem(`${PREFIX}footer_width`, v.toString()); }} className="w-full accent-blue-600" />
             </div>
 

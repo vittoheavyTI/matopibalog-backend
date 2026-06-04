@@ -95,6 +95,7 @@ export const Login: React.FC = () => {
   const tmpl = LOGIN_TEMPLATES.find(t => t.id === config.loginTemplate) || LOGIN_TEMPLATES[0];
   const footerTextColor = getContrastTextColor(config.footerColor);
   const footerBgWithOpacity = config.footerColor + Math.round(config.footerOpacity * 2.55).toString(16).padStart(2, '0');
+  const paddingHorizontal = Math.round(8 + (config.footerWidth - 20) * 52 / 80);
 
   useEffect(() => {
     if (user && user.role === 'admin') {
@@ -317,10 +318,11 @@ export const Login: React.FC = () => {
             bottom: '16px',
             left: '50%',
             transform: 'translateX(-50%)',
-            width: `${config.footerWidth}%`,
+            width: 'fit-content',
+            maxWidth: '90vw',
             background: footerBgWithOpacity,
             borderRadius: '8px',
-            padding: '8px 16px',
+            padding: `8px ${paddingHorizontal}px`,
             textAlign: 'center',
             zIndex: 50,
           }}>
