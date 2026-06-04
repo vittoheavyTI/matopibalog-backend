@@ -351,3 +351,255 @@ npx vite build  # NÃO use npm run build (tsc -b trava)
 - Skills em `.opencode/skills/`
 - opencode node_modules em `.opencode/node_modules/`
 - AGENTS.md na raiz do projeto com instruções de ambiente
+
+---
+
+# 13. ESTADO ATUAL — 2026-06-04 (Sessão Claude Code)
+
+> ⚠️ A partir daqui o conteúdo SUBSTITUI / atualiza as seções acima quando houver conflito.
+> Seções 1–12 são mantidas como histórico. As decisões e arquivos abaixo são os atuais.
+
+## 13.1 Infraestrutura atual (atualizada)
+
+| Componente | Onde | URL |
+|---|---|---|
+| Backend | **Railway** (não mais Render) | https://matopibalog-backend-production.up.railway.app |
+| Frontend | GitHub Pages via Actions | https://matopibalog.com.br |
+| Banco + Auth | Supabase | https://rjahjogidyndphdxevom.supabase.co |
+| Repositório | GitHub monorepo | vittoheavyTI/matopibalog-backend |
+| Node.js | 20+ (forçado no Railway) | |
+| E-mail | Resend via Supabase SMTP (recuperação) | sem envio direto pelo backend ainda |
+
+**Pipeline:** push na `main` → Railway redeploy (~2 min) + GitHub Actions build do frontend (~4 min).
+
+## 13.2 Autenticação — estado atual
+
+### JWT
+Payload atual (após login): `{ uid, email, role, is_super_admin }` — válido por 7 dias.
+
+### Web
+- Token via **httpOnly cookie** (`secure`, `sameSite: 'none'`)
+- AuthContext lê `GET /auth/me` na montagem para restaurar sessão
+- ProtectedRoute aguarda `loading` terminar antes de redirecionar
+- Interceptor de 401 em `api.ts` **ignora** `/auth/me` e `/auth/login` (evita logout imediato)
+- Evento `auth:unauthorized` só age após carregamento inicial (loadingRef)
+
+### App Flutter
+- Token via **`Authorization: Bearer`** no header
+- Backend aceita cookie OU Bearer (middleware `verifyToken` em `backend/middlewares/auth.js`)
+- Login retorna `token` no body (linha 178 do authController) para o Flutter salvar em SharedPreferences
+
+## 13.3 Multi-tenant + Super-admin (NOVO)
+
+### Conceito
+- **Admin comum** (`is_super_admin = false`): dono de uma empresa, só vê/gerencia dados dela.
+- **Super-admin** (`is_super_admin = true`): dono do sistema, vê tudo, pode impersonar.
+
+### Quem é super-admin
+- Campo `is_super_admin` BOOLEAN na tabela `usuarios` (default false)
+- Usuário marcado: **`vittoheavymetal@gmail.com`** (Jordão Vittor, id `f8b239d1-7f7d-4de5-81ea-f8b1c161cad2`)
+- SQL para marcar:
+  ```sql
+  UPDATE usuarios SET is_super_admin = TRUE WHERE email = 'vittoheavymetal@gmail.com';
+  ```
+
+### Backend — middlewares
+Em `backend/middlewares/auth.js`:
+- `verifyToken` — aceita cookie OU Bearer
+- `isAdmin` — exige `role === 'admin'`
+- **`isSuperAdmin`** — exige `req.user.is_super_admin === true`, senão 403
+
+Em `backend/middlewares/tenant.js`:
+- **`verificarEmpresa`** — injeta `req.empresa_id` do usuário logado
+- Admin pode impersonar via `?empresa_id=` se tiver `role === 'admin'` (deveria ser restrito a super-admin, hoje está aberto a qualquer admin — pendência)
+
+### Backend — proteção de rotas
+- `/painel-admin/*` → `router.use(verifyToken, isAdmin, isSuperAdmin)` — **só super-admin**
+- `/admin/motoristas` (GET) → `verificarEmpresa` + filtro por empresa (super-admin vê tudo)
+- `/admin/motoristas/pendentes`, `/approve`, `/block` → **AINDA SEM** filtro por empresa (pendência)
+
+### Frontend — proteção de rotas
+- `SuperAdminRoute.tsx` (componente novo) — redireciona admin comum para `/`
+- `App.tsx` — todas as rotas `/painel-administrativo/*` usam `SuperAdminRoute`
+- `Sidebar.tsx` — menu "Painel Admin." só renderiza se `user?.is_super_admin === true`
+- `AuthContext.tsx` — interface `User` inclui `is_super_admin?: boolean`
+
+## 13.4 Sistema de empresas + código de convite (NOVO)
+
+### Banco — tabela `empresas`
+Colunas adicionadas:
+- `codigo_convite TEXT NOT NULL UNIQUE` (formato `MATO-XXXXXX`)
+- `tipo TEXT DEFAULT 'transportadora' CHECK (tipo IN ('transportadora', 'autonomo'))`
+
+### Helper centralizado (NOVO)
+Arquivo `backend/services/empresaService.js` — exporta `criarEmpresaCompleta({ nome, cnpj, email_contato, telefone, plano_id, planoAlias, tipo })`:
+1. Resolve plano (por id, alias ou nome; default "Plano Básico")
+2. Gera `codigo_convite` único (5 tentativas)
+3. Calcula `trial_started_at` + `trial_ends_at` (default 7 dias)
+4. Insere empresa com todos os campos preenchidos
+5. Retorna `{ empresa, error }`
+
+### Quem usa o helper
+- `authController.registerEmpresa` (cadastro público) — cria empresa via helper + cria usuário admin
+- `painel-admin.js POST /empresas` (painel super-admin) — cria empresa via helper (sem admin ainda — Passo D pendente)
+- `authController.register` (cadastro de motorista) — **ainda usa lógica inline** para criar empresa autônoma (pode migrar depois)
+
+### Fluxo de cadastro de motorista
+- Com `codigo_convite` válido → vincula à empresa
+- Com código inválido → 400 com mensagem clara
+- Sem código → cria empresa autônoma própria + motorista vinculado
+
+### Endpoints novos
+- `GET /configuracoes/codigo-convite` — empresa vê o código dela
+- `POST /configuracoes/codigo-convite/regenerar` — regenera código
+
+### Painel Configurações
+Em `Configuracoes.tsx` aba "Dados da Empresa" — bloco com código de convite + botões "Copiar" e "Regenerar".
+
+## 13.5 Mudanças nos controllers/rotas (resumo)
+
+### `backend/controllers/authController.js`
+- `register` — 3 fluxos: com código, código inválido, autônomo (cria empresa própria)
+- `register` — captura erro do insert em `usuarios` e faz **rollback no Auth** se falhar
+- `register` — `tipo` default mudou de `'proprietario'` para `'motorista'` (constraint da tabela)
+- `login` — perfil ausente em `usuarios` retorna **409** ("Perfil incompleto, contate o suporte") em vez de 500
+- `login` — JWT inclui `is_super_admin`
+- `login` — resposta do body inclui `token` e `is_super_admin`
+- `registerEmpresa` — usa `criarEmpresaCompleta`
+
+### `backend/controllers/adminController.js`
+- `getAllMotoristas` — filtra por `usuarios.empresa_id` se não for super-admin; super-admin pode passar `?empresa_id=`
+
+### `backend/controllers/configController.js`
+- Novos endpoints `getCodigoConvite` e `regenerarCodigoConvite`
+
+### `backend/server.js`
+- `app.set('trust proxy', 1)` adicionado (Railway proxy reverso, corrige express-rate-limit)
+
+## 13.6 Frontend — arquivos críticos atuais
+
+### `painel_web/src/contexts/AuthContext.tsx`
+- Interface `User` inclui `is_super_admin?: boolean`
+- `loadingRef` evita race condition no logout imediato
+- Listener `auth:unauthorized` só age após loading terminar
+
+### `painel_web/src/components/SuperAdminRoute.tsx` (NOVO)
+Componente que redireciona admin comum logado para `/` se a rota exige super-admin.
+
+### `painel_web/src/components/Sidebar.tsx`
+- Importa `useAuth`
+- Menu "Painel Admin." só renderiza com `user?.is_super_admin`
+
+### `painel_web/src/api.ts`
+- Interceptor de 401 ignora `/auth/me` e `/auth/login`
+- BaseURL: Railway
+
+### `painel_web/src/App.tsx`
+- Importa `SuperAdminRoute`
+- Rotas `/painel-administrativo/*` usam `SuperAdminRoute`
+
+### `painel_web/src/pages/CadastroPublico.tsx`
+- Toast de sucesso simplificado (4s, sem contagem regressiva, com X)
+- `useEffect` com cleanup (sem bug do `setTimeout` no JSX)
+
+### `painel_web/src/pages/Login.tsx`
+- Modal "Esqueceu senha" usa `onMouseDown` no overlay (não fecha em clique de autocomplete)
+- Rodapé sem `maxWidth: 600px`; `gap: 10px`; spans com `whiteSpace: nowrap`
+
+### `painel_web/src/pages/Configuracoes.tsx`
+- Bloco de código de convite na aba "Dados da Empresa"
+- Rodapé preview com spans `whiteSpace: nowrap`
+
+### `painel_web/src/pages/PainelPlanos.tsx`
+- `recursosToString` helper para evitar React error #31 quando `recursos` vem como JSONB array/objeto
+
+### `painel_web/src/pages/Motoristas.tsx`
+- Query usa `motoristas` com `usuarios!inner(...)` e filtro por `empresa_id`
+
+## 13.7 App Flutter — estado atual
+
+### `app_android/lib/config.dart`
+- `apiBaseUrl = 'https://matopibalog-backend-production.up.railway.app'`
+
+### `app_android/lib/screens/cadastro_screen.dart`
+- Campo **opcional** "Código da empresa" com hint "deixe vazio se autônomo"
+- Envia `codigo_convite` no payload (apenas se preenchido)
+
+### `app_android/lib/services/api_service.dart`
+- Token salvo em SharedPreferences e enviado como Bearer
+
+### Pendências Flutter
+- Rebranding choferlog → matopibalog (parcial)
+- Refresh token (pós-Farmshow)
+- Máscaras de CPF, telefone, placa (pacote `mask_text_input_formatter`)
+
+## 13.8 Banco — SQLs já executados (não rodar de novo)
+
+```sql
+-- Código de convite + tipo na tabela empresas
+ALTER TABLE empresas ADD COLUMN IF NOT EXISTS codigo_convite TEXT UNIQUE;
+UPDATE empresas SET codigo_convite = 'MATO-' || UPPER(SUBSTRING(REPLACE(id::text,'-',''),1,6)) WHERE codigo_convite IS NULL;
+ALTER TABLE empresas ALTER COLUMN codigo_convite SET NOT NULL;
+ALTER TABLE empresas ADD COLUMN IF NOT EXISTS tipo TEXT DEFAULT 'transportadora' CHECK (tipo IN ('transportadora','autonomo'));
+
+-- Super-admin
+ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS is_super_admin BOOLEAN DEFAULT FALSE NOT NULL;
+UPDATE usuarios SET is_super_admin = TRUE WHERE email = 'vittoheavymetal@gmail.com';
+```
+
+## 13.9 Histórico de commits relevantes desta sessão (2026-06-03/04)
+
+```
+e67f2f8 fix(rodapé): largura do rodapé real bate com o preview
+63a7128 fix(Login): modal de recuperação não fecha ao clicar em autocomplete
+7c164c1 fix(CadastroPublico): simplificar toast de sucesso
+436295d fix(CadastroPublico): caixa de sucesso com contagem regressiva e botão X
+4859177 refactor(empresas): unificar criação via criarEmpresaCompleta
+b6356be feat(empresas): adicionar helper criarEmpresaCompleta
+0aae94c fix(PainelPlanos): corrigir React error #31 ao renderizar recursos
+1bd8d71 feat(segurança): restringir Painel Admin a super-admin no frontend
+5a3af4e feat(segurança): bloquear rotas /painel-admin para não super-admin
+9db4b9e feat(segurança): isolamento multi-tenant na lista de motoristas
+9e1d200 feat(auth): incluir is_super_admin na resposta do login
+f4f80b7 feat(auth): cadastro por código de convite + suporte a autônomo
+0e5992a fix(register): corrigir tipo padrão de 'proprietario' para 'motorista'
+03eb5b9 fix(backend): corrigir erro 500 no login e cadastro de usuários
+a34514a fix(auth): aceitar Bearer token para app mobile
+```
+
+## 13.10 Pendências engatilhadas (em ordem de prioridade)
+
+1. **Filtrar `/admin/motoristas/pendentes` por empresa** (vaza dados entre empresas)
+2. **Validar ownership em `/admin/motoristas/:id/approve` e `/block`** (admin pode aprovar motorista de outra empresa)
+3. **Restringir `?empresa_id=` no `tenant.js` apenas para super-admin** (hoje qualquer admin pode impersonar)
+4. **Passo C de empresas**: envio de e-mail Resend (fire-and-forget) em `criarEmpresaCompleta` para `vittoheavymetal@gmail.com` — campos: nome, email_contato, plano, codigo_convite, data cadastro, trial até
+5. **Passo D de empresas**: painel admin cria admin junto + dropdown de plano no form
+6. **Padronizar campo `recursos` de planos como JSONB-array** (banco já é JSONB, mas inputs mandam string; helpers no front normalizam para exibir)
+7. **Padronização de máscaras** (criar `maskMoeda` e `maskPlaca`, aplicar em CadastroPublico/PainelEmpresas/Motoristas/PainelPlanos/Flutter)
+8. **App Flutter**: rebranding completo, máscaras, refresh token
+9. **Defesa de profundidade**: `recursos` normalizado no backend (POST/PUT planos)
+
+## 13.11 Credenciais e contas de teste
+
+- **Super-admin**: `vittoheavymetal@gmail.com` (Jordão Vittor)
+- **Admin comum**: `admin@matopibalog.com.br` (Administrador)
+- Outras contas admin na tabela `usuarios` (todas com `is_super_admin = false`)
+
+## 13.12 Onde encontrar o quê
+
+| Tarefa | Arquivo |
+|---|---|
+| Adicionar middleware de segurança | `backend/middlewares/auth.js` ou `tenant.js` |
+| Criar empresa | `backend/services/empresaService.js` |
+| Rota privada super-admin | `backend/routes/painel-admin.js` |
+| Rota empresa logada | `backend/routes/admin.js` |
+| Cadastro motorista (com código/autônomo) | `backend/controllers/authController.js` `register` |
+| Cadastro empresa público | `backend/controllers/authController.js` `registerEmpresa` |
+| Tela de configurações da empresa | `painel_web/src/pages/Configuracoes.tsx` |
+| Tela do código de convite | `Configuracoes.tsx` aba "Dados da Empresa" |
+| Sidebar do app | `painel_web/src/components/Sidebar.tsx` |
+| Rota frontend super-admin | `painel_web/src/components/SuperAdminRoute.tsx` |
+| Contexto auth web | `painel_web/src/contexts/AuthContext.tsx` |
+| Cadastro Flutter | `app_android/lib/screens/cadastro_screen.dart` |
+| URL backend Flutter | `app_android/lib/config.dart` |
+
