@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { NavLink } from 'react-router-dom';
 import { LayoutDashboard, Users, FileText, ChevronLeft, ChevronRight, Upload, X, Check, Trash2, Settings, UserCircle, Plug, Shield, ChevronDown } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
 
 export const Sidebar: React.FC = () => {
+  const { user } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
   const [painelOpen, setPainelOpen] = useState(false);
   const [logoBase64, setLogoBase64] = useState<string | null>(null);
@@ -151,7 +153,8 @@ export const Sidebar: React.FC = () => {
               </NavLink>
             ))}
 
-            {/* Painel Admin - Expansível */}
+            {/* Painel Admin - Expansível (apenas super-admin) */}
+            {user?.is_super_admin && (
             <div>
               <button
                 onClick={() => setPainelOpen(!painelOpen)}
@@ -175,6 +178,7 @@ export const Sidebar: React.FC = () => {
                 </div>
               )}
             </div>
+            )}
 
             <NavLink to="/integracoes" className={linkClass} title={collapsed ? 'Integrações' : undefined}>
               <Plug size={20} className="flex-shrink-0" />

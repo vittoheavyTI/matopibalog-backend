@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
+import { SuperAdminRoute } from './components/SuperAdminRoute';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Layout } from './components/Layout';
 import { Login } from './pages/Login';
@@ -67,17 +68,17 @@ const AppRoutes = () => {
         <Route path="admins" element={<Usuarios />} />
         <Route path="painel-administrativo">
           <Route index element={<Navigate to="visao-geral" replace />} />
-          <Route path="visao-geral" element={<ProtectedRoute><PainelVisaoGeral /></ProtectedRoute>} />
-          <Route path="empresas" element={<ProtectedRoute><PainelEmpresas /></ProtectedRoute>} />
-          <Route path="planos" element={<ProtectedRoute><ErrorBoundary><PainelPlanos /></ErrorBoundary></ProtectedRoute>} />
-          <Route path="assinaturas" element={<ProtectedRoute><PainelAssinaturas /></ProtectedRoute>} />
-          <Route path="usuarios" element={<ProtectedRoute><PainelUsuarios /></ProtectedRoute>} />
-          <Route path="motoristas" element={<ProtectedRoute><PainelMotoristas /></ProtectedRoute>} />
-          <Route path="relatorios" element={<ProtectedRoute><PainelRelatorios /></ProtectedRoute>} />
-          <Route path="financeiro" element={<ProtectedRoute><PainelFinanceiro /></ProtectedRoute>} />
-          <Route path="configuracoes" element={<ProtectedRoute><PainelConfigSistema /></ProtectedRoute>} />
-          <Route path="notificacoes" element={<ProtectedRoute><PainelNotificacoes /></ProtectedRoute>} />
-          <Route path="faturas" element={<ProtectedRoute><Faturas /></ProtectedRoute>} />
+          <Route path="visao-geral" element={<SuperAdminRoute><PainelVisaoGeral /></SuperAdminRoute>} />
+          <Route path="empresas" element={<SuperAdminRoute><PainelEmpresas /></SuperAdminRoute>} />
+          <Route path="planos" element={<SuperAdminRoute><ErrorBoundary><PainelPlanos /></ErrorBoundary></SuperAdminRoute>} />
+          <Route path="assinaturas" element={<SuperAdminRoute><PainelAssinaturas /></SuperAdminRoute>} />
+          <Route path="usuarios" element={<SuperAdminRoute><PainelUsuarios /></SuperAdminRoute>} />
+          <Route path="motoristas" element={<SuperAdminRoute><PainelMotoristas /></SuperAdminRoute>} />
+          <Route path="relatorios" element={<SuperAdminRoute><PainelRelatorios /></SuperAdminRoute>} />
+          <Route path="financeiro" element={<SuperAdminRoute><PainelFinanceiro /></SuperAdminRoute>} />
+          <Route path="configuracoes" element={<SuperAdminRoute><PainelConfigSistema /></SuperAdminRoute>} />
+          <Route path="notificacoes" element={<SuperAdminRoute><PainelNotificacoes /></SuperAdminRoute>} />
+          <Route path="faturas" element={<SuperAdminRoute><Faturas /></SuperAdminRoute>} />
         </Route>
         <Route path="integracoes" element={<ProtectedRoute><Integracoes /></ProtectedRoute>} />
         <Route path="configuracoes" element={<Configuracoes />} />
