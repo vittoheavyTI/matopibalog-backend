@@ -183,7 +183,8 @@ exports.login = async (req, res) => {
         email: userData.email,
         role: userData.tipo,
         status: userData.status,
-        foto_url: userData.foto_url
+        foto_url: userData.foto_url,
+        is_super_admin: userData.is_super_admin ?? false,
       }
     });
   } catch (error) {
