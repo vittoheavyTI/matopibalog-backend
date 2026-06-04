@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Truck, User, Building2, Mail, Lock, Phone } from 'lucide-react';
+import { Truck, User, Building2, Mail, Lock, Phone, X } from 'lucide-react';
 import api from '../api';
 
 interface FormData {
@@ -24,6 +24,25 @@ export const CadastroPublico: React.FC = () => {
     nome: '', email: '', senha: '', confirmarSenha: '',
     empresa: '', cnpj: '', telefone: '', plano: 'basico',
   });
+  const [secondsLeft, setSecondsLeft] = useState(10);
+
+  // Após cadastro concluído (step 3 com success), conta 10s e redireciona.
+  // Usuário pode clicar no X para ir imediatamente.
+  useEffect(() => {
+    if (!success || step !== 3) return;
+    setSecondsLeft(10);
+    const tick = setInterval(() => {
+      setSecondsLeft((s) => {
+        if (s <= 1) {
+          clearInterval(tick);
+          navigate('/login');
+          return 0;
+        }
+        return s - 1;
+      });
+    }, 1000);
+    return () => clearInterval(tick);
+  }, [success, step, navigate]);
 
   const planos = [
     { id: 'basico', nome: 'Básico', preco: 'R$ 49,90' },
@@ -93,10 +112,18 @@ export const CadastroPublico: React.FC = () => {
           )}
 
           {success && (
-            <div className="bg-green-50 text-green-700 p-4 rounded-lg text-sm mb-4">
+            <div className="relative bg-green-50 text-green-700 p-4 pr-10 rounded-lg text-sm mb-4">
+              <button
+                onClick={() => navigate('/login')}
+                aria-label="Ir para o login agora"
+                className="absolute top-2 right-2 p-1 rounded hover:bg-green-100 text-green-700"
+              >
+                <X size={16} />
+              </button>
               <p className="font-semibold mb-1">✅ {success}</p>
-              <p className="text-green-600">Você será redirecionado para o login em instantes...</p>
-              {setTimeout(() => { navigate('/login'); }, 4000)}
+              <p className="text-green-600">
+                Você será redirecionado para o login em {secondsLeft}s. Clique no X para ir agora.
+              </p>
             </div>
           )}
 
