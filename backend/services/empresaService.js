@@ -103,9 +103,9 @@ async function criarEmpresaCompleta(opts) {
     .from('empresas')
     .insert({
       nome: nome.trim(),
-      cnpj: cnpj || '',
-      email_contato: email_contato || '',
-      telefone_contato: telefone || '',
+      cnpj: cnpj && cnpj.trim() ? cnpj.trim() : null,
+      email_contato: email_contato && email_contato.trim() ? email_contato.trim() : null,
+      telefone_contato: telefone && telefone.trim() ? telefone.trim() : null,
       plano_id: plano?.id || null,
       status: 'trial',
       trial_started_at: agora.toISOString(),

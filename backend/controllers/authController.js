@@ -67,9 +67,9 @@ exports.register = async (req, res) => {
         .from('empresas')
         .insert({
           nome: nome + ' (Autônomo)',
-          cnpj: '',
+          cnpj: null,
           email_contato: email,
-          telefone_contato: '',
+          telefone_contato: null,
           plano_id: planoData?.id || null,
           status: 'trial',
           trial_started_at: new Date().toISOString(),
