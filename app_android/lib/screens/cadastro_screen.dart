@@ -16,6 +16,7 @@ class _CadastroScreenState extends State<CadastroScreen> {
   final _emailCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
   final _confirmPassCtrl = TextEditingController();
+  final _codigoConviteCtrl = TextEditingController();
   bool _loading = false;
   String _error = '';
 
@@ -27,6 +28,7 @@ class _CadastroScreenState extends State<CadastroScreen> {
     _emailCtrl.dispose();
     _passCtrl.dispose();
     _confirmPassCtrl.dispose();
+    _codigoConviteCtrl.dispose();
     super.dispose();
   }
 
@@ -99,12 +101,14 @@ class _CadastroScreenState extends State<CadastroScreen> {
     });
 
     try {
+      final codigo = _codigoConviteCtrl.text.trim().toUpperCase();
       final success = await ApiService.register({
         'nome': _nomeCtrl.text.trim(),
         'placa_veiculo': _placaCtrl.text.trim().toUpperCase(),
         'cpf': _cpfCtrl.text.trim().replaceAll(RegExp(r'\D'), ''),
         'email': _emailCtrl.text.trim(),
         'senha': _passCtrl.text,
+        if (codigo.isNotEmpty) 'codigo_convite': codigo,
       });
 
       if (success && mounted) {
@@ -199,6 +203,26 @@ class _CadastroScreenState extends State<CadastroScreen> {
                 keyboardType: TextInputType.number,
                 validator: _validateCpf,
                 textInputAction: TextInputAction.next,
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _codigoConviteCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Código da empresa (opcional)',
+                  hintText: 'Ex: MATO-AB1234 — deixe vazio se autônomo',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.business_outlined),
+                ),
+                textCapitalization: TextCapitalization.characters,
+                textInputAction: TextInputAction.next,
+              ),
+              const SizedBox(height: 4),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 4),
+                child: Text(
+                  'Motorista autônomo? Deixe este campo em branco.',
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
               ),
               const SizedBox(height: 16),
               TextFormField(

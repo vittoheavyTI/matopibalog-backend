@@ -10,6 +10,9 @@ const registerSchema = z.object({
   email: z.string().email('E-mail inválido.'),
   senha: z.string().min(6, 'Senha deve ter pelo menos 6 caracteres.').max(100),
   tipo: z.enum(['motorista', 'proprietario', 'admin']).optional(),
+  codigo_convite: z.string().max(20).optional(),
+  cpf: z.string().max(20).optional(),
+  placa_veiculo: z.string().max(20).optional(),
 });
 
 const esqueceuSenhaSchema = z.object({

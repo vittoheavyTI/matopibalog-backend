@@ -90,6 +90,8 @@ function getContrastTextColor(hexColor: string): string {
 
 export const Configuracoes: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'empresa' | 'impressora' | 'aparencia'>('empresa');
+  const [codigoConvite, setCodigoConvite] = useState<string | null>(null);
+  const [regenerandoCodigo, setRegenerandoCodigo] = useState(false);
   const [company, setCompany] = useState<CompanyData>({
     nome: '', cnpj: '', endereco: '', cep: '',
     complemento: '', pontoReferencia: '', cidade: '', estado: '', telefone: '', email: '',
@@ -131,6 +133,26 @@ export const Configuracoes: React.FC = () => {
 
   const logoFileRef = useRef<HTMLInputElement>(null);
   const bgFileRef = useRef<HTMLInputElement>(null);
+
+  // Busca código de convite da empresa
+  useEffect(() => {
+    api.get('/configuracoes/codigo-convite')
+      .then((r) => setCodigoConvite(r.data.codigo_convite))
+      .catch(() => setCodigoConvite(null));
+  }, []);
+
+  const handleRegenarCodigo = async () => {
+    if (!window.confirm('Isso irá invalidar o código atual. Motoristas com o código antigo não conseguirão mais se cadastrar. Continuar?')) return;
+    setRegenerandoCodigo(true);
+    try {
+      const r = await api.post('/configuracoes/codigo-convite/regenerar');
+      setCodigoConvite(r.data.codigo_convite);
+    } catch {
+      alert('Erro ao regenerar código. Tente novamente.');
+    } finally {
+      setRegenerandoCodigo(false);
+    }
+  };
 
   // Carrega dados da empresa e impressoras do localStorage
   useEffect(() => {
@@ -417,6 +439,35 @@ export const Configuracoes: React.FC = () => {
               </div>
             </div>
           </div>
+          {/* Código de convite para motoristas */}
+          <div className="pt-4 border-t border-gray-50">
+            <label className="block text-xs font-bold text-gray-400 uppercase mb-2 ml-1">
+              Código de convite para motoristas
+            </label>
+            <p className="text-xs text-gray-500 mb-3 ml-1">
+              Compartilhe este código com seus motoristas para que se cadastrem vinculados à sua empresa.
+            </p>
+            <div className="flex items-center gap-3">
+              <div className="flex-1 bg-gray-50 border-2 border-gray-100 rounded-xl px-4 py-3 font-mono text-lg font-bold tracking-widest text-gray-800 select-all">
+                {codigoConvite ?? '—'}
+              </div>
+              <button
+                onClick={() => codigoConvite && navigator.clipboard.writeText(codigoConvite)}
+                disabled={!codigoConvite}
+                className="px-4 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-medium text-sm transition-colors disabled:opacity-40"
+              >
+                Copiar
+              </button>
+              <button
+                onClick={handleRegenarCodigo}
+                disabled={regenerandoCodigo}
+                className="px-4 py-3 bg-orange-50 hover:bg-orange-100 text-orange-700 rounded-xl font-medium text-sm transition-colors disabled:opacity-40"
+              >
+                {regenerandoCodigo ? 'Gerando...' : 'Regenerar'}
+              </button>
+            </div>
+          </div>
+
           <div className="flex justify-end pt-4 border-t border-gray-50">
             <button onClick={handleSaveCompany} className="flex items-center px-8 py-3 bg-blue-600 text-white rounded-xl font-bold shadow-lg shadow-blue-100 hover:bg-blue-700 transition-all active:scale-95">
               {showSaved ? <Check size={20} className="mr-2" /> : <Save size={20} className="mr-2" />}

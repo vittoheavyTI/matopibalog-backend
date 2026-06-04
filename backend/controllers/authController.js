@@ -1,14 +1,93 @@
 const supabase = require('../config/supabase');
 const jwt = require('jsonwebtoken');
 
+// Gera código de convite no formato MATO-XXXXXX
+function gerarCodigoConvite() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let codigo = 'MATO-';
+  for (let i = 0; i < 6; i++) {
+    codigo += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return codigo;
+}
+
 exports.register = async (req, res) => {
-  const { nome, email, senha, tipo } = req.body;
+  const { nome, email, senha, codigo_convite, cpf, placa_veiculo } = req.body;
 
   if (!nome || !email || !senha) {
     return res.status(400).json({ message: 'Campos obrigatórios: nome, email, senha.' });
   }
 
   try {
+    let empresa_id = null;
+
+    if (codigo_convite && codigo_convite.trim() !== '') {
+      // --- Fluxo com código de convite: vincular à empresa ---
+      const { data: empresa, error: empresaError } = await supabase
+        .from('empresas')
+        .select('id, status')
+        .eq('codigo_convite', codigo_convite.trim().toUpperCase())
+        .single();
+
+      if (empresaError || !empresa) {
+        return res.status(400).json({ message: 'Código de empresa inválido. Verifique com sua transportadora.' });
+      }
+
+      if (empresa.status === 'expirado' || empresa.status === 'bloqueado') {
+        return res.status(400).json({ message: 'Esta empresa está com o plano inativo. Contate o suporte.' });
+      }
+
+      empresa_id = empresa.id;
+    } else {
+      // --- Fluxo autônomo: criar empresa própria ---
+      const { data: planoData } = await supabase
+        .from('planos')
+        .select('id, dias_trial')
+        .eq('nome', 'Plano Básico')
+        .single();
+
+      const trialEnd = new Date(
+        Date.now() + ((planoData?.dias_trial || 7) * 24 * 60 * 60 * 1000)
+      ).toISOString();
+
+      // Garantir código único (tentativas em caso de colisão)
+      let codigoUnico = null;
+      for (let tentativa = 0; tentativa < 5; tentativa++) {
+        const candidato = gerarCodigoConvite();
+        const { data: existente } = await supabase
+          .from('empresas')
+          .select('id')
+          .eq('codigo_convite', candidato)
+          .maybeSingle();
+        if (!existente) { codigoUnico = candidato; break; }
+      }
+
+      const { data: novaEmpresa, error: empresaError } = await supabase
+        .from('empresas')
+        .insert({
+          nome: nome + ' (Autônomo)',
+          cnpj: '',
+          email_contato: email,
+          telefone_contato: '',
+          plano_id: planoData?.id || null,
+          status: 'trial',
+          trial_started_at: new Date().toISOString(),
+          trial_ends_at: trialEnd,
+          codigo_convite: codigoUnico,
+          tipo: 'autonomo',
+        })
+        .select()
+        .single();
+
+      if (empresaError || !novaEmpresa) {
+        console.error('[register] Falha ao criar empresa autônoma:', empresaError?.message);
+        return res.status(500).json({ message: 'Erro ao criar perfil autônomo. Tente novamente.' });
+      }
+
+      empresa_id = novaEmpresa.id;
+    }
+
+    // Criar usuário no Supabase Auth
     const { data: authData, error: authError } = await supabase.auth.admin.createUser({
       email,
       password: senha,
@@ -17,12 +96,14 @@ exports.register = async (req, res) => {
 
     if (authError) return res.status(400).json({ message: authError.message });
 
+    // Criar perfil na tabela usuarios
     const { error: insertError } = await supabase.from('usuarios').insert({
       id: authData.user.id,
       nome,
       email,
-      tipo: tipo || 'motorista',
-      status: 'pendente'
+      tipo: 'motorista',
+      status: 'pendente',
+      empresa_id,
     });
 
     if (insertError) {
@@ -31,14 +112,13 @@ exports.register = async (req, res) => {
       return res.status(500).json({ message: 'Erro ao criar perfil. Tente novamente.' });
     }
 
-    if (tipo === 'motorista') {
-      await supabase.from('motoristas').insert({
-        id: authData.user.id,
-        cpf: '',
-        placa_veiculo: '',
-        status_cadastro: 'pendente'
-      });
-    }
+    // Criar registro na tabela motoristas
+    await supabase.from('motoristas').insert({
+      id: authData.user.id,
+      cpf: cpf || '',
+      placa_veiculo: placa_veiculo || '',
+      status_cadastro: 'pendente'
+    });
 
     res.status(201).json({ message: 'Usuário criado com sucesso!' });
   } catch (error) {
@@ -182,8 +262,17 @@ exports.registerEmpresa = async (req, res) => {
 
     if (planoError) return res.status(400).json({ message: 'Plano não encontrado.' });
 
-    // 2. Criar empresa
+    // 2. Criar empresa com código de convite único
     const trialEnd = new Date(Date.now() + (planoData.dias_trial || 7) * 24 * 60 * 60 * 1000).toISOString();
+
+    let codigoEmpresa = null;
+    for (let tentativa = 0; tentativa < 5; tentativa++) {
+      const candidato = gerarCodigoConvite();
+      const { data: existente } = await supabase
+        .from('empresas').select('id').eq('codigo_convite', candidato).maybeSingle();
+      if (!existente) { codigoEmpresa = candidato; break; }
+    }
+
     const { data: empresaData, error: empresaError } = await supabase
       .from('empresas')
       .insert({
@@ -195,6 +284,8 @@ exports.registerEmpresa = async (req, res) => {
         status: 'trial',
         trial_started_at: new Date().toISOString(),
         trial_ends_at: trialEnd,
+        codigo_convite: codigoEmpresa,
+        tipo: 'transportadora',
       })
       .select()
       .single();
