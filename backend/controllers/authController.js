@@ -161,7 +161,7 @@ exports.login = async (req, res) => {
 
     // 3. Gerar JWT para o backend
     const token = jwt.sign(
-      { uid: userData.id, email: userData.email, role: userData.tipo },
+      { uid: userData.id, email: userData.email, role: userData.tipo, is_super_admin: userData.is_super_admin ?? false },
       process.env.JWT_SECRET,
       { expiresIn: '7d' } // Token expira em 7 dias
     );

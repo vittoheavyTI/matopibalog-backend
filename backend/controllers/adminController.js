@@ -55,9 +55,20 @@ exports.approveMotorista = async (req, res) => {
 exports.getAllMotoristas = async (req, res) => {
   console.log('[adminController:getAllMotoristas] Buscando todos os motoristas...');
   try {
-    const { data, error } = await supabase
+    let query = supabase
       .from('motoristas')
-      .select('*, usuarios(nome, email, status)');
+      .select('*, usuarios!inner(nome, email, status, empresa_id, telefone, cep, endereco, bairro, cidade, foto_url)');
+
+    if (!req.user.is_super_admin) {
+      // Admin comum: filtra SEMPRE pela empresa dele, ignora qualquer ?empresa_id= passado
+      query = query.eq('usuarios.empresa_id', req.empresa_id);
+    } else if (req.query.empresa_id) {
+      // Super-admin: pode filtrar por empresa opcionalmente
+      query = query.eq('usuarios.empresa_id', req.query.empresa_id);
+    }
+    // Super-admin sem ?empresa_id= → retorna todos
+
+    const { data, error } = await query;
 
     if (error) throw error;
     res.status(200).json(data);
