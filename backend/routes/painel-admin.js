@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../config/supabase');
 const { verifyToken, isAdmin, isSuperAdmin } = require('../middlewares/auth');
+const { criarEmpresaCompleta } = require('../services/empresaService');
 
 router.use(verifyToken, isAdmin, isSuperAdmin);
 
@@ -28,16 +29,24 @@ router.get('/empresas', async (req, res) => {
 });
 
 router.post('/empresas', async (req, res) => {
-  const { data, error } = await supabase.from('empresas').insert({
-    nome: req.body.nome,
-    cnpj: req.body.cnpj,
-    email_contato: req.body.email,
-    telefone_contato: req.body.telefone,
-    plano_id: req.body.plano_id || req.body.plano,
-    status: req.body.status || 'trial'
-  }).select().single();
-  if (error) return res.status(500).json({ message: 'Erro ao criar empresa.' });
-  res.status(201).json(data);
+  try {
+    const { empresa, error } = await criarEmpresaCompleta({
+      nome: req.body.nome,
+      cnpj: req.body.cnpj,
+      email_contato: req.body.email,
+      telefone: req.body.telefone,
+      plano_id: req.body.plano_id,
+      planoAlias: req.body.plano,
+      tipo: req.body.tipo || 'transportadora',
+    });
+    if (error || !empresa) {
+      return res.status(500).json({ message: error || 'Erro ao criar empresa.' });
+    }
+    res.status(201).json(empresa);
+  } catch (err) {
+    console.error('[painel-admin POST /empresas] Exceção:', err);
+    res.status(500).json({ message: 'Erro ao criar empresa.' });
+  }
 });
 
 router.put('/empresas/:id', async (req, res) => {

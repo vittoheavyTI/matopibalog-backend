@@ -1,5 +1,6 @@
 const supabase = require('../config/supabase');
 const jwt = require('jsonwebtoken');
+const { criarEmpresaCompleta } = require('../services/empresaService');
 
 // Gera código de convite no formato MATO-XXXXXX
 function gerarCodigoConvite() {
@@ -252,48 +253,21 @@ exports.registerEmpresa = async (req, res) => {
   }
 
   try {
-    // 1. Buscar plano
-    const planosMap = { basico: 'Plano Básico', profissional: 'Plano Profissional', empresarial: 'Plano Enterprise' };
-    const planoNome = planosMap[plano] || 'Básico';
-    const { data: planoData, error: planoError } = await supabase
-      .from('planos')
-      .select('id, dias_trial')
-      .eq('nome', planoNome)
-      .single();
+    // 1. Criar empresa via helper (gera código, plano padrão, trial automático)
+    const { empresa: empresaData, error: empresaError } = await criarEmpresaCompleta({
+      nome: empresa,
+      cnpj,
+      email_contato: email,
+      telefone,
+      planoAlias: plano,
+      tipo: 'transportadora',
+    });
 
-    if (planoError) return res.status(400).json({ message: 'Plano não encontrado.' });
-
-    // 2. Criar empresa com código de convite único
-    const trialEnd = new Date(Date.now() + (planoData.dias_trial || 7) * 24 * 60 * 60 * 1000).toISOString();
-
-    let codigoEmpresa = null;
-    for (let tentativa = 0; tentativa < 5; tentativa++) {
-      const candidato = gerarCodigoConvite();
-      const { data: existente } = await supabase
-        .from('empresas').select('id').eq('codigo_convite', candidato).maybeSingle();
-      if (!existente) { codigoEmpresa = candidato; break; }
+    if (empresaError || !empresaData) {
+      return res.status(500).json({ message: empresaError || 'Erro ao criar empresa.' });
     }
 
-    const { data: empresaData, error: empresaError } = await supabase
-      .from('empresas')
-      .insert({
-        nome: empresa,
-        cnpj: cnpj || '',
-        email_contato: email,
-        telefone_contato: telefone || '',
-        plano_id: planoData.id,
-        status: 'trial',
-        trial_started_at: new Date().toISOString(),
-        trial_ends_at: trialEnd,
-        codigo_convite: codigoEmpresa,
-        tipo: 'transportadora',
-      })
-      .select()
-      .single();
-
-    if (empresaError) return res.status(500).json({ message: 'Erro ao criar empresa.' });
-
-    // 3. Criar usuário no Auth
+    // 2. Criar usuário admin no Supabase Auth
     const { data: authData, error: authError } = await supabase.auth.admin.createUser({
       email,
       password: senha,
@@ -305,7 +279,7 @@ exports.registerEmpresa = async (req, res) => {
       return res.status(400).json({ message: authError.message });
     }
 
-    // 4. Criar admin na tabela usuarios
+    // 3. Criar admin na tabela usuarios
     const { error: userError } = await supabase
       .from('usuarios')
       .insert({
@@ -319,6 +293,7 @@ exports.registerEmpresa = async (req, res) => {
       });
 
     if (userError) {
+      console.error('[registerEmpresa] Erro ao inserir usuario admin:', userError);
       await supabase.auth.admin.deleteUser(authData.user.id).catch(() => { });
       await supabase.from('empresas').delete().eq('id', empresaData.id);
       return res.status(500).json({ message: 'Erro ao salvar dados do usuário.' });
