@@ -24,24 +24,12 @@ export const CadastroPublico: React.FC = () => {
     nome: '', email: '', senha: '', confirmarSenha: '',
     empresa: '', cnpj: '', telefone: '', plano: 'basico',
   });
-  const [secondsLeft, setSecondsLeft] = useState(10);
-
-  // Após cadastro concluído (step 3 com success), conta 10s e redireciona.
-  // Usuário pode clicar no X para ir imediatamente.
+  // Após cadastro concluído (step 3 com success), some sozinho em 4s.
+  // Usuário pode clicar no X para fechar antes.
   useEffect(() => {
     if (!success || step !== 3) return;
-    setSecondsLeft(10);
-    const tick = setInterval(() => {
-      setSecondsLeft((s) => {
-        if (s <= 1) {
-          clearInterval(tick);
-          navigate('/login');
-          return 0;
-        }
-        return s - 1;
-      });
-    }, 1000);
-    return () => clearInterval(tick);
+    const timer = setTimeout(() => navigate('/login'), 4000);
+    return () => clearTimeout(timer);
   }, [success, step, navigate]);
 
   const planos = [
@@ -121,9 +109,7 @@ export const CadastroPublico: React.FC = () => {
                 <X size={16} />
               </button>
               <p className="font-semibold mb-1">✅ {success}</p>
-              <p className="text-green-600">
-                Você será redirecionado para o login em {secondsLeft}s. Clique no X para ir agora.
-              </p>
+              <p className="text-green-600">Você será redirecionado para o login.</p>
             </div>
           )}
 
