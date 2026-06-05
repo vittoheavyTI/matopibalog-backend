@@ -180,10 +180,12 @@ export const Sidebar: React.FC = () => {
             </div>
             )}
 
-            <NavLink to="/integracoes" className={linkClass} title={collapsed ? 'Integrações' : undefined}>
-              <Plug size={20} className="flex-shrink-0" />
-              {!collapsed && <span>Integrações</span>}
-            </NavLink>
+            {user?.is_super_admin && (
+              <NavLink to="/integracoes" className={linkClass} title={collapsed ? 'Integrações' : undefined}>
+                <Plug size={20} className="flex-shrink-0" />
+                {!collapsed && <span>Integrações</span>}
+              </NavLink>
+            )}
 
             <NavLink to="/configuracoes" className={linkClass} title={collapsed ? 'Configurações' : undefined}>
               <Settings size={20} className="flex-shrink-0" />

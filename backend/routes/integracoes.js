@@ -1,8 +1,8 @@
 const express = require('express');
 const router = express.Router();
-const { verifyToken, isAdmin } = require('../middlewares/auth');
+const { verifyToken, isSuperAdmin } = require('../middlewares/auth');
 
-router.post('/testar/asaas', verifyToken, isAdmin, async (req, res) => {
+router.post('/testar/asaas', verifyToken, isSuperAdmin, async (req, res) => {
   try {
     const { apiKey, environment } = req.body;
     const axios = require('axios');
@@ -21,7 +21,7 @@ router.post('/testar/asaas', verifyToken, isAdmin, async (req, res) => {
   }
 });
 
-router.post('/testar/clicksign', verifyToken, isAdmin, async (req, res) => {
+router.post('/testar/clicksign', verifyToken, isSuperAdmin, async (req, res) => {
   try {
     const { token, environment } = req.body;
     const axios = require('axios');
@@ -40,7 +40,7 @@ router.post('/testar/clicksign', verifyToken, isAdmin, async (req, res) => {
   }
 });
 
-router.post('/testar/viacep', verifyToken, isAdmin, async (req, res) => {
+router.post('/testar/viacep', verifyToken, isSuperAdmin, async (req, res) => {
   try {
     const axios = require('axios');
     await axios.get('https://viacep.com.br/ws/01001000/json/');
@@ -50,7 +50,7 @@ router.post('/testar/viacep', verifyToken, isAdmin, async (req, res) => {
   }
 });
 
-router.post('/testar/smtp', verifyToken, isAdmin, async (req, res) => {
+router.post('/testar/smtp', verifyToken, isSuperAdmin, async (req, res) => {
   try {
     const { host, port, user, pass } = req.body;
     const nodemailer = require('nodemailer');
@@ -67,7 +67,7 @@ router.post('/testar/smtp', verifyToken, isAdmin, async (req, res) => {
   }
 });
 
-router.post('/testar/supabase', verifyToken, isAdmin, async (req, res) => {
+router.post('/testar/supabase', verifyToken, isSuperAdmin, async (req, res) => {
   try {
     const supabase = require('../config/supabase');
     const { data } = await supabase.from('usuarios').select('id').limit(1);
@@ -81,7 +81,7 @@ router.post('/testar/supabase', verifyToken, isAdmin, async (req, res) => {
   }
 });
 
-router.post('/salvar', verifyToken, isAdmin, async (req, res) => {
+router.post('/salvar', verifyToken, isSuperAdmin, async (req, res) => {
   try {
     const { servico, config } = req.body;
     const supabase = require('../config/supabase');
