@@ -4,15 +4,27 @@ const supabase = require('../config/supabase');
 exports.getPendentes = async (req, res) => {
   console.log('[adminController:getPendentes] Buscando motoristas pendentes...');
   try {
-    const { data, error } = await supabase
+    const isSuperAdmin = req.user.is_super_admin === true;
+    const empresaAlvo = isSuperAdmin
+      ? (req.query.empresa_id || null)
+      : req.empresa_id;
+
+    let query = supabase
       .from('motoristas')
-      .select('*, usuarios(nome, email)')
+      .select('*, usuarios!inner(nome, email, empresa_id)')
       .eq('status_cadastro', 'pendente');
+
+    if (empresaAlvo) {
+      query = query.eq('usuarios.empresa_id', empresaAlvo);
+    }
+    // empresaAlvo === null → super-admin sem filtro → vê todos os pendentes
+
+    const { data, error } = await query;
 
     if (error) throw error;
     res.status(200).json(data);
   } catch (error) {
-    console.error('[adminController:getPendentes] Erro detalhado:', error);
+    console.error('[adminController:getPendentes] Erro:', error);
     res.status(500).json({ message: 'Erro ao listar motoristas pendentes: ' + (error.message || error) });
   }
 };

@@ -7,7 +7,7 @@ const { verificarEmpresa } = require('../middlewares/tenant');
 // Todas as rotas deste arquivo exigem privilégios de Administrador
 router.use(verifyToken, isAdmin);
 
-router.get('/motoristas/pendentes', adminController.getPendentes);
+router.get('/motoristas/pendentes', verificarEmpresa, adminController.getPendentes);
 router.patch('/motoristas/:id/approve', adminController.approveMotorista);
 router.get('/motoristas', verificarEmpresa, adminController.getAllMotoristas);
 router.put('/motoristas/:id/comissao', adminController.updateComissao);
