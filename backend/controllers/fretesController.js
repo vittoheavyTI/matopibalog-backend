@@ -84,6 +84,23 @@ exports.create = async (req, res) => {
 
     const comissao = valor_frete * (motData.percentual_comissao / 100);
 
+    // 2b. Definir quem_recebeu por tipo de empresa (TAC vs CLT), se não veio no body
+    //  - autonomo (TAC) → 'motorista' (recebe direto, é dono do veículo)
+    //  - transportadora (CLT) → 'proprietario' (a empresa recebe)
+    // O body sobrescreve, para casos especiais definidos pelo usuário.
+    let quemRecebeuFinal = quem_recebeu;
+    if (!quemRecebeuFinal) {
+      const { data: empData, error: empError } = await supabase
+        .from('empresas')
+        .select('tipo')
+        .eq('id', motData.empresa_id)
+        .single();
+      if (empError) {
+        console.error('[fretesController:create] Erro ao buscar tipo da empresa:', empError);
+      }
+      quemRecebeuFinal = empData?.tipo === 'autonomo' ? 'motorista' : 'proprietario';
+    }
+
     // 3. Inserir frete
     const { data, error } = await supabase
       .from('fretes')
@@ -94,7 +111,7 @@ exports.create = async (req, res) => {
         destino,
         km_inicial,
         valor_frete,
-        quem_recebeu: quem_recebeu || 'proprietario',
+        quem_recebeu: quemRecebeuFinal,
         placa: motData.placa_veiculo
       })
       .select()
