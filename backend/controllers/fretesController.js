@@ -76,7 +76,7 @@ exports.create = async (req, res) => {
     // 2. Buscar dados do motorista (placa e comissão) em uma única consulta
     const { data: motData, error: motError } = await supabase
       .from('motoristas')
-      .select('placa_veiculo, percentual_comissao')
+      .select('placa_veiculo, percentual_comissao, empresa_id')
       .eq('id', motorista_id)
       .single();
 
@@ -89,17 +89,21 @@ exports.create = async (req, res) => {
       .from('fretes')
       .insert({
         motorista_id,
+        empresa_id: motData.empresa_id,
         origem,
         destino,
         km_inicial,
         valor_frete,
-        quem_recebeu,
+        quem_recebeu: quem_recebeu || 'proprietario',
         placa: motData.placa_veiculo
       })
       .select()
       .single();
 
-    if (error) throw error;
+    if (error) {
+      console.error('[fretesController:create] Erro ao inserir frete:', error);
+      throw error;
+    }
 
     res.status(201).json({ ...data, comissao_calculada: comissao });
   } catch (error) {

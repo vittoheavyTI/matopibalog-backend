@@ -59,13 +59,13 @@ exports.create = async (req, res) => {
   }
 
   try {
-    const { data: userData } = await supabase.from('usuarios').select('status').eq('id', motorista_id_final).single();
+    const { data: userData } = await supabase.from('usuarios').select('status, empresa_id').eq('id', motorista_id_final).single();
     if (!userData || userData.status === 'bloqueado') return res.status(403).json({ message: 'Motorista bloqueado. Entre em contato com o administrador.' });
 
     const { data, error } = await supabase
       .from('abastecimentos')
       .insert({
-        motorista_id: motorista_id_final, frete_id, litros: parseFloat(litros), valor_total: parseFloat(valor_total),
+        motorista_id: motorista_id_final, empresa_id: userData.empresa_id, frete_id, litros: parseFloat(litros), valor_total: parseFloat(valor_total),
         quem_pagou, arla_litros: arla_litros ? parseFloat(arla_litros) : 0,
         arla_valor: arla_valor ? parseFloat(arla_valor) : 0,
         posto, foto_url: publicUrl,
@@ -73,9 +73,13 @@ exports.create = async (req, res) => {
       })
       .select().single();
 
-    if (error) throw error;
+    if (error) {
+      console.error('[abastecimentosController:create] Erro ao inserir abastecimento:', error);
+      throw error;
+    }
     res.status(201).json(data);
   } catch (error) {
+    console.error('[abastecimentosController:create] Erro:', error);
     res.status(500).json({ message: 'Erro ao registrar abastecimento.' });
   }
 };

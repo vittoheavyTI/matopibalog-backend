@@ -59,20 +59,23 @@ exports.create = async (req, res) => {
   }
 
   try {
-    const { data: userData } = await supabase.from('usuarios').select('status').eq('id', motorista_id_final).single();
+    const { data: userData } = await supabase.from('usuarios').select('status, empresa_id').eq('id', motorista_id_final).single();
     if (!userData || userData.status === 'bloqueado') return res.status(403).json({ message: 'Motorista bloqueado. Entre em contato com o administrador.' });
 
     const { data, error } = await supabase
       .from('vales')
       .insert({
-        motorista_id: motorista_id_final, frete_id, valor: parseFloat(valor),
+        motorista_id: motorista_id_final, empresa_id: userData.empresa_id, frete_id, valor: parseFloat(valor),
         quem_pagou, posto, litros: litros ? parseFloat(litros) : 0,
         foto_url: publicUrl,
         status: req.user.role === 'admin' ? 'aprovado' : 'pendente'
       })
       .select().single();
 
-    if (error) throw error;
+    if (error) {
+      console.error('[valesController:create] Erro ao inserir vale:', error);
+      throw error;
+    }
     res.status(201).json(data);
   } catch (error) {
     res.status(500).json({ message: 'Erro ao registrar vale.' });

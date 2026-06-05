@@ -57,7 +57,7 @@ exports.create = async (req, res) => {
     // Validar status do motorista
     const { data: userData, error: userError } = await supabase
       .from('usuarios')
-      .select('status')
+      .select('status, empresa_id')
       .eq('id', motorista_id)
       .single();
 
@@ -74,6 +74,7 @@ exports.create = async (req, res) => {
       .from('despesas')
       .insert({
         motorista_id,
+        empresa_id: userData.empresa_id,
         frete_id,
         tipo,
         descricao,
