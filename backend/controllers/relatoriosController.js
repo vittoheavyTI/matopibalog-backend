@@ -10,6 +10,22 @@ exports.getFichaViagem = async (req, res) => {
   const idsArray = fretes_ids.split(',').filter(Boolean);
 
   try {
+    // Validar que o motorista pertence à empresa do admin (super-admin pula)
+    const isSuperAdmin = req.user.is_super_admin === true;
+    if (!isSuperAdmin) {
+      const { data: pertence, error: pertenceError } = await supabase
+        .from('usuarios')
+        .select('id')
+        .eq('id', motorista_id)
+        .eq('empresa_id', req.empresa_id)
+        .eq('tipo', 'motorista')
+        .single();
+
+      if (pertenceError || !pertence) {
+        return res.status(403).json({ message: 'Acesso negado: motorista não pertence a esta empresa.' });
+      }
+    }
+
     // 1. Dados do Motorista
     const { data: motorista, error: motError } = await supabase
       .from('motoristas')
@@ -25,7 +41,8 @@ exports.getFichaViagem = async (req, res) => {
     const { data: fretesRaw, error: fretesError } = await supabase
       .from('fretes')
       .select('*')
-      .in('id', idsArray);
+      .in('id', idsArray)
+      .eq('motorista_id', motorista_id);
 
     if (fretesError) throw fretesError;
 
@@ -33,21 +50,24 @@ exports.getFichaViagem = async (req, res) => {
     const { data: abastecimentosRaw, error: eAbast } = await supabase
       .from('abastecimentos')
       .select('*')
-      .in('frete_id', idsArray);
+      .in('frete_id', idsArray)
+      .eq('motorista_id', motorista_id);
 
     if (eAbast) throw eAbast;
 
     const { data: despesasRaw, error: eDespesas } = await supabase
       .from('despesas')
       .select('*')
-      .in('frete_id', idsArray);
+      .in('frete_id', idsArray)
+      .eq('motorista_id', motorista_id);
 
     if (eDespesas) throw eDespesas;
 
     const { data: valesRaw, error: eVales } = await supabase
       .from('vales')
       .select('*')
-      .in('frete_id', idsArray);
+      .in('frete_id', idsArray)
+      .eq('motorista_id', motorista_id);
 
     if (eVales) throw eVales;
 
