@@ -2,10 +2,11 @@ const express = require('express');
 const router = express.Router();
 const fretesController = require('../controllers/fretesController');
 const { verifyToken, isAdmin } = require('../middlewares/auth');
+const { verificarEmpresa } = require('../middlewares/tenant');
 const validate = require('../middlewares/validate');
 const { createFreteSchema, updateFreteSchema } = require('../schemas/fretes');
 
-router.use(verifyToken);
+router.use(verifyToken, verificarEmpresa);
 
 router.get('/', fretesController.getAll);
 router.post('/', validate(createFreteSchema), fretesController.create);
