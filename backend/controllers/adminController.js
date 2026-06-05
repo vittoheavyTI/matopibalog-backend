@@ -209,6 +209,22 @@ exports.updateComissao = async (req, res) => {
   console.log(`[adminController:updateComissao] Atualizando motorista ${id}:`, { percentual_comissao, placa_veiculo, cpf });
 
   try {
+    // Validar ownership (super-admin pula)
+    const isSuperAdmin = req.user.is_super_admin === true;
+    if (!isSuperAdmin) {
+      const { data: pertence, error: pertenceError } = await supabase
+        .from('usuarios')
+        .select('id')
+        .eq('id', id)
+        .eq('empresa_id', req.empresa_id)
+        .eq('tipo', 'motorista')
+        .single();
+
+      if (pertenceError || !pertence) {
+        return res.status(403).json({ message: 'Acesso negado: motorista não pertence a esta empresa.' });
+      }
+    }
+
     const updateData = {};
     if (percentual_comissao !== undefined) updateData.percentual_comissao = percentual_comissao;
     if (placa_veiculo !== undefined) updateData.placa_veiculo = placa_veiculo;
@@ -236,12 +252,31 @@ exports.blockMotorista = async (req, res) => {
   console.log(`[adminController:blockMotorista] Alterando status do motorista ${id} para ${status}...`);
 
   try {
+    // Validar ownership (super-admin pula)
+    const isSuperAdmin = req.user.is_super_admin === true;
+    if (!isSuperAdmin) {
+      const { data: pertence, error: pertenceError } = await supabase
+        .from('usuarios')
+        .select('id')
+        .eq('id', id)
+        .eq('empresa_id', req.empresa_id)
+        .eq('tipo', 'motorista')
+        .single();
+
+      if (pertenceError || !pertence) {
+        return res.status(403).json({ message: 'Acesso negado: motorista não pertence a esta empresa.' });
+      }
+    }
+
     const { error: userError } = await supabase
       .from('usuarios')
       .update({ status })
       .eq('id', id);
 
-    if (userError) throw userError;
+    if (userError) {
+      console.error('[adminController:blockMotorista] Erro ao atualizar usuarios:', userError);
+      throw userError;
+    }
 
     const motStatus = status === 'bloqueado' ? 'bloqueado' : 'aprovado';
 
@@ -250,7 +285,10 @@ exports.blockMotorista = async (req, res) => {
       .update({ status_cadastro: motStatus })
       .eq('id', id);
 
-    if (motError) throw motError;
+    if (motError) {
+      console.error('[adminController:blockMotorista] Erro ao atualizar motoristas:', motError);
+      throw motError;
+    }
 
     console.log(`[adminController:blockMotorista] Status do motorista ${id} alterado com sucesso.`);
     res.status(200).json({ message: `Motorista ${motStatus === 'bloqueado' ? 'bloqueado' : 'desbloqueado'}.` });
@@ -400,10 +438,32 @@ exports.updateUsuario = async (req, res) => {
 exports.getEmViagem = async (req, res) => {
   console.log('[adminController:getEmViagem] Listando motoristas em viagem ativa...');
   try {
-    const { data, error } = await supabase
+    const isSuperAdmin = req.user.is_super_admin === true;
+    const empresaAlvo = isSuperAdmin
+      ? (req.query.empresa_id || null)
+      : req.empresa_id;
+
+    let idsPermitidos = null;
+    if (empresaAlvo) {
+      const { data: uids, error: uidsError } = await supabase
+        .from('usuarios')
+        .select('id')
+        .eq('empresa_id', empresaAlvo)
+        .eq('tipo', 'motorista');
+      if (uidsError) throw uidsError;
+      idsPermitidos = uids.map(u => u.id);
+    }
+
+    let query = supabase
       .from('fretes')
       .select('motorista_id, motoristas(*, usuarios(nome, email, status))')
       .in('status', ['ativo', 'pendente']);
+
+    if (idsPermitidos !== null) {
+      query = query.in('motorista_id', idsPermitidos.length ? idsPermitidos : ['']);
+    }
+
+    const { data, error } = await query;
 
     if (error) throw error;
 
@@ -494,6 +554,22 @@ exports.deleteMotorista = async (req, res) => {
   console.log(`[adminController:deleteMotorista] Solicitando exclusão do motorista ${id}...`);
 
   try {
+    // Validar ownership (super-admin pula) — ANTES de qualquer delete
+    const isSuperAdmin = req.user.is_super_admin === true;
+    if (!isSuperAdmin) {
+      const { data: pertence, error: pertenceError } = await supabase
+        .from('usuarios')
+        .select('id')
+        .eq('id', id)
+        .eq('empresa_id', req.empresa_id)
+        .eq('tipo', 'motorista')
+        .single();
+
+      if (pertenceError || !pertence) {
+        return res.status(403).json({ message: 'Acesso negado: motorista não pertence a esta empresa.' });
+      }
+    }
+
     // 1. Verificar se há fretes ativos (não pode excluir motorista em viagem ativa)
     const { data: fretesAtivos, error: fretesError } = await supabase
       .from('fretes')
