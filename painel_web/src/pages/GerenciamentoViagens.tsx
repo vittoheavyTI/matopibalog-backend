@@ -175,7 +175,7 @@ export const GerenciamentoViagens: React.FC = () => {
       }
       setShowModal(false);
     } catch (err: any) {
-      alert('Erro ao salvar viagem: ' + (err.response?.data?.message || err.message));
+      alert('Erro ao salvar frete: ' + (err.response?.data?.message || err.message));
     } finally {
       setIsSubmitting(false);
     }
@@ -193,7 +193,7 @@ export const GerenciamentoViagens: React.FC = () => {
         await loadData();
       }
     } catch (err: any) {
-      alert('Erro ao excluir viagem: ' + (err.response?.data?.message || err.message));
+      alert('Erro ao excluir frete: ' + (err.response?.data?.message || err.message));
     } finally {
       setIsDeleting(false);
     }
@@ -298,9 +298,9 @@ export const GerenciamentoViagens: React.FC = () => {
       setShowFinalizarModal(false);
       setFilterMot('todos');
       loadData();
-      alert('Viagem finalizada com sucesso! Os dados foram movidos para o resumo histórico.');
+      alert('Frete finalizado com sucesso! Os dados foram movidos para o resumo histórico.');
     } catch (err) {
-      alert('Erro ao finalizar viagem no servidor.');
+      alert('Erro ao finalizar frete no servidor.');
     }
   };
 
@@ -362,11 +362,11 @@ export const GerenciamentoViagens: React.FC = () => {
     <>
       <div className="flex flex-wrap justify-between items-center gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-gray-800">Gerenciamento de Viagens</h2>
+          <h2 className="text-2xl font-bold text-gray-800">Gerenciamento de Fretes</h2>
           <p className="text-gray-500 text-sm">Cadastro e acompanhamento de fretes</p>
         </div>
         <button onClick={() => openNewModal()} className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all shadow-md active:scale-95 font-bold">
-          <Plus size={20} className="mr-2" /> Nova Viagem
+          <Plus size={20} className="mr-2" /> Novo Frete
         </button>
       </div>
 
@@ -393,7 +393,7 @@ export const GerenciamentoViagens: React.FC = () => {
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="overflow-x-auto">
-          {loading ? (<p className="p-8 text-center text-gray-500">Carregando viagens...</p>)
+          {loading ? (<p className="p-8 text-center text-gray-500">Carregando fretes...</p>)
           : (
             <table className="w-full text-left border-collapse">
               <thead>
@@ -420,7 +420,7 @@ export const GerenciamentoViagens: React.FC = () => {
                       <button
                         onClick={() => setFilterMot(frete.motorista_id || frete.motoristaUid)}
                         className="w-full text-left px-3 py-2 rounded-lg text-sm font-medium text-gray-800 hover:bg-blue-50 hover:text-blue-700 transition-colors"
-                        title="Gerenciar viagens deste motorista"
+                        title="Gerenciar fretes deste motorista"
                       >
                         {frete.motoristas?.usuarios?.nome || frete.motoristaNome || 'N/A'}
                       </button>
@@ -455,13 +455,13 @@ export const GerenciamentoViagens: React.FC = () => {
                     <td className="p-4 text-center">
                       <div className="flex items-center justify-center space-x-1">
                         <button onClick={() => openEditModal(frete)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Editar"><Edit size={16} /></button>
-                        <button onClick={() => setDeleteTarget(frete)} className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="Cancelar viagem"><Trash2 size={16} /></button>
+                        <button onClick={() => setDeleteTarget(frete)} className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="Cancelar frete"><Trash2 size={16} /></button>
                       </div>
                     </td>
                   </tr>
                 ))}
                 {filtered.length === 0 && (
-                  <tr><td colSpan={7} className="p-8 text-center text-gray-400"><Truck size={40} className="mx-auto mb-2 text-gray-300" />Nenhuma viagem encontrada.</td></tr>
+                  <tr><td colSpan={7} className="p-8 text-center text-gray-400"><Truck size={40} className="mx-auto mb-2 text-gray-300" />Nenhum frete encontrado.</td></tr>
                 )}
               </tbody>
             </table>
@@ -665,7 +665,7 @@ export const GerenciamentoViagens: React.FC = () => {
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden max-h-[90vh] flex flex-col">
             <div className="p-5 border-b flex justify-between items-center bg-gray-50">
-              <h3 className="text-lg font-bold text-gray-800"><Truck size={20} className="inline mr-2 text-blue-600" />{editingFrete ? 'Editar Viagem' : 'Nova Viagem'}</h3>
+              <h3 className="text-lg font-bold text-gray-800"><Truck size={20} className="inline mr-2 text-blue-600" />{editingFrete ? 'Editar Frete' : 'Novo Frete'}</h3>
               <button onClick={() => setShowModal(false)} className="p-1.5 hover:bg-gray-200 rounded-full transition-colors"><X size={20} /></button>
             </div>
             <div className="p-5 overflow-y-auto space-y-4">
@@ -771,7 +771,7 @@ export const GerenciamentoViagens: React.FC = () => {
               <div className="w-14 h-14 bg-green-100 rounded-full flex items-center justify-center">
                 <Check size={28} className="text-green-600" />
               </div>
-              <h3 className="text-xl font-bold text-gray-800">Finalizar Viagem</h3>
+              <h3 className="text-xl font-bold text-gray-800">Finalizar Frete</h3>
               <p className="text-sm text-gray-500">Confira o resumo antes de finalizar:</p>
             </div>
             <div className="px-6 pb-4 space-y-3">
@@ -816,9 +816,9 @@ export const GerenciamentoViagens: React.FC = () => {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
             <div className="p-6 flex flex-col items-center text-center space-y-4">
               <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center"><AlertTriangle size={32} className="text-red-600" /></div>
-              <h3 className="text-xl font-bold text-gray-800">Cancelar Viagem</h3>
-              <p className="text-gray-500">Tem certeza que deseja cancelar a viagem de <strong>{deleteTarget.origem} → {deleteTarget.destino}</strong>?</p>
-              <p className="text-xs text-red-500 bg-red-50 p-3 rounded-xl w-full">⚠️ A viagem será marcada como cancelada no sistema.</p>
+              <h3 className="text-xl font-bold text-gray-800">Cancelar Frete</h3>
+              <p className="text-gray-500">Tem certeza que deseja cancelar o frete de <strong>{deleteTarget.origem} → {deleteTarget.destino}</strong>?</p>
+              <p className="text-xs text-red-500 bg-red-50 p-3 rounded-xl w-full">⚠️ O frete será marcado como cancelado no sistema.</p>
             </div>
             <div className="p-4 bg-gray-50 border-t flex justify-end space-x-3">
               <button onClick={() => setDeleteTarget(null)} disabled={isDeleting} className="px-5 py-2.5 font-bold text-gray-500 hover:bg-gray-200 rounded-xl transition-all">Voltar</button>
