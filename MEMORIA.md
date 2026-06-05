@@ -603,3 +603,158 @@ a34514a fix(auth): aceitar Bearer token para app mobile
 | Cadastro Flutter | `app_android/lib/screens/cadastro_screen.dart` |
 | URL backend Flutter | `app_android/lib/config.dart` |
 
+---
+
+# 14. AUDITORIA + EM ANDAMENTO — 2026-06-04 (parte 2)
+
+> Esta seção captura: (a) bugs corrigidos depois do commit `28143ad`, (b) a auditoria completa de segurança, (c) o trabalho em curso ainda não aplicado.
+
+## 14.1 Commits adicionais desde a última atualização
+
+```
+17f8a9a fix(empresas): cnpj/telefone vazios viram NULL para não colidir UNIQUE
+61a036b fix(segurança): remover PUT /configuracoes/public sem autenticação
+eae0593 fix(rodapé): pílula com largura do conteúdo, slider controla respiro
+```
+
+**Bug do CNPJ duplicado:** o fluxo autônomo inseria `cnpj=''` (string vazia). A coluna `empresas.cnpj` tem `UNIQUE`. Primeiro autônomo passava, segundo colidia. Fix: usar `NULL` em vez de `''` (PostgreSQL não considera múltiplos `NULL` como colisão). Aplicado em `authController.register` fluxo autônomo e em `services/empresaService.js`.
+
+**Endpoint público sem auth:** `PUT /configuracoes/public` aceitava qualquer um (nem token). Removido (handler + rota). Frontend não usava — só `GET /public` ainda existe (leitura).
+
+**Rodapé do login:** trocou `width: ${footerWidth}%` por `width: 'fit-content'` + slider passou a controlar `padding` horizontal (mín 8px, máx 60px). Label "Largura do Rodapé" → "Respiro do Rodapé". Preview e tela real agora usam mesmo cálculo.
+
+## 14.2 Auditoria completa — 38 itens mapeados
+
+Varredura de TODOS os endpoints + frontend. Lista priorizada por gravidade. **23 itens bloqueiam a Farmshow.** Categorias:
+
+- **A — Isolamento multi-tenant:** 11 itens críticos (fretes, despesas, vales, abastecimentos, dashboard, relatórios, motoristas pendentes/em-viagem, cobranças, faturas, configurações com `id=1` global)
+- **B — Permissões:** 8 itens (vários admin podem operar sobre qualquer empresa: approve/block/delete motorista, gerenciar usuários, impersonar via `?empresa_id=`)
+- **C — Integridade:** 9 itens (register motorista duplicado, insert em motoristas sem error capture, blob de configuracoes sobrescrevendo aparência global, ausência de validação Zod em rotas críticas)
+- **D — Fluxos incompletos:** 5 itens (Etapa D do admin pelo painel, reset obrigatório no primeiro acesso, mensagem confusa de pendente)
+- **E — Segurança:** 4 itens (rotas `/impressoras/*` SEM AUTH + executam `child_process.exec`, webhook Asaas sem validar assinatura)
+
+### Vulnerabilidades de destaque (não corrigidas)
+
+1. **`/impressoras/*` sem `verifyToken`** e usa `exec()` com input do body — vetor de injeção parcialmente escapado (só substitui `'` por `''`). Risco severo.
+2. **Webhook Asaas** aceita qualquer payload sem validar assinatura HMAC — atacante pode marcar empresa como `ativo` ao enviar `PAYMENT_CONFIRMED` fake.
+3. **`tenant.js verificarEmpresa`** permite qualquer admin (não só super-admin) impersonar via `?empresa_id=` — brecha grave em rotas que confiam no req.empresa_id.
+
+### Lista completa (resumida)
+
+| # | Categoria | Item | Bloqueia? |
+|---|---|---|---|
+| 1 | A | GET /fretes admin sem filtro de empresa | Sim |
+| 2 | A | GET /despesas idem | Sim |
+| 3 | A | GET /vales idem | Sim |
+| 4 | A | GET /abastecimentos idem | Sim |
+| 5 | A | GET /dashboard/summary agrega global | Sim |
+| 6 | A | GET /relatorios/ficha-viagem multi-tabela sem filtro | Sim |
+| 7 | A | configuracoes id=1 global mistura aparência + dados empresa + impressoras | Sim |
+| 8 | A | GET /admin/motoristas/pendentes sem filtro | Sim |
+| 9 | B | PATCH /admin/motoristas/:id/approve sem ownership | Sim |
+| 10 | B | PATCH /admin/motoristas/:id/block sem ownership | Sim |
+| 11 | B | DELETE /admin/motoristas/:id sem ownership | Sim |
+| 12 | B | PUT /admin/motoristas/:id/comissao sem ownership | Sim |
+| 13 | B | GET /admin/usuarios sem filtro | Sim |
+| 14 | B | CRUD /admin/usuarios sem isSuperAdmin nem ownership | Sim |
+| 15 | B | tenant.js qualquer admin pode impersonar | Sim |
+| 16 | B | PUT /configuracoes ainda com isAdmin (Passo 2 não aplicado) | Médio |
+| 17 | E | /impressoras/* sem auth + exec() — RCE | Risco |
+| 18 | A | GET /pagamentos/cobrancas/:empresa_id sem ownership | Sim |
+| 19 | A | GET /pagamentos/cobrancas/all sem isSuperAdmin | Sim |
+| 20 | B | POST /pagamentos/* sem validar empresa | Sim |
+| 21 | C | fluxo autônomo duplica criarEmpresaCompleta | Não |
+| 22 | C | insert motoristas no register sem error capture | Sim |
+| 23 | C | integracoes/salvar sobrescreve dados JSONB sem merge | Não |
+| 24 | D | Painel admin Nova Empresa não cria admin (Etapa D) | Sim |
+| 25 | D | Aprovação motorista UX | Não |
+| 26 | D | Mensagem login motorista pendente confusa | Não |
+| 27 | D | Reset obrigatório primeiro acesso (depende #24) | Sim |
+| 28 | C | syncConfigToServer envia blob inteiro | Sim |
+| 29 | C | getPublic 200 com {} mascara erro | Não |
+| 30 | E | POST /painel-admin/planos sem Zod | Não |
+| 31 | E | webhook Asaas sem validação de assinatura | Risco |
+| 32 | B | aba Aparência visível para admin comum (Passo 3 não aplicado) | Não |
+| 33 | C | status 'suspenso' não checado em verificarPlano | Não |
+| 34 | C | falta Zod em configuracoes, painel-admin, pagamentos, integracoes | Não |
+| 35 | D | recuperação senha SMTP só funciona bem em Gmail | Não |
+| 36 | C | Flutter sem refresh token | Não |
+| 37 | C | Flutter sem máscaras CPF/telefone/placa | Não |
+| 38 | A | GET /admin/motoristas/em-viagem sem filtro | Sim |
+
+## 14.3 Em curso (diagnóstico/diff pronto, NÃO aplicado)
+
+### PASSO 1 do Grupo Isolamento — GET /fretes
+Diff pronto, aguardando confirmação. Estratégia (validada como padrão para os outros 10 endpoints A):
+
+- Aplicar middleware `verificarEmpresa` na rota
+- Como `fretes` está 2 níveis abaixo de `usuarios.empresa_id` (fretes → motoristas → usuarios), usar **2 queries**:
+  1. Buscar IDs dos motoristas da empresa-alvo (`from('usuarios').select('id').eq('empresa_id', X).eq('tipo', 'motorista')`)
+  2. Filtrar fretes com `.in('motorista_id', ids)`
+- Super-admin sem filtro = vê todos; com `?empresa_id=` filtra; admin comum sempre por própria empresa; motorista por si só
+
+### Etapa D (cadastro de admin pelo painel super-admin) — diagnóstico pronto, NÃO aplicado
+Plano em 5 passos:
+1. SQL: `ALTER TABLE usuarios ADD COLUMN precisa_trocar_senha BOOLEAN DEFAULT FALSE NOT NULL`
+2. Backend `POST /painel-admin/empresas`: criar empresa + Auth user + linha usuarios (tipo admin, status ativo, precisa_trocar_senha=true) com rollback completo
+3. Backend `login`/`/auth/me`: incluir `precisa_trocar_senha` na resposta; JWT pode incluir também
+4. Frontend `PainelEmpresas.tsx`: adicionar campos admin (nome, email, senha com olhinho); trocar input "Plano ID" por dropdown de planos (reusar `GET /painel-admin/planos`)
+5. Frontend `/primeiro-acesso`: nova tela; redirect no ProtectedRoute quando user.precisa_trocar_senha; novo endpoint `POST /auth/trocar-senha-obrigatoria` (usa JWT + service role para `supabase.auth.admin.updateUserById` e zera flag)
+
+### Padronização de máscaras (web + Flutter)
+Pendente. Faltam: `maskMoeda`, `maskPlaca`. Aplicar em CadastroPublico, PainelEmpresas, Motoristas (placa), PainelPlanos (preço), Dashboard/GerenciamentoViagens (valores), Faturas. Flutter: instalar `mask_text_input_formatter`, criar `lib/utils/masks.dart`.
+
+## 14.4 Ordem prática recomendada para a feira
+
+**Bloco 1 — Isolamento (urgente):** após validar o padrão em `/fretes`, replicar nos itens #2–#6, #8, #38. Cada um: middleware tenant + filtro por empresa-alvo, super-admin pode passar `?empresa_id=`.
+
+**Bloco 2 — Ownership/Permissões:** #9–#12, #14, #18, #20. Validar `motorista.empresa_id === req.empresa_id` antes de approve/block/delete; restringir cobranças ao admin da própria empresa.
+
+**Bloco 3 — Configurações:** separar `configuracoes.dados` global. Mover `company` para colunas em `empresas`; mover `printers` para coluna `impressoras JSONB` em `empresas` ou tabela própria. PUT /configuracoes vira `isSuperAdmin` (Passo 2 antigo). Frontend aba Aparência só super-admin.
+
+**Bloco 4 — Etapa D:** cadastro admin pelo painel + reset obrigatório.
+
+**Bloco 5 — Vulnerabilidades:** `/impressoras/*` adicionar auth e validar nome; webhook Asaas validar assinatura (chave secreta).
+
+**Bloco 6 — UX/Cosmético:** máscaras, mensagem login pendente, validação Zod nas rotas faltantes.
+
+## 14.5 Estado dos arquivos sensíveis (recapitulando após auditoria)
+
+| Arquivo | Estado |
+|---|---|
+| `backend/controllers/fretesController.js` | Vaza fretes entre empresas — sem filtro de tenant |
+| `backend/controllers/despesasController.js` | Idem |
+| `backend/controllers/valesController.js` | Idem |
+| `backend/controllers/abastecimentosController.js` | Idem |
+| `backend/controllers/dashboardController.js` | Idem |
+| `backend/controllers/relatoriosController.js` | Idem |
+| `backend/routes/admin.js` | `getAllMotoristas` corrigido; resto (pendentes, approve, block, delete) ainda vaza |
+| `backend/routes/painel-admin.js` | POST /empresas usa helper mas não cria admin; planos sem Zod |
+| `backend/routes/pagamentos.js` | Sem ownership checks |
+| `backend/routes/impressoras.js` | **Sem auth + `exec()` com input parcialmente escapado** |
+| `backend/controllers/configController.js` | id=1 global, mistura tudo |
+| `backend/services/empresaService.js` | OK (recém-corrigido cnpj/telefone NULL) |
+| `backend/middlewares/tenant.js` | Aceita qualquer admin impersonar via `?empresa_id=` |
+| `backend/middlewares/auth.js` | `isSuperAdmin` implementado, ok |
+| `painel_web/src/contexts/AuthContext.tsx` | OK (interface tem is_super_admin) |
+| `painel_web/src/components/SuperAdminRoute.tsx` | OK |
+| `painel_web/src/components/Sidebar.tsx` | OK (Painel Admin só super-admin) |
+| `painel_web/src/pages/PainelEmpresas.tsx` | Form sem campos admin; plano_id texto livre |
+| `painel_web/src/pages/Configuracoes.tsx` | Aba Aparência visível para todos; salva blob inteiro |
+
+## 14.6 Pendências consolidadas (ordem de prioridade revisada)
+
+1. **Isolamento de tenant** nos 11 endpoints A (começa por `/fretes` — diff pronto)
+2. **Ownership** nas operações de motorista e cobranças
+3. **`tenant.js`:** só super-admin impersona com `?empresa_id=`
+4. **Etapa D** (admin + reset obrigatório)
+5. **Separar `configuracoes.dados`** (aparência global vs dados da empresa por empresa)
+6. **Auth + escape em `/impressoras/*`**
+7. **Webhook Asaas:** validar assinatura
+8. **Frontend aba Aparência só super-admin** + bloquear `syncConfigToServer` em aba de empresa
+9. **Validação Zod** nas rotas faltantes
+10. **Status `suspenso`** entrar em `verificarPlano`
+11. **Máscaras web + Flutter**
+12. **Refresh token Flutter** (pós-Farmshow)
+13. **Toast/UX:** mensagem clara para motorista pendente no Flutter
+
