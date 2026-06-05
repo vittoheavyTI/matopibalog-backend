@@ -16,9 +16,9 @@ router.patch('/motoristas/:id/block', verificarEmpresa, adminController.blockMot
 router.get('/motoristas/em-viagem', verificarEmpresa, adminController.getEmViagem);
 router.delete('/motoristas/:id', verificarEmpresa, adminController.deleteMotorista);
 
-router.get('/usuarios', adminController.getUsuarios);
-router.post('/usuarios', adminController.createUsuario);
-router.put('/usuarios/:id', adminController.updateUsuario);
-router.delete('/usuarios/:id', adminController.deleteUsuario);
+router.get('/usuarios', verificarEmpresa, adminController.getUsuarios);
+router.post('/usuarios', verificarEmpresa, adminController.createUsuario);
+router.put('/usuarios/:id', verificarEmpresa, adminController.updateUsuario);
+router.delete('/usuarios/:id', verificarEmpresa, adminController.deleteUsuario);
 
 module.exports = router;

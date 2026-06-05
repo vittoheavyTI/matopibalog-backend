@@ -302,12 +302,29 @@ exports.blockMotorista = async (req, res) => {
 exports.getUsuarios = async (req, res) => {
   console.log('[adminController:getUsuarios] Listando todos os usuários...');
   try {
-    const { data: usuariosDb, error } = await supabase
+    const isSuperAdmin = req.user.is_super_admin === true;
+    const empresaAlvo = isSuperAdmin ? (req.query.empresa_id || null) : req.empresa_id;
+
+    let query = supabase
       .from('usuarios')
       .select('*')
       .order('nome', { ascending: true });
 
+    if (empresaAlvo) {
+      query = query.eq('empresa_id', empresaAlvo);
+    }
+    // super-admin sem filtro → vê todos
+
+    const { data: usuariosDb, error } = await query;
+
     if (error) throw error;
+
+    // Órfãos do Auth (sem linha em usuarios) NÃO têm empresa_id → não dá para
+    // atribuir a uma empresa. Só super-admin os vê; admin comum nunca (evita
+    // vazar e-mails de outras empresas).
+    if (!isSuperAdmin) {
+      return res.status(200).json(usuariosDb || []);
+    }
 
     const { data: authList } = await supabase.auth.admin.listUsers({ perPage: 1000 });
     const authUsers = authList?.users || [];
@@ -377,6 +394,7 @@ exports.createUsuario = async (req, res) => {
         email,
         tipo: tipo || 'admin',
         status: 'ativo',
+        empresa_id: req.empresa_id,
         telefone: telefone || null,
         cep: cep || null,
         endereco: endereco || null,
@@ -407,6 +425,21 @@ exports.updateUsuario = async (req, res) => {
   console.log(`[adminController:updateUsuario] Atualizando usuário ${id}:`, { nome, status, tipo });
 
   try {
+    // Validar ownership (super-admin pula)
+    const isSuperAdmin = req.user.is_super_admin === true;
+    if (!isSuperAdmin) {
+      const { data: pertence, error: pertenceError } = await supabase
+        .from('usuarios')
+        .select('id')
+        .eq('id', id)
+        .eq('empresa_id', req.empresa_id)
+        .single();
+
+      if (pertenceError || !pertence) {
+        return res.status(403).json({ message: 'Acesso negado: usuário não pertence a esta empresa.' });
+      }
+    }
+
     const updateData = {};
     if (nome !== undefined) updateData.nome = nome;
     if (telefone !== undefined) updateData.telefone = telefone;
@@ -495,6 +528,21 @@ exports.deleteUsuario = async (req, res) => {
   }
 
   try {
+    // Validar ownership (super-admin pula) — ANTES de qualquer delete
+    const isSuperAdmin = req.user.is_super_admin === true;
+    if (!isSuperAdmin) {
+      const { data: pertence, error: pertenceError } = await supabase
+        .from('usuarios')
+        .select('id')
+        .eq('id', id)
+        .eq('empresa_id', req.empresa_id)
+        .single();
+
+      if (pertenceError || !pertence) {
+        return res.status(403).json({ message: 'Acesso negado: usuário não pertence a esta empresa.' });
+      }
+    }
+
     // 1. Verificar se o usuário possui registro na tabela motoristas
     const { data: motorista } = await supabase
       .from('motoristas')
