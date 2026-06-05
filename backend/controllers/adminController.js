@@ -176,6 +176,7 @@ exports.createMotorista = async (req, res) => {
       .from('motoristas')
       .insert({
         id: uid,
+        empresa_id: req.empresa_id,
         cpf: cpf && cpf.trim() !== '' ? cpf.trim() : null,
         placa_veiculo: placa_veiculo || '',
         percentual_comissao: percentual_comissao || 12.0,
