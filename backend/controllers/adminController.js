@@ -112,6 +112,95 @@ exports.getAllMotoristas = async (req, res) => {
   }
 };
 
+// ─── Criar Motorista (cadastro pelo admin) ────────────────────────────────────
+exports.createMotorista = async (req, res) => {
+  const {
+    nome, email, senha, cpf, placa_veiculo,
+    telefone, cep, endereco, bairro, cidade, foto_url, percentual_comissao
+  } = req.body;
+  console.log('[adminController:createMotorista] Criando motorista:', { email, nome, empresa_id: req.empresa_id });
+
+  if (!nome || !email || !senha) {
+    return res.status(400).json({ message: 'Nome, e-mail e senha são obrigatórios.' });
+  }
+  if (senha.length < 6) {
+    return res.status(400).json({ message: 'A senha deve ter no mínimo 6 caracteres.' });
+  }
+
+  let uid = null;
+  try {
+    // 1. Criar no Supabase Auth
+    const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+      email,
+      password: senha,
+      email_confirm: true
+    });
+
+    if (authError) {
+      console.error('[adminController:createMotorista] Erro no Supabase Auth:', authError.message);
+      if (authError.message?.toLowerCase().includes('already') || authError.status === 422) {
+        return res.status(400).json({ message: 'Este e-mail já está cadastrado no sistema.' });
+      }
+      return res.status(500).json({ message: `Erro ao criar motorista no Auth: ${authError.message}` });
+    }
+
+    uid = authData.user.id;
+
+    // 2. Inserir em usuarios (empresa do ADMIN, já ativo, senha temporária)
+    const { error: userError } = await supabase
+      .from('usuarios')
+      .insert({
+        id: uid,
+        nome,
+        email,
+        tipo: 'motorista',
+        status: 'ativo',
+        empresa_id: req.empresa_id,
+        senha_temporaria: true,
+        telefone: telefone || null,
+        cep: cep || null,
+        endereco: endereco || null,
+        bairro: bairro || null,
+        cidade: cidade || null,
+        foto_url: foto_url || null
+      });
+
+    if (userError) {
+      console.error('[adminController:createMotorista] Erro ao inserir em usuarios, revertendo Auth:', userError);
+      try { await supabase.auth.admin.deleteUser(uid); } catch (e) { console.error('[adminController:createMotorista] rollback auth falhou:', e); }
+      return res.status(500).json({ message: `Erro ao salvar motorista no banco: ${userError.message}` });
+    }
+
+    // 3. Inserir em motoristas (cpf vazio → null para não colidir no UNIQUE)
+    const { error: motError } = await supabase
+      .from('motoristas')
+      .insert({
+        id: uid,
+        cpf: cpf && cpf.trim() !== '' ? cpf.trim() : null,
+        placa_veiculo: placa_veiculo || '',
+        percentual_comissao: percentual_comissao || 12.0,
+        status_cadastro: 'aprovado'
+      });
+
+    if (motError) {
+      console.error('[adminController:createMotorista] Erro ao inserir em motoristas, revertendo usuarios + Auth:', motError);
+      try { await supabase.from('usuarios').delete().eq('id', uid); } catch (e) { console.error('[adminController:createMotorista] rollback usuarios falhou:', e); }
+      try { await supabase.auth.admin.deleteUser(uid); } catch (e) { console.error('[adminController:createMotorista] rollback auth falhou:', e); }
+      return res.status(500).json({ message: `Erro ao salvar dados do motorista: ${motError.message}` });
+    }
+
+    console.log(`[adminController:createMotorista] Motorista ${nome} criado com sucesso (uid ${uid}).`);
+    res.status(201).json({ message: 'Motorista cadastrado com sucesso.', uid });
+  } catch (error) {
+    console.error('[adminController:createMotorista] Erro geral:', error);
+    if (uid) {
+      try { await supabase.from('usuarios').delete().eq('id', uid); } catch (e) { console.error('[adminController:createMotorista] rollback usuarios falhou:', e); }
+      try { await supabase.auth.admin.deleteUser(uid); } catch (e) { console.error('[adminController:createMotorista] rollback auth falhou:', e); }
+    }
+    res.status(500).json({ message: 'Erro inesperado ao cadastrar motorista: ' + (error.message || error) });
+  }
+};
+
 // ─── Atualizar Comissão e Dados do Motorista ──────────────────────────────────
 exports.updateComissao = async (req, res) => {
   const { id } = req.params;

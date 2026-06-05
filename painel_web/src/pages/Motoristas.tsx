@@ -59,7 +59,7 @@ export const Motoristas: React.FC = () => {
   const handleAddMotorista = async () => {
     try {
       setIsSubmitting(true);
-      await api.post('/auth/register', {
+      await api.post('/admin/motoristas', {
         nome: newMot.nomeCompleto,
         cpf: newMot.cpf,
         email: newMot.email,
@@ -71,13 +71,12 @@ export const Motoristas: React.FC = () => {
         bairro: newMot.bairro,
         cidade: newMot.cidade,
         foto_url: newMot.fotoUrl,
-        percentual_comissao: newMot.percentualComissao,
-        status_cadastro: 'pendente'
+        percentual_comissao: newMot.percentualComissao
       });
       await loadMotoristas();
       setShowNewModal(false);
       setNewMot({ nomeCompleto: '', cpf: '', email: '', senha: '', placaVeiculo: '', telefone: '', cep: '', endereco: '', bairro: '', cidade: '', fotoUrl: '', percentualComissao: 12 });
-      alert('Motorista cadastrado com sucesso. Status inicial: pendente.');
+      alert('Motorista cadastrado e já ativo. Ele troca a senha no primeiro acesso.');
     } catch (error: any) {
       console.error('Erro detalhado ao cadastrar motorista:', error);
       console.error('Payload do motorista enviado:', newMot);
