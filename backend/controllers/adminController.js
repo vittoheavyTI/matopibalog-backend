@@ -36,24 +36,46 @@ exports.approveMotorista = async (req, res) => {
   console.log(`[adminController:approveMotorista] Aprovando motorista ${id} com comissão ${percentual_comissao}%...`);
 
   try {
+    // Validar ownership (super-admin pula)
+    const isSuperAdmin = req.user.is_super_admin === true;
+    if (!isSuperAdmin) {
+      const { data: pertence, error: pertenceError } = await supabase
+        .from('usuarios')
+        .select('id')
+        .eq('id', id)
+        .eq('empresa_id', req.empresa_id)
+        .eq('tipo', 'motorista')
+        .single();
+
+      if (pertenceError || !pertence) {
+        return res.status(403).json({ message: 'Acesso negado: motorista não pertence a esta empresa.' });
+      }
+    }
+
     // 1. Atualizar status na tabela usuarios
     const { error: userError } = await supabase
       .from('usuarios')
       .update({ status: 'ativo' })
       .eq('id', id);
 
-    if (userError) throw userError;
+    if (userError) {
+      console.error('[adminController:approveMotorista] Erro ao atualizar usuarios:', userError);
+      throw userError;
+    }
 
     // 2. Atualizar motorista
     const { error: motError } = await supabase
       .from('motoristas')
-      .update({ 
+      .update({
         status_cadastro: 'aprovado',
         percentual_comissao: percentual_comissao || 12.0
       })
       .eq('id', id);
 
-    if (motError) throw motError;
+    if (motError) {
+      console.error('[adminController:approveMotorista] Erro ao atualizar motoristas:', motError);
+      throw motError;
+    }
 
     console.log(`[adminController:approveMotorista] Motorista ${id} aprovado com sucesso.`);
     res.status(200).json({ message: 'Motorista aprovado com sucesso.' });
