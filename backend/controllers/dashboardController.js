@@ -11,26 +11,47 @@ exports.getSummary = async (req, res) => {
     const dataInicio = new Date(anoInt, mesInt - 1, 1).toISOString();
     const dataFim = new Date(anoInt, mesInt, 0, 23, 59, 59).toISOString();
 
+    // Calcular escopo de empresa
+    const isSuperAdmin = req.user.is_super_admin === true;
+    const empresaAlvo = isSuperAdmin ? (req.query.empresa_id || null) : req.empresa_id;
+
+    let idsPermitidos = null; // null = super-admin global, sem filtro
+    if (empresaAlvo) {
+      const { data: uids, error: uidsError } = await supabase
+        .from('usuarios')
+        .select('id')
+        .eq('empresa_id', empresaAlvo)
+        .eq('tipo', 'motorista');
+      if (uidsError) throw uidsError;
+      idsPermitidos = uids.map(u => u.id);
+    }
+
+    // null → sem filtro | [ids] → filtra | [] → [''] para retornar zero sem vazar
+    const comFiltroEmpresa = (query) => {
+      if (idsPermitidos === null) return query;
+      return query.in('motorista_id', idsPermitidos.length ? idsPermitidos : ['']);
+    };
+
     // 1. Buscar todos os fretes do período
-    const { data: fretesRaw, error: eFretes } = await supabase.from('fretes')
+    const { data: fretesRaw, error: eFretes } = await comFiltroEmpresa(supabase.from('fretes')
       .select('*, motoristas(usuarios(nome), percentual_comissao)')
       .eq('status', 'finalizado')
       .gte('data', dataInicio)
-      .lte('data', dataFim)
+      .lte('data', dataFim))
       .order('data', { ascending: false });
     if (eFretes) throw eFretes;
 
     // 2. Buscar deduções e abastecimentos FINALIZADOS
-    const { data: despesasRaw, error: eDespesas } = await supabase.from('despesas').select('valor, motorista_id').eq('quem_pagou', 'proprietario').eq('status', 'finalizado').gte('data', dataInicio).lte('data', dataFim);
+    const { data: despesasRaw, error: eDespesas } = await comFiltroEmpresa(supabase.from('despesas').select('valor, motorista_id').eq('quem_pagou', 'proprietario').eq('status', 'finalizado').gte('data', dataInicio).lte('data', dataFim));
     if (eDespesas) throw eDespesas;
 
-    const { data: abastecimentosOwnerRaw, error: eAbastOwner } = await supabase.from('abastecimentos').select('valor_total, motorista_id').eq('quem_pagou', 'proprietario').eq('status', 'finalizado').gte('data', dataInicio).lte('data', dataFim);
+    const { data: abastecimentosOwnerRaw, error: eAbastOwner } = await comFiltroEmpresa(supabase.from('abastecimentos').select('valor_total, motorista_id').eq('quem_pagou', 'proprietario').eq('status', 'finalizado').gte('data', dataInicio).lte('data', dataFim));
     if (eAbastOwner) throw eAbastOwner;
 
-    const { data: allAbastecimentosRaw, error: eAllAbast } = await supabase.from('abastecimentos').select('litros, motorista_id').eq('status', 'finalizado').gte('data', dataInicio).lte('data', dataFim);
+    const { data: allAbastecimentosRaw, error: eAllAbast } = await comFiltroEmpresa(supabase.from('abastecimentos').select('litros, motorista_id').eq('status', 'finalizado').gte('data', dataInicio).lte('data', dataFim));
     if (eAllAbast) throw eAllAbast;
 
-    const { data: valesRaw, error: eVales } = await supabase.from('vales').select('valor, motorista_id').eq('quem_pagou', 'proprietario').eq('status', 'finalizado').gte('data', dataInicio).lte('data', dataFim);
+    const { data: valesRaw, error: eVales } = await comFiltroEmpresa(supabase.from('vales').select('valor, motorista_id').eq('quem_pagou', 'proprietario').eq('status', 'finalizado').gte('data', dataInicio).lte('data', dataFim));
     if (eVales) throw eVales;
 
     // Garantir arrays nunca nulos
