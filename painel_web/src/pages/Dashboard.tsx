@@ -261,7 +261,7 @@ export const Dashboard: React.FC = () => {
       } else if (tipo === 'vale') {
         await api.post('/vales', { motorista_id: selectedMot.uid, descricao: newDespesa.descricao || 'Vale/Adiantamento', valor: Number(newDespesa.valor), quem_pagou: 'proprietario', data: newDespesa.data });
       } else {
-        await api.post('/despesas', { motorista_id: selectedMot.uid, descricao: newDespesa.descricao, valor: Number(newDespesa.valor), quem_pagou: newDespesa.quem_pagou, data: newDespesa.data });
+        await api.post('/despesas', { motorista_id: selectedMot.uid, tipo: 'geral', descricao: newDespesa.descricao, valor: Number(newDespesa.valor), quem_pagou: newDespesa.quem_pagou, data: newDespesa.data });
       }
       setShowAddDespesaModal(false);
       setNewDespesa({ tipo: 'despesa', descricao: '', valor: '', quem_pagou: 'proprietario', posto: '', litros: '', valor_total: '', data: '' });

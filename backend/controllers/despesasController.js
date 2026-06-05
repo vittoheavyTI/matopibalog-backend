@@ -76,7 +76,7 @@ exports.create = async (req, res) => {
         motorista_id,
         empresa_id: userData.empresa_id,
         frete_id,
-        tipo,
+        tipo: tipo || 'geral',
         descricao,
         valor: parseFloat(valor),
         quem_pagou,
