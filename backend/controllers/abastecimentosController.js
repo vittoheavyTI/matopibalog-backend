@@ -5,16 +5,37 @@ exports.getAll = async (req, res) => {
   const { motorista_id } = req.query;
   const isAdmin = req.user.role === 'admin';
   try {
+    const isSuperAdmin = req.user.is_super_admin === true;
+    const empresaAlvo = isSuperAdmin
+      ? (req.query.empresa_id || null)
+      : req.empresa_id;
+
+    let idsPermitidos = null;
+    if (!isAdmin) {
+      idsPermitidos = [req.user.uid];
+    } else if (empresaAlvo) {
+      const { data: uids, error: uidsError } = await supabase
+        .from('usuarios')
+        .select('id')
+        .eq('empresa_id', empresaAlvo)
+        .eq('tipo', 'motorista');
+      if (uidsError) throw uidsError;
+      idsPermitidos = uids.map(u => u.id);
+    }
+
     let query = supabase.from('abastecimentos').select('*, motoristas(usuarios(nome))');
+    if (idsPermitidos !== null) {
+      query = query.in('motorista_id', idsPermitidos.length ? idsPermitidos : ['']);
+    }
     if (isAdmin && motorista_id) {
       query = query.eq('motorista_id', motorista_id);
-    } else if (!isAdmin) {
-      query = query.eq('motorista_id', req.user.uid);
     }
+
     const { data, error } = await query.order('data', { ascending: false });
     if (error) throw error;
     res.status(200).json(data);
   } catch (error) {
+    console.error('Erro ao listar abastecimentos:', error);
     res.status(500).json({ message: 'Erro ao listar abastecimentos.' });
   }
 };
