@@ -1,5 +1,28 @@
 const supabase = require('../config/supabase');
 
+// Whitelist de campos de APARÊNCIA (únicos que a tela de login precisa, sem auth)
+const APPEARANCE_KEYS = [
+  'loginLogo', 'loginLogoScale', 'loginLogoY', 'loginBg', 'loginBgScale', 'loginBgY',
+  'loginTemplate', 'footerText', 'contactPhone', 'contactEmail', 'footerColor',
+  'footerOpacity', 'footerFontSize', 'footerBold', 'footerFontFamily', 'footerWidth',
+  'footerHeight', 'inputBgColor', 'inputBorderColor'
+];
+
+// Campos extras que o admin logado usa (preview + empresa + impressoras)
+const ADMIN_EXTRA_KEYS = ['cardOffsetX', 'cardOffsetY', 'company', 'printers'];
+
+// Config de SISTEMA — só super-admin (PainelConfigSistema)
+const SYSTEM_KEYS = ['nome_sistema', 'email_suporte', 'trial_dias', 'manutencao', 'registros_abertos'];
+
+// Monta objeto só com as chaves permitidas (whitelist — nunca blacklist)
+function pick(obj, keys) {
+  const out = {};
+  for (const k of keys) {
+    if (obj[k] !== undefined) out[k] = obj[k];
+  }
+  return out;
+}
+
 function gerarCodigoConvite() {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   let codigo = 'MATO-';
@@ -83,7 +106,20 @@ exports.get = async (req, res) => {
       .single();
 
     if (error) throw error;
-    res.json(data?.dados || {});
+    const dados = data?.dados || {};
+
+    // Aparência + preview + empresa + impressoras (nunca os segredos por padrão)
+    const resposta = pick(dados, [...APPEARANCE_KEYS, ...ADMIN_EXTRA_KEYS]);
+
+    // Segredos de integração + config de sistema SÓ para super-admin
+    if (req.user?.is_super_admin) {
+      Object.assign(resposta, pick(dados, SYSTEM_KEYS));
+      for (const k of Object.keys(dados)) {
+        if (k.startsWith('integracao_')) resposta[k] = dados[k];
+      }
+    }
+
+    res.json(resposta);
   } catch (err) {
     res.status(500).json({ message: 'Erro ao carregar configurações.' });
   }
@@ -100,7 +136,8 @@ exports.getPublic = async (req, res) => {
     if (error) {
       return res.status(200).json({});
     }
-    res.json(data?.dados || {});
+    // Sem auth → SOMENTE aparência (nada de empresa, impressoras ou segredos)
+    res.json(pick(data?.dados || {}, APPEARANCE_KEYS));
   } catch (err) {
     res.status(200).json({});
   }
