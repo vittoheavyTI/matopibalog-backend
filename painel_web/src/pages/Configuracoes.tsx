@@ -202,6 +202,9 @@ export const Configuracoes: React.FC = () => {
         if (response.data && Object.keys(response.data).length > 0) {
           setCompany(response.data);
           localStorage.setItem(`${PREFIX}company`, JSON.stringify(response.data));
+        } else {
+          // API retornou vazio: limpa cache antigo para não vazar dados de outra conta
+          localStorage.removeItem(`${PREFIX}company`);
         }
       })
       .catch(() => { });

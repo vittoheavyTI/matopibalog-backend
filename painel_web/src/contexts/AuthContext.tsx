@@ -73,6 +73,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       await api.post('/auth/logout');
     } catch {}
+    // Limpa cache per-session para a próxima conta começar sem dados da anterior
+    ['matopibalog_company', 'choferlog_company',
+     'matopibalog_logo', 'choferlog_logo',
+     'matopibalog_logo_scale', 'choferlog_logo_scale',
+     'matopibalog_logo_y', 'choferlog_logo_y'].forEach(k => localStorage.removeItem(k));
     setUser(null);
   };
 
