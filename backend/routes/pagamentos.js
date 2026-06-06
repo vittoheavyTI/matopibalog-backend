@@ -189,6 +189,13 @@ router.post('/webhook/asaas', async (req, res) => {
         .eq('id', fatura.empresa_id);
     }
 
+    if (novoStatus === 'vencido' && fatura?.empresa_id) {
+      await supabase
+        .from('empresas')
+        .update({ status: 'suspenso' })
+        .eq('id', fatura.empresa_id);
+    }
+
     res.status(200).json({ received: true });
   } catch (err) {
     console.error('Webhook Asaas error:', err.message);

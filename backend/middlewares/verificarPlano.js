@@ -21,7 +21,7 @@ const verificarPlano = async (req, res, next) => {
       return res.status(403).json({ message: 'Período de teste expirado. Assine um plano para continuar.' });
     }
 
-    if (data.status === 'expirado' || data.status === 'bloqueado') {
+    if (data.status === 'expirado' || data.status === 'bloqueado' || data.status === 'suspenso') {
       return res.status(403).json({ message: 'Plano bloqueado ou expirado. Entre em contato com o suporte.' });
     }
 
