@@ -148,7 +148,7 @@ export const Sidebar: React.FC = () => {
         <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: collapsed ? '8px 4px' : '8px' }}>
           <nav className="space-y-1">
             {mainNav.map(item => (
-              <NavLink key={item.to} to={item.to} end={item.to === '/'} className={linkClass} title={collapsed ? item.label : undefined}>
+              <NavLink key={item.to} to={item.to} end={item.to === '/' || item.to === '/relatorios'} className={linkClass} title={collapsed ? item.label : undefined}>
                 <item.icon size={20} className="flex-shrink-0" />
                 {!collapsed && <span>{item.label}</span>}
               </NavLink>
