@@ -6,6 +6,7 @@ import {
 import { maskPhone, maskCNPJ, maskCEP } from '../utils/masks';
 import api from '../api';
 import { writeToLS } from '../hooks/useLoginConfig';
+import { useAuth } from '../contexts/AuthContext';
 
 const PREFIX = 'matopibalog_';
 
@@ -90,6 +91,7 @@ function getContrastTextColor(hexColor: string): string {
 
 export const Configuracoes: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'empresa' | 'impressora' | 'aparencia'>('empresa');
+  const { user } = useAuth();
   const [codigoConvite, setCodigoConvite] = useState<string | null>(null);
   const [regenerandoCodigo, setRegenerandoCodigo] = useState(false);
   const [company, setCompany] = useState<CompanyData>({
@@ -172,7 +174,6 @@ export const Configuracoes: React.FC = () => {
       .then((response) => {
         const d = response.data;
         if (!d) return;
-        if (d.company) setCompany(d.company);
         if (d.printers) setPrinters(d.printers);
         if (d.loginLogo !== undefined) setLoginLogo(d.loginLogo);
         if (d.loginBg !== undefined) setLoginBg(d.loginBg);
@@ -190,6 +191,18 @@ export const Configuracoes: React.FC = () => {
         if (d.loginTemplate) setSelectedTemplate(d.loginTemplate);
         // Escreve no localStorage para manter consistência
         writeToLS(d);
+      })
+      .catch(() => { });
+  }, []);
+
+  // Dados da empresa vêm do caminho por-empresa (não do blob global) (#16/#32)
+  useEffect(() => {
+    api.get('/configuracoes/empresa')
+      .then((response) => {
+        if (response.data && Object.keys(response.data).length > 0) {
+          setCompany(response.data);
+          localStorage.setItem(`${PREFIX}company`, JSON.stringify(response.data));
+        }
       })
       .catch(() => { });
   }, []);
@@ -234,7 +247,11 @@ export const Configuracoes: React.FC = () => {
 
   const handleSaveCompany = async () => {
     localStorage.setItem(`${PREFIX}company`, JSON.stringify(company));
-    await syncConfigToServer();
+    try {
+      await api.put('/configuracoes/empresa', company);
+    } catch (err) {
+      console.error('Erro ao salvar dados da empresa:', err);
+    }
     showSavedFeedback();
   };
 
@@ -371,7 +388,9 @@ export const Configuracoes: React.FC = () => {
       </div>
 
       <div className="flex space-x-1 bg-gray-100 p-1 rounded-xl w-fit">
-        {(['empresa', 'impressora', 'aparencia'] as const).map((tab) => (
+        {(['empresa', 'impressora', 'aparencia'] as const)
+          .filter((tab) => tab !== 'aparencia' || user?.is_super_admin)
+          .map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}

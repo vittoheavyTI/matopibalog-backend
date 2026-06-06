@@ -170,3 +170,35 @@ exports.update = async (req, res) => {
     res.status(500).json({ message: 'Erro ao salvar configurações.' });
   }
 };
+
+// Dados da empresa (por empresa) — substitui o 'company' do blob global id=1 (#16/#32)
+exports.getEmpresaConfig = async (req, res) => {
+  try {
+    if (!req.empresa_id) return res.json({});
+    const { data, error } = await supabase
+      .from('empresas')
+      .select('config_empresa')
+      .eq('id', req.empresa_id)
+      .single();
+    if (error) throw error;
+    res.json(data?.config_empresa || {});
+  } catch (err) {
+    console.error('Erro ao carregar dados da empresa:', err);
+    res.status(500).json({ message: 'Erro ao carregar dados da empresa.' });
+  }
+};
+
+exports.updateEmpresaConfig = async (req, res) => {
+  try {
+    if (!req.empresa_id) return res.status(400).json({ message: 'Empresa não encontrada.' });
+    const { error } = await supabase
+      .from('empresas')
+      .update({ config_empresa: req.body })
+      .eq('id', req.empresa_id);
+    if (error) throw error;
+    res.json({ message: 'Dados da empresa salvos.' });
+  } catch (err) {
+    console.error('Erro ao salvar dados da empresa:', err);
+    res.status(500).json({ message: 'Erro ao salvar dados da empresa.' });
+  }
+};
