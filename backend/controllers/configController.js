@@ -105,7 +105,8 @@ exports.get = async (req, res) => {
       .eq('id', 1)
       .single();
 
-    if (error) throw error;
+    // Tolera linha inexistente (PGRST116) — responde {} em vez de 500
+    if (error && error.code !== 'PGRST116') throw error;
     const dados = data?.dados || {};
 
     // Aparência + preview + empresa + impressoras (nunca os segredos por padrão)
