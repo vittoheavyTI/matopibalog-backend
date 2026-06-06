@@ -1,8 +1,16 @@
 const express = require('express');
 const router = express.Router();
 const axios = require('axios');
+const crypto = require('crypto');
 const supabase = require('../config/supabase');
 const { verifyToken, isAdmin } = require('../middlewares/auth');
+
+// Comparação em tempo constante (hash de tamanho fixo evita vazar comprimento)
+function safeEqual(a, b) {
+  const ah = crypto.createHash('sha256').update(String(a)).digest();
+  const bh = crypto.createHash('sha256').update(String(b)).digest();
+  return crypto.timingSafeEqual(ah, bh);
+}
 
 async function getAsaasConfig() {
   const { data } = await supabase
@@ -130,6 +138,15 @@ router.get('/cobrancas/all', verifyToken, isAdmin, async (req, res) => {
 
 router.post('/webhook/asaas', async (req, res) => {
   try {
+    // Portão de autenticação: o Asaas envia um token fixo no header
+    // 'asaas-access-token' em toda requisição. Comparar com o segredo nosso.
+    // Fail-closed: sem env var configurada OU header ausente/diferente → 401.
+    const expected = process.env.ASAAS_WEBHOOK_TOKEN;
+    const received = req.headers['asaas-access-token'];
+    if (!expected || !received || !safeEqual(received, expected)) {
+      return res.status(401).json({ message: 'Unauthorized' });
+    }
+
     const event = req.body;
 
     if (!event?.payment?.id) {
