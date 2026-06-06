@@ -51,7 +51,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   const Icon(Icons.local_shipping, size: 80, color: Colors.blue),
                   const SizedBox(height: 16),
                   const Text(
-                    'CHOFER LOG',
+                    'MATOPIBA LOG',
                     style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 48),

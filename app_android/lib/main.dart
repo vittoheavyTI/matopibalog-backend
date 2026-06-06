@@ -39,7 +39,7 @@ class ChoferLogApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Chofer Log',
+      title: 'Matopiba Log',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorSchemeSeed: Colors.blue,
@@ -100,7 +100,7 @@ class _SplashBody extends StatelessWidget {
             const Icon(Icons.local_shipping, size: 80, color: Colors.blue),
             const SizedBox(height: 24),
             Text(
-              'CHOFER LOG',
+              'MATOPIBA LOG',
               style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                 fontWeight: FontWeight.bold,
               ),
