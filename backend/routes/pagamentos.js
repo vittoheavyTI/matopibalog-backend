@@ -3,7 +3,8 @@ const router = express.Router();
 const axios = require('axios');
 const crypto = require('crypto');
 const supabase = require('../config/supabase');
-const { verifyToken, isAdmin } = require('../middlewares/auth');
+const { verifyToken, isAdmin, isSuperAdmin } = require('../middlewares/auth');
+const { verificarEmpresa } = require('../middlewares/tenant');
 
 // Comparação em tempo constante (hash de tamanho fixo evita vazar comprimento)
 function safeEqual(a, b) {
@@ -36,7 +37,7 @@ function asaasHeaders(apiKey) {
   };
 }
 
-router.post('/clientes', verifyToken, isAdmin, async (req, res) => {
+router.post('/clientes', verifyToken, isSuperAdmin, async (req, res) => {
   try {
     const { empresa_id, nome, cpfCnpj, email, telefone } = req.body;
     const { apiKey, baseURL } = await getAsaasConfig();
@@ -59,7 +60,7 @@ router.post('/clientes', verifyToken, isAdmin, async (req, res) => {
   }
 });
 
-router.post('/cobrancas', verifyToken, isAdmin, async (req, res) => {
+router.post('/cobrancas', verifyToken, isSuperAdmin, async (req, res) => {
   try {
     const { empresa_id, valor, tipo, descricao, parcelas } = req.body;
     const { apiKey, baseURL } = await getAsaasConfig();
@@ -109,21 +110,8 @@ router.post('/cobrancas', verifyToken, isAdmin, async (req, res) => {
   }
 });
 
-router.get('/cobrancas/:empresa_id', verifyToken, isAdmin, async (req, res) => {
-  try {
-    const { data } = await supabase
-      .from('faturas')
-      .select('*')
-      .eq('empresa_id', req.params.empresa_id)
-      .order('created_at', { ascending: false });
-
-    res.json(data || []);
-  } catch (err) {
-    res.status(500).json({ message: 'Erro ao listar cobranças.' });
-  }
-});
-
-router.get('/cobrancas/all', verifyToken, isAdmin, async (req, res) => {
+// IMPORTANTE: rota literal /all ANTES da paramétrica /:empresa_id (senão é capturada)
+router.get('/cobrancas/all', verifyToken, isSuperAdmin, async (req, res) => {
   try {
     const { data } = await supabase
       .from('faturas')
@@ -133,6 +121,26 @@ router.get('/cobrancas/all', verifyToken, isAdmin, async (req, res) => {
     res.json(data || []);
   } catch (err) {
     res.status(500).json({ message: 'Erro ao listar todas as cobranças.' });
+  }
+});
+
+router.get('/cobrancas/:empresa_id', verifyToken, isAdmin, verificarEmpresa, async (req, res) => {
+  try {
+    // Admin comum: IGNORA o :empresa_id da URL e usa SEMPRE a própria empresa.
+    // Super-admin: pode consultar qualquer empresa via :empresa_id.
+    const empresaAlvo = req.user.is_super_admin === true
+      ? req.params.empresa_id
+      : req.empresa_id;
+
+    const { data } = await supabase
+      .from('faturas')
+      .select('*')
+      .eq('empresa_id', empresaAlvo)
+      .order('created_at', { ascending: false });
+
+    res.json(data || []);
+  } catch (err) {
+    res.status(500).json({ message: 'Erro ao listar cobranças.' });
   }
 });
 
