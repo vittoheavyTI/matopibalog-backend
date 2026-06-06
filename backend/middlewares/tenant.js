@@ -1,8 +1,9 @@
 const supabase = require('../config/supabase');
 
 const verificarEmpresa = async (req, res, next) => {
-  // Admin pode opcionalmente impersonar via query param
-  if (req.user.role === 'admin' && req.query.empresa_id) {
+  // SOMENTE super-admin pode impersonar via query param (?empresa_id=).
+  // Admin comum: o param é IGNORADO — empresa vem sempre da própria conta.
+  if (req.user.is_super_admin === true && req.query.empresa_id) {
     req.empresa_id = req.query.empresa_id;
     req.impersonating = true;
     return next();
