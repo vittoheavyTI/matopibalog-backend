@@ -124,11 +124,11 @@ export const Sidebar: React.FC = () => {
         {/* Logo fixo no topo */}
         <div style={{ flexShrink: 0, padding: collapsed ? '12px 8px' : '16px', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
           <div
-            className={`relative group ${!logoBase64 ? 'cursor-pointer' : ''}`}
-            onClick={() => { if (!logoBase64) fileInputRef.current?.click(); }}
-            onDoubleClick={handleEditExisting}
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={handleDrop}
+            className={`relative group ${!logoBase64 && user?.is_super_admin ? 'cursor-pointer' : ''}`}
+            onClick={() => { if (!logoBase64 && user?.is_super_admin) fileInputRef.current?.click(); }}
+            onDoubleClick={() => { if (user?.is_super_admin) handleEditExisting(); }}
+            onDragOver={(e) => { if (user?.is_super_admin) e.preventDefault(); }}
+            onDrop={(e) => { if (user?.is_super_admin) handleDrop(e); }}
           >
             <input type="file" accept="image/*" ref={fileInputRef} className="hidden" onChange={handleFileChange} />
             {logoBase64 ? (

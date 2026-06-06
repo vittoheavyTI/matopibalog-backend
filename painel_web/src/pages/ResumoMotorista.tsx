@@ -219,7 +219,15 @@ export const ResumoMotorista: React.FC = () => {
       try { company = savedCompany ? JSON.parse(savedCompany) : null; } catch (e) {}
 
       if (savedLogo) {
-        try { doc.addImage(savedLogo, 'PNG', 12, 8, 35, 35); } catch (e) {}
+        try {
+          const img = new Image();
+          img.src = savedLogo;
+          const maxW = 35, maxH = 20;
+          const ratio = Math.min(maxW / (img.naturalWidth || maxW), maxH / (img.naturalHeight || maxH));
+          const w = (img.naturalWidth || maxW) * ratio;
+          const h = (img.naturalHeight || maxH) * ratio;
+          doc.addImage(savedLogo, 'PNG', 12, 8 + (maxH - h) / 2, w, h);
+        } catch (e) {}
       }
 
       doc.setFontSize(16).setFont("helvetica", "bold");
@@ -229,7 +237,7 @@ export const ResumoMotorista: React.FC = () => {
         doc.text(`${company.endereco || ''}, ${company.cidade || ''}-${company.estado || ''}`, 48, 22);
         doc.text(`CNPJ: ${company.cnpj || ''} | Tel: ${company.telefone || ''}`, 48, 28);
       } else {
-        doc.text('CHOFER LOG - GESTÃO DE FROTAS', 48, 20);
+        doc.text('MATOPIBA LOG - GESTÃO DE FROTAS', 48, 20);
       }
 
       const monthLabel = safeFmt(selectedDate + '-01T12:00:00', "MMMM 'de' yyyy");
@@ -345,7 +353,15 @@ export const ResumoMotorista: React.FC = () => {
       try { company = savedCompany ? JSON.parse(savedCompany) : null; } catch (e) {}
 
       if (savedLogo) {
-        try { doc.addImage(savedLogo, 'PNG', 12, 8, 35, 35); } catch (e) {}
+        try {
+          const img = new Image();
+          img.src = savedLogo;
+          const maxW = 35, maxH = 20;
+          const ratio = Math.min(maxW / (img.naturalWidth || maxW), maxH / (img.naturalHeight || maxH));
+          const w = (img.naturalWidth || maxW) * ratio;
+          const h = (img.naturalHeight || maxH) * ratio;
+          doc.addImage(savedLogo, 'PNG', 12, 8 + (maxH - h) / 2, w, h);
+        } catch (e) {}
       }
 
       doc.setFontSize(16).setFont("helvetica", "bold");
@@ -355,7 +371,7 @@ export const ResumoMotorista: React.FC = () => {
         doc.text(`${company.endereco || ''}, ${company.cidade || ''}-${company.estado || ''}`, 48, 22);
         doc.text(`CNPJ: ${company.cnpj || ''} | Tel: ${company.telefone || ''}`, 48, 28);
       } else {
-        doc.text('CHOFER LOG - GESTÃO DE FROTAS', 48, 20);
+        doc.text('MATOPIBA LOG - GESTÃO DE FROTAS', 48, 20);
       }
 
       doc.setFontSize(18).setFont("helvetica", "bold");

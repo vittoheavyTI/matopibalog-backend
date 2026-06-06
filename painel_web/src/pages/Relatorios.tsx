@@ -166,8 +166,14 @@ export const Relatorios: React.FC = () => {
     } catch (e) {}
 
     if (savedLogo) {
-      try { 
-        doc.addImage(savedLogo, 'PNG', 12, 8, 35, 35); 
+      try {
+        const img = new Image();
+        img.src = savedLogo;
+        const maxW = 35, maxH = 20;
+        const ratio = Math.min(maxW / (img.naturalWidth || maxW), maxH / (img.naturalHeight || maxH));
+        const w = (img.naturalWidth || maxW) * ratio;
+        const h = (img.naturalHeight || maxH) * ratio;
+        doc.addImage(savedLogo, 'PNG', 12, 8 + (maxH - h) / 2, w, h);
       } catch (e) {}
     }
 
@@ -178,7 +184,7 @@ export const Relatorios: React.FC = () => {
       doc.text(`${company.endereco || ''}, ${company.cidade || ''}-${company.estado || ''}`, 48, 22);
       doc.text(`CNPJ: ${company.cnpj || ''} | Tel: ${company.telefone || ''}`, 48, 28);
     } else {
-      doc.text('CHOFER LOG - GESTÃO DE FROTAS', 48, 20);
+      doc.text('MATOPIBA LOG - GESTÃO DE FROTAS', 48, 20);
     }
 
     const periodLabel = reportType === 'mensal' ? format(new Date(selectedDate + '-01T12:00:00'), "MMMM 'de' yyyy", { locale: ptBR }) : 
@@ -502,7 +508,13 @@ export const Relatorios: React.FC = () => {
 
     if (savedLogo) {
       try {
-        doc.addImage(savedLogo, 'PNG', 12, 8, 35, 35);
+        const img = new Image();
+        img.src = savedLogo;
+        const maxW = 35, maxH = 20;
+        const ratio = Math.min(maxW / (img.naturalWidth || maxW), maxH / (img.naturalHeight || maxH));
+        const w = (img.naturalWidth || maxW) * ratio;
+        const h = (img.naturalHeight || maxH) * ratio;
+        doc.addImage(savedLogo, 'PNG', 12, 8 + (maxH - h) / 2, w, h);
       } catch (e) {}
     }
 
@@ -513,7 +525,7 @@ export const Relatorios: React.FC = () => {
       doc.text(`${company.endereco || ''}, ${company.cidade || ''}-${company.estado || ''}`, 48, 22);
       doc.text(`CNPJ: ${company.cnpj || ''} | Tel: ${company.telefone || ''}`, 48, 28);
     } else {
-      doc.text('CHOFER LOG - GESTÃO DE FROTAS', 48, 20);
+      doc.text('MATOPIBA LOG - GESTÃO DE FROTAS', 48, 20);
     }
 
     const periodLabel = reportType === 'mensal' ? format(new Date(selectedDate + '-01T12:00:00'), "MMMM 'de' yyyy", { locale: ptBR }) :
