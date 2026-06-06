@@ -27,6 +27,7 @@ import { PainelNotificacoes } from './pages/PainelNotificacoes';
 import { PlanosPublicos } from './pages/PlanosPublicos';
 import { CadastroPublico } from './pages/CadastroPublico';
 import { Faturas } from './pages/Faturas';
+import { MinhasFaturas } from './pages/MinhasFaturas';
 import { RedefinirSenha } from './pages/RedefinirSenha';
 
 const AppRoutes = () => {
@@ -81,6 +82,7 @@ const AppRoutes = () => {
           <Route path="faturas" element={<SuperAdminRoute><Faturas /></SuperAdminRoute>} />
         </Route>
         <Route path="integracoes" element={<ProtectedRoute><Integracoes /></ProtectedRoute>} />
+        <Route path="minhas-faturas" element={<MinhasFaturas />} />
         <Route path="configuracoes" element={<Configuracoes />} />
       </Route>
 

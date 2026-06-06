@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Users, FileText, Truck, ChevronLeft, ChevronRight, Upload, X, Check, Trash2, Settings, UserCircle, Plug, Shield, ChevronDown } from 'lucide-react';
+import { LayoutDashboard, Users, FileText, Truck, ChevronLeft, ChevronRight, Upload, X, Check, Trash2, Settings, UserCircle, Plug, Shield, ChevronDown, Receipt } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 export const Sidebar: React.FC = () => {
@@ -185,6 +185,17 @@ export const Sidebar: React.FC = () => {
               <NavLink to="/integracoes" className={linkClass} title={collapsed ? 'Integrações' : undefined}>
                 <Plug size={20} className="flex-shrink-0" />
                 {!collapsed && <span>Integrações</span>}
+              </NavLink>
+            )}
+
+            {!user?.is_super_admin && (
+              <NavLink
+                to="/minhas-faturas"
+                className={linkClass}
+                title={collapsed ? 'Minhas Faturas' : undefined}
+              >
+                <Receipt size={20} className="flex-shrink-0" />
+                {!collapsed && <span>Minhas Faturas</span>}
               </NavLink>
             )}
 

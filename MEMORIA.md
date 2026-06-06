@@ -758,3 +758,102 @@ Pendente. Faltam: `maskMoeda`, `maskPlaca`. Aplicar em CadastroPublico, PainelEm
 12. **Refresh token Flutter** (pós-Farmshow)
 13. **Toast/UX:** mensagem clara para motorista pendente no Flutter
 
+---
+
+# 15. SESSÃO 2026-06-05/06 (Claude Code) — Isolamento aplicado + bugs de NOT NULL
+
+> Esta seção é a MAIS ATUAL. Substitui o status "NÃO aplicado" da seção 14.3 — vários blocos da auditoria foram efetivamente aplicados e estão em produção.
+
+## 15.1 Descoberta crítica de schema — `empresa_id NOT NULL` em várias tabelas
+
+O schema versionado (`database/migrations/001_create_tables.sql`, `full_setup.sql`) está **DESATUALIZADO** vs produção. Confirmado por SELECTs no banco real:
+- `motoristas`, `fretes`, `despesas`, `vales`, `abastecimentos` **TÊM `empresa_id` NOT NULL** em produção (não aparece nos SQLs).
+- Isso causou múltiplos bugs `null value in column empresa_id violates not-null constraint` nos inserts.
+- **A anotação antiga "motoristas NÃO tem empresa_id" estava ERRADA.**
+- **Dívida técnica (pós-Farmshow):** sincronizar os arquivos SQL versionados com o schema real de produção (dump do `information_schema`).
+
+## 15.2 Isolamento multi-tenant — APLICADO (Grupo A)
+
+Padrão validado e replicado. Para leitura (getAll): buscar IDs de motoristas via `usuarios.empresa_id` (2 queries), filtrar com `.in('motorista_id', ids.length?ids:[''])`. **Armadilha:** `.in('campo', [])` no PostgREST não filtra nada (vaza tudo) → usar `['']` na lista vazia. Super-admin sem `?empresa_id=` vê tudo; admin comum sempre pela própria empresa; motorista só os próprios.
+
+| # | Endpoint | Status |
+|---|---|---|
+| 1 | GET /fretes | ✅ aplicado |
+| 2 | GET /despesas | ✅ |
+| 3 | GET /vales | ✅ |
+| 4 | GET /abastecimentos | ✅ |
+| 5 | GET /dashboard/summary | ✅ (helper `comFiltroEmpresa` nas 5 queries; 3 casos null/lista/vazio) |
+| 6 | GET /relatorios/ficha-viagem | ✅ (validação de ownership do motorista + filtro duplo `.in(frete_ids)+.eq(motorista_id)`) |
+| 8 | GET /admin/motoristas/pendentes | ✅ (filtro inline via `usuarios!inner.empresa_id`) |
+| 38 | GET /admin/motoristas/em-viagem | ✅ |
+
+## 15.3 Ownership em ações de motorista — APLICADO (Grupo B)
+
+Padrão: buscar o alvo em `usuarios` com `.eq('id',id).eq('empresa_id',req.empresa_id).eq('tipo','motorista')`; se não bater → 403. Super-admin pula.
+
+| # | Endpoint | Status |
+|---|---|---|
+| 9 | PATCH /admin/motoristas/:id/approve | ✅ (já atualizava usuarios.status E motoristas.status_cadastro; + console.error por etapa) |
+| 10 | PATCH /admin/motoristas/:id/block | ✅ |
+| 11 | DELETE /admin/motoristas/:id | ✅ (ownership ANTES da cascata) |
+| 12 | PUT /admin/motoristas/:id/comissao | ✅ |
+| 13 | GET /admin/usuarios | ✅ (filtra por empresa; admin comum NÃO vê órfãos do Auth — evita vazar e-mails; super-admin vê todos+órfãos) |
+| 14 | CRUD /admin/usuarios | ✅ (create grava empresa_id; update/delete validam ownership) |
+
+## 15.4 Cadastro de motorista pelo admin — NOVA ROTA `POST /admin/motoristas`
+
+Antes o admin cadastrava via `POST /auth/register` (rota pública) → caía no fluxo autônomo → cada motorista virava empresa própria, sumindo da lista do admin. **3 caminhos de cadastro (não confundir):**
+1. **Admin** → `POST /admin/motoristas` → empresa do admin (`req.empresa_id`), nasce **ativo** (`status=ativo`, `status_cadastro=aprovado`), `senha_temporaria=true`, cpf vazio→null, insert com rollback em cascata reversa (motoristas→usuarios→Auth).
+2. **Código de convite** → `POST /auth/register` com código → empresa do código, nasce **pendente**.
+3. **Autônomo** → `POST /auth/register` sem código → cria empresa própria `tipo=autonomo`.
+
+Migration nova: `008_add_senha_temporaria.sql` (`ALTER TABLE usuarios ADD COLUMN senha_temporaria BOOLEAN DEFAULT false`). **Rodar no Supabase manualmente** (Railway não aplica SQL).
+
+## 15.5 Inserts de lançamento — empresa_id + defaults — APLICADO
+
+Os 4 creates (fretes, despesas, vales, abastecimentos) passaram a preencher `empresa_id` derivado do **motorista do lançamento** (nunca do body — segurança). Frete aproveita `motData`; os outros 3 adicionaram `empresa_id` ao select de `usuarios` que já faziam.
+
+Bugs de NOT NULL adicionais corrigidos:
+- **`fretes.quem_recebeu`**: modal rápido do Dashboard não enviava → default no backend. Agora **automático por tipo de empresa** (regra legal TAC vs CLT): `autonomo`→`'motorista'`, transportadora→`'proprietario'`. Body explícito (form completo do GerenciamentoViagens) sobrescreve.
+- **`despesas.tipo`** (NOT NULL): modal rápido não enviava → default `'geral'` no backend + form do Dashboard passa `tipo:'geral'`.
+
+## 15.6 Integrações (Opção A — só super-admin) — DIFF PRONTO, AGUARDANDO CONFIRMAÇÃO
+
+Decisão: Integrações são da PLATAFORMA (Asaas cobra planos, Clicksign contratos, SMTP do sistema), não de cada transportadora. Plano:
+- `backend/routes/integracoes.js`: trocar `isAdmin`→`isSuperAdmin` nas 6 rotas. Com só super-admin escrevendo no `configuracoes` `id=1`, o vazamento entre empresas deixa de existir (não precisa refatorar id=1 agora).
+- `painel_web/src/components/Sidebar.tsx`: envolver o NavLink "Integrações" em `{user?.is_super_admin && (...)}` (mesmo padrão do Painel Admin).
+- **Próximo passo desta sessão:** aplicar esses 2 diffs.
+
+## 15.7 Memória estruturada (auto-memória do Claude)
+
+Arquivos em `C:\Users\Jordão Vittor\.claude\projects\C--Projetos-matopibalog-backend\memory\`:
+- `project_isolamento_multitenant.md` — padrão completo + correção do empresa_id + dívida técnica dos SQLs
+- `project_cadastro_motorista_3_caminhos.md` — os 3 fluxos de cadastro
+- `project_tarefa_login_3_botoes.md` — pendente: tela de cadastro 3 botões + troca de senha no 1º acesso (coluna `senha_temporaria` já preparada)
+- `project_melhorias_negocio_pos_feira.md` — quem_recebeu automático (já implementado) + CIOT obrigatório 24/05/2026 como possível diferencial de venda
+
+## 15.8 Commits desta sessão (mais recentes no topo)
+
+```
+22b1459 fix(admin): isolamento/ownership na gestão de usuarios (#13, #14)
+d31563a fix(despesas): garantir tipo NOT NULL no create (default 'geral')
+9b58c20 feat(fretes): quem_recebeu automático por tipo de empresa (TAC vs CLT)
+a6b9c2c fix(lancamentos): preencher empresa_id nos creates + quem_recebeu default
+844d4b9 fix(motoristas): preencher empresa_id no insert de motoristas
+45a89d9 feat(motoristas): rota dedicada POST /admin/motoristas
+01d6ba8 fix(admin): ownership em approveMotorista + console.error por etapa
+0551b0e fix(admin): isolar getPendentes por empresa
+1e464cb fix(admin): ownership/isolamento em block, comissao, delete e em-viagem
+ef9bacb fix(relatorios): isolar ficha-viagem por empresa
+405b28f fix(dashboard): isolar getSummary por empresa
+5727f6e fix(vales,abastecimentos): isolar GET por empresa
+1785e0d fix(fretes): isolar GET /fretes por empresa
+```
+
+## 15.9 Pendências que sobraram da auditoria (ainda NÃO feitas)
+
+Da lista dos 38, ainda faltam: #7/#16/#28/#32 (configuracoes id=1 global — Bloco 3), #15 (tenant.js: só super-admin impersona), #17 (`/impressoras/*` sem auth + exec — RCE), #18/#19/#20 (pagamentos sem ownership), #24/#27 (Etapa D + reset obrigatório), #31 (webhook Asaas sem assinatura), #30/#34 (Zod faltante), #33 (status suspenso), #35/#36/#37 (SMTP, Flutter refresh/máscaras). Integrações (15.6) é o próximo a aplicar.
+
+## 15.10 Bug em aberto (a confirmar)
+- Despesa pelo app Flutter do motorista pode ainda falhar se o app também não enviar `tipo` — o default `'geral'` no backend já blinda. Confirmar quando testar o app.
+
