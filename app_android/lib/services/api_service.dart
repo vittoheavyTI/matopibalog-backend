@@ -25,12 +25,16 @@ class ApiService {
         body: jsonEncode({'email': email, 'senha': senha}),
       );
 
+      debugPrint('[ApiService.login] status=${response.statusCode} body=${response.body}');
+
       if (response.statusCode == 200) {
         return jsonDecode(response.body);
       }
-      return null;
+      // Retorna o body para o provider poder extrair a mensagem de erro
+      return {'_error': true, '_status': response.statusCode, '_body': response.body};
     } catch (e) {
-      return null;
+      debugPrint('[ApiService.login] exception: $e');
+      return {'_error': true, '_status': 0, '_body': e.toString()};
     }
   }
 

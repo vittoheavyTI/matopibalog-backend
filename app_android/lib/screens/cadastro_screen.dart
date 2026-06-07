@@ -176,7 +176,6 @@ class _CadastroScreenState extends State<CadastroScreen> {
                 controller: _nomeCtrl,
                 decoration: const InputDecoration(
                   labelText: 'Nome Completo',
-                  border: OutlineInputBorder(),
                   prefixIcon: Icon(Icons.person),
                 ),
                 validator: _validateNome,
@@ -187,7 +186,6 @@ class _CadastroScreenState extends State<CadastroScreen> {
                 controller: _placaCtrl,
                 decoration: const InputDecoration(
                   labelText: 'Placa do Veículo (AAA-0A00)',
-                  border: OutlineInputBorder(),
                   prefixIcon: Icon(Icons.directions_car),
                 ),
                 validator: _validatePlaca,
@@ -199,7 +197,6 @@ class _CadastroScreenState extends State<CadastroScreen> {
                 controller: _cpfCtrl,
                 decoration: const InputDecoration(
                   labelText: 'CPF (Apenas números)',
-                  border: OutlineInputBorder(),
                   prefixIcon: Icon(Icons.badge),
                 ),
                 keyboardType: TextInputType.number,
@@ -212,7 +209,6 @@ class _CadastroScreenState extends State<CadastroScreen> {
                 decoration: const InputDecoration(
                   labelText: 'Código da empresa (opcional)',
                   hintText: 'Ex: MATO-AB1234 — deixe vazio se autônomo',
-                  border: OutlineInputBorder(),
                   prefixIcon: Icon(Icons.business_outlined),
                 ),
                 textCapitalization: TextCapitalization.characters,
@@ -231,7 +227,6 @@ class _CadastroScreenState extends State<CadastroScreen> {
                 controller: _emailCtrl,
                 decoration: const InputDecoration(
                   labelText: 'E-mail',
-                  border: OutlineInputBorder(),
                   prefixIcon: Icon(Icons.email_outlined),
                 ),
                 keyboardType: TextInputType.emailAddress,
@@ -243,7 +238,6 @@ class _CadastroScreenState extends State<CadastroScreen> {
                 controller: _passCtrl,
                 decoration: InputDecoration(
                   labelText: 'Senha',
-                  border: const OutlineInputBorder(),
                   prefixIcon: const Icon(Icons.lock_outline),
                   suffixIcon: IconButton(
                     icon: Icon(_showPass ? Icons.visibility_off : Icons.visibility),
@@ -259,7 +253,6 @@ class _CadastroScreenState extends State<CadastroScreen> {
                 controller: _confirmPassCtrl,
                 decoration: InputDecoration(
                   labelText: 'Confirmar Senha',
-                  border: const OutlineInputBorder(),
                   prefixIcon: const Icon(Icons.lock_outline),
                   suffixIcon: IconButton(
                     icon: Icon(_showConfirmPass ? Icons.visibility_off : Icons.visibility),

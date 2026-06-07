@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
@@ -56,9 +57,19 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
 
     final res = await ApiService.login(email, senha);
-    if (res == null) {
+    if (res == null || res['_error'] == true) {
       _status = AuthStatus.error;
-      _error = 'E-mail ou senha incorretos.';
+      // Tenta extrair mensagem do backend, senão usa mensagem genérica
+      try {
+        if (res != null && res['_body'] != null) {
+          final body = jsonDecode(res['_body'] as String);
+          _error = body['message'] ?? body['error'] ?? 'E-mail ou senha incorretos.';
+        } else {
+          _error = 'Não foi possível conectar ao servidor.';
+        }
+      } catch (_) {
+        _error = 'E-mail ou senha incorretos.';
+      }
       notifyListeners();
       return false;
     }

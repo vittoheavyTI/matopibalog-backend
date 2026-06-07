@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
+import '../providers/theme_provider.dart';
 import '../services/api_service.dart';
 import 'cadastro_screen.dart';
 
@@ -46,7 +47,6 @@ class _LoginScreenState extends State<LoginScreen> {
           controller: emailCtrl,
           decoration: const InputDecoration(
             labelText: 'Seu e-mail',
-            border: OutlineInputBorder(),
             prefixIcon: Icon(Icons.email_outlined),
           ),
           keyboardType: TextInputType.emailAddress,
@@ -73,142 +73,157 @@ class _LoginScreenState extends State<LoginScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(ok
-              ? 'E-mail de recuperação enviado. Verifique sua caixa de entrada.'
-              : 'Não foi possível enviar o e-mail. Verifique o endereço.'),
-          backgroundColor: ok ? Colors.green : Colors.red,
+              ? 'E-mail de recuperação enviado!'
+              : 'Não foi possível enviar. Verifique o endereço.'),
+          backgroundColor: ok ? Colors.green.shade700 : Colors.red.shade700,
         ),
       );
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Erro ao enviar e-mail de recuperação.'),
-          backgroundColor: Colors.red,
-        ),
+        const SnackBar(content: Text('Erro ao enviar e-mail.')),
       );
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
     return Scaffold(
       body: Consumer<AuthProvider>(
         builder: (context, auth, _) {
           final loading = auth.status == AuthStatus.loading;
           final error = auth.error;
 
-          return Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 32.0, vertical: 24.0),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  // Logo Matopiba Log
-                  Image.asset(
-                    'assets/LOGOMARCA.png',
-                    height: 100,
-                    fit: BoxFit.contain,
-                  ),
-                  const SizedBox(height: 20),
-                  Text(
-                    'MATOPIBA LOG',
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1.2,
-                    ),
-                  ),
-                  const SizedBox(height: 40),
-                  if (error.isNotEmpty) ...[
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.red.shade50,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.red.shade200),
-                      ),
-                      child: Text(
-                        error,
-                        style: const TextStyle(color: Colors.red),
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                  ],
-                  TextField(
-                    controller: _emailCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'E-mail',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.email_outlined),
-                    ),
-                    keyboardType: TextInputType.emailAddress,
-                    textInputAction: TextInputAction.next,
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: _passCtrl,
-                    decoration: InputDecoration(
-                      labelText: 'Senha',
-                      border: const OutlineInputBorder(),
-                      prefixIcon: const Icon(Icons.lock_outline),
-                      suffixIcon: IconButton(
-                        icon: Icon(
-                          _showPass ? Icons.visibility_off : Icons.visibility,
-                        ),
-                        onPressed: () => setState(() => _showPass = !_showPass),
-                      ),
-                    ),
-                    obscureText: !_showPass,
-                    textInputAction: TextInputAction.done,
-                    onSubmitted: (_) => _login(),
-                  ),
-                  const SizedBox(height: 8),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton(
-                      onPressed: _esqueceuSenha,
-                      child: const Text('Esqueceu a senha?'),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 50,
-                    child: ElevatedButton(
-                      onPressed: loading ? null : _login,
-                      style: ElevatedButton.styleFrom(
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                      child: loading
-                          ? const SizedBox(
-                              height: 20,
-                              width: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Text('ENTRAR', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextButton(
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const CadastroScreen(),
-                        ),
-                      );
-                    },
-                    child: const Text('Não tem conta? Cadastre-se'),
-                  ),
-                ],
+          // Mostra erro do auth como SnackBar (não banner inline)
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (error.isNotEmpty && auth.status == AuthStatus.error) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(error),
+                  backgroundColor: theme.colorScheme.error,
+                  behavior: SnackBarBehavior.floating,
+                ),
+              );
+            }
+          });
+
+          return Stack(
+            children: [
+              // Toggle de tema no canto superior direito
+              Positioned(
+                top: 48,
+                right: 16,
+                child: IconButton(
+                  icon: Icon(isDark ? Icons.wb_sunny_outlined : Icons.dark_mode_outlined),
+                  onPressed: () => context.read<ThemeProvider>().toggleTheme(),
+                  tooltip: isDark ? 'Modo claro' : 'Modo escuro',
+                ),
               ),
-            ),
+
+              Center(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 80),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      // Logomarca — case exato do arquivo
+                      Image.asset(
+                        'assets/LOGOMARCA.png',
+                        height: 110,
+                        fit: BoxFit.contain,
+                      ),
+                      const SizedBox(height: 40),
+
+                      // Card do formulário
+                      Card(
+                        elevation: 4,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              TextField(
+                                controller: _emailCtrl,
+                                decoration: const InputDecoration(
+                                  labelText: 'E-mail',
+                                  prefixIcon: Icon(Icons.email_outlined),
+                                ),
+                                keyboardType: TextInputType.emailAddress,
+                                textInputAction: TextInputAction.next,
+                              ),
+                              const SizedBox(height: 16),
+                              TextField(
+                                controller: _passCtrl,
+                                decoration: InputDecoration(
+                                  labelText: 'Senha',
+                                  prefixIcon: const Icon(Icons.lock_outline),
+                                  suffixIcon: IconButton(
+                                    icon: Icon(_showPass
+                                        ? Icons.visibility_off
+                                        : Icons.visibility),
+                                    onPressed: () =>
+                                        setState(() => _showPass = !_showPass),
+                                  ),
+                                ),
+                                obscureText: !_showPass,
+                                textInputAction: TextInputAction.done,
+                                onSubmitted: (_) => _login(),
+                              ),
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: TextButton(
+                                  onPressed: _esqueceuSenha,
+                                  child: const Text('Esqueceu a senha?'),
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              SizedBox(
+                                height: 50,
+                                child: ElevatedButton(
+                                  onPressed: loading ? null : _login,
+                                  child: loading
+                                      ? const SizedBox(
+                                          height: 20,
+                                          width: 20,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            color: Colors.white,
+                                          ),
+                                        )
+                                      : const Text(
+                                          'ENTRAR',
+                                          style: TextStyle(
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+
+                      const SizedBox(height: 16),
+                      TextButton(
+                        onPressed: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const CadastroScreen()),
+                        ),
+                        child: const Text('Não tem conta? Cadastre-se'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           );
         },
       ),
