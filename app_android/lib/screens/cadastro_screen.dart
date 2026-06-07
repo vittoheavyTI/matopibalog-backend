@@ -19,6 +19,8 @@ class _CadastroScreenState extends State<CadastroScreen> {
   final _codigoConviteCtrl = TextEditingController();
   bool _loading = false;
   String _error = '';
+  bool _showPass = false;
+  bool _showConfirmPass = false;
 
   @override
   void dispose() {
@@ -239,24 +241,32 @@ class _CadastroScreenState extends State<CadastroScreen> {
               const SizedBox(height: 16),
               TextFormField(
                 controller: _passCtrl,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'Senha',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.lock_outline),
+                  border: const OutlineInputBorder(),
+                  prefixIcon: const Icon(Icons.lock_outline),
+                  suffixIcon: IconButton(
+                    icon: Icon(_showPass ? Icons.visibility_off : Icons.visibility),
+                    onPressed: () => setState(() => _showPass = !_showPass),
+                  ),
                 ),
-                obscureText: true,
+                obscureText: !_showPass,
                 validator: _validateSenha,
                 textInputAction: TextInputAction.next,
               ),
               const SizedBox(height: 16),
               TextFormField(
                 controller: _confirmPassCtrl,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'Confirmar Senha',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.lock_outline),
+                  border: const OutlineInputBorder(),
+                  prefixIcon: const Icon(Icons.lock_outline),
+                  suffixIcon: IconButton(
+                    icon: Icon(_showConfirmPass ? Icons.visibility_off : Icons.visibility),
+                    onPressed: () => setState(() => _showConfirmPass = !_showConfirmPass),
+                  ),
                 ),
-                obscureText: true,
+                obscureText: !_showConfirmPass,
                 validator: _validateConfirmSenha,
                 textInputAction: TextInputAction.done,
                 onFieldSubmitted: (_) => _cadastrar(),

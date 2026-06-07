@@ -47,6 +47,19 @@ class ApiService {
     }
   }
 
+  static Future<bool> esqueceuSenha(String email) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$_baseUrl/auth/esqueceu-senha'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'email': email}),
+      );
+      return response.statusCode == 200;
+    } catch (e) {
+      return false;
+    }
+  }
+
   static Future<Map<String, dynamic>?> getMe() async {
     try {
       final response = await http.get(

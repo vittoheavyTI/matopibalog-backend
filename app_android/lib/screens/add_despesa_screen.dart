@@ -176,7 +176,10 @@ class _AddDespesaScreenState extends State<AddDespesaScreen> {
               decoration: const InputDecoration(
                 labelText: 'Descrição',
                 border: OutlineInputBorder(),
+                alignLabelWithHint: true,
               ),
+              minLines: 2,
+              maxLines: 4,
             ),
             const SizedBox(height: 16),
             TextField(
