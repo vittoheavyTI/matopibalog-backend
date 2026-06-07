@@ -200,13 +200,11 @@ class _HomeScreenState extends State<HomeScreen> {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12.0),
       child: ElevatedButton.icon(
-        icon: Icon(icon, size: 28, color: Colors.white),
-        label: Text(
-          title,
-          style: const TextStyle(fontSize: 16, color: Colors.white),
-        ),
+        icon: Icon(icon, size: 28),
+        label: Text(title, style: const TextStyle(fontSize: 16)),
         style: ElevatedButton.styleFrom(
           backgroundColor: btnColor,
+          foregroundColor: Colors.white,
           padding: const EdgeInsets.symmetric(vertical: 16),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(8),

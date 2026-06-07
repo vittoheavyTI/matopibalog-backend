@@ -184,6 +184,10 @@ cd app_android && flutter pub get && flutter run
 - [x] flutter_launcher_icons configurado (Logo.png, fundo branco)
 - [x] Debug de conexão: debugPrint do status+body no login; erro real do backend exibido ao usuário
 - [x] Assets: case-sensitive confirmado (Logo.png, LOGOMARCA.png)
+- [x] Bug botão ENTRAR invisível: foregroundColor: Colors.white adicionado ao ElevatedButtonTheme (light e dark)
+- [x] Dark mode: estrutura correta (ThemeProvider acima do MaterialApp, themeMode: context.watch)
+- [x] Ícone launcher: flutter_launcher_icons ^0.14.3 configurado (dart run flutter_launcher_icons para gerar)
+- [x] Splash: Image.asset('assets/LOGOMARCA.png') confirmado
 - [ ] Teste de login real com motorista cadastrado
 - [ ] Relatório mensal (sessão separada)
 - [ ] Notificações push (precisa Firebase, sessão separada)
