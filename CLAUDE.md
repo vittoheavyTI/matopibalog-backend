@@ -173,6 +173,23 @@ cd app_android && flutter pub get && flutter run
 - [x] Rename "Gerenciamento de Viagens" → "Gerenciamento de Fretes" + item "Fretes" no menu
 - [x] despesas.tipo default 'geral' (NOT NULL)
 
+### App Flutter — estado atual
+- [x] Build funcionando (flutter build apk --debug passa — requer Modo Desenvolvedor Windows + flutter extraído)
+- [x] Redesign UI: Material 3, tema light/dark, cores da marca (#1B5E20 verde, #827717 oliva)
+- [x] ThemeProvider com SharedPreferences + toggle sol/lua
+- [x] Login: Card, logomarca LOGOMARCA.png, olhinho senha, Esqueceu senha, toggle tema
+- [x] Cadastro: mesma linguagem visual, olhinho nos 2 campos de senha
+- [x] Splash: LOGOMARCA.png em vez de ícone de caminhão
+- [x] Logos configuradas: Logo.png (launcher) e LOGOMARCA.png (telas) em assets/
+- [x] flutter_launcher_icons configurado (Logo.png, fundo branco)
+- [x] Debug de conexão: debugPrint do status+body no login; erro real do backend exibido ao usuário
+- [x] Assets: case-sensitive confirmado (Logo.png, LOGOMARCA.png)
+- [ ] Teste de login real com motorista cadastrado
+- [ ] Relatório mensal (sessão separada)
+- [ ] Notificações push (precisa Firebase, sessão separada)
+- [ ] Modo Desenvolvedor Windows: habilitar para rodar flutter localmente (start ms-settings:developers)
+- [ ] flutter extraído: C:\Users\Jordão Vittor\Downloads\flutter_windows_3.44.0-stable.zip → extrair antes de buildar
+
 ### Pendentes
 - [ ] #7 Refatorar configuracoes id=1 (company separado ✓; falta limpar blob/printers)
 - [ ] #30/#34 Validação Zod (configuracoes, painel-admin, pagamentos, integracoes)

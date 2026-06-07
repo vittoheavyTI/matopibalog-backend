@@ -1,4 +1,4 @@
-import 'dart:io';
+﻿import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
@@ -167,7 +167,6 @@ class _AddDespesaScreenState extends State<AddDespesaScreen> {
               onChanged: (val) => setState(() => _tipo = val!),
               decoration: const InputDecoration(
                 labelText: 'Tipo',
-                border: OutlineInputBorder(),
               ),
             ),
             const SizedBox(height: 16),
@@ -175,7 +174,6 @@ class _AddDespesaScreenState extends State<AddDespesaScreen> {
               controller: _descCtrl,
               decoration: const InputDecoration(
                 labelText: 'Descrição',
-                border: OutlineInputBorder(),
                 alignLabelWithHint: true,
               ),
               minLines: 2,
@@ -186,7 +184,6 @@ class _AddDespesaScreenState extends State<AddDespesaScreen> {
               controller: _valorCtrl,
               decoration: const InputDecoration(
                 labelText: 'Valor (R\$)',
-                border: OutlineInputBorder(),
                 prefixText: 'R\$ ',
               ),
               keyboardType: const TextInputType.numberWithOptions(decimal: true),

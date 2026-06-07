@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
+import '../providers/theme_provider.dart';
 import '../providers/finance_provider.dart';
 import 'add_frete_screen.dart';
 import 'add_despesa_screen.dart';
@@ -37,6 +38,14 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: Text('Olá, ${auth.nome}'),
         actions: [
+          IconButton(
+            icon: Icon(
+              Theme.of(context).brightness == Brightness.dark
+                  ? Icons.wb_sunny_outlined
+                  : Icons.dark_mode_outlined,
+            ),
+            onPressed: () => context.read<ThemeProvider>().toggleTheme(),
+          ),
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: () => auth.logout(),
@@ -171,7 +180,7 @@ class _HomeScreenState extends State<HomeScreen> {
           Text(
             'R\$ ${value.toStringAsFixed(2)}',
             style: TextStyle(
-              color: color ?? Colors.black,
+              color: color ?? Theme.of(context).colorScheme.onSurface,
               fontWeight: bold ? FontWeight.bold : FontWeight.normal,
             ),
           ),
@@ -185,8 +194,9 @@ class _HomeScreenState extends State<HomeScreen> {
     String title,
     IconData icon,
     Widget screen, {
-    Color color = Colors.blue,
+    Color? color,
   }) {
+    final btnColor = color ?? Theme.of(context).colorScheme.primary;
     return Padding(
       padding: const EdgeInsets.only(bottom: 12.0),
       child: ElevatedButton.icon(
@@ -196,7 +206,7 @@ class _HomeScreenState extends State<HomeScreen> {
           style: const TextStyle(fontSize: 16, color: Colors.white),
         ),
         style: ElevatedButton.styleFrom(
-          backgroundColor: color,
+          backgroundColor: btnColor,
           padding: const EdgeInsets.symmetric(vertical: 16),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(8),

@@ -9,3 +9,4 @@ backend.log
 scripts/
 .DS_Store
 Thumbs.db
+app_android/android/*.hprof

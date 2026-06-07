@@ -16,6 +16,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _emailCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
   bool _showPass = false;
+  String _lastShownError = '';
 
   @override
   void dispose() {
@@ -97,9 +98,11 @@ class _LoginScreenState extends State<LoginScreen> {
           final loading = auth.status == AuthStatus.loading;
           final error = auth.error;
 
-          // Mostra erro do auth como SnackBar (não banner inline)
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (error.isNotEmpty && auth.status == AuthStatus.error) {
+          // Mostra erro do auth como SnackBar uma única vez por erro
+          if (error.isNotEmpty && auth.status == AuthStatus.error && error != _lastShownError) {
+            _lastShownError = error;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!mounted) return;
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
                   content: Text(error),
@@ -107,8 +110,8 @@ class _LoginScreenState extends State<LoginScreen> {
                   behavior: SnackBarBehavior.floating,
                 ),
               );
-            }
-          });
+            });
+          }
 
           return Stack(
             children: [

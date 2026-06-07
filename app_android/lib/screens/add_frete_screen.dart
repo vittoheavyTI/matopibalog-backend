@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 
 class AddFreteScreen extends StatefulWidget {
@@ -54,17 +54,17 @@ class _AddFreteScreenState extends State<AddFreteScreen> {
         padding: const EdgeInsets.all(16.0),
         child: Column(
           children: [
-            TextField(controller: _origemCtrl, decoration: const InputDecoration(labelText: 'Origem', border: OutlineInputBorder())),
+            TextField(controller: _origemCtrl, decoration: const InputDecoration(labelText: 'Origem')),
             const SizedBox(height: 16),
-            TextField(controller: _destinoCtrl, decoration: const InputDecoration(labelText: 'Destino', border: OutlineInputBorder())),
+            TextField(controller: _destinoCtrl, decoration: const InputDecoration(labelText: 'Destino')),
             const SizedBox(height: 16),
-            TextField(controller: _kmCtrl, decoration: const InputDecoration(labelText: 'KM Inicial (Opcional)', border: OutlineInputBorder()), keyboardType: TextInputType.number),
+            TextField(controller: _kmCtrl, decoration: const InputDecoration(labelText: 'KM Inicial (Opcional)'), keyboardType: TextInputType.number),
             const SizedBox(height: 16),
-            TextField(controller: _valorCtrl, decoration: const InputDecoration(labelText: 'Valor do Frete', prefixText: 'R\$ ', border: OutlineInputBorder()), keyboardType: const TextInputType.numberWithOptions(decimal: true)),
+            TextField(controller: _valorCtrl, decoration: const InputDecoration(labelText: 'Valor do Frete', prefixText: 'R\$ '), keyboardType: const TextInputType.numberWithOptions(decimal: true)),
             const SizedBox(height: 16),
             DropdownButtonFormField<String>(
               value: _quemRecebeu,
-              decoration: const InputDecoration(labelText: 'Quem Recebeu o Frete?', border: OutlineInputBorder()),
+              decoration: const InputDecoration(labelText: 'Quem Recebeu o Frete?'),
               items: const [
                 DropdownMenuItem(value: 'motorista', child: Text('Motorista')),
                 DropdownMenuItem(value: 'proprietario', child: Text('Proprietário')),
@@ -86,3 +86,4 @@ class _AddFreteScreenState extends State<AddFreteScreen> {
     );
   }
 }
+

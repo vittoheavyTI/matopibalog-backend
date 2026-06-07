@@ -1,4 +1,4 @@
-import 'dart:io';
+﻿import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
@@ -148,7 +148,6 @@ class _AddAbastecimentoScreenState extends State<AddAbastecimentoScreen> {
               controller: _postoCtrl,
               decoration: const InputDecoration(
                 labelText: 'Posto',
-                border: OutlineInputBorder(),
               ),
             ),
             const SizedBox(height: 16),
@@ -156,7 +155,6 @@ class _AddAbastecimentoScreenState extends State<AddAbastecimentoScreen> {
               controller: _litrosCtrl,
               decoration: const InputDecoration(
                 labelText: 'Litros',
-                border: OutlineInputBorder(),
               ),
               keyboardType: TextInputType.number,
             ),
@@ -165,7 +163,6 @@ class _AddAbastecimentoScreenState extends State<AddAbastecimentoScreen> {
               controller: _valorTotalCtrl,
               decoration: const InputDecoration(
                 labelText: 'Valor Total (Diesel)',
-                border: OutlineInputBorder(),
                 prefixText: 'R\$ ',
               ),
               keyboardType: TextInputType.number,
@@ -175,7 +172,6 @@ class _AddAbastecimentoScreenState extends State<AddAbastecimentoScreen> {
               controller: _arlaLitrosCtrl,
               decoration: const InputDecoration(
                 labelText: 'Litros Arla (Opcional)',
-                border: OutlineInputBorder(),
               ),
               keyboardType: TextInputType.number,
             ),
@@ -184,7 +180,6 @@ class _AddAbastecimentoScreenState extends State<AddAbastecimentoScreen> {
               controller: _arlaValorCtrl,
               decoration: const InputDecoration(
                 labelText: 'Valor Arla (Opcional)',
-                border: OutlineInputBorder(),
                 prefixText: 'R\$ ',
               ),
               keyboardType: TextInputType.number,
@@ -199,7 +194,6 @@ class _AddAbastecimentoScreenState extends State<AddAbastecimentoScreen> {
               onChanged: (v) => setState(() => _quemPagou = v!),
               decoration: const InputDecoration(
                 labelText: 'Quem Pagou?',
-                border: OutlineInputBorder(),
               ),
             ),
             const SizedBox(height: 16),
