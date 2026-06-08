@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
+import '../services/app_logger.dart';
 
 class FinanceProvider extends ChangeNotifier {
   double _totalFretes = 0.0;
@@ -19,6 +20,7 @@ class FinanceProvider extends ChangeNotifier {
   String get error => _error;
 
   Future<void> loadData() async {
+    AppLogger.action('load_finance_data');
     _loading = true;
     _error = '';
     notifyListeners();
@@ -62,8 +64,16 @@ class FinanceProvider extends ChangeNotifier {
       _comissao = tf * (_percentualComissao / 100);
       _deducoes = td;
       _saldo = _comissao - _deducoes;
+
+      AppLogger.action('load_finance_data', params: {
+        'total_fretes': tf,
+        'comissao': _comissao,
+        'deducoes': td,
+        'saldo': _saldo,
+      });
     } catch (e) {
       _error = 'Erro ao carregar dados. Verifique sua conexão.';
+      AppLogger.error('FinanceProvider', 'loadData exception', e);
     } finally {
       _loading = false;
       notifyListeners();

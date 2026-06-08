@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config.dart';
+import 'app_logger.dart';
 
 class ApiService {
   static final String _baseUrl = Config.apiBaseUrl;
@@ -18,6 +19,7 @@ class ApiService {
 
   // AUTH
   static Future<Map<String, dynamic>?> login(String email, String senha) async {
+    AppLogger.action('login_attempt', params: {'email': email});
     try {
       final response = await http.post(
         Uri.parse('$_baseUrl/auth/login'),
@@ -28,11 +30,14 @@ class ApiService {
       debugPrint('[ApiService.login] status=${response.statusCode} body=${response.body}');
 
       if (response.statusCode == 200) {
+        AppLogger.action('login_success', params: {'email': email});
         return jsonDecode(response.body);
       }
+      AppLogger.action('login_error', params: {'email': email, 'status': response.statusCode});
       // Retorna o body para o provider poder extrair a mensagem de erro
       return {'_error': true, '_status': response.statusCode, '_body': response.body};
     } catch (e) {
+      AppLogger.action('login_error', params: {'email': email, 'error': e.toString()});
       debugPrint('[ApiService.login] exception: $e');
       return {'_error': true, '_status': 0, '_body': e.toString()};
     }
@@ -70,9 +75,14 @@ class ApiService {
         Uri.parse('$_baseUrl/auth/me'),
         headers: await _getHeaders(),
       );
-      if (response.statusCode == 200) return jsonDecode(response.body);
+      if (response.statusCode == 200) {
+        AppLogger.api('ApiService', 'GET /auth/me', response.statusCode);
+        return jsonDecode(response.body);
+      }
+      AppLogger.api('ApiService', 'GET /auth/me', response.statusCode);
       return null;
     } catch (e) {
+      AppLogger.error('ApiService', 'GET /auth/me exception', e);
       return null;
     }
   }
@@ -84,9 +94,14 @@ class ApiService {
         Uri.parse('$_baseUrl/fretes'),
         headers: await _getHeaders(),
       );
-      if (response.statusCode == 200) return jsonDecode(response.body);
+      if (response.statusCode == 200) {
+        AppLogger.api('ApiService', 'GET /fretes', response.statusCode);
+        return jsonDecode(response.body);
+      }
+      AppLogger.api('ApiService', 'GET /fretes', response.statusCode);
       return [];
     } catch (e) {
+      AppLogger.error('ApiService', 'GET /fretes exception', e);
       return [];
     }
   }
@@ -98,8 +113,14 @@ class ApiService {
         headers: await _getHeaders(),
         body: jsonEncode(data),
       );
+      if (response.statusCode == 201) {
+        AppLogger.api('ApiService', 'POST /fretes', response.statusCode);
+      } else {
+        AppLogger.api('ApiService', 'POST /fretes', response.statusCode);
+      }
       return response.statusCode == 201;
     } catch (e) {
+      AppLogger.error('ApiService', 'POST /fretes exception', e);
       return false;
     }
   }
@@ -118,8 +139,14 @@ class ApiService {
       request.files.add(await http.MultipartFile.fromPath('foto', filePath));
 
       var response = await request.send();
+      if (response.statusCode == 201) {
+        AppLogger.api('ApiService', 'POST /$endpoint', response.statusCode);
+      } else {
+        AppLogger.api('ApiService', 'POST /$endpoint', response.statusCode);
+      }
       return response.statusCode == 201;
     } catch (e) {
+      AppLogger.error('ApiService', 'POST /$endpoint exception', e);
       return false;
     }
   }
@@ -131,9 +158,14 @@ class ApiService {
         Uri.parse('$_baseUrl/$endpoint'),
         headers: await _getHeaders(),
       );
-      if (response.statusCode == 200) return jsonDecode(response.body);
+      if (response.statusCode == 200) {
+        AppLogger.api('ApiService', 'GET /$endpoint', response.statusCode);
+        return jsonDecode(response.body);
+      }
+      AppLogger.api('ApiService', 'GET /$endpoint', response.statusCode);
       return [];
     } catch (e) {
+      AppLogger.error('ApiService', 'GET /$endpoint exception', e);
       return [];
     }
   }
