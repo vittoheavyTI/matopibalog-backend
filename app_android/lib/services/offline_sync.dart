@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import 'api_service.dart';
+import 'app_logger.dart';
 
 class OfflineSync {
   static Database? _database;
@@ -57,28 +58,40 @@ class OfflineSync {
       whereArgs: ['pending', 5],
     );
 
+    if (tasks.isEmpty) return;
+    AppLogger.action('offline_sync_iniciado', params: {'total': tasks.length});
+
+    int ok = 0;
+    int falhas = 0;
+
     for (var task in tasks) {
-      bool success = false;
       final fields = Map<String, String>.from(jsonDecode(task['fields']));
       final endpoint = _getEndpoint(task['task_type']);
 
       try {
-        success = await ApiService.createMovementWithPhoto(endpoint, fields, task['local_path']);
-        
+        final success = await ApiService.createMovementWithPhoto(endpoint, fields, task['local_path']);
+
         if (success) {
+          ok++;
           await db.delete('sync_queue', where: 'id = ?', whereArgs: [task['id']]);
+          AppLogger.action('offline_sync_task_ok', params: {'tipo': task['task_type']});
         } else {
+          falhas++;
           await db.update(
             'sync_queue',
             {'attempts': task['attempts'] + 1},
             where: 'id = ?',
             whereArgs: [task['id']],
           );
+          AppLogger.warning('OfflineSync', 'task ${task["task_type"]} falhou, tentativas: ${task["attempts"] + 1}');
         }
       } catch (e) {
-        // Log ou tratamento de erro
+        falhas++;
+        AppLogger.error('OfflineSync', 'task ${task["task_type"]} excecao', e);
       }
     }
+
+    AppLogger.action('offline_sync_concluido', params: {'ok': ok, 'falhas': falhas});
   }
 
   static String _getEndpoint(String taskType) {

@@ -3,7 +3,10 @@ import 'package:flutter/foundation.dart';
 enum LogLevel { info, warning, error, api, action }
 
 class AppLogger {
-  static const _sanitizedFields = {'senha', 'password', 'token', 'authorization'};
+  static const _sanitizedFields = {
+    'senha', 'password', 'token', 'authorization',
+    'local_path', 'foto_url', 'path', 'foto',
+  };
 
   static void info(String tag, String message) =>
       _log(LogLevel.info, tag, message);

@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/theme_provider.dart';
 import '../providers/finance_provider.dart';
+import '../services/app_logger.dart';
 import 'add_frete_screen.dart';
 import 'add_despesa_screen.dart';
 import 'add_abastecimento_screen.dart';
@@ -20,6 +21,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    AppLogger.action('screen_open', params: {'tela': 'home'});
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<FinanceProvider>().loadData();
     });

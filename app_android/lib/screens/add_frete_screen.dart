@@ -1,5 +1,6 @@
 ﻿import 'package:flutter/material.dart';
 import '../services/api_service.dart';
+import '../services/app_logger.dart';
 
 class AddFreteScreen extends StatefulWidget {
   const AddFreteScreen({super.key});
@@ -16,12 +17,24 @@ class _AddFreteScreenState extends State<AddFreteScreen> {
   String _quemRecebeu = 'motorista';
   bool _loading = false;
 
+  @override
+  void initState() {
+    super.initState();
+    AppLogger.action('screen_open', params: {'tela': 'add_frete'});
+  }
+
   Future<void> _salvar() async {
     if (_origemCtrl.text.isEmpty || _destinoCtrl.text.isEmpty || _valorCtrl.text.isEmpty) {
+      AppLogger.action('frete_validation_error', params: {'motivo': 'campos_obrigatorios'});
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Preencha os campos obrigatórios.')));
       return;
     }
 
+    AppLogger.action('frete_save_attempt', params: {
+      'origem': _origemCtrl.text,
+      'destino': _destinoCtrl.text,
+      'quem_recebeu': _quemRecebeu,
+    });
     setState(() => _loading = true);
 
     try {
@@ -34,12 +47,15 @@ class _AddFreteScreenState extends State<AddFreteScreen> {
       });
 
       if (success && mounted) {
+        AppLogger.action('frete_save_ok');
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Frete registrado com sucesso!')));
       } else {
+        AppLogger.warning('AddFrete', 'API retornou false');
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Erro ao salvar frete.')));
       }
     } catch (e) {
+      AppLogger.error('AddFrete', 'erro_conexao', e);
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Erro de conexão.')));
     } finally {
       if (mounted) setState(() => _loading = false);

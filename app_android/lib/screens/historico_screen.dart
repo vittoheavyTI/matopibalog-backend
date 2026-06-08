@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
+import '../services/app_logger.dart';
 import 'package:intl/intl.dart';
 
 class HistoricoScreen extends StatefulWidget {
@@ -18,10 +19,12 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
   @override
   void initState() {
     super.initState();
+    AppLogger.action('screen_open', params: {'tela': 'historico'});
     _fetchData();
   }
 
   Future<void> _fetchData() async {
+    AppLogger.action('historico_fetch', params: {'tipo': _tipoFiltro});
     setState(() {
       _loading = true;
       _error = '';
@@ -34,6 +37,7 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
           _items = data;
           _loading = false;
         });
+        AppLogger.action('historico_fetch_ok', params: {'tipo': _tipoFiltro, 'total': data.length});
       }
     } catch (e) {
       if (mounted) {
@@ -41,6 +45,7 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
           _error = 'Erro ao carregar dados. Verifique sua conexão.';
           _loading = false;
         });
+        AppLogger.error('HistoricoScreen', 'fetch $_tipoFiltro', e);
       }
     }
   }

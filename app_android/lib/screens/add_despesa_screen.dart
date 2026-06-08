@@ -5,6 +5,7 @@ import 'package:uuid/uuid.dart';
 import 'package:workmanager/workmanager.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import '../services/api_service.dart';
+import '../services/app_logger.dart';
 import '../services/offline_sync.dart';
 
 class AddDespesaScreen extends StatefulWidget {
@@ -24,6 +25,12 @@ class _AddDespesaScreenState extends State<AddDespesaScreen> {
   bool _photoRequired = true;
 
   @override
+  void initState() {
+    super.initState();
+    AppLogger.action('screen_open', params: {'tela': 'add_despesa'});
+  }
+
+  @override
   void dispose() {
     _descCtrl.dispose();
     _valorCtrl.dispose();
@@ -41,9 +48,10 @@ class _AddDespesaScreenState extends State<AddDespesaScreen> {
         setState(() => _image = File(pickedFile.path));
       }
     } catch (e) {
+      AppLogger.error('AddDespesa', 'erro_foto', e);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erro ao acessar $source: $e')),
+          SnackBar(content: Text('Erro ao acessar câmera/galeria.')),
         );
       }
     }
@@ -89,10 +97,12 @@ class _AddDespesaScreenState extends State<AddDespesaScreen> {
 
   Future<void> _save() async {
     if (_image == null && _photoRequired) {
+      AppLogger.action('despesa_validation_error', params: {'motivo': 'foto_obrigatoria'});
       _showPhotoOptions();
       return;
     }
 
+    AppLogger.action('despesa_save_attempt', params: {'tipo': _tipo, 'quem_pagou': _quemPagou});
     setState(() => _loading = true);
 
     final fields = {
@@ -111,12 +121,15 @@ class _AddDespesaScreenState extends State<AddDespesaScreen> {
           _image!.path,
         );
         if (success) {
+          AppLogger.action('despesa_save_ok');
           if (mounted) Navigator.pop(context);
           return;
         }
+        AppLogger.warning('AddDespesa', 'upload falhou, tentando offline');
       }
 
       if (_image != null) {
+        AppLogger.action('despesa_offline_queued', params: {'tipo': _tipo});
         final queueId = const Uuid().v4();
         await OfflineSync.addPendingTask(
           id: queueId,
@@ -142,8 +155,9 @@ class _AddDespesaScreenState extends State<AddDespesaScreen> {
         );
       }
     } catch (e) {
+      AppLogger.error('AddDespesa', 'erro_conexao', e);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erro ao salvar: $e')),
+        const SnackBar(content: Text('Erro ao salvar despesa.')),
       );
     } finally {
       if (mounted) setState(() => _loading = false);
