@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Search, Plus, X, Check, AlertTriangle, Eye, Ban, Unlock, Trash2 } from 'lucide-react';
+import { Shield, Search, Plus, X, Check, AlertTriangle, Eye, Ban, Unlock, Trash2, KeyRound } from 'lucide-react';
 import api from '../api';
 
 export const PainelEmpresas: React.FC = () => {
@@ -38,6 +38,22 @@ export const PainelEmpresas: React.FC = () => {
     try { await api.put('/painel-admin/empresas/' + id, { status: e.status === 'suspenso' ? 'ativo' : 'suspenso' }); } catch { setToast({ message: 'Erro ao alterar status', tipo: 'erro' }); return; }
     setToast({ message: 'Status alterado!', tipo: 'sucesso' });
     carregar();
+  }
+
+  async function resetSenhaAdmin(empresaId: string, nomeEmpresa: string) {
+    const nova = prompt(`Nova senha para o admin de "${nomeEmpresa}" (mín. 6 caracteres):`);
+    if (!nova || nova.length < 6) return;
+    try {
+      // Busca o admin da empresa e reseta a senha
+      const resp = await api.get(`/admin/usuarios?empresa_id=${empresaId}`);
+      const admins = (resp.data || []).filter((u: any) => u.tipo === 'admin');
+      if (admins.length === 0) { alert('Nenhum admin encontrado para esta empresa.'); return; }
+      // Reseta a senha do primeiro admin
+      await api.post(`/admin/usuarios/${admins[0].id}/reset-senha`, { nova_senha: nova });
+      setToast({ message: `Senha do admin de "${nomeEmpresa}" resetada!`, tipo: 'sucesso' });
+    } catch {
+      setToast({ message: 'Erro ao resetar senha.', tipo: 'erro' });
+    }
   }
 
   async function excluir() {
@@ -92,6 +108,7 @@ export const PainelEmpresas: React.FC = () => {
                   <div className="flex items-center justify-center gap-1">
                     <button onClick={() => { setEditing(e); setFormDados({ nome: e.nome || '', cnpj: e.cnpj || '', email: e.email_contato || '', telefone: e.telefone_contato || '', plano_id: e.plano_id || '' }); setShowModal(true); }} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg"><Eye size={16} /></button>
                     <button onClick={() => suspender(e.id)} className="p-1.5 text-orange-500 hover:bg-orange-50 rounded-lg">{e.status === 'suspenso' ? <Unlock size={16} /> : <Ban size={16} />}</button>
+                    <button onClick={() => resetSenhaAdmin(e.id, e.nome)} className="p-1.5 text-gray-500 hover:bg-gray-100 rounded-lg" title="Resetar senha do admin"><KeyRound size={16} /></button>
                     <button onClick={() => setDeleteTarget(e)} className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg"><Trash2 size={16} /></button>
                   </div>
                 </td>

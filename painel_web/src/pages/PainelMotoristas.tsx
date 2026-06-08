@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Search, CheckCircle, XCircle, FileWarning } from 'lucide-react';
+import { Shield, Search, CheckCircle, XCircle, FileWarning, KeyRound } from 'lucide-react';
 import api from '../api';
 
 export const PainelMotoristas: React.FC = () => {
@@ -19,6 +19,17 @@ export const PainelMotoristas: React.FC = () => {
 
   async function reprovar(id: string) {
     try { await api.put('/painel-admin/motoristas/' + id + '/reprovar'); carregar(); } catch {}
+  }
+
+  async function resetSenha(id: string, nome: string) {
+    const nova = prompt(`Nova senha para ${nome} (mín. 6 caracteres):`);
+    if (!nova || nova.length < 6) return;
+    try {
+      await api.post(`/admin/usuarios/${id}/reset-senha`, { nova_senha: nova });
+      alert('Senha resetada com sucesso!');
+    } catch {
+      alert('Erro ao resetar senha.');
+    }
   }
 
   const filtered = motoristas.filter(m => (m.nome || '').toLowerCase().includes(searchTerm.toLowerCase()) || (m.email || '').includes(searchTerm));
@@ -61,12 +72,13 @@ export const PainelMotoristas: React.FC = () => {
                    <span className="flex items-center text-red-600 text-sm font-bold"><XCircle size={14} className="mr-1" />Reprovado</span>}
                 </td>
                 <td className="p-4 text-center">
-                  {m.status === 'pendente' ? (
-                    <div className="flex items-center justify-center gap-1">
+                  <div className="flex items-center justify-center gap-1 flex-wrap">
+                    {m.status === 'pendente' && <>
                       <button onClick={() => aprovar(m.id)} className="px-3 py-1.5 text-xs font-bold bg-green-500 text-white rounded-lg hover:bg-green-600 flex items-center"><CheckCircle size={14} className="mr-1" />Aprovar</button>
                       <button onClick={() => reprovar(m.id)} className="px-3 py-1.5 text-xs font-bold bg-red-500 text-white rounded-lg hover:bg-red-600 flex items-center"><XCircle size={14} className="mr-1" />Reprovar</button>
-                    </div>
-                  ) : <span className="text-xs text-gray-400">—</span>}
+                    </>}
+                    <button onClick={() => resetSenha(m.id, m.nome)} className="px-3 py-1.5 text-xs font-bold bg-gray-500 text-white rounded-lg hover:bg-gray-600 flex items-center"><KeyRound size={14} className="mr-1" />Resetar Senha</button>
+                  </div>
                 </td>
               </tr>
             ))}
