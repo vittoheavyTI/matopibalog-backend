@@ -1,6 +1,6 @@
 {
-    "name": "chofer_log",
-    "short_name": "chofer_log",
+    "name": "Matopiba Log",
+    "short_name": "Matopiba Log",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

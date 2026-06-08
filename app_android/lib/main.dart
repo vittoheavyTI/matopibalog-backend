@@ -33,13 +33,13 @@ void main() async {
         ChangeNotifierProvider(create: (_) => AuthProvider()),
         ChangeNotifierProvider(create: (_) => FinanceProvider()),
       ],
-      child: const ChoferLogApp(),
+      child: const MatopibaLogApp(),
     ),
   );
 }
 
-class ChoferLogApp extends StatelessWidget {
-  const ChoferLogApp({super.key});
+class MatopibaLogApp extends StatelessWidget {
+  const MatopibaLogApp({super.key});
 
   @override
   Widget build(BuildContext context) {

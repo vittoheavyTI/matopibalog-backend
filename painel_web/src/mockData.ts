@@ -57,7 +57,7 @@ export const mockMotoristas: Motorista[] = [
 export const mockUsuarios: Usuario[] = [
   {
     uid: 'mock-admin-uid',
-    nome: 'Administrador Chofer',
+    nome: 'Administrador Matopiba',
     email: 'admin@mock.com',
     celular: '(11) 99999-9999',
     endereco: 'Rua Principal, 100 - Centro',
