@@ -143,6 +143,22 @@ class ApiService {
     }
   }
 
+  static Future<Map<String, dynamic>?> finalizarViagem(String freteId) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$_baseUrl/fretes/$freteId/finalizar'),
+        headers: await _getHeaders(),
+      );
+      AppLogger.api('ApiService', 'POST /fretes/$freteId/finalizar', response.statusCode);
+      if (response.statusCode == 200) return jsonDecode(response.body);
+      final body = jsonDecode(response.body);
+      return {'_error': true, 'message': body['message'] ?? 'Erro ao finalizar.'};
+    } catch (e) {
+      AppLogger.error('ApiService', 'POST /fretes/finalizar exception', e);
+      return {'_error': true, 'message': 'Erro de conexão.'};
+    }
+  }
+
   static Future<bool> createFrete(Map<String, dynamic> data) async {
     try {
       final response = await http.post(

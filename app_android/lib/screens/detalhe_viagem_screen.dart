@@ -17,7 +17,9 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
   List<dynamic> _abastecimentos = [];
   List<dynamic> _vales = [];
   bool _loading = true;
+  bool _finalizando = false;
   String _error = '';
+  Map<String, dynamic>? _perfilCache;
 
   @override
   void initState() {
@@ -34,16 +36,18 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
       return;
     }
     try {
-      final results = await Future.wait([
-        ApiService.getListComFiltro('despesas', {'frete_id': freteId}),
-        ApiService.getListComFiltro('abastecimentos', {'frete_id': freteId}),
-        ApiService.getListComFiltro('vales', {'frete_id': freteId}),
-      ]);
+      final despesas = ApiService.getListComFiltro('despesas', {'frete_id': freteId});
+      final abast = ApiService.getListComFiltro('abastecimentos', {'frete_id': freteId});
+      final vales = ApiService.getListComFiltro('vales', {'frete_id': freteId});
+      final perfil = ApiService.getMe();
+      final results = await Future.wait([despesas, abast, vales]);
+      final perfilData = await perfil;
       if (mounted) {
         setState(() {
           _despesas = results[0];
           _abastecimentos = results[1];
           _vales = results[2];
+          _perfilCache = perfilData;
           _loading = false;
         });
         AppLogger.action('detalhe_viagem_fetch_ok', params: {
@@ -57,6 +61,47 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
         setState(() { _error = 'Erro ao carregar detalhes.'; _loading = false; });
         AppLogger.error('DetalheViagem', 'fetchDetalhes', e);
       }
+    }
+  }
+
+  bool _podeFinalizar() {
+    final status = widget.frete['status'] ?? '';
+    if (status == 'finalizado' || status == 'cancelado') return false;
+    final perfil = _perfilCache;
+    if (perfil == null) return false;
+    if (perfil['is_super_admin'] == true) return true;
+    if (perfil['role'] == 'admin') return true;
+    // motorista: verifica tipo de empresa e permissão
+    final empresa = perfil['empresas'] as Map<String, dynamic>?;
+    final isAutonomo = empresa?['tipo'] == 'autonomo';
+    if (isAutonomo) return true;
+    final motorista = perfil['motoristas'] as Map<String, dynamic>?;
+    return motorista?['pode_finalizar_viagem'] == true;
+  }
+
+  Future<void> _finalizarViagem() async {
+    final freteId = widget.frete['id']?.toString() ?? '';
+    if (freteId.isEmpty) return;
+    AppLogger.action('finalizar_viagem', params: {'frete_id': freteId});
+    setState(() => _finalizando = true);
+    try {
+      final result = await ApiService.finalizarViagem(freteId);
+      if (!mounted) return;
+      if (result != null && result['_error'] != true) {
+        AppLogger.action('finalizar_viagem_ok', params: {'frete_id': freteId});
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Viagem finalizada com sucesso!')),
+        );
+        Navigator.pop(context, true);
+      } else {
+        final msg = result?['message'] ?? 'Erro ao finalizar.';
+        AppLogger.warning('DetalheViagem', 'finalizar falhou: $msg');
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+      }
+    } catch (e) {
+      AppLogger.error('DetalheViagem', 'finalizarViagem exception', e);
+    } finally {
+      if (mounted) setState(() => _finalizando = false);
     }
   }
 
@@ -111,6 +156,35 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
                           const SizedBox(height: 12),
                         ],
                         _cardResumo(f),
+                        const SizedBox(height: 16),
+                        if (_podeFinalizar())
+                          SizedBox(
+                            height: 48,
+                            child: ElevatedButton.icon(
+                              icon: _finalizando
+                                  ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                  : const Icon(Icons.check_circle_outline),
+                              label: const Text('FINALIZAR VIAGEM'),
+                              style: ElevatedButton.styleFrom(backgroundColor: Colors.green.shade700),
+                              onPressed: _finalizando ? null : _finalizarViagem,
+                            ),
+                          )
+                        else if (widget.frete['status'] != 'finalizado' && widget.frete['status'] != 'cancelado')
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            child: Row(
+                              children: [
+                                Icon(Icons.lock_outline, color: Colors.grey.shade500, size: 14),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    'Finalização pelo app não autorizada. Contate o administrador.',
+                                    style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         const SizedBox(height: 24),
                       ],
                     ),
