@@ -55,6 +55,8 @@ export const Usuarios: React.FC = () => {
         cidade: u.cidade || '',
         fotoUrl: u.foto_url || '',
         nivel: u.tipo || 'admin',
+        empresaTipo: Array.isArray(u.empresas) ? u.empresas[0]?.tipo || null : u.empresas?.tipo || null,
+        is_super_admin: !!u.is_super_admin,
         permissoes: u.permissoes || { dashboard: true, motoristas: true, relatorios: true, usuarios: false, configuracoes: false },
         status: u.status
       })));
@@ -188,6 +190,22 @@ export const Usuarios: React.FC = () => {
     }
   };
 
+  const getTipoLabel = (user: any) => {
+    if (user.is_super_admin) return 'Super Admin';
+    if (user.empresaTipo === 'autonomo') return 'Autônomo';
+    if (user.nivel === 'admin') return 'Administrador';
+    if (user.nivel === 'motorista') return 'Motorista';
+    return user.nivel ? `${user.nivel.charAt(0).toUpperCase()}${user.nivel.slice(1)}` : 'Usuário';
+  };
+
+  const getTipoBadgeClasses = (user: any) => {
+    if (user.is_super_admin) return 'bg-yellow-100 text-yellow-800';
+    if (user.empresaTipo === 'autonomo') return 'bg-emerald-100 text-emerald-700';
+    if (user.nivel === 'admin') return 'bg-purple-100 text-purple-700';
+    if (user.nivel === 'motorista') return 'bg-blue-100 text-blue-700';
+    return 'bg-gray-100 text-gray-700';
+  };
+
   const filtered = usuarios.filter(u => 
     u.nome.toLowerCase().includes(searchTerm.toLowerCase()) || 
     u.email.toLowerCase().includes(searchTerm.toLowerCase())
@@ -256,12 +274,8 @@ export const Usuarios: React.FC = () => {
                       </p>
                     </td>
                     <td className="p-4">
-                      <span className={`px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest ${
-                        user.nivel === 'admin' ? 'bg-purple-100 text-purple-700' :
-                        user.nivel === 'motorista' ? 'bg-blue-100 text-blue-700' :
-                        'bg-gray-100 text-gray-700'
-                      }`}>
-                        {user.nivel === 'admin' ? 'Administrador' : user.nivel === 'motorista' ? 'Motorista' : 'Operador'}
+                      <span className={`px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest ${getTipoBadgeClasses(user)}`}>
+                        {getTipoLabel(user)}
                       </span>
                     </td>
                     <td className="p-4">

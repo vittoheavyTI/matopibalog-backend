@@ -307,7 +307,7 @@ exports.getUsuarios = async (req, res) => {
 
     let query = supabase
       .from('usuarios')
-      .select('*')
+      .select('*, empresas!left(tipo)')
       .order('nome', { ascending: true });
 
     if (empresaAlvo) {
@@ -319,16 +319,24 @@ exports.getUsuarios = async (req, res) => {
 
     if (error) throw error;
 
+    const usuariosComEmpresa = (usuariosDb || []).map(u => ({
+      ...u,
+      empresa_tipo: Array.isArray(u.empresas)
+        ? u.empresas[0]?.tipo || null
+        : u.empresas?.tipo || null,
+      is_super_admin: u.is_super_admin === true,
+    }));
+
     // Órfãos do Auth (sem linha em usuarios) NÃO têm empresa_id → não dá para
     // atribuir a uma empresa. Só super-admin os vê; admin comum nunca (evita
     // vazar e-mails de outras empresas).
     if (!isSuperAdmin) {
-      return res.status(200).json(usuariosDb || []);
+      return res.status(200).json(usuariosComEmpresa || []);
     }
 
     const { data: authList } = await supabase.auth.admin.listUsers({ perPage: 1000 });
     const authUsers = authList?.users || [];
-    const dbIds = new Set((usuariosDb || []).map(u => u.id));
+    const dbIds = new Set((usuariosComEmpresa || []).map(u => u.id));
 
     const orphans = authUsers
       .filter(au => !dbIds.has(au.id))
@@ -344,7 +352,7 @@ exports.getUsuarios = async (req, res) => {
         _orphan: true
       }));
 
-    res.status(200).json([...(usuariosDb || []), ...orphans]);
+    res.status(200).json([...(usuariosComEmpresa || []), ...orphans]);
   } catch (error) {
     console.error('[adminController:getUsuarios] Erro detalhado ao listar usuários admin:', error);
     res.status(500).json({ message: 'Erro ao listar administradores: ' + (error.message || error) });
@@ -415,6 +423,34 @@ exports.createUsuario = async (req, res) => {
   } catch (error) {
     console.error('[adminController:createUsuario] Erro geral:', error);
     res.status(500).json({ message: 'Erro inesperado ao criar administrador: ' + (error.message || error) });
+  }
+};
+
+// ─── Resetar Senha de Usuário ───────────────────────────────────────────────
+exports.resetSenhaUsuario = async (req, res) => {
+  const { id } = req.params;
+  const { nova_senha } = req.body;
+  console.log(`[adminController:resetSenhaUsuario] Resetando senha do usuário ${id}...`);
+
+  if (!nova_senha || typeof nova_senha !== 'string' || nova_senha.length < 6) {
+    return res.status(400).json({ message: 'Senha deve ter pelo menos 6 caracteres.' });
+  }
+
+  try {
+    const { data, error } = await supabase.auth.admin.updateUserById(id, {
+      password: nova_senha
+    });
+
+    if (error) {
+      console.error('[adminController:resetSenhaUsuario] Erro no Supabase Auth:', error);
+      return res.status(500).json({ message: 'Erro ao resetar senha do usuário.' });
+    }
+
+    console.log(`[adminController:resetSenhaUsuario] Senha resetada com sucesso para ${id}.`);
+    res.status(200).json({ message: 'Senha resetada com sucesso.' });
+  } catch (error) {
+    console.error('[adminController:resetSenhaUsuario] Erro detalhado:', error);
+    res.status(500).json({ message: 'Erro ao resetar senha do usuário: ' + (error.message || error) });
   }
 };
 

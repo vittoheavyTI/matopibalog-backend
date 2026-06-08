@@ -19,6 +19,10 @@ const esqueceuSenhaSchema = z.object({
   email: z.string().email('E-mail inválido.'),
 });
 
+const resetSenhaSchema = z.object({
+  nova_senha: z.string().min(6, 'Senha deve ter pelo menos 6 caracteres.'),
+});
+
 const registerEmpresaSchema = z.object({
   nome: z.string().min(2, 'Nome do responsável obrigatório.').max(100),
   email: z.string().email('E-mail inválido.'),
@@ -29,4 +33,4 @@ const registerEmpresaSchema = z.object({
   plano: z.enum(['basico', 'profissional', 'empresarial']).optional(),
 });
 
-module.exports = { loginSchema, registerSchema, esqueceuSenhaSchema, registerEmpresaSchema };
+module.exports = { loginSchema, registerSchema, esqueceuSenhaSchema, resetSenhaSchema, registerEmpresaSchema };
