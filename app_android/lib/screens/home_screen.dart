@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../providers/auth_provider.dart';
-import '../providers/theme_provider.dart';
 import '../providers/finance_provider.dart';
 import '../services/app_logger.dart';
 import 'add_frete_screen.dart';
@@ -33,28 +31,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final auth = context.watch<AuthProvider>();
     final finance = context.watch<FinanceProvider>();
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('Olá, ${auth.nome}'),
-        actions: [
-          IconButton(
-            icon: Icon(
-              Theme.of(context).brightness == Brightness.dark
-                  ? Icons.wb_sunny_outlined
-                  : Icons.dark_mode_outlined,
-            ),
-            onPressed: () => context.read<ThemeProvider>().toggleTheme(),
-          ),
-          IconButton(
-            icon: const Icon(Icons.logout),
-            onPressed: () => auth.logout(),
-          ),
-        ],
-      ),
-      body: RefreshIndicator(
+    return RefreshIndicator(
         onRefresh: _refresh,
         child: finance.loading
             ? const Center(child: CircularProgressIndicator())
@@ -158,7 +137,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   ],
                 ),
               ),
-      ),
     );
   }
 
