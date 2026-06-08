@@ -109,7 +109,9 @@ export const Login: React.FC = () => {
     setError('');
     try {
       const response = await api.post('/auth/login', { email, senha: password });
-      const { user: rawUser } = response.data;
+      const { user: rawUser, token } = response.data;
+      // Save token for future requests (Bearer)
+      try { localStorage.setItem('auth_token', token); } catch (e) {}
       login({ ...rawUser, fotoUrl: rawUser.foto_url });
       navigate('/');
     } catch (err: any) {

@@ -3,7 +3,21 @@ import axios from 'axios';
 const api = axios.create({
   // Tente adicionar o /api no final do baseURL se suas rotas do backend usam /api
   baseURL: import.meta.env.VITE_API_URL || 'https://matopibalog-backend-production.up.railway.app',
-  withCredentials: true, // ESSENCIAL: Isso faz o navegador enviar o Cookie HTTPOnly
+  withCredentials: false, // Não depender de cookie; usaremos Bearer token em Authorization
+});
+
+// Envia Authorization: Bearer <token> em todas as requisições quando presente
+api.interceptors.request.use((config) => {
+  try {
+    const token = localStorage.getItem('auth_token');
+    if (token) {
+      config.headers = config.headers || {};
+      (config.headers as any).Authorization = `Bearer ${token}`;
+    }
+  } catch (e) {
+    // ignore
+  }
+  return config;
 });
 
 // Mantemos apenas o interceptor de resposta para avisar o sistema caso o login expire (Erro 401)

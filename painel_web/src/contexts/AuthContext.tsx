@@ -34,6 +34,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Verifica o cookie na montagem para restaurar a sessão
   useEffect(() => {
+    // Preferir token salvo no localStorage (Bearer). Se não existir, não tenta API.
+    const token = localStorage.getItem('auth_token');
+    if (!token) {
+      loadingRef.current = false;
+      setLoading(false);
+      setUser(null);
+      return;
+    }
+
     api.get('/auth/me')
       .then((res) => {
         const data = res.data;
@@ -48,6 +57,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         });
       })
       .catch(() => {
+        // Se o token for inválido, remove e limpa estado
+        localStorage.removeItem('auth_token');
         setUser(null);
       })
       .finally(() => {
@@ -73,6 +84,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       await api.post('/auth/logout');
     } catch {}
+    // Remove token stored locally
+    try { localStorage.removeItem('auth_token'); } catch(e) {}
     // Limpa cache per-session para a próxima conta começar sem dados da anterior
     // company é per-session (varia por empresa); logo é do sistema (persiste entre sessões)
     ['matopibalog_company', 'choferlog_company',

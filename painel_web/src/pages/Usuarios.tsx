@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { UserPlus, Search, Shield, Phone, MapPin, Camera, X, Check, Trash2, AlertTriangle, Loader2 } from 'lucide-react';
+import { UserPlus, Search, Shield, Phone, MapPin, Camera, X, Check, Trash2, AlertTriangle, Loader2, Key } from 'lucide-react';
 import api from '../api';
 import { maskPhone, maskCEP } from '../utils/masks';
 import axios from 'axios';
@@ -19,6 +19,10 @@ export const Usuarios: React.FC = () => {
   const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isFetchingCep, setIsFetchingCep] = useState(false);
+  const [resetUserId, setResetUserId] = useState<string | null>(null);
+  const [novaSenha, setNovaSenha] = useState('');
+  const [isResetting, setIsResetting] = useState(false);
+  const [resetMessage, setResetMessage] = useState('');
 
   const [newUser, setNewUser] = useState({
     nome: '',
@@ -140,6 +144,27 @@ export const Usuarios: React.FC = () => {
       alert('Erro ao excluir: ' + (error.response?.data?.message || error.message || 'Erro desconhecido'));
     } finally {
       setIsDeleting(false);
+    }
+  };
+
+  const handleResetSenha = async () => {
+    if (!resetUserId) return;
+    if (!novaSenha || novaSenha.length < 6) {
+      alert('Senha deve ter pelo menos 6 caracteres.');
+      return;
+    }
+    try {
+      setIsResetting(true);
+      await api.post(`/admin/usuarios/${resetUserId}/reset-senha`, { nova_senha: novaSenha });
+      setResetMessage('Senha resetada com sucesso.');
+      setResetUserId(null);
+      setNovaSenha('');
+      await loadUsuarios();
+    } catch (err: any) {
+      console.error('Erro ao resetar senha:', err);
+      alert('Erro ao resetar senha: ' + (err.response?.data?.message || err.message || 'Erro desconhecido'));
+    } finally {
+      setIsResetting(false);
     }
   };
 
@@ -300,6 +325,15 @@ export const Usuarios: React.FC = () => {
                         >
                           Editar
                         </button>
+                        {currentUser?.is_super_admin && (
+                          <button
+                            onClick={() => setResetUserId(user.uid)}
+                            className="text-orange-600 hover:bg-orange-50 px-3 py-1.5 rounded-lg font-bold text-sm transition-colors"
+                            title="Resetar Senha"
+                          >
+                            <Key size={14} className="mr-2 inline" /> Resetar Senha
+                          </button>
+                        )}
                         {user.uid !== currentUserId && (
                           <button 
                             onClick={() => setDeleteTarget(user)}
@@ -575,6 +609,33 @@ export const Usuarios: React.FC = () => {
                 <Trash2 size={18} className="mr-2" />
                 {isDeleting ? 'Excluindo...' : 'Sim, Excluir'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Resetar Senha (super-admin) */}
+      {resetUserId && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+            <div className="p-6 border-b flex justify-between items-center">
+              <h3 className="text-lg font-bold">Resetar Senha do Usuário</h3>
+              <button onClick={() => setResetUserId(null)} className="p-2 hover:bg-gray-200 rounded-full"><X size={20} /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-sm text-gray-600">Informe a nova senha para o usuário selecionado. A senha deve ter ao menos 6 caracteres.</p>
+              <input
+                type="password"
+                value={novaSenha}
+                onChange={e => setNovaSenha(e.target.value)}
+                placeholder="Nova senha (mín. 6 caracteres)"
+                className="w-full border rounded px-3 py-2"
+              />
+              {resetMessage && <p className="text-sm text-green-600">{resetMessage}</p>}
+            </div>
+            <div className="p-4 bg-gray-50 flex justify-end space-x-2">
+              <button onClick={() => { setResetUserId(null); setNovaSenha(''); setResetMessage(''); }} className="px-4 py-2 border rounded">Cancelar</button>
+              <button onClick={handleResetSenha} disabled={isResetting} className="px-4 py-2 bg-orange-600 text-white rounded">{isResetting ? 'Processando...' : 'Confirmar Reset'}</button>
             </div>
           </div>
         </div>
