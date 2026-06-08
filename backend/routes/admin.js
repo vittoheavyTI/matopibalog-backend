@@ -3,7 +3,7 @@ const router = express.Router();
 const adminController = require('../controllers/adminController');
 const { verifyToken, isAdmin, isSuperAdmin } = require('../middlewares/auth');
 const { verificarEmpresa } = require('../middlewares/tenant');
-const { validate } = require('../middlewares/validate');
+const validate = require('../middlewares/validate');
 const { resetSenhaSchema } = require('../schemas/auth');
 
 // Todas as rotas deste arquivo exigem privilégios de Administrador
