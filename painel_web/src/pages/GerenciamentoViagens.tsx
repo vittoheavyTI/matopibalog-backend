@@ -199,20 +199,30 @@ export const GerenciamentoViagens: React.FC = () => {
     }
   };
 
-  const handleAprovarDespesa = async (id: string, tipoItem: string, aprovado: boolean) => {
+  const handleAprovarDespesa = async (id: string, tipoItem: string, aprovado: boolean, obs?: string) => {
     const status = aprovado ? 'aprovado' : 'rejeitado';
+    const payload: any = { status };
+    if (obs !== undefined) payload.obs_resolucao = obs;
     try {
       if (tipoItem === 'despesa' || tipoItem === 'manutencao') {
-        await api.patch('/despesas/' + id, { status });
+        await api.patch('/despesas/' + id, payload);
       } else if (tipoItem === 'abastecimento') {
-        await api.patch('/abastecimentos/' + id, { status });
+        await api.patch('/abastecimentos/' + id, payload);
       } else if (tipoItem === 'vale') {
-        await api.patch('/vales/' + id, { status });
+        await api.patch('/vales/' + id, payload);
       }
       if (filterMot !== 'todos') loadMotoristaData(filterMot);
     } catch (err) {
       alert('Erro ao atualizar status.');
     }
+  };
+
+  const handleResolverComObservacao = async (id: string, tipoItem: string, aprovado: boolean) => {
+    const obs = window.prompt(
+      aprovado ? 'Observação ao aprovar (opcional):' : 'Motivo da rejeição (opcional):'
+    );
+    if (obs === null) return; // cancelou
+    await handleAprovarDespesa(id, tipoItem, aprovado, obs || undefined);
   };
 
   const handleResetStatus = async (id: string, tipoItem: string) => {
@@ -594,8 +604,8 @@ export const GerenciamentoViagens: React.FC = () => {
                       <span className={`font-bold ${type === 'vale' ? 'text-red-600' : 'text-gray-700'}`}>{formatCurrency(Math.abs(item.valor || item.valorTotal))}</span>
                       {item.status === 'pendente' ? (
                         <div className="flex space-x-1">
-                          <button onClick={() => handleAprovarDespesa(item.id, type, true)} className="p-1 text-green-600 hover:bg-green-100 rounded transition-colors" title="Aprovar"><Check size={18} /></button>
-                          <button onClick={() => handleAprovarDespesa(item.id, type, false)} className="p-1 text-red-600 hover:bg-red-100 rounded transition-colors" title="Rejeitar"><X size={18} /></button>
+                          <button onClick={() => handleResolverComObservacao(item.id, type, true)} className="p-1 text-green-600 hover:bg-green-100 rounded transition-colors" title="Aprovar com observação"><Check size={18} /></button>
+                          <button onClick={() => handleResolverComObservacao(item.id, type, false)} className="p-1 text-red-600 hover:bg-red-100 rounded transition-colors" title="Rejeitar com motivo"><X size={18} /></button>
                         </div>
                       ) : (
                         <div className="flex items-center space-x-1">

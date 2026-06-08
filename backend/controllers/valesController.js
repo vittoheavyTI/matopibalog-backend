@@ -97,7 +97,7 @@ exports.getById = async (req, res) => {
 
 exports.update = async (req, res) => {
   const { id } = req.params;
-  const { valor, status, posto, litros } = req.body;
+  const { valor, status, posto, litros, obs_resolucao } = req.body;
 
   try {
     const { data: checkData } = await supabase.from('vales').select('motorista_id').eq('id', id).single();
@@ -108,6 +108,11 @@ exports.update = async (req, res) => {
     const updateData = {};
     if (valor !== undefined) updateData.valor = parseFloat(valor);
     if (status !== undefined) updateData.status = status;
+    if (obs_resolucao !== undefined) {
+      updateData.obs_resolucao = obs_resolucao;
+      updateData.resolvido_por = req.user.uid;
+      updateData.resolvido_em = new Date().toISOString();
+    }
     if (posto !== undefined) updateData.posto = posto;
     if (litros !== undefined) updateData.litros = parseFloat(litros);
 

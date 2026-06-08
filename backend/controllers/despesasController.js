@@ -116,7 +116,7 @@ exports.getById = async (req, res) => {
 
 exports.update = async (req, res) => {
   const { id } = req.params;
-  const { descricao, valor, status, tipo } = req.body;
+  const { descricao, valor, status, tipo, obs_resolucao } = req.body;
 
   try {
     const { data: checkData, error: checkError } = await supabase
@@ -139,6 +139,11 @@ exports.update = async (req, res) => {
     if (valor !== undefined) updateData.valor = parseFloat(valor);
     if (status !== undefined) updateData.status = status;
     if (tipo !== undefined) updateData.tipo = tipo;
+    if (obs_resolucao !== undefined) {
+      updateData.obs_resolucao = obs_resolucao;
+      updateData.resolvido_por = req.user.uid;
+      updateData.resolvido_em = new Date().toISOString();
+    }
 
     const { data, error } = await supabase
       .from('despesas')
