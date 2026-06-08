@@ -158,8 +158,8 @@ export const Relatorios: React.FC = () => {
       const doc = new jsPDF();
     
     // Header
-    const savedLogo = localStorage.getItem('choferlog_logo');
-    const savedCompany = localStorage.getItem('choferlog_company');
+    const savedLogo = localStorage.getItem('matopibalog_logo');
+    const savedCompany = localStorage.getItem('matopibalog_company');
     let company: any = null;
     try {
       company = savedCompany ? JSON.parse(savedCompany) : null;
@@ -499,8 +499,8 @@ export const Relatorios: React.FC = () => {
 
       const doc = new jsPDF();
 
-    const savedLogo = localStorage.getItem('choferlog_logo');
-    const savedCompany = localStorage.getItem('choferlog_company');
+    const savedLogo = localStorage.getItem('matopibalog_logo');
+    const savedCompany = localStorage.getItem('matopibalog_company');
     let company: any = null;
     try {
       company = savedCompany ? JSON.parse(savedCompany) : null;
