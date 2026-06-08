@@ -1,5 +1,6 @@
 const supabase = require('../config/supabase');
 const path = require('path');
+const notificacaoService = require('../services/notificacaoService');
 
 exports.getAll = async (req, res) => {
   const { tipo, data_inicio, data_fim, frete_id, motorista_id } = req.query;
@@ -153,6 +154,9 @@ exports.update = async (req, res) => {
       .single();
 
     if (error) throw error;
+    if (status && (status === 'aprovado' || status === 'rejeitado') && data) {
+      notificacaoService.notificarLancamentoResolvido(data, 'despesa', status === 'aprovado').catch(() => {});
+    }
     res.status(200).json(data);
   } catch (error) {
     console.error('Erro ao atualizar despesa:', error);

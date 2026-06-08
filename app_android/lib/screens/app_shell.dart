@@ -11,6 +11,7 @@ import 'add_despesa_screen.dart';
 import 'add_abastecimento_screen.dart';
 import 'add_vale_screen.dart';
 import 'perfil_screen.dart';
+import 'notificacoes_screen.dart';
 
 class AppShell extends StatelessWidget {
   const AppShell({super.key});
@@ -99,6 +100,14 @@ class AppShell extends StatelessWidget {
               onTap: () {
                 AppLogger.action('menu_nav', params: {'destino': 'historico'});
                 _navegarPara(context, const HistoricoScreen());
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.notifications_outlined),
+              title: const Text('Notificações'),
+              onTap: () {
+                AppLogger.action('menu_nav', params: {'destino': 'notificacoes'});
+                _navegarPara(context, const NotificacoesScreen());
               },
             ),
             ListTile(

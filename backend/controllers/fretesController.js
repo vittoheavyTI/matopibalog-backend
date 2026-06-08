@@ -1,4 +1,5 @@
 const supabase = require('../config/supabase');
+const notificacaoService = require('../services/notificacaoService');
 
 // Helper para validar status do motorista
 const checkMotoristaStatus = async (uid) => {
@@ -255,6 +256,7 @@ exports.finalizar = async (req, res) => {
       .single();
 
     if (error) throw error;
+    notificacaoService.notificarViagemFinalizada(data).catch(() => {});
     res.status(200).json(data);
   } catch (error) {
     console.error('Erro ao finalizar frete:', error);

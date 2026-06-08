@@ -13,6 +13,7 @@ const valesRoutes = require('./routes/vales');
 const dashboardRoutes = require('./routes/dashboard');
 const relatoriosRoutes = require('./routes/relatorios');
 const configRoutes = require('./routes/config');
+const notificacoesRoutes = require('./routes/notificacoes');
 
 const app = express();
 
@@ -82,6 +83,7 @@ app.use('/impressoras', require('./routes/impressoras'));
 app.use('/integracoes', require('./routes/integracoes'));
 app.use('/painel-admin', require('./routes/painel-admin'));
 app.use('/pagamentos', require('./routes/pagamentos'));
+app.use('/notificacoes', notificacoesRoutes);
 
 require('./jobs/expirarTrials');
 

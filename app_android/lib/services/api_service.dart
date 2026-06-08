@@ -143,6 +143,24 @@ class ApiService {
     }
   }
 
+  static Future<List<dynamic>> getNotificacoes() async {
+    try {
+      final response = await http.get(Uri.parse('$_baseUrl/notificacoes'), headers: await _getHeaders());
+      AppLogger.api('ApiService', 'GET /notificacoes', response.statusCode);
+      if (response.statusCode == 200) return jsonDecode(response.body);
+      return [];
+    } catch (e) {
+      AppLogger.error('ApiService', 'GET /notificacoes exception', e);
+      return [];
+    }
+  }
+
+  static Future<void> marcarNotificacaoLida(String id) async {
+    try {
+      await http.patch(Uri.parse('$_baseUrl/notificacoes/$id/lida'), headers: await _getHeaders());
+    } catch (_) {}
+  }
+
   static Future<Map<String, dynamic>?> finalizarViagem(String freteId) async {
     try {
       final response = await http.post(
