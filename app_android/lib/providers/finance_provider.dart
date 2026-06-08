@@ -10,6 +10,7 @@ class FinanceProvider extends ChangeNotifier {
   double _percentualComissao = 12.0;
   bool _loading = false;
   String _error = '';
+  List<dynamic> _fretes = [];
 
   double get totalFretes => _totalFretes;
   double get comissao => _comissao;
@@ -18,6 +19,7 @@ class FinanceProvider extends ChangeNotifier {
   double get percentualComissao => _percentualComissao;
   bool get loading => _loading;
   String get error => _error;
+  List<dynamic> get fretes => _fretes;
 
   Future<void> loadData() async {
     AppLogger.action('load_finance_data');
@@ -34,6 +36,7 @@ class FinanceProvider extends ChangeNotifier {
       }
 
       final fretes = await ApiService.getFretes();
+      _fretes = fretes;
       final despesas = await ApiService.getList('despesas');
       final abastecimentos = await ApiService.getList('abastecimentos');
       final vales = await ApiService.getList('vales');

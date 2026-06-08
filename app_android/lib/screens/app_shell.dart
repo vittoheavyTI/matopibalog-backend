@@ -10,6 +10,7 @@ import 'add_frete_screen.dart';
 import 'add_despesa_screen.dart';
 import 'add_abastecimento_screen.dart';
 import 'add_vale_screen.dart';
+import 'perfil_screen.dart';
 
 class AppShell extends StatelessWidget {
   const AppShell({super.key});
@@ -102,10 +103,7 @@ class AppShell extends StatelessWidget {
               title: const Text('Perfil'),
               onTap: () {
                 AppLogger.action('menu_nav', params: {'destino': 'perfil'});
-                Navigator.of(context).pop();
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Perfil em breve.')),
-                );
+                _navegarPara(context, const PerfilScreen());
               },
             ),
             const Divider(),

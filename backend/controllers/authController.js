@@ -208,7 +208,7 @@ exports.getMe = async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('usuarios')
-      .select('*, motoristas(*)')
+      .select('*, motoristas(*), empresas(nome, tipo)')
       .eq('id', req.user.uid)
       .single();
 
