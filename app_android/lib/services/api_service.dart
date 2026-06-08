@@ -189,6 +189,19 @@ class ApiService {
   }
 
   // LISTAGENS GENÉRICAS
+  static Future<List<dynamic>> getListComFiltro(String endpoint, Map<String, String> params) async {
+    try {
+      final uri = Uri.parse('$_baseUrl/$endpoint').replace(queryParameters: params);
+      final response = await http.get(uri, headers: await _getHeaders());
+      AppLogger.api('ApiService', 'GET /$endpoint?...', response.statusCode);
+      if (response.statusCode == 200) return jsonDecode(response.body);
+      return [];
+    } catch (e) {
+      AppLogger.error('ApiService', 'GET /$endpoint filtrado exception', e);
+      return [];
+    }
+  }
+
   static Future<List<dynamic>> getList(String endpoint) async {
     try {
       final response = await http.get(

@@ -2,7 +2,7 @@ const supabase = require('../config/supabase');
 const path = require('path');
 
 exports.getAll = async (req, res) => {
-  const { motorista_id } = req.query;
+  const { motorista_id, frete_id } = req.query;
   const isAdmin = req.user.role === 'admin';
   try {
     const isSuperAdmin = req.user.is_super_admin === true;
@@ -30,6 +30,7 @@ exports.getAll = async (req, res) => {
     if (isAdmin && motorista_id) {
       query = query.eq('motorista_id', motorista_id);
     }
+    if (frete_id) query = query.eq('frete_id', frete_id);
 
     const { data, error } = await query.order('data', { ascending: false });
     if (error) throw error;
