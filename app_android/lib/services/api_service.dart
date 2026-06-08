@@ -87,6 +87,43 @@ class ApiService {
     }
   }
 
+  static Future<Map<String, dynamic>?> updateMe(Map<String, dynamic> data) async {
+    try {
+      final response = await http.patch(
+        Uri.parse('$_baseUrl/auth/me'),
+        headers: await _getHeaders(),
+        body: jsonEncode(data),
+      );
+      AppLogger.api('ApiService', 'PATCH /auth/me', response.statusCode);
+      if (response.statusCode == 200) return jsonDecode(response.body);
+      return null;
+    } catch (e) {
+      AppLogger.error('ApiService', 'PATCH /auth/me exception', e);
+      return null;
+    }
+  }
+
+  static Future<String?> uploadFotoPerfil(String filePath) async {
+    try {
+      final headers = await _getHeaders();
+      var request = http.MultipartRequest('POST', Uri.parse('$_baseUrl/auth/me/foto'));
+      request.headers.addAll(headers);
+      request.headers.remove('Content-Type');
+      request.files.add(await http.MultipartFile.fromPath('foto', filePath));
+      final response = await request.send();
+      AppLogger.api('ApiService', 'POST /auth/me/foto', response.statusCode);
+      if (response.statusCode == 200) {
+        final body = await response.stream.bytesToString();
+        final json = jsonDecode(body);
+        return json['foto_url'] as String?;
+      }
+      return null;
+    } catch (e) {
+      AppLogger.error('ApiService', 'POST /auth/me/foto exception', e);
+      return null;
+    }
+  }
+
   // FRETES
   static Future<List<dynamic>> getFretes() async {
     try {

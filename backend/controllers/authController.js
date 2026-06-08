@@ -204,6 +204,51 @@ exports.logout = async (req, res) => {
   return res.status(200).json({ message: 'Logout realizado com sucesso' });
 };
 
+exports.updateMe = async (req, res) => {
+  const CAMPOS_PERMITIDOS = ['telefone', 'celular', 'cep', 'endereco', 'bairro', 'cidade'];
+  const update = {};
+  for (const campo of CAMPOS_PERMITIDOS) {
+    if (req.body[campo] !== undefined) update[campo] = req.body[campo];
+  }
+  if (Object.keys(update).length === 0) {
+    return res.status(400).json({ message: 'Nenhum campo válido para atualizar.' });
+  }
+  try {
+    const { data, error } = await supabase
+      .from('usuarios')
+      .update(update)
+      .eq('id', req.user.uid)
+      .select('*, motoristas(*), empresas(nome, tipo)')
+      .single();
+    if (error) throw error;
+    res.status(200).json(data);
+  } catch (error) {
+    res.status(500).json({ message: 'Erro ao atualizar perfil.' });
+  }
+};
+
+exports.uploadFotoPerfil = async (req, res) => {
+  const file = req.file;
+  if (!file) return res.status(400).json({ message: 'Foto não enviada.' });
+  try {
+    const path = require('path');
+    const fileName = `avatars/${req.user.uid}/profile${path.extname(file.originalname) || '.jpg'}`;
+    await supabase.storage
+      .from('comprovantes')
+      .upload(fileName, file.buffer, { contentType: file.mimetype, upsert: true });
+    const { data: urlData } = supabase.storage.from('comprovantes').getPublicUrl(fileName);
+    const publicUrl = urlData.publicUrl;
+    const { error } = await supabase
+      .from('usuarios')
+      .update({ foto_url: publicUrl })
+      .eq('id', req.user.uid);
+    if (error) throw error;
+    res.status(200).json({ foto_url: publicUrl });
+  } catch (error) {
+    res.status(500).json({ message: 'Erro ao enviar foto de perfil.' });
+  }
+};
+
 exports.getMe = async (req, res) => {
   try {
     const { data, error } = await supabase

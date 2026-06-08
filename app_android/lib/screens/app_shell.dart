@@ -47,7 +47,10 @@ class AppShell extends StatelessWidget {
               accountEmail: const Text('Matopiba Log'),
               currentAccountPicture: CircleAvatar(
                 backgroundColor: const Color(0xFF827717),
-                child: Text(inicial, style: const TextStyle(color: Colors.white, fontSize: 22)),
+                backgroundImage: auth.fotoUrl.isNotEmpty ? NetworkImage(auth.fotoUrl) : null,
+                child: auth.fotoUrl.isEmpty
+                    ? Text(inicial, style: const TextStyle(color: Colors.white, fontSize: 22))
+                    : null,
               ),
             ),
             ListTile(

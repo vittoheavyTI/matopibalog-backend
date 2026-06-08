@@ -13,6 +13,7 @@ class AuthProvider extends ChangeNotifier {
   String _role = '';
   String _uid = '';
   String _error = '';
+  String _fotoUrl = '';
 
   AuthStatus get status => _status;
   String get token => _token;
@@ -20,6 +21,7 @@ class AuthProvider extends ChangeNotifier {
   String get role => _role;
   String get uid => _uid;
   String get error => _error;
+  String get fotoUrl => _fotoUrl;
   bool get isLoggedIn => _status == AuthStatus.authenticated;
   bool get isMotorista => _role == 'motorista';
 
@@ -45,6 +47,7 @@ class AuthProvider extends ChangeNotifier {
     final profile = await ApiService.getMe();
     if (profile != null) {
       _nome = profile['nome'] ?? _nome;
+      _fotoUrl = profile['foto_url'] ?? '';
       _status = AuthStatus.authenticated;
       AppLogger.action('try_auto_login', params: {'result': 'success', 'user': _nome});
     } else {
@@ -106,6 +109,8 @@ class AuthProvider extends ChangeNotifier {
     _role = userRole;
     _uid = res['user']['uid'];
 
+    _fotoUrl = res['user']['foto_url'] ?? '';
+
     await prefs.setString('token', _token);
     await prefs.setString('user_role', _role);
     await prefs.setString('user_nome', _nome);
@@ -115,6 +120,11 @@ class AuthProvider extends ChangeNotifier {
     AppLogger.action('login_success', params: {'email': email, 'user': _nome});
     notifyListeners();
     return true;
+  }
+
+  void atualizarFotoUrl(String url) {
+    _fotoUrl = url;
+    notifyListeners();
   }
 
   Future<void> logout() async {
