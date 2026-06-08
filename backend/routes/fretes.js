@@ -11,6 +11,7 @@ router.use(verifyToken, verificarEmpresa);
 router.get('/', fretesController.getAll);
 router.post('/', validate(createFreteSchema), fretesController.create);
 router.get('/:id', fretesController.getById);
+router.post('/:id/finalizar', fretesController.finalizar);
 router.patch('/:id', validate(updateFreteSchema), fretesController.update);
 router.delete('/:id', isAdmin, fretesController.delete);
 

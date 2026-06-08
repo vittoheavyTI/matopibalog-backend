@@ -43,7 +43,8 @@ export const Motoristas: React.FC = () => {
         fotoUrl: m.usuarios.foto_url || '',
         placaVeiculo: m.placa_veiculo,
         percentualComissao: m.percentual_comissao,
-        statusCadastro: m.status_cadastro
+        statusCadastro: m.status_cadastro,
+        podeFinalizarViagem: m.pode_finalizar_viagem ?? false
       })));
     } catch (error: any) {
       console.error('Erro detalhado ao carregar motoristas:', error);
@@ -103,7 +104,8 @@ export const Motoristas: React.FC = () => {
       await api.put('/admin/motoristas/' + editingMot.uid + '/comissao', {
         percentual_comissao: editingMot.percentualComissao,
         placa_veiculo: editingMot.placaVeiculo,
-        cpf: editingMot.cpf
+        cpf: editingMot.cpf,
+        pode_finalizar_viagem: editingMot.podeFinalizarViagem ?? false
       });
 
       const motoristaOriginal = motoristas.find(m => m.uid === editingMot.uid);
@@ -553,6 +555,19 @@ export const Motoristas: React.FC = () => {
                     />
                   </div>
                 </div>
+              </div>
+              <div className="flex items-center justify-between bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 mt-2">
+                <div>
+                  <p className="text-sm font-semibold text-blue-800">Motorista pode finalizar viagem pelo app</p>
+                  <p className="text-xs text-blue-600 mt-0.5">Permite que o motorista conclua viagens diretamente no app</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditingMot({...editingMot, podeFinalizarViagem: !editingMot.podeFinalizarViagem})}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${editingMot.podeFinalizarViagem ? 'bg-blue-600' : 'bg-gray-300'}`}
+                >
+                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${editingMot.podeFinalizarViagem ? 'translate-x-6' : 'translate-x-1'}`} />
+                </button>
               </div>
               <p className="text-xs text-gray-400 mt-2">* Administradores agora podem editar todas as informações, exceto o CPF.</p>
             </div>

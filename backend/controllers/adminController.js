@@ -205,8 +205,8 @@ exports.createMotorista = async (req, res) => {
 // ─── Atualizar Comissão e Dados do Motorista ──────────────────────────────────
 exports.updateComissao = async (req, res) => {
   const { id } = req.params;
-  const { percentual_comissao, placa_veiculo, cpf } = req.body;
-  console.log(`[adminController:updateComissao] Atualizando motorista ${id}:`, { percentual_comissao, placa_veiculo, cpf });
+  const { percentual_comissao, placa_veiculo, cpf, pode_finalizar_viagem } = req.body;
+  console.log(`[adminController:updateComissao] Atualizando motorista ${id}:`, { percentual_comissao, placa_veiculo, cpf, pode_finalizar_viagem });
 
   try {
     // Validar ownership (super-admin pula)
@@ -229,6 +229,7 @@ exports.updateComissao = async (req, res) => {
     if (percentual_comissao !== undefined) updateData.percentual_comissao = percentual_comissao;
     if (placa_veiculo !== undefined) updateData.placa_veiculo = placa_veiculo;
     if (cpf !== undefined) updateData.cpf = cpf;
+    if (pode_finalizar_viagem !== undefined) updateData.pode_finalizar_viagem = Boolean(pode_finalizar_viagem);
 
     const { error } = await supabase
       .from('motoristas')

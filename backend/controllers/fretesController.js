@@ -1,4 +1,5 @@
 const supabase = require('../config/supabase');
+const notificacaoService = require('../services/notificacaoService');
 
 // Helper para validar status do motorista
 const checkMotoristaStatus = async (uid) => {
@@ -194,6 +195,72 @@ exports.update = async (req, res) => {
   } catch (error) {
     console.error('Erro ao atualizar frete:', error);
     res.status(500).json({ message: 'Erro ao atualizar frete.' });
+  }
+};
+
+exports.finalizar = async (req, res) => {
+  const { id } = req.params;
+  const isSuperAdmin = req.user.is_super_admin === true;
+  const isAdmin = req.user.role === 'admin';
+
+  try {
+    // Busca o frete e verifica ownership
+    const { data: frete, error: freteError } = await supabase
+      .from('fretes')
+      .select('id, motorista_id, empresa_id, status')
+      .eq('id', id)
+      .single();
+
+    if (freteError || !frete) return res.status(404).json({ message: 'Frete não encontrado.' });
+
+    // super-admin: sempre pode
+    if (!isSuperAdmin) {
+      // admin empresa: verifica se o frete é da empresa
+      if (isAdmin) {
+        if (frete.empresa_id !== req.empresa_id) {
+          return res.status(403).json({ message: 'Acesso negado.' });
+        }
+      } else {
+        // motorista: verifica ownership + permissão
+        if (frete.motorista_id !== req.user.uid) {
+          return res.status(403).json({ message: 'Acesso negado.' });
+        }
+
+        // Busca permissão e tipo de empresa
+        const { data: motData } = await supabase
+          .from('motoristas')
+          .select('pode_finalizar_viagem, empresas(tipo)')
+          .eq('id', req.user.uid)
+          .single();
+
+        const isAutonomo = motData?.empresas?.tipo === 'autonomo';
+        const podeFinalizar = motData?.pode_finalizar_viagem === true;
+
+        if (!isAutonomo && !podeFinalizar) {
+          return res.status(403).json({
+            message: 'Sua empresa não autorizou a finalização de viagens pelo app. Contate o administrador.'
+          });
+        }
+      }
+    }
+
+    if (frete.status === 'finalizado') {
+      return res.status(400).json({ message: 'Esta viagem já está finalizada.' });
+    }
+
+    const { data, error } = await supabase
+      .from('fretes')
+      .update({ status: 'finalizado' })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    notificacaoService.notificarViagemFinalizada(data).catch(() => {});
+    res.status(200).json(data);
+  } catch (error) {
+    console.error('Erro ao finalizar frete:', error);
+    res.status(500).json({ message: 'Erro ao finalizar viagem.' });
   }
 };
 

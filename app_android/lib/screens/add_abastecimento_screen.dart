@@ -5,6 +5,7 @@ import 'package:uuid/uuid.dart';
 import 'package:workmanager/workmanager.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import '../services/api_service.dart';
+import '../services/app_logger.dart';
 import '../services/offline_sync.dart';
 
 class AddAbastecimentoScreen extends StatefulWidget {
@@ -23,6 +24,12 @@ class _AddAbastecimentoScreenState extends State<AddAbastecimentoScreen> {
   String _quemPagou = 'proprietario';
   File? _image;
   bool _loading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    AppLogger.action('screen_open', params: {'tela': 'add_abastecimento'});
+  }
 
   @override
   void dispose() {
@@ -45,9 +52,10 @@ class _AddAbastecimentoScreenState extends State<AddAbastecimentoScreen> {
         setState(() => _image = File(pickedFile.path));
       }
     } catch (e) {
+      AppLogger.error('AddAbastecimento', 'erro_foto', e);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erro ao acessar $source: $e')),
+          const SnackBar(content: Text('Erro ao acessar câmera/galeria.')),
         );
       }
     }
@@ -84,10 +92,12 @@ class _AddAbastecimentoScreenState extends State<AddAbastecimentoScreen> {
 
   Future<void> _save() async {
     if (_image == null) {
+      AppLogger.action('abastecimento_validation_error', params: {'motivo': 'foto_obrigatoria'});
       _showPhotoOptions();
       return;
     }
 
+    AppLogger.action('abastecimento_save_attempt', params: {'posto': _postoCtrl.text, 'quem_pagou': _quemPagou});
     setState(() => _loading = true);
 
     final fields = {
@@ -108,11 +118,14 @@ class _AddAbastecimentoScreenState extends State<AddAbastecimentoScreen> {
           _image!.path,
         );
         if (success) {
+          AppLogger.action('abastecimento_save_ok');
           if (mounted) Navigator.pop(context);
           return;
         }
+        AppLogger.warning('AddAbastecimento', 'upload falhou, tentando offline');
       }
 
+      AppLogger.action('abastecimento_offline_queued');
       final queueId = const Uuid().v4();
       await OfflineSync.addPendingTask(
         id: queueId,
@@ -128,8 +141,9 @@ class _AddAbastecimentoScreenState extends State<AddAbastecimentoScreen> {
 
       if (mounted) Navigator.pop(context);
     } catch (e) {
+      AppLogger.error('AddAbastecimento', 'erro_conexao', e);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erro: $e')),
+        const SnackBar(content: Text('Erro ao salvar abastecimento.')),
       );
     } finally {
       if (mounted) setState(() => _loading = false);

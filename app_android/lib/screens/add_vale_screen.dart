@@ -5,6 +5,7 @@ import 'package:uuid/uuid.dart';
 import 'package:workmanager/workmanager.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import '../services/api_service.dart';
+import '../services/app_logger.dart';
 import '../services/offline_sync.dart';
 
 class AddValeScreen extends StatefulWidget {
@@ -21,6 +22,12 @@ class _AddValeScreenState extends State<AddValeScreen> {
   String _quemPagou = 'proprietario';
   File? _image;
   bool _loading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    AppLogger.action('screen_open', params: {'tela': 'add_vale'});
+  }
 
   @override
   void dispose() {
@@ -41,9 +48,10 @@ class _AddValeScreenState extends State<AddValeScreen> {
         setState(() => _image = File(pickedFile.path));
       }
     } catch (e) {
+      AppLogger.error('AddVale', 'erro_foto', e);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erro ao acessar $source: $e')),
+          const SnackBar(content: Text('Erro ao acessar câmera/galeria.')),
         );
       }
     }
@@ -80,10 +88,12 @@ class _AddValeScreenState extends State<AddValeScreen> {
 
   Future<void> _save() async {
     if (_image == null) {
+      AppLogger.action('vale_validation_error', params: {'motivo': 'foto_obrigatoria'});
       _showPhotoOptions();
       return;
     }
 
+    AppLogger.action('vale_save_attempt', params: {'quem_pagou': _quemPagou});
     setState(() => _loading = true);
 
     final fields = {
@@ -102,11 +112,14 @@ class _AddValeScreenState extends State<AddValeScreen> {
           _image!.path,
         );
         if (success) {
+          AppLogger.action('vale_save_ok');
           if (mounted) Navigator.pop(context);
           return;
         }
+        AppLogger.warning('AddVale', 'upload falhou, tentando offline');
       }
 
+      AppLogger.action('vale_offline_queued');
       final queueId = const Uuid().v4();
       await OfflineSync.addPendingTask(
         id: queueId,
@@ -122,8 +135,9 @@ class _AddValeScreenState extends State<AddValeScreen> {
 
       if (mounted) Navigator.pop(context);
     } catch (e) {
+      AppLogger.error('AddVale', 'erro_conexao', e);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erro: $e')),
+        const SnackBar(content: Text('Erro ao salvar vale.')),
       );
     } finally {
       if (mounted) setState(() => _loading = false);

@@ -1,5 +1,6 @@
 const supabase = require('../config/supabase');
 const path = require('path');
+const notificacaoService = require('../services/notificacaoService');
 
 exports.getAll = async (req, res) => {
   const { tipo, data_inicio, data_fim, frete_id, motorista_id } = req.query;
@@ -116,7 +117,7 @@ exports.getById = async (req, res) => {
 
 exports.update = async (req, res) => {
   const { id } = req.params;
-  const { descricao, valor, status, tipo } = req.body;
+  const { descricao, valor, status, tipo, obs_resolucao } = req.body;
 
   try {
     const { data: checkData, error: checkError } = await supabase
@@ -139,6 +140,11 @@ exports.update = async (req, res) => {
     if (valor !== undefined) updateData.valor = parseFloat(valor);
     if (status !== undefined) updateData.status = status;
     if (tipo !== undefined) updateData.tipo = tipo;
+    if (obs_resolucao !== undefined) {
+      updateData.obs_resolucao = obs_resolucao;
+      updateData.resolvido_por = req.user.uid;
+      updateData.resolvido_em = new Date().toISOString();
+    }
 
     const { data, error } = await supabase
       .from('despesas')
@@ -148,6 +154,9 @@ exports.update = async (req, res) => {
       .single();
 
     if (error) throw error;
+    if (status && (status === 'aprovado' || status === 'rejeitado') && data) {
+      notificacaoService.notificarLancamentoResolvido(data, 'despesa', status === 'aprovado').catch(() => {});
+    }
     res.status(200).json(data);
   } catch (error) {
     console.error('Erro ao atualizar despesa:', error);

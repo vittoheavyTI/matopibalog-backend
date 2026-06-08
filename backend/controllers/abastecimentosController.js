@@ -2,7 +2,7 @@ const supabase = require('../config/supabase');
 const path = require('path');
 
 exports.getAll = async (req, res) => {
-  const { motorista_id } = req.query;
+  const { motorista_id, frete_id } = req.query;
   const isAdmin = req.user.role === 'admin';
   try {
     const isSuperAdmin = req.user.is_super_admin === true;
@@ -30,6 +30,7 @@ exports.getAll = async (req, res) => {
     if (isAdmin && motorista_id) {
       query = query.eq('motorista_id', motorista_id);
     }
+    if (frete_id) query = query.eq('frete_id', frete_id);
 
     const { data, error } = await query.order('data', { ascending: false });
     if (error) throw error;
@@ -98,7 +99,7 @@ exports.getById = async (req, res) => {
 
 exports.update = async (req, res) => {
   const { id } = req.params;
-  const { posto, valor_total, status, litros } = req.body;
+  const { posto, valor_total, status, litros, obs_resolucao } = req.body;
   try {
     const { data: checkData } = await supabase.from('abastecimentos').select('motorista_id').eq('id', id).single();
     if (req.user.role !== 'admin' && checkData.motorista_id !== req.user.uid) {
@@ -110,6 +111,11 @@ exports.update = async (req, res) => {
     if (valor_total !== undefined) updateData.valor_total = parseFloat(valor_total);
     if (litros !== undefined) updateData.litros = parseFloat(litros);
     if (status !== undefined) updateData.status = status;
+    if (obs_resolucao !== undefined) {
+      updateData.obs_resolucao = obs_resolucao;
+      updateData.resolvido_por = req.user.uid;
+      updateData.resolvido_em = new Date().toISOString();
+    }
 
     const { data, error } = await supabase
       .from('abastecimentos')

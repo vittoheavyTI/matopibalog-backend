@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
+import '../services/app_logger.dart';
 
 enum AuthStatus { initial, loading, authenticated, unauthenticated, error }
 
@@ -12,6 +13,7 @@ class AuthProvider extends ChangeNotifier {
   String _role = '';
   String _uid = '';
   String _error = '';
+  String _fotoUrl = '';
 
   AuthStatus get status => _status;
   String get token => _token;
@@ -19,16 +21,19 @@ class AuthProvider extends ChangeNotifier {
   String get role => _role;
   String get uid => _uid;
   String get error => _error;
+  String get fotoUrl => _fotoUrl;
   bool get isLoggedIn => _status == AuthStatus.authenticated;
   bool get isMotorista => _role == 'motorista';
 
   Future<void> tryAutoLogin() async {
+    AppLogger.action('try_auto_login');
     _status = AuthStatus.loading;
     notifyListeners();
 
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('token');
     if (token == null) {
+      AppLogger.action('try_auto_login', params: {'result': 'no_token'});
       _status = AuthStatus.unauthenticated;
       notifyListeners();
       return;
@@ -42,16 +47,20 @@ class AuthProvider extends ChangeNotifier {
     final profile = await ApiService.getMe();
     if (profile != null) {
       _nome = profile['nome'] ?? _nome;
+      _fotoUrl = profile['foto_url'] ?? '';
       _status = AuthStatus.authenticated;
+      AppLogger.action('try_auto_login', params: {'result': 'success', 'user': _nome});
     } else {
       await prefs.clear();
       _token = '';
       _status = AuthStatus.unauthenticated;
+      AppLogger.action('try_auto_login', params: {'result': 'api_failed'});
     }
     notifyListeners();
   }
 
   Future<bool> login(String email, String senha) async {
+    AppLogger.action('login_attempt', params: {'email': email});
     _status = AuthStatus.loading;
     _error = '';
     notifyListeners();
@@ -70,6 +79,7 @@ class AuthProvider extends ChangeNotifier {
       } catch (_) {
         _error = 'E-mail ou senha incorretos.';
       }
+      AppLogger.action('login_error', params: {'email': email, 'error': _error});
       notifyListeners();
       return false;
     }
@@ -80,6 +90,7 @@ class AuthProvider extends ChangeNotifier {
     if (userStatus == 'pendente') {
       _status = AuthStatus.error;
       _error = 'Sua conta está aguardando aprovação.';
+      AppLogger.action('login_error', params: {'email': email, 'error': 'pendente'});
       notifyListeners();
       return false;
     }
@@ -87,6 +98,7 @@ class AuthProvider extends ChangeNotifier {
     if (userRole == 'admin') {
       _status = AuthStatus.error;
       _error = 'Acesso ao App restrito para motoristas.';
+      AppLogger.action('login_error', params: {'email': email, 'error': 'admin_blocked'});
       notifyListeners();
       return false;
     }
@@ -97,17 +109,26 @@ class AuthProvider extends ChangeNotifier {
     _role = userRole;
     _uid = res['user']['uid'];
 
+    _fotoUrl = res['user']['foto_url'] ?? '';
+
     await prefs.setString('token', _token);
     await prefs.setString('user_role', _role);
     await prefs.setString('user_nome', _nome);
     await prefs.setString('user_uid', _uid);
 
     _status = AuthStatus.authenticated;
+    AppLogger.action('login_success', params: {'email': email, 'user': _nome});
     notifyListeners();
     return true;
   }
 
+  void atualizarFotoUrl(String url) {
+    _fotoUrl = url;
+    notifyListeners();
+  }
+
   Future<void> logout() async {
+    AppLogger.action('logout', params: {'user': _nome});
     final prefs = await SharedPreferences.getInstance();
     await prefs.clear();
     _token = '';

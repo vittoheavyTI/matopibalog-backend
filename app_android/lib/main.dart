@@ -5,7 +5,7 @@ import 'providers/auth_provider.dart';
 import 'providers/finance_provider.dart';
 import 'providers/theme_provider.dart';
 import 'screens/login_screen.dart';
-import 'screens/home_screen.dart';
+import 'screens/app_shell.dart';
 import 'services/offline_sync.dart';
 
 @pragma('vm:entry-point')
@@ -33,13 +33,13 @@ void main() async {
         ChangeNotifierProvider(create: (_) => AuthProvider()),
         ChangeNotifierProvider(create: (_) => FinanceProvider()),
       ],
-      child: const ChoferLogApp(),
+      child: const MatopibaLogApp(),
     ),
   );
 }
 
-class ChoferLogApp extends StatelessWidget {
-  const ChoferLogApp({super.key});
+class MatopibaLogApp extends StatelessWidget {
+  const MatopibaLogApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -168,7 +168,7 @@ class _SplashScreenState extends State<SplashScreen> {
       builder: (context, auth, _) {
         switch (auth.status) {
           case AuthStatus.authenticated:
-            return const HomeScreen();
+            return const AppShell();
           case AuthStatus.unauthenticated:
             return const LoginScreen();
           case AuthStatus.loading:

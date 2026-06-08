@@ -17,11 +17,11 @@ export const Sidebar: React.FC = () => {
   const [tempY, setTempY] = useState<number>(0);
 
   useEffect(() => {
-    const savedLogo = localStorage.getItem('choferlog_logo');
+    const savedLogo = localStorage.getItem('matopibalog_logo');
     if (savedLogo) setLogoBase64(savedLogo);
-    const savedScale = localStorage.getItem('choferlog_logo_scale');
+    const savedScale = localStorage.getItem('matopibalog_logo_scale');
     if (savedScale) setLogoScale(Number(savedScale));
-    const savedY = localStorage.getItem('choferlog_logo_y');
+    const savedY = localStorage.getItem('matopibalog_logo_y');
     if (savedY) setLogoY(Number(savedY));
   }, []);
 
@@ -67,18 +67,18 @@ export const Sidebar: React.FC = () => {
     setLogoScale(tempScale);
     setLogoY(tempY);
     if (tempLogo) {
-      localStorage.setItem('choferlog_logo', tempLogo);
-      localStorage.setItem('choferlog_logo_scale', tempScale.toString());
-      localStorage.setItem('choferlog_logo_y', tempY.toString());
+      localStorage.setItem('matopibalog_logo', tempLogo);
+      localStorage.setItem('matopibalog_logo_scale', tempScale.toString());
+      localStorage.setItem('matopibalog_logo_y', tempY.toString());
     }
     setIsEditingLogo(false);
   };
 
   const removeLogo = () => {
     setLogoBase64(null);
-    localStorage.removeItem('choferlog_logo');
-    localStorage.removeItem('choferlog_logo_scale');
-    localStorage.removeItem('choferlog_logo_y');
+    localStorage.removeItem('matopibalog_logo');
+    localStorage.removeItem('matopibalog_logo_scale');
+    localStorage.removeItem('matopibalog_logo_y');
     setIsEditingLogo(false);
   };
 

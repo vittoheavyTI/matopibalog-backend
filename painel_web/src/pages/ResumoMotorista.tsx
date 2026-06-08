@@ -213,8 +213,8 @@ export const ResumoMotorista: React.FC = () => {
     try {
       setIsGenerating(true);
       const doc = new jsPDF();
-      const savedLogo = localStorage.getItem('choferlog_logo');
-      const savedCompany = localStorage.getItem('choferlog_company');
+      const savedLogo = localStorage.getItem('matopibalog_logo');
+      const savedCompany = localStorage.getItem('matopibalog_company');
       let company: any = null;
       try { company = savedCompany ? JSON.parse(savedCompany) : null; } catch (e) {}
 
@@ -347,8 +347,8 @@ export const ResumoMotorista: React.FC = () => {
     try {
       setIsGenerating(true);
       const doc = new jsPDF();
-      const savedLogo = localStorage.getItem('choferlog_logo');
-      const savedCompany = localStorage.getItem('choferlog_company');
+      const savedLogo = localStorage.getItem('matopibalog_logo');
+      const savedCompany = localStorage.getItem('matopibalog_company');
       let company: any = null;
       try { company = savedCompany ? JSON.parse(savedCompany) : null; } catch (e) {}
 
