@@ -264,51 +264,51 @@ export const Usuarios: React.FC = () => {
           {loading ? (
             <p className="p-8 text-center text-gray-500">Carregando usuários...</p>
           ) : (
-            <table className="w-full text-left border-collapse">
+            <table className="w-full table-auto text-left border-collapse">
               <thead>
                 <tr className="bg-gray-50 text-gray-600 text-xs font-bold uppercase tracking-wider">
-                  <th className="p-4 border-b">Usuário</th>
-                  <th className="p-4 border-b">Contato</th>
-                  <th className="p-4 border-b">Nível</th>
-                  <th className="p-4 border-b">Status</th>
-                  <th className="p-4 border-b">Permissões</th>
-                  <th className="p-4 border-b text-center">Ações</th>
+                  <th className="p-3 border-b">Usuário</th>
+                  <th className="p-3 border-b">Contato</th>
+                  <th className="p-3 border-b">Nível</th>
+                  <th className="p-3 border-b">Status</th>
+                  <th className="p-3 border-b">Permissões</th>
+                  <th className="p-3 border-b text-center">Ações</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
                 {filtered.map(user => (
                   <tr key={user.uid} className="hover:bg-gray-50/50 transition-colors">
-                    <td className="p-4">
-                      <div className="flex items-center space-x-3">
+                    <td className="p-3">
+                      <div className="flex items-center space-x-2 min-w-0">
                         <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold overflow-hidden border border-blue-50">
                           {user.fotoUrl ? <img src={user.fotoUrl} alt="" className="w-full h-full object-cover" /> : user.nome?.charAt(0).toUpperCase() || '?'}
                         </div>
-                        <div>
-                          <p className="font-bold text-gray-800">{user.nome}</p>
-                          <p className="text-xs text-gray-500">{user.email}</p>
+                        <div className="min-w-0">
+                          <p className="font-bold text-gray-800 truncate">{user.nome}</p>
+                          <p className="text-xs text-gray-500 truncate">{user.email}</p>
                         </div>
                       </div>
                     </td>
-                    <td className="p-4">
+                    <td className="p-3">
                       <p className="text-sm text-gray-700 flex items-center"><Phone size={14} className="mr-1.5 text-gray-400" /> {user.celular || '-'}</p>
                       <p className="text-[10px] text-gray-400 flex items-center mt-1">
                         <MapPin size={12} className="mr-1.5 flex-shrink-0" /> 
-                        <span className="truncate max-w-[200px]">
+                        <span className="truncate max-w-[160px] block">
                           {user.cidade ? `${user.cidade} - ${user.endereco}` : (user.endereco || 'Sem endereço')}
                         </span>
                       </p>
                     </td>
-                    <td className="p-4">
+                    <td className="p-3 align-top">
                       <span className={`px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest ${getTipoBadgeClasses(user)}`}>
                         {getTipoLabel(user)}
                       </span>
                     </td>
-                    <td className="p-4">
+                    <td className="p-3 align-top">
                       <span className={`px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest ${user.status === 'ativo' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
                         {user.status || 'ATIVO'}
                       </span>
                     </td>
-                    <td className="p-4">
+                    <td className="p-3">
                       <div className="flex flex-wrap gap-1">
                         {Object.entries(user.permissoes || {}).filter(([_, v]) => v).map(([key]) => (
                           <span key={key} className="bg-gray-100 text-gray-500 text-[9px] px-1.5 py-0.5 rounded border border-gray-200 uppercase font-medium">
@@ -317,11 +317,11 @@ export const Usuarios: React.FC = () => {
                         ))}
                       </div>
                     </td>
-                    <td className="p-4 text-center">
-                       <div className="flex items-center justify-center space-x-2">
+                    <td className="p-3 text-center align-top">
+                       <div className="flex items-center justify-center space-x-1">
                         <button 
                           onClick={() => { setEditingUser(user); setShowModal(true); }}
-                          className="text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded-lg font-bold text-sm transition-colors"
+                          className="text-blue-600 hover:bg-blue-50 px-2 py-1 rounded-lg font-bold text-sm transition-colors"
                         >
                           Editar
                         </button>
