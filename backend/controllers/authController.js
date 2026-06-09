@@ -241,10 +241,14 @@ exports.uploadFotoPerfil = async (req, res) => {
   if (!file) return res.status(400).json({ message: 'Foto não enviada.' });
   try {
     const path = require('path');
-    const fileName = `avatars/${req.user.uid}/profile${path.extname(file.originalname) || '.jpg'}`;
+    // Filename único por upload: evita que Flutter use cache do URL anterior
+    // (quando o nome era sempre "profile.jpg", a URL nunca mudava e o avatar
+    // ficava congelado no cache do NetworkImage entre sessões)
+    const ext = path.extname(file.originalname) || '.jpg';
+    const fileName = `avatars/${req.user.uid}/profile_${Date.now()}${ext}`;
     await supabase.storage
       .from('comprovantes')
-      .upload(fileName, file.buffer, { contentType: file.mimetype, upsert: true });
+      .upload(fileName, file.buffer, { contentType: file.mimetype, upsert: false });
     const { data: urlData } = supabase.storage.from('comprovantes').getPublicUrl(fileName);
     const publicUrl = urlData.publicUrl;
     const { error } = await supabase
