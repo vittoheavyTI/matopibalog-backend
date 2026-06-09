@@ -1,4 +1,4 @@
-﻿import 'dart:io';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
@@ -40,13 +40,8 @@ class _AddValeScreenState extends State<AddValeScreen> {
   Future<void> _pickPhoto(ImageSource source) async {
     try {
       final picker = ImagePicker();
-      final pickedFile = await picker.pickImage(
-        source: source,
-        imageQuality: 70,
-      );
-      if (pickedFile != null) {
-        setState(() => _image = File(pickedFile.path));
-      }
+      final pickedFile = await picker.pickImage(source: source, imageQuality: 70);
+      if (pickedFile != null) setState(() => _image = File(pickedFile.path));
     } catch (e) {
       AppLogger.error('AddVale', 'erro_foto', e);
       if (mounted) {
@@ -67,19 +62,19 @@ class _AddValeScreenState extends State<AddValeScreen> {
             ListTile(
               leading: const Icon(Icons.camera_alt),
               title: const Text('Tirar Foto'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _pickPhoto(ImageSource.camera);
-              },
+              onTap: () { Navigator.pop(ctx); _pickPhoto(ImageSource.camera); },
             ),
             ListTile(
               leading: const Icon(Icons.photo_library),
               title: const Text('Escolher da Galeria'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _pickPhoto(ImageSource.gallery);
-              },
+              onTap: () { Navigator.pop(ctx); _pickPhoto(ImageSource.gallery); },
             ),
+            if (_image != null)
+              ListTile(
+                leading: const Icon(Icons.close, color: Colors.red),
+                title: const Text('Remover foto'),
+                onTap: () { Navigator.pop(ctx); setState(() => _image = null); },
+              ),
           ],
         ),
       ),
@@ -87,17 +82,20 @@ class _AddValeScreenState extends State<AddValeScreen> {
   }
 
   Future<void> _save() async {
-    if (_image == null) {
-      AppLogger.action('vale_validation_error', params: {'motivo': 'foto_obrigatoria'});
-      _showPhotoOptions();
+    final valorText = _valorCtrl.text.replaceAll(',', '.');
+
+    if (valorText.isEmpty || double.tryParse(valorText) == null || double.parse(valorText) <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Informe um valor válido maior que zero.')),
+      );
       return;
     }
 
     AppLogger.action('vale_save_attempt', params: {'quem_pagou': _quemPagou});
     setState(() => _loading = true);
 
-    final fields = {
-      'valor': _valorCtrl.text.replaceAll(',', '.'),
+    final fieldsStr = {
+      'valor': valorText,
       'posto': _postoCtrl.text,
       'litros': _litrosCtrl.text.replaceAll(',', '.'),
       'quem_pagou': _quemPagou,
@@ -105,40 +103,71 @@ class _AddValeScreenState extends State<AddValeScreen> {
 
     try {
       final connectivity = await Connectivity().checkConnectivity();
+
       if (connectivity != ConnectivityResult.none) {
-        final success = await ApiService.createMovementWithPhoto(
-          'vales',
-          fields,
-          _image!.path,
-        );
-        if (success) {
+        Map<String, dynamic> result;
+        if (_image != null) {
+          result = await ApiService.createMovementWithPhoto('vales', fieldsStr, _image!.path);
+        } else {
+          result = await ApiService.createMovementJson('vales', <String, dynamic>{
+            'valor': valorText,
+            'quem_pagou': _quemPagou,
+            if (_postoCtrl.text.isNotEmpty) 'posto': _postoCtrl.text,
+            if (_litrosCtrl.text.isNotEmpty) 'litros': _litrosCtrl.text.replaceAll(',', '.'),
+          });
+        }
+
+        if (result['ok'] == true) {
           AppLogger.action('vale_save_ok');
-          if (mounted) Navigator.pop(context);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Vale salvo com sucesso.'),
+                backgroundColor: Colors.green,
+              ),
+            );
+            Navigator.pop(context, true);
+          }
           return;
         }
-        AppLogger.warning('AddVale', 'upload falhou, tentando offline');
+
+        final msg = result['message'] as String? ?? 'Erro ao salvar vale.';
+        AppLogger.warning('AddVale', 'save falhou: $msg');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+        }
+        return;
       }
 
-      AppLogger.action('vale_offline_queued');
-      final queueId = const Uuid().v4();
-      await OfflineSync.addPendingTask(
-        id: queueId,
-        taskType: 'CREATE_VALE',
-        fields: fields,
-        localPath: _image!.path,
-      );
-      Workmanager().registerOneOffTask(
-        queueId,
-        'sync_offline_data',
-        constraints: Constraints(networkType: NetworkType.connected),
-      );
-
-      if (mounted) Navigator.pop(context);
+      // Sem conexão
+      if (_image != null) {
+        AppLogger.action('vale_offline_queued');
+        final queueId = const Uuid().v4();
+        await OfflineSync.addPendingTask(
+          id: queueId,
+          taskType: 'CREATE_VALE',
+          fields: fieldsStr,
+          localPath: _image!.path,
+        );
+        Workmanager().registerOneOffTask(
+          queueId,
+          'sync_offline_data',
+          constraints: Constraints(networkType: NetworkType.connected),
+        );
+      }
+      if (mounted) {
+        Navigator.pop(context, true);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Salvo localmente. Será sincronizado quando houver conexão.')),
+        );
+      }
     } catch (e) {
       AppLogger.error('AddVale', 'erro_conexao', e);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Erro ao salvar vale.')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Erro ao salvar vale.')),
+        );
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -155,25 +184,21 @@ class _AddValeScreenState extends State<AddValeScreen> {
             TextField(
               controller: _valorCtrl,
               decoration: const InputDecoration(
-                labelText: 'Valor do Vale',
+                labelText: 'Valor do Vale *',
                 prefixText: 'R\$ ',
               ),
-              keyboardType: TextInputType.number,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
             ),
             const SizedBox(height: 16),
             TextField(
               controller: _postoCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Posto (Opcional)',
-              ),
+              decoration: const InputDecoration(labelText: 'Posto (opcional)'),
             ),
             const SizedBox(height: 16),
             TextField(
               controller: _litrosCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Litros (Opcional)',
-              ),
-              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Litros (opcional)'),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
             ),
             const SizedBox(height: 16),
             DropdownButtonFormField<String>(
@@ -183,21 +208,34 @@ class _AddValeScreenState extends State<AddValeScreen> {
                 DropdownMenuItem(value: 'motorista', child: Text('Motorista')),
               ],
               onChanged: (v) => setState(() => _quemPagou = v!),
-              decoration: const InputDecoration(
-                labelText: 'Quem Pagou?',
-              ),
+              decoration: const InputDecoration(labelText: 'Quem Pagou?'),
             ),
             const SizedBox(height: 16),
-            ElevatedButton.icon(
+            OutlinedButton.icon(
               onPressed: _showPhotoOptions,
-              icon: const Icon(Icons.camera_alt),
-              label: Text(_image == null ? 'ADICIONAR FOTO' : 'TROCAR FOTO'),
+              icon: const Icon(Icons.camera_alt_outlined),
+              label: Text(_image == null ? 'Adicionar foto (opcional)' : 'Trocar foto'),
             ),
             if (_image != null) ...[
               const SizedBox(height: 8),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: Image.file(_image!, height: 100, fit: BoxFit.cover),
+              Stack(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.file(_image!, height: 100, fit: BoxFit.cover, width: double.infinity),
+                  ),
+                  Positioned(
+                    top: 4, right: 4,
+                    child: GestureDetector(
+                      onTap: () => setState(() => _image = null),
+                      child: Container(
+                        decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
+                        padding: const EdgeInsets.all(4),
+                        child: const Icon(Icons.close, color: Colors.white, size: 16),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ],
             const SizedBox(height: 32),
@@ -205,8 +243,13 @@ class _AddValeScreenState extends State<AddValeScreen> {
               width: double.infinity,
               height: 48,
               child: ElevatedButton(
-                onPressed: (_image == null || _loading) ? null : _save,
-                child: const Text('SALVAR'),
+                onPressed: _loading ? null : _save,
+                child: _loading
+                    ? const SizedBox(
+                        height: 20, width: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      )
+                    : const Text('SALVAR'),
               ),
             ),
           ],

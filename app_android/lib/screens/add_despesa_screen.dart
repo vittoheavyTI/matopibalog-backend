@@ -1,4 +1,4 @@
-﻿import 'dart:io';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
@@ -22,7 +22,6 @@ class _AddDespesaScreenState extends State<AddDespesaScreen> {
   String _quemPagou = 'proprietario';
   File? _image;
   bool _loading = false;
-  bool _photoRequired = true;
 
   @override
   void initState() {
@@ -40,18 +39,13 @@ class _AddDespesaScreenState extends State<AddDespesaScreen> {
   Future<void> _pickPhoto(ImageSource source) async {
     try {
       final picker = ImagePicker();
-      final pickedFile = await picker.pickImage(
-        source: source,
-        imageQuality: 70,
-      );
-      if (pickedFile != null) {
-        setState(() => _image = File(pickedFile.path));
-      }
+      final pickedFile = await picker.pickImage(source: source, imageQuality: 70);
+      if (pickedFile != null) setState(() => _image = File(pickedFile.path));
     } catch (e) {
       AppLogger.error('AddDespesa', 'erro_foto', e);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erro ao acessar câmera/galeria.')),
+          const SnackBar(content: Text('Erro ao acessar câmera/galeria.')),
         );
       }
     }
@@ -67,27 +61,18 @@ class _AddDespesaScreenState extends State<AddDespesaScreen> {
             ListTile(
               leading: const Icon(Icons.camera_alt),
               title: const Text('Tirar Foto'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _pickPhoto(ImageSource.camera);
-              },
+              onTap: () { Navigator.pop(ctx); _pickPhoto(ImageSource.camera); },
             ),
             ListTile(
               leading: const Icon(Icons.photo_library),
               title: const Text('Escolher da Galeria'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _pickPhoto(ImageSource.gallery);
-              },
+              onTap: () { Navigator.pop(ctx); _pickPhoto(ImageSource.gallery); },
             ),
-            if (!_photoRequired)
+            if (_image != null)
               ListTile(
-                leading: const Icon(Icons.close),
-                title: const Text('Pular (sem foto)'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  setState(() => _photoRequired = false);
-                },
+                leading: const Icon(Icons.close, color: Colors.red),
+                title: const Text('Remover foto'),
+                onTap: () { Navigator.pop(ctx); setState(() => _image = null); },
               ),
           ],
         ),
@@ -96,45 +81,73 @@ class _AddDespesaScreenState extends State<AddDespesaScreen> {
   }
 
   Future<void> _save() async {
-    if (_image == null && _photoRequired) {
-      AppLogger.action('despesa_validation_error', params: {'motivo': 'foto_obrigatoria'});
-      _showPhotoOptions();
+    final descricao = _descCtrl.text.trim();
+    final valorText = _valorCtrl.text.replaceAll(',', '.');
+
+    if (descricao.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Informe a descrição.')),
+      );
+      return;
+    }
+    if (valorText.isEmpty || double.tryParse(valorText) == null || double.parse(valorText) <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Informe um valor válido maior que zero.')),
+      );
       return;
     }
 
     AppLogger.action('despesa_save_attempt', params: {'tipo': _tipo, 'quem_pagou': _quemPagou});
     setState(() => _loading = true);
 
-    final fields = {
+    final fieldsStr = {
       'tipo': _tipo,
-      'descricao': _descCtrl.text,
-      'valor': _valorCtrl.text.replaceAll(',', '.'),
+      'descricao': descricao,
+      'valor': valorText,
       'quem_pagou': _quemPagou,
     };
 
     try {
       final connectivity = await Connectivity().checkConnectivity();
-      if (connectivity != ConnectivityResult.none && _image != null) {
-        final success = await ApiService.createMovementWithPhoto(
-          'despesas',
-          fields,
-          _image!.path,
-        );
-        if (success) {
+
+      if (connectivity != ConnectivityResult.none) {
+        Map<String, dynamic> result;
+        if (_image != null) {
+          result = await ApiService.createMovementWithPhoto('despesas', fieldsStr, _image!.path);
+        } else {
+          result = await ApiService.createMovementJson('despesas', fieldsStr);
+        }
+
+        if (result['ok'] == true) {
           AppLogger.action('despesa_save_ok');
-          if (mounted) Navigator.pop(context);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Despesa salva com sucesso.'),
+                backgroundColor: Colors.green,
+              ),
+            );
+            Navigator.pop(context, true);
+          }
           return;
         }
-        AppLogger.warning('AddDespesa', 'upload falhou, tentando offline');
+
+        final msg = result['message'] as String? ?? 'Erro ao salvar despesa.';
+        AppLogger.warning('AddDespesa', 'save falhou: $msg');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+        }
+        return;
       }
 
+      // Sem conexão — enfileirar com foto se disponível
       if (_image != null) {
         AppLogger.action('despesa_offline_queued', params: {'tipo': _tipo});
         final queueId = const Uuid().v4();
         await OfflineSync.addPendingTask(
           id: queueId,
           taskType: 'CREATE_DESPESA',
-          fields: fields,
+          fields: fieldsStr,
           localPath: _image!.path,
         );
         Workmanager().registerOneOffTask(
@@ -143,22 +156,21 @@ class _AddDespesaScreenState extends State<AddDespesaScreen> {
           constraints: Constraints(networkType: NetworkType.connected),
         );
       }
-
       if (mounted) {
-        Navigator.pop(context);
+        Navigator.pop(context, true);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text(
-              'Dados salvos localmente. Serão sincronizados quando houver conexão.',
-            ),
+            content: Text('Salvo localmente. Será sincronizado quando houver conexão.'),
           ),
         );
       }
     } catch (e) {
       AppLogger.error('AddDespesa', 'erro_conexao', e);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Erro ao salvar despesa.')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Erro ao salvar despesa.')),
+        );
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -179,9 +191,7 @@ class _AddDespesaScreenState extends State<AddDespesaScreen> {
                   .map((t) => DropdownMenuItem(value: t, child: Text(t)))
                   .toList(),
               onChanged: (val) => setState(() => _tipo = val!),
-              decoration: const InputDecoration(
-                labelText: 'Tipo',
-              ),
+              decoration: const InputDecoration(labelText: 'Tipo'),
             ),
             const SizedBox(height: 16),
             TextField(
@@ -221,20 +231,34 @@ class _AddDespesaScreenState extends State<AddDespesaScreen> {
               ],
             ),
             const SizedBox(height: 16),
-            ElevatedButton.icon(
+            OutlinedButton.icon(
               onPressed: _showPhotoOptions,
-              icon: const Icon(Icons.camera_alt),
-              label: Text(
-                _photoRequired && _image == null
-                    ? 'ADICIONAR FOTO (OBRIGATÓRIO)'
-                    : 'TROCAR FOTO',
-              ),
+              icon: const Icon(Icons.camera_alt_outlined),
+              label: Text(_image == null ? 'Adicionar foto (opcional)' : 'Trocar foto'),
             ),
             if (_image != null) ...[
               const SizedBox(height: 8),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: Image.file(_image!, height: 150, fit: BoxFit.cover),
+              Stack(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.file(_image!, height: 150, fit: BoxFit.cover, width: double.infinity),
+                  ),
+                  Positioned(
+                    top: 4, right: 4,
+                    child: GestureDetector(
+                      onTap: () => setState(() => _image = null),
+                      child: Container(
+                        decoration: const BoxDecoration(
+                          color: Colors.black54,
+                          shape: BoxShape.circle,
+                        ),
+                        padding: const EdgeInsets.all(4),
+                        child: const Icon(Icons.close, color: Colors.white, size: 16),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ],
             const SizedBox(height: 32),
@@ -243,7 +267,10 @@ class _AddDespesaScreenState extends State<AddDespesaScreen> {
               child: ElevatedButton(
                 onPressed: _loading ? null : _save,
                 child: _loading
-                    ? const CircularProgressIndicator()
+                    ? const SizedBox(
+                        height: 20, width: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      )
                     : const Text('SALVAR'),
               ),
             ),
