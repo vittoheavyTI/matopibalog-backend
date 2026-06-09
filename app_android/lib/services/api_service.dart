@@ -231,29 +231,53 @@ class ApiService {
     }
   }
 
-  // DESPESAS / ABASTECIMENTOS / VALES (Multipart)
-  static Future<bool> createMovementWithPhoto(String endpoint, Map<String, String> fields, String filePath) async {
+  // DESPESAS / ABASTECIMENTOS / VALES
+
+  // Envia com foto (multipart). Retorna {ok, message}.
+  static Future<Map<String, dynamic>> createMovementWithPhoto(
+      String endpoint, Map<String, String> fields, String filePath) async {
     try {
       var request = http.MultipartRequest('POST', Uri.parse('$_baseUrl/$endpoint'));
       request.headers.addAll(await _getHeaders());
-      request.headers.remove('Content-Type'); // O MultipartRequest define o seu próprio
-
-      fields.forEach((key, value) {
-        request.fields[key] = value;
-      });
-
+      request.headers.remove('Content-Type');
+      fields.forEach((key, value) => request.fields[key] = value);
       request.files.add(await http.MultipartFile.fromPath('foto', filePath));
-
       var response = await request.send();
-      if (response.statusCode == 201) {
-        AppLogger.api('ApiService', 'POST /$endpoint', response.statusCode);
-      } else {
-        AppLogger.api('ApiService', 'POST /$endpoint', response.statusCode);
-      }
-      return response.statusCode == 201;
+      AppLogger.api('ApiService', 'POST /$endpoint (foto)', response.statusCode);
+      if (response.statusCode == 201) return {'ok': true};
+      String msg = 'Erro ao salvar.';
+      try {
+        final body = await response.stream.bytesToString();
+        final json = jsonDecode(body);
+        msg = json['message'] ?? json['error'] ?? msg;
+      } catch (_) {}
+      return {'ok': false, 'message': msg};
     } catch (e) {
-      AppLogger.error('ApiService', 'POST /$endpoint exception', e);
-      return false;
+      AppLogger.error('ApiService', 'POST /$endpoint (foto) exception', e);
+      return {'ok': false, 'message': 'Erro de conexão.'};
+    }
+  }
+
+  // Envia sem foto (JSON). Retorna {ok, message}.
+  static Future<Map<String, dynamic>> createMovementJson(
+      String endpoint, Map<String, dynamic> fields) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$_baseUrl/$endpoint'),
+        headers: await _getHeaders(),
+        body: jsonEncode(fields),
+      );
+      AppLogger.api('ApiService', 'POST /$endpoint (json)', response.statusCode);
+      if (response.statusCode == 201) return {'ok': true};
+      String msg = 'Erro ao salvar.';
+      try {
+        final json = jsonDecode(response.body);
+        msg = json['message'] ?? json['error'] ?? msg;
+      } catch (_) {}
+      return {'ok': false, 'message': msg};
+    } catch (e) {
+      AppLogger.error('ApiService', 'POST /$endpoint (json) exception', e);
+      return {'ok': false, 'message': 'Erro de conexão.'};
     }
   }
 

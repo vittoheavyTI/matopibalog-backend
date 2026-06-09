@@ -69,9 +69,9 @@ class OfflineSync {
       final endpoint = _getEndpoint(task['task_type']);
 
       try {
-        final success = await ApiService.createMovementWithPhoto(endpoint, fields, task['local_path']);
+        final result = await ApiService.createMovementWithPhoto(endpoint, fields, task['local_path']);
 
-        if (success) {
+        if (result['ok'] == true) {
           ok++;
           await db.delete('sync_queue', where: 'id = ?', whereArgs: [task['id']]);
           AppLogger.action('offline_sync_task_ok', params: {'tipo': task['task_type']});

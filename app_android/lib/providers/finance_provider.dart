@@ -11,6 +11,9 @@ class FinanceProvider extends ChangeNotifier {
   bool _loading = false;
   String _error = '';
   List<dynamic> _fretes = [];
+  List<dynamic> _despesas = [];
+  List<dynamic> _abastecimentos = [];
+  List<dynamic> _vales = [];
 
   double get totalFretes => _totalFretes;
   double get comissao => _comissao;
@@ -20,6 +23,9 @@ class FinanceProvider extends ChangeNotifier {
   bool get loading => _loading;
   String get error => _error;
   List<dynamic> get fretes => _fretes;
+  List<dynamic> get despesas => _despesas;
+  List<dynamic> get abastecimentos => _abastecimentos;
+  List<dynamic> get vales => _vales;
 
   Future<void> loadData() async {
     AppLogger.action('load_finance_data');
@@ -49,6 +55,9 @@ class FinanceProvider extends ChangeNotifier {
       final abastecimentos = results[2];
       final vales          = results[3];
       _fretes = fretes;
+      _despesas = despesas;
+      _abastecimentos = abastecimentos;
+      _vales = vales;
 
       double tf = 0.0;
       for (var f in fretes) {
