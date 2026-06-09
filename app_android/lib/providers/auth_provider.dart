@@ -68,18 +68,20 @@ class AuthProvider extends ChangeNotifier {
     final res = await ApiService.login(email, senha);
     if (res == null || res['_error'] == true) {
       _status = AuthStatus.error;
-      // Tenta extrair mensagem do backend, senão usa mensagem genérica
-      try {
-        if (res != null && res['_body'] != null) {
-          final body = jsonDecode(res['_body'] as String);
+      final httpStatus = res?['_status'] as int? ?? 0;
+      if (httpStatus == 0) {
+        // Exceção de rede (sem conexão, timeout, SSL) — _body não é JSON
+        _error = 'Não foi possível conectar ao servidor. Verifique sua conexão.';
+      } else {
+        // Resposta HTTP do backend — extrair mensagem do JSON
+        try {
+          final body = jsonDecode(res?['_body'] as String? ?? '{}');
           _error = body['message'] ?? body['error'] ?? 'E-mail ou senha incorretos.';
-        } else {
-          _error = 'Não foi possível conectar ao servidor.';
+        } catch (_) {
+          _error = 'Erro inesperado ao processar resposta do servidor.';
         }
-      } catch (_) {
-        _error = 'E-mail ou senha incorretos.';
       }
-      AppLogger.action('login_error', params: {'email': email, 'error': _error});
+      AppLogger.action('login_error', params: {'email': email, 'status': httpStatus, 'error': _error});
       notifyListeners();
       return false;
     }
