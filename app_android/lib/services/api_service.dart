@@ -21,11 +21,13 @@ class ApiService {
   static Future<Map<String, dynamic>?> login(String email, String senha) async {
     AppLogger.action('login_attempt', params: {'email': email});
     try {
-      final response = await http.post(
-        Uri.parse('$_baseUrl/auth/login'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'email': email, 'senha': senha}),
-      );
+      final response = await http
+          .post(
+            Uri.parse('$_baseUrl/auth/login'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'email': email, 'senha': senha}),
+          )
+          .timeout(const Duration(seconds: 20));
 
       debugPrint('[ApiService.login] status=${response.statusCode} body=${response.body}');
 
@@ -37,8 +39,9 @@ class ApiService {
       // Retorna o body para o provider poder extrair a mensagem de erro
       return {'_error': true, '_status': response.statusCode, '_body': response.body};
     } catch (e) {
-      AppLogger.action('login_error', params: {'email': email, 'error': e.toString()});
+      debugPrint('[ApiService.login] exception type: ${e.runtimeType}');
       debugPrint('[ApiService.login] exception: $e');
+      AppLogger.action('login_error', params: {'email': email, 'tipo': e.runtimeType.toString(), 'error': e.toString()});
       return {'_error': true, '_status': 0, '_body': e.toString()};
     }
   }
