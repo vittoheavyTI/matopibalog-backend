@@ -146,20 +146,33 @@ exports.getPublic = async (req, res) => {
 
 exports.update = async (req, res) => {
   try {
-    // Buscar empresa_id atual para respeitar a restrição NOT NULL na tabela
     const { data: current } = await supabase
       .from('configuracoes')
       .select('empresa_id')
       .eq('id', 1)
       .single();
 
-    const empresaId = current?.empresa_id || '00000000-0000-0000-0000-000000000001';
+    let empresaId = current?.empresa_id;
+
+    // Linha id=1 ainda não existe: busca empresa_id do usuário autenticado
+    if (!empresaId) {
+      const { data: usuario } = await supabase
+        .from('usuarios')
+        .select('empresa_id')
+        .eq('id', req.user.uid)
+        .single();
+      empresaId = usuario?.empresa_id;
+    }
+
+    if (!empresaId) {
+      return res.status(400).json({ message: 'Não foi possível determinar empresa_id para salvar configurações.' });
+    }
 
     const { error } = await supabase
       .from('configuracoes')
-      .upsert({ 
-        id: 1, 
-        dados: req.body, 
+      .upsert({
+        id: 1,
+        dados: req.body,
         atualizado_em: new Date(),
         empresa_id: empresaId
       });
