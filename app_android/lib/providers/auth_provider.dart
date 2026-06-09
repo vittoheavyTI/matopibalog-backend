@@ -14,6 +14,7 @@ class AuthProvider extends ChangeNotifier {
   String _uid = '';
   String _error = '';
   String _fotoUrl = '';
+  bool _senhaTemporaria = false;
 
   AuthStatus get status => _status;
   String get token => _token;
@@ -22,6 +23,7 @@ class AuthProvider extends ChangeNotifier {
   String get uid => _uid;
   String get error => _error;
   String get fotoUrl => _fotoUrl;
+  bool get senhaTemporaria => _senhaTemporaria;
   bool get isLoggedIn => _status == AuthStatus.authenticated;
   bool get isMotorista => _role == 'motorista';
 
@@ -68,18 +70,20 @@ class AuthProvider extends ChangeNotifier {
     final res = await ApiService.login(email, senha);
     if (res == null || res['_error'] == true) {
       _status = AuthStatus.error;
-      // Tenta extrair mensagem do backend, senão usa mensagem genérica
-      try {
-        if (res != null && res['_body'] != null) {
-          final body = jsonDecode(res['_body'] as String);
+      final httpStatus = res?['_status'] as int? ?? 0;
+      if (httpStatus == 0) {
+        // Exceção de rede (sem conexão, timeout, SSL) — _body não é JSON
+        _error = 'Não foi possível conectar ao servidor. Verifique sua conexão.';
+      } else {
+        // Resposta HTTP do backend — extrair mensagem do JSON
+        try {
+          final body = jsonDecode(res?['_body'] as String? ?? '{}');
           _error = body['message'] ?? body['error'] ?? 'E-mail ou senha incorretos.';
-        } else {
-          _error = 'Não foi possível conectar ao servidor.';
+        } catch (_) {
+          _error = 'Erro inesperado ao processar resposta do servidor.';
         }
-      } catch (_) {
-        _error = 'E-mail ou senha incorretos.';
       }
-      AppLogger.action('login_error', params: {'email': email, 'error': _error});
+      AppLogger.action('login_error', params: {'email': email, 'status': httpStatus, 'error': _error});
       notifyListeners();
       return false;
     }
@@ -108,8 +112,8 @@ class AuthProvider extends ChangeNotifier {
     _nome = res['user']['nome'];
     _role = userRole;
     _uid = res['user']['uid'];
-
     _fotoUrl = res['user']['foto_url'] ?? '';
+    _senhaTemporaria = res['user']['senha_temporaria'] == true;
 
     await prefs.setString('token', _token);
     await prefs.setString('user_role', _role);
@@ -127,6 +131,11 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  void limparSenhaTemporaria() {
+    _senhaTemporaria = false;
+    notifyListeners();
+  }
+
   Future<void> logout() async {
     AppLogger.action('logout', params: {'user': _nome});
     final prefs = await SharedPreferences.getInstance();
@@ -135,6 +144,7 @@ class AuthProvider extends ChangeNotifier {
     _nome = '';
     _role = '';
     _uid = '';
+    _senhaTemporaria = false;
     _status = AuthStatus.unauthenticated;
     notifyListeners();
   }

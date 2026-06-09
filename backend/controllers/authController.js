@@ -186,6 +186,7 @@ exports.login = async (req, res) => {
         status: userData.status,
         foto_url: userData.foto_url,
         is_super_admin: userData.is_super_admin ?? false,
+        senha_temporaria: userData.senha_temporaria ?? false,
       }
     });
   } catch (error) {
@@ -261,6 +262,39 @@ exports.getMe = async (req, res) => {
     res.status(200).json(data);
   } catch (error) {
     res.status(500).json({ message: 'Erro ao buscar dados do usuário.' });
+  }
+};
+
+exports.trocarSenha = async (req, res) => {
+  const { nova_senha } = req.body;
+
+  if (!nova_senha || typeof nova_senha !== 'string' || nova_senha.length < 6) {
+    return res.status(400).json({ message: 'A nova senha deve ter pelo menos 6 caracteres.' });
+  }
+
+  try {
+    const { error: authError } = await supabase.auth.admin.updateUserById(req.user.uid, {
+      password: nova_senha
+    });
+
+    if (authError) {
+      console.error('[trocarSenha] Erro no Supabase Auth:', authError.message);
+      return res.status(500).json({ message: 'Erro ao atualizar senha. Tente novamente.' });
+    }
+
+    const { error: dbError } = await supabase
+      .from('usuarios')
+      .update({ senha_temporaria: false })
+      .eq('id', req.user.uid);
+
+    if (dbError) {
+      console.error('[trocarSenha] Erro ao atualizar usuarios:', dbError.message);
+    }
+
+    res.status(200).json({ message: 'Senha atualizada com sucesso.' });
+  } catch (error) {
+    console.error('[trocarSenha] Erro inesperado:', error.message || error);
+    res.status(500).json({ message: 'Erro inesperado ao atualizar senha.' });
   }
 };
 

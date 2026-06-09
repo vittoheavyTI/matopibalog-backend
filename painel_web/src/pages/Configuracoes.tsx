@@ -662,7 +662,7 @@ export const Configuracoes: React.FC = () => {
                 }}>
                   <div style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    gap: '10px', flexWrap: 'wrap',
+                    gap: '10px', flexWrap: 'nowrap',
                     fontSize: `${footerFontSize}px`,
                     fontWeight: footerBold ? 'bold' : 'normal',
                     fontFamily: footerFontFamily,

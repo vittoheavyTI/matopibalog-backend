@@ -333,7 +333,7 @@ export const Login: React.FC = () => {
               alignItems: 'center',
               justifyContent: 'center',
               gap: '10px',
-              flexWrap: 'wrap',
+              flexWrap: 'nowrap',
               fontSize: `${config.footerFontSize}px`,
               fontWeight: config.footerBold ? 'bold' : 'normal',
               fontFamily: config.footerFontFamily,
