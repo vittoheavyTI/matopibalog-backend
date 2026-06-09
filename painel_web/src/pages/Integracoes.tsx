@@ -105,6 +105,8 @@ const camposPorServico: Record<string, CampoConfig[]> = {
   supabase: []
 };
 
+const LS_KEY = 'matopibalog_integracoes';
+
 export const Integracoes: React.FC = () => {
   const [integracoes, setIntegracoes] = useState<Integracao[]>(integracoesPadrao);
   const [showModal, setShowModal] = useState(false);
@@ -112,6 +114,8 @@ export const Integracoes: React.FC = () => {
   const [configEdit, setConfigEdit] = useState<Record<string, string>>({});
   const [testando, setTestando] = useState<string | null>(null);
   const [mensagemTeste, setMensagemTeste] = useState<{ tipo: 'sucesso' | 'erro'; texto: string } | null>(null);
+  // Toast global para feedback fora do modal
+  const [toast, setToast] = useState<{ tipo: 'sucesso' | 'erro'; texto: string } | null>(null);
   const [salvando, setSalvando] = useState(false);
   const [showNovaIntegracao, setShowNovaIntegracao] = useState(false);
   const [novaIntegracao, setNovaIntegracao] = useState({
@@ -123,7 +127,8 @@ export const Integracoes: React.FC = () => {
   const [camposDinamicos, setCamposDinamicos] = useState<{ chave: string; valor: string }[]>([]);
 
   useEffect(() => {
-    const saved = localStorage.getItem('choferlog_integracoes');
+    // Tenta ler da chave nova; se não existir, migra da chave legada (rebranding)
+    const saved = localStorage.getItem(LS_KEY) || localStorage.getItem('choferlog_integracoes');
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
@@ -134,6 +139,9 @@ export const Integracoes: React.FC = () => {
           }
           return p;
         }));
+        // Garante que a chave nova existe (migração silenciosa)
+        localStorage.setItem(LS_KEY, saved);
+        localStorage.removeItem('choferlog_integracoes');
       } catch {}
     }
   }, []);
@@ -141,8 +149,13 @@ export const Integracoes: React.FC = () => {
   const persistirIntegracoes = (novas: Integracao[]) => {
     const obj: Record<string, any> = {};
     novas.forEach(i => { obj[i.id] = { config: i.config, status: i.status, ultimaVerificacao: i.ultimaVerificacao }; });
-    localStorage.setItem('choferlog_integracoes', JSON.stringify(obj));
+    localStorage.setItem(LS_KEY, JSON.stringify(obj));
     setIntegracoes(novas);
+  };
+
+  const mostrarToast = (tipo: 'sucesso' | 'erro', texto: string) => {
+    setToast({ tipo, texto });
+    setTimeout(() => setToast(null), 4000);
   };
 
   const abrirModal = (servico: Integracao) => {
@@ -156,16 +169,26 @@ export const Integracoes: React.FC = () => {
     setTestando(servico.id);
     setMensagemTeste(null);
     const config = configOverride || servico.config;
-    localStorage.setItem(`choferlog_integracao_config_${servico.id}`, JSON.stringify(config));
+    localStorage.setItem(`matopibalog_integracao_config_${servico.id}`, JSON.stringify(config));
     try {
-      await api.post('/integracoes/testar/' + servico.id, config);
+      const resp = await api.post('/integracoes/testar/' + servico.id, config);
+      const msgSucesso = resp.data?.message || 'Conexão estabelecida com sucesso.';
       const novas = integracoes.map(i => i.id === servico.id ? { ...i, status: 'conectado' as const, ultimaVerificacao: new Date().toISOString() } : i);
       persistirIntegracoes(novas);
-      setMensagemTeste({ tipo: 'sucesso', texto: 'Conexão estabelecida com sucesso.' });
-    } catch {
+      setMensagemTeste({ tipo: 'sucesso', texto: msgSucesso });
+      // Toast visível mesmo fora do modal
+      mostrarToast('sucesso', `${servico.nome}: ${msgSucesso}`);
+    } catch (err: any) {
+      const msgErro = err?.response?.data?.message || 'Falha na conexão. Verifique as configurações.';
+      const statusCode = err?.response?.status;
       const novas = integracoes.map(i => i.id === servico.id ? { ...i, status: 'erro' as const, ultimaVerificacao: new Date().toISOString() } : i);
       persistirIntegracoes(novas);
-      setMensagemTeste({ tipo: 'erro', texto: 'Falha na conexão. Verifique as configurações.' });
+      // 403 = permissão insuficiente (endpoint exige super-admin)
+      const msgFinal = statusCode === 403
+        ? 'Apenas super-admin pode testar esta integração.'
+        : msgErro;
+      setMensagemTeste({ tipo: 'erro', texto: msgFinal });
+      mostrarToast('erro', `${servico.nome}: ${msgFinal}`);
     }
     setTestando(null);
   };
@@ -207,6 +230,16 @@ export const Integracoes: React.FC = () => {
 
   return (
     <div className="space-y-6 pb-20">
+      {/* Toast global — visível mesmo fora do modal */}
+      {toast && (
+        <div className={`fixed top-4 right-4 z-[100] flex items-center space-x-2 px-5 py-3 rounded-xl shadow-lg text-sm font-semibold transition-all animate-fade-in ${
+          toast.tipo === 'sucesso' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'
+        }`}>
+          {toast.tipo === 'sucesso' ? <Check size={18} /> : <AlertTriangle size={18} />}
+          <span>{toast.texto}</span>
+        </div>
+      )}
+
       <div className="flex items-center space-x-3 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
         <div className="bg-gray-800 p-2 rounded-lg text-white">
           <Plug size={24} />

@@ -146,9 +146,10 @@ exports.getPublic = async (req, res) => {
 
 exports.update = async (req, res) => {
   try {
+    // Busca linha atual para preservar empresa_id e mesclar dados existentes
     const { data: current } = await supabase
       .from('configuracoes')
-      .select('empresa_id')
+      .select('empresa_id, dados')
       .eq('id', 1)
       .single();
 
@@ -168,11 +169,16 @@ exports.update = async (req, res) => {
       return res.status(400).json({ message: 'Não foi possível determinar empresa_id para salvar configurações.' });
     }
 
+    // Merge: preserva campos existentes que não vieram no payload
+    // Isso evita que um save parcial (ex: só aparência) apague outros campos (ex: printers, company)
+    const dadosAtuais = current?.dados || {};
+    const dadosMesclados = { ...dadosAtuais, ...req.body };
+
     const { error } = await supabase
       .from('configuracoes')
       .upsert({
         id: 1,
-        dados: req.body,
+        dados: dadosMesclados,
         atualizado_em: new Date(),
         empresa_id: empresaId
       });

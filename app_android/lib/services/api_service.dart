@@ -202,22 +202,22 @@ class ApiService {
     }
   }
 
-  static Future<bool> createFrete(Map<String, dynamic> data) async {
+  static Future<Map<String, dynamic>> createFrete(Map<String, dynamic> data) async {
     try {
       final response = await http.post(
         Uri.parse('$_baseUrl/fretes'),
         headers: await _getHeaders(),
         body: jsonEncode(data),
       );
+      AppLogger.api('ApiService', 'POST /fretes', response.statusCode);
       if (response.statusCode == 201) {
-        AppLogger.api('ApiService', 'POST /fretes', response.statusCode);
-      } else {
-        AppLogger.api('ApiService', 'POST /fretes', response.statusCode);
+        return {'ok': true};
       }
-      return response.statusCode == 201;
+      final body = jsonDecode(response.body);
+      return {'ok': false, 'message': body['message'] ?? 'Erro ao salvar frete.'};
     } catch (e) {
       AppLogger.error('ApiService', 'POST /fretes exception', e);
-      return false;
+      return {'ok': false, 'message': 'Erro de conexão.'};
     }
   }
 
