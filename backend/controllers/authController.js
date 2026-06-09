@@ -246,18 +246,32 @@ exports.uploadFotoPerfil = async (req, res) => {
     // ficava congelado no cache do NetworkImage entre sessões)
     const ext = path.extname(file.originalname) || '.jpg';
     const fileName = `avatars/${req.user.uid}/profile_${Date.now()}${ext}`;
-    await supabase.storage
+
+    const { error: uploadError } = await supabase.storage
       .from('comprovantes')
       .upload(fileName, file.buffer, { contentType: file.mimetype, upsert: false });
+
+    if (uploadError) {
+      console.error('[uploadFotoPerfil] Erro Supabase Storage:', uploadError.message);
+      return res.status(500).json({ message: 'Erro ao salvar foto no storage.' });
+    }
+
     const { data: urlData } = supabase.storage.from('comprovantes').getPublicUrl(fileName);
     const publicUrl = urlData.publicUrl;
-    const { error } = await supabase
+
+    const { error: dbError } = await supabase
       .from('usuarios')
       .update({ foto_url: publicUrl })
       .eq('id', req.user.uid);
-    if (error) throw error;
+
+    if (dbError) {
+      console.error('[uploadFotoPerfil] Erro ao atualizar foto_url no banco:', dbError.message);
+      return res.status(500).json({ message: 'Foto salva no storage mas erro ao atualizar perfil.' });
+    }
+
     res.status(200).json({ foto_url: publicUrl });
   } catch (error) {
+    console.error('[uploadFotoPerfil] Erro inesperado:', error.message || error);
     res.status(500).json({ message: 'Erro ao enviar foto de perfil.' });
   }
 };
