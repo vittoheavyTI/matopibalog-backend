@@ -48,14 +48,43 @@ class _AddFreteScreenState extends State<AddFreteScreen> {
     });
     setState(() => _loading = true);
 
+    // Validação do KM inicial (campo opcional):
+    // - em branco → permitido, não envia
+    // - texto não-numérico → bloqueia com mensagem
+    // - zero ou negativo → bloqueia com mensagem
+    // - positivo → envia
+    final kmStr = _kmCtrl.text.trim();
+    int? kmInicial;
+    if (kmStr.isNotEmpty) {
+      kmInicial = int.tryParse(kmStr);
+      if (kmInicial == null) {
+        AppLogger.action('frete_validation_error', params: {'motivo': 'km_invalido'});
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('KM inicial inválido. Use apenas números.')),
+        );
+        setState(() => _loading = false);
+        return;
+      }
+      if (kmInicial <= 0) {
+        AppLogger.action('frete_validation_error', params: {'motivo': 'km_nao_positivo'});
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('KM inicial deve ser maior que zero.')),
+        );
+        setState(() => _loading = false);
+        return;
+      }
+    }
+
+    final payload = <String, dynamic>{
+      'origem': _origemCtrl.text.trim(),
+      'destino': _destinoCtrl.text.trim(),
+      'valor_frete': valorFrete,
+      'quem_recebeu': _quemRecebeu,
+    };
+    if (kmInicial != null) payload['km_inicial'] = kmInicial;
+
     try {
-      final resultado = await ApiService.createFrete({
-        'origem': _origemCtrl.text.trim(),
-        'destino': _destinoCtrl.text.trim(),
-        'km_inicial': int.tryParse(_kmCtrl.text.trim()),
-        'valor_frete': valorFrete,
-        'quem_recebeu': _quemRecebeu,
-      });
+      final resultado = await ApiService.createFrete(payload);
 
       if (!mounted) return;
 

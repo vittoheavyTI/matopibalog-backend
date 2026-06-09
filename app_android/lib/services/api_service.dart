@@ -214,7 +214,17 @@ class ApiService {
         return {'ok': true};
       }
       final body = jsonDecode(response.body);
-      return {'ok': false, 'message': body['message'] ?? 'Erro ao salvar frete.'};
+      // Zod retorna { message: 'Dados inválidos.', errors: [{campo, mensagem}] }
+      // Prefere mostrar o primeiro erro específico ao invés da mensagem genérica
+      String msg = body['message'] as String? ?? 'Erro ao salvar frete.';
+      final errors = body['errors'];
+      if (errors is List && errors.isNotEmpty) {
+        final primeiro = errors.first;
+        if (primeiro is Map && primeiro['mensagem'] != null) {
+          msg = '${primeiro['mensagem']} (campo: ${primeiro['campo'] ?? '?'})';
+        }
+      }
+      return {'ok': false, 'message': msg};
     } catch (e) {
       AppLogger.error('ApiService', 'POST /fretes exception', e);
       return {'ok': false, 'message': 'Erro de conexão.'};

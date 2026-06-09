@@ -17,7 +17,19 @@ router.post('/testar/asaas', verifyToken, isSuperAdmin, async (req, res) => {
 
     res.json({ status: 'conectado', message: 'Conexão com Asaas bem-sucedida.' });
   } catch (err) {
-    res.status(400).json({ status: 'erro', message: err.response?.data?.errors?.[0]?.description || 'Erro ao conectar com Asaas.' });
+    const asaasDesc = err.response?.data?.errors?.[0]?.description || '';
+    const httpStatus = err.response?.status;
+    const base = asaasDesc || 'Erro ao conectar com Asaas.';
+
+    // Detecta erro de autenticação/ambiente e adiciona hint sem expor a chave
+    const isAuthErr = httpStatus === 401 || httpStatus === 403 ||
+      /api.?key|access|unauthorized|invalid/i.test(asaasDesc);
+    const envLabel = environment === 'production' ? 'produção' : 'sandbox';
+    const hint = isAuthErr
+      ? ` Verifique se a chave pertence ao ambiente "${envLabel}" selecionado.`
+      : '';
+
+    res.status(400).json({ status: 'erro', message: base + hint });
   }
 });
 
