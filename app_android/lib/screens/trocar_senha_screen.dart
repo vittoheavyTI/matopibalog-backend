@@ -52,16 +52,11 @@ class _TrocarSenhaScreenState extends State<TrocarSenhaScreen> {
 
     if (resultado['ok'] == true) {
       AppLogger.action('trocar_senha_ok');
+      // O Consumer<AuthProvider> em main.dart troca automaticamente para AppShell
+      // quando senhaTemporaria = false. NÃO chamar Navigator.pop() aqui —
+      // a TrocarSenhaScreen é renderizada inline (não via push), e pop() na raiz
+      // causaria tela preta antes do rebuild.
       context.read<AuthProvider>().limparSenhaTemporaria();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Senha definida com sucesso! Bem-vindo.'),
-            backgroundColor: Colors.green,
-          ),
-        );
-        Navigator.of(context).pop();
-      }
     } else {
       AppLogger.action('trocar_senha_erro', params: {'msg': resultado['message']});
       ScaffoldMessenger.of(context).showSnackBar(

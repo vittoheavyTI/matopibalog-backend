@@ -28,18 +28,27 @@ class FinanceProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
+      // Perfil carregado primeiro para obter percentual_comissao antes dos cálculos
       final profile = await ApiService.getMe();
       if (profile != null) {
         _percentualComissao = double.tryParse(
-          profile['motoristas']['percentual_comissao'].toString(),
+          profile['motoristas']?['percentual_comissao']?.toString() ?? '',
         ) ?? 12.0;
       }
 
-      final fretes = await ApiService.getFretes();
+      // As 4 listas são independentes entre si — busca em paralelo
+      final results = await Future.wait([
+        ApiService.getFretes(),
+        ApiService.getList('despesas'),
+        ApiService.getList('abastecimentos'),
+        ApiService.getList('vales'),
+      ]);
+
+      final fretes         = results[0];
+      final despesas       = results[1];
+      final abastecimentos = results[2];
+      final vales          = results[3];
       _fretes = fretes;
-      final despesas = await ApiService.getList('despesas');
-      final abastecimentos = await ApiService.getList('abastecimentos');
-      final vales = await ApiService.getList('vales');
 
       double tf = 0.0;
       for (var f in fretes) {

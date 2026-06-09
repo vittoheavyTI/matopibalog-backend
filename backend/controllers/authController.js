@@ -97,13 +97,20 @@ exports.register = async (req, res) => {
 
     if (authError) return res.status(400).json({ message: authError.message });
 
+    // Autônomo (sem código de convite) não tem admin para aprovar:
+    // já nasce ativo e aprovado para poder usar o app imediatamente.
+    // Motorista via convite permanece pendente até aprovação do admin da empresa.
+    const isAutonomo = !codigo_convite || codigo_convite.trim() === '';
+    const statusUsuario = isAutonomo ? 'ativo' : 'pendente';
+    const statusCadastro = isAutonomo ? 'aprovado' : 'pendente';
+
     // Criar perfil na tabela usuarios
     const { error: insertError } = await supabase.from('usuarios').insert({
       id: authData.user.id,
       nome,
       email,
       tipo: 'motorista',
-      status: 'pendente',
+      status: statusUsuario,
       empresa_id,
     });
 
@@ -116,9 +123,10 @@ exports.register = async (req, res) => {
     // Criar registro na tabela motoristas
     await supabase.from('motoristas').insert({
       id: authData.user.id,
+      empresa_id,
       cpf: cpf || '',
       placa_veiculo: placa_veiculo || '',
-      status_cadastro: 'pendente'
+      status_cadastro: statusCadastro
     });
 
     res.status(201).json({ message: 'Usuário criado com sucesso!' });

@@ -30,6 +30,17 @@ class _AddFreteScreenState extends State<AddFreteScreen> {
       return;
     }
 
+    // Aceita vírgula decimal (padrão brasileiro) convertendo para ponto
+    final valorStr = _valorCtrl.text.trim().replaceAll(',', '.');
+    final valorFrete = double.tryParse(valorStr);
+    if (valorFrete == null || valorFrete <= 0) {
+      AppLogger.action('frete_validation_error', params: {'motivo': 'valor_invalido'});
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Valor do frete inválido. Use apenas números (ex: 1500 ou 1500,50).')),
+      );
+      return;
+    }
+
     AppLogger.action('frete_save_attempt', params: {
       'origem': _origemCtrl.text,
       'destino': _destinoCtrl.text,
@@ -38,25 +49,32 @@ class _AddFreteScreenState extends State<AddFreteScreen> {
     setState(() => _loading = true);
 
     try {
-      final success = await ApiService.createFrete({
-        'origem': _origemCtrl.text,
-        'destino': _destinoCtrl.text,
-        'km_inicial': int.tryParse(_kmCtrl.text),
-        'valor_frete': double.tryParse(_valorCtrl.text),
+      final resultado = await ApiService.createFrete({
+        'origem': _origemCtrl.text.trim(),
+        'destino': _destinoCtrl.text.trim(),
+        'km_inicial': int.tryParse(_kmCtrl.text.trim()),
+        'valor_frete': valorFrete,
         'quem_recebeu': _quemRecebeu,
       });
 
-      if (success && mounted) {
+      if (!mounted) return;
+
+      if (resultado['ok'] == true) {
         AppLogger.action('frete_save_ok');
         Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Frete registrado com sucesso!')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Frete registrado com sucesso!')),
+        );
       } else {
-        AppLogger.warning('AddFrete', 'API retornou false');
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Erro ao salvar frete.')));
+        final msg = resultado['message'] as String? ?? 'Erro ao salvar frete.';
+        AppLogger.warning('AddFrete', msg);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
       }
     } catch (e) {
       AppLogger.error('AddFrete', 'erro_conexao', e);
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Erro de conexão.')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Erro de conexão.')));
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
