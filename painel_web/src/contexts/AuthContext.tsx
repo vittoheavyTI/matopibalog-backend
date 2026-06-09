@@ -9,6 +9,9 @@ export interface User {
   status: string;
   fotoUrl?: string;
   is_super_admin?: boolean;
+  empresa_id?: string;
+  empresa_tipo?: string;
+  empresa_nome?: string;
 }
 
 interface AuthContextType {
@@ -54,6 +57,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           status: data.status,
           fotoUrl: data.foto_url,
           is_super_admin: data.is_super_admin ?? false,
+          empresa_id: data.empresa_id,
+          empresa_tipo: data.empresas?.tipo ?? undefined,
+          empresa_nome: data.empresas?.nome ?? undefined,
         });
       })
       .catch(() => {

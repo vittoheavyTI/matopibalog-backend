@@ -150,10 +150,10 @@ exports.login = async (req, res) => {
 
     const uid = authData.user.id;
 
-    // 2. Buscar perfil detalhado
+    // 2. Buscar perfil detalhado com tipo da empresa
     const { data: userData, error: userError } = await supabase
       .from('usuarios')
-      .select('*')
+      .select('*, empresas(nome, tipo)')
       .eq('id', uid)
       .single();
 
@@ -195,6 +195,9 @@ exports.login = async (req, res) => {
         foto_url: userData.foto_url,
         is_super_admin: userData.is_super_admin ?? false,
         senha_temporaria: userData.senha_temporaria ?? false,
+        empresa_id: userData.empresa_id,
+        empresa_tipo: userData.empresas?.tipo ?? null,
+        empresa_nome: userData.empresas?.nome ?? null,
       }
     });
   } catch (error) {
