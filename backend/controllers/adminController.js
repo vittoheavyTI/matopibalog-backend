@@ -447,6 +447,15 @@ exports.resetSenhaUsuario = async (req, res) => {
       return res.status(500).json({ message: 'Erro ao resetar senha do usuário.' });
     }
 
+    const { error: dbError } = await supabase
+      .from('usuarios')
+      .update({ senha_temporaria: false })
+      .eq('id', id);
+
+    if (dbError) {
+      console.error('[adminController:resetSenhaUsuario] Erro ao atualizar senha_temporaria:', dbError.message);
+    }
+
     console.log(`[adminController:resetSenhaUsuario] Senha resetada com sucesso para ${id}.`);
     res.status(200).json({ message: 'Senha resetada com sucesso.' });
   } catch (error) {

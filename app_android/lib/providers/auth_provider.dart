@@ -14,6 +14,7 @@ class AuthProvider extends ChangeNotifier {
   String _uid = '';
   String _error = '';
   String _fotoUrl = '';
+  bool _senhaTemporaria = false;
 
   AuthStatus get status => _status;
   String get token => _token;
@@ -22,6 +23,7 @@ class AuthProvider extends ChangeNotifier {
   String get uid => _uid;
   String get error => _error;
   String get fotoUrl => _fotoUrl;
+  bool get senhaTemporaria => _senhaTemporaria;
   bool get isLoggedIn => _status == AuthStatus.authenticated;
   bool get isMotorista => _role == 'motorista';
 
@@ -110,8 +112,8 @@ class AuthProvider extends ChangeNotifier {
     _nome = res['user']['nome'];
     _role = userRole;
     _uid = res['user']['uid'];
-
     _fotoUrl = res['user']['foto_url'] ?? '';
+    _senhaTemporaria = res['user']['senha_temporaria'] == true;
 
     await prefs.setString('token', _token);
     await prefs.setString('user_role', _role);
@@ -129,6 +131,11 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  void limparSenhaTemporaria() {
+    _senhaTemporaria = false;
+    notifyListeners();
+  }
+
   Future<void> logout() async {
     AppLogger.action('logout', params: {'user': _nome});
     final prefs = await SharedPreferences.getInstance();
@@ -137,6 +144,7 @@ class AuthProvider extends ChangeNotifier {
     _nome = '';
     _role = '';
     _uid = '';
+    _senhaTemporaria = false;
     _status = AuthStatus.unauthenticated;
     notifyListeners();
   }

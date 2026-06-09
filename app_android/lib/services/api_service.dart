@@ -72,6 +72,28 @@ class ApiService {
     }
   }
 
+  static Future<Map<String, dynamic>> trocarSenha(String novaSenha) async {
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$_baseUrl/auth/trocar-senha'),
+            headers: await _getHeaders(),
+            body: jsonEncode({'nova_senha': novaSenha}),
+          )
+          .timeout(const Duration(seconds: 20));
+
+      AppLogger.api('ApiService', 'POST /auth/trocar-senha', response.statusCode);
+      if (response.statusCode == 200) {
+        return {'ok': true};
+      }
+      final body = jsonDecode(response.body);
+      return {'ok': false, 'message': body['message'] ?? 'Erro ao trocar senha.'};
+    } catch (e) {
+      AppLogger.error('ApiService', 'POST /auth/trocar-senha exception', e);
+      return {'ok': false, 'message': 'Erro de conexão.'};
+    }
+  }
+
   static Future<Map<String, dynamic>?> getMe() async {
     try {
       final response = await http.get(
