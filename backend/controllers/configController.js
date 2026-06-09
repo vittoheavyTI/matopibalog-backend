@@ -8,8 +8,8 @@ const APPEARANCE_KEYS = [
   'footerHeight', 'inputBgColor', 'inputBorderColor'
 ];
 
-// Campos extras que o admin logado usa (preview + empresa + impressoras)
-const ADMIN_EXTRA_KEYS = ['cardOffsetX', 'cardOffsetY', 'printers'];
+// Campos extras que o admin logado usa (preview + empresa + impressoras + sidebar)
+const ADMIN_EXTRA_KEYS = ['cardOffsetX', 'cardOffsetY', 'printers', 'sidebarLogo', 'sidebarLogoScale', 'sidebarLogoY'];
 
 // Config de SISTEMA — só super-admin (PainelConfigSistema)
 const SYSTEM_KEYS = ['nome_sistema', 'email_suporte', 'trial_dias', 'manutencao', 'registros_abertos'];

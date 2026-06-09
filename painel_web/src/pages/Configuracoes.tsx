@@ -189,6 +189,10 @@ export const Configuracoes: React.FC = () => {
         if (d.inputBgColor) setInputBgColor(d.inputBgColor);
         if (d.inputBorderColor) setInputBorderColor(d.inputBorderColor);
         if (d.loginTemplate) setSelectedTemplate(d.loginTemplate);
+        // Sincroniza sidebar logo do backend → localStorage (persiste entre dispositivos)
+        if (d.sidebarLogo)                   localStorage.setItem('matopibalog_logo', d.sidebarLogo);
+        if (d.sidebarLogoScale !== undefined) localStorage.setItem('matopibalog_logo_scale', String(d.sidebarLogoScale));
+        if (d.sidebarLogoY !== undefined)     localStorage.setItem('matopibalog_logo_y', String(d.sidebarLogoY));
         // Escreve no localStorage para manter consistência
         writeToLS(d);
       })
@@ -234,6 +238,10 @@ export const Configuracoes: React.FC = () => {
       loginLogoY: Number(localStorage.getItem(`${PREFIX}login_logo_y`)) || 0,
       loginBgScale: Number(localStorage.getItem(`${PREFIX}login_bg_scale`)) || 100,
       loginBgY: Number(localStorage.getItem(`${PREFIX}login_bg_y`)) || 0,
+      // Sidebar logo — persiste ao backend para sobreviver troca de dispositivo/localStorage
+      sidebarLogo: localStorage.getItem('matopibalog_logo') || null,
+      sidebarLogoScale: Number(localStorage.getItem('matopibalog_logo_scale')) || 100,
+      sidebarLogoY: Number(localStorage.getItem('matopibalog_logo_y')) || 0,
     };
     writeToLS(dados); // dispara evento para Login.tsx atualizar em tempo real
     try {

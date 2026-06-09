@@ -162,6 +162,105 @@ class _PerfilScreenState extends State<PerfilScreen> {
     }
   }
 
+  Future<void> _alterarSenha() async {
+    final novaSenhaCtrl   = TextEditingController();
+    final confirmaSenhaCtrl = TextEditingController();
+    bool showNova    = false;
+    bool showConfirma = false;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('Alterar senha'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: novaSenhaCtrl,
+                obscureText: !showNova,
+                decoration: InputDecoration(
+                  labelText: 'Nova senha',
+                  prefixIcon: const Icon(Icons.lock_outline),
+                  suffixIcon: IconButton(
+                    icon: Icon(showNova ? Icons.visibility_off : Icons.visibility),
+                    onPressed: () => setDialogState(() => showNova = !showNova),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: confirmaSenhaCtrl,
+                obscureText: !showConfirma,
+                decoration: InputDecoration(
+                  labelText: 'Confirmar nova senha',
+                  prefixIcon: const Icon(Icons.lock_outline),
+                  suffixIcon: IconButton(
+                    icon: Icon(showConfirma ? Icons.visibility_off : Icons.visibility),
+                    onPressed: () => setDialogState(() => showConfirma = !showConfirma),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('CANCELAR'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('SALVAR'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    final nova    = novaSenhaCtrl.text;
+    final confirma = confirmaSenhaCtrl.text;
+    novaSenhaCtrl.dispose();
+    confirmaSenhaCtrl.dispose();
+
+    if (nova.length < 6) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('A senha deve ter pelo menos 6 caracteres.')),
+        );
+      }
+      return;
+    }
+    if (nova != confirma) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('As senhas não coincidem.')),
+        );
+      }
+      return;
+    }
+
+    AppLogger.action('alterar_senha_attempt');
+    setState(() => _salvando = true);
+    final resultado = await ApiService.trocarSenha(nova);
+    if (!mounted) return;
+    setState(() => _salvando = false);
+
+    if (resultado['ok'] == true) {
+      AppLogger.action('alterar_senha_ok');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Senha alterada com sucesso!'), backgroundColor: Colors.green),
+      );
+    } else {
+      AppLogger.action('alterar_senha_erro', params: {'msg': resultado['message']});
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(resultado['message'] as String? ?? 'Erro ao alterar senha.')),
+      );
+    }
+  }
+
   String _mascaraCpf(String? cpf) {
     if (cpf == null || cpf.isEmpty) return '--';
     final digits = cpf.replaceAll(RegExp(r'\D'), '');
@@ -303,6 +402,15 @@ class _PerfilScreenState extends State<PerfilScreen> {
             _linha('CPF', _mascaraCpf(p['cpf'])),
             _linha('Status', p['status'] ?? '--'),
             _linha('Tipo de conta', p['role'] ?? '--'),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: _salvando ? null : _alterarSenha,
+              icon: const Icon(Icons.lock_reset_outlined, size: 18),
+              label: const Text('Alterar senha'),
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size(double.infinity, 44),
+              ),
+            ),
 
             if (motorista != null) ...[
               const SizedBox(height: 16),

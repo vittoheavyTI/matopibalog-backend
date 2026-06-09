@@ -50,6 +50,9 @@ class AuthProvider extends ChangeNotifier {
     if (profile != null) {
       _nome = profile['nome'] ?? _nome;
       _fotoUrl = profile['foto_url'] ?? '';
+      // Restaura senha_temporaria do perfil: sem isso, ao reabrir o app com token
+      // salvo o flag seria false e o motorista pularia a tela de troca de senha.
+      _senhaTemporaria = profile['senha_temporaria'] == true;
       _status = AuthStatus.authenticated;
       AppLogger.action('try_auto_login', params: {'result': 'success', 'user': _nome});
     } else {
@@ -127,7 +130,11 @@ class AuthProvider extends ChangeNotifier {
   }
 
   void atualizarFotoUrl(String url) {
-    _fotoUrl = url;
+    // Remove cache-buster anterior se presente, depois adiciona novo timestamp.
+    // Isso força o NetworkImage a recarregar a imagem mesmo quando o filename
+    // no Supabase Storage não muda entre uploads.
+    final base = url.contains('?') ? url.split('?').first : url;
+    _fotoUrl = '$base?t=${DateTime.now().millisecondsSinceEpoch}';
     notifyListeners();
   }
 
