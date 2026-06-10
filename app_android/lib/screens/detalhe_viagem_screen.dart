@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
+import '../providers/auth_provider.dart';
 import '../services/api_service.dart';
 import '../services/app_logger.dart';
+import 'add_despesa_screen.dart';
+import 'add_abastecimento_screen.dart';
+import 'add_vale_screen.dart';
 
 class DetalheViagemScreen extends StatefulWidget {
   final Map<String, dynamic> frete;
@@ -124,14 +129,92 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
     return total;
   }
 
+  /// Abre bottom sheet para adicionar lançamento vinculado a este frete
+  void _abrirNovoLancamento(BuildContext ctx) {
+    final freteId = widget.frete['id']?.toString() ?? '';
+    final isAutonomo = context.read<AuthProvider>().isAutonomo;
+    final status = widget.frete['status'] ?? '';
+    // Não permite lançamento em frete finalizado ou cancelado
+    if (status == 'finalizado' || status == 'cancelado') {
+      ScaffoldMessenger.of(ctx).showSnackBar(
+        const SnackBar(content: Text('Este frete já está encerrado. Novos lançamentos não são permitidos.')),
+      );
+      return;
+    }
+
+    showModalBottomSheet(
+      context: ctx,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (bsCtx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2))),
+            const SizedBox(height: 12),
+            const Text('Novo Lançamento neste Frete', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            ListTile(
+              leading: const Icon(Icons.receipt_outlined, color: Color(0xFF1B5E20)),
+              title: const Text('Despesa'),
+              onTap: () async {
+                Navigator.pop(bsCtx);
+                await Navigator.push(ctx, MaterialPageRoute(
+                  builder: (_) => AddDespesaScreen(freteId: freteId),
+                ));
+                if (mounted) _fetchDetalhes();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.local_gas_station_outlined, color: Color(0xFF1B5E20)),
+              title: const Text('Abastecimento'),
+              onTap: () async {
+                Navigator.pop(bsCtx);
+                await Navigator.push(ctx, MaterialPageRoute(
+                  builder: (_) => AddAbastecimentoScreen(freteId: freteId),
+                ));
+                if (mounted) _fetchDetalhes();
+              },
+            ),
+            if (!isAutonomo)
+              ListTile(
+                leading: const Icon(Icons.payments_outlined, color: Color(0xFF1B5E20)),
+                title: const Text('Vale'),
+                onTap: () async {
+                  Navigator.pop(bsCtx);
+                  await Navigator.push(ctx, MaterialPageRoute(
+                    builder: (_) => AddValeScreen(freteId: freteId),
+                  ));
+                  if (mounted) _fetchDetalhes();
+                },
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final f = widget.frete;
     final origem = f['origem'] ?? '-';
     final destino = f['destino'] ?? '-';
+    final status = f['status'] ?? '';
+    final podeAdicionar = status != 'finalizado' && status != 'cancelado';
 
     return Scaffold(
       appBar: AppBar(title: Text('$origem → $destino', overflow: TextOverflow.ellipsis)),
+      floatingActionButton: podeAdicionar
+          ? FloatingActionButton.extended(
+              onPressed: () => _abrirNovoLancamento(context),
+              icon: const Icon(Icons.add),
+              label: const Text('Novo Lançamento'),
+              backgroundColor: const Color(0xFF1B5E20),
+            )
+          : null,
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error.isNotEmpty
@@ -322,7 +405,7 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
       // Autônomo: Faturamento - Despesas = Resultado
       final resultado = valorFrete - totalDeducoes;
       return Card(
-        color: const Color(0xFF1B5E20).withValues(alpha: 0.05),
+        // sem color explícita → segue tema (evita fundo verde-escuro no dark mode)
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(

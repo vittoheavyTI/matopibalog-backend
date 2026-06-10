@@ -423,8 +423,10 @@ class _PerfilScreenState extends State<PerfilScreen> {
               const SizedBox(height: 16),
               _secao('Motorista'),
               _linha('Placa', motorista['placa_veiculo'] ?? '--'),
-              _linha('Comissão', motorista['percentual_comissao'] != null
-                  ? '${motorista['percentual_comissao']}%' : '--'),
+              // Para autônomo: percentual por frete (não há fixo); ocultar comissão fixa
+              if (empresa?['tipo'] != 'autonomo')
+                _linha('Comissão', motorista['percentual_comissao'] != null
+                    ? '${motorista['percentual_comissao']}%' : '--'),
               _linha('Status', motorista['status_cadastro'] ?? '--'),
             ],
 

@@ -11,7 +11,11 @@ import '../services/app_logger.dart';
 import '../services/offline_sync.dart';
 
 class AddAbastecimentoScreen extends StatefulWidget {
-  const AddAbastecimentoScreen({super.key});
+  /// Quando lançado a partir do detalhe de um frete, passar o id do frete
+  /// para que o abastecimento fique vinculado automaticamente.
+  final String? freteId;
+
+  const AddAbastecimentoScreen({super.key, this.freteId});
 
   @override
   State<AddAbastecimentoScreen> createState() => _AddAbastecimentoScreenState();
@@ -117,13 +121,14 @@ class _AddAbastecimentoScreenState extends State<AddAbastecimentoScreen> {
     AppLogger.action('abastecimento_save_attempt', params: {'posto': _postoCtrl.text, 'quem_pagou': quemPagou});
     setState(() => _loading = true);
 
-    final fieldsStr = {
+    final fieldsStr = <String, String>{
       'litros': litrosText,
       'valor_total': valorText,
       'arla_litros': _arlaLitrosCtrl.text.replaceAll(',', '.'),
       'arla_valor': _arlaValorCtrl.text.replaceAll(',', '.'),
       'posto': _postoCtrl.text,
       'quem_pagou': quemPagou,
+      if (widget.freteId != null && widget.freteId!.isNotEmpty) 'frete_id': widget.freteId!,
     };
 
     try {
@@ -141,6 +146,7 @@ class _AddAbastecimentoScreenState extends State<AddAbastecimentoScreen> {
             if (_arlaLitrosCtrl.text.isNotEmpty) 'arla_litros': _arlaLitrosCtrl.text.replaceAll(',', '.'),
             if (_arlaValorCtrl.text.isNotEmpty) 'arla_valor': _arlaValorCtrl.text.replaceAll(',', '.'),
             if (_postoCtrl.text.isNotEmpty) 'posto': _postoCtrl.text,
+            if (widget.freteId != null && widget.freteId!.isNotEmpty) 'frete_id': widget.freteId!,
           });
         }
 

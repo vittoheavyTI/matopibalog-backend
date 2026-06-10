@@ -11,7 +11,11 @@ import '../services/app_logger.dart';
 import '../services/offline_sync.dart';
 
 class AddDespesaScreen extends StatefulWidget {
-  const AddDespesaScreen({super.key});
+  /// Quando lançado a partir do detalhe de um frete, passar o id do frete
+  /// para que a despesa fique vinculada automaticamente.
+  final String? freteId;
+
+  const AddDespesaScreen({super.key, this.freteId});
 
   @override
   State<AddDespesaScreen> createState() => _AddDespesaScreenState();
@@ -112,11 +116,12 @@ class _AddDespesaScreenState extends State<AddDespesaScreen> {
     AppLogger.action('despesa_save_attempt', params: {'tipo': _tipo, 'quem_pagou': quemPagou});
     setState(() => _loading = true);
 
-    final fieldsStr = {
+    final fieldsStr = <String, String>{
       'tipo': _tipo,
       'descricao': descricao,
       'valor': valorText,
       'quem_pagou': quemPagou,
+      if (widget.freteId != null && widget.freteId!.isNotEmpty) 'frete_id': widget.freteId!,
     };
 
     try {

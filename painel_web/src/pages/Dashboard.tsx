@@ -92,7 +92,8 @@ export const Dashboard: React.FC = () => {
         valor: d.valor,
         quemPagou: d.quem_pagou,
         status: d.status,
-        data: d.data
+        data: d.data,
+        tipo: d.tipo === 'manutencao' ? 'manutencao' : 'despesa'  // preserva sub-tipo de manutenção
       })));
       setAbastecimentos(abastData.filter((a: any) => a.status !== 'finalizado').map((a: any) => ({
         id: a.id,
@@ -103,7 +104,8 @@ export const Dashboard: React.FC = () => {
         quemPagou: a.quem_pagou,
         status: a.status,
         data: a.data,
-        frete_id: a.frete_id
+        frete_id: a.frete_id,
+        tipo: 'abastecimento'   // tipo explícito — elimina heurística baseada em litros
       })));
       setVales(valesData.filter((v: any) => v.status !== 'finalizado').map((v: any) => ({
         id: v.id,
@@ -112,7 +114,8 @@ export const Dashboard: React.FC = () => {
         valor: v.valor,
         quemPagou: v.quem_pagou,
         status: v.status,
-        data: v.data
+        data: v.data,
+        tipo: 'vale'            // tipo explícito — evita falsa classificação como despesa
       })));
     } catch (err) {
       console.error('Erro ao carregar dados do motorista', err);
@@ -481,7 +484,8 @@ export const Dashboard: React.FC = () => {
                     ))}
 
                     {[...mDespesas, ...mAbast, ...mVales].map((item: any) => {
-                      const type = item.litros ? 'abastecimento' : item.quemPagou === 'proprietario' && !item.descricao ? 'vale' : item.tipo === 'manutencao' ? 'manutencao' : 'despesa';
+                      // tipo vem do mapeamento explícito — não usar heurística de litros/quemPagou
+                      const type: string = item.tipo || 'despesa';
                       return (
                         <div key={item.id} className={`group flex justify-between items-center p-3 border rounded-lg transition-all ${item.status === 'aprovado' ? 'bg-green-50/50 border-green-100' : item.status === 'rejeitado' ? 'bg-red-50/50 border-red-100' : 'border-gray-100'}`}>
                           <div className="flex-1">
