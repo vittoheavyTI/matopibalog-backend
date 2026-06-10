@@ -100,7 +100,8 @@ export const GerenciamentoViagens: React.FC = () => {
         data: a.data, frete_id: a.frete_id, tipo: 'abastecimento'
       })));
       setVales(valesData.filter((v: any) => v.status !== 'finalizado').map((v: any) => ({
-        id: v.id, motoristaUid: v.motorista_id, descricao: v.descricao,
+        // Vale: descricao é o campo correto; posto é fallback p/ registros antigos
+        id: v.id, motoristaUid: v.motorista_id, descricao: v.descricao || v.posto || '',
         valor: v.valor, quemPagou: v.quem_pagou, status: v.status, data: v.data, tipo: 'vale'
       })));
     } catch (err) {
@@ -263,7 +264,8 @@ export const GerenciamentoViagens: React.FC = () => {
           posto: data.posto, litros: parseFloat(data.litros), valor_total: parseFloat(data.valorTotal || data.valor_total)
         });
       } else if (type === 'vale') {
-        await api.patch('/vales/' + id, { valor: parseFloat(data.valor), posto: data.posto });
+        // Vale usa descricao (não posto/litros). posto fica só como fallback de leitura.
+        await api.patch('/vales/' + id, { valor: parseFloat(data.valor), descricao: data.descricao });
       }
       if (filterMot !== 'todos') loadMotoristaData(filterMot);
       setEditingItem(null);

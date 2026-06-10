@@ -110,7 +110,8 @@ export const Dashboard: React.FC = () => {
       setVales(valesData.filter((v: any) => v.status !== 'finalizado').map((v: any) => ({
         id: v.id,
         motoristaUid: v.motorista_id,
-        descricao: v.descricao,
+        // Vale: descricao correto; posto é fallback p/ registros antigos
+        descricao: v.descricao || v.posto || '',
         valor: v.valor,
         quemPagou: v.quem_pagou,
         status: v.status,

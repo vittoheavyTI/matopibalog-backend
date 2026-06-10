@@ -1,6 +1,4 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
 import 'package:workmanager/workmanager.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -20,11 +18,12 @@ class AddValeScreen extends StatefulWidget {
 }
 
 class _AddValeScreenState extends State<AddValeScreen> {
+  // Vale é dinheiro solicitado/adiantamento: tem valor e descrição/motivo.
+  // Não tem posto, não tem litros e não exige foto/comprovante.
+  // Não há campo "Quem Pagou?" na UI — enviamos 'proprietario' fixo no payload
+  // para preservar a regra financeira (vale do vinculado entra como dedução).
   final _valorCtrl = TextEditingController();
-  final _postoCtrl = TextEditingController();
-  final _litrosCtrl = TextEditingController();
-  String _quemPagou = 'proprietario';
-  File? _image;
+  final _descCtrl = TextEditingController();
   bool _loading = false;
 
   @override
@@ -36,57 +35,13 @@ class _AddValeScreenState extends State<AddValeScreen> {
   @override
   void dispose() {
     _valorCtrl.dispose();
-    _postoCtrl.dispose();
-    _litrosCtrl.dispose();
+    _descCtrl.dispose();
     super.dispose();
-  }
-
-  Future<void> _pickPhoto(ImageSource source) async {
-    try {
-      final picker = ImagePicker();
-      final pickedFile = await picker.pickImage(source: source, imageQuality: 70);
-      if (pickedFile != null) setState(() => _image = File(pickedFile.path));
-    } catch (e) {
-      AppLogger.error('AddVale', 'erro_foto', e);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Erro ao acessar câmera/galeria.')),
-        );
-      }
-    }
-  }
-
-  void _showPhotoOptions() {
-    showModalBottomSheet(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.camera_alt),
-              title: const Text('Tirar Foto'),
-              onTap: () { Navigator.pop(ctx); _pickPhoto(ImageSource.camera); },
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library),
-              title: const Text('Escolher da Galeria'),
-              onTap: () { Navigator.pop(ctx); _pickPhoto(ImageSource.gallery); },
-            ),
-            if (_image != null)
-              ListTile(
-                leading: const Icon(Icons.close, color: Colors.red),
-                title: const Text('Remover foto'),
-                onTap: () { Navigator.pop(ctx); setState(() => _image = null); },
-              ),
-          ],
-        ),
-      ),
-    );
   }
 
   Future<void> _save() async {
     final valorText = _valorCtrl.text.replaceAll(',', '.');
+    final descricao = _descCtrl.text.trim();
 
     if (valorText.isEmpty || double.tryParse(valorText) == null || double.parse(valorText) <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -94,22 +49,20 @@ class _AddValeScreenState extends State<AddValeScreen> {
       );
       return;
     }
-    // Vale só aparece para vinculado → foto sempre obrigatória
-    if (_image == null) {
+    if (descricao.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Anexe uma foto do comprovante para continuar.')),
+        const SnackBar(content: Text('Informe a descrição/motivo do vale.')),
       );
       return;
     }
 
-    AppLogger.action('vale_save_attempt', params: {'quem_pagou': _quemPagou});
+    AppLogger.action('vale_save_attempt');
     setState(() => _loading = true);
 
     final fieldsStr = <String, String>{
       'valor': valorText,
-      'posto': _postoCtrl.text,
-      'litros': _litrosCtrl.text.replaceAll(',', '.'),
-      'quem_pagou': _quemPagou,
+      'descricao': descricao,
+      'quem_pagou': 'proprietario', // fixo: sem campo visual (regra financeira)
       if (widget.freteId != null && widget.freteId!.isNotEmpty) 'frete_id': widget.freteId!,
     };
 
@@ -117,25 +70,14 @@ class _AddValeScreenState extends State<AddValeScreen> {
       final connectivity = await Connectivity().checkConnectivity();
 
       if (connectivity != ConnectivityResult.none) {
-        Map<String, dynamic> result;
-        if (_image != null) {
-          result = await ApiService.createMovementWithPhoto('vales', fieldsStr, _image!.path);
-        } else {
-          result = await ApiService.createMovementJson('vales', <String, dynamic>{
-            'valor': valorText,
-            'quem_pagou': _quemPagou,
-            if (_postoCtrl.text.isNotEmpty) 'posto': _postoCtrl.text,
-            if (_litrosCtrl.text.isNotEmpty) 'litros': _litrosCtrl.text.replaceAll(',', '.'),
-            if (widget.freteId != null && widget.freteId!.isNotEmpty) 'frete_id': widget.freteId!,
-          });
-        }
+        final result = await ApiService.createMovementJson('vales', fieldsStr);
 
         if (result['ok'] == true) {
           AppLogger.action('vale_save_ok');
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text('Vale salvo com sucesso.'),
+                content: Text('Vale solicitado com sucesso.'),
                 backgroundColor: Colors.green,
               ),
             );
@@ -152,22 +94,19 @@ class _AddValeScreenState extends State<AddValeScreen> {
         return;
       }
 
-      // Sem conexão
-      if (_image != null) {
-        AppLogger.action('vale_offline_queued');
-        final queueId = const Uuid().v4();
-        await OfflineSync.addPendingTask(
-          id: queueId,
-          taskType: 'CREATE_VALE',
-          fields: fieldsStr,
-          localPath: _image!.path,
-        );
-        Workmanager().registerOneOffTask(
-          queueId,
-          'sync_offline_data',
-          constraints: Constraints(networkType: NetworkType.connected),
-        );
-      }
+      // Sem conexão — enfileira sem foto (Vale não tem comprovante)
+      AppLogger.action('vale_offline_queued');
+      final queueId = const Uuid().v4();
+      await OfflineSync.addPendingTask(
+        id: queueId,
+        taskType: 'CREATE_VALE',
+        fields: fieldsStr,
+      );
+      Workmanager().registerOneOffTask(
+        queueId,
+        'sync_offline_data',
+        constraints: Constraints(networkType: NetworkType.connected),
+      );
       if (mounted) {
         Navigator.pop(context, true);
         ScaffoldMessenger.of(context).showSnackBar(
@@ -189,10 +128,11 @@ class _AddValeScreenState extends State<AddValeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Adicionar Vale')),
+      appBar: AppBar(title: const Text('Solicitar Vale')),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             TextField(
               controller: _valorCtrl,
@@ -204,64 +144,18 @@ class _AddValeScreenState extends State<AddValeScreen> {
             ),
             const SizedBox(height: 16),
             TextField(
-              controller: _postoCtrl,
-              decoration: const InputDecoration(labelText: 'Posto (opcional)'),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _litrosCtrl,
-              decoration: const InputDecoration(labelText: 'Litros (opcional)'),
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            ),
-            const SizedBox(height: 16),
-            DropdownButtonFormField<String>(
-              value: _quemPagou,
-              items: const [
-                DropdownMenuItem(value: 'proprietario', child: Text('Proprietário')),
-                DropdownMenuItem(value: 'motorista', child: Text('Motorista')),
-              ],
-              onChanged: (v) => setState(() => _quemPagou = v!),
-              decoration: const InputDecoration(labelText: 'Quem Pagou?'),
-            ),
-            const SizedBox(height: 16),
-            OutlinedButton.icon(
-              onPressed: _showPhotoOptions,
-              icon: const Icon(Icons.camera_alt_outlined),
-              label: Text(_image == null ? 'Foto do comprovante *' : 'Trocar foto'),
-            ),
-            if (_image == null)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text(
-                  'Obrigatório para motorista vinculado.',
-                  style: TextStyle(color: Colors.orange.shade700, fontSize: 12),
-                ),
+              controller: _descCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Descrição / Motivo *',
+                alignLabelWithHint: true,
+                hintText: 'Ex: adiantamento para alimentação',
+                border: OutlineInputBorder(),
               ),
-            if (_image != null) ...[
-              const SizedBox(height: 8),
-              Stack(
-                children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: Image.file(_image!, height: 100, fit: BoxFit.cover, width: double.infinity),
-                  ),
-                  Positioned(
-                    top: 4, right: 4,
-                    child: GestureDetector(
-                      onTap: () => setState(() => _image = null),
-                      child: Container(
-                        decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
-                        padding: const EdgeInsets.all(4),
-                        child: const Icon(Icons.close, color: Colors.white, size: 16),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
+              minLines: 2,
+              maxLines: 4,
+            ),
             const SizedBox(height: 32),
             SizedBox(
-              width: double.infinity,
               height: 48,
               child: ElevatedButton(
                 onPressed: _loading ? null : _save,
@@ -270,7 +164,7 @@ class _AddValeScreenState extends State<AddValeScreen> {
                         height: 20, width: 20,
                         child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                       )
-                    : const Text('SALVAR'),
+                    : const Text('SOLICITAR VALE'),
               ),
             ),
           ],

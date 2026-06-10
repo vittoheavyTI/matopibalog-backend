@@ -142,6 +142,8 @@ export const ResumoMotorista: React.FC = () => {
       const vales = (valesData || []).filter((v: any) => v.status === 'aprovado').map((v: any) => ({
         motoristaUid: v.motorista_id,
         valor: parseFloat(v.valor),
+        // Vale: descricao correto; posto é fallback p/ registros antigos
+        descricao: v.descricao || v.posto || '',
         posto: v.posto,
         litros: v.litros ? parseFloat(v.litros) : null,
         quemPagou: v.quem_pagou,
@@ -463,15 +465,14 @@ export const ResumoMotorista: React.FC = () => {
       if (fVales.length > 0) {
         autoTable(doc, {
           startY: yDesp + 10,
-          head: [['Vales', 'Posto', 'Litros', 'Quem Pagou', 'Valor']],
+          head: [['Vales', 'Descrição', 'Quem Pagou', 'Valor']],
           body: fVales.map(v => [
             'Vale',
-            v.posto || '-',
-            v.litros ? `${v.litros.toFixed(1)}L` : '-',
+            v.descricao || v.posto || 'Vale/Adiantamento',
             v.quemPagou === 'proprietario' ? 'Proprietário' : v.quemPagou === 'motorista' ? 'Motorista' : '-',
             formatCurrency(v.valor)
           ]),
-          foot: [['TOTAL', '', '', '', formatCurrency(fVales.reduce((s, v) => s + v.valor, 0))]],
+          foot: [['TOTAL', '', '', formatCurrency(fVales.reduce((s, v) => s + v.valor, 0))]],
           headStyles: { fillColor: [249, 115, 22] },
           footStyles: { fillColor: [241, 245, 249], textColor: [31, 41, 55], fontStyle: 'bold' }
         });
@@ -624,7 +625,7 @@ export const ResumoMotorista: React.FC = () => {
                   <p className="text-[10px] font-bold text-orange-500 uppercase mb-2 flex items-center"><DollarSign size={14} className="mr-1" /> Vales / Adiantamentos</p>
                   {fVales.map((v, i) => (
                     <div key={`v-${i}`} className="flex justify-between items-center text-sm bg-orange-50/50 rounded-lg px-3 py-2 border border-orange-100 mb-1">
-                      <span className="text-gray-700">Vale</span>
+                      <span className="text-gray-700">{v.descricao || v.posto || 'Vale/Adiantamento'}</span>
                       <span className="font-bold text-orange-700">{formatCurrency(v.valor)}</span>
                     </div>
                   ))}
@@ -834,7 +835,7 @@ export const ResumoMotorista: React.FC = () => {
                         ))}
                         {unlinkedVales.map((v, i) => (
                           <div key={`ul-vale-${i}`} className="flex justify-between items-center text-sm bg-red-50/50 rounded-lg px-3 py-2 border border-red-100">
-                            <span className="text-gray-700"><DollarSign size={14} className="inline mr-1 text-red-500" />Vale</span>
+                            <span className="text-gray-700"><DollarSign size={14} className="inline mr-1 text-red-500" />{v.descricao || v.posto || 'Vale/Adiantamento'}</span>
                             <span className="font-bold text-red-600">{formatCurrency(v.valor)}</span>
                           </div>
                         ))}
