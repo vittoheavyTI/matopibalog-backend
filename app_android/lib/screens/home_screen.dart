@@ -68,6 +68,16 @@ class _HomeScreenState extends State<HomeScreen> {
               title: const Text('Abastecimento'),
               onTap: () { Navigator.pop(ctx); _navegarERefresh(const AddAbastecimentoScreen()); },
             ),
+            ListTile(
+              leading: const Icon(Icons.build_outlined, color: Color(0xFF1B5E20)),
+              title: const Text('Manutenção'),
+              onTap: () { Navigator.pop(ctx); _navegarERefresh(const AddDespesaScreen(tipoInicial: 'Manutenção')); },
+            ),
+            ListTile(
+              leading: const Icon(Icons.more_horiz, color: Color(0xFF1B5E20)),
+              title: const Text('Outro'),
+              onTap: () { Navigator.pop(ctx); _navegarERefresh(const AddDespesaScreen(tipoInicial: 'Outros')); },
+            ),
             // Vale: oculto para autônomo (ele é proprietário, não faz sentido)
             if (!isAutonomo)
               ListTile(

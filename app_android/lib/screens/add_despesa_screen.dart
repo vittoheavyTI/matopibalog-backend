@@ -14,8 +14,10 @@ class AddDespesaScreen extends StatefulWidget {
   /// Quando lançado a partir do detalhe de um frete, passar o id do frete
   /// para que a despesa fique vinculada automaticamente.
   final String? freteId;
+  /// Quando aberto por um atalho (Manutenção/Outro), pré-seleciona o tipo.
+  final String? tipoInicial;
 
-  const AddDespesaScreen({super.key, this.freteId});
+  const AddDespesaScreen({super.key, this.freteId, this.tipoInicial});
 
   @override
   State<AddDespesaScreen> createState() => _AddDespesaScreenState();
@@ -24,7 +26,7 @@ class AddDespesaScreen extends StatefulWidget {
 class _AddDespesaScreenState extends State<AddDespesaScreen> {
   final _descCtrl = TextEditingController();
   final _valorCtrl = TextEditingController();
-  String _tipo = 'Alimentação';
+  late String _tipo;
   String _quemPagou = 'proprietario';
   File? _image;
   bool _loading = false;
@@ -32,7 +34,28 @@ class _AddDespesaScreenState extends State<AddDespesaScreen> {
   @override
   void initState() {
     super.initState();
+    const tipos = ['Alimentação', 'Pedágio', 'Manutenção', 'Outros'];
+    _tipo = (widget.tipoInicial != null && tipos.contains(widget.tipoInicial))
+        ? widget.tipoInicial!
+        : 'Alimentação';
     AppLogger.action('screen_open', params: {'tela': 'add_despesa'});
+  }
+
+  /// Converte o label visual do dropdown no valor técnico salvo no backend
+  /// (sem acento/maiúscula). O painel usa 'manutencao' para o selo/tratamento.
+  String _tipoTecnico(String visual) {
+    switch (visual) {
+      case 'Manutenção':
+        return 'manutencao';
+      case 'Alimentação':
+        return 'alimentacao';
+      case 'Pedágio':
+        return 'pedagio';
+      case 'Outros':
+        return 'outros';
+      default:
+        return 'geral';
+    }
   }
 
   @override
@@ -113,11 +136,15 @@ class _AddDespesaScreenState extends State<AddDespesaScreen> {
     // Para autônomo: quem_pagou é sempre 'motorista' (ele é o proprietário)
     final quemPagou = isAutonomo ? 'motorista' : _quemPagou;
 
-    AppLogger.action('despesa_save_attempt', params: {'tipo': _tipo, 'quem_pagou': quemPagou});
+    // Valor técnico (sem acento/maiúscula) — mantém consistência com o painel
+    // (ex.: 'manutencao' é o que o Dashboard espera para exibir o selo).
+    final tipoTecnico = _tipoTecnico(_tipo);
+
+    AppLogger.action('despesa_save_attempt', params: {'tipo': tipoTecnico, 'quem_pagou': quemPagou});
     setState(() => _loading = true);
 
     final fieldsStr = <String, String>{
-      'tipo': _tipo,
+      'tipo': tipoTecnico,
       'descricao': descricao,
       'valor': valorText,
       'quem_pagou': quemPagou,

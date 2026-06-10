@@ -178,6 +178,28 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
                 if (mounted) _fetchDetalhes();
               },
             ),
+            ListTile(
+              leading: const Icon(Icons.build_outlined, color: Color(0xFF1B5E20)),
+              title: const Text('Manutenção'),
+              onTap: () async {
+                Navigator.pop(bsCtx);
+                await Navigator.push(ctx, MaterialPageRoute(
+                  builder: (_) => AddDespesaScreen(freteId: freteId, tipoInicial: 'Manutenção'),
+                ));
+                if (mounted) _fetchDetalhes();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.more_horiz, color: Color(0xFF1B5E20)),
+              title: const Text('Outro'),
+              onTap: () async {
+                Navigator.pop(bsCtx);
+                await Navigator.push(ctx, MaterialPageRoute(
+                  builder: (_) => AddDespesaScreen(freteId: freteId, tipoInicial: 'Outros'),
+                ));
+                if (mounted) _fetchDetalhes();
+              },
+            ),
             if (!isAutonomo)
               ListTile(
                 leading: const Icon(Icons.payments_outlined, color: Color(0xFF1B5E20)),
@@ -433,7 +455,7 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
     final saldoLiquido = comissao - totalDeducoes;
 
     return Card(
-      color: const Color(0xFF1B5E20).withValues(alpha: 0.05),
+      // sem color explícita → segue tema (evita fundo escuro no dark mode), igual ao autônomo
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
