@@ -43,7 +43,7 @@ exports.getAll = async (req, res) => {
 };
 
 exports.create = async (req, res) => {
-  const { valor, quem_pagou, posto, litros, frete_id, motorista_id } = req.body;
+  const { valor, quem_pagou, descricao, posto, litros, frete_id, motorista_id } = req.body;
   const motorista_id_final = req.user.role === 'admin' ? (motorista_id || req.user.uid) : req.user.uid;
   const file = req.file;
 
@@ -68,7 +68,7 @@ exports.create = async (req, res) => {
       .from('vales')
       .insert({
         motorista_id: motorista_id_final, empresa_id: userData.empresa_id, frete_id, valor: parseFloat(valor),
-        quem_pagou, posto, litros: litros ? parseFloat(litros) : 0,
+        quem_pagou, descricao, posto, litros: litros ? parseFloat(litros) : 0,
         foto_url: publicUrl,
         status: req.user.role === 'admin' ? 'aprovado' : 'pendente'
       })
@@ -98,7 +98,7 @@ exports.getById = async (req, res) => {
 
 exports.update = async (req, res) => {
   const { id } = req.params;
-  const { valor, status, posto, litros, obs_resolucao } = req.body;
+  const { valor, status, descricao, posto, litros, obs_resolucao } = req.body;
 
   try {
     const { data: checkData } = await supabase.from('vales').select('motorista_id').eq('id', id).single();
@@ -108,6 +108,7 @@ exports.update = async (req, res) => {
 
     const updateData = {};
     if (valor !== undefined) updateData.valor = parseFloat(valor);
+    if (descricao !== undefined) updateData.descricao = descricao;
     if (status !== undefined) updateData.status = status;
     if (obs_resolucao !== undefined) {
       updateData.obs_resolucao = obs_resolucao;

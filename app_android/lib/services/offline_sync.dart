@@ -37,7 +37,7 @@ class OfflineSync {
     required String id,
     required String taskType,
     required Map<String, String> fields,
-    required String localPath,
+    String localPath = '', // vazio = tarefa sem foto (ex.: Vale)
   }) async {
     final db = await database;
     await db.insert('sync_queue', {
@@ -69,7 +69,11 @@ class OfflineSync {
       final endpoint = _getEndpoint(task['task_type']);
 
       try {
-        final result = await ApiService.createMovementWithPhoto(endpoint, fields, task['local_path']);
+        final localPath = (task['local_path'] as String?) ?? '';
+        // Sem foto (ex.: Vale) → envia JSON; com foto → multipart.
+        final result = localPath.isEmpty
+            ? await ApiService.createMovementJson(endpoint, fields)
+            : await ApiService.createMovementWithPhoto(endpoint, fields, localPath);
 
         if (result['ok'] == true) {
           ok++;
