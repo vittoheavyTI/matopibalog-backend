@@ -9,7 +9,11 @@ import '../services/app_logger.dart';
 import '../services/offline_sync.dart';
 
 class AddValeScreen extends StatefulWidget {
-  const AddValeScreen({super.key});
+  /// Quando lançado a partir do detalhe de um frete, passar o id do frete
+  /// para que o vale fique vinculado automaticamente.
+  final String? freteId;
+
+  const AddValeScreen({super.key, this.freteId});
 
   @override
   State<AddValeScreen> createState() => _AddValeScreenState();
@@ -101,11 +105,12 @@ class _AddValeScreenState extends State<AddValeScreen> {
     AppLogger.action('vale_save_attempt', params: {'quem_pagou': _quemPagou});
     setState(() => _loading = true);
 
-    final fieldsStr = {
+    final fieldsStr = <String, String>{
       'valor': valorText,
       'posto': _postoCtrl.text,
       'litros': _litrosCtrl.text.replaceAll(',', '.'),
       'quem_pagou': _quemPagou,
+      if (widget.freteId != null && widget.freteId!.isNotEmpty) 'frete_id': widget.freteId!,
     };
 
     try {
@@ -121,6 +126,7 @@ class _AddValeScreenState extends State<AddValeScreen> {
             'quem_pagou': _quemPagou,
             if (_postoCtrl.text.isNotEmpty) 'posto': _postoCtrl.text,
             if (_litrosCtrl.text.isNotEmpty) 'litros': _litrosCtrl.text.replaceAll(',', '.'),
+            if (widget.freteId != null && widget.freteId!.isNotEmpty) 'frete_id': widget.freteId!,
           });
         }
 
