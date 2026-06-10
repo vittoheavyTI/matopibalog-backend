@@ -91,7 +91,8 @@ export const GerenciamentoViagens: React.FC = () => {
       })));
       setDespesas(despesasData.filter((d: any) => d.status !== 'finalizado').map((d: any) => ({
         id: d.id, motoristaUid: d.motorista_id, descricao: d.descricao,
-        valor: d.valor, quemPagou: d.quem_pagou, status: d.status, data: d.data, tipo: 'despesa'
+        valor: d.valor, quemPagou: d.quem_pagou, status: d.status, data: d.data,
+        tipo: d.tipo === 'manutencao' ? 'manutencao' : 'despesa'  // preserva sub-tipo (consistente com Dashboard)
       })));
       setAbastecimentos(abastData.filter((a: any) => a.status !== 'finalizado').map((a: any) => ({
         id: a.id, motoristaUid: a.motorista_id, posto: a.posto, litros: a.litros,
@@ -275,7 +276,7 @@ export const GerenciamentoViagens: React.FC = () => {
     if (!selectedMotorista || !showAddModal) return;
     try {
       if (showAddModal === 'despesa' || showAddModal === 'manutencao') {
-        await api.post('/despesas', { motorista_id: filterMot, descricao: newItemData.descricao, valor: Number(newItemData.valor), quem_pagou: newItemData.quemPagou || 'proprietario' });
+        await api.post('/despesas', { motorista_id: filterMot, tipo: showAddModal === 'manutencao' ? 'manutencao' : 'geral', descricao: newItemData.descricao, valor: Number(newItemData.valor), quem_pagou: newItemData.quemPagou || 'proprietario' });
       } else if (showAddModal === 'abastecimento') {
         await api.post('/abastecimentos', { motorista_id: filterMot, posto: newItemData.posto, litros: Number(newItemData.litros), valor_total: Number(newItemData.valorTotal), quem_pagou: newItemData.quemPagou || 'proprietario' });
       } else if (showAddModal === 'vale') {
