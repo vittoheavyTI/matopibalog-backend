@@ -39,6 +39,9 @@ class _HomeScreenState extends State<HomeScreen> {
   void _abrirNovoLancamento() {
     AppLogger.action('novo_lancamento_sheet_open');
     final isAutonomo = context.read<AuthProvider>().isAutonomo;
+    final finance = context.read<FinanceProvider>();
+    final freteAtivo = finance.freteAtivo;
+    final freteAtivoId = finance.freteAtivoId;
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
@@ -52,6 +55,16 @@ class _HomeScreenState extends State<HomeScreen> {
             Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2))),
             const SizedBox(height: 16),
             const Text('Novo Lançamento', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            if (freteAtivo != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+                child: Text(
+                  'Despesa/Abastecimento/Vale serão vinculados ao frete ativo: '
+                  '${freteAtivo['origem'] ?? '-'} → ${freteAtivo['destino'] ?? '-'}',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                ),
+              ),
             const SizedBox(height: 8),
             ListTile(
               leading: const Icon(Icons.local_shipping_outlined, color: Color(0xFF1B5E20)),
@@ -61,29 +74,29 @@ class _HomeScreenState extends State<HomeScreen> {
             ListTile(
               leading: const Icon(Icons.receipt_outlined, color: Color(0xFF1B5E20)),
               title: const Text('Despesa'),
-              onTap: () { Navigator.pop(ctx); _navegarERefresh(const AddDespesaScreen()); },
+              onTap: () { Navigator.pop(ctx); _navegarERefresh(AddDespesaScreen(freteId: freteAtivoId)); },
             ),
             ListTile(
               leading: const Icon(Icons.local_gas_station_outlined, color: Color(0xFF1B5E20)),
               title: const Text('Abastecimento'),
-              onTap: () { Navigator.pop(ctx); _navegarERefresh(const AddAbastecimentoScreen()); },
+              onTap: () { Navigator.pop(ctx); _navegarERefresh(AddAbastecimentoScreen(freteId: freteAtivoId)); },
             ),
             ListTile(
               leading: const Icon(Icons.build_outlined, color: Color(0xFF1B5E20)),
               title: const Text('Manutenção'),
-              onTap: () { Navigator.pop(ctx); _navegarERefresh(const AddDespesaScreen(tipoInicial: 'Manutenção')); },
+              onTap: () { Navigator.pop(ctx); _navegarERefresh(AddDespesaScreen(freteId: freteAtivoId, tipoInicial: 'Manutenção')); },
             ),
             ListTile(
               leading: const Icon(Icons.more_horiz, color: Color(0xFF1B5E20)),
               title: const Text('Outro'),
-              onTap: () { Navigator.pop(ctx); _navegarERefresh(const AddDespesaScreen(tipoInicial: 'Outros')); },
+              onTap: () { Navigator.pop(ctx); _navegarERefresh(AddDespesaScreen(freteId: freteAtivoId, tipoInicial: 'Outros')); },
             ),
             // Vale: oculto para autônomo (ele é proprietário, não faz sentido)
             if (!isAutonomo)
               ListTile(
                 leading: const Icon(Icons.payments_outlined, color: Color(0xFF1B5E20)),
                 title: const Text('Vale'),
-                onTap: () { Navigator.pop(ctx); _navegarERefresh(const AddValeScreen()); },
+                onTap: () { Navigator.pop(ctx); _navegarERefresh(AddValeScreen(freteId: freteAtivoId)); },
               ),
             const SizedBox(height: 8),
           ],
@@ -276,6 +289,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     final status = item['status'] as String? ?? 'pendente';
+    final obs = item['obs_resolucao'] as String?;
     final Color statusColor = status == 'aprovado'
         ? Colors.green
         : status == 'rejeitado'
@@ -292,7 +306,20 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Icon(icon, color: color, size: 18),
         ),
         title: Text(desc, style: const TextStyle(fontSize: 13), overflow: TextOverflow.ellipsis),
-        subtitle: Text('$label · $dataStr', style: const TextStyle(fontSize: 11)),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('$label · $dataStr', style: const TextStyle(fontSize: 11)),
+            if (obs != null && obs.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(
+                  '${status == 'rejeitado' ? 'Motivo' : 'Obs'}: $obs',
+                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600, fontStyle: FontStyle.italic),
+                ),
+              ),
+          ],
+        ),
         trailing: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.end,

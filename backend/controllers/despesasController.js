@@ -159,11 +159,19 @@ exports.update = async (req, res) => {
 
     if (error) throw error;
     if (status && (status === 'aprovado' || status === 'rejeitado') && data) {
-      notificacaoService.notificarLancamentoResolvido(data, 'despesa', status === 'aprovado').catch(() => {});
+      notificacaoService.notificarLancamentoResolvido(data, 'despesa', status === 'aprovado')
+        .catch((err) => console.error('[despesasController] Falha ao notificar lançamento resolvido', { tipo: 'despesa', id: data?.id, erro: err?.message || err }));
     }
     res.status(200).json(data);
   } catch (error) {
-    console.error('Erro ao atualizar despesa:', error);
+    console.error('[despesasController.update] falha', {
+      id: req.params.id,
+      status: req.body && req.body.status,
+      tem_obs: req.body && req.body.obs_resolucao !== undefined,
+      user_id: req.user && req.user.uid,
+      empresa_id: req.empresa_id,
+      erro: (error && error.message) || String(error),
+    });
     res.status(500).json({ message: 'Erro ao atualizar despesa.' });
   }
 };

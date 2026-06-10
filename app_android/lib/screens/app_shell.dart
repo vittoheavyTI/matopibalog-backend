@@ -22,6 +22,27 @@ class AppShell extends StatelessWidget {
     if (context.mounted) context.read<FinanceProvider>().loadData();
   }
 
+  /// Abre uma tela de lançamento (Despesa/Abastecimento/Vale) garantindo que o
+  /// frete ativo já esteja resolvido. O drawer fica acessível pela AppBar mesmo
+  /// enquanto a Home carrega, então _fretes pode ainda estar vazio: se não houver
+  /// freteAtivoId, recarrega os dados antes de decidir. Se continuar nulo, não há
+  /// frete ativo → lançamento solto (intencional).
+  Future<void> _novoLancamentoComFrete(
+    BuildContext context,
+    Widget Function(String? freteId) builder,
+  ) async {
+    final finance = context.read<FinanceProvider>();
+    Navigator.of(context).pop(); // fecha o drawer
+    var freteId = finance.freteAtivoId;
+    if (freteId == null) {
+      await finance.loadData();
+      freteId = finance.freteAtivoId;
+    }
+    if (!context.mounted) return;
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => builder(freteId)));
+    if (context.mounted) finance.loadData();
+  }
+
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
@@ -75,7 +96,7 @@ class AppShell extends StatelessWidget {
               title: const Text('Nova Despesa'),
               onTap: () {
                 AppLogger.action('menu_nav', params: {'destino': 'add_despesa'});
-                _navegarPara(context, const AddDespesaScreen());
+                _novoLancamentoComFrete(context, (freteId) => AddDespesaScreen(freteId: freteId));
               },
             ),
             ListTile(
@@ -83,7 +104,7 @@ class AppShell extends StatelessWidget {
               title: const Text('Novo Abastecimento'),
               onTap: () {
                 AppLogger.action('menu_nav', params: {'destino': 'add_abastecimento'});
-                _navegarPara(context, const AddAbastecimentoScreen());
+                _novoLancamentoComFrete(context, (freteId) => AddAbastecimentoScreen(freteId: freteId));
               },
             ),
             // Vale: oculto para autônomo (ele é proprietário, não faz sentido pedir vale)
@@ -93,7 +114,7 @@ class AppShell extends StatelessWidget {
                 title: const Text('Novo Vale'),
                 onTap: () {
                   AppLogger.action('menu_nav', params: {'destino': 'add_vale'});
-                  _navegarPara(context, const AddValeScreen());
+                  _novoLancamentoComFrete(context, (freteId) => AddValeScreen(freteId: freteId));
                 },
               ),
             ListTile(
