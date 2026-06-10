@@ -214,8 +214,8 @@ export const Configuracoes: React.FC = () => {
       .catch(() => { });
   }, []);
 
-  const syncConfigToServer = async () => {
-    const dados = {
+  const syncConfigToServer = async (overrides: Record<string, any> = {}) => {
+    const dados: Record<string, any> = {
       company,
       printers,
       loginLogo,
@@ -242,10 +242,21 @@ export const Configuracoes: React.FC = () => {
       sidebarLogo: localStorage.getItem('matopibalog_logo') || null,
       sidebarLogoScale: Number(localStorage.getItem('matopibalog_logo_scale')) || 100,
       sidebarLogoY: Number(localStorage.getItem('matopibalog_logo_y')) || 0,
+      ...overrides,
     };
-    writeToLS(dados); // dispara evento para Login.tsx atualizar em tempo real
+    // Blindagem contra corrida: NUNCA enviar null/undefined ao backend. Um save
+    // parcial disparado antes do GET /configuracoes terminar deixaria loginLogo/
+    // loginBg em null e apagaria a config global no merge. Removemos esses campos
+    // do payload — o backend então preserva o valor existente.
+    // Remoção intencional de logo/imagem usa string vazia '' (passa pelo filtro):
+    // ver botões "Remover", que enviam { loginLogo: '' } / { loginBg: '' }.
+    const payload: Record<string, any> = {};
+    for (const [chave, valor] of Object.entries(dados)) {
+      if (valor !== null && valor !== undefined) payload[chave] = valor;
+    }
+    writeToLS(payload); // dispara evento para Login.tsx atualizar em tempo real
     try {
-      await api.put('/configuracoes', dados);
+      await api.put('/configuracoes', payload);
     } catch (err) {
       console.error('Erro ao sincronizar com servidor:', err);
     }
@@ -354,13 +365,15 @@ export const Configuracoes: React.FC = () => {
   const removeImage = async () => {
     if (!editingTarget) return;
     const prefix = `${PREFIX}login_${editingTarget}`;
+    const campo = editingTarget === 'logo' ? 'loginLogo' : 'loginBg';
     localStorage.removeItem(prefix);
     localStorage.removeItem(`${prefix}_scale`);
     localStorage.removeItem(`${prefix}_y`);
     if (editingTarget === 'logo') setLoginLogo(null);
     else setLoginBg(null);
     setEditingTarget(null);
-    await syncConfigToServer();
+    // Remoção intencional: '' (não null) para passar pelo filtro e apagar no servidor
+    await syncConfigToServer({ [campo]: '' });
   };
 
   const handleSaveFooter = async () => {
@@ -588,7 +601,8 @@ export const Configuracoes: React.FC = () => {
                         localStorage.removeItem(`${PREFIX}login_${target}_scale`);
                         localStorage.removeItem(`${PREFIX}login_${target}_y`);
                         if (target === 'logo') setLoginLogo(null); else setLoginBg(null);
-                        await syncConfigToServer();
+                        // Remoção intencional: '' (não null) para apagar no servidor
+                        await syncConfigToServer({ [target === 'logo' ? 'loginLogo' : 'loginBg']: '' });
                       }} className="text-xs px-3 py-1.5 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 font-medium transition-colors">
                         <Trash2 size={14} className="inline mr-1" />Remover
                       </button>

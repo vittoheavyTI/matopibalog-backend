@@ -171,8 +171,14 @@ exports.update = async (req, res) => {
 
     // Merge: preserva campos existentes que não vieram no payload
     // Isso evita que um save parcial (ex: só aparência) apague outros campos (ex: printers, company)
+    // Merge defensivo: ignora null/undefined do payload para não apagar config
+    // existente por um save parcial/corrida (ex: loginLogo:null enviado antes do
+    // GET terminar). Remoção intencional chega como string vazia '' e é preservada.
     const dadosAtuais = current?.dados || {};
-    const dadosMesclados = { ...dadosAtuais, ...req.body };
+    const dadosMesclados = { ...dadosAtuais };
+    for (const [chave, valor] of Object.entries(req.body || {})) {
+      if (valor !== null && valor !== undefined) dadosMesclados[chave] = valor;
+    }
 
     const { error } = await supabase
       .from('configuracoes')
