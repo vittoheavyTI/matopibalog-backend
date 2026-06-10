@@ -1,5 +1,6 @@
 const supabase = require('../config/supabase');
 const path = require('path');
+const notificacaoService = require('../services/notificacaoService');
 
 exports.getAll = async (req, res) => {
   const { motorista_id, frete_id } = req.query;
@@ -124,9 +125,20 @@ exports.update = async (req, res) => {
       .single();
 
     if (error) throw error;
+    if (status && (status === 'aprovado' || status === 'rejeitado') && data) {
+      notificacaoService.notificarLancamentoResolvido(data, 'vale', status === 'aprovado')
+        .catch((err) => console.error('[valesController] Falha ao notificar lançamento resolvido', { tipo: 'vale', id: data?.id, erro: err?.message || err }));
+    }
     res.status(200).json(data);
   } catch (error) {
-    console.error('Erro ao atualizar vale:', error);
+    console.error('[valesController.update] falha', {
+      id: req.params.id,
+      status: req.body && req.body.status,
+      tem_obs: req.body && req.body.obs_resolucao !== undefined,
+      user_id: req.user && req.user.uid,
+      empresa_id: req.empresa_id,
+      erro: (error && error.message) || String(error),
+    });
     res.status(500).json({ message: 'Erro ao atualizar vale.' });
   }
 };

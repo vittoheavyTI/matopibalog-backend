@@ -29,6 +29,30 @@ class FinanceProvider extends ChangeNotifier {
   List<dynamic> get abastecimentos => _abastecimentos;
   List<dynamic> get vales => _vales;
 
+  // Status considerados "frete em execução", em ordem de prioridade.
+  static const List<String> _statusAtivoPrioritario = ['em_viagem', 'em_andamento', 'ativo'];
+  // Fallback: 'pendente' é o default histórico do banco e a convenção do painel
+  // (ativo||pendente). Nunca consideramos 'finalizado'/'cancelado' como ativos.
+  static const String _statusAtivoFallback = 'pendente';
+
+  /// Frete ativo do motorista para auto-vincular lançamentos feitos pela Home/Menu.
+  /// _fretes vem ordenado por data desc (mais recente primeiro). Se houver mais de
+  /// um frete ativo, retorna o mais recente — limitação controlada (ver relatório).
+  Map<String, dynamic>? get freteAtivo {
+    for (final f in _fretes) {
+      final s = (f['status'] ?? '').toString();
+      if (_statusAtivoPrioritario.contains(s)) return Map<String, dynamic>.from(f as Map);
+    }
+    for (final f in _fretes) {
+      final s = (f['status'] ?? '').toString();
+      if (s == _statusAtivoFallback) return Map<String, dynamic>.from(f as Map);
+    }
+    return null;
+  }
+
+  /// id do frete ativo, ou null quando não há frete em execução (lançamento solto).
+  String? get freteAtivoId => freteAtivo?['id']?.toString();
+
   Future<void> loadData() async {
     AppLogger.action('load_finance_data');
     _loading = true;
