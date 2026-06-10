@@ -517,7 +517,7 @@ export const ResumoMotorista: React.FC = () => {
       return (
         <div className="py-20 text-center text-gray-500">
           <Truck size={48} className="mx-auto mb-3 text-gray-300" />
-          <p>Carregando dados da viagem...</p>
+          <p>Carregando dados do frete...</p>
         </div>
       );
     }
@@ -582,11 +582,11 @@ export const ResumoMotorista: React.FC = () => {
         <div className="bg-white rounded-xl shadow-sm border border-gray-100">
           <div className="p-4 border-b border-gray-100">
             <h3 className="font-bold text-gray-700 flex items-center">
-              <FileText size={18} className="mr-2 text-blue-600" /> Lançamentos da Viagem
+              <FileText size={18} className="mr-2 text-blue-600" /> Lançamentos do Frete
             </h3>
           </div>
           {fAbs.length === 0 && fDesp.length === 0 && fVales.length === 0 ? (
-            <div className="p-6 text-center text-gray-400">Nenhum lançamento registrado para esta viagem.</div>
+            <div className="p-6 text-center text-gray-400">Nenhum lançamento registrado para este frete.</div>
           ) : (
             <div className="p-4 space-y-4">
               {fAbs.length > 0 && (
@@ -669,7 +669,7 @@ export const ResumoMotorista: React.FC = () => {
             className="flex items-center px-6 py-3 bg-blue-600 text-white rounded-xl font-bold shadow-lg hover:bg-blue-700 transition-all active:scale-95 disabled:opacity-50"
           >
             <Printer size={20} className="mr-2" />
-            {isGenerating ? 'Gerando...' : 'Imprimir Relatório desta Viagem'}
+            {isGenerating ? 'Gerando...' : 'Imprimir Relatório deste Frete'}
           </button>
         </div>
       </>
@@ -816,7 +816,7 @@ export const ResumoMotorista: React.FC = () => {
                       <div className="bg-gray-50 p-4 border-b border-gray-100">
                         <h3 className="font-bold text-gray-700 flex items-center">
                           <FileText size={18} className="mr-2 text-blue-600" />
-                          Lançamentos Gerais (sem viagem vinculada)
+                          Lançamentos Gerais (sem frete vinculado)
                         </h3>
                       </div>
                       <div className="p-4 space-y-2">

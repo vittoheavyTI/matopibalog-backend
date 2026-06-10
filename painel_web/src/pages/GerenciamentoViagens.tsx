@@ -310,7 +310,7 @@ export const GerenciamentoViagens: React.FC = () => {
       setShowFinalizarModal(false);
       setFilterMot('todos');
       loadData();
-      alert('Frete finalizado com sucesso! Os dados foram movidos para o resumo histórico.');
+      alert('Frete finalizado! Os dados foram movidos para o resumo histórico.');
     } catch (err) {
       alert('Erro ao finalizar frete no servidor.');
     }
@@ -662,7 +662,7 @@ export const GerenciamentoViagens: React.FC = () => {
           </div>
           <button onClick={handleFinalizarViagem} disabled={temPendente || !temFreteAtivo}
             className="mt-8 w-full py-4 bg-green-600 text-white rounded-xl font-bold text-lg shadow-lg hover:bg-green-700 transition-all disabled:opacity-50 disabled:shadow-none active:scale-95 flex items-center justify-center">
-            {temFreteAtivo ? <><Check size={20} className="mr-2" /> FINALIZAR VIAGEM</> : <span className="flex items-center"><Check size={20} className="mr-2" /> VIAGEM FINALIZADA</span>}
+            {temFreteAtivo ? <><Check size={20} className="mr-2" /> FINALIZAR FRETE</> : <span className="flex items-center"><Check size={20} className="mr-2" /> FRETE FINALIZADO</span>}
           </button>
         </div>
       </div>
@@ -785,7 +785,7 @@ export const GerenciamentoViagens: React.FC = () => {
               <div className="w-14 h-14 bg-green-100 rounded-full flex items-center justify-center">
                 <Check size={28} className="text-green-600" />
               </div>
-              <h3 className="text-xl font-bold text-gray-800">Finalizar Frete</h3>
+              <h3 className="text-xl font-bold text-gray-800">Confirmar Finalização do Frete</h3>
               <p className="text-sm text-gray-500">Confira o resumo antes de finalizar:</p>
             </div>
             <div className="px-6 pb-4 space-y-3">

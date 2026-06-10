@@ -122,15 +122,22 @@ class _HomeScreenState extends State<HomeScreen> {
                         children: [
                           const Text('Resumo do Mês', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                           const Divider(),
-                          _infoRow('Total Fretes', finance.totalFretes),
-                          _infoRow(
-                            'Comissão (${finance.percentualComissao.toStringAsFixed(1)}%)',
-                            finance.comissao,
-                            color: Colors.blue,
-                          ),
-                          _infoRow('Despesas', finance.deducoes, color: Colors.red),
-                          const Divider(),
-                          _infoRow('Saldo a Receber', finance.saldo, color: Colors.green, bold: true),
+                          if (finance.isAutonomo) ...[
+                            _infoRow('Faturamento', finance.totalFretes),
+                            _infoRow('Despesas', finance.deducoes, color: Colors.red),
+                            const Divider(),
+                            _infoRow('Resultado', finance.saldo, color: finance.saldo >= 0 ? Colors.green : Colors.red, bold: true),
+                          ] else ...[
+                            _infoRow('Total Fretes', finance.totalFretes),
+                            _infoRow(
+                              'Comissão (${finance.percentualComissao.toStringAsFixed(1)}%)',
+                              finance.comissao,
+                              color: Colors.blue,
+                            ),
+                            _infoRow('Despesas', finance.deducoes, color: Colors.red),
+                            const Divider(),
+                            _infoRow('Saldo a Receber', finance.saldo, color: Colors.green, bold: true),
+                          ],
                         ],
                       ),
                     ),
@@ -148,15 +155,15 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   const SizedBox(height: 20),
 
-                  // Últimas viagens
+                  // Últimos fretes
                   if (finance.fretes.isNotEmpty) ...[
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text('Últimas Viagens', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                        const Text('Últimos Fretes', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                         TextButton(
                           onPressed: () => _navegarERefresh(const HistoricoScreen()),
-                          child: const Text('Ver todas'),
+                          child: const Text('Ver todos'),
                         ),
                       ],
                     ),
@@ -170,7 +177,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           children: [
                             Icon(Icons.local_shipping_outlined, size: 48, color: Colors.grey.shade400),
                             const SizedBox(height: 8),
-                            Text('Nenhuma viagem ainda.', style: TextStyle(color: Colors.grey.shade600)),
+                            Text('Nenhum frete ainda.', style: TextStyle(color: Colors.grey.shade600)),
                             const SizedBox(height: 4),
                             Text('Toque em NOVO LANÇAMENTO para começar.', style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
                           ],

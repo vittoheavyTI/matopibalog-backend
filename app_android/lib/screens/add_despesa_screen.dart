@@ -1,9 +1,11 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:provider/provider.dart';
 import 'package:uuid/uuid.dart';
 import 'package:workmanager/workmanager.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import '../providers/auth_provider.dart';
 import '../services/api_service.dart';
 import '../services/app_logger.dart';
 import '../services/offline_sync.dart';
@@ -80,7 +82,7 @@ class _AddDespesaScreenState extends State<AddDespesaScreen> {
     );
   }
 
-  Future<void> _save() async {
+  Future<void> _save(bool isAutonomo) async {
     final descricao = _descCtrl.text.trim();
     final valorText = _valorCtrl.text.replaceAll(',', '.');
 
@@ -96,15 +98,25 @@ class _AddDespesaScreenState extends State<AddDespesaScreen> {
       );
       return;
     }
+    // Vinculado precisa de foto obrigatória
+    if (!isAutonomo && _image == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Anexe uma foto do comprovante para continuar.')),
+      );
+      return;
+    }
 
-    AppLogger.action('despesa_save_attempt', params: {'tipo': _tipo, 'quem_pagou': _quemPagou});
+    // Para autônomo: quem_pagou é sempre 'motorista' (ele é o proprietário)
+    final quemPagou = isAutonomo ? 'motorista' : _quemPagou;
+
+    AppLogger.action('despesa_save_attempt', params: {'tipo': _tipo, 'quem_pagou': quemPagou});
     setState(() => _loading = true);
 
     final fieldsStr = {
       'tipo': _tipo,
       'descricao': descricao,
       'valor': valorText,
-      'quem_pagou': _quemPagou,
+      'quem_pagou': quemPagou,
     };
 
     try {
@@ -178,6 +190,9 @@ class _AddDespesaScreenState extends State<AddDespesaScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isAutonomo = context.read<AuthProvider>().isAutonomo;
+    final fotoObrigatoria = !isAutonomo;
+
     return Scaffold(
       appBar: AppBar(title: const Text('Adicionar Despesa')),
       body: SingleChildScrollView(
@@ -212,30 +227,43 @@ class _AddDespesaScreenState extends State<AddDespesaScreen> {
               ),
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
             ),
-            const SizedBox(height: 16),
-            const Text('Quem pagou?'),
-            Row(
-              children: [
-                Radio(
-                  value: 'proprietario',
-                  groupValue: _quemPagou,
-                  onChanged: (val) => setState(() => _quemPagou = val.toString()),
-                ),
-                const Text('Proprietário'),
-                Radio(
-                  value: 'motorista',
-                  groupValue: _quemPagou,
-                  onChanged: (val) => setState(() => _quemPagou = val.toString()),
-                ),
-                const Text('Motorista'),
-              ],
-            ),
+            // "Quem pagou" só aparece para motorista vinculado
+            if (!isAutonomo) ...[
+              const SizedBox(height: 16),
+              const Text('Quem pagou?'),
+              Row(
+                children: [
+                  Radio(
+                    value: 'proprietario',
+                    groupValue: _quemPagou,
+                    onChanged: (val) => setState(() => _quemPagou = val.toString()),
+                  ),
+                  const Text('Proprietário'),
+                  Radio(
+                    value: 'motorista',
+                    groupValue: _quemPagou,
+                    onChanged: (val) => setState(() => _quemPagou = val.toString()),
+                  ),
+                  const Text('Motorista'),
+                ],
+              ),
+            ],
             const SizedBox(height: 16),
             OutlinedButton.icon(
               onPressed: _showPhotoOptions,
               icon: const Icon(Icons.camera_alt_outlined),
-              label: Text(_image == null ? 'Adicionar foto (opcional)' : 'Trocar foto'),
+              label: Text(_image == null
+                  ? (fotoObrigatoria ? 'Foto do comprovante *' : 'Adicionar foto (opcional)')
+                  : 'Trocar foto'),
             ),
+            if (fotoObrigatoria && _image == null)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  'Obrigatório para motorista vinculado.',
+                  style: TextStyle(color: Colors.orange.shade700, fontSize: 12),
+                ),
+              ),
             if (_image != null) ...[
               const SizedBox(height: 8),
               Stack(
@@ -265,7 +293,7 @@ class _AddDespesaScreenState extends State<AddDespesaScreen> {
             SizedBox(
               height: 48,
               child: ElevatedButton(
-                onPressed: _loading ? null : _save,
+                onPressed: _loading ? null : () => _save(isAutonomo),
                 child: _loading
                     ? const SizedBox(
                         height: 20, width: 20,

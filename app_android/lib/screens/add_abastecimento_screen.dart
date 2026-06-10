@@ -1,9 +1,11 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:provider/provider.dart';
 import 'package:uuid/uuid.dart';
 import 'package:workmanager/workmanager.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import '../providers/auth_provider.dart';
 import '../services/api_service.dart';
 import '../services/app_logger.dart';
 import '../services/offline_sync.dart';
@@ -85,7 +87,7 @@ class _AddAbastecimentoScreenState extends State<AddAbastecimentoScreen> {
     );
   }
 
-  Future<void> _save() async {
+  Future<void> _save(bool isAutonomo) async {
     final litrosText = _litrosCtrl.text.replaceAll(',', '.');
     final valorText = _valorTotalCtrl.text.replaceAll(',', '.');
 
@@ -101,8 +103,18 @@ class _AddAbastecimentoScreenState extends State<AddAbastecimentoScreen> {
       );
       return;
     }
+    // Vinculado precisa de foto obrigatória
+    if (!isAutonomo && _image == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Anexe uma foto do comprovante para continuar.')),
+      );
+      return;
+    }
 
-    AppLogger.action('abastecimento_save_attempt', params: {'posto': _postoCtrl.text, 'quem_pagou': _quemPagou});
+    // Para autônomo: quem_pagou é sempre 'motorista' (ele é o proprietário)
+    final quemPagou = isAutonomo ? 'motorista' : _quemPagou;
+
+    AppLogger.action('abastecimento_save_attempt', params: {'posto': _postoCtrl.text, 'quem_pagou': quemPagou});
     setState(() => _loading = true);
 
     final fieldsStr = {
@@ -111,7 +123,7 @@ class _AddAbastecimentoScreenState extends State<AddAbastecimentoScreen> {
       'arla_litros': _arlaLitrosCtrl.text.replaceAll(',', '.'),
       'arla_valor': _arlaValorCtrl.text.replaceAll(',', '.'),
       'posto': _postoCtrl.text,
-      'quem_pagou': _quemPagou,
+      'quem_pagou': quemPagou,
     };
 
     try {
@@ -125,7 +137,7 @@ class _AddAbastecimentoScreenState extends State<AddAbastecimentoScreen> {
           result = await ApiService.createMovementJson('abastecimentos', <String, dynamic>{
             'litros': litrosText,
             'valor_total': valorText,
-            'quem_pagou': _quemPagou,
+            'quem_pagou': quemPagou,
             if (_arlaLitrosCtrl.text.isNotEmpty) 'arla_litros': _arlaLitrosCtrl.text.replaceAll(',', '.'),
             if (_arlaValorCtrl.text.isNotEmpty) 'arla_valor': _arlaValorCtrl.text.replaceAll(',', '.'),
             if (_postoCtrl.text.isNotEmpty) 'posto': _postoCtrl.text,
@@ -190,6 +202,9 @@ class _AddAbastecimentoScreenState extends State<AddAbastecimentoScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isAutonomo = context.read<AuthProvider>().isAutonomo;
+    final fotoObrigatoria = !isAutonomo;
+
     return Scaffold(
       appBar: AppBar(title: const Text('Adicionar Abastecimento')),
       body: SingleChildScrollView(
@@ -230,22 +245,35 @@ class _AddAbastecimentoScreenState extends State<AddAbastecimentoScreen> {
               ),
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
             ),
-            const SizedBox(height: 16),
-            DropdownButtonFormField<String>(
-              value: _quemPagou,
-              items: const [
-                DropdownMenuItem(value: 'proprietario', child: Text('Proprietário')),
-                DropdownMenuItem(value: 'motorista', child: Text('Motorista')),
-              ],
-              onChanged: (v) => setState(() => _quemPagou = v!),
-              decoration: const InputDecoration(labelText: 'Quem Pagou?'),
-            ),
+            // "Quem pagou" só aparece para motorista vinculado
+            if (!isAutonomo) ...[
+              const SizedBox(height: 16),
+              DropdownButtonFormField<String>(
+                value: _quemPagou,
+                items: const [
+                  DropdownMenuItem(value: 'proprietario', child: Text('Proprietário')),
+                  DropdownMenuItem(value: 'motorista', child: Text('Motorista')),
+                ],
+                onChanged: (v) => setState(() => _quemPagou = v!),
+                decoration: const InputDecoration(labelText: 'Quem Pagou?'),
+              ),
+            ],
             const SizedBox(height: 16),
             OutlinedButton.icon(
               onPressed: _showPhotoOptions,
               icon: const Icon(Icons.camera_alt_outlined),
-              label: Text(_image == null ? 'Adicionar foto (opcional)' : 'Trocar foto'),
+              label: Text(_image == null
+                  ? (fotoObrigatoria ? 'Foto do comprovante *' : 'Adicionar foto (opcional)')
+                  : 'Trocar foto'),
             ),
+            if (fotoObrigatoria && _image == null)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  'Obrigatório para motorista vinculado.',
+                  style: TextStyle(color: Colors.orange.shade700, fontSize: 12),
+                ),
+              ),
             if (_image != null) ...[
               const SizedBox(height: 8),
               Stack(
@@ -273,7 +301,7 @@ class _AddAbastecimentoScreenState extends State<AddAbastecimentoScreen> {
               width: double.infinity,
               height: 48,
               child: ElevatedButton(
-                onPressed: _loading ? null : _save,
+                onPressed: _loading ? null : () => _save(isAutonomo),
                 child: _loading
                     ? const SizedBox(
                         height: 20, width: 20,

@@ -558,8 +558,8 @@ export const Motoristas: React.FC = () => {
               </div>
               <div className="flex items-center justify-between bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 mt-2">
                 <div>
-                  <p className="text-sm font-semibold text-blue-800">Motorista pode finalizar viagem pelo app</p>
-                  <p className="text-xs text-blue-600 mt-0.5">Permite que o motorista conclua viagens diretamente no app</p>
+                  <p className="text-sm font-semibold text-blue-800">Motorista pode finalizar frete pelo app</p>
+                  <p className="text-xs text-blue-600 mt-0.5">Permite que o motorista conclua fretes diretamente no app</p>
                 </div>
                 <button
                   type="button"
