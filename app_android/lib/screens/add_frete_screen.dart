@@ -90,7 +90,7 @@ class _AddFreteScreenState extends State<AddFreteScreen> {
 
       if (resultado['ok'] == true) {
         AppLogger.action('frete_save_ok');
-        Navigator.pop(context);
+        Navigator.pop(context, true);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Frete registrado com sucesso!')),
         );

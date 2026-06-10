@@ -60,27 +60,29 @@ class FinanceProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      // Perfil carregado primeiro para obter percentual_comissao e tipo de empresa
-      final profile = await ApiService.getMe();
-      if (profile != null) {
-        _percentualComissao = double.tryParse(
-          profile['motoristas']?['percentual_comissao']?.toString() ?? '',
-        ) ?? 12.0;
-        _isAutonomo = (profile['empresas'] as Map?)?['tipo'] == 'autonomo';
-      }
-
-      // As 4 listas são independentes entre si — busca em paralelo
+      // Perfil + 4 listas são independentes entre si — busca tudo em paralelo
+      // (1 onda de rede). Antes o getMe era serial e bloqueava as outras 4.
       final results = await Future.wait([
+        ApiService.getMe(),
         ApiService.getFretes(),
         ApiService.getList('despesas'),
         ApiService.getList('abastecimentos'),
         ApiService.getList('vales'),
       ]);
 
-      final fretes         = results[0];
-      final despesas       = results[1];
-      final abastecimentos = results[2];
-      final vales          = results[3];
+      final profile        = results[0] as Map<String, dynamic>?;
+      final fretes         = results[1] as List<dynamic>;
+      final despesas       = results[2] as List<dynamic>;
+      final abastecimentos = results[3] as List<dynamic>;
+      final vales          = results[4] as List<dynamic>;
+
+      // Cálculo de percentual/tipo de empresa só depois das respostas chegarem
+      if (profile != null) {
+        _percentualComissao = double.tryParse(
+          profile['motoristas']?['percentual_comissao']?.toString() ?? '',
+        ) ?? 12.0;
+        _isAutonomo = (profile['empresas'] as Map?)?['tipo'] == 'autonomo';
+      }
       _fretes = fretes;
       _despesas = despesas;
       _abastecimentos = abastecimentos;

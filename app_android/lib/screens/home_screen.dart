@@ -32,8 +32,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _navegarERefresh(Widget tela) async {
-    await Navigator.push(context, MaterialPageRoute(builder: (_) => tela));
-    if (mounted) _refresh();
+    // Só recarrega se a tela retornou true (lançamento/frete salvo).
+    // "Ver todos" → Histórico não altera dados → não dispara reload.
+    final alterou = await Navigator.push(context, MaterialPageRoute(builder: (_) => tela));
+    if (alterou == true && mounted) _refresh();
   }
 
   void _abrirNovoLancamento() {
