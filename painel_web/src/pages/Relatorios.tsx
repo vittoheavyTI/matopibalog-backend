@@ -490,7 +490,7 @@ export const Relatorios: React.FC = () => {
       setIsGenerating(true);
 
       if (selectedTripIds.length === 0) {
-        alert("Nenhuma viagem selecionada.");
+        alert("Nenhum frete selecionado.");
         setIsGenerating(false);
         return;
       }
@@ -1088,7 +1088,7 @@ export const Relatorios: React.FC = () => {
                                         </div>
 
                                         {fAbs.length === 0 && fDesp.length === 0 && fVal.length === 0 ? (
-                                          <p className="text-xs text-gray-400 text-center py-2">Nenhum lançamento nesta viagem.</p>
+                                          <p className="text-xs text-gray-400 text-center py-2">Nenhum lançamento neste frete.</p>
                                         ) : (
                                           <div className="space-y-3">
                                             {fAbs.length > 0 && (
@@ -1149,7 +1149,7 @@ export const Relatorios: React.FC = () => {
                       })}
                       {fretes.length === 0 && (
                         <tr>
-                          <td colSpan={4} className="p-6 text-center text-gray-400 text-sm">Nenhuma viagem encontrada neste período.</td>
+                          <td colSpan={4} className="p-6 text-center text-gray-400 text-sm">Nenhum frete encontrado neste período.</td>
                         </tr>
                       )}
                     </tbody>

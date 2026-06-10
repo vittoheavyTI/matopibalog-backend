@@ -40,6 +40,7 @@ export const Dashboard: React.FC = () => {
       const mapMotorista = (m: any) => ({
         uid: m.id,
         nomeCompleto: m.usuarios?.nome || 'Motorista',
+        fotoUrl: m.usuarios?.foto_url || '',
         placaVeiculo: m.placa_veiculo,
         percentualComissao: m.percentual_comissao,
         statusCadastro: m.status_cadastro
@@ -128,15 +129,17 @@ export const Dashboard: React.FC = () => {
     }
   }, [selectedMot]);
 
-  const handleAprovarDespesa = async (id: string, tipoItem: string, aprovado: boolean) => {
+  const handleAprovarDespesa = async (id: string, tipoItem: string, aprovado: boolean, obs?: string) => {
     const status = aprovado ? 'aprovado' : 'rejeitado';
+    const payload: any = { status };
+    if (obs !== undefined) payload.obs_resolucao = obs;
     try {
       if (tipoItem === 'despesa' || tipoItem === 'manutencao') {
-        await api.patch('/despesas/' + id, { status });
+        await api.patch('/despesas/' + id, payload);
       } else if (tipoItem === 'abastecimento') {
-        await api.patch('/abastecimentos/' + id, { status });
+        await api.patch('/abastecimentos/' + id, payload);
       } else if (tipoItem === 'vale') {
-        await api.patch('/vales/' + id, { status });
+        await api.patch('/vales/' + id, payload);
       }
 
       if (selectedMot) loadMotoristaData(selectedMot.uid);
@@ -145,6 +148,14 @@ export const Dashboard: React.FC = () => {
       console.error(err);
       alert('Erro ao atualizar status. Verifique se o servidor está rodando.');
     }
+  };
+
+  const handleResolverComObservacao = async (id: string, tipoItem: string, aprovado: boolean) => {
+    const obs = window.prompt(
+      aprovado ? 'Justificativa da aprovação (opcional):' : 'Motivo da rejeição (opcional):'
+    );
+    if (obs === null) return; // cancelou
+    await handleAprovarDespesa(id, tipoItem, aprovado, obs || undefined);
   };
 
   const handleResetStatus = async (id: string, tipoItem: string) => {
@@ -210,9 +221,9 @@ export const Dashboard: React.FC = () => {
       }
       setSelectedMot(null);
       loadDashboardData();
-      alert('Viagem finalizada com sucesso! Os dados foram movidos para o resumo histórico.');
+      alert('Frete finalizado com sucesso! Os dados foram movidos para o resumo histórico.');
     } catch (err) {
-      alert('Erro ao finalizar viagem no servidor.');
+      alert('Erro ao finalizar frete no servidor.');
     }
   };
 
@@ -373,9 +384,9 @@ export const Dashboard: React.FC = () => {
             <button
               onClick={() => window.open('/viagens', '_blank')}
               className="text-xl font-bold text-gray-700 flex items-center hover:text-blue-600 transition-colors cursor-pointer"
-              title="Abrir Gerenciamento de Viagens em nova aba"
+              title="Abrir Gerenciamento de Fretes em nova aba"
             >
-              <DollarSign size={20} className="mr-2 text-green-600" /> Gerenciamento de Viagens
+              <DollarSign size={20} className="mr-2 text-green-600" /> Gerenciamento de Fretes
             </button>
             <button
               onClick={() => { setShowAddFreteModal(true); setNewFrete({ motorista_id: '', origem: '', destino: '', valor_frete: '', km_inicial: '' }); }}
@@ -484,8 +495,8 @@ export const Dashboard: React.FC = () => {
                             <span className={`font-bold ${type === 'vale' ? 'text-red-600' : 'text-gray-700'}`}>{formatCurrency(Math.abs(item.valor || item.valorTotal))}</span>
                             {item.status === 'pendente' ? (
                               <div className="flex space-x-1">
-                                <button onClick={() => handleAprovarDespesa(item.id, type as any, true)} className="p-1 text-green-600 hover:bg-green-100 rounded transition-colors" title="Aprovar"><Check size={18} /></button>
-                                <button onClick={() => handleAprovarDespesa(item.id, type as any, false)} className="p-1 text-red-600 hover:bg-red-100 rounded transition-colors" title="Rejeitar"><X size={18} /></button>
+                                <button onClick={() => handleResolverComObservacao(item.id, type as any, true)} className="p-1 text-green-600 hover:bg-green-100 rounded transition-colors" title="Aprovar com justificativa"><Check size={18} /></button>
+                                <button onClick={() => handleResolverComObservacao(item.id, type as any, false)} className="p-1 text-red-600 hover:bg-red-100 rounded transition-colors" title="Rejeitar com motivo"><X size={18} /></button>
                               </div>
                             ) : (
                               <div className="flex items-center space-x-1">
@@ -544,7 +555,7 @@ export const Dashboard: React.FC = () => {
                   </div>
                 </div>
                 <button onClick={handleFinalizarViagem} disabled={temPendente} className="mt-8 w-full py-4 bg-green-600 text-white rounded-xl font-bold text-lg shadow-lg hover:bg-green-700 transition-all disabled:opacity-50 disabled:shadow-none active:scale-95 flex items-center justify-center">
-                  <Check size={20} className="mr-2" /> FINALIZAR VIAGEM
+                  <Check size={20} className="mr-2" /> FINALIZAR FRETE
                 </button>
               </div>
             </div>
@@ -564,7 +575,7 @@ export const Dashboard: React.FC = () => {
                 {motoristasEmViagem.length === 0 ? (
                   <tr>
                     <td colSpan={4} className="p-10 text-center text-gray-500 italic">
-                      Nenhum motorista em viagem ativa no momento.
+                      Nenhum motorista em frete ativo no momento.
                     </td>
                   </tr>
                 ) : (
@@ -572,7 +583,11 @@ export const Dashboard: React.FC = () => {
                     <tr key={mot.uid} className="hover:bg-gray-50/50 transition-colors">
                       <td className="p-5">
                         <div className="flex items-center">
-                          <div className="bg-blue-50 text-blue-600 w-8 h-8 rounded-lg flex items-center justify-center mr-3 font-bold text-xs">{mot.nomeCompleto?.charAt(0) || '?'}</div>
+                          <div className="bg-blue-50 text-blue-600 w-8 h-8 rounded-lg flex items-center justify-center mr-3 font-bold text-xs overflow-hidden">
+                            {mot.fotoUrl
+                              ? <img src={mot.fotoUrl} alt="" className="w-full h-full object-cover" />
+                              : (mot.nomeCompleto?.charAt(0) || '?')}
+                          </div>
                           <span className="font-semibold text-gray-700">{mot.nomeCompleto}</span>
                         </div>
                       </td>
@@ -588,7 +603,7 @@ export const Dashboard: React.FC = () => {
                           onClick={() => { setSelectedMot(mot); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
                           className="px-5 py-2.5 bg-blue-600 text-white rounded-xl font-bold text-sm hover:bg-blue-700 shadow-md transition-all active:scale-95"
                         >
-                          Gerenciar Viagem
+                          Gerenciar Frete
                         </button>
                       </td>
                     </tr>

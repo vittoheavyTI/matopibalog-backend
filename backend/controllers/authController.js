@@ -252,7 +252,7 @@ exports.uploadFotoPerfil = async (req, res) => {
 
     const { error: uploadError } = await supabase.storage
       .from('comprovantes')
-      .upload(fileName, file.buffer, { contentType: file.mimetype, upsert: false });
+      .upload(fileName, file.buffer, { contentType: file.mimetype, upsert: true });
 
     if (uploadError) {
       console.error('[uploadFotoPerfil] Erro Supabase Storage:', uploadError.message);

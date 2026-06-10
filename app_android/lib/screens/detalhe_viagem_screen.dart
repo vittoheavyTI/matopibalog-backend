@@ -24,7 +24,7 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
   @override
   void initState() {
     super.initState();
-    AppLogger.action('screen_open', params: {'tela': 'detalhe_viagem', 'frete_id': widget.frete['id']?.toString()});
+    AppLogger.action('screen_open', params: {'tela': 'detalhe_frete', 'frete_id': widget.frete['id']?.toString()});
     _fetchDetalhes();
   }
 
@@ -50,7 +50,7 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
           _perfilCache = perfilData;
           _loading = false;
         });
-        AppLogger.action('detalhe_viagem_fetch_ok', params: {
+        AppLogger.action('detalhe_frete_fetch_ok', params: {
           'despesas': _despesas.length,
           'abastecimentos': _abastecimentos.length,
           'vales': _vales.length,
@@ -59,7 +59,7 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
     } catch (e) {
       if (mounted) {
         setState(() { _error = 'Erro ao carregar detalhes.'; _loading = false; });
-        AppLogger.error('DetalheViagem', 'fetchDetalhes', e);
+        AppLogger.error('DetalheFrete', 'fetchDetalhes', e);
       }
     }
   }
@@ -71,7 +71,6 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
     if (perfil == null) return false;
     if (perfil['is_super_admin'] == true) return true;
     if (perfil['role'] == 'admin') return true;
-    // motorista: verifica tipo de empresa e permissão
     final empresa = perfil['empresas'] as Map<String, dynamic>?;
     final isAutonomo = empresa?['tipo'] == 'autonomo';
     if (isAutonomo) return true;
@@ -79,27 +78,38 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
     return motorista?['pode_finalizar_viagem'] == true;
   }
 
-  Future<void> _finalizarViagem() async {
+  bool get _isAutonomo {
+    final empresa = _perfilCache?['empresas'] as Map<String, dynamic>?;
+    return empresa?['tipo'] == 'autonomo';
+  }
+
+  double get _percentualComissao {
+    return double.tryParse(
+      _perfilCache?['motoristas']?['percentual_comissao']?.toString() ?? '',
+    ) ?? 12.0;
+  }
+
+  Future<void> _finalizarFrete() async {
     final freteId = widget.frete['id']?.toString() ?? '';
     if (freteId.isEmpty) return;
-    AppLogger.action('finalizar_viagem', params: {'frete_id': freteId});
+    AppLogger.action('finalizar_frete', params: {'frete_id': freteId});
     setState(() => _finalizando = true);
     try {
       final result = await ApiService.finalizarViagem(freteId);
       if (!mounted) return;
       if (result != null && result['_error'] != true) {
-        AppLogger.action('finalizar_viagem_ok', params: {'frete_id': freteId});
+        AppLogger.action('finalizar_frete_ok', params: {'frete_id': freteId});
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Viagem finalizada com sucesso!')),
+          const SnackBar(content: Text('Frete finalizado com sucesso!')),
         );
         Navigator.pop(context, true);
       } else {
         final msg = result?['message'] ?? 'Erro ao finalizar.';
-        AppLogger.warning('DetalheViagem', 'finalizar falhou: $msg');
+        AppLogger.warning('DetalheFrete', 'finalizar falhou: $msg');
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
       }
     } catch (e) {
-      AppLogger.error('DetalheViagem', 'finalizarViagem exception', e);
+      AppLogger.error('DetalheFrete', 'finalizarFrete exception', e);
     } finally {
       if (mounted) setState(() => _finalizando = false);
     }
@@ -164,9 +174,9 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
                               icon: _finalizando
                                   ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                                   : const Icon(Icons.check_circle_outline),
-                              label: const Text('FINALIZAR VIAGEM'),
+                              label: const Text('FINALIZAR FRETE'),
                               style: ElevatedButton.styleFrom(backgroundColor: Colors.green.shade700),
-                              onPressed: _finalizando ? null : _finalizarViagem,
+                              onPressed: _finalizando ? null : _finalizarFrete,
                             ),
                           )
                         else if (widget.frete['status'] != 'finalizado' && widget.frete['status'] != 'cancelado')
@@ -228,7 +238,7 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
     );
   }
 
-  Widget _secaoLancamentos(String titulo, List<dynamic> items, String campovalor) {
+  Widget _secaoLancamentos(String titulo, List<dynamic> items, String campoValor) {
     final aprovados = items.where((i) => i['status'] == 'aprovado').toList();
     final pendentes = items.where((i) => i['status'] == 'pendente').toList();
     final rejeitados = items.where((i) => i['status'] == 'rejeitado').toList();
@@ -241,15 +251,12 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
           children: [
             Text(titulo, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
             const Divider(),
-            if (aprovados.isNotEmpty) ...[
-              _subSecao('Aprovados', aprovados, campovalor, Colors.green),
-            ],
-            if (pendentes.isNotEmpty) ...[
-              _subSecao('Pendentes', pendentes, campovalor, Colors.orange),
-            ],
-            if (rejeitados.isNotEmpty) ...[
-              _subSecao('Rejeitados', rejeitados, campovalor, Colors.red),
-            ],
+            if (aprovados.isNotEmpty)
+              _subSecao('Aprovados', aprovados, campoValor, Colors.green),
+            if (pendentes.isNotEmpty)
+              _subSecao('Pendentes', pendentes, campoValor, Colors.orange),
+            if (rejeitados.isNotEmpty)
+              _subSecao('Rejeitados', rejeitados, campoValor, Colors.red),
           ],
         ),
       ),
@@ -267,12 +274,26 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
         ...items.map((item) {
           final val = double.tryParse(item[campoValor]?.toString() ?? '0') ?? 0.0;
           final desc = item['descricao'] ?? item['posto'] ?? item['tipo'] ?? '-';
+          final obs = item['obs_resolucao'] as String?;
           return Padding(
-            padding: const EdgeInsets.only(left: 8, bottom: 4),
-            child: Row(
+            padding: const EdgeInsets.only(left: 8, bottom: 6),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(child: Text(desc, style: const TextStyle(fontSize: 13))),
-                Text('R\$ ${val.toStringAsFixed(2)}', style: TextStyle(fontSize: 13, color: cor)),
+                Row(
+                  children: [
+                    Expanded(child: Text(desc, style: const TextStyle(fontSize: 13))),
+                    Text('R\$ ${val.toStringAsFixed(2)}', style: TextStyle(fontSize: 13, color: cor)),
+                  ],
+                ),
+                if (obs != null && obs.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      'Obs: $obs',
+                      style: TextStyle(fontSize: 11, color: Colors.grey.shade600, fontStyle: FontStyle.italic),
+                    ),
+                  ),
               ],
             ),
           );
@@ -284,14 +305,11 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
 
   Widget _cardResumo(Map<String, dynamic> f) {
     final valorFrete = double.tryParse(f['valor_frete']?.toString() ?? '0') ?? 0.0;
-    const comissaoPct = 12.0;
-    final comissao = valorFrete * (comissaoPct / 100);
 
     final despesasAprov = _soma(_despesas, 'valor', filtroStatus: 'aprovado');
     final abastAprov = _soma(_abastecimentos, 'valor_total', filtroStatus: 'aprovado');
     final valesAprov = _soma(_vales, 'valor', filtroStatus: 'aprovado');
     final totalDeducoes = despesasAprov + abastAprov + valesAprov;
-    final saldoLiquido = comissao - totalDeducoes;
 
     final pendentes = _despesas.where((i) => i['status'] == 'pendente').length +
         _abastecimentos.where((i) => i['status'] == 'pendente').length +
@@ -300,6 +318,37 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
         _abastecimentos.where((i) => i['status'] == 'rejeitado').length +
         _vales.where((i) => i['status'] == 'rejeitado').length;
 
+    if (_isAutonomo) {
+      // Autônomo: Faturamento - Despesas = Resultado
+      final resultado = valorFrete - totalDeducoes;
+      return Card(
+        color: const Color(0xFF1B5E20).withValues(alpha: 0.05),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text('Resumo do Frete', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1B5E20))),
+              const Divider(),
+              _linhaResumo('Valor do Frete', valorFrete),
+              _linhaResumo('Despesas aprovadas', -despesasAprov, color: Colors.red),
+              _linhaResumo('Abastecimentos aprovados', -abastAprov, color: Colors.red),
+              if (valesAprov > 0)
+                _linhaResumo('Vales aprovados', -valesAprov, color: Colors.red),
+              const Divider(),
+              _linhaResumo('Resultado', resultado, color: resultado >= 0 ? Colors.green : Colors.red, bold: true),
+              _avisosPendentes(pendentes, rejeitados),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // Vinculado: comissão pelo percentual do perfil
+    final pct = _percentualComissao;
+    final comissao = valorFrete * (pct / 100);
+    final saldoLiquido = comissao - totalDeducoes;
+
     return Card(
       color: const Color(0xFF1B5E20).withValues(alpha: 0.05),
       child: Padding(
@@ -307,40 +356,48 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text('Resumo Final', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1B5E20))),
+            const Text('Resumo do Frete', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1B5E20))),
             const Divider(),
             _linhaResumo('Valor do Frete', valorFrete),
-            _linhaResumo('Comissão ($comissaoPct%)', comissao, color: Colors.blue),
+            _linhaResumo('Comissão ($pct%)', comissao, color: Colors.blue),
             _linhaResumo('Despesas aprovadas', -despesasAprov, color: Colors.red),
             _linhaResumo('Abastecimentos aprovados', -abastAprov, color: Colors.red),
             _linhaResumo('Vales aprovados', -valesAprov, color: Colors.red),
             const Divider(),
             _linhaResumo('Saldo Líquido', saldoLiquido, color: saldoLiquido >= 0 ? Colors.green : Colors.red, bold: true),
-            if (pendentes > 0)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Row(
-                  children: [
-                    Icon(Icons.warning_amber_outlined, color: Colors.orange.shade700, size: 16),
-                    const SizedBox(width: 4),
-                    Text('$pendentes lançamento(s) pendente(s)', style: TextStyle(color: Colors.orange.shade700, fontSize: 12)),
-                  ],
-                ),
-              ),
-            if (rejeitados > 0)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Row(
-                  children: [
-                    const Icon(Icons.cancel_outlined, color: Colors.red, size: 16),
-                    const SizedBox(width: 4),
-                    Text('$rejeitados lançamento(s) rejeitado(s)', style: const TextStyle(color: Colors.red, fontSize: 12)),
-                  ],
-                ),
-              ),
+            _avisosPendentes(pendentes, rejeitados),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _avisosPendentes(int pendentes, int rejeitados) {
+    return Column(
+      children: [
+        if (pendentes > 0)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Row(
+              children: [
+                Icon(Icons.warning_amber_outlined, color: Colors.orange.shade700, size: 16),
+                const SizedBox(width: 4),
+                Text('$pendentes lançamento(s) pendente(s)', style: TextStyle(color: Colors.orange.shade700, fontSize: 12)),
+              ],
+            ),
+          ),
+        if (rejeitados > 0)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Row(
+              children: [
+                const Icon(Icons.cancel_outlined, color: Colors.red, size: 16),
+                const SizedBox(width: 4),
+                Text('$rejeitados lançamento(s) rejeitado(s)', style: const TextStyle(color: Colors.red, fontSize: 12)),
+              ],
+            ),
+          ),
+      ],
     );
   }
 

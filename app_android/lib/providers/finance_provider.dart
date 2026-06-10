@@ -8,6 +8,7 @@ class FinanceProvider extends ChangeNotifier {
   double _deducoes = 0.0;
   double _saldo = 0.0;
   double _percentualComissao = 12.0;
+  bool _isAutonomo = false;
   bool _loading = false;
   String _error = '';
   List<dynamic> _fretes = [];
@@ -20,6 +21,7 @@ class FinanceProvider extends ChangeNotifier {
   double get deducoes => _deducoes;
   double get saldo => _saldo;
   double get percentualComissao => _percentualComissao;
+  bool get isAutonomo => _isAutonomo;
   bool get loading => _loading;
   String get error => _error;
   List<dynamic> get fretes => _fretes;
@@ -36,12 +38,11 @@ class FinanceProvider extends ChangeNotifier {
     try {
       // Perfil carregado primeiro para obter percentual_comissao e tipo de empresa
       final profile = await ApiService.getMe();
-      bool isAutonomo = false;
       if (profile != null) {
         _percentualComissao = double.tryParse(
           profile['motoristas']?['percentual_comissao']?.toString() ?? '',
         ) ?? 12.0;
-        isAutonomo = (profile['empresas'] as Map?)?['tipo'] == 'autonomo';
+        _isAutonomo = (profile['empresas'] as Map?)?['tipo'] == 'autonomo';
       }
 
       // As 4 listas são independentes entre si — busca em paralelo
@@ -72,30 +73,40 @@ class FinanceProvider extends ChangeNotifier {
       double td = 0.0;
       for (var d in despesas) {
         if (d['status'] == 'rejeitado') continue;
-        if (isAutonomo || d['quem_pagou'] == 'proprietario') {
+        if (_isAutonomo || d['quem_pagou'] == 'proprietario') {
           td += double.tryParse(d['valor'].toString()) ?? 0.0;
         }
       }
       for (var a in abastecimentos) {
         if (a['status'] == 'rejeitado') continue;
-        if (isAutonomo || a['quem_pagou'] == 'proprietario') {
+        if (_isAutonomo || a['quem_pagou'] == 'proprietario') {
           td += double.tryParse(a['valor_total'].toString()) ?? 0.0;
         }
       }
       for (var v in vales) {
         if (v['status'] == 'rejeitado') continue;
-        if (isAutonomo || v['quem_pagou'] == 'proprietario') {
+        if (_isAutonomo || v['quem_pagou'] == 'proprietario') {
           td += double.tryParse(v['valor'].toString()) ?? 0.0;
         }
       }
 
       _totalFretes = tf;
-      _comissao = tf * (_percentualComissao / 100);
       _deducoes = td;
-      _saldo = _comissao - _deducoes;
+
+      if (_isAutonomo) {
+        // Autônomo: sem comissão por percentual do cadastro
+        // Resultado = faturamento - despesas
+        _comissao = 0.0;
+        _saldo = tf - td;
+      } else {
+        // Vinculado: comissão pelo percentual do cadastro
+        _comissao = tf * (_percentualComissao / 100);
+        _saldo = _comissao - td;
+      }
 
       AppLogger.action('load_finance_data', params: {
         'total_fretes': tf,
+        'is_autonomo': _isAutonomo,
         'comissao': _comissao,
         'deducoes': td,
         'saldo': _saldo,

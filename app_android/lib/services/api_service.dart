@@ -176,6 +176,22 @@ class ApiService {
     }
   }
 
+  static Future<List<dynamic>> getFretesComFiltro(String dataInicio, String dataFim) async {
+    try {
+      final uri = Uri.parse('$_baseUrl/fretes').replace(queryParameters: {
+        'data_inicio': dataInicio,
+        'data_fim': dataFim,
+      });
+      final response = await http.get(uri, headers: await _getHeaders());
+      AppLogger.api('ApiService', 'GET /fretes?data_inicio=$dataInicio&data_fim=$dataFim', response.statusCode);
+      if (response.statusCode == 200) return jsonDecode(response.body);
+      return [];
+    } catch (e) {
+      AppLogger.error('ApiService', 'GET /fretes com filtro exception', e);
+      return [];
+    }
+  }
+
   static Future<List<dynamic>> getNotificacoes() async {
     try {
       final response = await http.get(Uri.parse('$_baseUrl/notificacoes'), headers: await _getHeaders());

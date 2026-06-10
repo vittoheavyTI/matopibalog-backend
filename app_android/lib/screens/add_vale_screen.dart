@@ -90,6 +90,13 @@ class _AddValeScreenState extends State<AddValeScreen> {
       );
       return;
     }
+    // Vale só aparece para vinculado → foto sempre obrigatória
+    if (_image == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Anexe uma foto do comprovante para continuar.')),
+      );
+      return;
+    }
 
     AppLogger.action('vale_save_attempt', params: {'quem_pagou': _quemPagou});
     setState(() => _loading = true);
@@ -214,8 +221,16 @@ class _AddValeScreenState extends State<AddValeScreen> {
             OutlinedButton.icon(
               onPressed: _showPhotoOptions,
               icon: const Icon(Icons.camera_alt_outlined),
-              label: Text(_image == null ? 'Adicionar foto (opcional)' : 'Trocar foto'),
+              label: Text(_image == null ? 'Foto do comprovante *' : 'Trocar foto'),
             ),
+            if (_image == null)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  'Obrigatório para motorista vinculado.',
+                  style: TextStyle(color: Colors.orange.shade700, fontSize: 12),
+                ),
+              ),
             if (_image != null) ...[
               const SizedBox(height: 8),
               Stack(
