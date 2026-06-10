@@ -128,7 +128,8 @@ class ApiService {
     }
   }
 
-  static Future<String?> uploadFotoPerfil(String filePath) async {
+  /// Retorna {ok: true, foto_url: String} em sucesso, {ok: false, message: String} em erro.
+  static Future<Map<String, dynamic>> uploadFotoPerfil(String filePath) async {
     try {
       final headers = await _getHeaders();
       var request = http.MultipartRequest('POST', Uri.parse('$_baseUrl/auth/me/foto'));
@@ -140,12 +141,19 @@ class ApiService {
       if (response.statusCode == 200) {
         final body = await response.stream.bytesToString();
         final json = jsonDecode(body);
-        return json['foto_url'] as String?;
+        return {'ok': true, 'foto_url': json['foto_url'] as String?};
       }
-      return null;
+      String msg = 'Erro ao enviar foto (HTTP ${response.statusCode}).';
+      try {
+        final body = await response.stream.bytesToString();
+        final json = jsonDecode(body);
+        msg = json['message'] ?? json['error'] ?? msg;
+      } catch (_) {}
+      AppLogger.warning('ApiService', 'POST /auth/me/foto falhou: $msg');
+      return {'ok': false, 'message': msg};
     } catch (e) {
       AppLogger.error('ApiService', 'POST /auth/me/foto exception', e);
-      return null;
+      return {'ok': false, 'message': 'Erro de conexão ao enviar foto.'};
     }
   }
 

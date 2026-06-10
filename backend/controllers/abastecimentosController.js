@@ -60,8 +60,11 @@ exports.create = async (req, res) => {
   }
 
   try {
-    const { data: userData } = await supabase.from('usuarios').select('status, empresa_id').eq('id', motorista_id_final).single();
+    const { data: userData } = await supabase.from('usuarios').select('status, empresa_id, empresas(tipo)').eq('id', motorista_id_final).single();
     if (!userData || userData.status === 'bloqueado') return res.status(403).json({ message: 'Motorista bloqueado. Entre em contato com o administrador.' });
+
+    const isAutonomo = userData.empresas?.tipo === 'autonomo';
+    const statusLancamento = (req.user.role === 'admin' || isAutonomo) ? 'aprovado' : 'pendente';
 
     const { data, error } = await supabase
       .from('abastecimentos')
@@ -70,7 +73,7 @@ exports.create = async (req, res) => {
         quem_pagou, arla_litros: arla_litros ? parseFloat(arla_litros) : 0,
         arla_valor: arla_valor ? parseFloat(arla_valor) : 0,
         posto, foto_url: publicUrl,
-        status: req.user.role === 'admin' ? 'aprovado' : 'pendente'
+        status: statusLancamento
       })
       .select().single();
 

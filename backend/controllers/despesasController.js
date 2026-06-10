@@ -55,10 +55,10 @@ exports.create = async (req, res) => {
   }
 
   try {
-    // Validar status do motorista
+    // Validar status do motorista e obter tipo da empresa
     const { data: userData, error: userError } = await supabase
       .from('usuarios')
-      .select('status, empresa_id')
+      .select('status, empresa_id, empresas(tipo)')
       .eq('id', motorista_id)
       .single();
 
@@ -69,6 +69,10 @@ exports.create = async (req, res) => {
     if (!userData || userData.status === 'bloqueado') {
       return res.status(403).json({ message: 'Motorista bloqueado. Entre em contato com o administrador.' });
     }
+
+    // Autônomo é dono dos próprios dados — lançamentos nascem aprovados
+    const isAutonomo = userData.empresas?.tipo === 'autonomo';
+    const statusLancamento = (req.user.role === 'admin' || isAutonomo) ? 'aprovado' : 'pendente';
 
     // Gravar no banco
     const { data, error } = await supabase
@@ -82,7 +86,7 @@ exports.create = async (req, res) => {
         valor: parseFloat(valor),
         quem_pagou,
         foto_url: publicUrl,
-        status: req.user.role === 'admin' ? 'aprovado' : 'pendente',
+        status: statusLancamento,
         sincronizado: true
       })
       .select()

@@ -14,6 +14,7 @@ class AuthProvider extends ChangeNotifier {
   String _uid = '';
   String _error = '';
   String _fotoUrl = '';
+  String _empresaTipo = '';
   bool _senhaTemporaria = false;
 
   AuthStatus get status => _status;
@@ -23,6 +24,8 @@ class AuthProvider extends ChangeNotifier {
   String get uid => _uid;
   String get error => _error;
   String get fotoUrl => _fotoUrl;
+  String get empresaTipo => _empresaTipo;
+  bool get isAutonomo => _empresaTipo == 'autonomo';
   bool get senhaTemporaria => _senhaTemporaria;
   bool get isLoggedIn => _status == AuthStatus.authenticated;
   bool get isMotorista => _role == 'motorista';
@@ -45,11 +48,14 @@ class AuthProvider extends ChangeNotifier {
     _nome = prefs.getString('user_nome') ?? '';
     _role = prefs.getString('user_role') ?? '';
     _uid = prefs.getString('user_uid') ?? '';
+    _empresaTipo = prefs.getString('user_empresa_tipo') ?? '';
 
     final profile = await ApiService.getMe();
     if (profile != null) {
       _nome = profile['nome'] ?? _nome;
       _fotoUrl = profile['foto_url'] ?? '';
+      // Restaura empresaTipo do perfil (fonte mais confiável que SharedPreferences)
+      _empresaTipo = (profile['empresas'] as Map?)?['tipo'] as String? ?? _empresaTipo;
       // Restaura senha_temporaria do perfil: sem isso, ao reabrir o app com token
       // salvo o flag seria false e o motorista pularia a tela de troca de senha.
       _senhaTemporaria = profile['senha_temporaria'] == true;
@@ -116,12 +122,14 @@ class AuthProvider extends ChangeNotifier {
     _role = userRole;
     _uid = res['user']['uid'];
     _fotoUrl = res['user']['foto_url'] ?? '';
+    _empresaTipo = res['user']['empresa_tipo'] as String? ?? '';
     _senhaTemporaria = res['user']['senha_temporaria'] == true;
 
     await prefs.setString('token', _token);
     await prefs.setString('user_role', _role);
     await prefs.setString('user_nome', _nome);
     await prefs.setString('user_uid', _uid);
+    await prefs.setString('user_empresa_tipo', _empresaTipo);
 
     _status = AuthStatus.authenticated;
     AppLogger.action('login_success', params: {'email': email, 'user': _nome});
@@ -151,6 +159,7 @@ class AuthProvider extends ChangeNotifier {
     _nome = '';
     _role = '';
     _uid = '';
+    _empresaTipo = '';
     _senhaTemporaria = false;
     _status = AuthStatus.unauthenticated;
     notifyListeners();

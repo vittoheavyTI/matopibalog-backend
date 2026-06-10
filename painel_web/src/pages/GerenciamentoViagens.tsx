@@ -204,6 +204,7 @@ export const GerenciamentoViagens: React.FC = () => {
     const payload: any = { status };
     if (obs !== undefined) payload.obs_resolucao = obs;
     try {
+      // Usar tipoItem diretamente (já vem correto do mapeamento via item.tipo)
       if (tipoItem === 'despesa' || tipoItem === 'manutencao') {
         await api.patch('/despesas/' + id, payload);
       } else if (tipoItem === 'abastecimento') {
@@ -211,9 +212,10 @@ export const GerenciamentoViagens: React.FC = () => {
       } else if (tipoItem === 'vale') {
         await api.patch('/vales/' + id, payload);
       }
-      if (filterMot !== 'todos') loadMotoristaData(filterMot);
-    } catch (err) {
-      alert('Erro ao atualizar status.');
+      if (filterMot !== 'todos') await loadMotoristaData(filterMot);
+    } catch (err: any) {
+      const msg = err?.response?.data?.message || err?.message || 'Tente novamente.';
+      alert('Erro ao atualizar status: ' + msg);
     }
   };
 
@@ -590,7 +592,9 @@ export const GerenciamentoViagens: React.FC = () => {
               ))}
 
               {[...mDesp, ...mAbs, ...mVales].map((item: any) => {
-                const type = item.litros ? 'abastecimento' : item.quemPagou === 'proprietario' && !item.descricao ? 'vale' : item.tipo === 'manutencao' ? 'manutencao' : 'despesa';
+                // Usar item.tipo diretamente (definido no mapeamento de loadMotoristaData)
+                // Evita inferência por heurística que falhava quando litros=0 ou quemPagou='motorista'
+                const type: string = item.tipo || 'despesa';
                 return (
                   <div key={item.id} className={`group flex justify-between items-center p-3 border rounded-lg transition-all ${item.status === 'aprovado' ? 'bg-green-50/50 border-green-100' : item.status === 'rejeitado' ? 'bg-red-50/50 border-red-100' : 'border-gray-100'}`}>
                     <div className="flex-1">
@@ -795,7 +799,7 @@ export const GerenciamentoViagens: React.FC = () => {
                   <span className="font-bold text-blue-600">{formatCurrency(opComissao)}</span>
                 </div>
                 <div className="border-t border-gray-200 pt-2">
-                  <p className="text-xs text-gray-400 font-medium mb-2">Deduções</p>
+                  <p className="text-xs text-gray-400 font-medium mb-2">Despesas</p>
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-500">Desp./Abast.:</span>
                     <span className="font-bold text-orange-600">{formatCurrency(opDespMot + opAbastMot)}</span>
