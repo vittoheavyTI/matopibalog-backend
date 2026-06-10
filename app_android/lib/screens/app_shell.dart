@@ -18,8 +18,10 @@ class AppShell extends StatelessWidget {
 
   Future<void> _navegarPara(BuildContext context, Widget tela) async {
     Navigator.of(context).pop();
-    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => tela));
-    if (context.mounted) context.read<FinanceProvider>().loadData();
+    final alterou = await Navigator.of(context).push(MaterialPageRoute(builder: (_) => tela));
+    // Só recarrega se a tela sinalizou alteração (pop(context, true)).
+    // Perfil/Histórico/Notificações não alteram dados → não disparam reload.
+    if (alterou == true && context.mounted) context.read<FinanceProvider>().loadData();
   }
 
   /// Abre uma tela de lançamento (Despesa/Abastecimento/Vale) garantindo que o
@@ -39,8 +41,10 @@ class AppShell extends StatelessWidget {
       freteId = finance.freteAtivoId;
     }
     if (!context.mounted) return;
-    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => builder(freteId)));
-    if (context.mounted) finance.loadData();
+    // Só recarrega se o lançamento foi salvo (a tela retorna true). Antes havia
+    // load duplo: o pré-load (fallback acima) + este pós-load incondicional.
+    final alterou = await Navigator.of(context).push(MaterialPageRoute(builder: (_) => builder(freteId)));
+    if (alterou == true && context.mounted) finance.loadData();
   }
 
   @override
