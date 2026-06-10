@@ -137,21 +137,28 @@ class _PerfilScreenState extends State<PerfilScreen> {
 
       AppLogger.action('perfil_foto_upload');
       setState(() => _salvando = true);
-      final fotoUrl = await ApiService.uploadFotoPerfil(picked.path);
+      final result = await ApiService.uploadFotoPerfil(picked.path);
       if (mounted) {
-        if (fotoUrl != null) {
-          context.read<AuthProvider>().atualizarFotoUrl(fotoUrl);
-          setState(() {
-            if (_profile != null) _profile!['foto_url'] = fotoUrl;
-          });
-          AppLogger.action('perfil_foto_ok');
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Foto atualizada!')),
-          );
+        if (result['ok'] == true) {
+          final fotoUrl = result['foto_url'] as String?;
+          if (fotoUrl != null) {
+            context.read<AuthProvider>().atualizarFotoUrl(fotoUrl);
+            setState(() {
+              if (_profile != null) _profile!['foto_url'] = fotoUrl;
+            });
+            AppLogger.action('perfil_foto_ok');
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Foto atualizada!'),
+                backgroundColor: Colors.green,
+              ),
+            );
+          }
         } else {
-          AppLogger.warning('PerfilScreen', 'uploadFoto retornou null');
+          final msg = result['message'] as String? ?? 'Erro ao enviar foto.';
+          AppLogger.warning('PerfilScreen', 'uploadFoto falhou: $msg');
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Erro ao enviar foto.')),
+            SnackBar(content: Text(msg)),
           );
         }
       }

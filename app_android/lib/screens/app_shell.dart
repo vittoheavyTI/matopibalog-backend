@@ -86,14 +86,16 @@ class AppShell extends StatelessWidget {
                 _navegarPara(context, const AddAbastecimentoScreen());
               },
             ),
-            ListTile(
-              leading: const Icon(Icons.payments_outlined),
-              title: const Text('Novo Vale'),
-              onTap: () {
-                AppLogger.action('menu_nav', params: {'destino': 'add_vale'});
-                _navegarPara(context, const AddValeScreen());
-              },
-            ),
+            // Vale: oculto para autônomo (ele é proprietário, não faz sentido pedir vale)
+            if (!auth.isAutonomo)
+              ListTile(
+                leading: const Icon(Icons.payments_outlined),
+                title: const Text('Novo Vale'),
+                onTap: () {
+                  AppLogger.action('menu_nav', params: {'destino': 'add_vale'});
+                  _navegarPara(context, const AddValeScreen());
+                },
+              ),
             ListTile(
               leading: const Icon(Icons.history),
               title: const Text('Histórico'),

@@ -351,7 +351,7 @@ export const Dashboard: React.FC = () => {
               <div className="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center">
                 <Fuel size={20} className="text-orange-600" />
               </div>
-              <p className="text-sm text-gray-500 font-medium">Deduções</p>
+              <p className="text-sm text-gray-500 font-medium">Despesas</p>
             </div>
             <p className="text-3xl font-bold text-orange-600">{formatCurrency(summary.total_deducoes)}</p>
           </div>

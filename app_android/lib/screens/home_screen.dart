@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
+import '../providers/auth_provider.dart';
 import '../providers/finance_provider.dart';
 import '../services/app_logger.dart';
 import 'add_frete_screen.dart';
@@ -37,6 +38,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _abrirNovoLancamento() {
     AppLogger.action('novo_lancamento_sheet_open');
+    final isAutonomo = context.read<AuthProvider>().isAutonomo;
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
@@ -66,11 +68,13 @@ class _HomeScreenState extends State<HomeScreen> {
               title: const Text('Abastecimento'),
               onTap: () { Navigator.pop(ctx); _navegarERefresh(const AddAbastecimentoScreen()); },
             ),
-            ListTile(
-              leading: const Icon(Icons.payments_outlined, color: Color(0xFF1B5E20)),
-              title: const Text('Vale'),
-              onTap: () { Navigator.pop(ctx); _navegarERefresh(const AddValeScreen()); },
-            ),
+            // Vale: oculto para autônomo (ele é proprietário, não faz sentido)
+            if (!isAutonomo)
+              ListTile(
+                leading: const Icon(Icons.payments_outlined, color: Color(0xFF1B5E20)),
+                title: const Text('Vale'),
+                onTap: () { Navigator.pop(ctx); _navegarERefresh(const AddValeScreen()); },
+              ),
             const SizedBox(height: 8),
           ],
         ),
@@ -124,7 +128,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             finance.comissao,
                             color: Colors.blue,
                           ),
-                          _infoRow('Deduções (Empresa)', finance.deducoes, color: Colors.red),
+                          _infoRow('Despesas', finance.deducoes, color: Colors.red),
                           const Divider(),
                           _infoRow('Saldo a Receber', finance.saldo, color: Colors.green, bold: true),
                         ],

@@ -34,12 +34,14 @@ class FinanceProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      // Perfil carregado primeiro para obter percentual_comissao antes dos cálculos
+      // Perfil carregado primeiro para obter percentual_comissao e tipo de empresa
       final profile = await ApiService.getMe();
+      bool isAutonomo = false;
       if (profile != null) {
         _percentualComissao = double.tryParse(
           profile['motoristas']?['percentual_comissao']?.toString() ?? '',
         ) ?? 12.0;
+        isAutonomo = (profile['empresas'] as Map?)?['tipo'] == 'autonomo';
       }
 
       // As 4 listas são independentes entre si — busca em paralelo
@@ -64,19 +66,25 @@ class FinanceProvider extends ChangeNotifier {
         tf += double.tryParse(f['valor_frete'].toString()) ?? 0.0;
       }
 
+      // Autônomo: todas as despesas contam (ele é o proprietário).
+      // Vinculado: apenas quem_pagou = 'proprietario' conta como dedução da comissão.
+      // Rejeitados não entram no cálculo em nenhum caso.
       double td = 0.0;
       for (var d in despesas) {
-        if (d['quem_pagou'] == 'proprietario') {
+        if (d['status'] == 'rejeitado') continue;
+        if (isAutonomo || d['quem_pagou'] == 'proprietario') {
           td += double.tryParse(d['valor'].toString()) ?? 0.0;
         }
       }
       for (var a in abastecimentos) {
-        if (a['quem_pagou'] == 'proprietario') {
+        if (a['status'] == 'rejeitado') continue;
+        if (isAutonomo || a['quem_pagou'] == 'proprietario') {
           td += double.tryParse(a['valor_total'].toString()) ?? 0.0;
         }
       }
       for (var v in vales) {
-        if (v['quem_pagou'] == 'proprietario') {
+        if (v['status'] == 'rejeitado') continue;
+        if (isAutonomo || v['quem_pagou'] == 'proprietario') {
           td += double.tryParse(v['valor'].toString()) ?? 0.0;
         }
       }
