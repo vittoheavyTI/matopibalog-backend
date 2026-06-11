@@ -91,11 +91,13 @@ export const GerenciamentoViagens: React.FC = () => {
       })));
       setDespesas(despesasData.filter((d: any) => d.status !== 'finalizado').map((d: any) => ({
         id: d.id, motoristaUid: d.motorista_id, descricao: d.descricao, fotoUrl: d.foto_url,
+        obsResolucao: d.obs_resolucao,
         valor: d.valor, quemPagou: d.quem_pagou, status: d.status, data: d.data,
         tipo: d.tipo === 'manutencao' ? 'manutencao' : 'despesa'  // preserva sub-tipo (consistente com Dashboard)
       })));
       setAbastecimentos(abastData.filter((a: any) => a.status !== 'finalizado').map((a: any) => ({
         id: a.id, motoristaUid: a.motorista_id, posto: a.posto, litros: a.litros, fotoUrl: a.foto_url,
+        obsResolucao: a.obs_resolucao,
         valorTotal: a.valor_total, quemPagou: a.quem_pagou, status: a.status,
         data: a.data, frete_id: a.frete_id, tipo: 'abastecimento'
       })));
@@ -103,6 +105,7 @@ export const GerenciamentoViagens: React.FC = () => {
         // Vale: descricao é o campo correto; posto é fallback p/ registros antigos.
         // fotoUrl mapeado só por consistência — Vale NÃO renderiza comprovante.
         id: v.id, motoristaUid: v.motorista_id, descricao: v.descricao || v.posto || '', fotoUrl: v.foto_url,
+        obsResolucao: v.obs_resolucao,
         valor: v.valor, quemPagou: v.quem_pagou, status: v.status, data: v.data, tipo: 'vale'
       })));
     } catch (err) {
@@ -637,6 +640,14 @@ export const GerenciamentoViagens: React.FC = () => {
                         ) : (
                           <p className="text-xs text-gray-400 mt-0.5">Sem comprovante</p>
                         )
+                      )}
+                      {item.obsResolucao && item.status !== 'pendente' && (
+                        <p className="text-xs mt-0.5 text-gray-600 italic">
+                          <span className="font-semibold not-italic">
+                            {item.status === 'rejeitado' ? 'Obs. rejeição: ' : 'Justificativa do admin: '}
+                          </span>
+                          {item.obsResolucao}
+                        </p>
                       )}
                     </div>
                     <div className="flex items-center space-x-2">
