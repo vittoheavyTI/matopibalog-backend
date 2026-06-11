@@ -327,7 +327,9 @@ export const GerenciamentoViagens: React.FC = () => {
     try {
       const ativo = fretes.find(f => f.status === 'ativo' || f.status === 'pendente');
       if (ativo) {
-        await api.patch('/fretes/' + ativo.id, { status: 'finalizado' });
+        // Finaliza via rota dedicada — o backend é a trava final (409 se houver pendência)
+        await api.post('/fretes/' + ativo.id + '/finalizar');
+        // Marca os aprovados como finalizado SOMENTE após a finalização ter sucesso
         const promises = [
           ...despesas.filter(d => d.status === 'aprovado').map(d => api.patch('/despesas/' + d.id, { status: 'finalizado' })),
           ...abastecimentos.filter(a => a.status === 'aprovado').map(a => api.patch('/abastecimentos/' + a.id, { status: 'finalizado' })),
@@ -339,8 +341,11 @@ export const GerenciamentoViagens: React.FC = () => {
       setFilterMot('todos');
       loadData();
       alert('Frete finalizado! Os dados foram movidos para o resumo histórico.');
-    } catch (err) {
-      alert('Erro ao finalizar frete no servidor.');
+    } catch (err: any) {
+      const msg = err?.response?.status === 409
+        ? (err.response.data?.message || 'Há lançamentos pendentes deste motorista.')
+        : 'Erro ao finalizar frete no servidor.';
+      alert(msg);
     }
   };
 

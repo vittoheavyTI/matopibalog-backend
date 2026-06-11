@@ -13,6 +13,24 @@ const checkMotoristaStatus = async (uid) => {
   return data.status === 'ativo';
 };
 
+// Mensagem única da trava de pendências (reuso nas duas travas)
+const MSG_PENDENCIAS = 'Não é possível finalizar: há lançamentos pendentes deste motorista. Aprove ou rejeite todos antes de finalizar.';
+
+// Retorna true se o motorista tem QUALQUER lançamento pendente (despesa/abast/vale).
+// Checagem por motorista_id (não só frete_id): lançamentos do painel têm frete_id = null.
+const motoristaTemPendencias = async (motoristaId) => {
+  for (const tabela of ['despesas', 'abastecimentos', 'vales']) {
+    const { count, error } = await supabase
+      .from(tabela)
+      .select('id', { count: 'exact', head: true })
+      .eq('motorista_id', motoristaId)
+      .eq('status', 'pendente');
+    if (error) throw error;
+    if ((count || 0) > 0) return true;
+  }
+  return false;
+};
+
 exports.getAll = async (req, res) => {
   const { data_inicio, data_fim, status, motorista_id } = req.query;
   const isAdmin = req.user.role === 'admin';
@@ -183,6 +201,11 @@ exports.update = async (req, res) => {
       return res.status(400).json({ message: 'Nenhum campo válido para atualizar.' });
     }
 
+    // Trava de finalização: bloqueia se o motorista tiver lançamentos pendentes (vale p/ todos)
+    if (allowedUpdate.status === 'finalizado' && await motoristaTemPendencias(checkData.motorista_id)) {
+      return res.status(409).json({ message: MSG_PENDENCIAS });
+    }
+
     const { data, error } = await supabase
       .from('fretes')
       .update(allowedUpdate)
@@ -246,6 +269,11 @@ exports.finalizar = async (req, res) => {
 
     if (frete.status === 'finalizado') {
       return res.status(400).json({ message: 'Esta viagem já está finalizada.' });
+    }
+
+    // Trava de finalização: bloqueia se o motorista tiver lançamentos pendentes (vale p/ todos, inclusive super-admin)
+    if (await motoristaTemPendencias(frete.motorista_id)) {
+      return res.status(409).json({ message: MSG_PENDENCIAS });
     }
 
     const { data, error } = await supabase
