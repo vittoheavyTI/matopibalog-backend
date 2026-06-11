@@ -43,14 +43,30 @@ exports.create = async (req, res) => {
   if (file) {
     try {
       const fileName = `${motorista_id}/despesas/${Date.now()}-${path.basename(file.originalname)}`;
-      await supabase.storage
+      const { error: uploadError } = await supabase.storage
         .from('comprovantes')
         .upload(fileName, file.buffer, { contentType: file.mimetype, upsert: true });
-      const { data: urlData } = supabase.storage.from('comprovantes').getPublicUrl(fileName);
-      publicUrl = urlData.publicUrl;
+      if (uploadError) {
+        // Upload falhou: NÃO fabricar URL morta. Loga contexto e segue com foto_url = null.
+        console.error('[despesasController] Falha no upload do comprovante', {
+          controller: 'despesas',
+          motorista_id,
+          fileName,
+          mimetype: file.mimetype,
+          size: file.size,
+          erro: uploadError.message || String(uploadError),
+        });
+      } else {
+        const { data: urlData } = supabase.storage.from('comprovantes').getPublicUrl(fileName);
+        publicUrl = urlData.publicUrl;
+      }
     } catch (uploadError) {
-      console.error('Erro no upload do comprovante:', uploadError);
-      // Upload falhou mas continua — despesa pode ser registrada sem foto
+      // Exceção inesperada — não interrompe o lançamento; foto_url permanece null.
+      console.error('[despesasController] Exceção no upload do comprovante', {
+        controller: 'despesas',
+        motorista_id,
+        erro: uploadError.message || String(uploadError),
+      });
     }
   }
 

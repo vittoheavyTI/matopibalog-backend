@@ -52,11 +52,30 @@ exports.create = async (req, res) => {
   if (file) {
     try {
       const fileName = `${motorista_id_final}/abastecimentos/${Date.now()}-${path.basename(file.originalname)}`;
-      await supabase.storage.from('comprovantes').upload(fileName, file.buffer, { contentType: file.mimetype });
-      const { data: { publicUrl: url } } = supabase.storage.from('comprovantes').getPublicUrl(fileName);
-      publicUrl = url;
+      const { error: uploadError } = await supabase.storage
+        .from('comprovantes')
+        .upload(fileName, file.buffer, { contentType: file.mimetype, upsert: true });
+      if (uploadError) {
+        // Upload falhou: NÃO fabricar URL morta. Loga contexto e segue com foto_url = null.
+        console.error('[abastecimentosController] Falha no upload do comprovante', {
+          controller: 'abastecimentos',
+          motorista_id: motorista_id_final,
+          fileName,
+          mimetype: file.mimetype,
+          size: file.size,
+          erro: uploadError.message || String(uploadError),
+        });
+      } else {
+        const { data: { publicUrl: url } } = supabase.storage.from('comprovantes').getPublicUrl(fileName);
+        publicUrl = url;
+      }
     } catch (err) {
-      console.error('Upload failed:', err);
+      // Exceção inesperada — não interrompe o lançamento; foto_url permanece null.
+      console.error('[abastecimentosController] Exceção no upload do comprovante', {
+        controller: 'abastecimentos',
+        motorista_id: motorista_id_final,
+        erro: err.message || String(err),
+      });
     }
   }
 
