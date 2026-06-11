@@ -20,7 +20,7 @@ async function expirarTrials() {
       const ids = expirados.map(e => e.id);
       const { error: updateError } = await supabase
         .from('empresas')
-        .update({ status: 'expirado' })
+        .update({ status: 'suspenso' })
         .in('id', ids);
 
       if (updateError) {

@@ -17,7 +17,7 @@ const verificarPlano = async (req, res, next) => {
 
     // Se for trial e expirou, atualiza automaticamente
     if (data.status === 'trial' && data.trial_ends_at && new Date(data.trial_ends_at) < new Date()) {
-      await supabase.from('empresas').update({ status: 'expirado' }).eq('id', req.empresa_id);
+      await supabase.from('empresas').update({ status: 'suspenso' }).eq('id', req.empresa_id);
       return res.status(403).json({ message: 'Período de teste expirado. Assine um plano para continuar.' });
     }
 
