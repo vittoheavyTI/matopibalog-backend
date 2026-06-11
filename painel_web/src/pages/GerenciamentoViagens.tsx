@@ -90,18 +90,19 @@ export const GerenciamentoViagens: React.FC = () => {
         status: f.status, placa: f.placa
       })));
       setDespesas(despesasData.filter((d: any) => d.status !== 'finalizado').map((d: any) => ({
-        id: d.id, motoristaUid: d.motorista_id, descricao: d.descricao,
+        id: d.id, motoristaUid: d.motorista_id, descricao: d.descricao, fotoUrl: d.foto_url,
         valor: d.valor, quemPagou: d.quem_pagou, status: d.status, data: d.data,
         tipo: d.tipo === 'manutencao' ? 'manutencao' : 'despesa'  // preserva sub-tipo (consistente com Dashboard)
       })));
       setAbastecimentos(abastData.filter((a: any) => a.status !== 'finalizado').map((a: any) => ({
-        id: a.id, motoristaUid: a.motorista_id, posto: a.posto, litros: a.litros,
+        id: a.id, motoristaUid: a.motorista_id, posto: a.posto, litros: a.litros, fotoUrl: a.foto_url,
         valorTotal: a.valor_total, quemPagou: a.quem_pagou, status: a.status,
         data: a.data, frete_id: a.frete_id, tipo: 'abastecimento'
       })));
       setVales(valesData.filter((v: any) => v.status !== 'finalizado').map((v: any) => ({
-        // Vale: descricao é o campo correto; posto é fallback p/ registros antigos
-        id: v.id, motoristaUid: v.motorista_id, descricao: v.descricao || v.posto || '',
+        // Vale: descricao é o campo correto; posto é fallback p/ registros antigos.
+        // fotoUrl mapeado só por consistência — Vale NÃO renderiza comprovante.
+        id: v.id, motoristaUid: v.motorista_id, descricao: v.descricao || v.posto || '', fotoUrl: v.foto_url,
         valor: v.valor, quemPagou: v.quem_pagou, status: v.status, data: v.data, tipo: 'vale'
       })));
     } catch (err) {
@@ -245,6 +246,27 @@ export const GerenciamentoViagens: React.FC = () => {
   };
 
   const handleStartEdit = (item: any, type: any) => setEditingItem({ id: item.id, type, data: { ...item } });
+
+  // Baixa o comprovante via fetch->blob. Em falha (CORS/erro), abre em nova aba
+  // como fallback seguro — nunca quebra a tela.
+  const baixarComprovante = async (url: string, id: string) => {
+    try {
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const blob = await resp.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objectUrl;
+      a.download = `comprovante-${id}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch (e) {
+      console.warn('Falha no download do comprovante, abrindo em nova aba:', e);
+      window.open(url, '_blank', 'noopener,noreferrer');
+    }
+  };
 
   const handleSaveEdit = async () => {
     if (!editingItem) return;
@@ -606,6 +628,16 @@ export const GerenciamentoViagens: React.FC = () => {
                         {item.descricao || item.posto || 'Vale/Adiantamento'} {item.litros && <span className="text-xs text-blue-600">({item.litros}L)</span>}
                       </p>
                       <p className="text-xs text-gray-500">Pago por: {item.quemPagou} • {gvFmt(item.data, 'dd/MM HH:mm')}</p>
+                      {type !== 'vale' && (
+                        item.fotoUrl ? (
+                          <p className="text-xs mt-0.5 flex items-center gap-3">
+                            <a href={item.fotoUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Abrir comprovante</a>
+                            <button type="button" onClick={() => baixarComprovante(item.fotoUrl, item.id)} className="text-blue-600 hover:underline">Baixar</button>
+                          </p>
+                        ) : (
+                          <p className="text-xs text-gray-400 mt-0.5">Sem comprovante</p>
+                        )
+                      )}
                     </div>
                     <div className="flex items-center space-x-2">
                       <span className={`font-bold ${type === 'vale' ? 'text-red-600' : 'text-gray-700'}`}>{formatCurrency(Math.abs(item.valor || item.valorTotal))}</span>
