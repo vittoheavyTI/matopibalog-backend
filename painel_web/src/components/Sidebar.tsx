@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { NavLink } from 'react-router-dom';
 import { LayoutDashboard, Users, FileText, Truck, ChevronLeft, ChevronRight, Upload, X, Check, Trash2, Settings, UserCircle, Plug, Shield, ChevronDown, Receipt } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import api from '../api';
 
 export const Sidebar: React.FC = () => {
   const { user } = useAuth();
@@ -17,12 +18,32 @@ export const Sidebar: React.FC = () => {
   const [tempY, setTempY] = useState<number>(0);
 
   useEffect(() => {
+    // 1) Leitura imediata do cache local (comportamento atual — mostra sem esperar a rede)
     const savedLogo = localStorage.getItem('matopibalog_logo');
     if (savedLogo) setLogoBase64(savedLogo);
     const savedScale = localStorage.getItem('matopibalog_logo_scale');
     if (savedScale) setLogoScale(Number(savedScale));
     const savedY = localStorage.getItem('matopibalog_logo_y');
     if (savedY) setLogoY(Number(savedY));
+
+    // 2) Hidrata do backend (fonte durável) para sobreviver a troca de dispositivo /
+    // cache limpo. Só sobrescreve quando vier valor real; falha de rede mantém o cache.
+    api.get('/configuracoes')
+      .then(({ data }) => {
+        if (data?.sidebarLogo) {
+          setLogoBase64(data.sidebarLogo);
+          localStorage.setItem('matopibalog_logo', data.sidebarLogo);
+        }
+        if (data?.sidebarLogoScale !== undefined && data?.sidebarLogoScale !== null) {
+          setLogoScale(Number(data.sidebarLogoScale));
+          localStorage.setItem('matopibalog_logo_scale', String(data.sidebarLogoScale));
+        }
+        if (data?.sidebarLogoY !== undefined && data?.sidebarLogoY !== null) {
+          setLogoY(Number(data.sidebarLogoY));
+          localStorage.setItem('matopibalog_logo_y', String(data.sidebarLogoY));
+        }
+      })
+      .catch(() => {}); // offline / erro → mantém o cache local, não quebra nada
   }, []);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
