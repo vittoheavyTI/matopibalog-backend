@@ -8,12 +8,31 @@ exports.getAll = async (req, res) => {
   const isAdmin = req.user.role === 'admin';
 
   try {
-    let query = supabase.from('despesas').select('*, motoristas(usuarios(nome))');
+    // Isolamento multi-tenant — mesmo padrão de abastecimentos/vales
+    const isSuperAdmin = req.user.is_super_admin === true;
+    const empresaAlvo = isSuperAdmin
+      ? (req.query.empresa_id || null)
+      : req.empresa_id;
 
+    let idsPermitidos = null;
+    if (!isAdmin) {
+      idsPermitidos = [req.user.uid];
+    } else if (empresaAlvo) {
+      const { data: uids, error: uidsError } = await supabase
+        .from('usuarios')
+        .select('id')
+        .eq('empresa_id', empresaAlvo)
+        .eq('tipo', 'motorista');
+      if (uidsError) throw uidsError;
+      idsPermitidos = uids.map(u => u.id);
+    }
+
+    let query = supabase.from('despesas').select('*, motoristas(usuarios(nome))');
+    if (idsPermitidos !== null) {
+      query = query.in('motorista_id', idsPermitidos.length ? idsPermitidos : ['']);
+    }
     if (isAdmin && motorista_id) {
       query = query.eq('motorista_id', motorista_id);
-    } else if (!isAdmin) {
-      query = query.eq('motorista_id', req.user.uid);
     }
 
     if (tipo) query = query.eq('tipo', tipo);
