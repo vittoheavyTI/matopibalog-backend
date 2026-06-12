@@ -14,16 +14,16 @@ const checkMotoristaStatus = async (uid) => {
 };
 
 // Mensagem única da trava de pendências (reuso nas duas travas)
-const MSG_PENDENCIAS = 'Não é possível finalizar: há lançamentos pendentes deste motorista. Aprove ou rejeite todos antes de finalizar.';
+const MSG_PENDENCIAS = 'Não é possível finalizar: há lançamentos pendentes desta viagem. Aprove ou rejeite todos antes de finalizar.';
 
-// Retorna true se o motorista tem QUALQUER lançamento pendente (despesa/abast/vale).
-// Checagem por motorista_id (não só frete_id): lançamentos do painel têm frete_id = null.
-const motoristaTemPendencias = async (motoristaId) => {
+// Retorna true se o FRETE tem algum lançamento pendente (despesa/abast/vale).
+// Escopo por frete_id: bloqueia só a viagem atual, não outras viagens do motorista.
+const freteTemPendencias = async (freteId) => {
   for (const tabela of ['despesas', 'abastecimentos', 'vales']) {
     const { count, error } = await supabase
       .from(tabela)
       .select('id', { count: 'exact', head: true })
-      .eq('motorista_id', motoristaId)
+      .eq('frete_id', freteId)
       .eq('status', 'pendente');
     if (error) throw error;
     if ((count || 0) > 0) return true;
@@ -202,7 +202,7 @@ exports.update = async (req, res) => {
     }
 
     // Trava de finalização: bloqueia se o motorista tiver lançamentos pendentes (vale p/ todos)
-    if (allowedUpdate.status === 'finalizado' && await motoristaTemPendencias(checkData.motorista_id)) {
+    if (allowedUpdate.status === 'finalizado' && await freteTemPendencias(id)) {
       return res.status(409).json({ message: MSG_PENDENCIAS });
     }
 
@@ -271,8 +271,8 @@ exports.finalizar = async (req, res) => {
       return res.status(400).json({ message: 'Esta viagem já está finalizada.' });
     }
 
-    // Trava de finalização: bloqueia se o motorista tiver lançamentos pendentes (vale p/ todos, inclusive super-admin)
-    if (await motoristaTemPendencias(frete.motorista_id)) {
+    // Trava de finalização: bloqueia se a viagem tiver lançamentos pendentes (vale p/ todos, inclusive super-admin)
+    if (await freteTemPendencias(frete.id)) {
       return res.status(409).json({ message: MSG_PENDENCIAS });
     }
 

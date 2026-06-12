@@ -92,7 +92,7 @@ export const GerenciamentoViagens: React.FC = () => {
       setDespesas(despesasData.filter((d: any) => d.status !== 'finalizado').map((d: any) => ({
         id: d.id, motoristaUid: d.motorista_id, descricao: d.descricao, fotoUrl: d.foto_url,
         obsResolucao: d.obs_resolucao,
-        valor: d.valor, quemPagou: d.quem_pagou, status: d.status, data: d.data,
+        valor: d.valor, quemPagou: d.quem_pagou, status: d.status, data: d.data, frete_id: d.frete_id,
         tipo: d.tipo === 'manutencao' ? 'manutencao' : 'despesa'  // preserva sub-tipo (consistente com Dashboard)
       })));
       setAbastecimentos(abastData.filter((a: any) => a.status !== 'finalizado').map((a: any) => ({
@@ -106,7 +106,7 @@ export const GerenciamentoViagens: React.FC = () => {
         // fotoUrl mapeado só por consistência — Vale NÃO renderiza comprovante.
         id: v.id, motoristaUid: v.motorista_id, descricao: v.descricao || v.posto || '', fotoUrl: v.foto_url,
         obsResolucao: v.obs_resolucao,
-        valor: v.valor, quemPagou: v.quem_pagou, status: v.status, data: v.data, tipo: 'vale'
+        valor: v.valor, quemPagou: v.quem_pagou, status: v.status, data: v.data, frete_id: v.frete_id, tipo: 'vale'
       })));
     } catch (err) {
       console.error('Erro ao carregar dados do motorista', err);
@@ -302,12 +302,17 @@ export const GerenciamentoViagens: React.FC = () => {
   const handleAddItem = async () => {
     if (!selectedMotorista || !showAddModal) return;
     try {
+      // Vincula o lançamento ao frete ativo do motorista (mesma regra do finalize)
+      const freteAtivo = fretes.find(f =>
+        (f.motoristaUid === filterMot || f.motorista_id === filterMot) &&
+        (f.status === 'ativo' || f.status === 'pendente'));
+      const freteId = freteAtivo?.id;
       if (showAddModal === 'despesa' || showAddModal === 'manutencao') {
-        await api.post('/despesas', { motorista_id: filterMot, tipo: showAddModal === 'manutencao' ? 'manutencao' : 'geral', descricao: newItemData.descricao, valor: Number(newItemData.valor), quem_pagou: newItemData.quemPagou || 'proprietario' });
+        await api.post('/despesas', { motorista_id: filterMot, frete_id: freteId, tipo: showAddModal === 'manutencao' ? 'manutencao' : 'geral', descricao: newItemData.descricao, valor: Number(newItemData.valor), quem_pagou: newItemData.quemPagou || 'proprietario' });
       } else if (showAddModal === 'abastecimento') {
-        await api.post('/abastecimentos', { motorista_id: filterMot, posto: newItemData.posto, litros: Number(newItemData.litros), valor_total: Number(newItemData.valorTotal), quem_pagou: newItemData.quemPagou || 'proprietario' });
+        await api.post('/abastecimentos', { motorista_id: filterMot, frete_id: freteId, posto: newItemData.posto, litros: Number(newItemData.litros), valor_total: Number(newItemData.valorTotal), quem_pagou: newItemData.quemPagou || 'proprietario' });
       } else if (showAddModal === 'vale') {
-        await api.post('/vales', { motorista_id: filterMot, descricao: newItemData.descricao, valor: Number(newItemData.valor), quem_pagou: newItemData.quemPagou || 'proprietario' });
+        await api.post('/vales', { motorista_id: filterMot, frete_id: freteId, descricao: newItemData.descricao, valor: Number(newItemData.valor), quem_pagou: newItemData.quemPagou || 'proprietario' });
       }
       if (filterMot !== 'todos') loadMotoristaData(filterMot);
       setShowAddModal(null);
@@ -329,11 +334,11 @@ export const GerenciamentoViagens: React.FC = () => {
       if (ativo) {
         // Finaliza via rota dedicada — o backend é a trava final (409 se houver pendência)
         await api.post('/fretes/' + ativo.id + '/finalizar');
-        // Marca os aprovados como finalizado SOMENTE após a finalização ter sucesso
+        // Marca como finalizado SOMENTE os aprovados DESTA viagem (frete ativo), após sucesso
         const promises = [
-          ...despesas.filter(d => d.status === 'aprovado').map(d => api.patch('/despesas/' + d.id, { status: 'finalizado' })),
-          ...abastecimentos.filter(a => a.status === 'aprovado').map(a => api.patch('/abastecimentos/' + a.id, { status: 'finalizado' })),
-          ...vales.filter(v => v.status === 'aprovado').map(v => api.patch('/vales/' + v.id, { status: 'finalizado' }))
+          ...despesas.filter(d => d.status === 'aprovado' && d.frete_id === ativo.id).map(d => api.patch('/despesas/' + d.id, { status: 'finalizado' })),
+          ...abastecimentos.filter(a => a.status === 'aprovado' && a.frete_id === ativo.id).map(a => api.patch('/abastecimentos/' + a.id, { status: 'finalizado' })),
+          ...vales.filter(v => v.status === 'aprovado' && v.frete_id === ativo.id).map(v => api.patch('/vales/' + v.id, { status: 'finalizado' }))
         ];
         await Promise.all(promises);
       }
