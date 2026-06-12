@@ -117,17 +117,20 @@ export const ResumoMotorista: React.FC = () => {
 
       setFretesDetalhados(fretes);
 
-      const despesas = (despesasData || []).filter((d: any) => d.status === 'aprovado').map((d: any) => ({
+      // Histórico: inclui aprovados E finalizados (ao finalizar a viagem, itens aprovados viram 'finalizado').
+      // Pendentes/rejeitados ficam fora (rejeitados em auditoria = bloco próprio).
+      const despesas = (despesasData || []).filter((d: any) => d.status === 'aprovado' || d.status === 'finalizado').map((d: any) => ({
         motoristaUid: d.motorista_id,
         valor: parseFloat(d.valor),
         descricao: d.descricao,
         tipo: d.tipo,
         quemPagou: d.quem_pagou,
         data: d.data,
-        frete_id: d.frete_id
+        frete_id: d.frete_id,
+        fotoUrl: d.foto_url
       }));
 
-      const abastecimentos = (abastecimentosData || []).filter((a: any) => a.status === 'aprovado').map((a: any) => ({
+      const abastecimentos = (abastecimentosData || []).filter((a: any) => a.status === 'aprovado' || a.status === 'finalizado').map((a: any) => ({
         motoristaUid: a.motorista_id,
         valorTotal: parseFloat(a.valor_total),
         litros: parseFloat(a.litros),
@@ -136,10 +139,11 @@ export const ResumoMotorista: React.FC = () => {
         posto: a.posto,
         quemPagou: a.quem_pagou,
         data: a.data,
-        frete_id: a.frete_id
+        frete_id: a.frete_id,
+        fotoUrl: a.foto_url
       }));
 
-      const vales = (valesData || []).filter((v: any) => v.status === 'aprovado').map((v: any) => ({
+      const vales = (valesData || []).filter((v: any) => v.status === 'aprovado' || v.status === 'finalizado').map((v: any) => ({
         motoristaUid: v.motorista_id,
         valor: parseFloat(v.valor),
         // Vale: descricao correto; posto é fallback p/ registros antigos
@@ -595,7 +599,7 @@ export const ResumoMotorista: React.FC = () => {
                   <p className="text-[10px] font-bold text-blue-600 uppercase mb-2 flex items-center"><Fuel size={14} className="mr-1" /> Abastecimentos</p>
                   {fAbs.map((a, i) => (
                     <div key={`a-${i}`} className="flex justify-between items-center text-sm bg-blue-50/50 rounded-lg px-3 py-2 border border-blue-100 mb-1">
-                      <span className="text-gray-700">{a.posto} <span className="text-gray-400">({a.litros.toFixed(1)}L)</span></span>
+                      <span className="text-gray-700">{a.posto} <span className="text-gray-400">({a.litros.toFixed(1)}L)</span>{a.fotoUrl && <> • <a href={a.fotoUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Ver comprovante</a></>}</span>
                       <span className="font-bold text-gray-800">{formatCurrency(a.valorTotal)}</span>
                     </div>
                   ))}
@@ -610,7 +614,7 @@ export const ResumoMotorista: React.FC = () => {
                   <p className="text-[10px] font-bold text-red-500 uppercase mb-2 flex items-center"><FileText size={14} className="mr-1" /> Despesas</p>
                   {fDesp.map((d, i) => (
                     <div key={`d-${i}`} className="flex justify-between items-center text-sm bg-red-50/50 rounded-lg px-3 py-2 border border-red-100 mb-1">
-                      <span className="text-gray-700">{d.descricao}</span>
+                      <span className="text-gray-700">{d.descricao}{d.fotoUrl && <> • <a href={d.fotoUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Ver comprovante</a></>}</span>
                       <span className="font-bold text-gray-800">{formatCurrency(d.valor)}</span>
                     </div>
                   ))}
@@ -823,13 +827,13 @@ export const ResumoMotorista: React.FC = () => {
                       <div className="p-4 space-y-2">
                         {unlinkedAbs.map((a, i) => (
                           <div key={`ul-abs-${i}`} className="flex justify-between items-center text-sm bg-blue-50/50 rounded-lg px-3 py-2 border border-blue-100">
-                            <span className="text-gray-700"><Fuel size={14} className="inline mr-1 text-blue-500" />{a.posto} <span className="text-gray-400">({a.litros}L)</span></span>
+                            <span className="text-gray-700"><Fuel size={14} className="inline mr-1 text-blue-500" />{a.posto} <span className="text-gray-400">({a.litros}L)</span>{a.fotoUrl && <> • <a href={a.fotoUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Ver comprovante</a></>}</span>
                             <span className="font-bold text-gray-700">{formatCurrency(a.valorTotal)}</span>
                           </div>
                         ))}
                         {unlinkedDesp.map((d, i) => (
                           <div key={`ul-desp-${i}`} className="flex justify-between items-center text-sm bg-orange-50/50 rounded-lg px-3 py-2 border border-orange-100">
-                            <span className="text-gray-700"><FileText size={14} className="inline mr-1 text-orange-500" />{d.descricao}</span>
+                            <span className="text-gray-700"><FileText size={14} className="inline mr-1 text-orange-500" />{d.descricao}{d.fotoUrl && <> • <a href={d.fotoUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Ver comprovante</a></>}</span>
                             <span className="font-bold text-gray-700">{formatCurrency(d.valor)}</span>
                           </div>
                         ))}

@@ -93,6 +93,7 @@ export const Dashboard: React.FC = () => {
         quemPagou: d.quem_pagou,
         status: d.status,
         data: d.data,
+        fotoUrl: d.foto_url,
         tipo: d.tipo === 'manutencao' ? 'manutencao' : 'despesa'  // preserva sub-tipo de manutenção
       })));
       setAbastecimentos(abastData.filter((a: any) => a.status !== 'finalizado').map((a: any) => ({
@@ -105,6 +106,7 @@ export const Dashboard: React.FC = () => {
         status: a.status,
         data: a.data,
         frete_id: a.frete_id,
+        fotoUrl: a.foto_url,
         tipo: 'abastecimento'   // tipo explícito — elimina heurística baseada em litros
       })));
       setVales(valesData.filter((v: any) => v.status !== 'finalizado').map((v: any) => ({
@@ -495,6 +497,11 @@ export const Dashboard: React.FC = () => {
                               {item.descricao || item.posto || 'Vale/Adiantamento'} {item.litros && <span className="text-xs text-blue-600">({item.litros}L)</span>}
                             </p>
                             <p className="text-xs text-gray-500">Pago por: {item.quemPagou} • {format(new Date(item.data), 'dd/MM HH:mm')}</p>
+                            {type !== 'vale' && item.fotoUrl && (
+                              <p className="text-xs mt-0.5">
+                                <a href={item.fotoUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Ver comprovante</a>
+                              </p>
+                            )}
                           </div>
                           <div className="flex items-center space-x-2">
                             <span className={`font-bold ${type === 'vale' ? 'text-red-600' : 'text-gray-700'}`}>{formatCurrency(Math.abs(item.valor || item.valorTotal))}</span>
