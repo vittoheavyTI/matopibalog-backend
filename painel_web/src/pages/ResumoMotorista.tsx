@@ -47,8 +47,9 @@ export const ResumoMotorista: React.FC = () => {
   const [tripDesp, setTripDesp] = useState<any[]>([]);
   const [tripAbs, setTripAbs] = useState<any[]>([]);
   const [tripVales, setTripVales] = useState<any[]>([]);
-  // Rejeitados da viagem — exibidos só para auditoria (Etapa C).
-  // NUNCA entram nos cálculos nem no PDF: gerarPDFViagem lê apenas tripDesp/tripAbs/tripVales.
+  // Rejeitados da viagem — exibidos só para auditoria (Etapas C/D).
+  // NUNCA entram nos cálculos; no PDF aparecem apenas na seção
+  // "LANÇAMENTOS REJEITADOS — FORA DOS CÁLCULOS", sem totais.
   const [tripDespRej, setTripDespRej] = useState<any[]>([]);
   const [tripAbsRej, setTripAbsRej] = useState<any[]>([]);
   const [tripValesRej, setTripValesRej] = useState<any[]>([]);
@@ -450,11 +451,50 @@ export const ResumoMotorista: React.FC = () => {
 
       doc.setFontSize(18).setFont("helvetica", "bold");
       doc.text('RELATÓRIO DE VIAGEM', 105, 42, { align: 'center' });
+      doc.setFontSize(8).setFont("helvetica", "normal");
+      doc.text(`Emitido em: ${new Date().toLocaleString('pt-BR')}`, 105, 47, { align: 'center' });
 
       // Mesmos arrays do detalhe aberto (por frete_id) — tela e PDF sempre iguais
       const fDesp = tripDesp;
       const fAbs = tripAbs;
       const fVales = tripVales;
+
+      // Linha extra de auditoria (justificativa/comprovante) abaixo do item,
+      // em colSpan na largura total — não espreme colunas e não afeta totais:
+      // os foots somam o ARRAY de dados, nunca as linhas da tabela.
+      const montarBody = (
+        itens: any[],
+        linhaPrincipal: (item: any) => any[],
+        colunas: number,
+        comComprovante: boolean,
+        justificativaObrigatoria = false
+      ) => {
+        const body: any[] = [];
+        const links: Record<number, string> = {};
+        itens.forEach(item => {
+          body.push(linhaPrincipal(item));
+          const partes: string[] = [];
+          const obs = item.obsResolucao || (justificativaObrigatoria ? 'Sem justificativa informada' : '');
+          if (obs) partes.push(`Justificativa: ${obs}`);
+          if (comComprovante && item.fotoUrl) partes.push('Ver comprovante');
+          if (partes.length > 0) {
+            if (comComprovante && item.fotoUrl) links[body.length] = item.fotoUrl;
+            body.push([{
+              content: partes.join('   •   '),
+              colSpan: colunas,
+              styles: { fontSize: 8, textColor: [100, 116, 139], fontStyle: 'italic' }
+            }]);
+          }
+        });
+        return { body, links };
+      };
+      // Torna a linha com "Ver comprovante" clicável sem imprimir a URL crua.
+      const linkComprovante = (links: Record<number, string>) => (data: any) => {
+        const url = links[data.row.index];
+        if (data.section === 'body' && url) {
+          doc.link(data.cell.x, data.cell.y, data.cell.width, data.cell.height, { url });
+        }
+      };
 
       const motInfo = motoristas.find(m => m.uid === selectedMot);
       const motNome = motInfo?.nomeCompleto || trip.motoristaNome || 'N/A';
@@ -495,15 +535,16 @@ export const ResumoMotorista: React.FC = () => {
       const finalY = (doc as any).lastAutoTable?.finalY || yAfter;
 
       if (fAbs.length > 0) {
+        const abs = montarBody(fAbs, (a: any) => [
+          a.posto || '-',
+          `${Number(a.litros || 0).toFixed(1)}L`,
+          a.arlaLitros ? `${a.arlaLitros.toFixed(1)}L (${formatCurrency(a.arlaValor)})` : '-',
+          formatCurrency(a.valorTotal)
+        ], 4, true);
         autoTable(doc, {
           startY: finalY + 10,
           head: [['Abastecimentos', 'Litros', 'ARLA', 'Valor']],
-          body: fAbs.map(a => [
-            a.posto || '-',
-            `${a.litros.toFixed(1)}L`,
-            a.arlaLitros ? `${a.arlaLitros.toFixed(1)}L (${formatCurrency(a.arlaValor)})` : '-',
-            formatCurrency(a.valorTotal)
-          ]),
+          body: abs.body,
           foot: [[
             'TOTAL',
             `${fAbs.reduce((s, a) => s + a.litros, 0).toFixed(1)}L`,
@@ -511,40 +552,45 @@ export const ResumoMotorista: React.FC = () => {
             formatCurrency(fAbs.reduce((s, a) => s + a.valorTotal, 0))
           ]],
           headStyles: { fillColor: [59, 130, 246] },
-          footStyles: { fillColor: [241, 245, 249], textColor: [31, 41, 55], fontStyle: 'bold' }
+          footStyles: { fillColor: [241, 245, 249], textColor: [31, 41, 55], fontStyle: 'bold' },
+          didDrawCell: linkComprovante(abs.links)
         });
       }
 
       const yAbs = (doc as any).lastAutoTable?.finalY || finalY;
 
       if (fDesp.length > 0) {
+        const desp = montarBody(fDesp, (d: any) => [
+          d.descricao,
+          d.tipo || '-',
+          d.quemPagou === 'proprietario' ? 'Proprietário' : d.quemPagou === 'motorista' ? 'Motorista' : '-',
+          formatCurrency(d.valor)
+        ], 4, true);
         autoTable(doc, {
           startY: yAbs + 10,
           head: [['Despesas', 'Tipo', 'Quem Pagou', 'Valor']],
-          body: fDesp.map(d => [
-            d.descricao,
-            d.tipo || '-',
-            d.quemPagou === 'proprietario' ? 'Proprietário' : d.quemPagou === 'motorista' ? 'Motorista' : '-',
-            formatCurrency(d.valor)
-          ]),
+          body: desp.body,
           foot: [['TOTAL', '', '', formatCurrency(fDesp.reduce((s, d) => s + d.valor, 0))]],
           headStyles: { fillColor: [239, 68, 68] },
-          footStyles: { fillColor: [241, 245, 249], textColor: [31, 41, 55], fontStyle: 'bold' }
+          footStyles: { fillColor: [241, 245, 249], textColor: [31, 41, 55], fontStyle: 'bold' },
+          didDrawCell: linkComprovante(desp.links)
         });
       }
 
       const yDesp = (doc as any).lastAutoTable?.finalY || yAbs;
 
       if (fVales.length > 0) {
+        // Vales não têm comprovante (mapVale não traz foto_url)
+        const vls = montarBody(fVales, (v: any) => [
+          'Vale',
+          v.descricao || v.posto || 'Vale/Adiantamento',
+          v.quemPagou === 'proprietario' ? 'Proprietário' : v.quemPagou === 'motorista' ? 'Motorista' : '-',
+          formatCurrency(v.valor)
+        ], 4, false);
         autoTable(doc, {
           startY: yDesp + 10,
           head: [['Vales', 'Descrição', 'Quem Pagou', 'Valor']],
-          body: fVales.map(v => [
-            'Vale',
-            v.descricao || v.posto || 'Vale/Adiantamento',
-            v.quemPagou === 'proprietario' ? 'Proprietário' : v.quemPagou === 'motorista' ? 'Motorista' : '-',
-            formatCurrency(v.valor)
-          ]),
+          body: vls.body,
           foot: [['TOTAL', '', '', formatCurrency(fVales.reduce((s, v) => s + v.valor, 0))]],
           headStyles: { fillColor: [249, 115, 22] },
           footStyles: { fillColor: [241, 245, 249], textColor: [31, 41, 55], fontStyle: 'bold' }
@@ -583,6 +629,74 @@ export const ResumoMotorista: React.FC = () => {
           row.cells.forEach((cell: any) => { cell.styles.fontStyle = 'bold'; cell.styles.fontSize = 12; });
         }
       });
+
+      // ===== Auditoria: lançamentos rejeitados (Etapa D) =====
+      // Lê APENAS tripDespRej/tripAbsRej/tripValesRej. Sem foot/total de
+      // propósito: nada desta seção entra em soma alguma.
+      if (tripDespRej.length > 0 || tripAbsRej.length > 0 || tripValesRej.length > 0) {
+        let yRej = ((doc as any).lastAutoTable?.finalY || ySummary) + 15;
+        // Título é doc.text manual (não pagina sozinho): perto do rodapé, vira página
+        if (yRej > doc.internal.pageSize.getHeight() - 40) {
+          doc.addPage();
+          yRej = 20;
+        }
+        doc.setFontSize(12).setFont("helvetica", "bold");
+        doc.text('LANÇAMENTOS REJEITADOS — FORA DOS CÁLCULOS', 14, yRej);
+        doc.setFontSize(8).setFont("helvetica", "normal");
+        doc.text('Exibidos somente para auditoria; não entram em nenhum total.', 14, yRej + 5);
+        const estiloRej = {
+          headStyles: { fillColor: [148, 163, 184] as any },
+          bodyStyles: { textColor: [100, 116, 139] as any }
+        };
+        let yTab = yRej + 10;
+        if (tripDespRej.length > 0) {
+          const rej = montarBody(tripDespRej, (d: any) => [
+            d.descricao,
+            d.tipo || '-',
+            'REJEITADO',
+            formatCurrency(d.valor)
+          ], 4, true, true);
+          autoTable(doc, {
+            startY: yTab,
+            head: [['Despesas rejeitadas', 'Tipo', 'Status', 'Valor']],
+            body: rej.body,
+            ...estiloRej,
+            didDrawCell: linkComprovante(rej.links)
+          });
+          yTab = (doc as any).lastAutoTable.finalY + 8;
+        }
+        if (tripAbsRej.length > 0) {
+          const rej = montarBody(tripAbsRej, (a: any) => [
+            a.posto || '-',
+            `${Number(a.litros || 0).toFixed(1)}L`,
+            'REJEITADO',
+            formatCurrency(a.valorTotal)
+          ], 4, true, true);
+          autoTable(doc, {
+            startY: yTab,
+            head: [['Abastecimentos rejeitados', 'Litros', 'Status', 'Valor']],
+            body: rej.body,
+            ...estiloRej,
+            didDrawCell: linkComprovante(rej.links)
+          });
+          yTab = (doc as any).lastAutoTable.finalY + 8;
+        }
+        if (tripValesRej.length > 0) {
+          // Vales não têm comprovante (mapVale não traz foto_url)
+          const rej = montarBody(tripValesRej, (v: any) => [
+            v.descricao || v.posto || 'Vale/Adiantamento',
+            'Vale',
+            'REJEITADO',
+            formatCurrency(v.valor)
+          ], 4, false, true);
+          autoTable(doc, {
+            startY: yTab,
+            head: [['Vales rejeitados', 'Tipo', 'Status', 'Valor']],
+            body: rej.body,
+            ...estiloRej
+          });
+        }
+      }
 
       doc.save(`Viagem_${trip.origem}_${trip.destino}_${safeFmt(trip.data, 'ddMMyyyy')}.pdf`);
     } catch (error) {
