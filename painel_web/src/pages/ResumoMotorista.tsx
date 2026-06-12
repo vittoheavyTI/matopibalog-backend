@@ -47,6 +47,8 @@ export const ResumoMotorista: React.FC = () => {
   const [tripDesp, setTripDesp] = useState<any[]>([]);
   const [tripAbs, setTripAbs] = useState<any[]>([]);
   const [tripVales, setTripVales] = useState<any[]>([]);
+  // true enquanto os 3 GETs por frete_id estão em voo — bloqueia o PDF de sair vazio
+  const [tripLoading, setTripLoading] = useState(false);
 
   useEffect(() => {
     const init = async () => {
@@ -77,7 +79,12 @@ export const ResumoMotorista: React.FC = () => {
     // Limpa imediatamente: ao trocar de viagem, nada da anterior pode aparecer
     // na tela nem entrar num PDF gerado durante o carregamento.
     setTripDesp([]); setTripAbs([]); setTripVales([]);
+    // Desliga o loading aqui também: se o efeito anterior foi cancelado (vivo=false),
+    // o finally dele não roda — sem isso, "Voltar para Motoristas" durante o fetch
+    // deixaria tripLoading preso em true.
+    setTripLoading(false);
     if (!selectedTripId) return;
+    setTripLoading(true);
     let vivo = true;
     (async () => {
       try {
@@ -107,6 +114,8 @@ export const ResumoMotorista: React.FC = () => {
         })));
       } catch (err) {
         console.error('Erro ao carregar lançamentos da viagem:', err);
+      } finally {
+        if (vivo) setTripLoading(false);
       }
     })();
     return () => { vivo = false; };
@@ -741,11 +750,11 @@ export const ResumoMotorista: React.FC = () => {
         <div className="flex justify-center">
           <button
             onClick={() => gerarPDFViagem(trip)}
-            disabled={isGenerating}
+            disabled={isGenerating || tripLoading}
             className="flex items-center px-6 py-3 bg-blue-600 text-white rounded-xl font-bold shadow-lg hover:bg-blue-700 transition-all active:scale-95 disabled:opacity-50"
           >
             <Printer size={20} className="mr-2" />
-            {isGenerating ? 'Gerando...' : 'Imprimir Relatório deste Frete'}
+            {tripLoading ? 'Carregando lançamentos...' : isGenerating ? 'Gerando...' : 'Imprimir Relatório deste Frete'}
           </button>
         </div>
       </>
@@ -758,8 +767,16 @@ export const ResumoMotorista: React.FC = () => {
       {selectedTripId ? renderDetalheViagem() : (<>
       <div className="flex flex-wrap justify-between items-center gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-gray-800">Resumo por Motorista</h2>
-          <p className="text-gray-500 text-sm">Acompanhamento financeiro consolidado</p>
+          {selectedMot !== 'todos' && (
+            <button
+              onClick={() => { setSelectedMot('todos'); setSelectedTripId(null); }}
+              className="flex items-center text-blue-600 hover:text-blue-800 font-bold transition-colors text-sm mb-1"
+            >
+              <ChevronLeft size={18} className="mr-1" /> Voltar para Motoristas
+            </button>
+          )}
+          <h2 className="text-2xl font-bold text-gray-800">Histórico de Fretes</h2>
+          <p className="text-gray-500 text-sm">Auditoria de viagens, lançamentos, comprovantes e resultado financeiro por frete.</p>
         </div>
         {stats.length > 0 && (
           <button
