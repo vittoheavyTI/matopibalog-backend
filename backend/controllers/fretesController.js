@@ -187,7 +187,8 @@ exports.update = async (req, res) => {
     }
 
     // Extrair APENAS campos permitidos (previne mass assignment)
-    const { origem, destino, km_inicial, km_final, valor_frete, status, quem_recebeu } = req.body;
+    // data com alias (dataFrete) para não colidir com o const { data } do Supabase abaixo
+    const { origem, destino, km_inicial, km_final, valor_frete, status, quem_recebeu, data: dataFrete } = req.body;
     const allowedUpdate = {};
     if (origem !== undefined) allowedUpdate.origem = origem;
     if (destino !== undefined) allowedUpdate.destino = destino;
@@ -196,6 +197,7 @@ exports.update = async (req, res) => {
     if (valor_frete !== undefined) allowedUpdate.valor_frete = parseFloat(valor_frete);
     if (status !== undefined) allowedUpdate.status = status;
     if (quem_recebeu !== undefined) allowedUpdate.quem_recebeu = quem_recebeu;
+    if (dataFrete !== undefined) allowedUpdate.data = dataFrete;
 
     if (Object.keys(allowedUpdate).length === 0) {
       return res.status(400).json({ message: 'Nenhum campo válido para atualizar.' });
