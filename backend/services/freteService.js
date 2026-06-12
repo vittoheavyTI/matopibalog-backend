@@ -13,4 +13,35 @@ async function checarFreteAberto(freteId) {
   return { ok: true, status: data.status };
 }
 
-module.exports = { checarFreteAberto, STATUS_ENCERRADOS };
+// Resolve o frete de um lançamento. Regra única antifraude (vale p/ todos os perfis):
+// - frete_id informado → frete deve existir e estar aberto (ativo/pendente);
+// - frete_id vazio → busca viagens abertas do motorista:
+//     0 → 409 (sem viagem ativa) | 1 → vincula automaticamente | >1 → 409 (ambíguo).
+// Nunca lança exceção: erros viram { ok:false, http, message } para uso direto nos controllers.
+async function resolverFreteParaLancamento(freteId, motoristaId) {
+  if (freteId) {
+    const check = await checarFreteAberto(freteId);
+    if (check.notFound) return { ok: false, http: 404, message: 'Frete não encontrado.' };
+    if (check.encerrado) {
+      const palavra = check.status === 'cancelado' ? 'cancelada' : 'finalizada';
+      return { ok: false, http: 409, message: `Não é possível lançar em uma viagem ${palavra}.` };
+    }
+    return { ok: true, freteId };
+  }
+  const { data, error } = await supabase
+    .from('fretes')
+    .select('id')
+    .eq('motorista_id', motoristaId)
+    .in('status', ['ativo', 'pendente']);
+  if (error) return { ok: false, http: 500, message: 'Erro ao validar a viagem do lançamento.' };
+  const abertos = data || [];
+  if (abertos.length === 0) {
+    return { ok: false, http: 409, message: 'Não há viagem ativa para este motorista. Inicie um frete antes de lançar.' };
+  }
+  if (abertos.length > 1) {
+    return { ok: false, http: 409, message: 'Há mais de uma viagem ativa para este motorista. Selecione a viagem no lançamento.' };
+  }
+  return { ok: true, freteId: abertos[0].id, vinculadoAutomaticamente: true };
+}
+
+module.exports = { checarFreteAberto, resolverFreteParaLancamento, STATUS_ENCERRADOS };

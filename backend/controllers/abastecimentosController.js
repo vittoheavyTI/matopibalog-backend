@@ -1,7 +1,7 @@
 const supabase = require('../config/supabase');
 const path = require('path');
 const notificacaoService = require('../services/notificacaoService');
-const { checarFreteAberto } = require('../services/freteService');
+const { resolverFreteParaLancamento } = require('../services/freteService');
 
 exports.getAll = async (req, res) => {
   const { motorista_id, frete_id } = req.query;
@@ -47,13 +47,9 @@ exports.create = async (req, res) => {
   const { litros, valor_total, quem_pagou, arla_litros, arla_valor, posto, frete_id, motorista_id } = req.body;
   const motorista_id_final = req.user.role === 'admin' ? (motorista_id || req.user.uid) : req.user.uid;
 
-  // Trava: não permitir lançar em viagem encerrada (finalizada/cancelada)
-  const freteCheck = await checarFreteAberto(frete_id);
-  if (freteCheck.notFound) return res.status(404).json({ message: 'Frete não encontrado.' });
-  if (freteCheck.encerrado) {
-    const palavra = freteCheck.status === 'cancelado' ? 'cancelada' : 'finalizada';
-    return res.status(409).json({ message: `Não é possível lançar em uma viagem ${palavra}.` });
-  }
+  // Trava antifraude: todo lançamento exige viagem aberta (vincula automaticamente se houver só uma)
+  const freteResolvido = await resolverFreteParaLancamento(frete_id, motorista_id_final);
+  if (!freteResolvido.ok) return res.status(freteResolvido.http).json({ message: freteResolvido.message });
 
   const file = req.file;
 
@@ -99,7 +95,7 @@ exports.create = async (req, res) => {
     const { data, error } = await supabase
       .from('abastecimentos')
       .insert({
-        motorista_id: motorista_id_final, empresa_id: userData.empresa_id, frete_id, litros: parseFloat(litros), valor_total: parseFloat(valor_total),
+        motorista_id: motorista_id_final, empresa_id: userData.empresa_id, frete_id: freteResolvido.freteId, litros: parseFloat(litros), valor_total: parseFloat(valor_total),
         quem_pagou, arla_litros: arla_litros ? parseFloat(arla_litros) : 0,
         arla_valor: arla_valor ? parseFloat(arla_valor) : 0,
         posto, foto_url: publicUrl,

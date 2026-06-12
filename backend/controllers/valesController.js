@@ -1,7 +1,7 @@
 const supabase = require('../config/supabase');
 const path = require('path');
 const notificacaoService = require('../services/notificacaoService');
-const { checarFreteAberto } = require('../services/freteService');
+const { resolverFreteParaLancamento } = require('../services/freteService');
 
 exports.getAll = async (req, res) => {
   const { motorista_id, frete_id } = req.query;
@@ -47,13 +47,9 @@ exports.create = async (req, res) => {
   const { valor, quem_pagou, descricao, posto, litros, frete_id, motorista_id } = req.body;
   const motorista_id_final = req.user.role === 'admin' ? (motorista_id || req.user.uid) : req.user.uid;
 
-  // Trava: não permitir lançar em viagem encerrada (finalizada/cancelada)
-  const freteCheck = await checarFreteAberto(frete_id);
-  if (freteCheck.notFound) return res.status(404).json({ message: 'Frete não encontrado.' });
-  if (freteCheck.encerrado) {
-    const palavra = freteCheck.status === 'cancelado' ? 'cancelada' : 'finalizada';
-    return res.status(409).json({ message: `Não é possível lançar em uma viagem ${palavra}.` });
-  }
+  // Trava antifraude: todo lançamento exige viagem aberta (vincula automaticamente se houver só uma)
+  const freteResolvido = await resolverFreteParaLancamento(frete_id, motorista_id_final);
+  if (!freteResolvido.ok) return res.status(freteResolvido.http).json({ message: freteResolvido.message });
 
   const file = req.file;
 
@@ -77,7 +73,7 @@ exports.create = async (req, res) => {
     const { data, error } = await supabase
       .from('vales')
       .insert({
-        motorista_id: motorista_id_final, empresa_id: userData.empresa_id, frete_id, valor: parseFloat(valor),
+        motorista_id: motorista_id_final, empresa_id: userData.empresa_id, frete_id: freteResolvido.freteId, valor: parseFloat(valor),
         quem_pagou, descricao, posto, litros: litros ? parseFloat(litros) : 0,
         foto_url: publicUrl,
         status: req.user.role === 'admin' ? 'aprovado' : 'pendente'
