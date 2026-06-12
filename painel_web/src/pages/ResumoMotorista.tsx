@@ -42,6 +42,11 @@ export const ResumoMotorista: React.FC = () => {
   const [despesasDet, setDespesasDet] = useState<any[]>([]);
   const [abastecimentosDet, setAbastecimentosDet] = useState<any[]>([]);
   const [valesDet, setValesDet] = useState<any[]>([]);
+  // Lançamentos da viagem aberta — buscados por frete_id direto na API (modelo do app).
+  // Independe do mês do lançamento; os arrays mensais continuam alimentando stats/totais.
+  const [tripDesp, setTripDesp] = useState<any[]>([]);
+  const [tripAbs, setTripAbs] = useState<any[]>([]);
+  const [tripVales, setTripVales] = useState<any[]>([]);
 
   useEffect(() => {
     const init = async () => {
@@ -52,7 +57,7 @@ export const ResumoMotorista: React.FC = () => {
           nomeCompleto: m.usuarios.nome,
           percentualComissao: m.percentual_comissao,
           placa: m.placa_veiculo
-        })));
+        })).sort((a: any, b: any) => (a.nomeCompleto || '').localeCompare(b.nomeCompleto || '')));
       } catch (err) {
         console.error('Erro ao buscar motoristas:', err);
       }
@@ -66,6 +71,46 @@ export const ResumoMotorista: React.FC = () => {
       loadData();
     }
   }, [selectedDate, selectedMot, motoristas]);
+
+  // Histórico: aprovado e finalizado entram; pendente fica fora; rejeitado entra na etapa de auditoria (C)
+  useEffect(() => {
+    // Limpa imediatamente: ao trocar de viagem, nada da anterior pode aparecer
+    // na tela nem entrar num PDF gerado durante o carregamento.
+    setTripDesp([]); setTripAbs([]); setTripVales([]);
+    if (!selectedTripId) return;
+    let vivo = true;
+    (async () => {
+      try {
+        const [rd, ra, rv] = await Promise.all([
+          api.get('/despesas?frete_id=' + selectedTripId),
+          api.get('/abastecimentos?frete_id=' + selectedTripId),
+          api.get('/vales?frete_id=' + selectedTripId),
+        ]);
+        if (!vivo) return;
+        const resolvido = (s: string) => s === 'aprovado' || s === 'finalizado';
+        setTripDesp((rd.data || []).filter((d: any) => resolvido(d.status)).map((d: any) => ({
+          valor: parseFloat(d.valor), descricao: d.descricao, tipo: d.tipo,
+          quemPagou: d.quem_pagou, data: d.data, frete_id: d.frete_id,
+          fotoUrl: d.foto_url, obsResolucao: d.obs_resolucao
+        })));
+        setTripAbs((ra.data || []).filter((a: any) => resolvido(a.status)).map((a: any) => ({
+          valorTotal: parseFloat(a.valor_total), litros: parseFloat(a.litros),
+          arlaLitros: a.arla_litros ? parseFloat(a.arla_litros) : null,
+          arlaValor: a.arla_valor ? parseFloat(a.arla_valor) : null,
+          posto: a.posto, quemPagou: a.quem_pagou, data: a.data, frete_id: a.frete_id,
+          fotoUrl: a.foto_url, obsResolucao: a.obs_resolucao
+        })));
+        setTripVales((rv.data || []).filter((v: any) => resolvido(v.status)).map((v: any) => ({
+          valor: parseFloat(v.valor), descricao: v.descricao || v.posto || '',
+          posto: v.posto, quemPagou: v.quem_pagou, data: v.data, frete_id: v.frete_id,
+          obsResolucao: v.obs_resolucao
+        })));
+      } catch (err) {
+        console.error('Erro ao carregar lançamentos da viagem:', err);
+      }
+    })();
+    return () => { vivo = false; };
+  }, [selectedTripId]);
 
   const loadData = async () => {
     const date = new Date(selectedDate + '-01T12:00:00');
@@ -383,9 +428,10 @@ export const ResumoMotorista: React.FC = () => {
       doc.setFontSize(18).setFont("helvetica", "bold");
       doc.text('RELATÓRIO DE VIAGEM', 105, 42, { align: 'center' });
 
-      const fDesp = despesasDet.filter(d => d.frete_id === trip.id);
-      const fAbs = abastecimentosDet.filter(a => a.frete_id === trip.id);
-      const fVales = valesDet.filter(v => v.frete_id === trip.id);
+      // Mesmos arrays do detalhe aberto (por frete_id) — tela e PDF sempre iguais
+      const fDesp = tripDesp;
+      const fAbs = tripAbs;
+      const fVales = tripVales;
 
       const motInfo = motoristas.find(m => m.uid === selectedMot);
       const motNome = motInfo?.nomeCompleto || trip.motoristaNome || 'N/A';
@@ -483,10 +529,16 @@ export const ResumoMotorista: React.FC = () => {
       }
 
       const ySummary = (doc as any).lastAutoTable?.finalY || yDesp;
-      const totalGastos = fDesp.reduce((s, d) => s + d.valor, 0) + fAbs.reduce((s, a) => s + a.valorTotal, 0) + fVales.reduce((s, v) => s + v.valor, 0);
+      // Mesmas fórmulas da tela (por viagem, sem Math.abs)
       const percentComissao = motInfo?.percentualComissao || 0;
       const valorComissao = trip.valorFrete * (percentComissao / 100);
-      const saldoMotorista = valorComissao - totalGastos;
+      const gastosMotorista = fDesp.filter(d => d.quemPagou === 'motorista').reduce((s, d) => s + d.valor, 0)
+        + fAbs.filter(a => a.quemPagou === 'motorista').reduce((s, a) => s + a.valorTotal, 0);
+      const gastosProprietario = fDesp.filter(d => d.quemPagou === 'proprietario').reduce((s, d) => s + d.valor, 0)
+        + fAbs.filter(a => a.quemPagou === 'proprietario').reduce((s, a) => s + a.valorTotal, 0);
+      const valesViagem = fVales.filter(v => v.quemPagou === 'proprietario').reduce((s, v) => s + v.valor, 0);
+      const saldoMotorista = valorComissao + gastosMotorista - valesViagem;
+      const resultadoEmpresa = trip.valorFrete - valorComissao - gastosProprietario;
 
       autoTable(doc, {
         startY: ySummary + 15,
@@ -494,15 +546,17 @@ export const ResumoMotorista: React.FC = () => {
           ['RESUMO FINANCEIRO', '', ''],
           ['Valor do Frete', formatCurrency(trip.valorFrete), ''],
           [`Comissão (${percentComissao}%)`, formatCurrency(valorComissao), ''],
-          ['Total Despesas', formatCurrency(totalGastos), ''],
+          ['Desp./Abast. pagos pelo Motorista', formatCurrency(gastosMotorista), ''],
+          ['Vales / Adiantamentos', formatCurrency(valesViagem), ''],
           ['SALDO DO MOTORISTA', formatCurrency(saldoMotorista), ''],
+          ['RESULTADO DA EMPRESA', formatCurrency(resultadoEmpresa), ''],
         ],
         theme: 'plain',
         styles: { fontSize: 11 },
         columnStyles: { 0: { fontStyle: 'bold', cellWidth: 80 }, 1: { cellWidth: 40 } },
       });
       (doc as any).lastAutoTable?.rows?.forEach((row: any, i: number) => {
-        if (i === 0 || i === 4) {
+        if (i === 0 || i === 5 || i === 6) {
           row.cells.forEach((cell: any) => { cell.styles.fontStyle = 'bold'; cell.styles.fontSize = 12; });
         }
       });
@@ -527,17 +581,25 @@ export const ResumoMotorista: React.FC = () => {
       );
     }
 
-    const fDesp = despesasDet.filter(d => d.frete_id === trip.id);
-    const fAbs = abastecimentosDet.filter(a => a.frete_id === trip.id);
-    const fVales = valesDet.filter(v => v.frete_id === trip.id);
+    const fDesp = tripDesp;
+    const fAbs = tripAbs;
+    const fVales = tripVales;
     const dist = trip.km_final && trip.km_inicial ? trip.km_final - trip.km_inicial : 0;
     const litrosTotal = fAbs.reduce((s, a) => s + a.litros, 0);
     const media = litrosTotal > 0 && dist > 0 ? (dist / litrosTotal).toFixed(2) : null;
     const totalDesp = fDesp.reduce((s, d) => s + d.valor, 0);
     const totalAbs = fAbs.reduce((s, a) => s + a.valorTotal, 0);
     const totalVales = fVales.reduce((s, v) => s + v.valor, 0);
-    const totalGastos = totalDesp + totalAbs + totalVales;
-    const saldo = trip.valorFrete - totalGastos;
+    // Cálculo por viagem (somente lançamentos desta viagem; sem Math.abs — sinal real)
+    const percentComissao = motoristas.find(m => m.uid === selectedMot)?.percentualComissao || 0;
+    const comissaoViagem = trip.valorFrete * (percentComissao / 100);
+    const gastosMotorista = fDesp.filter(d => d.quemPagou === 'motorista').reduce((s, d) => s + d.valor, 0)
+      + fAbs.filter(a => a.quemPagou === 'motorista').reduce((s, a) => s + a.valorTotal, 0);
+    const gastosProprietario = fDesp.filter(d => d.quemPagou === 'proprietario').reduce((s, d) => s + d.valor, 0)
+      + fAbs.filter(a => a.quemPagou === 'proprietario').reduce((s, a) => s + a.valorTotal, 0);
+    const valesViagem = fVales.filter(v => v.quemPagou === 'proprietario').reduce((s, v) => s + v.valor, 0);
+    const saldoMotoristaViagem = comissaoViagem + gastosMotorista - valesViagem;
+    const resultadoEmpresaViagem = trip.valorFrete - comissaoViagem - gastosProprietario;
 
     return (
       <>
@@ -599,7 +661,7 @@ export const ResumoMotorista: React.FC = () => {
                   <p className="text-[10px] font-bold text-blue-600 uppercase mb-2 flex items-center"><Fuel size={14} className="mr-1" /> Abastecimentos</p>
                   {fAbs.map((a, i) => (
                     <div key={`a-${i}`} className="flex justify-between items-center text-sm bg-blue-50/50 rounded-lg px-3 py-2 border border-blue-100 mb-1">
-                      <span className="text-gray-700">{a.posto} <span className="text-gray-400">({a.litros.toFixed(1)}L)</span>{a.fotoUrl && <> • <a href={a.fotoUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Ver comprovante</a></>}</span>
+                      <span className="text-gray-700">{a.posto} <span className="text-gray-400">({a.litros.toFixed(1)}L)</span>{a.fotoUrl && <> • <a href={a.fotoUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Ver comprovante</a></>}{a.obsResolucao && <span className="block text-xs text-gray-500 italic">Justificativa: {a.obsResolucao}</span>}</span>
                       <span className="font-bold text-gray-800">{formatCurrency(a.valorTotal)}</span>
                     </div>
                   ))}
@@ -614,7 +676,7 @@ export const ResumoMotorista: React.FC = () => {
                   <p className="text-[10px] font-bold text-red-500 uppercase mb-2 flex items-center"><FileText size={14} className="mr-1" /> Despesas</p>
                   {fDesp.map((d, i) => (
                     <div key={`d-${i}`} className="flex justify-between items-center text-sm bg-red-50/50 rounded-lg px-3 py-2 border border-red-100 mb-1">
-                      <span className="text-gray-700">{d.descricao}{d.fotoUrl && <> • <a href={d.fotoUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Ver comprovante</a></>}</span>
+                      <span className="text-gray-700">{d.descricao}{d.fotoUrl && <> • <a href={d.fotoUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Ver comprovante</a></>}{d.obsResolucao && <span className="block text-xs text-gray-500 italic">Justificativa: {d.obsResolucao}</span>}</span>
                       <span className="font-bold text-gray-800">{formatCurrency(d.valor)}</span>
                     </div>
                   ))}
@@ -629,7 +691,7 @@ export const ResumoMotorista: React.FC = () => {
                   <p className="text-[10px] font-bold text-orange-500 uppercase mb-2 flex items-center"><DollarSign size={14} className="mr-1" /> Vales / Adiantamentos</p>
                   {fVales.map((v, i) => (
                     <div key={`v-${i}`} className="flex justify-between items-center text-sm bg-orange-50/50 rounded-lg px-3 py-2 border border-orange-100 mb-1">
-                      <span className="text-gray-700">{v.descricao || v.posto || 'Vale/Adiantamento'}</span>
+                      <span className="text-gray-700">{v.descricao || v.posto || 'Vale/Adiantamento'}{v.obsResolucao && <span className="block text-xs text-gray-500 italic">Justificativa: {v.obsResolucao}</span>}</span>
                       <span className="font-bold text-orange-700">{formatCurrency(v.valor)}</span>
                     </div>
                   ))}
@@ -653,17 +715,26 @@ export const ResumoMotorista: React.FC = () => {
               <span className="font-bold text-gray-800">{formatCurrency(trip.valorFrete)}</span>
             </div>
             <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
-              <span className="text-gray-500">Comissão do Motorista</span>
-              <span className="font-bold text-green-600">{formatCurrency(trip.valorFrete * ((motoristas.find(m => m.uid === selectedMot)?.percentualComissao || 0) / 100))}</span>
+              <span className="text-gray-500">Comissão do Motorista ({percentComissao}%)</span>
+              <span className="font-bold text-blue-600">{formatCurrency(comissaoViagem)}</span>
             </div>
             <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
-              <span className="text-gray-500">Total de Gastos</span>
-              <span className="font-bold text-red-600">-{formatCurrency(totalGastos)}</span>
+              <span className="text-gray-500">Desp./Abast. pagos pelo Motorista</span>
+              <span className="font-bold text-green-600">+{formatCurrency(gastosMotorista)}</span>
+            </div>
+            <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
+              <span className="text-gray-500">Vales / Adiantamentos</span>
+              <span className="font-bold text-red-600">-{formatCurrency(valesViagem)}</span>
             </div>
             <div className="flex justify-between items-center text-base font-extrabold bg-gray-50 p-3 rounded-lg">
-              <span className="text-gray-700">SALDO DA VIAGEM</span>
-              <span className={saldo >= 0 ? 'text-green-600' : 'text-red-600'}>{formatCurrency(Math.abs(saldo))}</span>
+              <span className="text-gray-700">SALDO DO MOTORISTA</span>
+              <span className={saldoMotoristaViagem >= 0 ? 'text-green-600' : 'text-red-600'}>{formatCurrency(saldoMotoristaViagem)}</span>
             </div>
+            <div className="flex justify-between items-center text-sm font-bold pt-3 border-t border-gray-100">
+              <span className="text-gray-600 flex items-center"><TrendingUp size={16} className="mr-2 text-green-500" /> RESULTADO DA EMPRESA (desta viagem)</span>
+              <span className={resultadoEmpresaViagem >= 0 ? 'text-gray-900' : 'text-red-600'}>{formatCurrency(resultadoEmpresaViagem)}</span>
+            </div>
+            <p className="text-[10px] text-gray-400 px-1">* Frete (−) Comissão (−) Desp./Abast. pagos pela empresa, somente desta viagem.</p>
           </div>
         </div>
 
@@ -873,7 +944,7 @@ export const ResumoMotorista: React.FC = () => {
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {stats.map(s => (
-                    <tr key={s.uid} className="hover:bg-gray-50/50 transition-colors">
+                    <tr key={s.uid} onClick={() => setSelectedMot(s.uid)} className="hover:bg-blue-50/40 transition-colors cursor-pointer" title="Ver viagens deste motorista">
                       <td className="p-4">
                         <div className="flex items-center">
                           <User size={16} className="mr-2 text-blue-500" />
