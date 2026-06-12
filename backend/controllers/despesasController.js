@@ -1,6 +1,7 @@
 const supabase = require('../config/supabase');
 const path = require('path');
 const notificacaoService = require('../services/notificacaoService');
+const { checarFreteAberto } = require('../services/freteService');
 
 exports.getAll = async (req, res) => {
   const { tipo, data_inicio, data_fim, frete_id, motorista_id } = req.query;
@@ -35,6 +36,14 @@ exports.create = async (req, res) => {
   const motorista_id = req.user.role === 'admin'
     ? (req.body.motorista_id || req.user.uid)
     : req.user.uid;
+
+  // Trava: não permitir lançar em viagem encerrada (finalizada/cancelada)
+  const freteCheck = await checarFreteAberto(frete_id);
+  if (freteCheck.notFound) return res.status(404).json({ message: 'Frete não encontrado.' });
+  if (freteCheck.encerrado) {
+    const palavra = freteCheck.status === 'cancelado' ? 'cancelada' : 'finalizada';
+    return res.status(409).json({ message: `Não é possível lançar em uma viagem ${palavra}.` });
+  }
 
   const file = req.file;
 
