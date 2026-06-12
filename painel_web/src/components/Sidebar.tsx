@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Users, FileText, Truck, ChevronLeft, ChevronRight, Upload, X, Check, Trash2, Settings, UserCircle, Plug, Shield, ChevronDown, Receipt } from 'lucide-react';
+import { LayoutDashboard, Users, FileText, Truck, ChevronLeft, ChevronRight, Upload, X, Check, Trash2, Settings, UserCircle, Plug, Shield, ChevronDown, Receipt, History } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../api';
 
@@ -106,7 +106,8 @@ export const Sidebar: React.FC = () => {
   const mainNav = [
     { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
     { to: '/motoristas', icon: Users, label: 'Motoristas' },
-    { to: '/relatorios/viagens', icon: Truck, label: 'Fretes' },
+    { to: '/relatorios/viagens', icon: Truck, label: 'Gerenciamento de Fretes' },
+    { to: '/relatorios/resumo', icon: History, label: 'Histórico de Fretes' },
     { to: '/relatorios', icon: FileText, label: 'Relatórios' },
     { to: '/admins', icon: UserCircle, label: 'Usuários' },
   ];

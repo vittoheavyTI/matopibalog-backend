@@ -633,9 +633,9 @@ export const Dashboard: React.FC = () => {
               <button
                 onClick={() => window.open('/resumo', '_blank')}
                 className="text-lg font-bold text-gray-800 flex items-center hover:text-blue-600 transition-colors cursor-pointer"
-                title="Abrir Resumo por Motorista em nova aba"
+                title="Abrir Histórico de Fretes em nova aba"
               >
-                <Truck size={22} className="mr-2 text-blue-600" /> Resumo por Motorista
+                <Truck size={22} className="mr-2 text-blue-600" /> Histórico de Fretes
               </button>
               <div className="flex items-center space-x-4">
                 <div className="flex items-center space-x-2">
