@@ -7,14 +7,19 @@ const STATUS_ENCERRADOS = ['finalizado', 'cancelado'];
 async function checarFreteAberto(freteId) {
   if (!freteId) return { ok: true, semFrete: true };
   const { data, error } = await supabase
-    .from('fretes').select('status').eq('id', freteId).single();
+    .from('fretes').select('status, motorista_id').eq('id', freteId).single();
   if (error || !data) return { ok: false, notFound: true };
-  if (STATUS_ENCERRADOS.includes(data.status)) return { ok: false, encerrado: true, status: data.status };
-  return { ok: true, status: data.status };
+  if (STATUS_ENCERRADOS.includes(data.status)) {
+    return { ok: false, encerrado: true, status: data.status, motoristaId: data.motorista_id };
+  }
+  return { ok: true, status: data.status, motoristaId: data.motorista_id };
 }
 
 // Resolve o frete de um lançamento. Regra única antifraude (vale p/ todos os perfis):
-// - frete_id informado → frete deve existir e estar aberto (ativo/pendente);
+// - frete_id informado → frete deve existir, pertencer ao motorista do lançamento
+//   e estar aberto (ativo/pendente). Ownership é checado ANTES do status: frete de
+//   outro motorista (ou sem motorista_id no banco) retorna sempre 422, sem revelar
+//   se está ativo ou encerrado;
 // - frete_id vazio → busca viagens abertas do motorista:
 //     0 → 409 (sem viagem ativa) | 1 → vincula automaticamente | >1 → 409 (ambíguo).
 // Nunca lança exceção: erros viram { ok:false, http, message } para uso direto nos controllers.
@@ -22,6 +27,9 @@ async function resolverFreteParaLancamento(freteId, motoristaId) {
   if (freteId) {
     const check = await checarFreteAberto(freteId);
     if (check.notFound) return { ok: false, http: 404, message: 'Frete não encontrado.' };
+    if (check.motoristaId !== motoristaId) {
+      return { ok: false, http: 422, message: 'O frete informado não pertence a este motorista.' };
+    }
     if (check.encerrado) {
       const palavra = check.status === 'cancelado' ? 'cancelada' : 'finalizada';
       return { ok: false, http: 409, message: `Não é possível lançar em uma viagem ${palavra}.` };
