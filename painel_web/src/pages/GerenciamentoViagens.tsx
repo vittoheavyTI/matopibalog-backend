@@ -317,8 +317,10 @@ export const GerenciamentoViagens: React.FC = () => {
       if (filterMot !== 'todos') loadMotoristaData(filterMot);
       setShowAddModal(null);
       setNewItemData({});
-    } catch (err) {
-      alert('Erro ao adicionar item.');
+    } catch (err: any) {
+      alert(err?.response?.status === 409
+        ? (err.response.data?.message || 'Não é possível lançar em uma viagem encerrada.')
+        : 'Erro ao adicionar item.');
     }
   };
 
@@ -569,13 +571,13 @@ export const GerenciamentoViagens: React.FC = () => {
             <div className="bg-gray-50 p-4 border-b border-gray-100 font-bold text-gray-700 flex items-center justify-between">
               <span className="flex items-center"><FileText className="mr-2" size={18} /> Lançamentos</span>
               <div className="flex space-x-2">
-                <button onClick={() => setShowAddModal('despesa')} className="flex items-center px-3 py-1.5 bg-blue-100 text-blue-600 rounded-lg hover:bg-blue-200 transition-colors font-bold text-xs shadow-sm">
+                <button onClick={() => setShowAddModal('despesa')} disabled={!temFreteAtivo} title={!temFreteAtivo ? 'Não há viagem ativa para lançar' : undefined} className="flex items-center px-3 py-1.5 bg-blue-100 text-blue-600 rounded-lg hover:bg-blue-200 transition-colors font-bold text-xs shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">
                   <Plus size={14} className="mr-1" /> Despesa
                 </button>
-                <button onClick={() => setShowAddModal('abastecimento')} className="flex items-center px-3 py-1.5 bg-blue-100 text-blue-600 rounded-lg hover:bg-blue-200 transition-colors font-bold text-xs shadow-sm">
+                <button onClick={() => setShowAddModal('abastecimento')} disabled={!temFreteAtivo} title={!temFreteAtivo ? 'Não há viagem ativa para lançar' : undefined} className="flex items-center px-3 py-1.5 bg-blue-100 text-blue-600 rounded-lg hover:bg-blue-200 transition-colors font-bold text-xs shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">
                   <Plus size={14} className="mr-1" /> Abast.
                 </button>
-                <button onClick={() => setShowAddModal('vale')} className="flex items-center px-3 py-1.5 bg-blue-100 text-blue-600 rounded-lg hover:bg-blue-200 transition-colors font-bold text-xs shadow-sm">
+                <button onClick={() => setShowAddModal('vale')} disabled={!temFreteAtivo} title={!temFreteAtivo ? 'Não há viagem ativa para lançar' : undefined} className="flex items-center px-3 py-1.5 bg-blue-100 text-blue-600 rounded-lg hover:bg-blue-200 transition-colors font-bold text-xs shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">
                   <Plus size={14} className="mr-1" /> Vale
                 </button>
               </div>
