@@ -307,6 +307,12 @@ export const GerenciamentoViagens: React.FC = () => {
         (f.motoristaUid === filterMot || f.motorista_id === filterMot) &&
         (f.status === 'ativo' || f.status === 'pendente'));
       const freteId = freteAtivo?.id;
+      // Regra da tela: sem frete ativo/pendente, não lança (e nunca POST sem frete_id aqui).
+      // Backend permite frete_id=null por design (Dashboard/app/legado), então a trava é local.
+      if (!freteId) {
+        alert('Não há viagem ativa para lançar.');
+        return;
+      }
       if (showAddModal === 'despesa' || showAddModal === 'manutencao') {
         await api.post('/despesas', { motorista_id: filterMot, frete_id: freteId, tipo: showAddModal === 'manutencao' ? 'manutencao' : 'geral', descricao: newItemData.descricao, valor: Number(newItemData.valor), quem_pagou: newItemData.quemPagou || 'proprietario' });
       } else if (showAddModal === 'abastecimento') {
