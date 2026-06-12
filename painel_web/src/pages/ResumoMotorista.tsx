@@ -47,6 +47,11 @@ export const ResumoMotorista: React.FC = () => {
   const [tripDesp, setTripDesp] = useState<any[]>([]);
   const [tripAbs, setTripAbs] = useState<any[]>([]);
   const [tripVales, setTripVales] = useState<any[]>([]);
+  // Rejeitados da viagem — exibidos só para auditoria (Etapa C).
+  // NUNCA entram nos cálculos nem no PDF: gerarPDFViagem lê apenas tripDesp/tripAbs/tripVales.
+  const [tripDespRej, setTripDespRej] = useState<any[]>([]);
+  const [tripAbsRej, setTripAbsRej] = useState<any[]>([]);
+  const [tripValesRej, setTripValesRej] = useState<any[]>([]);
   // true enquanto os 3 GETs por frete_id estão em voo — bloqueia o PDF de sair vazio
   const [tripLoading, setTripLoading] = useState(false);
 
@@ -79,6 +84,7 @@ export const ResumoMotorista: React.FC = () => {
     // Limpa imediatamente: ao trocar de viagem, nada da anterior pode aparecer
     // na tela nem entrar num PDF gerado durante o carregamento.
     setTripDesp([]); setTripAbs([]); setTripVales([]);
+    setTripDespRej([]); setTripAbsRej([]); setTripValesRej([]);
     // Desliga o loading aqui também: se o efeito anterior foi cancelado (vivo=false),
     // o finally dele não roda — sem isso, "Voltar para Motoristas" durante o fetch
     // deixaria tripLoading preso em true.
@@ -95,23 +101,31 @@ export const ResumoMotorista: React.FC = () => {
         ]);
         if (!vivo) return;
         const resolvido = (s: string) => s === 'aprovado' || s === 'finalizado';
-        setTripDesp((rd.data || []).filter((d: any) => resolvido(d.status)).map((d: any) => ({
+        const rejeitado = (s: string) => s === 'rejeitado';
+        const mapDesp = (d: any) => ({
           valor: parseFloat(d.valor), descricao: d.descricao, tipo: d.tipo,
           quemPagou: d.quem_pagou, data: d.data, frete_id: d.frete_id,
           fotoUrl: d.foto_url, obsResolucao: d.obs_resolucao
-        })));
-        setTripAbs((ra.data || []).filter((a: any) => resolvido(a.status)).map((a: any) => ({
+        });
+        const mapAbs = (a: any) => ({
           valorTotal: parseFloat(a.valor_total), litros: parseFloat(a.litros),
           arlaLitros: a.arla_litros ? parseFloat(a.arla_litros) : null,
           arlaValor: a.arla_valor ? parseFloat(a.arla_valor) : null,
           posto: a.posto, quemPagou: a.quem_pagou, data: a.data, frete_id: a.frete_id,
           fotoUrl: a.foto_url, obsResolucao: a.obs_resolucao
-        })));
-        setTripVales((rv.data || []).filter((v: any) => resolvido(v.status)).map((v: any) => ({
+        });
+        const mapVale = (v: any) => ({
           valor: parseFloat(v.valor), descricao: v.descricao || v.posto || '',
           posto: v.posto, quemPagou: v.quem_pagou, data: v.data, frete_id: v.frete_id,
           obsResolucao: v.obs_resolucao
-        })));
+        });
+        setTripDesp((rd.data || []).filter((d: any) => resolvido(d.status)).map(mapDesp));
+        setTripAbs((ra.data || []).filter((a: any) => resolvido(a.status)).map(mapAbs));
+        setTripVales((rv.data || []).filter((v: any) => resolvido(v.status)).map(mapVale));
+        // Rejeitados: auditoria apenas — fora de todo cálculo e do PDF. Pendentes continuam fora.
+        setTripDespRej((rd.data || []).filter((d: any) => rejeitado(d.status)).map(mapDesp));
+        setTripAbsRej((ra.data || []).filter((a: any) => rejeitado(a.status)).map(mapAbs));
+        setTripValesRej((rv.data || []).filter((v: any) => rejeitado(v.status)).map(mapVale));
       } catch (err) {
         console.error('Erro ao carregar lançamentos da viagem:', err);
       } finally {
@@ -593,6 +607,10 @@ export const ResumoMotorista: React.FC = () => {
     const fDesp = tripDesp;
     const fAbs = tripAbs;
     const fVales = tripVales;
+    const fDespRej = tripDespRej;
+    const fAbsRej = tripAbsRej;
+    const fValesRej = tripValesRej;
+    const temRejeitados = fDespRej.length > 0 || fAbsRej.length > 0 || fValesRej.length > 0;
     const dist = trip.km_final && trip.km_inicial ? trip.km_final - trip.km_inicial : 0;
     const litrosTotal = fAbs.reduce((s, a) => s + a.litros, 0);
     const media = litrosTotal > 0 && dist > 0 ? (dist / litrosTotal).toFixed(2) : null;
@@ -662,7 +680,11 @@ export const ResumoMotorista: React.FC = () => {
             </h3>
           </div>
           {fAbs.length === 0 && fDesp.length === 0 && fVales.length === 0 ? (
-            <div className="p-6 text-center text-gray-400">Nenhum lançamento registrado para este frete.</div>
+            <div className="p-6 text-center text-gray-400">
+              {temRejeitados
+                ? 'Nenhum lançamento aprovado para este frete — há apenas lançamentos rejeitados (abaixo).'
+                : 'Nenhum lançamento registrado para este frete.'}
+            </div>
           ) : (
             <div className="p-4 space-y-4">
               {fAbs.length > 0 && (
@@ -713,6 +735,64 @@ export const ResumoMotorista: React.FC = () => {
             </div>
           )}
         </div>
+
+        {temRejeitados && (
+          <div className="bg-white rounded-xl shadow-sm border border-red-200">
+            <div className="p-4 border-b border-red-100">
+              <h3 className="font-bold text-red-700 flex items-center">
+                <FileText size={18} className="mr-2 text-red-600" /> Lançamentos rejeitados (fora dos cálculos)
+              </h3>
+              <p className="text-xs text-gray-400 mt-1">Exibidos somente para auditoria — não entram em nenhum total nem no saldo.</p>
+            </div>
+            <div className="p-4 space-y-4">
+              {fDespRej.length > 0 && (
+                <div>
+                  <p className="text-[10px] font-bold text-red-500 uppercase mb-2 flex items-center"><FileText size={14} className="mr-1" /> Despesas rejeitadas</p>
+                  {fDespRej.map((d, i) => (
+                    <div key={`dr-${i}`} className="flex justify-between items-center text-sm bg-gray-50 rounded-lg px-3 py-2 border border-gray-200 mb-1">
+                      <span className="text-gray-600">
+                        <span className="inline-block mr-2 px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-red-100 text-red-700">Rejeitado</span>
+                        {d.descricao}{d.fotoUrl && <> • <a href={d.fotoUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Ver comprovante</a></>}
+                        <span className="block text-xs text-gray-500 italic">Justificativa: {d.obsResolucao || 'Sem justificativa informada'}</span>
+                      </span>
+                      <span className="font-bold text-gray-400 line-through">{formatCurrency(d.valor)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {fAbsRej.length > 0 && (
+                <div>
+                  <p className="text-[10px] font-bold text-red-500 uppercase mb-2 flex items-center"><Fuel size={14} className="mr-1" /> Abastecimentos rejeitados</p>
+                  {fAbsRej.map((a, i) => (
+                    <div key={`ar-${i}`} className="flex justify-between items-center text-sm bg-gray-50 rounded-lg px-3 py-2 border border-gray-200 mb-1">
+                      <span className="text-gray-600">
+                        <span className="inline-block mr-2 px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-red-100 text-red-700">Rejeitado</span>
+                        {a.posto} <span className="text-gray-400">({a.litros.toFixed(1)}L)</span>{a.fotoUrl && <> • <a href={a.fotoUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Ver comprovante</a></>}
+                        <span className="block text-xs text-gray-500 italic">Justificativa: {a.obsResolucao || 'Sem justificativa informada'}</span>
+                      </span>
+                      <span className="font-bold text-gray-400 line-through">{formatCurrency(a.valorTotal)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {fValesRej.length > 0 && (
+                <div>
+                  <p className="text-[10px] font-bold text-red-500 uppercase mb-2 flex items-center"><DollarSign size={14} className="mr-1" /> Vales rejeitados</p>
+                  {fValesRej.map((v, i) => (
+                    <div key={`vr-${i}`} className="flex justify-between items-center text-sm bg-gray-50 rounded-lg px-3 py-2 border border-gray-200 mb-1">
+                      <span className="text-gray-600">
+                        <span className="inline-block mr-2 px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-red-100 text-red-700">Rejeitado</span>
+                        {v.descricao || v.posto || 'Vale/Adiantamento'}
+                        <span className="block text-xs text-gray-500 italic">Justificativa: {v.obsResolucao || 'Sem justificativa informada'}</span>
+                      </span>
+                      <span className="font-bold text-gray-400 line-through">{formatCurrency(v.valor)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
           <h4 className="flex items-center text-gray-800 mb-4 font-bold text-lg">
