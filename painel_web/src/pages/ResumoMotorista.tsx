@@ -67,7 +67,8 @@ export const ResumoMotorista: React.FC = () => {
           uid: m.id,
           nomeCompleto: m.usuarios.nome,
           percentualComissao: m.percentual_comissao,
-          placa: m.placa_veiculo
+          placa: m.placa_veiculo,
+          empresaTipo: m.empresa_tipo
         })).sort((a: any, b: any) => (a.nomeCompleto || '').localeCompare(b.nomeCompleto || '')));
       } catch (err) {
         console.error('Erro ao buscar motoristas:', err);

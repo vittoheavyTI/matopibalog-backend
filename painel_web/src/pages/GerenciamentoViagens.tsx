@@ -58,7 +58,8 @@ export const GerenciamentoViagens: React.FC = () => {
         nome: m.usuarios?.nome,
         placa: m.placa_veiculo,
         comissao: m.percentual_comissao,
-        status: m.usuarios?.status
+        status: m.usuarios?.status,
+        empresaTipo: m.empresa_tipo
       })));
     } catch (err) {
       console.error('Erro ao carregar viagens:', err);

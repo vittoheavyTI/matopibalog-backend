@@ -8,6 +8,7 @@ export interface Motorista {
   statusCadastro: 'aprovado' | 'pendente' | 'bloqueado';
   telefone: string;
   dataCadastro: string;
+  empresaTipo?: 'autonomo' | 'transportadora';
 }
 
 export interface Frete {

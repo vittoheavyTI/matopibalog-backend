@@ -91,7 +91,7 @@ exports.getAllMotoristas = async (req, res) => {
   try {
     let query = supabase
       .from('motoristas')
-      .select('*, usuarios!inner(nome, email, status, empresa_id, telefone, cep, endereco, bairro, cidade, foto_url)');
+      .select('*, usuarios!inner(nome, email, status, empresa_id, telefone, cep, endereco, bairro, cidade, foto_url), empresas!left(tipo)');
 
     if (!req.user.is_super_admin) {
       // Admin comum: filtra SEMPRE pela empresa dele, ignora qualquer ?empresa_id= passado
@@ -105,7 +105,16 @@ exports.getAllMotoristas = async (req, res) => {
     const { data, error } = await query;
 
     if (error) throw error;
-    res.status(200).json(data);
+    // Achata o tipo da empresa por motorista (mesmo padrão de getUsuarios).
+    // Necessário para o painel diferenciar autônomo de vinculado nos cálculos
+    // financeiros (PRs seguintes). Não altera nenhum cálculo aqui.
+    const motoristasComTipo = (data || []).map(m => ({
+      ...m,
+      empresa_tipo: Array.isArray(m.empresas)
+        ? m.empresas[0]?.tipo || null
+        : m.empresas?.tipo || null,
+    }));
+    res.status(200).json(motoristasComTipo);
   } catch (error) {
     console.error('[adminController:getAllMotoristas] Erro detalhado:', error);
     res.status(500).json({ message: 'Erro ao listar motoristas: ' + (error.message || error) });

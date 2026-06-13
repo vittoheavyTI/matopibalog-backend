@@ -32,7 +32,8 @@ export const Relatorios: React.FC = () => {
         setMotoristas((response.data || []).map((m: any) => ({
           uid: m.id,
           nomeCompleto: m.usuarios.nome,
-          percentualComissao: m.percentual_comissao
+          percentualComissao: m.percentual_comissao,
+          empresaTipo: m.empresa_tipo
         })));
       } catch (err) {
         console.error('Erro ao buscar motoristas:', err);
