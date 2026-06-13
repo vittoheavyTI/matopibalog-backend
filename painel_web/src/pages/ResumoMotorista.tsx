@@ -453,7 +453,7 @@ export const ResumoMotorista: React.FC = () => {
       }
 
       doc.setFontSize(18).setFont("helvetica", "bold");
-      doc.text('RELATÓRIO DE VIAGEM', 105, 42, { align: 'center' });
+      doc.text('RELATÓRIO DE FRETE', 105, 42, { align: 'center' });
       doc.setFontSize(8).setFont("helvetica", "normal");
       doc.text(`Emitido em: ${new Date().toLocaleString('pt-BR')}`, 105, 47, { align: 'center' });
 
@@ -505,7 +505,7 @@ export const ResumoMotorista: React.FC = () => {
       autoTable(doc, {
         startY: 50,
         body: [
-          ['Rota:', `${trip.origem} → ${trip.destino}`],
+          ['Rota:', `${trip.origem} > ${trip.destino}`],
           ['Data:', safeFmt(trip.data, 'dd/MM/yyyy')],
           ['Motorista:', motNome],
           ['Placa:', trip.placa || '-'],
@@ -701,10 +701,273 @@ export const ResumoMotorista: React.FC = () => {
         }
       }
 
-      doc.save(`Viagem_${trip.origem}_${trip.destino}_${safeFmt(trip.data, 'ddMMyyyy')}.pdf`);
+      doc.save(`Frete_${trip.origem}_${trip.destino}_${safeFmt(trip.data, 'ddMMyyyy')}.pdf`);
     } catch (error) {
       console.error('Erro ao gerar PDF:', error);
       alert('Ocorreu um erro ao gerar o relatório.');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  // PDF Auditoria mensal de UM motorista. Reusa o padrão do PDF da viagem,
+  // mas com helpers DUPLICADOS (montarBody/linkComprovante) para NÃO tocar
+  // gerarPDFViagem (já validado). Sem endpoint novo: itera fretesDetalhados e
+  // busca despesas/abastecimentos/vales por frete_id. Fórmulas idênticas ao detalhe.
+  const gerarPDFAuditoriaMensalMotorista = async () => {
+    if (selectedMot === 'todos') return;
+    const motInfo = motoristas.find(m => m.uid === selectedMot);
+    const trips = fretesDetalhados;
+    if (!trips || trips.length === 0) {
+      alert('Nenhum frete finalizado para este motorista no período selecionado.');
+      return;
+    }
+    try {
+      setIsGenerating(true);
+      const doc = new jsPDF();
+
+      // Linha de "Evidência": Ref (UUID) do lançamento + justificativa + status do comprovante.
+      const montarBody = (
+        itens: any[], linhaPrincipal: (item: any) => any[], colunas: number,
+        comComprovante: boolean, justificativaObrigatoria = false
+      ) => {
+        const body: any[] = []; const links: Record<number, string> = {};
+        itens.forEach(item => {
+          body.push(linhaPrincipal(item));
+          const partes: string[] = [];
+          if (item.id) partes.push(`Ref: ${item.id}`);
+          if (item.status) partes.push(`Status: ${String(item.status).toUpperCase()}`);
+          const obs = item.obsResolucao || (justificativaObrigatoria ? 'Sem justificativa informada' : '');
+          if (obs) partes.push(`Justificativa: ${obs}`);
+          if (comComprovante) {
+            if (item.fotoUrl) { links[body.length] = item.fotoUrl; partes.push('Ver comprovante'); }
+            else partes.push('Sem comprovante');
+          }
+          if (partes.length > 0) {
+            body.push([{ content: 'Evidência — ' + partes.join('   •   '), colSpan: colunas,
+              styles: { fontSize: 8, textColor: [100, 116, 139], fontStyle: 'italic' } }]);
+          }
+        });
+        return { body, links };
+      };
+      const linkComprovante = (links: Record<number, string>) => (data: any) => {
+        const url = links[data.row.index];
+        if (data.section === 'body' && url) {
+          doc.link(data.cell.x, data.cell.y, data.cell.width, data.cell.height, { url });
+        }
+      };
+      const resolvido = (s: string) => s === 'aprovado' || s === 'finalizado';
+      const rejeitado = (s: string) => s === 'rejeitado';
+      const mapDesp = (d: any) => ({ id: d.id, status: d.status, valor: parseFloat(d.valor), descricao: d.descricao, tipo: d.tipo,
+        quemPagou: d.quem_pagou, data: d.data, frete_id: d.frete_id, fotoUrl: d.foto_url, obsResolucao: d.obs_resolucao });
+      const mapAbs = (a: any) => ({ id: a.id, status: a.status, valorTotal: parseFloat(a.valor_total), litros: parseFloat(a.litros),
+        arlaLitros: a.arla_litros ? parseFloat(a.arla_litros) : null, arlaValor: a.arla_valor ? parseFloat(a.arla_valor) : null,
+        posto: a.posto, quemPagou: a.quem_pagou, data: a.data, frete_id: a.frete_id, fotoUrl: a.foto_url, obsResolucao: a.obs_resolucao });
+      const mapVale = (v: any) => ({ id: v.id, status: v.status, valor: parseFloat(v.valor), descricao: v.descricao || v.posto || '',
+        posto: v.posto, quemPagou: v.quem_pagou, data: v.data, frete_id: v.frete_id, obsResolucao: v.obs_resolucao });
+
+      // Cabeçalho (mesmo padrão dos outros PDFs)
+      const savedLogo = localStorage.getItem('matopibalog_logo');
+      const savedCompany = localStorage.getItem('matopibalog_company');
+      let company: any = null;
+      try { company = savedCompany ? JSON.parse(savedCompany) : null; } catch (e) {}
+      if (savedLogo) {
+        try {
+          const img = new Image(); img.src = savedLogo;
+          const maxW = 35, maxH = 20;
+          const ratio = Math.min(maxW / (img.naturalWidth || maxW), maxH / (img.naturalHeight || maxH));
+          doc.addImage(savedLogo, 'PNG', 12, 8 + (maxH - (img.naturalHeight || maxH) * ratio) / 2,
+            (img.naturalWidth || maxW) * ratio, (img.naturalHeight || maxH) * ratio);
+        } catch (e) {}
+      }
+      doc.setFontSize(16).setFont("helvetica", "bold");
+      if (company && company.nome) {
+        doc.text(company.nome.toUpperCase(), 48, 14);
+        doc.setFontSize(8).setFont("helvetica", "normal");
+        doc.text(`${company.endereco || ''}, ${company.cidade || ''}-${company.estado || ''}`, 48, 22);
+        doc.text(`CNPJ: ${company.cnpj || ''} | Tel: ${company.telefone || ''}`, 48, 28);
+      } else {
+        doc.text('MATOPIBA LOG - GESTÃO DE FROTAS', 48, 20);
+      }
+      const monthLabel = format(new Date(selectedDate + '-01T12:00:00'), "MMMM 'de' yyyy", { locale: ptBR });
+      doc.setFontSize(16).setFont("helvetica", "bold");
+      doc.text('AUDITORIA MENSAL DE FRETES POR MOTORISTA', 105, 42, { align: 'center' });
+      doc.setFontSize(8).setFont("helvetica", "italic");
+      doc.text('Documento de apoio à auditoria. Não substitui conferência fiscal/contábil nem garante ausência de fraude.', 105, 47, { align: 'center' });
+      doc.setFontSize(10).setFont("helvetica", "normal");
+      doc.text(`Período: ${monthLabel.toUpperCase()} | Motorista: ${(motInfo?.nomeCompleto || 'N/A').toUpperCase()}`, 14, 54);
+      doc.text(`Emitido em: ${new Date().toLocaleString('pt-BR')}`, 14, 59);
+
+      const pct = motInfo?.percentualComissao || 0;
+      let pFrete = 0, pComissao = 0, pSaldoMot = 0, pResultEmp = 0, pGastosMot = 0, pGastosProp = 0, pVales = 0;
+      let nRejDesp = 0, nRejAbs = 0, nRejVale = 0, vRej = 0, nSemComp = 0, nViagensAlerta = 0;
+      let primeiro = true;
+
+      for (const trip of trips) {
+        const [rd, ra, rv] = await Promise.all([
+          api.get('/despesas?frete_id=' + trip.id),
+          api.get('/abastecimentos?frete_id=' + trip.id),
+          api.get('/vales?frete_id=' + trip.id),
+        ]);
+        const fDesp: any[] = (rd.data || []).filter((d: any) => resolvido(d.status)).map(mapDesp);
+        const fAbs: any[] = (ra.data || []).filter((a: any) => resolvido(a.status)).map(mapAbs);
+        const fVales: any[] = (rv.data || []).filter((v: any) => resolvido(v.status)).map(mapVale);
+        const fDespRej: any[] = (rd.data || []).filter((d: any) => rejeitado(d.status)).map(mapDesp);
+        const fAbsRej: any[] = (ra.data || []).filter((a: any) => rejeitado(a.status)).map(mapAbs);
+        const fValesRej: any[] = (rv.data || []).filter((v: any) => rejeitado(v.status)).map(mapVale);
+
+        let y = 66;
+        if (!primeiro) { doc.addPage(); y = 18; }
+        primeiro = false;
+
+        const dist = trip.km_final && trip.km_inicial ? trip.km_final - trip.km_inicial : 0;
+        doc.setFontSize(12).setFont("helvetica", "bold");
+        doc.text(`FRETE: ${trip.origem} > ${trip.destino}`, 14, y);
+        autoTable(doc, {
+          startY: y + 4,
+          body: [
+            ['Ref (frete_id):', String(trip.id), 'Data:', safeFmt(trip.data, 'dd/MM/yyyy')],
+            ['Motorista:', motInfo?.nomeCompleto || '-', 'Placa:', trip.placa || '-'],
+            ['Status:', (trip.status || '-').toUpperCase(), 'Quem Recebeu:',
+              trip.quemRecebeu === 'proprietario' ? 'Proprietário' : trip.quemRecebeu === 'motorista' ? 'Motorista' : '-'],
+            ['Valor Frete:', formatCurrency(trip.valorFrete), 'Distância:', dist > 0 ? `${dist.toLocaleString()} km` : '-'],
+          ],
+          theme: 'plain', styles: { fontSize: 9 },
+          columnStyles: { 0: { fontStyle: 'bold' }, 2: { fontStyle: 'bold' } },
+        });
+        let cy = (doc as any).lastAutoTable.finalY + 6;
+
+        if (fAbs.length > 0) {
+          const abs = montarBody(fAbs, (a: any) => [a.posto || '-', `${Number(a.litros || 0).toFixed(1)}L`,
+            a.arlaLitros ? `${a.arlaLitros.toFixed(1)}L (${formatCurrency(a.arlaValor)})` : '-', formatCurrency(a.valorTotal)], 4, true);
+          autoTable(doc, { startY: cy, head: [['Abastecimentos', 'Litros', 'ARLA', 'Valor']], body: abs.body,
+            foot: [['TOTAL', `${fAbs.reduce((s, a) => s + a.litros, 0).toFixed(1)}L`,
+              fAbs.some(a => a.arlaValor) ? formatCurrency(fAbs.reduce((s, a) => s + (a.arlaValor || 0), 0)) : '-',
+              formatCurrency(fAbs.reduce((s, a) => s + a.valorTotal, 0))]],
+            headStyles: { fillColor: [59, 130, 246] }, footStyles: { fillColor: [241, 245, 249], textColor: [31, 41, 55], fontStyle: 'bold' },
+            didDrawCell: linkComprovante(abs.links) });
+          cy = (doc as any).lastAutoTable.finalY + 6;
+        }
+        if (fDesp.length > 0) {
+          const desp = montarBody(fDesp, (d: any) => [d.descricao, d.tipo || '-',
+            d.quemPagou === 'proprietario' ? 'Proprietário' : d.quemPagou === 'motorista' ? 'Motorista' : '-', formatCurrency(d.valor)], 4, true);
+          autoTable(doc, { startY: cy, head: [['Despesas', 'Tipo', 'Quem Pagou', 'Valor']], body: desp.body,
+            foot: [['TOTAL', '', '', formatCurrency(fDesp.reduce((s, d) => s + d.valor, 0))]],
+            headStyles: { fillColor: [239, 68, 68] }, footStyles: { fillColor: [241, 245, 249], textColor: [31, 41, 55], fontStyle: 'bold' },
+            didDrawCell: linkComprovante(desp.links) });
+          cy = (doc as any).lastAutoTable.finalY + 6;
+        }
+        if (fVales.length > 0) {
+          const vls = montarBody(fVales, (v: any) => ['Vale', v.descricao || v.posto || 'Vale/Adiantamento',
+            v.quemPagou === 'proprietario' ? 'Proprietário' : v.quemPagou === 'motorista' ? 'Motorista' : '-', formatCurrency(v.valor)], 4, false);
+          autoTable(doc, { startY: cy, head: [['Vales', 'Descrição', 'Quem Pagou', 'Valor']], body: vls.body,
+            foot: [['TOTAL', '', '', formatCurrency(fVales.reduce((s, v) => s + v.valor, 0))]],
+            headStyles: { fillColor: [249, 115, 22] }, footStyles: { fillColor: [241, 245, 249], textColor: [31, 41, 55], fontStyle: 'bold' } });
+          cy = (doc as any).lastAutoTable.finalY + 6;
+        }
+
+        // Fórmulas IDÊNTICAS ao detalhe da viagem (gerarPDFViagem) — não alteradas
+        const valorComissao = trip.valorFrete * (pct / 100);
+        const gastosMotorista = fDesp.filter(d => d.quemPagou === 'motorista').reduce((s, d) => s + d.valor, 0)
+          + fAbs.filter(a => a.quemPagou === 'motorista').reduce((s, a) => s + a.valorTotal, 0);
+        const gastosProprietario = fDesp.filter(d => d.quemPagou === 'proprietario').reduce((s, d) => s + d.valor, 0)
+          + fAbs.filter(a => a.quemPagou === 'proprietario').reduce((s, a) => s + a.valorTotal, 0);
+        const valesViagem = fVales.filter(v => v.quemPagou === 'proprietario').reduce((s, v) => s + v.valor, 0);
+        const saldoMotorista = valorComissao + gastosMotorista - valesViagem;
+        const resultadoEmpresa = trip.valorFrete - valorComissao - gastosProprietario;
+        pFrete += trip.valorFrete; pComissao += valorComissao; pSaldoMot += saldoMotorista; pResultEmp += resultadoEmpresa;
+        pGastosMot += gastosMotorista; pGastosProp += gastosProprietario; pVales += valesViagem;
+
+        autoTable(doc, { startY: cy,
+          body: [
+            ['Comissão', formatCurrency(valorComissao)],
+            ['Desp./Abast. pagos pelo Motorista', formatCurrency(gastosMotorista)],
+            ['Desp./Abast. pagos pelo Proprietário', formatCurrency(gastosProprietario)],
+            ['Vales / Adiantamentos', formatCurrency(valesViagem)],
+            ['SALDO DO MOTORISTA', formatCurrency(saldoMotorista)],
+            ['RESULTADO DA EMPRESA', formatCurrency(resultadoEmpresa)],
+          ],
+          theme: 'plain', styles: { fontSize: 10 }, columnStyles: { 0: { fontStyle: 'bold', cellWidth: 95 } } });
+        cy = (doc as any).lastAutoTable.finalY + 8;
+
+        // ===== ALERTAS DE AUDITORIA (por viagem) =====
+        const despSemComp = fDesp.filter(d => !d.fotoUrl).length;
+        const absSemComp = fAbs.filter(a => !a.fotoUrl).length;
+        const totalRej = fDespRej.length + fAbsRej.length + fValesRej.length;
+        const alertas: string[] = [];
+        if (fDesp.length === 0 && fAbs.length === 0 && fVales.length === 0) alertas.push('Frete sem lançamentos aprovados/finalizados.');
+        if (!trip.km_inicial || !trip.km_final) alertas.push('KM inicial e/ou final ausente.');
+        if (dist <= 0) alertas.push('Distância zerada ou incompleta.');
+        if (despSemComp > 0) alertas.push(`${despSemComp} despesa(s) aprovada(s)/finalizada(s) sem comprovante.`);
+        if (absSemComp > 0) alertas.push(`${absSemComp} abastecimento(s) aprovado(s)/finalizado(s) sem comprovante.`);
+        if (fDespRej.some(d => !d.obsResolucao)) alertas.push('Despesa rejeitada sem justificativa.');
+        if (fAbsRej.some(a => !a.obsResolucao)) alertas.push('Abastecimento rejeitado sem justificativa.');
+        if (fValesRej.some(v => !v.obsResolucao)) alertas.push('Vale rejeitado sem justificativa.');
+        if (totalRej > 0) alertas.push(`${totalRej} lançamento(s) rejeitado(s) (fora dos cálculos).`);
+        if (valesViagem > 0) alertas.push('Vales/adiantamentos impactando o saldo do motorista.');
+
+        nSemComp += despSemComp + absSemComp;
+        nRejDesp += fDespRej.length; nRejAbs += fAbsRej.length; nRejVale += fValesRej.length;
+        vRej += fDespRej.reduce((s, d) => s + d.valor, 0) + fAbsRej.reduce((s, a) => s + a.valorTotal, 0) + fValesRej.reduce((s, v) => s + v.valor, 0);
+        if (alertas.length > 0) nViagensAlerta++;
+
+        if (alertas.length > 0) {
+          if (cy > doc.internal.pageSize.getHeight() - 40) { doc.addPage(); cy = 18; }
+          autoTable(doc, { startY: cy,
+            head: [['ALERTAS DE AUDITORIA']],
+            body: alertas.map(a => [a]),
+            headStyles: { fillColor: [202, 138, 4] }, bodyStyles: { textColor: [120, 53, 15], fontSize: 9 } });
+          cy = (doc as any).lastAutoTable.finalY + 8;
+        }
+
+        // ===== Rejeitados — evidência, fora dos cálculos =====
+        if (totalRej > 0) {
+          if (cy > doc.internal.pageSize.getHeight() - 40) { doc.addPage(); cy = 18; }
+          doc.setFontSize(11).setFont("helvetica", "bold");
+          doc.text('LANÇAMENTOS REJEITADOS — FORA DOS CÁLCULOS', 14, cy);
+          const estiloRej = { headStyles: { fillColor: [148, 163, 184] as any }, bodyStyles: { textColor: [100, 116, 139] as any } };
+          let yt = cy + 4;
+          if (fDespRej.length > 0) {
+            const r = montarBody(fDespRej, (d: any) => [d.descricao, d.tipo || '-', 'REJEITADO', formatCurrency(d.valor)], 4, true, true);
+            autoTable(doc, { startY: yt, head: [['Despesas rejeitadas', 'Tipo', 'Status', 'Valor']], body: r.body, ...estiloRej, didDrawCell: linkComprovante(r.links) });
+            yt = (doc as any).lastAutoTable.finalY + 6;
+          }
+          if (fAbsRej.length > 0) {
+            const r = montarBody(fAbsRej, (a: any) => [a.posto || '-', `${Number(a.litros || 0).toFixed(1)}L`, 'REJEITADO', formatCurrency(a.valorTotal)], 4, true, true);
+            autoTable(doc, { startY: yt, head: [['Abastecimentos rejeitados', 'Litros', 'Status', 'Valor']], body: r.body, ...estiloRej, didDrawCell: linkComprovante(r.links) });
+            yt = (doc as any).lastAutoTable.finalY + 6;
+          }
+          if (fValesRej.length > 0) {
+            const r = montarBody(fValesRej, (v: any) => [v.descricao || v.posto || 'Vale/Adiantamento', 'Vale', 'REJEITADO', formatCurrency(v.valor)], 4, false, true);
+            autoTable(doc, { startY: yt, head: [['Vales rejeitados', 'Tipo', 'Status', 'Valor']], body: r.body, ...estiloRej });
+          }
+        }
+      }
+
+      // ===== RESUMO DE MATERIALIDADE (período) =====
+      doc.addPage();
+      doc.setFontSize(14).setFont("helvetica", "bold");
+      doc.text('RESUMO DE MATERIALIDADE — PERÍODO', 14, 18);
+      autoTable(doc, { startY: 24,
+        body: [
+          ['Fretes auditados', String(trips.length)],
+          ['Total de Fretes', formatCurrency(pFrete)],
+          [`Total de Comissão (${pct}%)`, formatCurrency(pComissao)],
+          ['Total Desp./Abast. pagos pelo Motorista', formatCurrency(pGastosMot)],
+          ['Total Desp./Abast. pagos pelo Proprietário', formatCurrency(pGastosProp)],
+          ['Total de Vales/Adiantamentos', formatCurrency(pVales)],
+          ['SALDO TOTAL DO MOTORISTA', formatCurrency(pSaldoMot)],
+          ['RESULTADO TOTAL DA EMPRESA', formatCurrency(pResultEmp)],
+          ['Rejeitados (fora dos cálculos)', `${nRejDesp} desp. • ${nRejAbs} abast. • ${nRejVale} vales — ${formatCurrency(vRej)}`],
+          ['Lançamentos sem comprovante', String(nSemComp)],
+          ['Fretes com alerta', `${nViagensAlerta} de ${trips.length}`],
+        ],
+        theme: 'plain', styles: { fontSize: 11 }, columnStyles: { 0: { fontStyle: 'bold', cellWidth: 110 } } });
+
+      doc.save(`Auditoria_${(motInfo?.nomeCompleto || 'motorista').replace(/\s+/g, '_')}_${monthLabel}.pdf`);
+    } catch (error) {
+      console.error('Erro ao gerar PDF de auditoria:', error);
+      alert('Ocorreu um erro ao gerar a auditoria.');
     } finally {
       setIsGenerating(false);
     }
@@ -1010,14 +1273,13 @@ export const ResumoMotorista: React.FC = () => {
             </button>
             <button
               type="button"
-              disabled
-              title={selectedMot === 'todos'
-                ? 'Selecione um motorista para gerar auditoria no próximo bloco'
-                : 'PDF Auditoria será implementado no próximo bloco'}
-              className="flex items-center px-4 py-2 bg-white border border-blue-200 text-blue-600 rounded-lg font-bold text-sm opacity-50 cursor-not-allowed"
+              onClick={gerarPDFAuditoriaMensalMotorista}
+              disabled={isGenerating || selectedMot === 'todos'}
+              title={selectedMot === 'todos' ? 'Selecione um motorista para gerar auditoria' : undefined}
+              className="flex items-center px-4 py-2 bg-white border border-blue-200 text-blue-600 rounded-lg font-bold text-sm hover:bg-blue-50 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <FileText size={18} className="mr-2" />
-              PDF Auditoria (em breve)
+              {isGenerating ? 'Gerando auditoria...' : 'PDF Auditoria'}
             </button>
           </div>
         )}
