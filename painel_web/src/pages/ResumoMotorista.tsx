@@ -34,6 +34,7 @@ export const ResumoMotorista: React.FC = () => {
   const [motoristas, setMotoristas] = useState<any[]>([]);
   const [selectedMot, setSelectedMot] = useState<string>('todos');
   const [motoristaBusca, setMotoristaBusca] = useState<string>('');
+  const [motoristaAberto, setMotoristaAberto] = useState<boolean>(false);
   const [selectedDate, setSelectedDate] = useState<string>(format(new Date(), 'yyyy-MM'));
   const [loading, setLoading] = useState(false);
   const [stats, setStats] = useState<any[]>([]);
@@ -970,13 +971,15 @@ export const ResumoMotorista: React.FC = () => {
     valor: String(i + 1).padStart(2, '0'),
     nome: format(new Date(2000, i, 1), 'MMMM', { locale: ptBR }),
   }));
-  // Filtro só visual da lista; nunca altera dados carregados nem permissões.
-  // Mantém sempre o motorista já selecionado, mesmo que não case com a busca.
+  // Filtro só visual da lista do combobox; nunca altera dados carregados nem permissões.
   const motoristasFiltrados = motoristas.filter(m =>
     !motoristaBusca.trim() ||
-    (m.nomeCompleto || '').toLowerCase().includes(motoristaBusca.trim().toLowerCase()) ||
-    m.uid === selectedMot
+    (m.nomeCompleto || '').toLowerCase().includes(motoristaBusca.trim().toLowerCase())
   );
+  // Nome exibido no campo quando o dropdown está fechado (sincroniza com selectedMot).
+  const nomeMotoristaSelecionado = selectedMot === 'todos'
+    ? 'Todos os Motoristas'
+    : (motoristas.find(m => m.uid === selectedMot)?.nomeCompleto || '');
 
   return (
     <CatchError>
@@ -1031,23 +1034,39 @@ export const ResumoMotorista: React.FC = () => {
         </div>
         <div className="flex items-center space-x-2">
           <Users size={18} className="text-gray-400" />
-          <input
-            type="text"
-            value={motoristaBusca}
-            onChange={e => setMotoristaBusca(e.target.value)}
-            placeholder="Buscar motorista"
-            className="border rounded-lg p-2 outline-none focus:border-blue-500 w-40"
-          />
-          <select
-            value={selectedMot}
-            onChange={e => setSelectedMot(e.target.value)}
-            className="border rounded-lg p-2 outline-none bg-white"
-          >
-            <option value="todos">Todos os Motoristas</option>
-            {motoristasFiltrados.map(m => (
-              <option key={m.uid} value={m.uid}>{m.nomeCompleto}</option>
-            ))}
-          </select>
+          <div className="relative w-56">
+            <input
+              type="text"
+              value={motoristaAberto ? motoristaBusca : nomeMotoristaSelecionado}
+              onChange={e => setMotoristaBusca(e.target.value)}
+              onFocus={() => { setMotoristaAberto(true); setMotoristaBusca(''); }}
+              onBlur={() => setMotoristaAberto(false)}
+              placeholder="Buscar motorista"
+              className="border rounded-lg p-2 outline-none focus:border-blue-500 w-full bg-white"
+            />
+            {motoristaAberto && (
+              <ul className="absolute z-20 mt-1 w-full max-h-60 overflow-auto bg-white border border-gray-200 rounded-lg shadow-lg">
+                <li
+                  onMouseDown={() => { setSelectedMot('todos'); setMotoristaAberto(false); setMotoristaBusca(''); }}
+                  className="px-3 py-2 cursor-pointer hover:bg-blue-50 text-sm font-medium"
+                >
+                  Todos os Motoristas
+                </li>
+                {motoristasFiltrados.map(m => (
+                  <li
+                    key={m.uid}
+                    onMouseDown={() => { setSelectedMot(m.uid); setMotoristaAberto(false); setMotoristaBusca(''); }}
+                    className="px-3 py-2 cursor-pointer hover:bg-blue-50 text-sm"
+                  >
+                    {m.nomeCompleto}
+                  </li>
+                ))}
+                {motoristasFiltrados.length === 0 && (
+                  <li className="px-3 py-2 text-sm text-gray-400">Nenhum motorista encontrado</li>
+                )}
+              </ul>
+            )}
+          </div>
         </div>
       </div>
 
