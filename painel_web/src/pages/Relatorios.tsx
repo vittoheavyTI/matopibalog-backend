@@ -97,7 +97,7 @@ export const Relatorios: React.FC = () => {
         data: f.data
       })));
 
-      setDespesas((resD.data || []).filter((d: any) => d.status === 'aprovado').map((d: any) => ({
+      setDespesas((resD.data || []).filter((d: any) => d.status === 'aprovado' || d.status === 'finalizado').map((d: any) => ({
         id: d.id,
         motoristaUid: d.motorista_id,
         valor: parseFloat(d.valor),
@@ -109,7 +109,7 @@ export const Relatorios: React.FC = () => {
         frete_id: d.frete_id
       })));
 
-      setAbastecimentos((resA.data || []).filter((a: any) => a.status === 'aprovado').map((a: any) => ({
+      setAbastecimentos((resA.data || []).filter((a: any) => a.status === 'aprovado' || a.status === 'finalizado').map((a: any) => ({
         id: a.id,
         motoristaUid: a.motorista_id,
         valorTotal: parseFloat(a.valor_total),
@@ -123,7 +123,7 @@ export const Relatorios: React.FC = () => {
         data: a.data
       })));
 
-      setVales((resV.data || []).filter((v: any) => v.status === 'aprovado').map((v: any) => ({
+      setVales((resV.data || []).filter((v: any) => v.status === 'aprovado' || v.status === 'finalizado').map((v: any) => ({
         id: v.id,
         motoristaUid: v.motorista_id,
         valor: parseFloat(v.valor),
