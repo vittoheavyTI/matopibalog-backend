@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { format, startOfMonth, endOfMonth } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 import { formatCurrency } from '../utils';
 import { Calendar, Users, User, Download, Truck, DollarSign, ChevronLeft, ChevronRight, Fuel, FileText, TrendingUp, Printer } from 'lucide-react';
 import jsPDF from 'jspdf';
@@ -315,7 +316,7 @@ export const ResumoMotorista: React.FC = () => {
         doc.text('MATOPIBA LOG - GESTÃO DE FROTAS', 48, 20);
       }
 
-      const monthLabel = safeFmt(selectedDate + '-01T12:00:00', "MMMM 'de' yyyy");
+      const monthLabel = format(new Date(selectedDate + '-01T12:00:00'), "MMMM 'de' yyyy", { locale: ptBR });
       const motLabel = selectedMot === 'todos' ? 'TODOS OS MOTORISTAS' : (motoristas.find(m => m.uid === selectedMot)?.nomeCompleto || 'SELECIONADO');
       doc.setFontSize(14).setFont("helvetica", "bold");
       doc.text('RESUMO POR MOTORISTA', 105, 45, { align: 'center' });
