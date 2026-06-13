@@ -999,14 +999,27 @@ export const ResumoMotorista: React.FC = () => {
           <p className="text-gray-500 text-sm">Auditoria de viagens, lançamentos, comprovantes e resultado financeiro por frete.</p>
         </div>
         {stats.length > 0 && (
-          <button
-            onClick={generatePDF}
-            disabled={isGenerating}
-            className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all shadow-md active:scale-95 font-bold text-sm disabled:opacity-50"
-          >
-            <Download size={18} className="mr-2" />
-            {isGenerating ? 'Gerando...' : 'Gerar Relatório PDF'}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={generatePDF}
+              disabled={isGenerating}
+              className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all shadow-md active:scale-95 font-bold text-sm disabled:opacity-50"
+            >
+              <Download size={18} className="mr-2" />
+              {isGenerating ? 'Gerando...' : 'PDF Resumo'}
+            </button>
+            <button
+              type="button"
+              disabled
+              title={selectedMot === 'todos'
+                ? 'Selecione um motorista para gerar auditoria no próximo bloco'
+                : 'PDF Auditoria será implementado no próximo bloco'}
+              className="flex items-center px-4 py-2 bg-white border border-blue-200 text-blue-600 rounded-lg font-bold text-sm opacity-50 cursor-not-allowed"
+            >
+              <FileText size={18} className="mr-2" />
+              PDF Auditoria (em breve)
+            </button>
+          </div>
         )}
       </div>
 
