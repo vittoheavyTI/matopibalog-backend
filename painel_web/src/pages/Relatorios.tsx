@@ -969,7 +969,7 @@ export const Relatorios: React.FC = () => {
                         <th className="p-4 w-8"></th>
                         <th className="p-4">Motorista</th>
                         <th className="p-4 text-right">Frete Bruto</th>
-                        <th className="p-4 text-right">Saldo Líq.</th>
+                        <th className="p-4 text-right">Comissão</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
