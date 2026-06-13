@@ -44,7 +44,8 @@ export const Motoristas: React.FC = () => {
         placaVeiculo: m.placa_veiculo,
         percentualComissao: m.percentual_comissao,
         statusCadastro: m.status_cadastro,
-        podeFinalizarViagem: m.pode_finalizar_viagem ?? false
+        podeFinalizarViagem: m.pode_finalizar_viagem ?? false,
+        empresaTipo: m.empresa_tipo
       })));
     } catch (error: any) {
       console.error('Erro detalhado ao carregar motoristas:', error);

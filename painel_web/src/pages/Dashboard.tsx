@@ -43,7 +43,8 @@ export const Dashboard: React.FC = () => {
         fotoUrl: m.usuarios?.foto_url || '',
         placaVeiculo: m.placa_veiculo,
         percentualComissao: m.percentual_comissao,
-        statusCadastro: m.status_cadastro
+        statusCadastro: m.status_cadastro,
+        empresaTipo: m.empresa_tipo
       });
 
       setAllMotoristas(motoristasData.map(mapMotorista));
