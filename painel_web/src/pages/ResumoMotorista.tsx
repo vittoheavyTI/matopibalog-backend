@@ -33,6 +33,7 @@ class CatchError extends React.Component<{ children: React.ReactNode }, { error:
 export const ResumoMotorista: React.FC = () => {
   const [motoristas, setMotoristas] = useState<any[]>([]);
   const [selectedMot, setSelectedMot] = useState<string>('todos');
+  const [motoristaBusca, setMotoristaBusca] = useState<string>('');
   const [selectedDate, setSelectedDate] = useState<string>(format(new Date(), 'yyyy-MM'));
   const [loading, setLoading] = useState(false);
   const [stats, setStats] = useState<any[]>([]);
@@ -956,6 +957,27 @@ export const ResumoMotorista: React.FC = () => {
     );
   };
 
+  // Filtros do Histórico: mês/ano derivam de selectedDate (yyyy-MM), que segue sendo a fonte única.
+  const anoAtual = new Date().getFullYear();
+  const anoSel = selectedDate.split('-')[0];
+  const mesSel = selectedDate.split('-')[1];
+  // Intervalo dinâmico: 3 anos atrás até 2 à frente, sempre incluindo o ano selecionado.
+  const anosDisponiveis = Array.from(new Set([
+    ...Array.from({ length: 6 }, (_, i) => String(anoAtual - 3 + i)),
+    anoSel,
+  ])).sort();
+  const meses = Array.from({ length: 12 }, (_, i) => ({
+    valor: String(i + 1).padStart(2, '0'),
+    nome: format(new Date(2000, i, 1), 'MMMM', { locale: ptBR }),
+  }));
+  // Filtro só visual da lista; nunca altera dados carregados nem permissões.
+  // Mantém sempre o motorista já selecionado, mesmo que não case com a busca.
+  const motoristasFiltrados = motoristas.filter(m =>
+    !motoristaBusca.trim() ||
+    (m.nomeCompleto || '').toLowerCase().includes(motoristaBusca.trim().toLowerCase()) ||
+    m.uid === selectedMot
+  );
+
   return (
     <CatchError>
     <div className="space-y-6 pb-20 px-6">
@@ -988,22 +1010,41 @@ export const ResumoMotorista: React.FC = () => {
       <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-wrap items-center gap-4">
         <div className="flex items-center space-x-2">
           <Calendar size={18} className="text-gray-400" />
-          <input
-            type="month"
-            value={selectedDate}
-            onChange={e => setSelectedDate(e.target.value)}
-            className="border rounded-lg p-2 outline-none focus:border-blue-500"
-          />
+          <select
+            value={mesSel}
+            onChange={e => setSelectedDate(`${anoSel}-${e.target.value}`)}
+            className="border rounded-lg p-2 outline-none focus:border-blue-500 bg-white capitalize"
+          >
+            {meses.map(m => (
+              <option key={m.valor} value={m.valor} className="capitalize">{m.nome}</option>
+            ))}
+          </select>
+          <select
+            value={anoSel}
+            onChange={e => setSelectedDate(`${e.target.value}-${mesSel}`)}
+            className="border rounded-lg p-2 outline-none focus:border-blue-500 bg-white"
+          >
+            {anosDisponiveis.map(a => (
+              <option key={a} value={a}>{a}</option>
+            ))}
+          </select>
         </div>
         <div className="flex items-center space-x-2">
           <Users size={18} className="text-gray-400" />
+          <input
+            type="text"
+            value={motoristaBusca}
+            onChange={e => setMotoristaBusca(e.target.value)}
+            placeholder="Buscar motorista"
+            className="border rounded-lg p-2 outline-none focus:border-blue-500 w-40"
+          />
           <select
             value={selectedMot}
             onChange={e => setSelectedMot(e.target.value)}
             className="border rounded-lg p-2 outline-none bg-white"
           >
             <option value="todos">Todos os Motoristas</option>
-            {motoristas.map(m => (
+            {motoristasFiltrados.map(m => (
               <option key={m.uid} value={m.uid}>{m.nomeCompleto}</option>
             ))}
           </select>
