@@ -338,7 +338,7 @@ export const ResumoMotorista: React.FC = () => {
 
         autoTable(doc, {
           startY: 60,
-          head: [['Motorista', 'Viagens', 'Total Frete', 'Comissão', 'Despesas', 'Saldo Líq.', 'Média']],
+          head: [['Motorista', 'Fretes', 'Total Frete', 'Comissão', 'Despesas', 'Saldo Líq.', 'Média']],
           body: tableBody,
           theme: 'striped',
           headStyles: { fillColor: [59, 130, 246] },
@@ -357,7 +357,7 @@ export const ResumoMotorista: React.FC = () => {
         if (selectedMot !== 'todos' && fretesDetalhados.length > 0) {
           doc.addPage();
           doc.setFontSize(14).setFont("helvetica", "bold");
-          doc.text(`VIAGENS DETALHADAS - ${motLabel}`, 14, 15);
+          doc.text(`FRETES DETALHADOS - ${motLabel}`, 14, 15);
 
           autoTable(doc, {
             startY: 20,
@@ -388,7 +388,7 @@ export const ResumoMotorista: React.FC = () => {
 
             doc.addPage();
             doc.setFontSize(13).setFont("helvetica", "bold");
-            doc.text(`VIAGENS: ${m.nomeCompleto.toUpperCase()}`, 14, 15);
+            doc.text(`FRETES: ${m.nomeCompleto.toUpperCase()}`, 14, 15);
 
             autoTable(doc, {
               startY: 20,
@@ -1011,7 +1011,7 @@ export const ResumoMotorista: React.FC = () => {
     return (
       <>
         <button onClick={() => setSelectedTripId(null)} className="flex items-center text-blue-600 hover:text-blue-800 font-bold transition-colors">
-          <ChevronLeft size={20} className="mr-1" /> Voltar para Viagens
+          <ChevronLeft size={20} className="mr-1" /> Voltar para Fretes
         </button>
 
         <div className="bg-blue-600 p-6 rounded-xl shadow-lg text-white">
@@ -1200,10 +1200,10 @@ export const ResumoMotorista: React.FC = () => {
               <span className={saldoMotoristaViagem >= 0 ? 'text-green-600' : 'text-red-600'}>{formatCurrency(saldoMotoristaViagem)}</span>
             </div>
             <div className="flex justify-between items-center text-sm font-bold pt-3 border-t border-gray-100">
-              <span className="text-gray-600 flex items-center"><TrendingUp size={16} className="mr-2 text-green-500" /> RESULTADO DA EMPRESA (desta viagem)</span>
+              <span className="text-gray-600 flex items-center"><TrendingUp size={16} className="mr-2 text-green-500" /> RESULTADO DA EMPRESA (deste frete)</span>
               <span className={resultadoEmpresaViagem >= 0 ? 'text-gray-900' : 'text-red-600'}>{formatCurrency(resultadoEmpresaViagem)}</span>
             </div>
-            <p className="text-[10px] text-gray-400 px-1">* Frete (−) Comissão (−) Desp./Abast. pagos pela empresa, somente desta viagem.</p>
+            <p className="text-[10px] text-gray-400 px-1">* Frete (−) Comissão (−) Desp./Abast. pagos pela empresa, somente deste frete.</p>
           </div>
         </div>
 
@@ -1259,7 +1259,7 @@ export const ResumoMotorista: React.FC = () => {
             </button>
           )}
           <h2 className="text-2xl font-bold text-gray-800">Histórico de Fretes</h2>
-          <p className="text-gray-500 text-sm">Auditoria de viagens, lançamentos, comprovantes e resultado financeiro por frete.</p>
+          <p className="text-gray-500 text-sm">Auditoria de fretes, lançamentos, comprovantes e resultado financeiro por frete.</p>
         </div>
         {stats.length > 0 && (
           <div className="flex items-center gap-2">
@@ -1356,7 +1356,7 @@ export const ResumoMotorista: React.FC = () => {
         <>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
             <div className="p-4 bg-gray-50 rounded-2xl border border-gray-100">
-              <p className="text-[10px] font-bold text-gray-400 uppercase mb-1">Viagens</p>
+              <p className="text-[10px] font-bold text-gray-400 uppercase mb-1">Fretes</p>
               <p className="text-2xl font-black text-gray-800">{totals?.viagens ?? 0}</p>
             </div>
             <div className="p-4 bg-blue-50 rounded-2xl border border-blue-100">
@@ -1385,7 +1385,7 @@ export const ResumoMotorista: React.FC = () => {
                 <div className="bg-gray-50 p-4 border-b border-gray-100">
                   <h3 className="font-bold text-gray-700 flex items-center">
                     <Truck size={18} className="mr-2 text-blue-600" />
-                    Viagens de {motoristas.find(m => m.uid === selectedMot)?.nomeCompleto || 'Motorista'}
+                    Fretes de {motoristas.find(m => m.uid === selectedMot)?.nomeCompleto || 'Motorista'}
                   </h3>
                 </div>
                 <div className="divide-y divide-gray-100">
@@ -1480,7 +1480,7 @@ export const ResumoMotorista: React.FC = () => {
                 <thead className="bg-gray-50 text-[10px] font-bold uppercase text-gray-400 border-b">
                   <tr>
                     <th className="p-4">Motorista</th>
-                    <th className="p-4 text-right">Viagens</th>
+                    <th className="p-4 text-right">Fretes</th>
                     <th className="p-4 text-right">Total Frete</th>
                     <th className="p-4 text-right">Comissão</th>
                     <th className="p-4 text-right">Despesas</th>
@@ -1491,7 +1491,7 @@ export const ResumoMotorista: React.FC = () => {
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {stats.map(s => (
-                    <tr key={s.uid} onClick={() => setSelectedMot(s.uid)} className="hover:bg-blue-50/40 transition-colors cursor-pointer" title="Ver viagens deste motorista">
+                    <tr key={s.uid} onClick={() => setSelectedMot(s.uid)} className="hover:bg-blue-50/40 transition-colors cursor-pointer" title="Ver fretes deste motorista">
                       <td className="p-4">
                         <div className="flex items-center">
                           <User size={16} className="mr-2 text-blue-500" />
