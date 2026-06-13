@@ -42,16 +42,16 @@ exports.getSummary = async (req, res) => {
     if (eFretes) throw eFretes;
 
     // 2. Buscar deduções e abastecimentos FINALIZADOS
-    const { data: despesasRaw, error: eDespesas } = await comFiltroEmpresa(supabase.from('despesas').select('valor, motorista_id').eq('quem_pagou', 'proprietario').eq('status', 'finalizado').gte('data', dataInicio).lte('data', dataFim));
+    const { data: despesasRaw, error: eDespesas } = await comFiltroEmpresa(supabase.from('despesas').select('valor, motorista_id').eq('quem_pagou', 'proprietario').in('status', ['aprovado', 'finalizado']).gte('data', dataInicio).lte('data', dataFim));
     if (eDespesas) throw eDespesas;
 
-    const { data: abastecimentosOwnerRaw, error: eAbastOwner } = await comFiltroEmpresa(supabase.from('abastecimentos').select('valor_total, motorista_id').eq('quem_pagou', 'proprietario').eq('status', 'finalizado').gte('data', dataInicio).lte('data', dataFim));
+    const { data: abastecimentosOwnerRaw, error: eAbastOwner } = await comFiltroEmpresa(supabase.from('abastecimentos').select('valor_total, motorista_id').eq('quem_pagou', 'proprietario').in('status', ['aprovado', 'finalizado']).gte('data', dataInicio).lte('data', dataFim));
     if (eAbastOwner) throw eAbastOwner;
 
-    const { data: allAbastecimentosRaw, error: eAllAbast } = await comFiltroEmpresa(supabase.from('abastecimentos').select('litros, motorista_id').eq('status', 'finalizado').gte('data', dataInicio).lte('data', dataFim));
+    const { data: allAbastecimentosRaw, error: eAllAbast } = await comFiltroEmpresa(supabase.from('abastecimentos').select('litros, motorista_id').in('status', ['aprovado', 'finalizado']).gte('data', dataInicio).lte('data', dataFim));
     if (eAllAbast) throw eAllAbast;
 
-    const { data: valesRaw, error: eVales } = await comFiltroEmpresa(supabase.from('vales').select('valor, motorista_id').eq('quem_pagou', 'proprietario').eq('status', 'finalizado').gte('data', dataInicio).lte('data', dataFim));
+    const { data: valesRaw, error: eVales } = await comFiltroEmpresa(supabase.from('vales').select('valor, motorista_id').eq('quem_pagou', 'proprietario').in('status', ['aprovado', 'finalizado']).gte('data', dataInicio).lte('data', dataFim));
     if (eVales) throw eVales;
 
     // Garantir arrays nunca nulos
