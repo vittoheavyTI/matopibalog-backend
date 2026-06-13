@@ -177,9 +177,11 @@ exports.getSummary = async (req, res) => {
           gastosAuto += valorSegmentado;
           stats.gastos_autonomo += valorSegmentado;
         }
-      } else {
+      } else if (stats) {
+        // [PR2A.1] vinculado também mantém a base de fretes finalizados (exige stats),
+        // alinhando deducoes_vinculados a total_comissoes_vinculados. Não toca os antigos.
         deducoesVinc += valorSegmentado;
-        if (stats) stats.deducoes_vinculado += valorSegmentado;
+        stats.deducoes_vinculado += valorSegmentado;
       }
     });
 
