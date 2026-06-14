@@ -7,6 +7,28 @@ import {
 } from 'lucide-react';
 import api from '../api';
 
+// [PR2B] Card de métrica reutilizável. Recebe as classes de cor como strings
+// literais (nunca interpoladas) para não quebrar o purge do Tailwind.
+const StatCard: React.FC<{
+  label: string;
+  value: string;
+  icon: React.ElementType;
+  boxBorder: string;
+  iconBg: string;
+  iconColor: string;
+  valueColor: string;
+}> = ({ label, value, icon: Icon, boxBorder, iconBg, iconColor, valueColor }) => (
+  <div className={`bg-white p-6 rounded-xl shadow-sm border ${boxBorder}`}>
+    <div className="flex items-center space-x-3 mb-3">
+      <div className={`w-10 h-10 ${iconBg} rounded-lg flex items-center justify-center`}>
+        <Icon size={20} className={iconColor} />
+      </div>
+      <p className="text-sm text-gray-500 font-medium">{label}</p>
+    </div>
+    <p className={`text-3xl font-bold ${valueColor}`}>{value}</p>
+  </div>
+);
+
 export const Dashboard: React.FC = () => {
   const [motoristasEmViagem, setMotoristasEmViagem] = useState<any[]>([]);
   const [_allMotoristas, setAllMotoristas] = useState<any[]>([]);
@@ -330,6 +352,15 @@ export const Dashboard: React.FC = () => {
     summaryPage * summaryPageSize
   ) || [];
 
+  // [PR2B] Cenário dos cards. Sem scope (backend antigo) → comporta como antes (vinculado).
+  const scope = summary?.scope;
+  const temVinculados = scope?.tem_vinculados ?? true;
+  const temAutonomos = scope?.tem_autonomos ?? false;
+  const soAutonomo = temAutonomos && !temVinculados;
+  const misto = temVinculados && temAutonomos;
+  // soVinculado é o padrão: cobre vinculado-only e o caso sem motoristas (4 cards zerados, como hoje).
+  const soVinculado = !soAutonomo && !misto;
+
   return (
     <div className="space-y-6 pb-10">
       {!selectedMot && (
@@ -345,43 +376,47 @@ export const Dashboard: React.FC = () => {
       )}
 
       {!selectedMot && summary && (
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 animate-fade-in">
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-blue-100">
-            <div className="flex items-center space-x-3 mb-3">
-              <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-                <DollarSign size={20} className="text-blue-600" />
-              </div>
-              <p className="text-sm text-gray-500 font-medium">Total de Fretes</p>
+        <div className="space-y-6 animate-fade-in">
+          {/* [PR2B] Vinculado-only: visual atual preservado (campos antigos). */}
+          {soVinculado && (
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+              <StatCard label="Total de Fretes" value={formatCurrency(summary.total_fretes)} icon={DollarSign} boxBorder="border-blue-100" iconBg="bg-blue-100" iconColor="text-blue-600" valueColor="text-blue-600" />
+              <StatCard label="Comissão" value={formatCurrency(summary.total_comissoes)} icon={TrendingUp} boxBorder="border-green-100" iconBg="bg-green-100" iconColor="text-green-600" valueColor="text-green-600" />
+              <StatCard label="Despesas" value={formatCurrency(summary.total_deducoes)} icon={Fuel} boxBorder="border-orange-100" iconBg="bg-orange-100" iconColor="text-orange-600" valueColor="text-orange-600" />
+              <StatCard label="Saldo a Receber" value={formatCurrency(Math.abs(summary.saldo_a_pagar))} icon={Truck} boxBorder="border-purple-100" iconBg="bg-purple-100" iconColor="text-purple-600" valueColor="text-purple-600" />
             </div>
-            <p className="text-3xl font-bold text-blue-600">{formatCurrency(summary.total_fretes)}</p>
-          </div>
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-green-100">
-            <div className="flex items-center space-x-3 mb-3">
-              <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
-                <TrendingUp size={20} className="text-green-600" />
-              </div>
-              <p className="text-sm text-gray-500 font-medium">Comissão</p>
+          )}
+
+          {/* [PR2B] Autônomo-only: Faturamento / Gastos / Resultado (sem comissão, sem saldo a pagar). */}
+          {soAutonomo && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <StatCard label="Faturamento" value={formatCurrency(summary.faturamento_autonomos)} icon={DollarSign} boxBorder="border-blue-100" iconBg="bg-blue-100" iconColor="text-blue-600" valueColor="text-blue-600" />
+              <StatCard label="Gastos" value={formatCurrency(summary.gastos_autonomos)} icon={Fuel} boxBorder="border-orange-100" iconBg="bg-orange-100" iconColor="text-orange-600" valueColor="text-orange-600" />
+              <StatCard label="Resultado" value={formatCurrency(summary.resultado_autonomos)} icon={TrendingUp} boxBorder="border-green-100" iconBg="bg-green-100" iconColor="text-green-600" valueColor={summary.resultado_autonomos >= 0 ? 'text-green-600' : 'text-red-600'} />
             </div>
-            <p className="text-3xl font-bold text-green-600">{formatCurrency(summary.total_comissoes)}</p>
-          </div>
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-orange-100">
-            <div className="flex items-center space-x-3 mb-3">
-              <div className="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center">
-                <Fuel size={20} className="text-orange-600" />
+          )}
+
+          {/* [PR2B] Global/misto: duas faixas separadas, sem somar conceitos. */}
+          {misto && (
+            <>
+              <div>
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Vinculados</p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <StatCard label="Comissão" value={formatCurrency(summary.total_comissoes_vinculados)} icon={TrendingUp} boxBorder="border-green-100" iconBg="bg-green-100" iconColor="text-green-600" valueColor="text-green-600" />
+                  <StatCard label="Despesas" value={formatCurrency(summary.deducoes_vinculados)} icon={Fuel} boxBorder="border-orange-100" iconBg="bg-orange-100" iconColor="text-orange-600" valueColor="text-orange-600" />
+                  <StatCard label="Saldo" value={formatCurrency(summary.saldo_a_pagar_vinculados)} icon={Truck} boxBorder="border-purple-100" iconBg="bg-purple-100" iconColor="text-purple-600" valueColor={summary.saldo_a_pagar_vinculados >= 0 ? 'text-purple-600' : 'text-red-600'} />
+                </div>
               </div>
-              <p className="text-sm text-gray-500 font-medium">Despesas</p>
-            </div>
-            <p className="text-3xl font-bold text-orange-600">{formatCurrency(summary.total_deducoes)}</p>
-          </div>
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-purple-100">
-            <div className="flex items-center space-x-3 mb-3">
-              <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
-                <Truck size={20} className="text-purple-600" />
+              <div>
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Autônomos</p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <StatCard label="Faturamento" value={formatCurrency(summary.faturamento_autonomos)} icon={DollarSign} boxBorder="border-blue-100" iconBg="bg-blue-100" iconColor="text-blue-600" valueColor="text-blue-600" />
+                  <StatCard label="Gastos" value={formatCurrency(summary.gastos_autonomos)} icon={Fuel} boxBorder="border-orange-100" iconBg="bg-orange-100" iconColor="text-orange-600" valueColor="text-orange-600" />
+                  <StatCard label="Resultado" value={formatCurrency(summary.resultado_autonomos)} icon={TrendingUp} boxBorder="border-green-100" iconBg="bg-green-100" iconColor="text-green-600" valueColor={summary.resultado_autonomos >= 0 ? 'text-green-600' : 'text-red-600'} />
+                </div>
               </div>
-              <p className="text-sm text-gray-500 font-medium">Saldo a Receber</p>
-            </div>
-            <p className="text-3xl font-bold text-purple-600">{formatCurrency(Math.abs(summary.saldo_a_pagar))}</p>
-          </div>
+            </>
+          )}
         </div>
       )}
 
@@ -661,48 +696,61 @@ export const Dashboard: React.FC = () => {
                     <th className="p-4">Última Rota</th>
                     <th className="p-4 text-center">KM Total</th>
                     <th className="p-4 text-center">Média</th>
-                    <th className="p-4 text-right">Total Fretes</th>
-                    <th className="p-4 text-right">Comissão</th>
-                    <th className="p-4 text-right">Despesas</th>
-                    <th className="p-4 text-right">Saldo Líquido</th>
+                    {/* [PR2B] autônomo-only usa linguagem própria e sem coluna Comissão */}
+                    <th className="p-4 text-right">{soAutonomo ? 'Faturamento' : 'Total Fretes'}</th>
+                    {!soAutonomo && <th className="p-4 text-right">Comissão</th>}
+                    <th className="p-4 text-right">{soAutonomo ? 'Gastos' : 'Despesas'}</th>
+                    <th className="p-4 text-right">{soAutonomo ? 'Resultado' : 'Saldo Líquido'}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {paginatedSummary.map((m: any, idx: number) => (
-                    <tr key={idx} className="hover:bg-blue-50/30 transition-colors group">
-                      <td className="p-4">
-                        <div className="flex items-center">
-                          <div className="w-7 h-7 bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center text-[10px] font-bold mr-2 border border-blue-200">
-                            {m.nome?.charAt(0) || '?'}
+                  {paginatedSummary.map((m: any, idx: number) => {
+                    // [PR2B] Autônomo: Comissão "—", Despesas=Gastos, Saldo=Resultado.
+                    // Vinculado: usa campos segmentados (idênticos aos antigos p/ vinculado).
+                    const auto = m.is_autonomo;
+                    const despVal = auto ? (m.gastos_autonomo ?? 0) : (m.deducoes_vinculado ?? m.deducoes);
+                    const saldoVal = auto ? (m.resultado_autonomo ?? 0) : (m.saldo_vinculado ?? m.saldo);
+                    return (
+                      <tr key={idx} className="hover:bg-blue-50/30 transition-colors group">
+                        <td className="p-4">
+                          <div className="flex items-center">
+                            <div className="w-7 h-7 bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center text-[10px] font-bold mr-2 border border-blue-200">
+                              {m.nome?.charAt(0) || '?'}
+                            </div>
+                            <span className="text-sm font-bold text-gray-700">{m.nome}</span>
+                            {auto && <span className="ml-2 text-[9px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded font-bold uppercase">Autônomo</span>}
                           </div>
-                          <span className="text-sm font-bold text-gray-700">{m.nome}</span>
-                        </div>
-                      </td>
-                      <td className="p-4">
-                        <span className="text-[11px] font-medium text-gray-500 bg-gray-100 px-2 py-1 rounded-md">{m.ultima_rota || '-'}</span>
-                      </td>
-                      <td className="p-4 text-center">
-                        <span className="text-xs font-bold text-gray-600">{m.total_km} KM</span>
-                      </td>
-                      <td className="p-4 text-center">
-                        <span className={`text-xs font-bold px-2 py-1 rounded-md ${parseFloat(m.media_consumo) > 0 ? 'bg-blue-50 text-blue-700' : 'bg-gray-50 text-gray-400'}`}>
-                          {m.media_consumo} KM/L
-                        </span>
-                      </td>
-                      <td className="p-4 text-right">
-                        <span className="text-xs font-bold text-gray-700">{formatCurrency(m.total_fretes)}</span>
-                      </td>
-                      <td className="p-4 text-right">
-                        <span className="text-xs font-bold text-blue-600">{formatCurrency(m.comissao)}</span>
-                      </td>
-                      <td className="p-4 text-right">
-                        <span className="text-xs font-medium text-red-500">-{formatCurrency(m.deducoes)}</span>
-                      </td>
-                      <td className="p-4 text-right">
-                        <span className="text-sm font-black text-green-700">{formatCurrency(m.saldo)}</span>
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td className="p-4">
+                          <span className="text-[11px] font-medium text-gray-500 bg-gray-100 px-2 py-1 rounded-md">{m.ultima_rota || '-'}</span>
+                        </td>
+                        <td className="p-4 text-center">
+                          <span className="text-xs font-bold text-gray-600">{m.total_km} KM</span>
+                        </td>
+                        <td className="p-4 text-center">
+                          <span className={`text-xs font-bold px-2 py-1 rounded-md ${parseFloat(m.media_consumo) > 0 ? 'bg-blue-50 text-blue-700' : 'bg-gray-50 text-gray-400'}`}>
+                            {m.media_consumo} KM/L
+                          </span>
+                        </td>
+                        <td className="p-4 text-right">
+                          <span className="text-xs font-bold text-gray-700">{formatCurrency(m.total_fretes)}</span>
+                        </td>
+                        {!soAutonomo && (
+                          <td className="p-4 text-right">
+                            {auto
+                              ? <span className="text-xs font-bold text-gray-400">—</span>
+                              : <span className="text-xs font-bold text-blue-600">{formatCurrency(m.comissao_vinculado ?? m.comissao)}</span>}
+                          </td>
+                        )}
+                        <td className="p-4 text-right">
+                          <span className="text-xs font-medium text-red-500">-{formatCurrency(despVal)}</span>
+                        </td>
+                        <td className="p-4 text-right">
+                          <span className={`text-sm font-black ${auto ? (saldoVal >= 0 ? 'text-green-700' : 'text-red-600') : 'text-green-700'}`}>{formatCurrency(saldoVal)}</span>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
