@@ -398,6 +398,14 @@ export const GerenciamentoViagens: React.FC = () => {
   const opValesOwner = mVales.filter(v => v.status === 'aprovado' && v.quemPagou === 'proprietario').reduce((acc, v) => acc + parseFloat(v.valor), 0);
   const opSaldoLiquido = opComissao + opDespMot + opAbastMot - opValesOwner;
   const opLucroEmpresa = opTotalFretes - opComissao - opDespOwner - opAbastOwner;
+  // Autônomo: modelo faturamento - gastos (sem comissão/saldo/resultado-empresa).
+  // Gastos ignoram quem_pagou e somam despesas + abastecimentos + vales aprovados.
+  const isAutonomo = selectedMotorista?.empresaTipo === 'autonomo';
+  const autGastos =
+    mDesp.filter(d => d.status === 'aprovado').reduce((acc, d) => acc + (parseFloat(d.valor) || 0), 0) +
+    mAbs.filter(a => a.status === 'aprovado').reduce((acc, a) => acc + (parseFloat(a.valorTotal) || 0), 0) +
+    mVales.filter(v => v.status === 'aprovado').reduce((acc, v) => acc + (parseFloat(v.valor) || 0), 0);
+  const autResultado = opTotalFretes - autGastos;
   const temPendente = mDesp.some(d => d.status === 'pendente') || mAbs.some(a => a.status === 'pendente') || mVales.some(v => v.status === 'pendente');
   const temFreteAtivo = mFretes.some(f => f.status === 'ativo' || f.status === 'pendente');
   const totalLiters = mAbs.filter(a => a.status === 'aprovado').reduce((acc, a) => acc + (parseFloat(a.litros) || 0), 0);
@@ -554,7 +562,7 @@ export const GerenciamentoViagens: React.FC = () => {
             </div>
             <div>
               <h2 className="text-2xl font-bold">{selectedMotorista.nome}</h2>
-              <p className="text-blue-100 text-sm">Placa: {selectedMotorista.placa} | Comissão: {selectedMotorista.comissao}%</p>
+              <p className="text-blue-100 text-sm">Placa: {selectedMotorista.placa}{!isAutonomo && ` | Comissão: ${selectedMotorista.comissao}%`}</p>
             </div>
           </div>
           <div className="flex items-center space-x-4">
@@ -697,33 +705,52 @@ export const GerenciamentoViagens: React.FC = () => {
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 h-fit sticky top-6">
           <h4 className="flex items-center text-gray-800 mb-6 font-bold text-lg"><DollarSign className="mr-2 text-green-600" /> Balanço Atual</h4>
           <div className="space-y-4">
-            <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
-              <span className="text-gray-500">Valor Total do Frete:</span>
-              <span className="font-bold text-gray-800">{formatCurrency(opTotalFretes)}</span>
-            </div>
-            <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
-              <span className="text-gray-500">Porcentagem Motorista ({selectedMotorista?.comissao || 0}%):</span>
-              <span className="font-bold text-blue-600">+{formatCurrency(opComissao)}</span>
-            </div>
-            <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
-              <span className="text-gray-500">Desp./Abast. (Motorista):</span>
-              <span className="font-bold text-green-600">+{formatCurrency(opDespMot + opAbastMot)}</span>
-            </div>
-            <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
-              <span className="text-gray-500">Vales / Adiantamentos:</span>
-              <span className="font-bold text-red-600">-{formatCurrency(opValesOwner)}</span>
-            </div>
-            <div className="flex justify-between items-center text-base font-extrabold bg-gray-50 p-3 rounded-lg">
-              <span className="text-gray-700">SALDO MOTORISTA:</span>
-              <span className={opSaldoLiquido >= 0 ? 'text-green-600' : 'text-red-600'}>{formatCurrency(Math.abs(opSaldoLiquido))}</span>
-            </div>
-            <div className="pt-6 border-t border-gray-100 mt-4">
-              <div className="flex justify-between items-center text-sm font-bold text-gray-600 px-1">
-                <span className="flex items-center"><TrendingUp size={16} className="mr-2 text-green-500" /> RESULTADO EMPRESA:</span>
-                <span className="text-gray-900">{formatCurrency(Math.abs(opLucroEmpresa))}</span>
-              </div>
-              <p className="text-[10px] text-gray-400 mt-1 px-1">* Frete Total (-) Comissão (-) Despesas/Abast. pagos pela empresa.</p>
-            </div>
+            {isAutonomo ? (
+              <>
+                <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
+                  <span className="text-gray-500">Faturamento:</span>
+                  <span className="font-bold text-gray-800">{formatCurrency(opTotalFretes)}</span>
+                </div>
+                <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
+                  <span className="text-gray-500">Gastos:</span>
+                  <span className="font-bold text-red-600">-{formatCurrency(autGastos)}</span>
+                </div>
+                <div className="flex justify-between items-center text-base font-extrabold bg-gray-50 p-3 rounded-lg">
+                  <span className="text-gray-700">RESULTADO:</span>
+                  <span className={autResultado >= 0 ? 'text-green-600' : 'text-red-600'}>{formatCurrency(Math.abs(autResultado))}</span>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
+                  <span className="text-gray-500">Valor Total do Frete:</span>
+                  <span className="font-bold text-gray-800">{formatCurrency(opTotalFretes)}</span>
+                </div>
+                <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
+                  <span className="text-gray-500">Porcentagem Motorista ({selectedMotorista?.comissao || 0}%):</span>
+                  <span className="font-bold text-blue-600">+{formatCurrency(opComissao)}</span>
+                </div>
+                <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
+                  <span className="text-gray-500">Desp./Abast. (Motorista):</span>
+                  <span className="font-bold text-green-600">+{formatCurrency(opDespMot + opAbastMot)}</span>
+                </div>
+                <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
+                  <span className="text-gray-500">Vales / Adiantamentos:</span>
+                  <span className="font-bold text-red-600">-{formatCurrency(opValesOwner)}</span>
+                </div>
+                <div className="flex justify-between items-center text-base font-extrabold bg-gray-50 p-3 rounded-lg">
+                  <span className="text-gray-700">SALDO MOTORISTA:</span>
+                  <span className={opSaldoLiquido >= 0 ? 'text-green-600' : 'text-red-600'}>{formatCurrency(Math.abs(opSaldoLiquido))}</span>
+                </div>
+                <div className="pt-6 border-t border-gray-100 mt-4">
+                  <div className="flex justify-between items-center text-sm font-bold text-gray-600 px-1">
+                    <span className="flex items-center"><TrendingUp size={16} className="mr-2 text-green-500" /> RESULTADO EMPRESA:</span>
+                    <span className="text-gray-900">{formatCurrency(Math.abs(opLucroEmpresa))}</span>
+                  </div>
+                  <p className="text-[10px] text-gray-400 mt-1 px-1">* Frete Total (-) Comissão (-) Despesas/Abast. pagos pela empresa.</p>
+                </div>
+              </>
+            )}
           </div>
           <button onClick={handleFinalizarViagem} disabled={temPendente || !temFreteAtivo}
             className="mt-8 w-full py-4 bg-green-600 text-white rounded-xl font-bold text-lg shadow-lg hover:bg-green-700 transition-all disabled:opacity-50 disabled:shadow-none active:scale-95 flex items-center justify-center">
