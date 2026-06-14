@@ -25,6 +25,107 @@ const loadLogoDims = (dataUrl: string, maxW = 35, maxH = 20): Promise<{ w: numbe
     } catch { resolve({ w: maxW, h: maxH }); }
   });
 
+// PR3B.2: renderiza a tabela-resumo + bloco de resumo de UM grupo (vinculados OU autônomos).
+// Compartilhado entre generatePDF e generatePDFSelected para evitar divergência.
+// - tipo 'vinculado'  → colunas Fretes/Total Frete/Comissão/Despesas/Saldo Líq./Média.
+// - tipo 'autonomo'   → colunas Fretes/Faturamento/Gastos/Resultado/Média (sem comissão/saldo).
+// - titulo = null reproduz o layout validado no PR3B.1 / atual (grupo único, sem cabeçalho de seção).
+// - titulo != null adiciona o cabeçalho de seção (modo misto). Retorna o Y ao final do bloco de resumo.
+const renderResumoGrupo = (
+  doc: jsPDF,
+  stats: any[],
+  tipo: 'vinculado' | 'autonomo',
+  startY: number,
+  titulo: string | null,
+  resumoLabel: string
+): number => {
+  const isAuto = tipo === 'autonomo';
+  let y = startY;
+
+  if (titulo) {
+    doc.setFontSize(13).setFont('helvetica', 'bold').setTextColor(31, 41, 55);
+    doc.text(titulo, 14, y);
+    doc.setTextColor(0, 0, 0);
+    y += 6;
+  }
+
+  const tableBody = stats.map(s => isAuto
+    ? [s.nome, s.viagens.toString(), formatCurrency(s.totalFrete), formatCurrency(s.totalGastos), formatCurrency(s.totalFrete - s.totalGastos), `${s.media} KM/L`]
+    : [s.nome, s.viagens.toString(), formatCurrency(s.totalFrete), formatCurrency(s.comissao), formatCurrency(s.totalGastos), formatCurrency(s.saldoLiq), `${s.media} KM/L`]
+  );
+
+  const totals = stats.reduce((acc, s) => ({
+    viagens: acc.viagens + s.viagens,
+    totalFrete: acc.totalFrete + s.totalFrete,
+    comissao: acc.comissao + s.comissao,
+    totalGastos: acc.totalGastos + s.totalGastos,
+    saldoLiq: acc.saldoLiq + s.saldoLiq,
+    totalKm: acc.totalKm + s.totalKm,
+    totalLitros: acc.totalLitros + s.totalLitros
+  }), { viagens: 0, totalFrete: 0, comissao: 0, totalGastos: 0, saldoLiq: 0, totalKm: 0, totalLitros: 0 });
+
+  const mediaGlobal = `${totals.totalLitros > 0 ? (totals.totalKm / totals.totalLitros).toFixed(2) : '0.00'} KM/L`;
+
+  autoTable(doc, {
+    startY: y,
+    head: isAuto
+      ? [['Motorista', 'Fretes', 'Faturamento', 'Gastos', 'Resultado', 'Média']]
+      : [['Motorista', 'Fretes', 'Total Frete', 'Comissão', 'Despesas', 'Saldo Líq.', 'Média']],
+    body: tableBody,
+    theme: 'striped',
+    headStyles: { fillColor: [59, 130, 246] },
+    foot: [isAuto
+      ? ['TOTAIS', totals.viagens.toString(), formatCurrency(totals.totalFrete), formatCurrency(totals.totalGastos), formatCurrency(totals.totalFrete - totals.totalGastos), mediaGlobal]
+      : ['TOTAIS', totals.viagens.toString(), formatCurrency(totals.totalFrete), formatCurrency(totals.comissao), formatCurrency(totals.totalGastos), formatCurrency(totals.saldoLiq), mediaGlobal]
+    ],
+    footStyles: { fillColor: [241, 245, 249], textColor: [31, 41, 55], fontStyle: 'bold' }
+  });
+
+  const finalY = (doc as any).lastAutoTable.finalY + 15;
+  const rightEdge = 195;
+  const labelX = 130;
+
+  doc.setFontSize(12).setFont('helvetica', 'bold').setTextColor(0, 0, 0);
+  doc.text(resumoLabel, rightEdge, finalY, { align: 'right' });
+
+  doc.setFontSize(10).setFont('helvetica', 'normal');
+  if (isAuto) {
+    const resultado = totals.totalFrete - totals.totalGastos;
+    doc.text('Faturamento Total:', labelX, finalY + 10);
+    doc.text(`${formatCurrency(totals.totalFrete)}`, rightEdge, finalY + 10, { align: 'right' });
+
+    doc.text('Total Gastos:', labelX, finalY + 18);
+    doc.text(`${formatCurrency(totals.totalGastos)}`, rightEdge, finalY + 18, { align: 'right' });
+
+    doc.setDrawColor(200).line(labelX, finalY + 22, rightEdge, finalY + 22);
+
+    doc.setFontSize(11).setFont('helvetica', 'bold');
+    if (resultado >= 0) { doc.setTextColor(21, 128, 61); } else { doc.setTextColor(185, 28, 28); }
+    doc.text('RESULTADO:', labelX, finalY + 30);
+    doc.text(`${formatCurrency(resultado)}`, rightEdge, finalY + 30, { align: 'right' });
+    doc.setTextColor(0, 0, 0);
+    return finalY + 30;
+  }
+
+  doc.text('Total Bruto (Fretes):', labelX, finalY + 10);
+  doc.text(`${formatCurrency(totals.totalFrete)}`, rightEdge, finalY + 10, { align: 'right' });
+
+  doc.text('Total Comissões:', labelX, finalY + 18);
+  doc.text(`${formatCurrency(totals.comissao)}`, rightEdge, finalY + 18, { align: 'right' });
+
+  doc.text('Total Despesas/Vales:', labelX, finalY + 26);
+  doc.text(`${formatCurrency(totals.totalGastos)}`, rightEdge, finalY + 26, { align: 'right' });
+
+  doc.setDrawColor(200).line(labelX, finalY + 30, rightEdge, finalY + 30);
+
+  doc.setFontSize(11).setFont('helvetica', 'bold');
+  if (totals.saldoLiq >= 0) { doc.setTextColor(21, 128, 61); } else { doc.setTextColor(185, 28, 28); }
+  doc.text('SALDO LÍQUIDO FINAL:', labelX, finalY + 38);
+  doc.text(`${formatCurrency(totals.saldoLiq)}`, rightEdge, finalY + 38, { align: 'right' });
+  doc.setTextColor(0, 0, 0);
+  return finalY + 38;
+};
+
 export const Relatorios: React.FC = () => {
   const [motoristas, setMotoristas] = useState<any[]>([]);
   const [selectedMot, setSelectedMot] = useState<string>('todos');
@@ -241,6 +342,7 @@ export const Relatorios: React.FC = () => {
       return {
         nome: m.nomeCompleto,
         uid: m.uid,
+        isAutonomo: m.empresaTipo === 'autonomo',
         viagens: mFretes.length,
         totalFrete,
         comissao,
@@ -258,101 +360,34 @@ export const Relatorios: React.FC = () => {
       return;
     }
 
-    // PR3B.1: motorista autônomo selecionado → modelo Faturamento/Gastos/Resultado (sem comissão/saldo).
-    // Misto ("Todos") e vinculado mantêm o layout atual.
-    const isAutonomoPDF = selectedMot !== 'todos'
-      && motoristas.find(m => String(m.uid).trim() === String(selectedMot).trim())?.empresaTipo === 'autonomo';
+    // PR3B.2: separar Vinculados e Autônomos. Misto → duas seções tituladas, cada uma com seu
+    // próprio subtotal/resumo (sem total geral único). Grupo único preserva o layout validado
+    // no PR3B.1 (autônomo) e o layout atual (vinculado).
+    const vinculados = rawStats.filter(s => !s.isAutonomo);
+    const autonomos = rawStats.filter(s => s.isAutonomo);
 
-    const tableBody = rawStats.map(s => isAutonomoPDF
-      ? [s.nome, s.viagens.toString(), formatCurrency(s.totalFrete), formatCurrency(s.totalGastos), formatCurrency(s.totalFrete - s.totalGastos), `${s.media} KM/L`]
-      : [s.nome, s.viagens.toString(), formatCurrency(s.totalFrete), formatCurrency(s.comissao), formatCurrency(s.totalGastos), formatCurrency(s.saldoLiq), `${s.media} KM/L`]
-    );
-
-    const globalTotals = rawStats.reduce((acc, s) => ({
-      viagens: acc.viagens + s.viagens,
-      totalFrete: acc.totalFrete + s.totalFrete,
-      comissao: acc.comissao + s.comissao,
-      totalGastos: acc.totalGastos + s.totalGastos,
-      saldoLiq: acc.saldoLiq + s.saldoLiq,
-      totalKm: acc.totalKm + s.totalKm,
-      totalLitros: acc.totalLitros + s.totalLitros
-    }), { viagens: 0, totalFrete: 0, comissao: 0, totalGastos: 0, saldoLiq: 0, totalKm: 0, totalLitros: 0 });
-
-    const mediaGlobal = `${globalTotals.totalLitros > 0 ? (globalTotals.totalKm / globalTotals.totalLitros).toFixed(2) : '0.00'} KM/L`;
-
-    autoTable(doc, {
-      startY: 92,
-      head: isAutonomoPDF
-        ? [['Motorista', 'Fretes', 'Faturamento', 'Gastos', 'Resultado', 'Média']]
-        : [['Motorista', 'Viagens', 'Total Frete', 'Comissão', 'Despesas', 'Saldo Líq.', 'Média']],
-      body: tableBody,
-      theme: 'striped',
-      headStyles: { fillColor: [59, 130, 246] },
-      foot: [isAutonomoPDF
-        ? ['TOTAIS', globalTotals.viagens.toString(), formatCurrency(globalTotals.totalFrete), formatCurrency(globalTotals.totalGastos), formatCurrency(globalTotals.totalFrete - globalTotals.totalGastos), mediaGlobal]
-        : ['TOTAIS', globalTotals.viagens.toString(), formatCurrency(globalTotals.totalFrete), formatCurrency(globalTotals.comissao), formatCurrency(globalTotals.totalGastos), formatCurrency(globalTotals.saldoLiq), mediaGlobal]
-      ],
-      footStyles: { fillColor: [241, 245, 249], textColor: [31, 41, 55], fontStyle: 'bold' }
-    });
-
-    // Profit Summary after the table
-    const finalY = (doc as any).lastAutoTable.finalY + 15;
-    const rightEdge = 195;
-    const labelX = 130;
-
-    doc.setFontSize(12).setFont("helvetica", "bold").setTextColor(0, 0, 0);
-    doc.text('RESUMO GERAL DO PERÍODO', rightEdge, finalY, { align: 'right' });
-
-    doc.setFontSize(10).setFont("helvetica", "normal");
-    if (isAutonomoPDF) {
-      const resultadoGlobal = globalTotals.totalFrete - globalTotals.totalGastos;
-      doc.text(`Faturamento Total:`, labelX, finalY + 10);
-      doc.text(`${formatCurrency(globalTotals.totalFrete)}`, rightEdge, finalY + 10, { align: 'right' });
-
-      doc.text(`Total Gastos:`, labelX, finalY + 18);
-      doc.text(`${formatCurrency(globalTotals.totalGastos)}`, rightEdge, finalY + 18, { align: 'right' });
-
-      doc.setDrawColor(200).line(labelX, finalY + 22, rightEdge, finalY + 22);
-
-      doc.setFontSize(11).setFont("helvetica", "bold");
-      if (resultadoGlobal >= 0) { doc.setTextColor(21, 128, 61); } else { doc.setTextColor(185, 28, 28); }
-      doc.text(`RESULTADO:`, labelX, finalY + 30);
-      doc.text(`${formatCurrency(resultadoGlobal)}`, rightEdge, finalY + 30, { align: 'right' });
-      doc.setTextColor(0, 0, 0);
+    let resumoEndY: number;
+    if (vinculados.length > 0 && autonomos.length > 0) {
+      let y = renderResumoGrupo(doc, vinculados, 'vinculado', 92, 'MOTORISTAS VINCULADOS', 'RESUMO — MOTORISTAS VINCULADOS');
+      y += 18;
+      if (y > 250) { doc.addPage(); y = 15; }
+      resumoEndY = renderResumoGrupo(doc, autonomos, 'autonomo', y, 'MOTORISTAS AUTÔNOMOS', 'RESUMO — MOTORISTAS AUTÔNOMOS');
     } else {
-      doc.text(`Total Bruto (Fretes):`, labelX, finalY + 10);
-      doc.text(`${formatCurrency(globalTotals.totalFrete)}`, rightEdge, finalY + 10, { align: 'right' });
-
-      doc.text(`Total Comissões:`, labelX, finalY + 18);
-      doc.text(`${formatCurrency(globalTotals.comissao)}`, rightEdge, finalY + 18, { align: 'right' });
-
-      doc.text(`Total Despesas/Vales:`, labelX, finalY + 26);
-      doc.text(`${formatCurrency(globalTotals.totalGastos)}`, rightEdge, finalY + 26, { align: 'right' });
-
-      doc.setDrawColor(200).line(labelX, finalY + 30, rightEdge, finalY + 30);
-
-      doc.setFontSize(11).setFont("helvetica", "bold");
-      if (globalTotals.saldoLiq >= 0) {
-        doc.setTextColor(21, 128, 61); // Green
-      } else {
-        doc.setTextColor(185, 28, 28); // Red
-      }
-      doc.text(`SALDO LÍQUIDO FINAL:`, labelX, finalY + 38);
-      doc.text(`${formatCurrency(globalTotals.saldoLiq)}`, rightEdge, finalY + 38, { align: 'right' });
-      doc.setTextColor(0, 0, 0);
+      const soAutonomo = autonomos.length > 0;
+      resumoEndY = renderResumoGrupo(doc, soAutonomo ? autonomos : vinculados, soAutonomo ? 'autonomo' : 'vinculado', 92, null, 'RESUMO GERAL DO PERÍODO');
     }
 
     // Detailed breakdown by type for each motorista
     const targetMots = motoristas.filter(m => {
       const isTarget = selectedMot === 'todos' || String(m.uid).trim() === String(selectedMot).trim();
       if (!isTarget) return false;
-      return fretes.some(f => String(f.motoristaUid).trim() === String(m.uid).trim()) || 
+      return fretes.some(f => String(f.motoristaUid).trim() === String(m.uid).trim()) ||
              despesas.some(d => String(d.motoristaUid).trim() === String(m.uid).trim()) ||
              abastecimentos.some(a => String(a.motoristaUid).trim() === String(m.uid).trim()) ||
              vales.some(v => String(v.motoristaUid).trim() === String(m.uid).trim());
     });
 
-    let detalhamentoY = finalY + 55;
+    let detalhamentoY = resumoEndY + 17;
 
     targetMots.forEach((m) => {
       const mFretes = fretes.filter(f => String(f.motoristaUid).trim() === String(m.uid).trim());
@@ -578,9 +613,6 @@ export const Relatorios: React.FC = () => {
     // Summary table for selected trips
     const motoristaUids = [...new Set(selectedFretes.map(f => f.motoristaUid))];
     const targetMots = motoristas.filter(m => motoristaUids.includes(m.uid));
-    // PR3B.1: fretes selecionados de UM único motorista autônomo → modelo Faturamento/Gastos/Resultado.
-    // Seleção mista (mais de um motorista) mantém o layout atual.
-    const isAutonomoPDF = targetMots.length === 1 && targetMots[0]?.empresaTipo === 'autonomo';
 
     const rawStats = targetMots.map(m => {
       const mFretes = selectedFretes.filter(f => String(f.motoristaUid).trim() === String(m.uid).trim());
@@ -602,6 +634,7 @@ export const Relatorios: React.FC = () => {
       return {
         nome: m.nomeCompleto,
         uid: m.uid,
+        isAutonomo: m.empresaTipo === 'autonomo',
         viagens: mFretes.length,
         totalFrete,
         comissao,
@@ -616,85 +649,23 @@ export const Relatorios: React.FC = () => {
     let detalhamentoY = 105;
 
     if (rawStats.length > 0) {
-      const tableBody = rawStats.map(s => isAutonomoPDF
-        ? [s.nome, s.viagens.toString(), formatCurrency(s.totalFrete), formatCurrency(s.totalGastos), formatCurrency(s.totalFrete - s.totalGastos), `${s.media} KM/L`]
-        : [s.nome, s.viagens.toString(), formatCurrency(s.totalFrete), formatCurrency(s.comissao), formatCurrency(s.totalGastos), formatCurrency(s.saldoLiq), `${s.media} KM/L`]
-      );
+      // PR3B.2: mesma separação Vinculados/Autônomos do PDF geral. Seleção só-autônomos preserva
+      // o layout do PR3B.1; só-vinculados preserva o atual; seleção mista vira duas seções.
+      const vinculados = rawStats.filter(s => !s.isAutonomo);
+      const autonomos = rawStats.filter(s => s.isAutonomo);
 
-      const globalTotals = rawStats.reduce((acc, s) => ({
-        viagens: acc.viagens + s.viagens,
-        totalFrete: acc.totalFrete + s.totalFrete,
-        comissao: acc.comissao + s.comissao,
-        totalGastos: acc.totalGastos + s.totalGastos,
-        saldoLiq: acc.saldoLiq + s.saldoLiq,
-        totalKm: acc.totalKm + s.totalKm,
-        totalLitros: acc.totalLitros + s.totalLitros
-      }), { viagens: 0, totalFrete: 0, comissao: 0, totalGastos: 0, saldoLiq: 0, totalKm: 0, totalLitros: 0 });
-
-      const mediaGlobal = `${globalTotals.totalLitros > 0 ? (globalTotals.totalKm / globalTotals.totalLitros).toFixed(2) : '0.00'} KM/L`;
-
-      autoTable(doc, {
-        startY: 99,
-        head: isAutonomoPDF
-          ? [['Motorista', 'Fretes', 'Faturamento', 'Gastos', 'Resultado', 'Média']]
-          : [['Motorista', 'Viagens', 'Total Frete', 'Comissão', 'Despesas', 'Saldo Líq.', 'Média']],
-        body: tableBody,
-        theme: 'striped',
-        headStyles: { fillColor: [59, 130, 246] },
-        foot: [isAutonomoPDF
-          ? ['TOTAIS', globalTotals.viagens.toString(), formatCurrency(globalTotals.totalFrete), formatCurrency(globalTotals.totalGastos), formatCurrency(globalTotals.totalFrete - globalTotals.totalGastos), mediaGlobal]
-          : ['TOTAIS', globalTotals.viagens.toString(), formatCurrency(globalTotals.totalFrete), formatCurrency(globalTotals.comissao), formatCurrency(globalTotals.totalGastos), formatCurrency(globalTotals.saldoLiq), mediaGlobal]
-        ],
-        footStyles: { fillColor: [241, 245, 249], textColor: [31, 41, 55], fontStyle: 'bold' }
-      });
-
-      const finalY = (doc as any).lastAutoTable.finalY + 15;
-      const rightEdge = 195;
-      const labelX = 130;
-
-      doc.setFontSize(12).setFont("helvetica", "bold").setTextColor(0, 0, 0);
-      doc.text('RESUMO GERAL DO PERÍODO', rightEdge, finalY, { align: 'right' });
-
-      doc.setFontSize(10).setFont("helvetica", "normal");
-      if (isAutonomoPDF) {
-        const resultadoGlobal = globalTotals.totalFrete - globalTotals.totalGastos;
-        doc.text(`Faturamento Total:`, labelX, finalY + 10);
-        doc.text(`${formatCurrency(globalTotals.totalFrete)}`, rightEdge, finalY + 10, { align: 'right' });
-
-        doc.text(`Total Gastos:`, labelX, finalY + 18);
-        doc.text(`${formatCurrency(globalTotals.totalGastos)}`, rightEdge, finalY + 18, { align: 'right' });
-
-        doc.setDrawColor(200).line(labelX, finalY + 22, rightEdge, finalY + 22);
-
-        doc.setFontSize(11).setFont("helvetica", "bold");
-        if (resultadoGlobal >= 0) { doc.setTextColor(21, 128, 61); } else { doc.setTextColor(185, 28, 28); }
-        doc.text(`RESULTADO:`, labelX, finalY + 30);
-        doc.text(`${formatCurrency(resultadoGlobal)}`, rightEdge, finalY + 30, { align: 'right' });
-        doc.setTextColor(0, 0, 0);
+      let resumoEndY: number;
+      if (vinculados.length > 0 && autonomos.length > 0) {
+        let y = renderResumoGrupo(doc, vinculados, 'vinculado', 99, 'MOTORISTAS VINCULADOS', 'RESUMO — MOTORISTAS VINCULADOS');
+        y += 18;
+        if (y > 250) { doc.addPage(); y = 15; }
+        resumoEndY = renderResumoGrupo(doc, autonomos, 'autonomo', y, 'MOTORISTAS AUTÔNOMOS', 'RESUMO — MOTORISTAS AUTÔNOMOS');
       } else {
-        doc.text(`Total Bruto (Fretes):`, labelX, finalY + 10);
-        doc.text(`${formatCurrency(globalTotals.totalFrete)}`, rightEdge, finalY + 10, { align: 'right' });
-
-        doc.text(`Total Comissões:`, labelX, finalY + 18);
-        doc.text(`${formatCurrency(globalTotals.comissao)}`, rightEdge, finalY + 18, { align: 'right' });
-
-        doc.text(`Total Despesas/Vales:`, labelX, finalY + 26);
-        doc.text(`${formatCurrency(globalTotals.totalGastos)}`, rightEdge, finalY + 26, { align: 'right' });
-
-        doc.setDrawColor(200).line(labelX, finalY + 30, rightEdge, finalY + 30);
-
-        doc.setFontSize(11).setFont("helvetica", "bold");
-        if (globalTotals.saldoLiq >= 0) {
-          doc.setTextColor(21, 128, 61);
-        } else {
-          doc.setTextColor(185, 28, 28);
-        }
-        doc.text(`SALDO LÍQUIDO FINAL:`, labelX, finalY + 38);
-        doc.text(`${formatCurrency(globalTotals.saldoLiq)}`, rightEdge, finalY + 38, { align: 'right' });
-        doc.setTextColor(0, 0, 0);
+        const soAutonomo = autonomos.length > 0;
+        resumoEndY = renderResumoGrupo(doc, soAutonomo ? autonomos : vinculados, soAutonomo ? 'autonomo' : 'vinculado', 99, null, 'RESUMO GERAL DO PERÍODO');
       }
 
-      detalhamentoY = finalY + 55;
+      detalhamentoY = resumoEndY + 17;
     }
 
     targetMots.forEach((m) => {
