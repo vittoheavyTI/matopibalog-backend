@@ -400,7 +400,7 @@ export const Dashboard: React.FC = () => {
           {misto && (
             <>
               <div>
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Vinculados</p>
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Motoristas Vinculados</p>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                   <StatCard label="Comissão" value={formatCurrency(summary.total_comissoes_vinculados)} icon={TrendingUp} boxBorder="border-green-100" iconBg="bg-green-100" iconColor="text-green-600" valueColor="text-green-600" />
                   <StatCard label="Despesas" value={formatCurrency(summary.deducoes_vinculados)} icon={Fuel} boxBorder="border-orange-100" iconBg="bg-orange-100" iconColor="text-orange-600" valueColor="text-orange-600" />
@@ -408,7 +408,7 @@ export const Dashboard: React.FC = () => {
                 </div>
               </div>
               <div>
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Autônomos</p>
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Motoristas Autônomos</p>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                   <StatCard label="Faturamento" value={formatCurrency(summary.faturamento_autonomos)} icon={DollarSign} boxBorder="border-blue-100" iconBg="bg-blue-100" iconColor="text-blue-600" valueColor="text-blue-600" />
                   <StatCard label="Gastos" value={formatCurrency(summary.gastos_autonomos)} icon={Fuel} boxBorder="border-orange-100" iconBg="bg-orange-100" iconColor="text-orange-600" valueColor="text-orange-600" />
