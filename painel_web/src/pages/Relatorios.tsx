@@ -7,6 +7,24 @@ import { formatCurrency } from '../utils';
 import { Calendar, FileText, Users, User, Download, Filter, Truck } from 'lucide-react';
 import api from '../api';
 
+// Carrega a logo (data URL do localStorage) e calcula dimensões preservando o aspecto real.
+// Evita o esticamento: antes o addImage usava naturalWidth=0 (imagem ainda não decodificada)
+// e caía no fallback de caixa fixa 35x20.
+const loadLogoDims = (dataUrl: string, maxW = 35, maxH = 20): Promise<{ w: number; h: number }> =>
+  new Promise((resolve) => {
+    try {
+      const img = new Image();
+      img.onload = () => {
+        const nw = img.naturalWidth || maxW;
+        const nh = img.naturalHeight || maxH;
+        const ratio = Math.min(maxW / nw, maxH / nh);
+        resolve({ w: nw * ratio, h: nh * ratio });
+      };
+      img.onerror = () => resolve({ w: maxW, h: maxH });
+      img.src = dataUrl;
+    } catch { resolve({ w: maxW, h: maxH }); }
+  });
+
 export const Relatorios: React.FC = () => {
   const [motoristas, setMotoristas] = useState<any[]>([]);
   const [selectedMot, setSelectedMot] = useState<string>('todos');
@@ -168,12 +186,9 @@ export const Relatorios: React.FC = () => {
 
     if (savedLogo) {
       try {
-        const img = new Image();
-        img.src = savedLogo;
         const maxW = 35, maxH = 20;
-        const ratio = Math.min(maxW / (img.naturalWidth || maxW), maxH / (img.naturalHeight || maxH));
-        const w = (img.naturalWidth || maxW) * ratio;
-        const h = (img.naturalHeight || maxH) * ratio;
+        // Aguarda o decode da imagem p/ usar dimensões reais e preservar o aspecto (não estica).
+        const { w, h } = await loadLogoDims(savedLogo, maxW, maxH);
         doc.addImage(savedLogo, 'PNG', 12, 8 + (maxH - h) / 2, w, h);
       } catch (e) {}
     }
@@ -243,15 +258,15 @@ export const Relatorios: React.FC = () => {
       return;
     }
 
-    const tableBody = rawStats.map(s => [
-      s.nome,
-      s.viagens.toString(),
-      formatCurrency(s.totalFrete),
-      formatCurrency(s.comissao),
-      formatCurrency(s.totalGastos),
-      formatCurrency(s.saldoLiq),
-      `${s.media} KM/L`
-    ]);
+    // PR3B.1: motorista autônomo selecionado → modelo Faturamento/Gastos/Resultado (sem comissão/saldo).
+    // Misto ("Todos") e vinculado mantêm o layout atual.
+    const isAutonomoPDF = selectedMot !== 'todos'
+      && motoristas.find(m => String(m.uid).trim() === String(selectedMot).trim())?.empresaTipo === 'autonomo';
+
+    const tableBody = rawStats.map(s => isAutonomoPDF
+      ? [s.nome, s.viagens.toString(), formatCurrency(s.totalFrete), formatCurrency(s.totalGastos), formatCurrency(s.totalFrete - s.totalGastos), `${s.media} KM/L`]
+      : [s.nome, s.viagens.toString(), formatCurrency(s.totalFrete), formatCurrency(s.comissao), formatCurrency(s.totalGastos), formatCurrency(s.saldoLiq), `${s.media} KM/L`]
+    );
 
     const globalTotals = rawStats.reduce((acc, s) => ({
       viagens: acc.viagens + s.viagens,
@@ -263,21 +278,20 @@ export const Relatorios: React.FC = () => {
       totalLitros: acc.totalLitros + s.totalLitros
     }), { viagens: 0, totalFrete: 0, comissao: 0, totalGastos: 0, saldoLiq: 0, totalKm: 0, totalLitros: 0 });
 
+    const mediaGlobal = `${globalTotals.totalLitros > 0 ? (globalTotals.totalKm / globalTotals.totalLitros).toFixed(2) : '0.00'} KM/L`;
+
     autoTable(doc, {
       startY: 92,
-      head: [['Motorista', 'Viagens', 'Total Frete', 'Comissão', 'Despesas', 'Saldo Líq.', 'Média']],
+      head: isAutonomoPDF
+        ? [['Motorista', 'Fretes', 'Faturamento', 'Gastos', 'Resultado', 'Média']]
+        : [['Motorista', 'Viagens', 'Total Frete', 'Comissão', 'Despesas', 'Saldo Líq.', 'Média']],
       body: tableBody,
       theme: 'striped',
       headStyles: { fillColor: [59, 130, 246] },
-      foot: [[
-        'TOTAIS',
-        globalTotals.viagens.toString(),
-        formatCurrency(globalTotals.totalFrete),
-        formatCurrency(globalTotals.comissao),
-        formatCurrency(globalTotals.totalGastos),
-        formatCurrency(globalTotals.saldoLiq),
-        `${globalTotals.totalLitros > 0 ? (globalTotals.totalKm / globalTotals.totalLitros).toFixed(2) : '0.00'} KM/L`
-      ]],
+      foot: [isAutonomoPDF
+        ? ['TOTAIS', globalTotals.viagens.toString(), formatCurrency(globalTotals.totalFrete), formatCurrency(globalTotals.totalGastos), formatCurrency(globalTotals.totalFrete - globalTotals.totalGastos), mediaGlobal]
+        : ['TOTAIS', globalTotals.viagens.toString(), formatCurrency(globalTotals.totalFrete), formatCurrency(globalTotals.comissao), formatCurrency(globalTotals.totalGastos), formatCurrency(globalTotals.saldoLiq), mediaGlobal]
+      ],
       footStyles: { fillColor: [241, 245, 249], textColor: [31, 41, 55], fontStyle: 'bold' }
     });
 
@@ -285,31 +299,48 @@ export const Relatorios: React.FC = () => {
     const finalY = (doc as any).lastAutoTable.finalY + 15;
     const rightEdge = 195;
     const labelX = 130;
-    
+
     doc.setFontSize(12).setFont("helvetica", "bold").setTextColor(0, 0, 0);
     doc.text('RESUMO GERAL DO PERÍODO', rightEdge, finalY, { align: 'right' });
-    
+
     doc.setFontSize(10).setFont("helvetica", "normal");
-    doc.text(`Total Bruto (Fretes):`, labelX, finalY + 10);
-    doc.text(`${formatCurrency(globalTotals.totalFrete)}`, rightEdge, finalY + 10, { align: 'right' });
-    
-    doc.text(`Total Comissões:`, labelX, finalY + 18);
-    doc.text(`${formatCurrency(globalTotals.comissao)}`, rightEdge, finalY + 18, { align: 'right' });
+    if (isAutonomoPDF) {
+      const resultadoGlobal = globalTotals.totalFrete - globalTotals.totalGastos;
+      doc.text(`Faturamento Total:`, labelX, finalY + 10);
+      doc.text(`${formatCurrency(globalTotals.totalFrete)}`, rightEdge, finalY + 10, { align: 'right' });
 
-    doc.text(`Total Despesas/Vales:`, labelX, finalY + 26);
-    doc.text(`${formatCurrency(globalTotals.totalGastos)}`, rightEdge, finalY + 26, { align: 'right' });
+      doc.text(`Total Gastos:`, labelX, finalY + 18);
+      doc.text(`${formatCurrency(globalTotals.totalGastos)}`, rightEdge, finalY + 18, { align: 'right' });
 
-    doc.setDrawColor(200).line(labelX, finalY + 30, rightEdge, finalY + 30);
+      doc.setDrawColor(200).line(labelX, finalY + 22, rightEdge, finalY + 22);
 
-    doc.setFontSize(11).setFont("helvetica", "bold");
-    if (globalTotals.saldoLiq >= 0) {
-      doc.setTextColor(21, 128, 61); // Green
+      doc.setFontSize(11).setFont("helvetica", "bold");
+      if (resultadoGlobal >= 0) { doc.setTextColor(21, 128, 61); } else { doc.setTextColor(185, 28, 28); }
+      doc.text(`RESULTADO:`, labelX, finalY + 30);
+      doc.text(`${formatCurrency(resultadoGlobal)}`, rightEdge, finalY + 30, { align: 'right' });
+      doc.setTextColor(0, 0, 0);
     } else {
-      doc.setTextColor(185, 28, 28); // Red
+      doc.text(`Total Bruto (Fretes):`, labelX, finalY + 10);
+      doc.text(`${formatCurrency(globalTotals.totalFrete)}`, rightEdge, finalY + 10, { align: 'right' });
+
+      doc.text(`Total Comissões:`, labelX, finalY + 18);
+      doc.text(`${formatCurrency(globalTotals.comissao)}`, rightEdge, finalY + 18, { align: 'right' });
+
+      doc.text(`Total Despesas/Vales:`, labelX, finalY + 26);
+      doc.text(`${formatCurrency(globalTotals.totalGastos)}`, rightEdge, finalY + 26, { align: 'right' });
+
+      doc.setDrawColor(200).line(labelX, finalY + 30, rightEdge, finalY + 30);
+
+      doc.setFontSize(11).setFont("helvetica", "bold");
+      if (globalTotals.saldoLiq >= 0) {
+        doc.setTextColor(21, 128, 61); // Green
+      } else {
+        doc.setTextColor(185, 28, 28); // Red
+      }
+      doc.text(`SALDO LÍQUIDO FINAL:`, labelX, finalY + 38);
+      doc.text(`${formatCurrency(globalTotals.saldoLiq)}`, rightEdge, finalY + 38, { align: 'right' });
+      doc.setTextColor(0, 0, 0);
     }
-    doc.text(`SALDO LÍQUIDO FINAL:`, labelX, finalY + 38);
-    doc.text(`${formatCurrency(globalTotals.saldoLiq)}`, rightEdge, finalY + 38, { align: 'right' });
-    doc.setTextColor(0, 0, 0);
 
     // Detailed breakdown by type for each motorista
     const targetMots = motoristas.filter(m => {
@@ -509,12 +540,9 @@ export const Relatorios: React.FC = () => {
 
     if (savedLogo) {
       try {
-        const img = new Image();
-        img.src = savedLogo;
         const maxW = 35, maxH = 20;
-        const ratio = Math.min(maxW / (img.naturalWidth || maxW), maxH / (img.naturalHeight || maxH));
-        const w = (img.naturalWidth || maxW) * ratio;
-        const h = (img.naturalHeight || maxH) * ratio;
+        // Aguarda o decode da imagem p/ usar dimensões reais e preservar o aspecto (não estica).
+        const { w, h } = await loadLogoDims(savedLogo, maxW, maxH);
         doc.addImage(savedLogo, 'PNG', 12, 8 + (maxH - h) / 2, w, h);
       } catch (e) {}
     }
@@ -545,11 +573,14 @@ export const Relatorios: React.FC = () => {
     doc.text(`PERÍODO: ${startF} até ${endF}`, 14, 82);
 
     doc.setFontSize(9).setFont("helvetica", "italic");
-    doc.text(`VIAGENS SELECIONADAS: ${selectedTripIds.length}`, 14, 89);
+    doc.text(`FRETES SELECIONADOS: ${selectedTripIds.length}`, 14, 89);
 
     // Summary table for selected trips
     const motoristaUids = [...new Set(selectedFretes.map(f => f.motoristaUid))];
     const targetMots = motoristas.filter(m => motoristaUids.includes(m.uid));
+    // PR3B.1: fretes selecionados de UM único motorista autônomo → modelo Faturamento/Gastos/Resultado.
+    // Seleção mista (mais de um motorista) mantém o layout atual.
+    const isAutonomoPDF = targetMots.length === 1 && targetMots[0]?.empresaTipo === 'autonomo';
 
     const rawStats = targetMots.map(m => {
       const mFretes = selectedFretes.filter(f => String(f.motoristaUid).trim() === String(m.uid).trim());
@@ -585,15 +616,10 @@ export const Relatorios: React.FC = () => {
     let detalhamentoY = 105;
 
     if (rawStats.length > 0) {
-      const tableBody = rawStats.map(s => [
-        s.nome,
-        s.viagens.toString(),
-        formatCurrency(s.totalFrete),
-        formatCurrency(s.comissao),
-        formatCurrency(s.totalGastos),
-        formatCurrency(s.saldoLiq),
-        `${s.media} KM/L`
-      ]);
+      const tableBody = rawStats.map(s => isAutonomoPDF
+        ? [s.nome, s.viagens.toString(), formatCurrency(s.totalFrete), formatCurrency(s.totalGastos), formatCurrency(s.totalFrete - s.totalGastos), `${s.media} KM/L`]
+        : [s.nome, s.viagens.toString(), formatCurrency(s.totalFrete), formatCurrency(s.comissao), formatCurrency(s.totalGastos), formatCurrency(s.saldoLiq), `${s.media} KM/L`]
+      );
 
       const globalTotals = rawStats.reduce((acc, s) => ({
         viagens: acc.viagens + s.viagens,
@@ -605,21 +631,20 @@ export const Relatorios: React.FC = () => {
         totalLitros: acc.totalLitros + s.totalLitros
       }), { viagens: 0, totalFrete: 0, comissao: 0, totalGastos: 0, saldoLiq: 0, totalKm: 0, totalLitros: 0 });
 
+      const mediaGlobal = `${globalTotals.totalLitros > 0 ? (globalTotals.totalKm / globalTotals.totalLitros).toFixed(2) : '0.00'} KM/L`;
+
       autoTable(doc, {
         startY: 99,
-        head: [['Motorista', 'Viagens', 'Total Frete', 'Comissão', 'Despesas', 'Saldo Líq.', 'Média']],
+        head: isAutonomoPDF
+          ? [['Motorista', 'Fretes', 'Faturamento', 'Gastos', 'Resultado', 'Média']]
+          : [['Motorista', 'Viagens', 'Total Frete', 'Comissão', 'Despesas', 'Saldo Líq.', 'Média']],
         body: tableBody,
         theme: 'striped',
         headStyles: { fillColor: [59, 130, 246] },
-        foot: [[
-          'TOTAIS',
-          globalTotals.viagens.toString(),
-          formatCurrency(globalTotals.totalFrete),
-          formatCurrency(globalTotals.comissao),
-          formatCurrency(globalTotals.totalGastos),
-          formatCurrency(globalTotals.saldoLiq),
-          `${globalTotals.totalLitros > 0 ? (globalTotals.totalKm / globalTotals.totalLitros).toFixed(2) : '0.00'} KM/L`
-        ]],
+        foot: [isAutonomoPDF
+          ? ['TOTAIS', globalTotals.viagens.toString(), formatCurrency(globalTotals.totalFrete), formatCurrency(globalTotals.totalGastos), formatCurrency(globalTotals.totalFrete - globalTotals.totalGastos), mediaGlobal]
+          : ['TOTAIS', globalTotals.viagens.toString(), formatCurrency(globalTotals.totalFrete), formatCurrency(globalTotals.comissao), formatCurrency(globalTotals.totalGastos), formatCurrency(globalTotals.saldoLiq), mediaGlobal]
+        ],
         footStyles: { fillColor: [241, 245, 249], textColor: [31, 41, 55], fontStyle: 'bold' }
       });
 
@@ -631,26 +656,43 @@ export const Relatorios: React.FC = () => {
       doc.text('RESUMO GERAL DO PERÍODO', rightEdge, finalY, { align: 'right' });
 
       doc.setFontSize(10).setFont("helvetica", "normal");
-      doc.text(`Total Bruto (Fretes):`, labelX, finalY + 10);
-      doc.text(`${formatCurrency(globalTotals.totalFrete)}`, rightEdge, finalY + 10, { align: 'right' });
+      if (isAutonomoPDF) {
+        const resultadoGlobal = globalTotals.totalFrete - globalTotals.totalGastos;
+        doc.text(`Faturamento Total:`, labelX, finalY + 10);
+        doc.text(`${formatCurrency(globalTotals.totalFrete)}`, rightEdge, finalY + 10, { align: 'right' });
 
-      doc.text(`Total Comissões:`, labelX, finalY + 18);
-      doc.text(`${formatCurrency(globalTotals.comissao)}`, rightEdge, finalY + 18, { align: 'right' });
+        doc.text(`Total Gastos:`, labelX, finalY + 18);
+        doc.text(`${formatCurrency(globalTotals.totalGastos)}`, rightEdge, finalY + 18, { align: 'right' });
 
-      doc.text(`Total Despesas/Vales:`, labelX, finalY + 26);
-      doc.text(`${formatCurrency(globalTotals.totalGastos)}`, rightEdge, finalY + 26, { align: 'right' });
+        doc.setDrawColor(200).line(labelX, finalY + 22, rightEdge, finalY + 22);
 
-      doc.setDrawColor(200).line(labelX, finalY + 30, rightEdge, finalY + 30);
-
-      doc.setFontSize(11).setFont("helvetica", "bold");
-      if (globalTotals.saldoLiq >= 0) {
-        doc.setTextColor(21, 128, 61);
+        doc.setFontSize(11).setFont("helvetica", "bold");
+        if (resultadoGlobal >= 0) { doc.setTextColor(21, 128, 61); } else { doc.setTextColor(185, 28, 28); }
+        doc.text(`RESULTADO:`, labelX, finalY + 30);
+        doc.text(`${formatCurrency(resultadoGlobal)}`, rightEdge, finalY + 30, { align: 'right' });
+        doc.setTextColor(0, 0, 0);
       } else {
-        doc.setTextColor(185, 28, 28);
+        doc.text(`Total Bruto (Fretes):`, labelX, finalY + 10);
+        doc.text(`${formatCurrency(globalTotals.totalFrete)}`, rightEdge, finalY + 10, { align: 'right' });
+
+        doc.text(`Total Comissões:`, labelX, finalY + 18);
+        doc.text(`${formatCurrency(globalTotals.comissao)}`, rightEdge, finalY + 18, { align: 'right' });
+
+        doc.text(`Total Despesas/Vales:`, labelX, finalY + 26);
+        doc.text(`${formatCurrency(globalTotals.totalGastos)}`, rightEdge, finalY + 26, { align: 'right' });
+
+        doc.setDrawColor(200).line(labelX, finalY + 30, rightEdge, finalY + 30);
+
+        doc.setFontSize(11).setFont("helvetica", "bold");
+        if (globalTotals.saldoLiq >= 0) {
+          doc.setTextColor(21, 128, 61);
+        } else {
+          doc.setTextColor(185, 28, 28);
+        }
+        doc.text(`SALDO LÍQUIDO FINAL:`, labelX, finalY + 38);
+        doc.text(`${formatCurrency(globalTotals.saldoLiq)}`, rightEdge, finalY + 38, { align: 'right' });
+        doc.setTextColor(0, 0, 0);
       }
-      doc.text(`SALDO LÍQUIDO FINAL:`, labelX, finalY + 38);
-      doc.text(`${formatCurrency(globalTotals.saldoLiq)}`, rightEdge, finalY + 38, { align: 'right' });
-      doc.setTextColor(0, 0, 0);
 
       detalhamentoY = finalY + 55;
     }
