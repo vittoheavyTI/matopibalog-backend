@@ -933,35 +933,90 @@ export const Relatorios: React.FC = () => {
                <div className="py-20 text-center text-gray-500">Carregando dados...</div>
             ) : (
               <>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-                  <div className="p-4 bg-gray-50 rounded-2xl border border-gray-100">
-                    <p className="text-[10px] font-bold text-gray-400 uppercase mb-1">Total Frete</p>
-                    <p className="text-lg font-black text-gray-800">{formatCurrency(fretes.reduce((s,f)=>s+f.valorFrete, 0))}</p>
-                  </div>
-                  <div className="p-4 bg-green-50 rounded-2xl border border-green-100">
-                    <p className="text-[10px] font-bold text-green-600 uppercase mb-1">Comissões</p>
-                    <p className="text-lg font-black text-green-700">
-                      {formatCurrency(fretes.reduce((s,f) => {
-                        const m = motoristas.find(mot => mot.uid === f.motoristaUid);
-                        return s + (f.valorFrete * ((m?.percentualComissao || 0)/100));
-                      }, 0))}
-                    </p>
-                  </div>
-                  <div className="p-4 bg-red-50 rounded-2xl border border-red-100">
-                    <p className="text-[10px] font-bold text-red-600 uppercase mb-1">Despesas</p>
-                    <p className="text-lg font-black text-red-700">
-                      {formatCurrency(
-                        despesas.reduce((s,d)=>s+d.valor,0) + 
-                        abastecimentos.reduce((s,a)=>s+a.valorTotal,0) + 
-                        vales.reduce((s,v)=>s+v.valor,0)
-                      )}
-                    </p>
-                  </div>
-                  <div className="p-4 bg-blue-50 rounded-2xl border border-blue-100">
-                    <p className="text-[10px] font-bold text-blue-600 uppercase mb-1">Viagens</p>
-                    <p className="text-lg font-black text-blue-700">{fretes.length}</p>
-                  </div>
-                </div>
+                {(() => {
+                  // PR3A: cards sensíveis ao tipo. Autônomo NÃO vê "Comissões" — vê Faturamento/Gastos/Resultado.
+                  // `|| 0` em todos os somatórios evita NaN.
+                  const selObj = selectedMot !== 'todos' ? motoristas.find(m => m.uid === selectedMot) : null;
+                  const isAutSel = selObj?.empresaTipo === 'autonomo';
+                  const totalFrete = fretes.reduce((s,f)=>s+(f.valorFrete||0), 0);
+                  const gastosTotais = despesas.reduce((s,d)=>s+(d.valor||0),0) + abastecimentos.reduce((s,a)=>s+(a.valorTotal||0),0) + vales.reduce((s,v)=>s+(v.valor||0),0);
+                  const card = (label: string, value: number, opts: any = {}) => (
+                    <div key={label} className={`p-4 rounded-2xl border ${opts.box || 'bg-gray-50 border-gray-100'}`}>
+                      <p className={`text-[10px] font-bold uppercase mb-1 ${opts.labelCls || 'text-gray-400'}`}>{label}</p>
+                      <p className={`text-lg font-black ${opts.valCls || 'text-gray-800'}`}>{opts.raw ? value : formatCurrency(value)}</p>
+                    </div>
+                  );
+
+                  // 1) Autônomo selecionado → Faturamento / Gastos / Resultado / Viagens (sem Comissões)
+                  if (isAutSel) {
+                    const resultado = totalFrete - gastosTotais;
+                    return (
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+                        {card('Faturamento', totalFrete)}
+                        {card('Gastos', gastosTotais, { box: 'bg-red-50 border-red-100', labelCls: 'text-red-600', valCls: 'text-red-700' })}
+                        {card('Resultado', resultado, { box: 'bg-green-50 border-green-100', labelCls: 'text-green-600', valCls: resultado >= 0 ? 'text-green-700' : 'text-red-700' })}
+                        {card('Viagens', fretes.length, { box: 'bg-blue-50 border-blue-100', labelCls: 'text-blue-600', valCls: 'text-blue-700', raw: true })}
+                      </div>
+                    );
+                  }
+
+                  // 2) Modo misto ("Todos") → separar visualmente Vinculados x Autônomos (sem total único)
+                  if (selectedMot === 'todos') {
+                    let tfVinc=0, comVinc=0, gVinc=0, tfAut=0, gAut=0, nVinc=0, nAut=0;
+                    motoristas.forEach(m => {
+                      const mF = fretes.filter(f => f.motoristaUid === m.uid);
+                      const g = despesas.filter(d => d.motoristaUid === m.uid).reduce((s,d)=>s+(d.valor||0),0)
+                        + abastecimentos.filter(a => a.motoristaUid === m.uid).reduce((s,a)=>s+(a.valorTotal||0),0)
+                        + vales.filter(v => v.motoristaUid === m.uid).reduce((s,v)=>s+(v.valor||0),0);
+                      if (mF.length === 0 && g === 0) return;
+                      const tot = mF.reduce((s,f)=>s+(f.valorFrete||0),0);
+                      if (m.empresaTipo === 'autonomo') { tfAut+=tot; gAut+=g; nAut++; }
+                      else { tfVinc+=tot; comVinc += tot*((m.percentualComissao||0)/100); gVinc+=g; nVinc++; }
+                    });
+                    const resAut = tfAut - gAut;
+                    return (
+                      <div className="space-y-4 mb-8">
+                        {nVinc > 0 && (
+                          <div>
+                            <p className="text-[10px] font-bold text-gray-400 uppercase mb-2 tracking-widest">Vinculados</p>
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                              {card('Total Frete', tfVinc)}
+                              {card('Comissões', comVinc, { box: 'bg-green-50 border-green-100', labelCls: 'text-green-600', valCls: 'text-green-700' })}
+                              {card('Despesas', gVinc, { box: 'bg-red-50 border-red-100', labelCls: 'text-red-600', valCls: 'text-red-700' })}
+                            </div>
+                          </div>
+                        )}
+                        {nAut > 0 && (
+                          <div>
+                            <p className="text-[10px] font-bold text-amber-500 uppercase mb-2 tracking-widest">Autônomos</p>
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                              {card('Faturamento', tfAut)}
+                              {card('Gastos', gAut, { box: 'bg-red-50 border-red-100', labelCls: 'text-red-600', valCls: 'text-red-700' })}
+                              {card('Resultado', resAut, { box: 'bg-green-50 border-green-100', labelCls: 'text-green-600', valCls: resAut >= 0 ? 'text-green-700' : 'text-red-700' })}
+                            </div>
+                          </div>
+                        )}
+                        {nVinc === 0 && nAut === 0 && (
+                          <p className="text-sm text-gray-400 text-center py-4">Nenhum dado no período.</p>
+                        )}
+                      </div>
+                    );
+                  }
+
+                  // 3) Vinculado selecionado → comportamento atual (Total Frete / Comissões / Despesas / Viagens)
+                  const comissaoVinc = fretes.reduce((s,f) => {
+                    const m = motoristas.find(mot => mot.uid === f.motoristaUid);
+                    return s + (m?.empresaTipo === 'autonomo' ? 0 : (f.valorFrete||0) * ((m?.percentualComissao || 0)/100));
+                  }, 0);
+                  return (
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+                      {card('Total Frete', totalFrete)}
+                      {card('Comissões', comissaoVinc, { box: 'bg-green-50 border-green-100', labelCls: 'text-green-600', valCls: 'text-green-700' })}
+                      {card('Despesas', gastosTotais, { box: 'bg-red-50 border-red-100', labelCls: 'text-red-600', valCls: 'text-red-700' })}
+                      {card('Viagens', fretes.length, { box: 'bg-blue-50 border-blue-100', labelCls: 'text-blue-600', valCls: 'text-blue-700', raw: true })}
+                    </div>
+                  );
+                })()}
 
                 <div className="border rounded-2xl overflow-hidden">
                   <table className="w-full text-left">
@@ -969,8 +1024,8 @@ export const Relatorios: React.FC = () => {
                       <tr>
                         <th className="p-4 w-8"></th>
                         <th className="p-4">Motorista</th>
-                        <th className="p-4 text-right">Frete Bruto</th>
-                        <th className="p-4 text-right">Comissão</th>
+                        <th className="p-4 text-right">{(selectedMot !== 'todos' && motoristas.find(m => m.uid === selectedMot)?.empresaTipo === 'autonomo') ? 'Faturamento' : 'Frete Bruto'}</th>
+                        <th className="p-4 text-right">{(selectedMot !== 'todos' && motoristas.find(m => m.uid === selectedMot)?.empresaTipo === 'autonomo') ? 'Resultado' : selectedMot === 'todos' ? 'Comissão / Resultado' : 'Comissão'}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
@@ -978,6 +1033,13 @@ export const Relatorios: React.FC = () => {
                         const mFretes = fretes.filter(f => f.motoristaUid === m.uid);
                         if (mFretes.length === 0) return null;
                         const total = mFretes.reduce((s,f)=>s+f.valorFrete,0);
+                        // PR3A: autônomo = Faturamento − Gastos (sem comissão). Gastos = desp+abast+vales
+                        // (já filtrados aprovado/finalizado no load), ignorando quem_pagou. `|| 0` evita NaN.
+                        const isAut = m.empresaTipo === 'autonomo';
+                        const mGastos = despesas.filter(d => d.motoristaUid === m.uid).reduce((s,d)=>s+(d.valor||0),0)
+                          + abastecimentos.filter(a => a.motoristaUid === m.uid).reduce((s,a)=>s+(a.valorTotal||0),0)
+                          + vales.filter(v => v.motoristaUid === m.uid).reduce((s,v)=>s+(v.valor||0),0);
+                        const resultado = total - mGastos;
                         return (
                           <React.Fragment key={m.uid}>
                             <tr className="bg-gray-100/30">
@@ -987,10 +1049,18 @@ export const Relatorios: React.FC = () => {
                                   <User size={16} className="text-blue-600" />
                                 </div>
                                 <span className="text-base font-black text-gray-800">{m.nomeCompleto}</span>
+                                {isAut && <span className="ml-2 text-[9px] font-bold uppercase bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">Autônomo</span>}
                               </td>
                               <td className="p-4 text-right text-sm font-black text-gray-700">{formatCurrency(total)}</td>
-                              <td className="p-4 text-right text-sm font-black text-blue-600">
-                                  {formatCurrency(total * ((m.percentualComissao || 0)/100))}
+                              <td className="p-4 text-right text-sm font-black">
+                                {isAut ? (
+                                  <div>
+                                    <span className={resultado >= 0 ? 'text-green-600' : 'text-red-600'}>{formatCurrency(resultado)}</span>
+                                    <p className="text-[9px] font-bold text-gray-400 uppercase">Resultado · Gastos {formatCurrency(mGastos)}</p>
+                                  </div>
+                                ) : (
+                                  <span className="text-blue-600">{formatCurrency(total * ((m.percentualComissao || 0)/100))}</span>
+                                )}
                               </td>
                             </tr>
                             {mFretes.map(f => {
