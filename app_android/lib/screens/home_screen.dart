@@ -307,17 +307,17 @@ class _HomeScreenState extends State<HomeScreen> {
           backgroundColor: color.withValues(alpha: 0.12),
           child: Icon(icon, color: color, size: 18),
         ),
-        title: Text(desc, style: const TextStyle(fontSize: 13), overflow: TextOverflow.ellipsis),
+        title: Text(desc, style: const TextStyle(fontSize: 14), overflow: TextOverflow.ellipsis),
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('$label · $dataStr', style: const TextStyle(fontSize: 11)),
+            Text('$label · $dataStr', style: const TextStyle(fontSize: 13)),
             if (obs != null && obs.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 2),
                 child: Text(
                   '${status == 'rejeitado' ? 'Motivo' : 'Obs'}: $obs',
-                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600, fontStyle: FontStyle.italic),
+                  style: TextStyle(fontSize: 13, color: Colors.grey.shade600, fontStyle: FontStyle.italic),
                 ),
               ),
           ],
@@ -328,7 +328,7 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             Text(
               'R\$ ${valor.toStringAsFixed(2)}',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: color),
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: color),
             ),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
@@ -336,7 +336,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 color: statusColor.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(4),
               ),
-              child: Text(status, style: TextStyle(color: statusColor, fontSize: 10)),
+              child: Text(status, style: TextStyle(color: statusColor, fontSize: 12)),
             ),
           ],
         ),
@@ -366,12 +366,12 @@ class _HomeScreenState extends State<HomeScreen> {
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            Text('R\$ ${valor.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+            Text('R\$ ${valor.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
             const SizedBox(height: 2),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
               decoration: BoxDecoration(color: statusColor.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(4)),
-              child: Text(status, style: TextStyle(color: statusColor, fontSize: 10)),
+              child: Text(status, style: TextStyle(color: statusColor, fontSize: 12)),
             ),
           ],
         ),
