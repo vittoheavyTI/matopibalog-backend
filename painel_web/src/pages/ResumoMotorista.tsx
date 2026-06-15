@@ -266,6 +266,8 @@ export const ResumoMotorista: React.FC = () => {
         return {
           nome: m.nomeCompleto,
           uid: m.uid,
+          // PR7B.1: tipo de empresa propagado p/ separar vinculado x autônomo na TELA (cards + tabela).
+          empresaTipo: m.empresaTipo,
           viagens: mFretes.length,
           totalFrete,
           comissao,
@@ -1298,6 +1300,177 @@ export const ResumoMotorista: React.FC = () => {
     ? 'Todos os Motoristas'
     : (motoristas.find(m => m.uid === selectedMot)?.nomeCompleto || '');
 
+  // PR7B.1: separa motoristas vinculados de autônomos na TELA (cards + tabela do modo "Todos").
+  // Vinculado mantém Comissão/Saldo Líq.; autônomo usa Faturamento/Gastos/Resultado.
+  // NÃO mexe em `stats`/`totals` consumidos pelo generatePDF — o PDF Resumo fica para o PR7B.2.
+  const statsVinculados = stats.filter((s: any) => s.empresaTipo !== 'autonomo');
+  const statsAutonomos = stats.filter((s: any) => s.empresaTipo === 'autonomo');
+  const somaGrupo = (arr: any[]) => arr.reduce((acc, s) => ({
+    viagens: acc.viagens + s.viagens,
+    totalFrete: acc.totalFrete + s.totalFrete,
+    comissao: acc.comissao + s.comissao,
+    totalGastos: acc.totalGastos + s.totalGastos,
+    saldoLiq: acc.saldoLiq + s.saldoLiq,
+    totalKm: acc.totalKm + s.totalKm,
+    totalLitros: acc.totalLitros + s.totalLitros,
+  }), { viagens: 0, totalFrete: 0, comissao: 0, totalGastos: 0, saldoLiq: 0, totalKm: 0, totalLitros: 0 });
+  const totaisVinculados = somaGrupo(statsVinculados);
+  const totaisAutonomos = somaGrupo(statsAutonomos);
+  // Tipo do motorista selecionado (quando não é "Todos") — define o layout dos cards do topo.
+  const selIsAutonomo = selectedMot !== 'todos'
+    && motoristas.find(m => m.uid === selectedMot)?.empresaTipo === 'autonomo';
+
+  // PR7B.1: cards do resumo. Vinculado = Fretes/Total Frete/Comissões/Despesas/Saldo Líq.;
+  // Autônomo = Fretes/Faturamento/Gastos/Resultado (sem Comissão/Saldo). `t` é um objeto de totais.
+  const renderCardsResumo = (t: any, isAut: boolean, titulo?: string) => (
+    <div key={titulo || 'cards'}>
+      {titulo && <p className="text-sm font-bold text-gray-600 mb-2">{titulo}</p>}
+      <div className={`grid grid-cols-2 ${isAut ? 'md:grid-cols-4' : 'md:grid-cols-5'} gap-4`}>
+        <div className="p-4 bg-gray-50 rounded-2xl border border-gray-100">
+          <p className="text-[10px] font-bold text-gray-400 uppercase mb-1">Fretes</p>
+          <p className="text-2xl font-black text-gray-800">{t?.viagens ?? 0}</p>
+        </div>
+        {isAut ? (
+          <>
+            <div className="p-4 bg-blue-50 rounded-2xl border border-blue-100">
+              <p className="text-[10px] font-bold text-blue-600 uppercase mb-1">Faturamento</p>
+              <p className="text-2xl font-black text-blue-700">{formatCurrency(t?.totalFrete ?? 0)}</p>
+            </div>
+            <div className="p-4 bg-red-50 rounded-2xl border border-red-100">
+              <p className="text-[10px] font-bold text-red-600 uppercase mb-1">Gastos</p>
+              <p className="text-2xl font-black text-red-700">{formatCurrency(t?.totalGastos ?? 0)}</p>
+            </div>
+            <div className="p-4 bg-indigo-50 rounded-2xl border border-indigo-100">
+              <p className="text-[10px] font-bold text-indigo-600 uppercase mb-1">Resultado</p>
+              <p className={`text-2xl font-black ${((t?.totalFrete ?? 0) - (t?.totalGastos ?? 0)) >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                {formatCurrency((t?.totalFrete ?? 0) - (t?.totalGastos ?? 0))}
+              </p>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="p-4 bg-blue-50 rounded-2xl border border-blue-100">
+              <p className="text-[10px] font-bold text-blue-600 uppercase mb-1">Total Frete</p>
+              <p className="text-2xl font-black text-blue-700">{formatCurrency(t?.totalFrete ?? 0)}</p>
+            </div>
+            <div className="p-4 bg-green-50 rounded-2xl border border-green-100">
+              <p className="text-[10px] font-bold text-green-600 uppercase mb-1">Comissões</p>
+              <p className="text-2xl font-black text-green-700">{formatCurrency(t?.comissao ?? 0)}</p>
+            </div>
+            <div className="p-4 bg-red-50 rounded-2xl border border-red-100">
+              <p className="text-[10px] font-bold text-red-600 uppercase mb-1">Despesas</p>
+              <p className="text-2xl font-black text-red-700">{formatCurrency(t?.totalGastos ?? 0)}</p>
+            </div>
+            <div className="p-4 bg-indigo-50 rounded-2xl border border-indigo-100">
+              <p className="text-[10px] font-bold text-indigo-600 uppercase mb-1">Saldo Líq.</p>
+              <p className={`text-2xl font-black ${(t?.saldoLiq ?? 0) >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                {formatCurrency(t?.saldoLiq ?? 0)}
+              </p>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+
+  // PR7B.1: tabela geral por grupo (modo "Todos"). Cada grupo tem seu próprio subtotal; sem total
+  // geral único misturando os dois modelos. Clique na linha mantém setSelectedMot(s.uid).
+  const renderTabelaGrupo = (titulo: string, arr: any[], tot: any, isAut: boolean) => {
+    const mediaSub = tot.totalLitros > 0 ? (tot.totalKm / tot.totalLitros).toFixed(2) : '0.00';
+    return (
+      <div key={titulo} className="mb-2 last:mb-0">
+        <div className="bg-gray-50 px-4 py-3 border-b border-gray-100">
+          <h3 className="font-bold text-gray-700 flex items-center">
+            <User size={16} className="mr-2 text-blue-600" /> {titulo}
+          </h3>
+        </div>
+        <table className="w-full text-left">
+          <thead className="bg-gray-50 text-[10px] font-bold uppercase text-gray-400 border-b">
+            <tr>
+              <th className="p-4">Motorista</th>
+              <th className="p-4 text-right">Fretes</th>
+              {isAut ? (
+                <>
+                  <th className="p-4 text-right">Faturamento</th>
+                  <th className="p-4 text-right">Gastos</th>
+                  <th className="p-4 text-right">Resultado</th>
+                </>
+              ) : (
+                <>
+                  <th className="p-4 text-right">Total Frete</th>
+                  <th className="p-4 text-right">Comissão</th>
+                  <th className="p-4 text-right">Despesas</th>
+                  <th className="p-4 text-right">Saldo Líq.</th>
+                </>
+              )}
+              <th className="p-4 text-right">KM Total</th>
+              <th className="p-4 text-right">Média</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {arr.map((s: any) => (
+              <tr key={s.uid} onClick={() => setSelectedMot(s.uid)} className="hover:bg-blue-50/40 transition-colors cursor-pointer" title="Ver fretes deste motorista">
+                <td className="p-4">
+                  <div className="flex items-center">
+                    <User size={16} className="mr-2 text-blue-500" />
+                    <span className="font-semibold text-gray-800">{s.nome}</span>
+                  </div>
+                </td>
+                <td className="p-4 text-right font-bold text-gray-700">{s.viagens}</td>
+                {isAut ? (
+                  <>
+                    <td className="p-4 text-right font-bold text-gray-700">{formatCurrency(s.totalFrete)}</td>
+                    <td className="p-4 text-right font-bold text-red-600">{formatCurrency(s.totalGastos)}</td>
+                    <td className={`p-4 text-right font-bold ${(s.totalFrete - s.totalGastos) >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                      {formatCurrency(s.totalFrete - s.totalGastos)}
+                    </td>
+                  </>
+                ) : (
+                  <>
+                    <td className="p-4 text-right font-bold text-gray-700">{formatCurrency(s.totalFrete)}</td>
+                    <td className="p-4 text-right font-bold text-green-600">{formatCurrency(s.comissao)}</td>
+                    <td className="p-4 text-right font-bold text-red-600">{formatCurrency(s.totalGastos)}</td>
+                    <td className={`p-4 text-right font-bold ${s.saldoLiq >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                      {formatCurrency(s.saldoLiq)}
+                    </td>
+                  </>
+                )}
+                <td className="p-4 text-right text-gray-600">{s.totalKm ? s.totalKm.toLocaleString() : 0} km</td>
+                <td className="p-4 text-right text-gray-600">{s.media ?? '-'} km/l</td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot className="bg-gray-50 border-t-2 border-gray-200">
+            <tr>
+              <td className="p-4 font-black text-gray-800">SUBTOTAL</td>
+              <td className="p-4 text-right font-black text-gray-800">{tot.viagens}</td>
+              {isAut ? (
+                <>
+                  <td className="p-4 text-right font-black text-gray-800">{formatCurrency(tot.totalFrete)}</td>
+                  <td className="p-4 text-right font-black text-red-700">{formatCurrency(tot.totalGastos)}</td>
+                  <td className={`p-4 text-right font-black ${(tot.totalFrete - tot.totalGastos) >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                    {formatCurrency(tot.totalFrete - tot.totalGastos)}
+                  </td>
+                </>
+              ) : (
+                <>
+                  <td className="p-4 text-right font-black text-gray-800">{formatCurrency(tot.totalFrete)}</td>
+                  <td className="p-4 text-right font-black text-green-700">{formatCurrency(tot.comissao)}</td>
+                  <td className="p-4 text-right font-black text-red-700">{formatCurrency(tot.totalGastos)}</td>
+                  <td className={`p-4 text-right font-black ${tot.saldoLiq >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                    {formatCurrency(tot.saldoLiq)}
+                  </td>
+                </>
+              )}
+              <td className="p-4 text-right font-black text-gray-800">{(tot.totalKm ?? 0).toLocaleString()} km</td>
+              <td className="p-4 text-right font-black text-gray-800">{mediaSub} km/l</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    );
+  };
+
   return (
     <CatchError>
     <div className="space-y-6 pb-20 px-6">
@@ -1408,30 +1581,16 @@ export const ResumoMotorista: React.FC = () => {
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-            <div className="p-4 bg-gray-50 rounded-2xl border border-gray-100">
-              <p className="text-[10px] font-bold text-gray-400 uppercase mb-1">Fretes</p>
-              <p className="text-2xl font-black text-gray-800">{totals?.viagens ?? 0}</p>
+          {selectedMot !== 'todos' ? (
+            // Motorista único: cards conforme o tipo (vinculado x autônomo).
+            renderCardsResumo(totals, selIsAutonomo)
+          ) : (
+            // "Todos": um strip de cards por grupo existente (sem total geral misturado).
+            <div className="space-y-4">
+              {statsVinculados.length > 0 && renderCardsResumo(totaisVinculados, false, statsAutonomos.length > 0 ? 'Motoristas Vinculados' : undefined)}
+              {statsAutonomos.length > 0 && renderCardsResumo(totaisAutonomos, true, statsVinculados.length > 0 ? 'Motoristas Autônomos' : undefined)}
             </div>
-            <div className="p-4 bg-blue-50 rounded-2xl border border-blue-100">
-              <p className="text-[10px] font-bold text-blue-600 uppercase mb-1">Total Frete</p>
-              <p className="text-2xl font-black text-blue-700">{formatCurrency(totals?.totalFrete ?? 0)}</p>
-            </div>
-            <div className="p-4 bg-green-50 rounded-2xl border border-green-100">
-              <p className="text-[10px] font-bold text-green-600 uppercase mb-1">Comissões</p>
-              <p className="text-2xl font-black text-green-700">{formatCurrency(totals?.comissao ?? 0)}</p>
-            </div>
-            <div className="p-4 bg-red-50 rounded-2xl border border-red-100">
-              <p className="text-[10px] font-bold text-red-600 uppercase mb-1">Despesas</p>
-              <p className="text-2xl font-black text-red-700">{formatCurrency(totals?.totalGastos ?? 0)}</p>
-            </div>
-            <div className="p-4 bg-indigo-50 rounded-2xl border border-indigo-100">
-              <p className="text-[10px] font-bold text-indigo-600 uppercase mb-1">Saldo Líq.</p>
-              <p className={`text-2xl font-black ${(totals?.saldoLiq ?? 0) >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-                {formatCurrency(totals?.saldoLiq ?? 0)}
-              </p>
-            </div>
-          </div>
+          )}
 
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
             {selectedMot !== 'todos' && fretesDetalhados.length > 0 ? (
@@ -1530,57 +1689,11 @@ export const ResumoMotorista: React.FC = () => {
                 })()}
               </div>
             ) : (
-              <table className="w-full text-left">
-                <thead className="bg-gray-50 text-[10px] font-bold uppercase text-gray-400 border-b">
-                  <tr>
-                    <th className="p-4">Motorista</th>
-                    <th className="p-4 text-right">Fretes</th>
-                    <th className="p-4 text-right">Total Frete</th>
-                    <th className="p-4 text-right">Comissão</th>
-                    <th className="p-4 text-right">Despesas</th>
-                    <th className="p-4 text-right">Saldo Líq.</th>
-                    <th className="p-4 text-right">KM Total</th>
-                    <th className="p-4 text-right">Média</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {stats.map(s => (
-                    <tr key={s.uid} onClick={() => setSelectedMot(s.uid)} className="hover:bg-blue-50/40 transition-colors cursor-pointer" title="Ver fretes deste motorista">
-                      <td className="p-4">
-                        <div className="flex items-center">
-                          <User size={16} className="mr-2 text-blue-500" />
-                          <span className="font-semibold text-gray-800">{s.nome}</span>
-                        </div>
-                      </td>
-                      <td className="p-4 text-right font-bold text-gray-700">{s.viagens}</td>
-                      <td className="p-4 text-right font-bold text-gray-700">{formatCurrency(s.totalFrete)}</td>
-                      <td className="p-4 text-right font-bold text-green-600">{formatCurrency(s.comissao)}</td>
-                      <td className="p-4 text-right font-bold text-red-600">{formatCurrency(s.totalGastos)}</td>
-                      <td className={`p-4 text-right font-bold ${s.saldoLiq >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-                        {formatCurrency(s.saldoLiq)}
-                      </td>
-                      <td className="p-4 text-right text-gray-600">{s.totalKm ? s.totalKm.toLocaleString() : 0} km</td>
-                      <td className="p-4 text-right text-gray-600">{s.media ?? '-'} km/l</td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot className="bg-gray-50 border-t-2 border-gray-200">
-                  <tr>
-                    <td className="p-4 font-black text-gray-800">TOTAIS</td>
-                    <td className="p-4 text-right font-black text-gray-800">{totals?.viagens ?? 0}</td>
-                    <td className="p-4 text-right font-black text-gray-800">{formatCurrency(totals?.totalFrete)}</td>
-                    <td className="p-4 text-right font-black text-green-700">{formatCurrency(totals?.comissao)}</td>
-                    <td className="p-4 text-right font-black text-red-700">{formatCurrency(totals?.totalGastos)}</td>
-                    <td className={`p-4 text-right font-black ${(totals?.saldoLiq ?? 0) >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-                      {formatCurrency(totals?.saldoLiq)}
-                    </td>
-                    <td className="p-4 text-right font-black text-gray-800">{(totals?.totalKm ?? 0).toLocaleString()} km</td>
-                    <td className="p-4 text-right font-black text-gray-800">
-                      {totals?.totalLitros > 0 ? (totals.totalKm / totals.totalLitros).toFixed(2) : '0.00'} km/l
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
+              // PR7B.1: "Todos" separado em grupos (Vinculados / Autônomos), cada um com subtotal próprio.
+              <div className="divide-y divide-gray-100">
+                {statsVinculados.length > 0 && renderTabelaGrupo('Motoristas Vinculados', statsVinculados, totaisVinculados, false)}
+                {statsAutonomos.length > 0 && renderTabelaGrupo('Motoristas Autônomos', statsAutonomos, totaisAutonomos, true)}
+              </div>
             )}
           </div>
         </>
