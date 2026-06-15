@@ -163,8 +163,10 @@ export const GerenciamentoViagens: React.FC = () => {
         origem: formData.origem,
         destino: formData.destino,
         valor_frete: parseFloat(formData.valor_frete),
-        km_inicial: formData.km_inicial ? parseInt(formData.km_inicial) : null,
-        km_final: formData.km_final ? parseInt(formData.km_final) : null,
+        // PR-G2: KM é opcional — manda null quando vazio, 0 ou negativo (o backend trata null
+        // como "não enviado"); evita coagir a 0 e reprovar na validação de número positivo.
+        km_inicial: Number(formData.km_inicial) > 0 ? parseInt(formData.km_inicial) : null,
+        km_final: Number(formData.km_final) > 0 ? parseInt(formData.km_final) : null,
         quem_recebeu: formData.quem_recebeu,
         status: formData.status,
         data: formData.data
@@ -182,7 +184,13 @@ export const GerenciamentoViagens: React.FC = () => {
       }
       setShowModal(false);
     } catch (err: any) {
-      alert('Erro ao salvar frete: ' + (err.response?.data?.message || err.message));
+      // PR-G2: mostra o(s) campo(s) inválido(s) que o backend devolve em errors[], em vez de
+      // só "Dados inválidos." — facilita diagnosticar qual campo reprovou.
+      const data = err.response?.data;
+      const detalhe = Array.isArray(data?.errors) && data.errors.length
+        ? ' (' + data.errors.map((e: any) => `${e.campo}: ${e.mensagem}`).join('; ') + ')'
+        : '';
+      alert('Erro ao salvar frete: ' + (data?.message || err.message) + detalhe);
     } finally {
       setIsSubmitting(false);
     }

@@ -1,19 +1,23 @@
 const { z } = require('zod');
 
-const createFreteSchema = z.object({
-  origem: z.string().min(2, 'Origem é obrigatória.').max(200),
-  destino: z.string().min(2, 'Destino é obrigatório.').max(200),
-  km_inicial: z.coerce.number({ invalid_type_error: 'KM inicial deve ser um número.' }).positive('KM inicial deve ser maior que zero.').optional(),
-  valor_frete: z.coerce.number({ invalid_type_error: 'Valor do frete deve ser um número.' }).nonnegative('Valor do frete não pode ser negativo.'),
-  quem_recebeu: z.enum(['proprietario', 'motorista']).optional(),
-  motorista_id: z.string().uuid('ID do motorista inválido.').optional(),
-});
-
 // Trata null/'' como "campo não enviado" — o modal do painel manda null quando KM
 // está vazio, e z.coerce.number() converteria null para 0 (reprovando no positive
 // ou gravando KM 0 indevido).
 const vazioComoIndefinido = (schema) =>
   z.preprocess((v) => (v === null || v === '' ? undefined : v), schema);
+
+// PR-G2: KM inicial/final são OPCIONAIS na criação (são preenchidos depois / na
+// finalização). null/'' viram undefined para não coagir a 0 e reprovar no positive.
+// valor_frete passa a exigir > 0 (frete de R$ 0 não é válido).
+const createFreteSchema = z.object({
+  origem: z.string().min(2, 'Origem é obrigatória.').max(200),
+  destino: z.string().min(2, 'Destino é obrigatório.').max(200),
+  km_inicial: vazioComoIndefinido(z.coerce.number({ invalid_type_error: 'KM inicial deve ser um número.' }).positive('KM inicial deve ser maior que zero.').optional()),
+  km_final: vazioComoIndefinido(z.coerce.number({ invalid_type_error: 'KM final deve ser um número.' }).positive('KM final deve ser maior que zero.').optional()),
+  valor_frete: z.coerce.number({ invalid_type_error: 'Valor do frete deve ser um número.' }).positive('Valor do frete deve ser maior que zero.'),
+  quem_recebeu: z.enum(['proprietario', 'motorista']).optional(),
+  motorista_id: z.string().uuid('ID do motorista inválido.').optional(),
+});
 
 // Whitelist da edição: somente campos editáveis pelo painel.
 // motorista_id, empresa_id e placa NÃO são editáveis via update.
