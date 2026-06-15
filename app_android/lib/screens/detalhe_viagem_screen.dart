@@ -20,17 +20,21 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
   bool _finalizando = false;
   String _error = '';
   Map<String, dynamic>? _perfilCache;
+  // Estado local do frete: parte do snapshot recebido, mas pode ser atualizado
+  // (ex.: após finalizar pelo próprio app) sem depender de novo fetch da lista.
+  late Map<String, dynamic> _frete;
 
   @override
   void initState() {
     super.initState();
-    AppLogger.action('screen_open', params: {'tela': 'detalhe_frete', 'frete_id': widget.frete['id']?.toString()});
+    _frete = widget.frete;
+    AppLogger.action('screen_open', params: {'tela': 'detalhe_frete', 'frete_id': _frete['id']?.toString()});
     _fetchDetalhes();
   }
 
   Future<void> _fetchDetalhes() async {
     setState(() { _loading = true; _error = ''; });
-    final freteId = widget.frete['id']?.toString() ?? '';
+    final freteId = _frete['id']?.toString() ?? '';
     if (freteId.isEmpty) {
       setState(() { _loading = false; });
       return;
@@ -65,7 +69,7 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
   }
 
   bool _podeFinalizar() {
-    final status = widget.frete['status'] ?? '';
+    final status = _frete['status'] ?? '';
     if (status == 'finalizado' || status == 'cancelado') return false;
     final perfil = _perfilCache;
     if (perfil == null) return false;
@@ -90,7 +94,7 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
   }
 
   Future<void> _finalizarFrete() async {
-    final freteId = widget.frete['id']?.toString() ?? '';
+    final freteId = _frete['id']?.toString() ?? '';
     if (freteId.isEmpty) return;
     AppLogger.action('finalizar_frete', params: {'frete_id': freteId});
     setState(() => _finalizando = true);
@@ -99,6 +103,9 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
       if (!mounted) return;
       if (result != null && result['_error'] != true) {
         AppLogger.action('finalizar_frete_ok', params: {'frete_id': freteId});
+        // Atualiza o status local para 'finalizado' para que o botão não
+        // reapareça caso a tela permaneça/seja reaberta com este snapshot.
+        setState(() => _frete['status'] = 'finalizado');
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Frete finalizado com sucesso!')),
         );
@@ -126,7 +133,7 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final f = widget.frete;
+    final f = _frete;
     final origem = f['origem'] ?? '-';
     final destino = f['destino'] ?? '-';
 
@@ -179,7 +186,7 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
                               onPressed: _finalizando ? null : _finalizarFrete,
                             ),
                           )
-                        else if (widget.frete['status'] != 'finalizado' && widget.frete['status'] != 'cancelado')
+                        else if (_frete['status'] != 'finalizado' && _frete['status'] != 'cancelado')
                           Padding(
                             padding: const EdgeInsets.symmetric(vertical: 8),
                             child: Row(
