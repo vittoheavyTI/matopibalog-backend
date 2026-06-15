@@ -1376,7 +1376,7 @@ export const ResumoMotorista: React.FC = () => {
   // Autônomo = Fretes/Faturamento/Gastos/Resultado (sem Comissão/Saldo). `t` é um objeto de totais.
   const renderCardsResumo = (t: any, isAut: boolean, titulo?: string) => (
     <div key={titulo || 'cards'}>
-      {titulo && <p className="text-sm font-bold text-gray-600 mb-2">{titulo}</p>}
+      {titulo && <p className="text-sm font-bold text-gray-600 mb-2 uppercase tracking-wide">{titulo}</p>}
       <div className={`grid grid-cols-2 ${isAut ? 'md:grid-cols-4' : 'md:grid-cols-5'} gap-4`}>
         <div className="p-4 bg-gray-50 rounded-2xl border border-gray-100">
           <p className="text-[10px] font-bold text-gray-400 uppercase mb-1">Fretes</p>
@@ -1430,9 +1430,9 @@ export const ResumoMotorista: React.FC = () => {
   const renderTabelaGrupo = (titulo: string, arr: any[], tot: any, isAut: boolean) => {
     const mediaSub = tot.totalLitros > 0 ? (tot.totalKm / tot.totalLitros).toFixed(2) : '0.00';
     return (
-      <div key={titulo} className="mb-2 last:mb-0">
+      <div key={titulo}>
         <div className="bg-gray-50 px-4 py-3 border-b border-gray-100">
-          <h3 className="font-bold text-gray-700 flex items-center">
+          <h3 className="font-bold text-gray-700 flex items-center uppercase tracking-wide">
             <User size={16} className="mr-2 text-blue-600" /> {titulo}
           </h3>
         </div>
@@ -1742,7 +1742,7 @@ export const ResumoMotorista: React.FC = () => {
               </div>
             ) : (
               // PR7B.1: "Todos" separado em grupos (Vinculados / Autônomos), cada um com subtotal próprio.
-              <div className="divide-y divide-gray-100">
+              <div className="space-y-6">
                 {statsVinculados.length > 0 && renderTabelaGrupo('Motoristas Vinculados', statsVinculados, totaisVinculados, false)}
                 {statsAutonomos.length > 0 && renderTabelaGrupo('Motoristas Autônomos', statsAutonomos, totaisAutonomos, true)}
               </div>
