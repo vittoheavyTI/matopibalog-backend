@@ -190,6 +190,12 @@ export const ResumoMotorista: React.FC = () => {
 
       setFretesDetalhados(fretes);
 
+      // PR7-base: o Histórico só considera fretes FINALIZADOS do período. Os lançamentos só entram
+      // nos TOTAIS do resumo se vinculados a um desses fretes (frete_id no Set abaixo). Lançamentos de
+      // fretes ativos/em andamento e órfãos (sem frete_id) ficam FORA dos totais. A seção
+      // "Lançamentos Gerais (sem frete vinculado)" segue exibindo os órfãos apenas como sinalização.
+      const fretesFinalizadosIds = new Set(fretes.map((f: any) => f.id));
+
       // Histórico: inclui aprovados E finalizados (ao finalizar a viagem, itens aprovados viram 'finalizado').
       // Pendentes/rejeitados ficam fora (rejeitados em auditoria = bloco próprio).
       const despesas = (despesasData || []).filter((d: any) => d.status === 'aprovado' || d.status === 'finalizado').map((d: any) => ({
@@ -242,9 +248,10 @@ export const ResumoMotorista: React.FC = () => {
 
       const rawStats = targetMots.map(m => {
         const mFretes = fretes.filter((f: any) => f.motoristaUid === m.uid);
-        const mDesp = despesas.filter((d: any) => d.motoristaUid === m.uid);
-        const mAbs = abastecimentos.filter((a: any) => a.motoristaUid === m.uid);
-        const mVal = vales.filter((v: any) => v.motoristaUid === m.uid);
+        // PR7-base: além do motorista, só entram lançamentos vinculados a frete finalizado do período.
+        const mDesp = despesas.filter((d: any) => d.motoristaUid === m.uid && d.frete_id && fretesFinalizadosIds.has(d.frete_id));
+        const mAbs = abastecimentos.filter((a: any) => a.motoristaUid === m.uid && a.frete_id && fretesFinalizadosIds.has(a.frete_id));
+        const mVal = vales.filter((v: any) => v.motoristaUid === m.uid && v.frete_id && fretesFinalizadosIds.has(v.frete_id));
 
         const totalFrete = mFretes.reduce((s: number, f: any) => s + f.valorFrete, 0);
         const comissao = totalFrete * ((m.percentualComissao || 0) / 100);
