@@ -235,11 +235,11 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
                 children: [
                   Icon(Icons.calendar_today_outlined, size: 13, color: Colors.grey.shade500),
                   const SizedBox(width: 4),
-                  Text(data, style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+                  Text(data, style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
                   const Spacer(),
                   Text(
                     'R\$ ${valor.toStringAsFixed(2)}',
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
                   ),
                   const SizedBox(width: 10),
                   Container(
@@ -248,13 +248,13 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
                       color: statusColor.withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(4),
                     ),
-                    child: Text(status, style: TextStyle(color: statusColor, fontSize: 11)),
+                    child: Text(status, style: TextStyle(color: statusColor, fontSize: 13)),
                   ),
                 ],
               ),
               if (frete['placa'] != null) ...[
                 const SizedBox(height: 4),
-                Text(frete['placa'], style: TextStyle(color: Colors.grey.shade500, fontSize: 11)),
+                Text(frete['placa'], style: TextStyle(color: Colors.grey.shade500, fontSize: 13)),
               ],
             ],
           ),

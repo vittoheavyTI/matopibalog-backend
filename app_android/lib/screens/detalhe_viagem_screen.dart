@@ -196,7 +196,7 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
                                 Expanded(
                                   child: Text(
                                     'Finalização pelo app não autorizada. Contate o administrador.',
-                                    style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                                    style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
                                   ),
                                 ),
                               ],
@@ -276,7 +276,7 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
       children: [
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 4),
-          child: Text(label, style: TextStyle(color: cor, fontSize: 12, fontWeight: FontWeight.w600)),
+          child: Text(label, style: TextStyle(color: cor, fontSize: 13, fontWeight: FontWeight.w600)),
         ),
         ...items.map((item) {
           final val = double.tryParse(item[campoValor]?.toString() ?? '0') ?? 0.0;
@@ -289,8 +289,8 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
               children: [
                 Row(
                   children: [
-                    Expanded(child: Text(desc, style: const TextStyle(fontSize: 13))),
-                    Text('R\$ ${val.toStringAsFixed(2)}', style: TextStyle(fontSize: 13, color: cor)),
+                    Expanded(child: Text(desc, style: const TextStyle(fontSize: 14))),
+                    Text('R\$ ${val.toStringAsFixed(2)}', style: TextStyle(fontSize: 14, color: cor)),
                   ],
                 ),
                 if (obs != null && obs.isNotEmpty)
@@ -298,7 +298,7 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
                     padding: const EdgeInsets.only(top: 2),
                     child: Text(
                       'Obs: $obs',
-                      style: TextStyle(fontSize: 11, color: Colors.grey.shade600, fontStyle: FontStyle.italic),
+                      style: TextStyle(fontSize: 13, color: Colors.grey.shade600, fontStyle: FontStyle.italic),
                     ),
                   ),
               ],
@@ -389,7 +389,7 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
               children: [
                 Icon(Icons.warning_amber_outlined, color: Colors.orange.shade700, size: 16),
                 const SizedBox(width: 4),
-                Text('$pendentes lançamento(s) pendente(s)', style: TextStyle(color: Colors.orange.shade700, fontSize: 12)),
+                Text('$pendentes lançamento(s) pendente(s)', style: TextStyle(color: Colors.orange.shade700, fontSize: 13)),
               ],
             ),
           ),
@@ -400,7 +400,7 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
               children: [
                 const Icon(Icons.cancel_outlined, color: Colors.red, size: 16),
                 const SizedBox(width: 4),
-                Text('$rejeitados lançamento(s) rejeitado(s)', style: const TextStyle(color: Colors.red, fontSize: 12)),
+                Text('$rejeitados lançamento(s) rejeitado(s)', style: const TextStyle(color: Colors.red, fontSize: 13)),
               ],
             ),
           ),
@@ -414,13 +414,13 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: TextStyle(fontWeight: bold ? FontWeight.bold : FontWeight.normal, fontSize: 13)),
+          Text(label, style: TextStyle(fontWeight: bold ? FontWeight.bold : FontWeight.normal, fontSize: 14)),
           Text(
             'R\$ ${valor.abs().toStringAsFixed(2)}',
             style: TextStyle(
               color: color ?? Theme.of(context).colorScheme.onSurface,
               fontWeight: bold ? FontWeight.bold : FontWeight.normal,
-              fontSize: 13,
+              fontSize: 14,
             ),
           ),
         ],
@@ -434,8 +434,8 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(width: 120, child: Text(label, style: TextStyle(color: Colors.grey.shade600, fontSize: 13))),
-          Expanded(child: Text(valor, style: const TextStyle(fontSize: 13))),
+          SizedBox(width: 120, child: Text(label, style: TextStyle(color: Colors.grey.shade600, fontSize: 14))),
+          Expanded(child: Text(valor, style: const TextStyle(fontSize: 14))),
         ],
       ),
     );
