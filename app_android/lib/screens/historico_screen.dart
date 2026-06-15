@@ -200,11 +200,16 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
       margin: const EdgeInsets.only(bottom: 10),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
-        onTap: () {
+        onTap: () async {
           AppLogger.action('frete_detalhe_abrir', params: {'frete_id': frete['id']?.toString()});
-          Navigator.push(context, MaterialPageRoute(
+          final result = await Navigator.push(context, MaterialPageRoute(
             builder: (_) => DetalheViagemScreen(frete: frete),
           ));
+          // Frete finalizado (ou alterado) dentro do detalhe → recarrega a lista
+          // para refletir o novo status no card.
+          if (result == true && mounted) {
+            await _fetchFretes();
+          }
         },
         child: Padding(
           padding: const EdgeInsets.all(14),
