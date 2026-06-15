@@ -9,6 +9,7 @@ import 'add_despesa_screen.dart';
 import 'add_abastecimento_screen.dart';
 import 'add_vale_screen.dart';
 import 'historico_screen.dart';
+import 'detalhe_viagem_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -359,6 +360,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
       child: ListTile(
+        onTap: () => _navegarERefresh(DetalheViagemScreen(frete: frete)),
         leading: const Icon(Icons.local_shipping_outlined, color: Color(0xFF1B5E20)),
         title: Text('${frete['origem'] ?? '-'} → ${frete['destino'] ?? '-'}'),
         subtitle: Text(data),
