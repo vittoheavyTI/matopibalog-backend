@@ -528,13 +528,15 @@ export const ResumoMotorista: React.FC = () => {
 
       const yAfter = (doc as any).lastAutoTable.finalY + 10;
 
-      if (trip.km_inicial || trip.km_final) {
-        const dist = trip.km_final && trip.km_inicial ? trip.km_final - trip.km_inicial : 0;
+      if (Number.isFinite(trip.km_inicial) || Number.isFinite(trip.km_final)) {
+        // PR7A: km_inicial/km_final vêm de parseFloat e podem ser NaN quando ausentes.
+        // NaN não é nullish, então `?.toString() || '-'` exibia "NaN" — usar Number.isFinite.
+        const dist = Number.isFinite(trip.km_final) && Number.isFinite(trip.km_inicial) ? trip.km_final - trip.km_inicial : 0;
         autoTable(doc, {
           startY: yAfter,
           body: [
-            ['KM Inicial:', trip.km_inicial?.toString() || '-'],
-            ['KM Final:', trip.km_final?.toString() || '-'],
+            ['KM Inicial:', Number.isFinite(trip.km_inicial) ? trip.km_inicial.toLocaleString() : '-'],
+            ['KM Final:', Number.isFinite(trip.km_final) ? trip.km_final.toLocaleString() : '-'],
             ['Distância:', dist > 0 ? `${dist.toLocaleString()} km` : '-'],
           ],
           theme: 'plain',
@@ -610,6 +612,9 @@ export const ResumoMotorista: React.FC = () => {
 
       const ySummary = (doc as any).lastAutoTable?.finalY || yDesp;
       // Mesmas fórmulas da tela (por viagem, sem Math.abs)
+      // PR7A: autônomo não usa comissão — resultado = Faturamento − Gastos (todos os
+      // lançamentos do frete, ignorando quem_pagou). Vinculado mantém o modelo atual.
+      const isAutonomo = motInfo?.empresaTipo === 'autonomo';
       const percentComissao = motInfo?.percentualComissao || 0;
       const valorComissao = trip.valorFrete * (percentComissao / 100);
       const gastosMotorista = fDesp.filter(d => d.quemPagou === 'motorista').reduce((s, d) => s + d.valor, 0)
@@ -619,10 +624,17 @@ export const ResumoMotorista: React.FC = () => {
       const valesViagem = fVales.filter(v => v.quemPagou === 'proprietario').reduce((s, v) => s + v.valor, 0);
       const saldoMotorista = valorComissao + gastosMotorista - valesViagem;
       const resultadoEmpresa = trip.valorFrete - valorComissao - gastosProprietario;
+      const gastosTotais = fDesp.reduce((s, d) => s + (d.valor || 0), 0) + fAbs.reduce((s, a) => s + (a.valorTotal || 0), 0) + fVales.reduce((s, v) => s + (v.valor || 0), 0);
+      const resultadoAut = trip.valorFrete - gastosTotais;
 
       autoTable(doc, {
         startY: ySummary + 15,
-        body: [
+        body: isAutonomo ? [
+          ['RESUMO FINANCEIRO', '', ''],
+          ['Faturamento', formatCurrency(trip.valorFrete), ''],
+          ['Gastos (desp. + abast. + vales)', formatCurrency(gastosTotais), ''],
+          ['RESULTADO', formatCurrency(resultadoAut), ''],
+        ] : [
           ['RESUMO FINANCEIRO', '', ''],
           ['Valor do Frete', formatCurrency(trip.valorFrete), ''],
           [`Comissão (${percentComissao}%)`, formatCurrency(valorComissao), ''],
@@ -635,8 +647,9 @@ export const ResumoMotorista: React.FC = () => {
         styles: { fontSize: 11 },
         columnStyles: { 0: { fontStyle: 'bold', cellWidth: 80 }, 1: { cellWidth: 40 } },
       });
+      const boldRows = isAutonomo ? [0, 3] : [0, 5, 6];
       (doc as any).lastAutoTable?.rows?.forEach((row: any, i: number) => {
-        if (i === 0 || i === 5 || i === 6) {
+        if (boldRows.includes(i)) {
           row.cells.forEach((cell: any) => { cell.styles.fontStyle = 'bold'; cell.styles.fontSize = 12; });
         }
       });
@@ -806,8 +819,10 @@ export const ResumoMotorista: React.FC = () => {
       doc.text(`Período: ${monthLabel.toUpperCase()} | Motorista: ${(motInfo?.nomeCompleto || 'N/A').toUpperCase()}`, 14, 54);
       doc.text(`Emitido em: ${new Date().toLocaleString('pt-BR')}`, 14, 59);
 
+      // PR7A: autônomo não usa comissão — resultado = Faturamento − Gastos (todos os lançamentos).
+      const isAutonomo = motInfo?.empresaTipo === 'autonomo';
       const pct = motInfo?.percentualComissao || 0;
-      let pFrete = 0, pComissao = 0, pSaldoMot = 0, pResultEmp = 0, pGastosMot = 0, pGastosProp = 0, pVales = 0;
+      let pFrete = 0, pComissao = 0, pSaldoMot = 0, pResultEmp = 0, pGastosMot = 0, pGastosProp = 0, pVales = 0, pGastosTotais = 0;
       let nRejDesp = 0, nRejAbs = 0, nRejVale = 0, vRej = 0, nSemComp = 0, nViagensAlerta = 0;
       let primeiro = true;
 
@@ -883,11 +898,16 @@ export const ResumoMotorista: React.FC = () => {
         const valesViagem = fVales.filter(v => v.quemPagou === 'proprietario').reduce((s, v) => s + v.valor, 0);
         const saldoMotorista = valorComissao + gastosMotorista - valesViagem;
         const resultadoEmpresa = trip.valorFrete - valorComissao - gastosProprietario;
+        const gastosTotaisTrip = fDesp.reduce((s, d) => s + (d.valor || 0), 0) + fAbs.reduce((s, a) => s + (a.valorTotal || 0), 0) + fVales.reduce((s, v) => s + (v.valor || 0), 0);
         pFrete += trip.valorFrete; pComissao += valorComissao; pSaldoMot += saldoMotorista; pResultEmp += resultadoEmpresa;
-        pGastosMot += gastosMotorista; pGastosProp += gastosProprietario; pVales += valesViagem;
+        pGastosMot += gastosMotorista; pGastosProp += gastosProprietario; pVales += valesViagem; pGastosTotais += gastosTotaisTrip;
 
         autoTable(doc, { startY: cy,
-          body: [
+          body: isAutonomo ? [
+            ['Faturamento', formatCurrency(trip.valorFrete)],
+            ['Gastos (desp. + abast. + vales)', formatCurrency(gastosTotaisTrip)],
+            ['RESULTADO', formatCurrency(trip.valorFrete - gastosTotaisTrip)],
+          ] : [
             ['Comissão', formatCurrency(valorComissao)],
             ['Desp./Abast. pagos pelo Motorista', formatCurrency(gastosMotorista)],
             ['Desp./Abast. pagos pelo Proprietário', formatCurrency(gastosProprietario)],
@@ -959,13 +979,19 @@ export const ResumoMotorista: React.FC = () => {
       autoTable(doc, { startY: 24,
         body: [
           ['Fretes auditados', String(trips.length)],
-          ['Total de Fretes', formatCurrency(pFrete)],
-          [`Total de Comissão (${pct}%)`, formatCurrency(pComissao)],
-          ['Total Desp./Abast. pagos pelo Motorista', formatCurrency(pGastosMot)],
-          ['Total Desp./Abast. pagos pelo Proprietário', formatCurrency(pGastosProp)],
-          ['Total de Vales/Adiantamentos', formatCurrency(pVales)],
-          ['SALDO TOTAL DO MOTORISTA', formatCurrency(pSaldoMot)],
-          ['RESULTADO TOTAL DA EMPRESA', formatCurrency(pResultEmp)],
+          ...(isAutonomo ? [
+            ['Total de Fretes (Faturamento)', formatCurrency(pFrete)],
+            ['Total de Gastos (desp. + abast. + vales)', formatCurrency(pGastosTotais)],
+            ['RESULTADO TOTAL', formatCurrency(pFrete - pGastosTotais)],
+          ] : [
+            ['Total de Fretes', formatCurrency(pFrete)],
+            [`Total de Comissão (${pct}%)`, formatCurrency(pComissao)],
+            ['Total Desp./Abast. pagos pelo Motorista', formatCurrency(pGastosMot)],
+            ['Total Desp./Abast. pagos pelo Proprietário', formatCurrency(pGastosProp)],
+            ['Total de Vales/Adiantamentos', formatCurrency(pVales)],
+            ['SALDO TOTAL DO MOTORISTA', formatCurrency(pSaldoMot)],
+            ['RESULTADO TOTAL DA EMPRESA', formatCurrency(pResultEmp)],
+          ]),
           ['Rejeitados (fora dos cálculos)', `${nRejDesp} desp. • ${nRejAbs} abast. • ${nRejVale} vales — ${formatCurrency(vRej)}`],
           ['Lançamentos sem comprovante', String(nSemComp)],
           ['Fretes com alerta', `${nViagensAlerta} de ${trips.length}`],
@@ -1015,6 +1041,10 @@ export const ResumoMotorista: React.FC = () => {
     const valesViagem = fVales.filter(v => v.quemPagou === 'proprietario').reduce((s, v) => s + v.valor, 0);
     const saldoMotoristaViagem = comissaoViagem + gastosMotorista - valesViagem;
     const resultadoEmpresaViagem = trip.valorFrete - comissaoViagem - gastosProprietario;
+    // PR7A: autônomo = Faturamento − Gastos (todos os lançamentos do frete, ignorando quem_pagou).
+    const isAutonomo = motoristas.find(m => m.uid === selectedMot)?.empresaTipo === 'autonomo';
+    const gastosTotaisViagem = totalDesp + totalAbs + totalVales;
+    const resultadoViagemAut = trip.valorFrete - gastosTotaisViagem;
 
     return (
       <>
@@ -1188,30 +1218,46 @@ export const ResumoMotorista: React.FC = () => {
           </h4>
           <div className="space-y-3">
             <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
-              <span className="text-gray-500">Valor do Frete</span>
+              <span className="text-gray-500">{isAutonomo ? 'Faturamento' : 'Valor do Frete'}</span>
               <span className="font-bold text-gray-800">{formatCurrency(trip.valorFrete)}</span>
             </div>
-            <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
-              <span className="text-gray-500">Comissão do Motorista ({percentComissao}%)</span>
-              <span className="font-bold text-blue-600">{formatCurrency(comissaoViagem)}</span>
-            </div>
-            <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
-              <span className="text-gray-500">Desp./Abast. pagos pelo Motorista</span>
-              <span className="font-bold text-green-600">+{formatCurrency(gastosMotorista)}</span>
-            </div>
-            <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
-              <span className="text-gray-500">Vales / Adiantamentos</span>
-              <span className="font-bold text-red-600">-{formatCurrency(valesViagem)}</span>
-            </div>
-            <div className="flex justify-between items-center text-base font-extrabold bg-gray-50 p-3 rounded-lg">
-              <span className="text-gray-700">SALDO DO MOTORISTA</span>
-              <span className={saldoMotoristaViagem >= 0 ? 'text-green-600' : 'text-red-600'}>{formatCurrency(saldoMotoristaViagem)}</span>
-            </div>
-            <div className="flex justify-between items-center text-sm font-bold pt-3 border-t border-gray-100">
-              <span className="text-gray-600 flex items-center"><TrendingUp size={16} className="mr-2 text-green-500" /> RESULTADO DA EMPRESA (deste frete)</span>
-              <span className={resultadoEmpresaViagem >= 0 ? 'text-gray-900' : 'text-red-600'}>{formatCurrency(resultadoEmpresaViagem)}</span>
-            </div>
-            <p className="text-[10px] text-gray-400 px-1">* Frete (−) Comissão (−) Desp./Abast. pagos pela empresa, somente deste frete.</p>
+            {isAutonomo ? (
+              <>
+                <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
+                  <span className="text-gray-500">Gastos (desp. + abast. + vales)</span>
+                  <span className="font-bold text-red-600">-{formatCurrency(gastosTotaisViagem)}</span>
+                </div>
+                <div className="flex justify-between items-center text-base font-extrabold bg-gray-50 p-3 rounded-lg">
+                  <span className="text-gray-700">RESULTADO</span>
+                  <span className={resultadoViagemAut >= 0 ? 'text-green-600' : 'text-red-600'}>{formatCurrency(resultadoViagemAut)}</span>
+                </div>
+                <p className="text-[10px] text-gray-400 px-1">* Faturamento (−) Gastos do frete (desp., abast. e vales), somente deste frete.</p>
+              </>
+            ) : (
+              <>
+                <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
+                  <span className="text-gray-500">Comissão do Motorista ({percentComissao}%)</span>
+                  <span className="font-bold text-blue-600">{formatCurrency(comissaoViagem)}</span>
+                </div>
+                <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
+                  <span className="text-gray-500">Desp./Abast. pagos pelo Motorista</span>
+                  <span className="font-bold text-green-600">+{formatCurrency(gastosMotorista)}</span>
+                </div>
+                <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
+                  <span className="text-gray-500">Vales / Adiantamentos</span>
+                  <span className="font-bold text-red-600">-{formatCurrency(valesViagem)}</span>
+                </div>
+                <div className="flex justify-between items-center text-base font-extrabold bg-gray-50 p-3 rounded-lg">
+                  <span className="text-gray-700">SALDO DO MOTORISTA</span>
+                  <span className={saldoMotoristaViagem >= 0 ? 'text-green-600' : 'text-red-600'}>{formatCurrency(saldoMotoristaViagem)}</span>
+                </div>
+                <div className="flex justify-between items-center text-sm font-bold pt-3 border-t border-gray-100">
+                  <span className="text-gray-600 flex items-center"><TrendingUp size={16} className="mr-2 text-green-500" /> RESULTADO DA EMPRESA (deste frete)</span>
+                  <span className={resultadoEmpresaViagem >= 0 ? 'text-gray-900' : 'text-red-600'}>{formatCurrency(resultadoEmpresaViagem)}</span>
+                </div>
+                <p className="text-[10px] text-gray-400 px-1">* Frete (−) Comissão (−) Desp./Abast. pagos pela empresa, somente deste frete.</p>
+              </>
+            )}
           </div>
         </div>
 
