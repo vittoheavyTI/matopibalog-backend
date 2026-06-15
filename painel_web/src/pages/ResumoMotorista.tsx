@@ -336,33 +336,85 @@ export const ResumoMotorista: React.FC = () => {
       doc.text(`Período: ${monthLabel.toUpperCase()} | Motorista: ${motLabel}`, 14, 55);
 
       if (stats.length > 0) {
-        const tableBody = stats.map(s => [
-          s.nome,
-          s.viagens.toString(),
-          formatCurrency(s.totalFrete),
-          formatCurrency(s.comissao),
-          formatCurrency(s.totalGastos),
-          formatCurrency(s.saldoLiq),
-          `${s.media} KM/L`
-        ]);
+        // PR7B.2: PDF Resumo separa vinculados de autônomos (espelha a tela do PR #59). A partição é
+        // recalculada localmente — os consts da tela vivem fora do escopo desta função. Sem total
+        // geral único: cada grupo tem seu SUBTOTAL próprio.
+        const statsVinculados = stats.filter((s: any) => s.empresaTipo !== 'autonomo');
+        const statsAutonomos = stats.filter((s: any) => s.empresaTipo === 'autonomo');
+        const somaGrupo = (arr: any[]) => arr.reduce((acc, s) => ({
+          viagens: acc.viagens + s.viagens,
+          totalFrete: acc.totalFrete + s.totalFrete,
+          comissao: acc.comissao + s.comissao,
+          totalGastos: acc.totalGastos + s.totalGastos,
+          saldoLiq: acc.saldoLiq + s.saldoLiq,
+          totalKm: acc.totalKm + s.totalKm,
+          totalLitros: acc.totalLitros + s.totalLitros,
+        }), { viagens: 0, totalFrete: 0, comissao: 0, totalGastos: 0, saldoLiq: 0, totalKm: 0, totalLitros: 0 });
+        const mediaGrupo = (t: any) => `${t.totalLitros > 0 ? (t.totalKm / t.totalLitros).toFixed(2) : '0.00'} KM/L`;
 
-        autoTable(doc, {
-          startY: 60,
-          head: [['Motorista', 'Fretes', 'Total Frete', 'Comissão', 'Despesas', 'Saldo Líq.', 'Média']],
-          body: tableBody,
-          theme: 'striped',
-          headStyles: { fillColor: [59, 130, 246] },
-          foot: [[
-            'TOTAIS',
-            (totals?.viagens || 0).toString(),
-            formatCurrency(totals?.totalFrete || 0),
-            formatCurrency(totals?.comissao || 0),
-            formatCurrency(totals?.totalGastos || 0),
-            formatCurrency(totals?.saldoLiq || 0),
-            `${totals?.totalLitros > 0 ? (totals.totalKm / totals.totalLitros).toFixed(2) : '0.00'} KM/L`
-          ]],
-          footStyles: { fillColor: [241, 245, 249], textColor: [31, 41, 55], fontStyle: 'bold' }
-        });
+        let cursorY = 60;
+
+        if (statsVinculados.length > 0) {
+          const tot = somaGrupo(statsVinculados);
+          doc.setFontSize(11).setFont('helvetica', 'bold');
+          doc.text('MOTORISTAS VINCULADOS', 14, cursorY);
+          autoTable(doc, {
+            startY: cursorY + 3,
+            head: [['Motorista', 'Fretes', 'Total Frete', 'Comissão', 'Despesas', 'Saldo Líq.', 'Média']],
+            body: statsVinculados.map((s: any) => [
+              s.nome,
+              s.viagens.toString(),
+              formatCurrency(s.totalFrete),
+              formatCurrency(s.comissao),
+              formatCurrency(s.totalGastos),
+              formatCurrency(s.saldoLiq),
+              `${s.media} KM/L`
+            ]),
+            theme: 'striped',
+            headStyles: { fillColor: [59, 130, 246] },
+            foot: [[
+              'SUBTOTAL',
+              tot.viagens.toString(),
+              formatCurrency(tot.totalFrete),
+              formatCurrency(tot.comissao),
+              formatCurrency(tot.totalGastos),
+              formatCurrency(tot.saldoLiq),
+              mediaGrupo(tot)
+            ]],
+            footStyles: { fillColor: [241, 245, 249], textColor: [31, 41, 55], fontStyle: 'bold' }
+          });
+          cursorY = (doc as any).lastAutoTable.finalY + 10;
+        }
+
+        if (statsAutonomos.length > 0) {
+          const tot = somaGrupo(statsAutonomos);
+          doc.setFontSize(11).setFont('helvetica', 'bold');
+          doc.text('MOTORISTAS AUTÔNOMOS', 14, cursorY);
+          autoTable(doc, {
+            startY: cursorY + 3,
+            head: [['Motorista', 'Fretes', 'Faturamento', 'Gastos', 'Resultado', 'Média']],
+            body: statsAutonomos.map((s: any) => [
+              s.nome,
+              s.viagens.toString(),
+              formatCurrency(s.totalFrete),
+              formatCurrency(s.totalGastos),
+              formatCurrency(s.totalFrete - s.totalGastos),
+              `${s.media} KM/L`
+            ]),
+            theme: 'striped',
+            headStyles: { fillColor: [22, 101, 52] },
+            foot: [[
+              'SUBTOTAL',
+              tot.viagens.toString(),
+              formatCurrency(tot.totalFrete),
+              formatCurrency(tot.totalGastos),
+              formatCurrency(tot.totalFrete - tot.totalGastos),
+              mediaGrupo(tot)
+            ]],
+            footStyles: { fillColor: [241, 245, 249], textColor: [31, 41, 55], fontStyle: 'bold' }
+          });
+          cursorY = (doc as any).lastAutoTable.finalY + 10;
+        }
 
         if (selectedMot !== 'todos' && fretesDetalhados.length > 0) {
           doc.addPage();
