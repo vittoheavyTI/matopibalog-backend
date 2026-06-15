@@ -608,7 +608,7 @@ export const Relatorios: React.FC = () => {
     doc.text(`PERÍODO: ${startF} até ${endF}`, 14, 82);
 
     doc.setFontSize(9).setFont("helvetica", "italic");
-    doc.text(`FRETES SELECIONADOS: ${selectedTripIds.length}`, 14, 89);
+    doc.text(`FRETES SELECIONADOS: ${selectedFretes.length}`, 14, 89);
 
     // Summary table for selected trips
     const motoristaUids = [...new Set(selectedFretes.map(f => f.motoristaUid))];
@@ -832,6 +832,29 @@ export const Relatorios: React.FC = () => {
     }
   };
 
+  // PR4: saneia a seleção sempre que os fretes carregados mudam. Toda troca de filtro
+  // (motorista, tipo de período, mês, intervalo) passa por loadReportData → setFretes, então
+  // este efeito remove IDs "fantasma" que não existem mais em `fretes`, evitando divergência
+  // entre a contagem "FRETES SELECIONADOS" e o conteúdo do PDF. Depende só de `fretes`
+  // (não de selectedTripIds) e só atualiza o estado quando algo muda → sem loop.
+  useEffect(() => {
+    setSelectedTripIds(prev => {
+      const validos = prev.filter(id => fretes.some(f => f.id === id));
+      return validos.length === prev.length ? prev : validos;
+    });
+  }, [fretes]);
+
+  // PR4: IDs dos fretes carregados por tipo de motorista. Operam só sobre `fretes` atuais
+  // (nunca IDs externos), garantindo que a seleção em massa bata com o que está exibido.
+  const idsVinculados = fretes.filter(f => {
+    const m = motoristas.find(mt => mt.uid === f.motoristaUid);
+    return m ? m.empresaTipo !== 'autonomo' : true;
+  }).map(f => f.id);
+  const idsAutonomos = fretes.filter(f => {
+    const m = motoristas.find(mt => mt.uid === f.motoristaUid);
+    return m ? m.empresaTipo === 'autonomo' : false;
+  }).map(f => f.id);
+
   return (
     <div className="space-y-6 animate-fade-in pb-20">
       <div className="flex justify-between items-center">
@@ -1031,6 +1054,41 @@ export const Relatorios: React.FC = () => {
                   );
                 })()}
 
+                {/* PR4: seleção em massa por grupo — botões toggle (selecionam todos do grupo;
+                    se o grupo já está todo selecionado, limpam só aquele grupo). Operam apenas
+                    sobre os fretes carregados/visíveis. Sem botão "Limpar seleção" separado. */}
+                {fretes.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-2 mb-3">
+                    <span className="text-[10px] font-bold uppercase text-gray-400 mr-1">Seleção rápida:</span>
+                    {idsVinculados.length > 0 && (() => {
+                      const allSel = idsVinculados.every(id => selectedTripIds.includes(id));
+                      return (
+                        <button
+                          onClick={() => setSelectedTripIds(prev => allSel
+                            ? prev.filter(id => !idsVinculados.includes(id))
+                            : [...new Set([...prev, ...idsVinculados])])}
+                          className={`px-3 py-1.5 text-xs font-bold rounded-lg border transition-all active:scale-95 ${allSel ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700' : 'border-blue-200 text-blue-600 hover:bg-blue-50'}`}
+                        >
+                          Selecionar Vinculados ({idsVinculados.length})
+                        </button>
+                      );
+                    })()}
+                    {idsAutonomos.length > 0 && (() => {
+                      const allSel = idsAutonomos.every(id => selectedTripIds.includes(id));
+                      return (
+                        <button
+                          onClick={() => setSelectedTripIds(prev => allSel
+                            ? prev.filter(id => !idsAutonomos.includes(id))
+                            : [...new Set([...prev, ...idsAutonomos])])}
+                          className={`px-3 py-1.5 text-xs font-bold rounded-lg border transition-all active:scale-95 ${allSel ? 'bg-amber-500 text-white border-amber-500 hover:bg-amber-600' : 'border-amber-200 text-amber-600 hover:bg-amber-50'}`}
+                        >
+                          Selecionar Autônomos ({idsAutonomos.length})
+                        </button>
+                      );
+                    })()}
+                  </div>
+                )}
+
                 <div className="border rounded-2xl overflow-hidden">
                   <table className="w-full text-left">
                     <thead className="bg-gray-50 text-[10px] font-bold uppercase text-gray-400 border-b">
@@ -1042,7 +1100,19 @@ export const Relatorios: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
-                      {motoristas.filter(m => selectedMot === 'todos' || m.uid === selectedMot).map(m => {
+                      {(() => {
+                        // PR4: separa a lista em duas seções (Vinculados / Autônomos), espelhando os PDFs.
+                        // Cada seção só aparece se houver motorista com frete. A renderização de cada
+                        // motorista/frete (renderGrupoMotorista) é a mesma de antes — sem redesign.
+                        const visiveis = motoristas.filter(m => (selectedMot === 'todos' || m.uid === selectedMot) && fretes.some(f => f.motoristaUid === m.uid));
+                        const motsVinc = visiveis.filter(m => m.empresaTipo !== 'autonomo');
+                        const motsAuto = visiveis.filter(m => m.empresaTipo === 'autonomo');
+                        const sectionHeader = (titulo: string) => (
+                          <tr key={`sec-${titulo}`} className="bg-gray-50">
+                            <td colSpan={4} className="px-4 py-2 text-[11px] font-black uppercase tracking-widest text-gray-500 border-y border-gray-200">{titulo}</td>
+                          </tr>
+                        );
+                        const renderGrupoMotorista = (m: any) => {
                         const mFretes = fretes.filter(f => f.motoristaUid === m.uid);
                         if (mFretes.length === 0) return null;
                         const total = mFretes.reduce((s,f)=>s+f.valorFrete,0);
@@ -1230,12 +1300,21 @@ export const Relatorios: React.FC = () => {
                             })}
                           </React.Fragment>
                         );
-                      })}
-                      {fretes.length === 0 && (
-                        <tr>
-                          <td colSpan={4} className="p-6 text-center text-gray-400 text-sm">Nenhum frete encontrado neste período.</td>
-                        </tr>
-                      )}
+                        };
+                        return (
+                          <>
+                            {motsVinc.length > 0 && sectionHeader('MOTORISTAS VINCULADOS')}
+                            {motsVinc.map(renderGrupoMotorista)}
+                            {motsAuto.length > 0 && sectionHeader('MOTORISTAS AUTÔNOMOS')}
+                            {motsAuto.map(renderGrupoMotorista)}
+                            {fretes.length === 0 && (
+                              <tr>
+                                <td colSpan={4} className="p-6 text-center text-gray-400 text-sm">Nenhum frete encontrado neste período.</td>
+                              </tr>
+                            )}
+                          </>
+                        );
+                      })()}
                     </tbody>
                   </table>
                 </div>
