@@ -882,29 +882,50 @@ export const GerenciamentoViagens: React.FC = () => {
             </div>
             <div className="px-6 pb-4 space-y-3">
               <div className="bg-gray-50 rounded-xl p-4 space-y-3">
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Total de Fretes:</span>
-                  <span className="font-bold text-gray-800">{formatCurrency(opTotalFretes)}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Comissão ({selectedMotorista?.comissao || 0}%):</span>
-                  <span className="font-bold text-blue-600">{formatCurrency(opComissao)}</span>
-                </div>
-                <div className="border-t border-gray-200 pt-2">
-                  <p className="text-xs text-gray-400 font-medium mb-2">Despesas</p>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-500">Desp./Abast.:</span>
-                    <span className="font-bold text-orange-600">{formatCurrency(opDespMot + opAbastMot)}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-500">Vales:</span>
-                    <span className="font-bold text-red-600">{formatCurrency(opValesOwner)}</span>
-                  </div>
-                </div>
-                <div className="border-t border-gray-200 pt-3 flex justify-between text-base font-extrabold">
-                  <span className="text-gray-700">Saldo Líquido:</span>
-                  <span className={opSaldoLiquido >= 0 ? 'text-green-600' : 'text-red-600'}>{formatCurrency(Math.abs(opSaldoLiquido))}</span>
-                </div>
+                {isAutonomo ? (
+                  // PR-G1: autônomo não usa comissão — resumo do modal = Faturamento − Gastos.
+                  // Espelha o card "Balanço Atual"; reusa opTotalFretes/autGastos/autResultado.
+                  <>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-500">Total de Fretes (Faturamento):</span>
+                      <span className="font-bold text-gray-800">{formatCurrency(opTotalFretes)}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-500">Gastos (desp. + abast. + vales):</span>
+                      <span className="font-bold text-red-600">{formatCurrency(autGastos)}</span>
+                    </div>
+                    <div className="border-t border-gray-200 pt-3 flex justify-between text-base font-extrabold">
+                      <span className="text-gray-700">Resultado:</span>
+                      <span className={autResultado >= 0 ? 'text-green-600' : 'text-red-600'}>{formatCurrency(Math.abs(autResultado))}</span>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-500">Total de Fretes:</span>
+                      <span className="font-bold text-gray-800">{formatCurrency(opTotalFretes)}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-500">Comissão ({selectedMotorista?.comissao || 0}%):</span>
+                      <span className="font-bold text-blue-600">{formatCurrency(opComissao)}</span>
+                    </div>
+                    <div className="border-t border-gray-200 pt-2">
+                      <p className="text-xs text-gray-400 font-medium mb-2">Despesas</p>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-500">Desp./Abast.:</span>
+                        <span className="font-bold text-orange-600">{formatCurrency(opDespMot + opAbastMot)}</span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-500">Vales:</span>
+                        <span className="font-bold text-red-600">{formatCurrency(opValesOwner)}</span>
+                      </div>
+                    </div>
+                    <div className="border-t border-gray-200 pt-3 flex justify-between text-base font-extrabold">
+                      <span className="text-gray-700">Saldo Líquido:</span>
+                      <span className={opSaldoLiquido >= 0 ? 'text-green-600' : 'text-red-600'}>{formatCurrency(Math.abs(opSaldoLiquido))}</span>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
             <div className="p-4 bg-gray-50 border-t flex justify-end space-x-3">
