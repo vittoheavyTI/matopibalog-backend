@@ -4,7 +4,7 @@ import autoTable from 'jspdf-autotable';
 import { format, startOfMonth, endOfMonth, startOfYear, endOfYear } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { formatCurrency } from '../utils';
-import { Calendar, FileText, Users, User, Download, Filter, Truck } from 'lucide-react';
+import { Calendar, FileText, Users, User, Download, Filter, Truck, ChevronDown, ChevronRight } from 'lucide-react';
 import api from '../api';
 
 // Carrega a logo (data URL do localStorage) e calcula dimensões preservando o aspecto real.
@@ -143,6 +143,18 @@ export const Relatorios: React.FC = () => {
   const [loadingData, setLoadingData] = useState(false);
   const [selectedTripIds, setSelectedTripIds] = useState<string[]>([]);
   const [expandedTripId, setExpandedTripId] = useState<string | null>(null);
+
+  // PR6: navegação em escala — combobox de busca, expandir/ocultar grupos e paginação por motorista.
+  const [motoristaBusca, setMotoristaBusca] = useState('');
+  const [motoristaAberto, setMotoristaAberto] = useState(false);
+  const [recentMots, setRecentMots] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem('matopibalog_relatorios_recent_mot') || '[]'); } catch { return []; }
+  });
+  const [vincAberto, setVincAberto] = useState(true);
+  const [autoAberto, setAutoAberto] = useState(true);
+  const [pageVinc, setPageVinc] = useState(1);
+  const [pageAuto, setPageAuto] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   useEffect(() => {
     const fetchMotoristas = async () => {
@@ -844,6 +856,39 @@ export const Relatorios: React.FC = () => {
     });
   }, [fretes]);
 
+  // PR6: volta para a página 1 sempre que o conjunto de dados muda por filtro/período/tamanho
+  // de página — evita ficar numa página vazia após a troca. Depende só dos filtros (não das
+  // próprias páginas) → sem loop.
+  useEffect(() => {
+    setPageVinc(1);
+    setPageAuto(1);
+  }, [selectedMot, reportType, selectedDate, startDate, endDate, pageSize]);
+
+  // PR6: seleciona um motorista (ou "todos") e registra os últimos 5 usados no localStorage.
+  const selecionarMotorista = (uid: string) => {
+    setSelectedMot(uid);
+    setMotoristaAberto(false);
+    setMotoristaBusca('');
+    if (uid !== 'todos') {
+      setRecentMots(prev => {
+        const novo = [uid, ...prev.filter(x => x !== uid)].slice(0, 5);
+        try { localStorage.setItem('matopibalog_relatorios_recent_mot', JSON.stringify(novo)); } catch {}
+        return novo;
+      });
+    }
+  };
+
+  // PR6: combobox de motorista — filtro só visual da lista já carregada (respeita permissões).
+  const motoristasFiltrados = motoristas.filter(m =>
+    !motoristaBusca.trim() || (m.nomeCompleto || '').toLowerCase().includes(motoristaBusca.trim().toLowerCase())
+  );
+  const nomeMotoristaSelecionado = selectedMot === 'todos'
+    ? 'Todos os Motoristas'
+    : (motoristas.find(m => m.uid === selectedMot)?.nomeCompleto || '');
+  const recentMotObjs = recentMots
+    .map(uid => motoristas.find(m => m.uid === uid))
+    .filter(Boolean) as any[];
+
   // PR4: IDs dos fretes carregados por tipo de motorista. Operam só sobre `fretes` atuais
   // (nunca IDs externos), garantindo que a seleção em massa bata com o que está exibido.
   const idsVinculados = fretes.filter(f => {
@@ -878,16 +923,65 @@ export const Relatorios: React.FC = () => {
                 <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Motorista</label>
                 <div className="relative">
                   <Users className="absolute left-3 top-3 text-gray-400" size={18} />
-                  <select 
-                    value={selectedMot} 
-                    onChange={(e) => setSelectedMot(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2.5 border rounded-xl appearance-none bg-white focus:border-blue-500 outline-none"
-                  >
-                    <option value="todos">Todos os Motoristas</option>
-                    {motoristas.map(m => (
-                      <option key={m.uid} value={m.uid}>{m.nomeCompleto}</option>
-                    ))}
-                  </select>
+                  {/* PR6: combobox de busca (substitui o select nativo). Filtra só a lista já
+                      carregada → respeita permissões; "onMouseDown" vence o "onBlur". */}
+                  <input
+                    type="text"
+                    value={motoristaAberto ? motoristaBusca : nomeMotoristaSelecionado}
+                    onChange={e => setMotoristaBusca(e.target.value)}
+                    onFocus={() => { setMotoristaAberto(true); setMotoristaBusca(''); }}
+                    onBlur={() => setMotoristaAberto(false)}
+                    placeholder="Buscar motorista..."
+                    className="w-full pl-10 pr-4 py-2.5 border rounded-xl bg-white focus:border-blue-500 outline-none"
+                  />
+                  {motoristaAberto && (
+                    <ul className="absolute z-20 mt-1 w-full max-h-72 overflow-auto bg-white border border-gray-200 rounded-xl shadow-lg">
+                      <li
+                        onMouseDown={() => selecionarMotorista('todos')}
+                        className="px-3 py-2 cursor-pointer hover:bg-blue-50 text-sm font-bold text-gray-700"
+                      >
+                        Todos os Motoristas
+                      </li>
+                      {/* PR6: campo vazio → só "Todos" + Recentes (até 5) + dica, sem a lista completa.
+                          Digitando → resultados filtrados limitados a 10, com aviso se houver mais. */}
+                      {!motoristaBusca.trim() ? (
+                        <>
+                          {recentMotObjs.length > 0 && (
+                            <>
+                              <li className="px-3 pt-2 pb-1 text-[9px] font-bold uppercase text-gray-400 tracking-widest">Recentes</li>
+                              {recentMotObjs.map(m => (
+                                <li
+                                  key={`r-${m.uid}`}
+                                  onMouseDown={() => selecionarMotorista(m.uid)}
+                                  className="px-3 py-2 cursor-pointer hover:bg-blue-50 text-sm"
+                                >
+                                  {m.nomeCompleto}
+                                </li>
+                              ))}
+                            </>
+                          )}
+                          <li className="px-3 py-2 text-[11px] text-gray-400 italic border-t border-gray-100">Digite para buscar motorista...</li>
+                        </>
+                      ) : motoristasFiltrados.length === 0 ? (
+                        <li className="px-3 py-2 text-sm text-gray-400">Nenhum motorista encontrado</li>
+                      ) : (
+                        <>
+                          {motoristasFiltrados.slice(0, 10).map(m => (
+                            <li
+                              key={m.uid}
+                              onMouseDown={() => selecionarMotorista(m.uid)}
+                              className="px-3 py-2 cursor-pointer hover:bg-blue-50 text-sm"
+                            >
+                              {m.nomeCompleto}
+                            </li>
+                          ))}
+                          {motoristasFiltrados.length > 10 && (
+                            <li className="px-3 py-2 text-[11px] text-gray-400 italic border-t border-gray-100">Mostrando 10 resultados. Continue digitando para refinar.</li>
+                          )}
+                        </>
+                      )}
+                    </ul>
+                  )}
                 </div>
               </div>
 
@@ -960,7 +1054,7 @@ export const Relatorios: React.FC = () => {
               <h3 className="font-bold text-gray-800">Prévia do Relatório</h3>
               <div className="flex items-center text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1 rounded-full uppercase">
                 <Calendar size={14} className="mr-1" /> 
-                {reportType === 'mensal' ? format(new Date(selectedDate + '-01T12:00:00'), 'MMMM / yyyy') : 
+                {reportType === 'mensal' ? format(new Date(selectedDate + '-01T12:00:00'), 'MMMM / yyyy', { locale: ptBR }) :
                  reportType === 'anual' ? selectedDate.split('-')[0] : 'Período Customizado'}
               </div>
             </div>
@@ -1089,6 +1183,20 @@ export const Relatorios: React.FC = () => {
                   </div>
                 )}
 
+                {/* PR6: itens por página (paginação por motorista). Reset de página tratado por useEffect. */}
+                {fretes.length > 0 && (
+                  <div className="flex items-center justify-end gap-2 mb-2">
+                    <span className="text-[10px] font-bold uppercase text-gray-400">Mostrar por página:</span>
+                    <select
+                      value={pageSize}
+                      onChange={e => setPageSize(Number(e.target.value))}
+                      className="border border-gray-200 rounded-lg px-2 py-1 text-xs font-bold text-gray-600 outline-none focus:border-blue-500 bg-white"
+                    >
+                      {[5, 10, 15, 20, 30, 50].map(n => <option key={n} value={n}>{n}</option>)}
+                    </select>
+                  </div>
+                )}
+
                 <div className="border rounded-2xl overflow-hidden">
                   <table className="w-full text-left">
                     <thead className="bg-gray-50 text-[10px] font-bold uppercase text-gray-400 border-b">
@@ -1107,11 +1215,39 @@ export const Relatorios: React.FC = () => {
                         const visiveis = motoristas.filter(m => (selectedMot === 'todos' || m.uid === selectedMot) && fretes.some(f => f.motoristaUid === m.uid));
                         const motsVinc = visiveis.filter(m => m.empresaTipo !== 'autonomo');
                         const motsAuto = visiveis.filter(m => m.empresaTipo === 'autonomo');
-                        const sectionHeader = (titulo: string) => (
+                        // PR6: cabeçalho de grupo clicável (expandir/ocultar). Permanece sempre visível.
+                        const sectionHeader = (titulo: string, aberto: boolean, onToggle: () => void, count: number) => (
                           <tr key={`sec-${titulo}`} className="bg-gray-50">
-                            <td colSpan={4} className="px-4 py-2 text-[11px] font-black uppercase tracking-widest text-gray-500 border-y border-gray-200">{titulo}</td>
+                            <td colSpan={4} className="p-0 border-y border-gray-200">
+                              <button
+                                type="button"
+                                onClick={onToggle}
+                                className="w-full flex items-center gap-2 px-4 py-2 text-[11px] font-black uppercase tracking-widest text-gray-500 hover:bg-gray-100 transition-colors"
+                              >
+                                {aberto ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                                {titulo}
+                                <span className="ml-1 text-gray-400 font-bold normal-case tracking-normal">({count})</span>
+                              </button>
+                            </td>
                           </tr>
                         );
+                        // PR6: controles de paginação por motorista (só quando excede o tamanho de página).
+                        const pageControls = (page: number, total: number, setPage: (n: number) => void, chave: string) => {
+                          if (total <= pageSize) return null;
+                          const totalPages = Math.max(1, Math.ceil(total / pageSize));
+                          const cur = Math.min(page, totalPages);
+                          return (
+                            <tr key={`pg-${chave}`}>
+                              <td colSpan={4} className="px-4 py-2 bg-gray-50/40">
+                                <div className="flex items-center justify-end gap-2 text-xs font-bold text-gray-500">
+                                  <button type="button" disabled={cur <= 1} onClick={() => setPage(cur - 1)} className="px-2 py-1 rounded border border-gray-200 disabled:opacity-40 hover:bg-white transition-colors">Anterior</button>
+                                  <span>Página {cur} de {totalPages}</span>
+                                  <button type="button" disabled={cur >= totalPages} onClick={() => setPage(cur + 1)} className="px-2 py-1 rounded border border-gray-200 disabled:opacity-40 hover:bg-white transition-colors">Próxima</button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        };
                         const renderGrupoMotorista = (m: any) => {
                         const mFretes = fretes.filter(f => f.motoristaUid === m.uid);
                         if (mFretes.length === 0) return null;
@@ -1301,12 +1437,21 @@ export const Relatorios: React.FC = () => {
                           </React.Fragment>
                         );
                         };
+                        // PR6: paginação POR MOTORISTA (mantém os fretes de cada motorista juntos).
+                        const totalPagesVinc = Math.max(1, Math.ceil(motsVinc.length / pageSize));
+                        const totalPagesAuto = Math.max(1, Math.ceil(motsAuto.length / pageSize));
+                        const curVinc = Math.min(pageVinc, totalPagesVinc);
+                        const curAuto = Math.min(pageAuto, totalPagesAuto);
+                        const motsVincPag = motsVinc.slice((curVinc - 1) * pageSize, curVinc * pageSize);
+                        const motsAutoPag = motsAuto.slice((curAuto - 1) * pageSize, curAuto * pageSize);
                         return (
                           <>
-                            {motsVinc.length > 0 && sectionHeader('MOTORISTAS VINCULADOS')}
-                            {motsVinc.map(renderGrupoMotorista)}
-                            {motsAuto.length > 0 && sectionHeader('MOTORISTAS AUTÔNOMOS')}
-                            {motsAuto.map(renderGrupoMotorista)}
+                            {motsVinc.length > 0 && sectionHeader('MOTORISTAS VINCULADOS', vincAberto, () => setVincAberto(v => !v), motsVinc.length)}
+                            {vincAberto && motsVincPag.map(renderGrupoMotorista)}
+                            {vincAberto && pageControls(curVinc, motsVinc.length, setPageVinc, 'vinc')}
+                            {motsAuto.length > 0 && sectionHeader('MOTORISTAS AUTÔNOMOS', autoAberto, () => setAutoAberto(v => !v), motsAuto.length)}
+                            {autoAberto && motsAutoPag.map(renderGrupoMotorista)}
+                            {autoAberto && pageControls(curAuto, motsAuto.length, setPageAuto, 'auto')}
                             {fretes.length === 0 && (
                               <tr>
                                 <td colSpan={4} className="p-6 text-center text-gray-400 text-sm">Nenhum frete encontrado neste período.</td>
