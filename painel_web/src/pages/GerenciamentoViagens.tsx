@@ -339,26 +339,42 @@ export const GerenciamentoViagens: React.FC = () => {
     }
   };
 
+  // Localiza o frete ativo/pendente do motorista atualmente selecionado.
+  // Mesma regra de vínculo usada nos lançamentos: motorista do filtro + status ativo/pendente.
+  const getFreteAtivoSelecionado = () =>
+    fretes.find(f =>
+      (f.motoristaUid === filterMot || f.motorista_id === filterMot) &&
+      (f.status === 'ativo' || f.status === 'pendente'));
+
   const handleFinalizarViagem = () => {
     if (!selectedMotorista) return;
+    // Defesa em camada de handler: sem frete ativo/pendente, não abre o modal.
+    if (!getFreteAtivoSelecionado()) {
+      alert('Nenhum frete ativo encontrado para finalizar.');
+      return;
+    }
     setShowFinalizarModal(true);
   };
 
   const confirmFinalizarViagem = async () => {
     if (!selectedMotorista) return;
+    // Defesa final: evita falso sucesso se o frete ativo sumiu entre abrir e confirmar.
+    const ativo = getFreteAtivoSelecionado();
+    if (!ativo) {
+      setShowFinalizarModal(false);
+      alert('Nenhum frete ativo encontrado para finalizar.');
+      return;
+    }
     try {
-      const ativo = fretes.find(f => f.status === 'ativo' || f.status === 'pendente');
-      if (ativo) {
-        // Finaliza via rota dedicada — o backend é a trava final (409 se houver pendência)
-        await api.post('/fretes/' + ativo.id + '/finalizar');
-        // Marca como finalizado SOMENTE os aprovados DESTA viagem (frete ativo), após sucesso
-        const promises = [
-          ...despesas.filter(d => d.status === 'aprovado' && d.frete_id === ativo.id).map(d => api.patch('/despesas/' + d.id, { status: 'finalizado' })),
-          ...abastecimentos.filter(a => a.status === 'aprovado' && a.frete_id === ativo.id).map(a => api.patch('/abastecimentos/' + a.id, { status: 'finalizado' })),
-          ...vales.filter(v => v.status === 'aprovado' && v.frete_id === ativo.id).map(v => api.patch('/vales/' + v.id, { status: 'finalizado' }))
-        ];
-        await Promise.all(promises);
-      }
+      // Finaliza via rota dedicada — o backend é a trava final (409 se houver pendência)
+      await api.post('/fretes/' + ativo.id + '/finalizar');
+      // Marca como finalizado SOMENTE os aprovados DESTA viagem (frete ativo), após sucesso
+      const promises = [
+        ...despesas.filter(d => d.status === 'aprovado' && d.frete_id === ativo.id).map(d => api.patch('/despesas/' + d.id, { status: 'finalizado' })),
+        ...abastecimentos.filter(a => a.status === 'aprovado' && a.frete_id === ativo.id).map(a => api.patch('/abastecimentos/' + a.id, { status: 'finalizado' })),
+        ...vales.filter(v => v.status === 'aprovado' && v.frete_id === ativo.id).map(v => api.patch('/vales/' + v.id, { status: 'finalizado' }))
+      ];
+      await Promise.all(promises);
       setShowFinalizarModal(false);
       setFilterMot('todos');
       loadData();
