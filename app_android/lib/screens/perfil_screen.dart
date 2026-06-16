@@ -409,13 +409,15 @@ class _PerfilScreenState extends State<PerfilScreen> {
             _linha('CPF', _mascaraCpf(p['cpf'])),
             _linha('Status', p['status'] ?? '--'),
             _linha('Tipo de conta', p['role'] ?? '--'),
-            const SizedBox(height: 12),
+            const SizedBox(height: 16),
             OutlinedButton.icon(
               onPressed: _salvando ? null : _alterarSenha,
               icon: const Icon(Icons.lock_reset_outlined, size: 18),
               label: const Text('Alterar senha'),
               style: OutlinedButton.styleFrom(
                 minimumSize: const Size(double.infinity, 44),
+                foregroundColor: Theme.of(context).colorScheme.primary,
+                side: BorderSide(color: Theme.of(context).colorScheme.primary),
               ),
             ),
 
@@ -445,20 +447,31 @@ class _PerfilScreenState extends State<PerfilScreen> {
   }
 
   Widget _secao(String titulo) => Padding(
-    padding: const EdgeInsets.only(bottom: 6),
-    child: Text(titulo, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF1B5E20))),
-  );
-
-  Widget _linha(String label, String? valor) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 5),
-    child: Row(
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        SizedBox(width: 130, child: Text(label, style: TextStyle(color: Colors.grey.shade600, fontSize: 13))),
-        Expanded(child: Text(valor ?? '--', style: const TextStyle(fontSize: 13))),
+        Text(titulo, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF1B5E20), letterSpacing: 0.3)),
+        const SizedBox(height: 4),
+        const Divider(height: 1),
       ],
     ),
   );
+
+  Widget _linha(String label, String? valor) {
+    // Label com cor derivada do tema: legível no dark (claro) e no light (escuro).
+    final corLabel = Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.75);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(width: 130, child: Text(label, style: TextStyle(color: corLabel, fontSize: 14))),
+          Expanded(child: Text(valor ?? '--', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500))),
+        ],
+      ),
+    );
+  }
 
   Widget _campo(String label, TextEditingController ctrl, TextInputType tipo) => TextField(
     controller: ctrl,
