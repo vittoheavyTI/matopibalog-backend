@@ -335,7 +335,7 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text('Resumo do Frete', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1B5E20))),
+              Text('Resumo do Frete', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.onSurface)),
               const Divider(),
               _linhaResumo('Valor do Frete', valorFrete),
               _linhaResumo('Despesas aprovadas', -despesasAprov, color: Colors.red),
@@ -363,7 +363,7 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text('Resumo do Frete', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1B5E20))),
+            Text('Resumo do Frete', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.onSurface)),
             const Divider(),
             _linhaResumo('Valor do Frete', valorFrete),
             _linhaResumo('Comissão ($pct%)', comissao, color: Colors.blue),
