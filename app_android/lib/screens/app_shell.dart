@@ -55,14 +55,7 @@ class AppShell extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('Olá, ${auth.nome}'),
-        actions: [
-          IconButton(
-            icon: Icon(isDark ? Icons.wb_sunny_outlined : Icons.dark_mode_outlined),
-            tooltip: isDark ? 'Modo claro' : 'Modo escuro',
-            onPressed: () => context.read<ThemeProvider>().toggleTheme(),
-          ),
-        ],
+        title: Text(auth.nome),
       ),
       drawer: Drawer(
         child: Column(
@@ -123,7 +116,7 @@ class AppShell extends StatelessWidget {
               ),
             ListTile(
               leading: const Icon(Icons.history),
-              title: const Text('Histórico'),
+              title: const Text('Histórico de Fretes'),
               onTap: () {
                 AppLogger.action('menu_nav', params: {'destino': 'historico'});
                 _navegarPara(context, const HistoricoScreen());

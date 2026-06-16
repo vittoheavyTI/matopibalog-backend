@@ -193,7 +193,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             foregroundColor: Theme.of(context).colorScheme.onSurface,
                             textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                           ),
-                          child: const Text('Ver todos'),
+                          child: const Text('Histórico de Fretes'),
                         ),
                       ],
                     ),
