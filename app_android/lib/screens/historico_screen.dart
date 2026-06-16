@@ -195,6 +195,9 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
     final valor = double.tryParse(frete['valor_frete']?.toString() ?? '0') ?? 0.0;
     final status = frete['status'] ?? 'pendente';
     final Color statusColor = _corStatus(status);
+    // Cor secundária derivada do tema: legível no dark (claro) e no light (escuro),
+    // ao contrário do cinza fixo que ficava apagado no tema escuro.
+    final Color corSecundaria = Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.75);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
@@ -233,9 +236,9 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
               const SizedBox(height: 8),
               Row(
                 children: [
-                  Icon(Icons.calendar_today_outlined, size: 13, color: Colors.grey.shade500),
+                  Icon(Icons.calendar_today_outlined, size: 13, color: corSecundaria),
                   const SizedBox(width: 4),
-                  Text(data, style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+                  Text(data, style: TextStyle(color: corSecundaria, fontSize: 13)),
                   const Spacer(),
                   Text(
                     'R\$ ${valor.toStringAsFixed(2)}',
@@ -254,7 +257,7 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
               ),
               if (frete['placa'] != null) ...[
                 const SizedBox(height: 4),
-                Text(frete['placa'], style: TextStyle(color: Colors.grey.shade500, fontSize: 13)),
+                Text(frete['placa'], style: TextStyle(color: corSecundaria, fontSize: 13)),
               ],
             ],
           ),

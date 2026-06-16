@@ -429,13 +429,14 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
   }
 
   Widget _linhaDado(String label, String valor) {
+    final corLabel = Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.75);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(width: 120, child: Text(label, style: TextStyle(color: Colors.grey.shade600, fontSize: 14))),
-          Expanded(child: Text(valor, style: const TextStyle(fontSize: 14))),
+          SizedBox(width: 130, child: Text(label, style: TextStyle(color: corLabel, fontSize: 15))),
+          Expanded(child: Text(valor, style: const TextStyle(fontSize: 15))),
         ],
       ),
     );

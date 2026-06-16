@@ -189,6 +189,10 @@ class _HomeScreenState extends State<HomeScreen> {
                         const Text('Últimos Fretes', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                         TextButton(
                           onPressed: () => _navegarERefresh(const HistoricoScreen()),
+                          style: TextButton.styleFrom(
+                            foregroundColor: Theme.of(context).colorScheme.onSurface,
+                            textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                          ),
                           child: const Text('Ver todos'),
                         ),
                       ],
@@ -308,11 +312,11 @@ class _HomeScreenState extends State<HomeScreen> {
           backgroundColor: color.withValues(alpha: 0.12),
           child: Icon(icon, color: color, size: 18),
         ),
-        title: Text(desc, style: const TextStyle(fontSize: 14), overflow: TextOverflow.ellipsis),
+        title: Text(desc, style: const TextStyle(fontSize: 15), overflow: TextOverflow.ellipsis),
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('$label · $dataStr', style: const TextStyle(fontSize: 13)),
+            Text('$label · $dataStr', style: const TextStyle(fontSize: 14)),
             if (obs != null && obs.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 2),
@@ -329,7 +333,7 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             Text(
               'R\$ ${valor.toStringAsFixed(2)}',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: color),
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: color),
             ),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
