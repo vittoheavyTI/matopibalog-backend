@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, X, Search, Filter, Truck, MapPin, Calendar, DollarSign, Gauge, Trash2, Edit, Check, AlertTriangle, ChevronLeft, Fuel, FileText, TrendingUp, Save, Unlock, Lock } from 'lucide-react';
+import { Plus, X, Search, Filter, Truck, MapPin, Calendar, DollarSign, Gauge, Trash2, Edit, Check, AlertTriangle, ChevronLeft, ChevronDown, ChevronRight, Fuel, FileText, TrendingUp, Save, Unlock, Lock } from 'lucide-react';
 import { format } from 'date-fns';
 import { formatCurrency } from '../utils';
 import api from '../api';
@@ -23,6 +23,9 @@ export const GerenciamentoViagens: React.FC = () => {
   const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showFinalizarModal, setShowFinalizarModal] = useState(false);
+  // Accordion da visualização por frete (detalhe do motorista).
+  const [fretesExpandidos, setFretesExpandidos] = useState<Set<string>>(new Set());
+  const [semFreteExpandido, setSemFreteExpandido] = useState(false);
 
   const [formData, setFormData] = useState({
     motorista_id: '',
@@ -62,7 +65,7 @@ export const GerenciamentoViagens: React.FC = () => {
         empresaTipo: m.empresa_tipo
       })));
     } catch (err) {
-      console.error('Erro ao carregar viagens:', err);
+      console.error('Erro ao carregar fretes:', err);
     } finally {
       setLoading(false);
     }
@@ -123,6 +126,32 @@ export const GerenciamentoViagens: React.FC = () => {
       loadMotoristaData(filterMot);
     }
   }, [filterMot]);
+
+  // Default do accordion: ao trocar de motorista / recarregar dados, fretes
+  // ativos/pendentes abrem; demais (ex.: cancelado) e o grupo legado iniciam fechados.
+  useEffect(() => {
+    if (filterMot === 'todos') return;
+    const abertosPorPadrao = fretes
+      .filter(f => f.status === 'ativo' || f.status === 'pendente')
+      .map(f => f.id as string);
+    setFretesExpandidos(new Set(abertosPorPadrao));
+    setSemFreteExpandido(false);
+  }, [filterMot, fretes]);
+
+  const toggleFreteExpandido = (freteId: string) => {
+    setFretesExpandidos(prev => {
+      const next = new Set(prev);
+      if (next.has(freteId)) next.delete(freteId);
+      else next.add(freteId);
+      return next;
+    });
+  };
+
+  // Ordenação por data desc (mais recente → mais antigo). Data ausente/inválida → fim.
+  const tsFrete = (f: any): number => {
+    const t = new Date(f?.data ?? f?.criadoEm ?? 0).getTime();
+    return Number.isNaN(t) ? 0 : t;
+  };
 
   const openNewModal = (motId?: string) => {
     setEditingFrete(null);
@@ -319,7 +348,7 @@ export const GerenciamentoViagens: React.FC = () => {
       // Regra da tela: sem frete ativo/pendente, não lança (e nunca POST sem frete_id aqui).
       // Backend permite frete_id=null por design (Dashboard/app/legado), então a trava é local.
       if (!freteId) {
-        alert('Não há viagem ativa para lançar.');
+        alert('Não há frete ativo para lançar.');
         return;
       }
       if (showAddModal === 'despesa' || showAddModal === 'manutencao') {
@@ -562,6 +591,69 @@ export const GerenciamentoViagens: React.FC = () => {
     </>
   );
 
+  // Renderiza um item de lançamento (despesa/abastecimento/vale) com os mesmos
+  // estilos e ações de antes. Extraído para reuso nos grupos por frete e no grupo legado.
+  const renderLancamentoItem = (item: any) => {
+    // Usar item.tipo diretamente (definido no mapeamento de loadMotoristaData)
+    // Evita inferência por heurística que falhava quando litros=0 ou quemPagou='motorista'
+    const type: string = item.tipo || 'despesa';
+    return (
+      <div key={item.id} className={`group flex justify-between items-center p-3 border rounded-lg transition-all ${item.status === 'aprovado' ? 'bg-green-50/50 border-green-100' : item.status === 'rejeitado' ? 'bg-red-50/50 border-red-100' : 'border-gray-100'}`}>
+        <div className="flex-1">
+          <p className="font-medium text-gray-800">
+            {type === 'manutencao' && <span className="text-[10px] bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded mr-2 font-bold">MANUTENÇÃO</span>}
+            {item.descricao || item.posto || 'Vale/Adiantamento'} {item.litros && <span className="text-xs text-blue-600">({item.litros}L)</span>}
+          </p>
+          <p className="text-xs text-gray-500">Pago por: {item.quemPagou} • {gvFmt(item.data, 'dd/MM HH:mm')}</p>
+          {type !== 'vale' && (
+            item.fotoUrl ? (
+              <p className="text-xs mt-0.5 flex items-center gap-3">
+                <a href={item.fotoUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Abrir comprovante</a>
+                <button type="button" onClick={() => baixarComprovante(item.fotoUrl, item.id)} className="text-blue-600 hover:underline">Baixar</button>
+              </p>
+            ) : (
+              <p className="text-xs text-gray-400 mt-0.5">Sem comprovante</p>
+            )
+          )}
+          {item.obsResolucao && item.status !== 'pendente' && (
+            <p className="text-xs mt-0.5 text-gray-600 italic">
+              <span className="font-semibold not-italic">
+                {item.status === 'rejeitado' ? 'Obs. rejeição: ' : 'Justificativa do admin: '}
+              </span>
+              {item.obsResolucao}
+            </p>
+          )}
+        </div>
+        <div className="flex items-center space-x-2">
+          <span className={`font-bold ${type === 'vale' ? 'text-red-600' : 'text-gray-700'}`}>{formatCurrency(Math.abs(item.valor || item.valorTotal))}</span>
+          {item.status === 'pendente' ? (
+            <div className="flex space-x-1">
+              <button onClick={() => handleResolverComObservacao(item.id, type, true)} className="p-1 text-green-600 hover:bg-green-100 rounded transition-colors" title="Aprovar com observação"><Check size={18} /></button>
+              <button onClick={() => handleResolverComObservacao(item.id, type, false)} className="p-1 text-red-600 hover:bg-red-100 rounded transition-colors" title="Rejeitar com motivo"><X size={18} /></button>
+            </div>
+          ) : (
+            <div className="flex items-center space-x-1">
+              <button onClick={() => handleResetStatus(item.id, type)}
+                className={`text-[10px] font-bold px-1.5 py-0.5 rounded uppercase transition-all hover:opacity-80 active:scale-95 ${item.status === 'aprovado' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}
+                title="Clique para mudar status">{item.status}</button>
+              {editingItem?.id === item.id
+                ? <button onClick={handleSaveEdit} className="p-1 bg-green-600 text-white rounded shadow-sm"><Save size={16} /></button>
+                : <button onClick={() => { handleStartEdit(item, type); handleResetStatus(item.id, type); }} className="p-1 text-gray-400 hover:text-blue-600 transition-colors" title="Editar"><Edit size={16} /></button>}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // Ordena lançamentos por data desc (mais recente primeiro); data ausente/inválida → fim.
+  const ordenarLancamentos = (itens: any[]) =>
+    [...itens].sort((x, y) => {
+      const tx = new Date(x?.data ?? 0).getTime();
+      const ty = new Date(y?.data ?? 0).getTime();
+      return (Number.isNaN(ty) ? 0 : ty) - (Number.isNaN(tx) ? 0 : tx);
+    });
+
   const renderDetalheMotorista = () => {
     if (!selectedMotorista) {
       return (
@@ -610,118 +702,120 @@ export const GerenciamentoViagens: React.FC = () => {
             <div className="bg-gray-50 p-4 border-b border-gray-100 font-bold text-gray-700 flex items-center justify-between">
               <span className="flex items-center"><FileText className="mr-2" size={18} /> Lançamentos</span>
               <div className="flex space-x-2">
-                <button onClick={() => setShowAddModal('despesa')} disabled={!temFreteAtivo} title={!temFreteAtivo ? 'Não há viagem ativa para lançar' : undefined} className="flex items-center px-3 py-1.5 bg-blue-100 text-blue-600 rounded-lg hover:bg-blue-200 transition-colors font-bold text-xs shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">
+                <button onClick={() => setShowAddModal('despesa')} disabled={!temFreteAtivo} title={!temFreteAtivo ? 'Não há frete ativo para lançar' : undefined} className="flex items-center px-3 py-1.5 bg-blue-100 text-blue-600 rounded-lg hover:bg-blue-200 transition-colors font-bold text-xs shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">
                   <Plus size={14} className="mr-1" /> Despesa
                 </button>
-                <button onClick={() => setShowAddModal('abastecimento')} disabled={!temFreteAtivo} title={!temFreteAtivo ? 'Não há viagem ativa para lançar' : undefined} className="flex items-center px-3 py-1.5 bg-blue-100 text-blue-600 rounded-lg hover:bg-blue-200 transition-colors font-bold text-xs shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">
+                <button onClick={() => setShowAddModal('abastecimento')} disabled={!temFreteAtivo} title={!temFreteAtivo ? 'Não há frete ativo para lançar' : undefined} className="flex items-center px-3 py-1.5 bg-blue-100 text-blue-600 rounded-lg hover:bg-blue-200 transition-colors font-bold text-xs shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">
                   <Plus size={14} className="mr-1" /> Abast.
                 </button>
-                <button onClick={() => setShowAddModal('vale')} disabled={!temFreteAtivo} title={!temFreteAtivo ? 'Não há viagem ativa para lançar' : undefined} className="flex items-center px-3 py-1.5 bg-blue-100 text-blue-600 rounded-lg hover:bg-blue-200 transition-colors font-bold text-xs shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">
+                <button onClick={() => setShowAddModal('vale')} disabled={!temFreteAtivo} title={!temFreteAtivo ? 'Não há frete ativo para lançar' : undefined} className="flex items-center px-3 py-1.5 bg-blue-100 text-blue-600 rounded-lg hover:bg-blue-200 transition-colors font-bold text-xs shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">
                   <Plus size={14} className="mr-1" /> Vale
                 </button>
               </div>
             </div>
-            <div className="p-4 space-y-4">
+            <div className="p-4 space-y-3">
               {mFretes.length === 0 && mDesp.length === 0 && mAbs.length === 0 && mVales.length === 0 &&
                 <p className="text-gray-500 text-center py-8">Nenhum lançamento.</p>}
 
-              {mFretes.map((f: any) => (
-                <div key={f.id} className="group flex justify-between items-center p-3 border rounded-lg bg-blue-50/30 border-blue-100 transition-all">
-                  <div className="flex-1">
-                    {editingItem?.id === f.id ? (
-                      <div className="grid grid-cols-3 gap-2 pr-4">
-                        <input className="border rounded px-2 py-1 text-sm" placeholder="Origem" value={editingItem?.data.origem || ''}
-                          onChange={e => setEditingItem(prev => prev ? {...prev, data: {...prev.data, origem: e.target.value}} : prev)} />
-                        <input className="border rounded px-2 py-1 text-sm" placeholder="Destino" value={editingItem?.data.destino || ''}
-                          onChange={e => setEditingItem(prev => prev ? {...prev, data: {...prev.data, destino: e.target.value}} : prev)} />
-                        <div className="flex space-x-1">
-                          <input type="number" className="border rounded px-2 py-1 text-sm w-1/2" placeholder="KM Ini" value={editingItem?.data.kmInicial || ''}
-                            onChange={e => setEditingItem(prev => prev ? {...prev, data: {...prev.data, kmInicial: Number(e.target.value)}} : prev)} />
-                          <input type="number" className="border rounded px-2 py-1 text-sm w-1/2" placeholder="KM Fim" value={editingItem?.data.kmFinal || ''}
-                            onChange={e => setEditingItem(prev => prev ? {...prev, data: {...prev.data, kmFinal: Number(e.target.value)}} : prev)} />
+              {/* Um card/accordion por frete, do mais recente para o mais antigo */}
+              {[...mFretes].sort((a: any, b: any) => tsFrete(b) - tsFrete(a)).map((f: any) => {
+                const despFrete = mDesp.filter((d: any) => d.frete_id === f.id);
+                const abastFrete = mAbs.filter((a: any) => a.frete_id === f.id);
+                const valesFrete = mVales.filter((v: any) => v.frete_id === f.id);
+                const itensFrete = ordenarLancamentos([...despFrete, ...abastFrete, ...valesFrete]);
+                const pendentesFrete = itensFrete.filter((i: any) => i.status === 'pendente').length;
+                const deducoesAprov = itensFrete
+                  .filter((i: any) => i.status === 'aprovado')
+                  .reduce((acc: number, i: any) => acc + (parseFloat(i.valor ?? i.valorTotal) || 0), 0);
+                const aberto = fretesExpandidos.has(f.id);
+                const editandoFrete = editingItem?.id === f.id;
+                const litrosFrete = abastFrete.filter((a: any) => a.status === 'aprovado').reduce((acc: number, a: any) => acc + (parseFloat(a.litros) || 0), 0);
+                const distFrete = (f.kmFinal || 0) - (f.kmInicial || 0);
+
+                return (
+                  <div key={f.id} className="border border-blue-100 rounded-lg overflow-hidden">
+                    <div className="group flex justify-between items-center gap-3 p-3 bg-blue-50/40">
+                      {editandoFrete ? (
+                        <div className="flex-1 grid grid-cols-3 gap-2 pr-2">
+                          <input className="border rounded px-2 py-1 text-sm" placeholder="Origem" value={editingItem?.data.origem || ''}
+                            onChange={e => setEditingItem(prev => prev ? {...prev, data: {...prev.data, origem: e.target.value}} : prev)} />
+                          <input className="border rounded px-2 py-1 text-sm" placeholder="Destino" value={editingItem?.data.destino || ''}
+                            onChange={e => setEditingItem(prev => prev ? {...prev, data: {...prev.data, destino: e.target.value}} : prev)} />
+                          <div className="flex space-x-1">
+                            <input type="number" className="border rounded px-2 py-1 text-sm w-1/2" placeholder="KM Ini" value={editingItem?.data.kmInicial || ''}
+                              onChange={e => setEditingItem(prev => prev ? {...prev, data: {...prev.data, kmInicial: Number(e.target.value)}} : prev)} />
+                            <input type="number" className="border rounded px-2 py-1 text-sm w-1/2" placeholder="KM Fim" value={editingItem?.data.kmFinal || ''}
+                              onChange={e => setEditingItem(prev => prev ? {...prev, data: {...prev.data, kmFinal: Number(e.target.value)}} : prev)} />
+                          </div>
                         </div>
+                      ) : (
+                        <button type="button" onClick={() => toggleFreteExpandido(f.id)} className="flex-1 text-left">
+                          <div className="flex items-center gap-2">
+                            {aberto ? <ChevronDown size={16} className="text-blue-600 flex-shrink-0" /> : <ChevronRight size={16} className="text-blue-600 flex-shrink-0" />}
+                            <p className="font-bold text-gray-800">{f.origem} ➔ {f.destino}</p>
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide ${getStatusBadge(f.status)}`}>{f.status}</span>
+                          </div>
+                          <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-gray-500 mt-1 pl-6">
+                            <span>{gvFmt(f.criadoEm || f.data, 'dd/MM/yyyy')}</span>
+                            {f.placa && <span className="bg-gray-100 px-1.5 py-0.5 rounded">{f.placa}</span>}
+                            {f.kmInicial && f.kmFinal ? (
+                              <span className="bg-gray-100 px-1.5 py-0.5 rounded">KM: {f.kmInicial} - {f.kmFinal} ({f.kmFinal - f.kmInicial} km)</span>
+                            ) : (<span className="text-orange-500 italic">KM Final Pendente</span>)}
+                            {litrosFrete > 0 && distFrete > 0 &&
+                              <span className="text-blue-600 font-bold bg-blue-50 px-1.5 py-0.5 rounded">Média: {(distFrete / litrosFrete).toFixed(2)} KM/L</span>}
+                            <span className="bg-gray-100 px-1.5 py-0.5 rounded">{despFrete.length} desp · {abastFrete.length} abast · {valesFrete.length} vale</span>
+                            {deducoesAprov > 0 && <span className="text-gray-500">Deduções aprov.: {formatCurrency(deducoesAprov)}</span>}
+                            {pendentesFrete > 0 && <span className="bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded font-bold">{pendentesFrete} pendente(s)</span>}
+                          </div>
+                        </button>
+                      )}
+                      <div className="flex items-center space-x-3">
+                        <span className="font-bold text-blue-600">{formatCurrency(f.valorFrete)}</span>
+                        {editandoFrete
+                          ? <button onClick={handleSaveEdit} className="p-1 bg-green-600 text-white rounded shadow-sm"><Save size={16} /></button>
+                          : <button onClick={() => handleStartEdit(f, 'frete')} className="p-1 text-gray-400 hover:text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity"><Edit size={16} /></button>}
                       </div>
-                    ) : (
-                      <div>
-                        <p className="font-medium text-gray-800">Frete: {f.origem} ➔ {f.destino}</p>
-                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-gray-500 mt-1">
-                          {f.kmInicial && f.kmFinal ? (
-                            <span className="bg-gray-100 px-1.5 py-0.5 rounded">KM: {f.kmInicial} - {f.kmFinal} ({f.kmFinal - f.kmInicial} km)</span>
-                          ) : (<span className="text-orange-500 italic">KM Final Pendente</span>)}
-                          <span>{gvFmt(f.criadoEm || f.data, 'dd/MM/yyyy')}</span>
-                          {(() => {
-                            const litrosFrete = mAbs.filter((a: any) => a.frete_id === f.id && a.status === 'aprovado').reduce((acc: number, a: any) => acc + (parseFloat(a.litros) || 0), 0);
-                            const dist = (f.kmFinal || 0) - (f.kmInicial || 0);
-                            if (litrosFrete > 0 && dist > 0) {
-                              return <span className="text-blue-600 font-bold bg-blue-50 px-1.5 py-0.5 rounded">Média: {(dist / litrosFrete).toFixed(2)} KM/L</span>;
-                            }
-                            return null;
-                          })()}
-                        </div>
+                    </div>
+
+                    {aberto && (
+                      <div className="p-3 space-y-3 bg-white">
+                        {itensFrete.length === 0
+                          ? <p className="text-gray-400 text-sm text-center py-3">Nenhum lançamento vinculado a este frete.</p>
+                          : itensFrete.map(renderLancamentoItem)}
                       </div>
                     )}
                   </div>
-                  <div className="flex items-center space-x-3">
-                    <span className="font-bold text-blue-600">{formatCurrency(f.valorFrete)}</span>
-                    {editingItem?.id === f.id
-                      ? <button onClick={handleSaveEdit} className="p-1 bg-green-600 text-white rounded shadow-sm"><Save size={16} /></button>
-                      : <button onClick={() => handleStartEdit(f, 'frete')} className="p-1 text-gray-400 hover:text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity"><Edit size={16} /></button>}
-                  </div>
-                </div>
-              ))}
-
-              {[...mDesp, ...mAbs, ...mVales].map((item: any) => {
-                // Usar item.tipo diretamente (definido no mapeamento de loadMotoristaData)
-                // Evita inferência por heurística que falhava quando litros=0 ou quemPagou='motorista'
-                const type: string = item.tipo || 'despesa';
-                return (
-                  <div key={item.id} className={`group flex justify-between items-center p-3 border rounded-lg transition-all ${item.status === 'aprovado' ? 'bg-green-50/50 border-green-100' : item.status === 'rejeitado' ? 'bg-red-50/50 border-red-100' : 'border-gray-100'}`}>
-                    <div className="flex-1">
-                      <p className="font-medium text-gray-800">
-                        {type === 'manutencao' && <span className="text-[10px] bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded mr-2 font-bold">MANUTENÇÃO</span>}
-                        {item.descricao || item.posto || 'Vale/Adiantamento'} {item.litros && <span className="text-xs text-blue-600">({item.litros}L)</span>}
-                      </p>
-                      <p className="text-xs text-gray-500">Pago por: {item.quemPagou} • {gvFmt(item.data, 'dd/MM HH:mm')}</p>
-                      {type !== 'vale' && (
-                        item.fotoUrl ? (
-                          <p className="text-xs mt-0.5 flex items-center gap-3">
-                            <a href={item.fotoUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Abrir comprovante</a>
-                            <button type="button" onClick={() => baixarComprovante(item.fotoUrl, item.id)} className="text-blue-600 hover:underline">Baixar</button>
-                          </p>
-                        ) : (
-                          <p className="text-xs text-gray-400 mt-0.5">Sem comprovante</p>
-                        )
-                      )}
-                      {item.obsResolucao && item.status !== 'pendente' && (
-                        <p className="text-xs mt-0.5 text-gray-600 italic">
-                          <span className="font-semibold not-italic">
-                            {item.status === 'rejeitado' ? 'Obs. rejeição: ' : 'Justificativa do admin: '}
-                          </span>
-                          {item.obsResolucao}
-                        </p>
-                      )}
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <span className={`font-bold ${type === 'vale' ? 'text-red-600' : 'text-gray-700'}`}>{formatCurrency(Math.abs(item.valor || item.valorTotal))}</span>
-                      {item.status === 'pendente' ? (
-                        <div className="flex space-x-1">
-                          <button onClick={() => handleResolverComObservacao(item.id, type, true)} className="p-1 text-green-600 hover:bg-green-100 rounded transition-colors" title="Aprovar com observação"><Check size={18} /></button>
-                          <button onClick={() => handleResolverComObservacao(item.id, type, false)} className="p-1 text-red-600 hover:bg-red-100 rounded transition-colors" title="Rejeitar com motivo"><X size={18} /></button>
-                        </div>
-                      ) : (
-                        <div className="flex items-center space-x-1">
-                          <button onClick={() => handleResetStatus(item.id, type)}
-                            className={`text-[10px] font-bold px-1.5 py-0.5 rounded uppercase transition-all hover:opacity-80 active:scale-95 ${item.status === 'aprovado' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}
-                            title="Clique para mudar status">{item.status}</button>
-                          {editingItem?.id === item.id
-                            ? <button onClick={handleSaveEdit} className="p-1 bg-green-600 text-white rounded shadow-sm"><Save size={16} /></button>
-                            : <button onClick={() => { handleStartEdit(item, type); handleResetStatus(item.id, type); }} className="p-1 text-gray-400 hover:text-blue-600 transition-colors" title="Editar"><Edit size={16} /></button>}
-                        </div>
-                      )}
-                    </div>
-                  </div>
                 );
               })}
+
+              {/* Grupo legado: lançamentos sem frete_id (não podem sumir) */}
+              {(() => {
+                const itensSemFrete = ordenarLancamentos([
+                  ...mDesp.filter((d: any) => !d.frete_id),
+                  ...mAbs.filter((a: any) => !a.frete_id),
+                  ...mVales.filter((v: any) => !v.frete_id),
+                ]);
+                if (itensSemFrete.length === 0) return null;
+                return (
+                  <div className="border border-gray-200 rounded-lg overflow-hidden">
+                    <button type="button" onClick={() => setSemFreteExpandido(v => !v)} className="w-full flex justify-between items-center gap-3 p-3 bg-gray-50 text-left">
+                      <div className="flex items-center gap-2">
+                        {semFreteExpandido ? <ChevronDown size={16} className="text-gray-500 flex-shrink-0" /> : <ChevronRight size={16} className="text-gray-500 flex-shrink-0" />}
+                        <div>
+                          <p className="font-bold text-gray-700">Lançamentos sem frete vinculado</p>
+                          <p className="text-[10px] text-gray-400">Itens legados, anteriores ao vínculo obrigatório</p>
+                        </div>
+                      </div>
+                      <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded text-[10px] font-bold">{itensSemFrete.length}</span>
+                    </button>
+                    {semFreteExpandido && (
+                      <div className="p-3 space-y-3 bg-white">
+                        {itensSemFrete.map(renderLancamentoItem)}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           </div>
         </div>
