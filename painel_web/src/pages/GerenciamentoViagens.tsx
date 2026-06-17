@@ -678,7 +678,10 @@ export const GerenciamentoViagens: React.FC = () => {
             </div>
             <div>
               <h2 className="text-2xl font-bold">{selectedMotorista.nome}</h2>
-              <p className="text-blue-100 text-sm">Placa: {selectedMotorista.placa}{!isAutonomo && ` | Comissão: ${selectedMotorista.comissao}%`}</p>
+              <p className="text-blue-100 text-sm">
+                Placa: {selectedMotorista.placa}
+                {isAutonomo ? ' | Motorista Autônomo' : ` | Comissão: ${selectedMotorista.comissao}%`}
+              </p>
             </div>
           </div>
           <div className="flex items-center space-x-4">
