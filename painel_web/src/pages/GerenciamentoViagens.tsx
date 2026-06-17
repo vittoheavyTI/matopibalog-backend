@@ -700,7 +700,7 @@ export const GerenciamentoViagens: React.FC = () => {
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 space-y-6">
+        <div className="lg:col-span-2 space-y-6 order-2 lg:order-1">
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
             <div className="bg-gray-50 p-4 border-b border-gray-100 font-bold text-gray-700 flex items-center justify-between">
               <span className="flex items-center"><FileText className="mr-2" size={18} /> Lançamentos</span>
@@ -823,7 +823,7 @@ export const GerenciamentoViagens: React.FC = () => {
           </div>
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 h-fit sticky top-6">
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 h-fit order-1 lg:order-2 lg:sticky lg:top-6 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
           <h4 className="flex items-center text-gray-800 mb-6 font-bold text-lg"><DollarSign className="mr-2 text-green-600" /> Balanço Atual</h4>
           <div className="space-y-4">
             {isAutonomo ? (
