@@ -31,7 +31,7 @@ const StatCard: React.FC<{
 
 export const Dashboard: React.FC = () => {
   const [motoristasEmViagem, setMotoristasEmViagem] = useState<any[]>([]);
-  const [_allMotoristas, setAllMotoristas] = useState<any[]>([]);
+  const [allMotoristas, setAllMotoristas] = useState<any[]>([]);
   const [fretes, setFretes] = useState<any[]>([]);
   const [despesas, setDespesas] = useState<any[]>([]);
   const [abastecimentos, setAbastecimentos] = useState<any[]>([]);
@@ -45,6 +45,10 @@ export const Dashboard: React.FC = () => {
   const [showAddFreteModal, setShowAddFreteModal] = useState(false);
   const [newFrete, setNewFrete] = useState({ motorista_id: '', origem: '', destino: '', valor_frete: '', km_inicial: '' });
   const [savingFrete, setSavingFrete] = useState(false);
+  // Combobox de motorista no modal "Adicionar Frete". Limpa busca e dropdown ao abrir/fechar.
+  const [buscaMotoristaFrete, setBuscaMotoristaFrete] = useState('');
+  const [motoristaFreteAberto, setMotoristaFreteAberto] = useState(false);
+  useEffect(() => { setBuscaMotoristaFrete(''); setMotoristaFreteAberto(false); }, [showAddFreteModal]);
 
   const [showAddDespesaModal, setShowAddDespesaModal] = useState(false);
   const [newDespesa, setNewDespesa] = useState({ tipo: 'despesa', descricao: '', valor: '', quem_pagou: 'proprietario', posto: '', litros: '', valor_total: '', data: '' });
@@ -372,6 +376,19 @@ export const Dashboard: React.FC = () => {
   const misto = temVinculados && temAutonomos;
   // soVinculado é o padrão: cobre vinculado-only e o caso sem motoristas (4 cards zerados, como hoje).
   const soVinculado = !soAutonomo && !misto;
+
+  // Combobox "Adicionar Frete": rótulo do selecionado e lista (busca vazia → 5 primeiros).
+  const motFreteSelecionado = allMotoristas.find(m => m.uid === newFrete.motorista_id);
+  const nomeMotoristaFreteSelecionado = motFreteSelecionado
+    ? `${motFreteSelecionado.nomeCompleto} — ${motFreteSelecionado.placaVeiculo}`
+    : '';
+  const termoMotoristaFrete = buscaMotoristaFrete.trim().toLowerCase();
+  const listaMotoristasFrete = termoMotoristaFrete
+    ? allMotoristas.filter(m =>
+        (m.nomeCompleto || '').toLowerCase().includes(termoMotoristaFrete) ||
+        (m.placaVeiculo || '').toLowerCase().includes(termoMotoristaFrete) ||
+        (m.email || '').toLowerCase().includes(termoMotoristaFrete))
+    : allMotoristas.slice(0, 5);
 
   return (
     <div className="space-y-6 pb-10">
@@ -821,12 +838,34 @@ export const Dashboard: React.FC = () => {
               <button onClick={() => setShowAddFreteModal(false)} className="p-2 hover:bg-gray-100 rounded-lg transition-colors"><X size={18} /></button>
             </div>
             <div className="p-5 space-y-4">
-              <div>
+              <div className="relative">
                 <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Motorista *</label>
-                <select value={newFrete.motorista_id} onChange={e => setNewFrete(p => ({ ...p, motorista_id: e.target.value }))} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500">
-                  <option value="">Selecione o motorista</option>
-                  {motoristasEmViagem.map(m => <option key={m.uid} value={m.uid}>{m.nomeCompleto} — {m.placaVeiculo}</option>)}
-                </select>
+                <input
+                  type="text"
+                  value={motoristaFreteAberto ? buscaMotoristaFrete : nomeMotoristaFreteSelecionado}
+                  onChange={e => setBuscaMotoristaFrete(e.target.value)}
+                  onFocus={() => { setMotoristaFreteAberto(true); setBuscaMotoristaFrete(''); }}
+                  onBlur={() => setMotoristaFreteAberto(false)}
+                  placeholder="Digite ou selecione o motorista..."
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500"
+                />
+                {motoristaFreteAberto && (
+                  <ul className="absolute z-20 mt-1 w-full max-h-56 overflow-auto bg-white border border-gray-200 rounded-lg shadow-lg">
+                    {listaMotoristasFrete.length === 0 ? (
+                      <li className="px-3 py-2 text-sm text-gray-400">Nenhum motorista encontrado</li>
+                    ) : (
+                      listaMotoristasFrete.map(m => (
+                        <li
+                          key={m.uid}
+                          onMouseDown={() => { setNewFrete(p => ({ ...p, motorista_id: m.uid })); setMotoristaFreteAberto(false); setBuscaMotoristaFrete(''); }}
+                          className="px-3 py-2 text-sm hover:bg-blue-50 cursor-pointer"
+                        >
+                          {m.nomeCompleto} — {m.placaVeiculo}
+                        </li>
+                      ))
+                    )}
+                  </ul>
+                )}
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
