@@ -52,29 +52,34 @@ export const Dashboard: React.FC = () => {
 
   const loadDashboardData = async () => {
     try {
-      // 1. Busca os motoristas (com tratamento de erro individual)
-      const resMot = await api.get('/admin/motoristas').catch(() => ({ data: [] }));
-
-      // 2. Busca o resumo do mês (com tratamento de erro individual)
-      const resSum = await api.get(`/dashboard/summary?mes=${selectedMonth.getMonth() + 1}&ano=${selectedMonth.getFullYear()}`).catch(() => ({ data: null }));
+      // 1. Busca os motoristas e motoristas em viagem (com tratamento de erro individual)
+      const [resMot, resEmViagem, resSum] = await Promise.all([
+        api.get('/admin/motoristas').catch(() => ({ data: [] })),
+        api.get('/admin/motoristas/em-viagem').catch(() => ({ data: [] })),
+        api.get(`/dashboard/summary?mes=${selectedMonth.getMonth() + 1}&ano=${selectedMonth.getFullYear()}`).catch(() => ({ data: null }))
+      ]);
 
       const motoristasData = resMot.data || [];
-      const mapMotorista = (m: any) => ({
-        uid: m.id,
-        nomeCompleto: m.usuarios?.nome || 'Motorista',
-        fotoUrl: m.usuarios?.foto_url || '',
-        placaVeiculo: m.placa_veiculo,
-        percentualComissao: m.percentual_comissao,
-        statusCadastro: m.status_cadastro,
-        empresaTipo: m.empresa_tipo
-      });
+      const emViagemData = resEmViagem.data || [];
+
+      // Mapeamento usando dados completos de resMot como fonte de verdade para empresa_tipo
+      const motoristaLookup = new Map<string, any>(motoristasData.map((m: any) => [m.id, m]));
+
+      const mapMotorista = (m: any) => {
+        const fullM = motoristaLookup.get(m.id) || m;
+        return {
+          uid: fullM.id,
+          nomeCompleto: fullM.usuarios?.nome || 'Motorista',
+          fotoUrl: fullM.usuarios?.foto_url || '',
+          placaVeiculo: fullM.placa_veiculo,
+          percentualComissao: fullM.percentual_comissao,
+          statusCadastro: fullM.status_cadastro,
+          empresaTipo: fullM.empresa_tipo
+        };
+      };
 
       setAllMotoristas(motoristasData.map(mapMotorista));
-      setMotoristasEmViagem(
-        motoristasData
-          .filter((m: any) => ['aprovado', 'pendente'].includes(m.status_cadastro))
-          .map(mapMotorista)
-      );
+      setMotoristasEmViagem(emViagemData.map(mapMotorista));
 
       setSummary(resSum.data || null);
     } catch (err) {
@@ -344,6 +349,13 @@ export const Dashboard: React.FC = () => {
   }, 0);
   const mediaConsumo = totalLiters > 0 && totalKM > 0 ? (totalKM / totalLiters).toFixed(2) : '0.00';
 
+  const isAutonomo = selectedMot?.empresaTipo === 'autonomo';
+  const autGastos =
+    mDespesas.filter(d => d.status === 'aprovado').reduce((acc, d) => acc + (parseFloat(d.valor) || 0), 0) +
+    mAbast.filter(a => a.status === 'aprovado').reduce((acc, a) => acc + (parseFloat(a.valorTotal) || 0), 0) +
+    mVales.filter(v => v.status === 'aprovado').reduce((acc, v) => acc + (parseFloat(v.valor) || 0), 0);
+  const autResultado = opTotalFretes - autGastos;
+
   // Lógica de Paginação do Resumo
   const totalItems = summary?.fretes_por_motorista?.length || 0;
   const totalPages = Math.ceil(totalItems / summaryPageSize);
@@ -449,7 +461,10 @@ export const Dashboard: React.FC = () => {
                 <div className="bg-white w-12 h-12 rounded-lg flex items-center justify-center text-blue-600 font-bold text-xl">{selectedMot.nomeCompleto?.charAt(0) || '?'}</div>
                 <div>
                   <h2 className="text-2xl font-bold">{selectedMot.nomeCompleto}</h2>
-                  <p className="text-blue-100 text-sm">Placa: {selectedMot.placaVeiculo} | Comissão: {selectedMot.percentualComissao}%</p>
+                  <p className="text-blue-100 text-sm">
+                    Placa: {selectedMot.placaVeiculo}
+                    {isAutonomo ? ' | Motorista Autônomo' : ` | Comissão: ${selectedMot.percentualComissao}%`}
+                  </p>
                 </div>
               </div>
               <div className="flex items-center space-x-4">
@@ -573,34 +588,53 @@ export const Dashboard: React.FC = () => {
               <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 h-fit sticky top-6">
                 <h4 className="flex items-center text-gray-800 mb-6 font-bold text-lg"><DollarSign className="mr-2 text-green-600" /> Balanço Atual</h4>
                 <div className="space-y-4">
-                  <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
-                    <span className="text-gray-500">Valor Total do Frete:</span>
-                    <span className="font-bold text-gray-800">{formatCurrency(opTotalFretes)}</span>
-                  </div>
-                  <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
-                    <span className="text-gray-500">Porcentagem Motorista ({selectedMot?.percentualComissao || 0}%):</span>
-                    <span className="font-bold text-blue-600">+{formatCurrency(opComissao)}</span>
-                  </div>
-                  <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
-                    <span className="text-gray-500">Desp./Abast. (Motorista):</span>
-                    <span className="font-bold text-green-600">+{formatCurrency(opDespMot + opAbastMot)}</span>
-                  </div>
-                  <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
-                    <span className="text-gray-500">Vales / Adiantamentos:</span>
-                    <span className="font-bold text-red-600">-{formatCurrency(opValesOwner)}</span>
-                  </div>
-                  <div className="flex justify-between items-center text-base font-extrabold bg-gray-50 p-3 rounded-lg">
-                    <span className="text-gray-700">SALDO MOTORISTA:</span>
-                    <span className={opSaldoLiquido >= 0 ? 'text-green-600' : 'text-red-600'}>{formatCurrency(Math.abs(opSaldoLiquido))}</span>
-                  </div>
+                  {isAutonomo ? (
+                    <>
+                      <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
+                        <span className="text-gray-500">Faturamento:</span>
+                        <span className="font-bold text-gray-800">{formatCurrency(opTotalFretes)}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
+                        <span className="text-gray-500">Gastos:</span>
+                        <span className="font-bold text-red-600">-{formatCurrency(autGastos)}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-base font-extrabold bg-gray-50 p-3 rounded-lg">
+                        <span className="text-gray-700">RESULTADO:</span>
+                        <span className={autResultado >= 0 ? 'text-green-600' : 'text-red-600'}>{formatCurrency(Math.abs(autResultado))}</span>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
+                        <span className="text-gray-500">Valor Total do Frete:</span>
+                        <span className="font-bold text-gray-800">{formatCurrency(opTotalFretes)}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
+                        <span className="text-gray-500">Porcentagem Motorista ({selectedMot?.percentualComissao || 0}%):</span>
+                        <span className="font-bold text-blue-600">+{formatCurrency(opComissao)}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
+                        <span className="text-gray-500">Desp./Abast. (Motorista):</span>
+                        <span className="font-bold text-green-600">+{formatCurrency(opDespMot + opAbastMot)}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
+                        <span className="text-gray-500">Vales / Adiantamentos:</span>
+                        <span className="font-bold text-red-600">-{formatCurrency(opValesOwner)}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-base font-extrabold bg-gray-50 p-3 rounded-lg">
+                        <span className="text-gray-700">SALDO MOTORISTA:</span>
+                        <span className={opSaldoLiquido >= 0 ? 'text-green-600' : 'text-red-600'}>{formatCurrency(Math.abs(opSaldoLiquido))}</span>
+                      </div>
 
-                  <div className="pt-6 border-t border-gray-100 mt-4">
-                    <div className="flex justify-between items-center text-sm font-bold text-gray-600 px-1">
-                      <span className="flex items-center"><TrendingUp size={16} className="mr-2 text-green-500" /> RESULTADO EMPRESA:</span>
-                      <span className="text-gray-900">{formatCurrency(Math.abs(opLucroEmpresa))}</span>
-                    </div>
-                    <p className="text-[10px] text-gray-400 mt-1 px-1">* Frete Total (-) Comissão (-) Despesas/Abast. pagos pela empresa.</p>
-                  </div>
+                      <div className="pt-6 border-t border-gray-100 mt-4">
+                        <div className="flex justify-between items-center text-sm font-bold text-gray-600 px-1">
+                          <span className="flex items-center"><TrendingUp size={16} className="mr-2 text-green-500" /> RESULTADO EMPRESA:</span>
+                          <span className="text-gray-900">{formatCurrency(Math.abs(opLucroEmpresa))}</span>
+                        </div>
+                        <p className="text-[10px] text-gray-400 mt-1 px-1">* Frete Total (-) Comissão (-) Despesas/Abast. pagos pela empresa.</p>
+                      </div>
+                    </>
+                  )}
                 </div>
                 <button onClick={handleFinalizarViagem} disabled={temPendente} className="mt-8 w-full py-4 bg-green-600 text-white rounded-xl font-bold text-lg shadow-lg hover:bg-green-700 transition-all disabled:opacity-50 disabled:shadow-none active:scale-95 flex items-center justify-center">
                   <Check size={20} className="mr-2" /> FINALIZAR FRETE
