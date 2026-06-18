@@ -696,21 +696,21 @@ export const GerenciamentoViagens: React.FC = () => {
       </button>
 
       {selectedMotorista && (
-        <div className="bg-blue-600 p-6 rounded-xl shadow-lg flex flex-wrap justify-between items-center gap-4 text-white">
-          <div className="flex items-center space-x-4">
-            <div className="bg-white w-12 h-12 rounded-lg flex items-center justify-center text-blue-600 font-bold text-xl">
+        <div className="bg-blue-600 p-4 rounded-xl shadow-lg flex flex-wrap justify-between items-center gap-3 text-white">
+          <div className="flex items-center space-x-3">
+            <div className="bg-white w-10 h-10 rounded-lg flex items-center justify-center text-blue-600 font-bold text-lg">
               {selectedMotorista.nome?.charAt(0) || '?'}
             </div>
             <div>
-              <h2 className="text-2xl font-bold">{selectedMotorista.nome}</h2>
+              <h2 className="text-xl font-bold">{selectedMotorista.nome}</h2>
               <p className="text-blue-100 text-sm">
                 Placa: {selectedMotorista.placa}
                 {isAutonomo ? ' | Motorista Autônomo' : ` | Comissão: ${selectedMotorista.comissao}%`}
               </p>
             </div>
           </div>
-          <div className="flex items-center space-x-4">
-            <div className="bg-white/20 px-4 py-2 rounded-lg flex items-center border border-white/10">
+          <div className="flex items-center space-x-3">
+            <div className="bg-white/20 px-3 py-1.5 rounded-lg flex items-center border border-white/10">
               <Fuel size={18} className="mr-2" />
               <div className="text-left">
                 <p className="text-[10px] uppercase font-bold text-blue-100">Média Consumo</p>
@@ -724,8 +724,8 @@ export const GerenciamentoViagens: React.FC = () => {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 space-y-6 order-2 lg:order-1">
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-6">
+        <div className="space-y-6 order-2 lg:order-1">
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
             <div className="bg-gray-50 p-4 border-b border-gray-100 font-bold text-gray-700 flex items-center justify-between">
               <span className="flex items-center"><FileText className="mr-2" size={18} /> Lançamentos</span>
@@ -848,58 +848,58 @@ export const GerenciamentoViagens: React.FC = () => {
           </div>
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 h-fit order-1 lg:order-2 lg:sticky lg:top-6 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
-          <h4 className="flex items-center text-gray-800 mb-6 font-bold text-lg"><DollarSign className="mr-2 text-green-600" /> Balanço Atual</h4>
-          <div className="space-y-4">
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 h-fit order-1 lg:order-2 lg:sticky lg:top-6">
+          <h4 className="flex items-center text-gray-800 mb-4 font-bold text-lg"><DollarSign className="mr-2 text-green-600" /> Balanço Atual</h4>
+          <div className="space-y-2">
             {isAutonomo ? (
               <>
-                <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
-                  <span className="text-gray-500">Faturamento:</span>
-                  <span className="font-bold text-gray-800">{formatCurrency(opTotalFretes)}</span>
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-sm border-b border-gray-50 pb-1">
+                  <span className="text-gray-500 min-w-0">Faturamento:</span>
+                  <span className="font-bold text-gray-800 text-right whitespace-nowrap tabular-nums min-w-[96px]">{formatCurrency(opTotalFretes)}</span>
                 </div>
-                <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
-                  <span className="text-gray-500">Gastos:</span>
-                  <span className="font-bold text-red-600">-{formatCurrency(autGastos)}</span>
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-sm border-b border-gray-50 pb-1">
+                  <span className="text-gray-500 min-w-0">Gastos:</span>
+                  <span className="font-bold text-red-600 text-right whitespace-nowrap tabular-nums min-w-[96px]">-{formatCurrency(autGastos)}</span>
                 </div>
-                <div className="flex justify-between items-center text-base font-extrabold bg-gray-50 p-3 rounded-lg">
-                  <span className="text-gray-700">RESULTADO:</span>
-                  <span className={autResultado >= 0 ? 'text-green-600' : 'text-red-600'}>{formatCurrency(Math.abs(autResultado))}</span>
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-base font-extrabold bg-gray-50 -mx-2 px-2 py-2 rounded-lg">
+                  <span className="text-gray-700 min-w-0">RESULTADO:</span>
+                  <span className={`text-right whitespace-nowrap tabular-nums min-w-[96px] ${autResultado >= 0 ? 'text-green-600' : 'text-red-600'}`}>{formatCurrency(Math.abs(autResultado))}</span>
                 </div>
               </>
             ) : (
               <>
-                <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
-                  <span className="text-gray-500">Valor Total do Frete:</span>
-                  <span className="font-bold text-gray-800">{formatCurrency(opTotalFretes)}</span>
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-sm border-b border-gray-50 pb-1">
+                  <span className="text-gray-500 min-w-0">Valor Total do Frete:</span>
+                  <span className="font-bold text-gray-800 text-right whitespace-nowrap tabular-nums min-w-[96px]">{formatCurrency(opTotalFretes)}</span>
                 </div>
-                <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
-                  <span className="text-gray-500">Porcentagem Motorista ({selectedMotorista?.comissao || 0}%):</span>
-                  <span className="font-bold text-blue-600">+{formatCurrency(opComissao)}</span>
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-sm border-b border-gray-50 pb-1">
+                  <span className="text-gray-500 min-w-0">Porcentagem Motorista ({selectedMotorista?.comissao || 0}%):</span>
+                  <span className="font-bold text-blue-600 text-right whitespace-nowrap tabular-nums min-w-[96px]">+{formatCurrency(opComissao)}</span>
                 </div>
-                <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
-                  <span className="text-gray-500">Desp./Abast. (Motorista):</span>
-                  <span className="font-bold text-green-600">+{formatCurrency(opDespMot + opAbastMot)}</span>
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-sm border-b border-gray-50 pb-1">
+                  <span className="text-gray-500 min-w-0">Desp./Abast. (Motorista):</span>
+                  <span className="font-bold text-green-600 text-right whitespace-nowrap tabular-nums min-w-[96px]">+{formatCurrency(opDespMot + opAbastMot)}</span>
                 </div>
-                <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
-                  <span className="text-gray-500">Vales / Adiantamentos:</span>
-                  <span className="font-bold text-red-600">-{formatCurrency(opValesOwner)}</span>
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-sm border-b border-gray-50 pb-1">
+                  <span className="text-gray-500 min-w-0">Vales / Adiantamentos:</span>
+                  <span className="font-bold text-red-600 text-right whitespace-nowrap tabular-nums min-w-[96px]">-{formatCurrency(opValesOwner)}</span>
                 </div>
-                <div className="flex justify-between items-center text-base font-extrabold bg-gray-50 p-3 rounded-lg">
-                  <span className="text-gray-700">SALDO MOTORISTA:</span>
-                  <span className={opSaldoLiquido >= 0 ? 'text-green-600' : 'text-red-600'}>{formatCurrency(Math.abs(opSaldoLiquido))}</span>
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-base font-extrabold bg-gray-50 -mx-2 px-2 py-2 rounded-lg">
+                  <span className="text-gray-700 min-w-0">SALDO MOTORISTA:</span>
+                  <span className={`text-right whitespace-nowrap tabular-nums min-w-[96px] ${opSaldoLiquido >= 0 ? 'text-green-600' : 'text-red-600'}`}>{formatCurrency(Math.abs(opSaldoLiquido))}</span>
                 </div>
-                <div className="pt-6 border-t border-gray-100 mt-4">
-                  <div className="flex justify-between items-center text-sm font-bold text-gray-600 px-1">
-                    <span className="flex items-center"><TrendingUp size={16} className="mr-2 text-green-500" /> RESULTADO EMPRESA:</span>
-                    <span className="text-gray-900">{formatCurrency(Math.abs(opLucroEmpresa))}</span>
+                <div className="pt-3 border-t border-gray-100 mt-2">
+                  <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-sm font-bold text-gray-600">
+                    <span className="flex items-center min-w-0"><TrendingUp size={16} className="mr-2 text-green-500 shrink-0" /> RESULTADO EMPRESA:</span>
+                    <span className="text-gray-900 text-right whitespace-nowrap tabular-nums min-w-[96px]">{formatCurrency(Math.abs(opLucroEmpresa))}</span>
                   </div>
-                  <p className="text-[10px] text-gray-400 mt-1 px-1">* Frete Total (-) Comissão (-) Despesas/Abast. pagos pela empresa.</p>
+                  <p className="text-[10px] text-gray-400 mt-1">* Frete Total (-) Comissão (-) Despesas/Abast. pagos pela empresa.</p>
                 </div>
               </>
             )}
           </div>
           <button onClick={handleFinalizarViagem} disabled={temPendente || !temFreteAtivo}
-            className="mt-8 w-full py-4 bg-green-600 text-white rounded-xl font-bold text-lg shadow-lg hover:bg-green-700 transition-all disabled:opacity-50 disabled:shadow-none active:scale-95 flex items-center justify-center">
+            className="mt-3 w-full py-2.5 bg-green-600 text-white rounded-xl font-bold text-lg shadow-lg hover:bg-green-700 transition-all disabled:opacity-50 disabled:shadow-none active:scale-95 flex items-center justify-center">
             {temFreteAtivo ? <><Check size={20} className="mr-2" /> FINALIZAR FRETE</> : <span className="flex items-center"><Check size={20} className="mr-2" /> FRETE FINALIZADO</span>}
           </button>
         </div>
@@ -910,7 +910,7 @@ export const GerenciamentoViagens: React.FC = () => {
 
   return (
 
-    <div className="space-y-6 pb-20 px-6">
+    <div className="space-y-3 pb-20 px-6">
       {filterMot === 'todos' ? renderLista() : renderDetalheMotorista()}
 
       {showModal && (
