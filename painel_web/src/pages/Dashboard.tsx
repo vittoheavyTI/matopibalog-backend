@@ -459,7 +459,7 @@ export const Dashboard: React.FC = () => {
               className="text-xl font-bold text-gray-700 flex items-center hover:text-blue-600 transition-colors cursor-pointer"
               title="Abrir Gerenciamento de Fretes em nova aba"
             >
-              <DollarSign size={20} className="mr-2 text-green-600" /> Gerenciamento de Fretes
+              <DollarSign size={20} className="mr-2 text-green-600" /> Motoristas em Frete
             </button>
             <button
               onClick={() => { setShowAddFreteModal(true); setNewFrete({ motorista_id: '', origem: '', destino: '', valor_frete: '', km_inicial: '' }); }}
