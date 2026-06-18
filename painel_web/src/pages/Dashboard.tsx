@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { formatCurrency } from '../utils';
 import {
@@ -30,6 +31,7 @@ const StatCard: React.FC<{
 );
 
 export const Dashboard: React.FC = () => {
+  const navigate = useNavigate();
   const [motoristasEmViagem, setMotoristasEmViagem] = useState<any[]>([]);
   const [allMotoristas, setAllMotoristas] = useState<any[]>([]);
   const [fretes, setFretes] = useState<any[]>([]);
@@ -699,7 +701,7 @@ export const Dashboard: React.FC = () => {
                       </td>
                       <td className="p-5 text-center">
                         <button
-                          onClick={() => { setSelectedMot(mot); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                          onClick={() => navigate('/relatorios/viagens?motorista=' + mot.uid)}
                           className="px-5 py-2.5 bg-blue-600 text-white rounded-xl font-bold text-sm hover:bg-blue-700 shadow-md transition-all active:scale-95"
                         >
                           Gerenciar Frete
