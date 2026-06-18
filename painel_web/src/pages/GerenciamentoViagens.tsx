@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Plus, X, Search, Filter, Truck, MapPin, Calendar, DollarSign, Gauge, Trash2, Edit, Check, AlertTriangle, ChevronLeft, ChevronDown, ChevronRight, Fuel, FileText, TrendingUp, Save, Unlock, Lock } from 'lucide-react';
 import { format } from 'date-fns';
 import { formatCurrency } from '../utils';
@@ -15,7 +16,17 @@ export const GerenciamentoViagens: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('todos');
-  const [filterMot, setFilterMot] = useState('todos');
+  // A URL (?motorista=<id>) é a fonte de verdade do motorista em foco; filterMot é sincronizado a partir dela.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const motoristaQuery = searchParams.get('motorista');
+  const [filterMot, setFilterMot] = useState(() => motoristaQuery || 'todos');
+
+  // Troca de motorista (dropdown / clique na lista / "Voltar para Lista"): mantém URL e filterMot juntos.
+  const selecionarMotorista = (value: string) => {
+    setFilterMot(value);
+    if (value === 'todos') setSearchParams({}, { replace: true });
+    else setSearchParams({ motorista: value }, { replace: true });
+  };
 
   const [showModal, setShowModal] = useState(false);
   const [editingFrete, setEditingFrete] = useState<any | null>(null);
@@ -121,10 +132,24 @@ export const GerenciamentoViagens: React.FC = () => {
     loadData();
   }, []);
 
+  // Reage à navegação do Dashboard / sidebar: ?motorista=<id> muda → atualiza o filtro
+  // mesmo sem o componente desmontar. Sem query → volta a "todos".
+  useEffect(() => {
+    setFilterMot(motoristaQuery || 'todos');
+  }, [motoristaQuery]);
+
+  // Carrega os dados conforme o modo. CAUSA-RAIZ: loadMotoristaData() sobrescreve os arrays
+  // globais (fretes/despesas/abastecimentos/vales) com os de UM motorista; ao voltar para
+  // "Todos" é preciso recarregar loadData() para a lista geral não ficar contaminada.
+  // O mount já chama loadData(); o guard evita um segundo fetch redundante no 1º render.
+  const isFirstFilterRun = useRef(true);
   useEffect(() => {
     if (filterMot !== 'todos') {
       loadMotoristaData(filterMot);
+    } else if (!isFirstFilterRun.current) {
+      loadData();
     }
+    isFirstFilterRun.current = false;
   }, [filterMot]);
 
   // Default do accordion: ao trocar de motorista / recarregar dados, fretes
@@ -498,7 +523,7 @@ export const GerenciamentoViagens: React.FC = () => {
         <div className="flex flex-wrap gap-3">
           <div className="flex items-center space-x-2 text-xs">
             <Filter size={14} className="text-gray-400" />
-            <select value={filterMot} onChange={e => setFilterMot(e.target.value)} className="border rounded-lg p-2 outline-none bg-white text-gray-600">
+            <select value={filterMot} onChange={e => selecionarMotorista(e.target.value)} className="border rounded-lg p-2 outline-none bg-white text-gray-600">
               <option value="todos">Todos Motoristas</option>
               {motoristas.map(m => (<option key={m.uid} value={m.uid}>{m.nome}</option>))}
             </select>
@@ -538,7 +563,7 @@ export const GerenciamentoViagens: React.FC = () => {
                     </td>
                     <td className="p-4">
                       <button
-                        onClick={() => setFilterMot(frete.motorista_id || frete.motoristaUid)}
+                        onClick={() => selecionarMotorista(frete.motorista_id || frete.motoristaUid)}
                         className="w-full text-left px-3 py-2 rounded-lg text-sm font-medium text-gray-800 hover:bg-blue-50 hover:text-blue-700 transition-colors"
                         title="Gerenciar fretes deste motorista"
                       >
@@ -666,7 +691,7 @@ export const GerenciamentoViagens: React.FC = () => {
 
     return (
     <>
-      <button onClick={() => setFilterMot('todos')} className="flex items-center text-blue-600 hover:text-blue-800 font-bold transition-colors">
+      <button onClick={() => selecionarMotorista('todos')} className="flex items-center text-blue-600 hover:text-blue-800 font-bold transition-colors">
         <ChevronLeft size={20} className="mr-1" /> Voltar para Lista
       </button>
 
