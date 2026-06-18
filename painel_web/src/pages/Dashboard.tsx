@@ -331,23 +331,32 @@ export const Dashboard: React.FC = () => {
   const mAbast = abastecimentos;
   const mVales = vales;
 
-  const opTotalFretes = mFretes.reduce((acc, f) => acc + parseFloat(f.valorFrete), 0);
+  // Cancelados continuam visíveis nas listagens (mFretes), mas ficam FORA de TODAS as agregações
+  // financeiras (Faturamento/Comissão/Saldo/Resultado) e operacionais (KM total, média de consumo).
+  const fretesParaCalculo = mFretes.filter(f => f.status !== 'cancelado');
+  const opTotalFretes = fretesParaCalculo.reduce((acc, f) => acc + parseFloat(f.valorFrete), 0);
   const opComissao = opTotalFretes * ((selectedMot?.percentualComissao || 0) / 100);
+  const fretesCanceladosIds = new Set(mFretes.filter(f => f.status === 'cancelado').map(f => f.id));
+  const isLancamentoDeFreteCancelado = (item: any) =>
+    item.frete_id !== null && item.frete_id !== undefined && fretesCanceladosIds.has(item.frete_id);
+  const despesasParaCalculo = mDespesas.filter(d => !isLancamentoDeFreteCancelado(d));
+  const abastecimentosParaCalculo = mAbast.filter(a => !isLancamentoDeFreteCancelado(a));
+  const valesParaCalculo = mVales.filter(v => !isLancamentoDeFreteCancelado(v));
 
-  const opDespMot = mDespesas.filter(d => d.status === 'aprovado' && d.quemPagou === 'motorista').reduce((acc, d) => acc + parseFloat(d.valor), 0);
-  const opAbastMot = mAbast.filter(a => a.status === 'aprovado' && a.quemPagou === 'motorista').reduce((acc, a) => acc + parseFloat(a.valorTotal), 0);
+  const opDespMot = despesasParaCalculo.filter(d => d.status === 'aprovado' && d.quemPagou === 'motorista').reduce((acc, d) => acc + parseFloat(d.valor), 0);
+  const opAbastMot = abastecimentosParaCalculo.filter(a => a.status === 'aprovado' && a.quemPagou === 'motorista').reduce((acc, a) => acc + parseFloat(a.valorTotal), 0);
 
-  const opDespOwner = mDespesas.filter(d => d.status === 'aprovado' && d.quemPagou === 'proprietario').reduce((acc, d) => acc + parseFloat(d.valor), 0);
-  const opAbastOwner = mAbast.filter(a => a.status === 'aprovado' && a.quemPagou === 'proprietario').reduce((acc, a) => acc + parseFloat(a.valorTotal), 0);
-  const opValesOwner = mVales.filter(v => v.status === 'aprovado' && v.quemPagou === 'proprietario').reduce((acc, v) => acc + parseFloat(v.valor), 0);
+  const opDespOwner = despesasParaCalculo.filter(d => d.status === 'aprovado' && d.quemPagou === 'proprietario').reduce((acc, d) => acc + parseFloat(d.valor), 0);
+  const opAbastOwner = abastecimentosParaCalculo.filter(a => a.status === 'aprovado' && a.quemPagou === 'proprietario').reduce((acc, a) => acc + parseFloat(a.valorTotal), 0);
+  const opValesOwner = valesParaCalculo.filter(v => v.status === 'aprovado' && v.quemPagou === 'proprietario').reduce((acc, v) => acc + parseFloat(v.valor), 0);
 
   const opSaldoLiquido = opComissao + opDespMot + opAbastMot - opValesOwner;
   const opLucroEmpresa = opTotalFretes - opComissao - opDespOwner - opAbastOwner;
 
   const temPendente = mDespesas.some(d => d.status === 'pendente') || mAbast.some(a => a.status === 'pendente') || mVales.some(v => v.status === 'pendente');
 
-  const totalLiters = mAbast.filter(a => a.status === 'aprovado').reduce((acc, a) => acc + (parseFloat(a.litros) || 0), 0);
-  const totalKM = mFretes.reduce((acc, f) => {
+  const totalLiters = abastecimentosParaCalculo.filter(a => a.status === 'aprovado').reduce((acc, a) => acc + (parseFloat(a.litros) || 0), 0);
+  const totalKM = fretesParaCalculo.reduce((acc, f) => {
     if (f.kmFinal && f.kmInicial && f.kmFinal > f.kmInicial) {
       return acc + (f.kmFinal - f.kmInicial);
     }
@@ -357,9 +366,9 @@ export const Dashboard: React.FC = () => {
 
   const isAutonomo = selectedMot?.empresaTipo === 'autonomo';
   const autGastos =
-    mDespesas.filter(d => d.status === 'aprovado').reduce((acc, d) => acc + (parseFloat(d.valor) || 0), 0) +
-    mAbast.filter(a => a.status === 'aprovado').reduce((acc, a) => acc + (parseFloat(a.valorTotal) || 0), 0) +
-    mVales.filter(v => v.status === 'aprovado').reduce((acc, v) => acc + (parseFloat(v.valor) || 0), 0);
+    despesasParaCalculo.filter(d => d.status === 'aprovado').reduce((acc, d) => acc + (parseFloat(d.valor) || 0), 0) +
+    abastecimentosParaCalculo.filter(a => a.status === 'aprovado').reduce((acc, a) => acc + (parseFloat(a.valorTotal) || 0), 0) +
+    valesParaCalculo.filter(v => v.status === 'aprovado').reduce((acc, v) => acc + (parseFloat(v.valor) || 0), 0);
   const autResultado = opTotalFretes - autGastos;
 
   // Lógica de Paginação do Resumo

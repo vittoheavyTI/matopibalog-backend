@@ -7,6 +7,9 @@ import { formatCurrency } from '../utils';
 import { Calendar, FileText, Users, User, Download, Filter, Truck, ChevronDown, ChevronRight } from 'lucide-react';
 import api from '../api';
 
+const estaVinculadoAFreteCancelado = (item: any, fretesCanceladosIds: Set<any>) =>
+  item.frete_id !== null && item.frete_id !== undefined && fretesCanceladosIds.has(item.frete_id);
+
 // Carrega a logo (data URL do localStorage) e calcula dimensões preservando o aspecto real.
 // Evita o esticamento: antes o addImage usava naturalWidth=0 (imagem ainda não decodificada)
 // e caía no fallback de caixa fixa 35x20.
@@ -339,23 +342,27 @@ export const Relatorios: React.FC = () => {
       const mDesp = despesas.filter(d => String(d.motoristaUid).trim() === String(m.uid).trim());
       const mAbs = abastecimentos.filter(a => String(a.motoristaUid).trim() === String(m.uid).trim());
       const mVales = vales.filter(v => String(v.motoristaUid).trim() === String(m.uid).trim());
+      const fretesCanceladosIds = new Set(mFretes.filter(f => f.status === 'cancelado').map(f => f.id));
+      const despesasParaCalculo = mDesp.filter(d => !estaVinculadoAFreteCancelado(d, fretesCanceladosIds));
+      const abastecimentosParaCalculo = mAbs.filter(a => !estaVinculadoAFreteCancelado(a, fretesCanceladosIds));
+      const valesParaCalculo = mVales.filter(v => !estaVinculadoAFreteCancelado(v, fretesCanceladosIds));
 
-      const totalFrete = mFretes.reduce((s, f) => s + (f.valorFrete || 0), 0);
+      const totalFrete = mFretes.filter(f => f.status !== 'cancelado').reduce((s, f) => s + (f.valorFrete || 0), 0);
       const comissao = totalFrete * ((m.percentualComissao || 0) / 100);
-      const totalGastos = mDesp.reduce((s, d) => s + (d.valor || 0), 0) + 
-                          mAbs.reduce((s, a) => s + (a.valorTotal || 0), 0) + 
-                          mVales.reduce((s, v) => s + (v.valor || 0), 0);
+      const totalGastos = despesasParaCalculo.reduce((s, d) => s + (d.valor || 0), 0) +
+                          abastecimentosParaCalculo.reduce((s, a) => s + (a.valorTotal || 0), 0) +
+                          valesParaCalculo.reduce((s, v) => s + (v.valor || 0), 0);
       const saldoLiq = comissao - totalGastos;
       
-      const totalKm = mFretes.reduce((s, f) => s + (f.km_final && f.km_inicial ? f.km_final - f.km_inicial : 0), 0);
-      const totalLitros = mAbs.reduce((s, a) => s + (a.litros || 0), 0);
+      const totalKm = mFretes.filter(f => f.status !== 'cancelado').reduce((s, f) => s + (f.km_final && f.km_inicial ? f.km_final - f.km_inicial : 0), 0);
+      const totalLitros = abastecimentosParaCalculo.reduce((s, a) => s + (a.litros || 0), 0);
       const media = totalLitros > 0 ? (totalKm / totalLitros).toFixed(2) : '0.00';
 
       return {
         nome: m.nomeCompleto,
         uid: m.uid,
         isAutonomo: m.empresaTipo === 'autonomo',
-        viagens: mFretes.length,
+        viagens: mFretes.filter(f => f.status !== 'cancelado').length,
         totalFrete,
         comissao,
         totalGastos,
@@ -406,6 +413,10 @@ export const Relatorios: React.FC = () => {
       const mDespAll = despesas.filter(d => String(d.motoristaUid).trim() === String(m.uid).trim());
       const mAbsAll = abastecimentos.filter(a => String(a.motoristaUid).trim() === String(m.uid).trim());
       const mValAll = vales.filter(v => String(v.motoristaUid).trim() === String(m.uid).trim());
+      const fretesCanceladosIds = new Set(mFretes.filter(f => f.status === 'cancelado').map(f => f.id));
+      const mDespAllParaCalculo = mDespAll.filter(d => !estaVinculadoAFreteCancelado(d, fretesCanceladosIds));
+      const mAbsAllParaCalculo = mAbsAll.filter(a => !estaVinculadoAFreteCancelado(a, fretesCanceladosIds));
+      const mValAllParaCalculo = mValAll.filter(v => !estaVinculadoAFreteCancelado(v, fretesCanceladosIds));
 
       if (mFretes.length === 0 && mDespAll.length === 0 && mAbsAll.length === 0 && mValAll.length === 0) return;
 
@@ -448,7 +459,7 @@ export const Relatorios: React.FC = () => {
           }),
           foot: [[
             'TOTAIS', '', '', '', '', '', '',
-            formatCurrency(mFretes.reduce((s, f) => s + (f.valorFrete || 0), 0)),
+            formatCurrency(mFretes.filter(f => f.status !== 'cancelado').reduce((s, f) => s + (f.valorFrete || 0), 0)),
             '', ''
           ]],
           headStyles: { fillColor: [59, 130, 246], fontSize: 7 },
@@ -480,8 +491,8 @@ export const Relatorios: React.FC = () => {
           foot: [[
             'TOTAIS',
             '',
-            `${mAbsAll.reduce((s, a) => s + (a.litros || 0) + (a.arlaLitros || 0), 0).toFixed(1)}L`,
-            formatCurrency(mAbsAll.reduce((s, a) => s + (a.valorTotal || 0), 0)),
+            `${mAbsAllParaCalculo.reduce((s, a) => s + (a.litros || 0) + (a.arlaLitros || 0), 0).toFixed(1)}L`,
+            formatCurrency(mAbsAllParaCalculo.reduce((s, a) => s + (a.valorTotal || 0), 0)),
             ''
           ]],
           headStyles: { fillColor: [245, 158, 11], fontSize: 8 },
@@ -509,7 +520,7 @@ export const Relatorios: React.FC = () => {
             formatCurrency(v.valor),
             v.quemPagou === 'proprietario' ? 'Proprietário' : 'Motorista'
           ]),
-          foot: [['TOTAIS', '', formatCurrency(mValAll.reduce((s, v) => s + (v.valor || 0), 0)), '']],
+          foot: [['TOTAIS', '', formatCurrency(mValAllParaCalculo.reduce((s, v) => s + (v.valor || 0), 0)), '']],
           headStyles: { fillColor: [139, 92, 246], fontSize: 8 },
           footStyles: { fillColor: [245, 243, 255], textColor: [31, 41, 55], fontStyle: 'bold', fontSize: 8 },
           styles: { fontSize: 8, cellPadding: 2 },
@@ -535,7 +546,7 @@ export const Relatorios: React.FC = () => {
             formatCurrency(d.valor),
             d.quemPagou === 'proprietario' ? 'Proprietário' : 'Motorista'
           ]),
-          foot: [['TOTAIS', '', formatCurrency(mDespAll.reduce((s, d) => s + (d.valor || 0), 0)), '']],
+          foot: [['TOTAIS', '', formatCurrency(mDespAllParaCalculo.reduce((s, d) => s + (d.valor || 0), 0)), '']],
           headStyles: { fillColor: [239, 68, 68], fontSize: 8 },
           footStyles: { fillColor: [254, 242, 242], textColor: [31, 41, 55], fontStyle: 'bold', fontSize: 8 },
           styles: { fontSize: 8, cellPadding: 2 },
@@ -631,23 +642,27 @@ export const Relatorios: React.FC = () => {
       const mDesp = despesas.filter(d => String(d.motoristaUid).trim() === String(m.uid).trim() && selectedTripIds.includes(d.frete_id));
       const mAbs = abastecimentos.filter(a => String(a.motoristaUid).trim() === String(m.uid).trim() && selectedTripIds.includes(a.frete_id));
       const mVales = vales.filter(v => String(v.motoristaUid).trim() === String(m.uid).trim() && selectedTripIds.includes(v.frete_id));
+      const fretesCanceladosIds = new Set(mFretes.filter(f => f.status === 'cancelado').map(f => f.id));
+      const despesasParaCalculo = mDesp.filter(d => !estaVinculadoAFreteCancelado(d, fretesCanceladosIds));
+      const abastecimentosParaCalculo = mAbs.filter(a => !estaVinculadoAFreteCancelado(a, fretesCanceladosIds));
+      const valesParaCalculo = mVales.filter(v => !estaVinculadoAFreteCancelado(v, fretesCanceladosIds));
 
-      const totalFrete = mFretes.reduce((s, f) => s + (f.valorFrete || 0), 0);
+      const totalFrete = mFretes.filter(f => f.status !== 'cancelado').reduce((s, f) => s + (f.valorFrete || 0), 0);
       const comissao = totalFrete * ((m.percentualComissao || 0) / 100);
-      const totalGastos = mDesp.reduce((s, d) => s + (d.valor || 0), 0) +
-                          mAbs.reduce((s, a) => s + (a.valorTotal || 0), 0) +
-                          mVales.reduce((s, v) => s + (v.valor || 0), 0);
+      const totalGastos = despesasParaCalculo.reduce((s, d) => s + (d.valor || 0), 0) +
+                          abastecimentosParaCalculo.reduce((s, a) => s + (a.valorTotal || 0), 0) +
+                          valesParaCalculo.reduce((s, v) => s + (v.valor || 0), 0);
       const saldoLiq = comissao - totalGastos;
 
-      const totalKm = mFretes.reduce((s, f) => s + (f.km_final && f.km_inicial ? f.km_final - f.km_inicial : 0), 0);
-      const totalLitros = mAbs.reduce((s, a) => s + (a.litros || 0), 0);
+      const totalKm = mFretes.filter(f => f.status !== 'cancelado').reduce((s, f) => s + (f.km_final && f.km_inicial ? f.km_final - f.km_inicial : 0), 0);
+      const totalLitros = abastecimentosParaCalculo.reduce((s, a) => s + (a.litros || 0), 0);
       const media = totalLitros > 0 ? (totalKm / totalLitros).toFixed(2) : '0.00';
 
       return {
         nome: m.nomeCompleto,
         uid: m.uid,
         isAutonomo: m.empresaTipo === 'autonomo',
-        viagens: mFretes.length,
+        viagens: mFretes.filter(f => f.status !== 'cancelado').length,
         totalFrete,
         comissao,
         totalGastos,
@@ -686,6 +701,10 @@ export const Relatorios: React.FC = () => {
       const mDespAll = despesas.filter(d => String(d.motoristaUid).trim() === String(m.uid).trim() && selectedIds.includes(d.frete_id));
       const mAbsAll = abastecimentos.filter(a => String(a.motoristaUid).trim() === String(m.uid).trim() && selectedIds.includes(a.frete_id));
       const mValAll = vales.filter(v => String(v.motoristaUid).trim() === String(m.uid).trim() && selectedIds.includes(v.frete_id));
+      const fretesCanceladosIds = new Set(mFretes.filter(f => f.status === 'cancelado').map(f => f.id));
+      const mDespAllParaCalculo = mDespAll.filter(d => !estaVinculadoAFreteCancelado(d, fretesCanceladosIds));
+      const mAbsAllParaCalculo = mAbsAll.filter(a => !estaVinculadoAFreteCancelado(a, fretesCanceladosIds));
+      const mValAllParaCalculo = mValAll.filter(v => !estaVinculadoAFreteCancelado(v, fretesCanceladosIds));
 
       if (mFretes.length === 0) return;
 
@@ -728,7 +747,7 @@ export const Relatorios: React.FC = () => {
           }),
           foot: [[
             'TOTAIS', '', '', '', '', '', '',
-            formatCurrency(mFretes.reduce((s, f) => s + (f.valorFrete || 0), 0)),
+            formatCurrency(mFretes.filter(f => f.status !== 'cancelado').reduce((s, f) => s + (f.valorFrete || 0), 0)),
             '', ''
           ]],
           headStyles: { fillColor: [59, 130, 246], fontSize: 7 },
@@ -760,8 +779,8 @@ export const Relatorios: React.FC = () => {
           foot: [[
             'TOTAIS',
             '',
-            `${mAbsAll.reduce((s, a) => s + (a.litros || 0) + (a.arlaLitros || 0), 0).toFixed(1)}L`,
-            formatCurrency(mAbsAll.reduce((s, a) => s + (a.valorTotal || 0), 0)),
+            `${mAbsAllParaCalculo.reduce((s, a) => s + (a.litros || 0) + (a.arlaLitros || 0), 0).toFixed(1)}L`,
+            formatCurrency(mAbsAllParaCalculo.reduce((s, a) => s + (a.valorTotal || 0), 0)),
             ''
           ]],
           headStyles: { fillColor: [245, 158, 11], fontSize: 8 },
@@ -789,7 +808,7 @@ export const Relatorios: React.FC = () => {
             formatCurrency(v.valor),
             v.quemPagou === 'proprietario' ? 'Proprietário' : 'Motorista'
           ]),
-          foot: [['TOTAIS', '', formatCurrency(mValAll.reduce((s, v) => s + (v.valor || 0), 0)), '']],
+          foot: [['TOTAIS', '', formatCurrency(mValAllParaCalculo.reduce((s, v) => s + (v.valor || 0), 0)), '']],
           headStyles: { fillColor: [139, 92, 246], fontSize: 8 },
           footStyles: { fillColor: [245, 243, 255], textColor: [31, 41, 55], fontStyle: 'bold', fontSize: 8 },
           styles: { fontSize: 8, cellPadding: 2 },
@@ -815,7 +834,7 @@ export const Relatorios: React.FC = () => {
             formatCurrency(d.valor),
             d.quemPagou === 'proprietario' ? 'Proprietário' : 'Motorista'
           ]),
-          foot: [['TOTAIS', '', formatCurrency(mDespAll.reduce((s, d) => s + (d.valor || 0), 0)), '']],
+          foot: [['TOTAIS', '', formatCurrency(mDespAllParaCalculo.reduce((s, d) => s + (d.valor || 0), 0)), '']],
           headStyles: { fillColor: [239, 68, 68], fontSize: 8 },
           footStyles: { fillColor: [254, 242, 242], textColor: [31, 41, 55], fontStyle: 'bold', fontSize: 8 },
           styles: { fontSize: 8, cellPadding: 2 },
@@ -1068,8 +1087,12 @@ export const Relatorios: React.FC = () => {
                   // `|| 0` em todos os somatórios evita NaN.
                   const selObj = selectedMot !== 'todos' ? motoristas.find(m => m.uid === selectedMot) : null;
                   const isAutSel = selObj?.empresaTipo === 'autonomo';
-                  const totalFrete = fretes.reduce((s,f)=>s+(f.valorFrete||0), 0);
-                  const gastosTotais = despesas.reduce((s,d)=>s+(d.valor||0),0) + abastecimentos.reduce((s,a)=>s+(a.valorTotal||0),0) + vales.reduce((s,v)=>s+(v.valor||0),0);
+                  const fretesCanceladosIds = new Set(fretes.filter(f => f.status === 'cancelado').map(f => f.id));
+                  const despesasParaCalculo = despesas.filter(d => !estaVinculadoAFreteCancelado(d, fretesCanceladosIds));
+                  const abastecimentosParaCalculo = abastecimentos.filter(a => !estaVinculadoAFreteCancelado(a, fretesCanceladosIds));
+                  const valesParaCalculo = vales.filter(v => !estaVinculadoAFreteCancelado(v, fretesCanceladosIds));
+                  const totalFrete = fretes.filter(f=>f.status!=='cancelado').reduce((s,f)=>s+(f.valorFrete||0), 0);
+                  const gastosTotais = despesasParaCalculo.reduce((s,d)=>s+(d.valor||0),0) + abastecimentosParaCalculo.reduce((s,a)=>s+(a.valorTotal||0),0) + valesParaCalculo.reduce((s,v)=>s+(v.valor||0),0);
                   const card = (label: string, value: number, opts: any = {}) => (
                     <div key={label} className={`p-4 rounded-2xl border ${opts.box || 'bg-gray-50 border-gray-100'}`}>
                       <p className={`text-[10px] font-bold uppercase mb-1 ${opts.labelCls || 'text-gray-400'}`}>{label}</p>
@@ -1085,7 +1108,7 @@ export const Relatorios: React.FC = () => {
                         {card('Faturamento', totalFrete)}
                         {card('Gastos', gastosTotais, { box: 'bg-red-50 border-red-100', labelCls: 'text-red-600', valCls: 'text-red-700' })}
                         {card('Resultado', resultado, { box: 'bg-green-50 border-green-100', labelCls: 'text-green-600', valCls: resultado >= 0 ? 'text-green-700' : 'text-red-700' })}
-                        {card('Viagens', fretes.length, { box: 'bg-blue-50 border-blue-100', labelCls: 'text-blue-600', valCls: 'text-blue-700', raw: true })}
+                        {card('Viagens', fretes.filter(f => f.status !== 'cancelado').length, { box: 'bg-blue-50 border-blue-100', labelCls: 'text-blue-600', valCls: 'text-blue-700', raw: true })}
                       </div>
                     );
                   }
@@ -1094,12 +1117,14 @@ export const Relatorios: React.FC = () => {
                   if (selectedMot === 'todos') {
                     let tfVinc=0, comVinc=0, gVinc=0, tfAut=0, gAut=0, nVinc=0, nAut=0;
                     motoristas.forEach(m => {
-                      const mF = fretes.filter(f => f.motoristaUid === m.uid);
-                      const g = despesas.filter(d => d.motoristaUid === m.uid).reduce((s,d)=>s+(d.valor||0),0)
-                        + abastecimentos.filter(a => a.motoristaUid === m.uid).reduce((s,a)=>s+(a.valorTotal||0),0)
-                        + vales.filter(v => v.motoristaUid === m.uid).reduce((s,v)=>s+(v.valor||0),0);
+                      const mTodosFretes = fretes.filter(f => f.motoristaUid === m.uid);
+                      const mFretesCanceladosIds = new Set(mTodosFretes.filter(f => f.status === 'cancelado').map(f => f.id));
+                      const mF = mTodosFretes.filter(f => f.status !== 'cancelado');
+                      const g = despesas.filter(d => d.motoristaUid === m.uid && !estaVinculadoAFreteCancelado(d, mFretesCanceladosIds)).reduce((s,d)=>s+(d.valor||0),0)
+                        + abastecimentos.filter(a => a.motoristaUid === m.uid && !estaVinculadoAFreteCancelado(a, mFretesCanceladosIds)).reduce((s,a)=>s+(a.valorTotal||0),0)
+                        + vales.filter(v => v.motoristaUid === m.uid && !estaVinculadoAFreteCancelado(v, mFretesCanceladosIds)).reduce((s,v)=>s+(v.valor||0),0);
                       if (mF.length === 0 && g === 0) return;
-                      const tot = mF.reduce((s,f)=>s+(f.valorFrete||0),0);
+                      const tot = mF.filter(f=>f.status!=='cancelado').reduce((s,f)=>s+(f.valorFrete||0),0);
                       if (m.empresaTipo === 'autonomo') { tfAut+=tot; gAut+=g; nAut++; }
                       else { tfVinc+=tot; comVinc += tot*((m.percentualComissao||0)/100); gVinc+=g; nVinc++; }
                     });
@@ -1134,7 +1159,7 @@ export const Relatorios: React.FC = () => {
                   }
 
                   // 3) Vinculado selecionado → comportamento atual (Total Frete / Comissões / Despesas / Viagens)
-                  const comissaoVinc = fretes.reduce((s,f) => {
+                  const comissaoVinc = fretes.filter(f=>f.status!=='cancelado').reduce((s,f) => {
                     const m = motoristas.find(mot => mot.uid === f.motoristaUid);
                     return s + (m?.empresaTipo === 'autonomo' ? 0 : (f.valorFrete||0) * ((m?.percentualComissao || 0)/100));
                   }, 0);
@@ -1143,7 +1168,7 @@ export const Relatorios: React.FC = () => {
                       {card('Total Frete', totalFrete)}
                       {card('Comissões', comissaoVinc, { box: 'bg-green-50 border-green-100', labelCls: 'text-green-600', valCls: 'text-green-700' })}
                       {card('Despesas', gastosTotais, { box: 'bg-red-50 border-red-100', labelCls: 'text-red-600', valCls: 'text-red-700' })}
-                      {card('Viagens', fretes.length, { box: 'bg-blue-50 border-blue-100', labelCls: 'text-blue-600', valCls: 'text-blue-700', raw: true })}
+                      {card('Viagens', fretes.filter(f => f.status !== 'cancelado').length, { box: 'bg-blue-50 border-blue-100', labelCls: 'text-blue-600', valCls: 'text-blue-700', raw: true })}
                     </div>
                   );
                 })()}
@@ -1251,13 +1276,14 @@ export const Relatorios: React.FC = () => {
                         const renderGrupoMotorista = (m: any) => {
                         const mFretes = fretes.filter(f => f.motoristaUid === m.uid);
                         if (mFretes.length === 0) return null;
-                        const total = mFretes.reduce((s,f)=>s+f.valorFrete,0);
+                        const fretesCanceladosIds = new Set(mFretes.filter(f=>f.status==='cancelado').map(f=>f.id));
+                        const total = mFretes.filter(f=>f.status!=='cancelado').reduce((s,f)=>s+f.valorFrete,0);
                         // PR3A: autônomo = Faturamento − Gastos (sem comissão). Gastos = desp+abast+vales
                         // (já filtrados aprovado/finalizado no load), ignorando quem_pagou. `|| 0` evita NaN.
                         const isAut = m.empresaTipo === 'autonomo';
-                        const mGastos = despesas.filter(d => d.motoristaUid === m.uid).reduce((s,d)=>s+(d.valor||0),0)
-                          + abastecimentos.filter(a => a.motoristaUid === m.uid).reduce((s,a)=>s+(a.valorTotal||0),0)
-                          + vales.filter(v => v.motoristaUid === m.uid).reduce((s,v)=>s+(v.valor||0),0);
+                        const mGastos = despesas.filter(d => d.motoristaUid === m.uid && !estaVinculadoAFreteCancelado(d, fretesCanceladosIds)).reduce((s,d)=>s+(d.valor||0),0)
+                          + abastecimentos.filter(a => a.motoristaUid === m.uid && !estaVinculadoAFreteCancelado(a, fretesCanceladosIds)).reduce((s,a)=>s+(a.valorTotal||0),0)
+                          + vales.filter(v => v.motoristaUid === m.uid && !estaVinculadoAFreteCancelado(v, fretesCanceladosIds)).reduce((s,v)=>s+(v.valor||0),0);
                         const resultado = total - mGastos;
                         return (
                           <React.Fragment key={m.uid}>
