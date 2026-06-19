@@ -127,6 +127,7 @@ export const Dashboard: React.FC = () => {
         quemPagou: d.quem_pagou,
         status: d.status,
         data: d.data,
+        frete_id: d.frete_id,
         fotoUrl: d.foto_url,
         tipo: d.tipo === 'manutencao' ? 'manutencao' : 'despesa'  // preserva sub-tipo de manutenção
       })));
@@ -152,6 +153,7 @@ export const Dashboard: React.FC = () => {
         quemPagou: v.quem_pagou,
         status: v.status,
         data: v.data,
+        frete_id: v.frete_id,
         tipo: 'vale'            // tipo explícito — evita falsa classificação como despesa
       })));
     } catch (err) {
@@ -251,19 +253,26 @@ export const Dashboard: React.FC = () => {
     try {
       const ativo = fretes.find(f => f.status === 'ativo' || f.status === 'pendente');
       if (ativo) {
-        await api.patch('/fretes/' + ativo.id, { status: 'finalizado' });
+        // Finaliza via rota dedicada — o backend é a trava final (409 se houver pendência),
+        // igual ao Gerenciamento de Fretes. Antes era um PATCH cru de status, que contornava a trava.
+        await api.post('/fretes/' + ativo.id + '/finalizar');
+        // Marca como finalizado SOMENTE os aprovados DESTE frete (frete_id === ativo.id), após sucesso.
+        // Lançamentos sem vínculo ou de outros fretes são preservados.
         const promises = [
-          ...despesas.filter(d => d.status === 'aprovado').map(d => api.patch('/despesas/' + d.id, { status: 'finalizado' })),
-          ...abastecimentos.filter(a => a.status === 'aprovado').map(a => api.patch('/abastecimentos/' + a.id, { status: 'finalizado' })),
-          ...vales.filter(v => v.status === 'aprovado').map(v => api.patch('/vales/' + v.id, { status: 'finalizado' }))
+          ...despesas.filter(d => d.status === 'aprovado' && d.frete_id === ativo.id).map(d => api.patch('/despesas/' + d.id, { status: 'finalizado' })),
+          ...abastecimentos.filter(a => a.status === 'aprovado' && a.frete_id === ativo.id).map(a => api.patch('/abastecimentos/' + a.id, { status: 'finalizado' })),
+          ...vales.filter(v => v.status === 'aprovado' && v.frete_id === ativo.id).map(v => api.patch('/vales/' + v.id, { status: 'finalizado' }))
         ];
         await Promise.allSettled(promises);
       }
       setSelectedMot(null);
       loadDashboardData();
       alert('Frete finalizado com sucesso! Os dados foram movidos para o resumo histórico.');
-    } catch (err) {
-      alert('Erro ao finalizar frete no servidor.');
+    } catch (err: any) {
+      const msg = err?.response?.status === 409
+        ? (err.response.data?.message || 'Há lançamentos pendentes deste motorista.')
+        : 'Erro ao finalizar frete no servidor.';
+      alert(msg);
     }
   };
 
