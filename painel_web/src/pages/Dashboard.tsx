@@ -316,12 +316,16 @@ export const Dashboard: React.FC = () => {
     if (tipo === 'vale' && !newDespesa.valor) { alert('Preencha o valor do vale.'); return; }
     setSavingDespesa(true);
     try {
+      // Vincula o lançamento ao frete ativo/pendente do motorista — mesmo critério de handleFinalizarViagem.
+      // Sem frete ativo, mantém o lançamento solto (sem frete_id), preservando o comportamento atual.
+      const ativo = fretes.find(f => f.status === 'ativo' || f.status === 'pendente');
+      const vinc = ativo ? { frete_id: ativo.id } : {};
       if (tipo === 'abastecimento') {
-        await api.post('/abastecimentos', { motorista_id: selectedMot.uid, posto: newDespesa.posto, litros: Number(newDespesa.litros), valor_total: Number(newDespesa.valor_total), quem_pagou: newDespesa.quem_pagou, data: newDespesa.data });
+        await api.post('/abastecimentos', { ...vinc, motorista_id: selectedMot.uid, posto: newDespesa.posto, litros: Number(newDespesa.litros), valor_total: Number(newDespesa.valor_total), quem_pagou: newDespesa.quem_pagou, data: newDespesa.data });
       } else if (tipo === 'vale') {
-        await api.post('/vales', { motorista_id: selectedMot.uid, descricao: newDespesa.descricao || 'Vale/Adiantamento', valor: Number(newDespesa.valor), quem_pagou: 'proprietario', data: newDespesa.data });
+        await api.post('/vales', { ...vinc, motorista_id: selectedMot.uid, descricao: newDespesa.descricao || 'Vale/Adiantamento', valor: Number(newDespesa.valor), quem_pagou: 'proprietario', data: newDespesa.data });
       } else {
-        await api.post('/despesas', { motorista_id: selectedMot.uid, tipo: 'geral', descricao: newDespesa.descricao, valor: Number(newDespesa.valor), quem_pagou: newDespesa.quem_pagou, data: newDespesa.data });
+        await api.post('/despesas', { ...vinc, motorista_id: selectedMot.uid, tipo: 'geral', descricao: newDespesa.descricao, valor: Number(newDespesa.valor), quem_pagou: newDespesa.quem_pagou, data: newDespesa.data });
       }
       setShowAddDespesaModal(false);
       setNewDespesa({ tipo: 'despesa', descricao: '', valor: '', quem_pagou: 'proprietario', posto: '', litros: '', valor_total: '', data: '' });
