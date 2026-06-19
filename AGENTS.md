@@ -30,10 +30,14 @@ try { $r = Invoke-WebRequest -Uri "http://localhost:5173/" -UseBasicParsing -Tim
 - Frontend: `painel_web/` (Vite 8 + React 19 + TypeScript 6 + Tailwind 4)
 - Backend: `backend/` (Express)
 - Ports: Frontend 5173, Backend 3000
-- Admin login: `admin@choferlog.com.br` / `Admin@123!`
+- Admin login: `<ADMIN_EMAIL>` / `<ADMIN_PASSWORD>`
 - Persistence: localStorage keys prefixed `choferlog_`
-- Netlify site: `d827f06f-7185-48a4-bd9c-252e18a3272f` (dazzling-fudge-f38a2c.netlify.app)
-- Netlify token: `nfp_pLWxbgbp4PiXptne6V99wRH5F6Ker98628e2`
+- Netlify site: `<NETLIFY_SITE_ID>` (`<LEGACY_ENDPOINT>`)
+- Netlify token: `<NETLIFY_TOKEN>`
+
+> **Segurança:** Nunca registrar tokens, senhas ou credenciais reais neste arquivo.
+> Use variáveis de ambiente, GitHub Secrets, Codemagic Secrets, Netlify Environment
+> Variables ou um secret manager.
 
 ## Session History (May 28, 2026)
 
