@@ -53,6 +53,15 @@ class FinanceProvider extends ChangeNotifier {
   /// id do frete ativo, ou null quando não há frete em execução (lançamento solto).
   String? get freteAtivoId => freteAtivo?['id']?.toString();
 
+  /// Verdadeiro quando o lançamento pertence a um frete cancelado.
+  /// Lançamentos sem frete_id (lançamentos soltos) são SEMPRE preservados.
+  bool _isLancamentoDeFreteCancelado(
+      Map<String, dynamic> item, Set<dynamic> fretesCanceladosIds) {
+    final freteId = item['frete_id'];
+    if (freteId == null || freteId.toString().isEmpty) return false;
+    return fretesCanceladosIds.contains(freteId.toString());
+  }
+
   Future<void> loadData() async {
     AppLogger.action('load_finance_data');
     _loading = true;
@@ -88,29 +97,44 @@ class FinanceProvider extends ChangeNotifier {
       _abastecimentos = abastecimentos;
       _vales = vales;
 
+      // Fretes cancelados continuam VISÍVEIS nas listas (_fretes, Home, Histórico,
+      // Detalhe), mas ficam FORA de todas as agregações financeiras: não entram no
+      // faturamento/comissão e seus lançamentos vinculados não entram nas deduções.
+      // IDs guardados como String para comparação consistente com frete_id dos lançamentos.
+      final fretesCanceladosIds = <dynamic>{
+        for (var f in fretes)
+          if ((f['status'] ?? '').toString() == 'cancelado') f['id']?.toString()
+      };
+
       double tf = 0.0;
       for (var f in fretes) {
+        if ((f['status'] ?? '').toString() == 'cancelado') continue;
         tf += double.tryParse(f['valor_frete'].toString()) ?? 0.0;
       }
 
       // Autônomo: todas as despesas contam (ele é o proprietário).
       // Vinculado: apenas quem_pagou = 'proprietario' conta como dedução da comissão.
       // Rejeitados não entram no cálculo em nenhum caso.
+      // Lançamentos vinculados a frete cancelado também são excluídos (itens sem
+      // frete_id — lançamentos soltos — são sempre preservados).
       double td = 0.0;
       for (var d in despesas) {
         if (d['status'] == 'rejeitado') continue;
+        if (_isLancamentoDeFreteCancelado(d, fretesCanceladosIds)) continue;
         if (_isAutonomo || d['quem_pagou'] == 'proprietario') {
           td += double.tryParse(d['valor'].toString()) ?? 0.0;
         }
       }
       for (var a in abastecimentos) {
         if (a['status'] == 'rejeitado') continue;
+        if (_isLancamentoDeFreteCancelado(a, fretesCanceladosIds)) continue;
         if (_isAutonomo || a['quem_pagou'] == 'proprietario') {
           td += double.tryParse(a['valor_total'].toString()) ?? 0.0;
         }
       }
       for (var v in vales) {
         if (v['status'] == 'rejeitado') continue;
+        if (_isLancamentoDeFreteCancelado(v, fretesCanceladosIds)) continue;
         if (_isAutonomo || v['quem_pagou'] == 'proprietario') {
           td += double.tryParse(v['valor'].toString()) ?? 0.0;
         }
