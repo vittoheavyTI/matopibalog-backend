@@ -221,7 +221,9 @@ export const GerenciamentoViagens: React.FC = () => {
         // como "não enviado"); evita coagir a 0 e reprovar na validação de número positivo.
         km_inicial: Number(formData.km_inicial) > 0 ? parseInt(formData.km_inicial) : null,
         km_final: Number(formData.km_final) > 0 ? parseInt(formData.km_final) : null,
-        quem_recebeu: formData.quem_recebeu,
+        // Autônomo nunca recebe via 'proprietario': força 'motorista' (regra de produto). Na criação
+        // este campo é omitido logo abaixo; logo, isto trava apenas o PATCH de edição.
+        quem_recebeu: isAutonomoNoModal ? 'motorista' : formData.quem_recebeu,
         status: formData.status,
         data: formData.data
       };
@@ -467,6 +469,11 @@ export const GerenciamentoViagens: React.FC = () => {
   };
 
   const selectedMotorista = filterMot !== 'todos' ? motoristas.find(m => m.uid === filterMot) : null;
+  // Autônomo do frete aberto no modal: na EDIÇÃO usa o motorista do frete editado (não o filtro,
+  // que pode estar em "Todos"); na criação, o motorista escolhido no formulário. Detecção pelo
+  // tipo real da empresa (empresaTipo), nunca pelo nome.
+  const motoristaIdNoModal = editingFrete?.motorista_id ?? formData.motorista_id;
+  const isAutonomoNoModal = motoristas.find(m => m.uid === motoristaIdNoModal)?.empresaTipo === 'autonomo';
 
   const mFretes = fretes.filter(f => f.motoristaUid === filterMot || f.motorista_id === filterMot);
   // Cancelados continuam visíveis na lista/badge (mFretes), mas ficam FORA de TODAS as agregações
@@ -958,7 +965,7 @@ export const GerenciamentoViagens: React.FC = () => {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div><label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">Quem Recebeu</label>
-                  <select className="w-full border p-2.5 rounded-xl outline-none focus:border-blue-500 bg-white" value={formData.quem_recebeu} onChange={e => setFormData({...formData, quem_recebeu: e.target.value})}>
+                  <select className="w-full border p-2.5 rounded-xl outline-none focus:border-blue-500 bg-white disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed" value={editingFrete && isAutonomoNoModal ? 'motorista' : formData.quem_recebeu} disabled={!!(editingFrete && isAutonomoNoModal)} onChange={e => setFormData({...formData, quem_recebeu: e.target.value})}>
                     <option value="proprietario">Proprietário</option><option value="motorista">Motorista</option>
                   </select>
                 </div>
