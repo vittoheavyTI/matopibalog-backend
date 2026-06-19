@@ -229,10 +229,11 @@ export const GerenciamentoViagens: React.FC = () => {
       if (editingFrete) {
         await api.patch('/fretes/' + editingFrete.id, {...payload});
       } else {
-        // Na CRIAÇÃO, não enviamos quem_recebeu: deixamos o backend derivar pelo tipo real da
-        // empresa (autonomo → 'motorista'; demais → 'proprietario'). Evita gravar 'proprietario'
-        // indevido para autônomo. O override manual segue valendo só na edição (PATCH acima).
-        const { quem_recebeu: _quemRecebeuOmitido, ...payloadCriacao } = payload;
+        // Na CRIAÇÃO, não enviamos quem_recebeu nem status: o backend ignora status na criação
+        // (insert não inclui o campo) e deriva quem_recebeu pelo tipo real da empresa
+        // (autonomo → 'motorista'; demais → 'proprietario'). Enviar status aqui era inócuo.
+        // O override manual de ambos segue valendo só na edição (PATCH acima).
+        const { quem_recebeu: _quemRecebeuOmitido, status: _statusOmitido, ...payloadCriacao } = payload;
         await api.post('/fretes', { ...payloadCriacao, motorista_id: formData.motorista_id });
       }
       if (filterMot !== 'todos') {
