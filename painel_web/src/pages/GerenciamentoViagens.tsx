@@ -211,6 +211,14 @@ export const GerenciamentoViagens: React.FC = () => {
   };
 
   const handleSave = async () => {
+    // Validação client-side dos obrigatórios (paridade com o modal do Dashboard). Bloqueia antes
+    // de chamar o backend. Motorista só é exigido na CRIAÇÃO — na edição vem do frete e o campo é
+    // oculto. KM, data, status e quem_recebeu seguem opcionais.
+    if (!editingFrete && !formData.motorista_id) { alert('Selecione um motorista.'); return; }
+    if (!formData.origem || !formData.origem.trim()) { alert('Informe a origem.'); return; }
+    if (!formData.destino || !formData.destino.trim()) { alert('Informe o destino.'); return; }
+    const valorFrete = parseFloat(formData.valor_frete);
+    if (!formData.valor_frete || isNaN(valorFrete) || valorFrete <= 0) { alert('Informe um valor de frete válido.'); return; }
     try {
       setIsSubmitting(true);
       const payload = {
