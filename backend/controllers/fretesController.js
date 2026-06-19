@@ -31,6 +31,25 @@ const freteTemPendencias = async (freteId) => {
   return false;
 };
 
+// Retorna true se o motorista pertence a uma empresa do tipo 'autonomo'.
+// Fonte confiável: motoristas.empresa_id → empresas.tipo. NUNCA detecta por nome.
+// Retorna null quando o lookup falha (indeterminado), para o chamador aplicar fallback leniente.
+const isMotoristaAutonomo = async (motoristaId) => {
+  const { data: mot, error: motErr } = await supabase
+    .from('motoristas')
+    .select('empresa_id')
+    .eq('id', motoristaId)
+    .single();
+  if (motErr || !mot) return null;
+  const { data: emp, error: empErr } = await supabase
+    .from('empresas')
+    .select('tipo')
+    .eq('id', mot.empresa_id)
+    .single();
+  if (empErr || !emp) return null;
+  return emp.tipo === 'autonomo';
+};
+
 exports.getAll = async (req, res) => {
   const { data_inicio, data_fim, status, motorista_id } = req.query;
   const isAdmin = req.user.role === 'admin';
@@ -103,21 +122,24 @@ exports.create = async (req, res) => {
 
     const comissao = valor_frete * (motData.percentual_comissao / 100);
 
-    // 2b. Definir quem_recebeu por tipo de empresa (TAC vs CLT), se não veio no body
-    //  - autonomo (TAC) → 'motorista' (recebe direto, é dono do veículo)
-    //  - transportadora (CLT) → 'proprietario' (a empresa recebe)
-    // O body sobrescreve, para casos especiais definidos pelo usuário.
+    // 2b. Definir quem_recebeu por tipo de empresa (TAC vs CLT):
+    //  - autonomo (TAC) → SEMPRE 'motorista' (recebe direto, é dono do veículo); o body NÃO
+    //    sobrescreve — defense-in-depth contra requisição forjada (espelha a trava do frontend).
+    //  - transportadora (CLT) / vinculado → respeita o body; default 'proprietario' se ausente.
+    // Lookup do tipo sempre executado; se falhar, fallback leniente + log (mantém comportamento atual).
     let quemRecebeuFinal = quem_recebeu;
-    if (!quemRecebeuFinal) {
-      const { data: empData, error: empError } = await supabase
-        .from('empresas')
-        .select('tipo')
-        .eq('id', motData.empresa_id)
-        .single();
-      if (empError) {
-        console.error('[fretesController:create] Erro ao buscar tipo da empresa:', empError);
-      }
-      quemRecebeuFinal = empData?.tipo === 'autonomo' ? 'motorista' : 'proprietario';
+    const { data: empData, error: empError } = await supabase
+      .from('empresas')
+      .select('tipo')
+      .eq('id', motData.empresa_id)
+      .single();
+    if (empError || !empData) {
+      console.warn('[fretesController:create] lookup tipo empresa falhou; fallback leniente:', empError?.message);
+    }
+    if (empData?.tipo === 'autonomo') {
+      quemRecebeuFinal = 'motorista';
+    } else if (!quemRecebeuFinal) {
+      quemRecebeuFinal = 'proprietario';
     }
 
     // 3. Inserir frete
@@ -201,6 +223,18 @@ exports.update = async (req, res) => {
 
     if (Object.keys(allowedUpdate).length === 0) {
       return res.status(400).json({ message: 'Nenhum campo válido para atualizar.' });
+    }
+
+    // Defense-in-depth: autônomo SEMPRE recebe via 'motorista'. Força o valor independentemente
+    // do body (espelha a trava do frontend). Vinculado preserva o valor enviado. Lookup pelo tipo
+    // real da empresa (motoristas → empresas.tipo), nunca por nome; falha → fallback leniente + log.
+    if (allowedUpdate.quem_recebeu !== undefined) {
+      const autonomo = await isMotoristaAutonomo(checkData.motorista_id);
+      if (autonomo === true) {
+        allowedUpdate.quem_recebeu = 'motorista';
+      } else if (autonomo === null) {
+        console.warn('[fretesController:update] lookup tipo empresa falhou; mantendo quem_recebeu do body (fallback leniente).');
+      }
     }
 
     // Trava de finalização: bloqueia se o motorista tiver lançamentos pendentes (vale p/ todos)
