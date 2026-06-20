@@ -387,6 +387,27 @@ exports.createUsuario = async (req, res) => {
     return res.status(400).json({ message: 'Motoristas devem ser cadastrados pelo fluxo de Motoristas.' });
   }
 
+  // [B1a] Super-admin deve escolher a empresa-alvo explicitamente (?empresa_id=, que o
+  // tenant.js resolve marcando req.impersonating). Sem isso, req.empresa_id seria a empresa
+  // do próprio super-admin → o usuário nasceria na empresa errada. Exige seleção explícita.
+  if (req.user.is_super_admin === true && !req.impersonating) {
+    return res.status(400).json({ message: 'Selecione a empresa para criar o usuário.' });
+  }
+
+  // [B1a] Validar que a empresa-alvo resolvida (req.empresa_id) existe — vale para super-admin
+  // impersonando e para admin comum. Evita criar usuário órfão ou em empresa inexistente.
+  if (!req.empresa_id) {
+    return res.status(400).json({ message: 'Empresa do usuário não identificada.' });
+  }
+  const { data: empresaAlvo, error: empresaAlvoError } = await supabase
+    .from('empresas')
+    .select('id')
+    .eq('id', req.empresa_id)
+    .single();
+  if (empresaAlvoError || !empresaAlvo) {
+    return res.status(400).json({ message: 'Empresa selecionada não encontrada.' });
+  }
+
   const senhaFinal = senha || '123456';
 
   try {
@@ -419,6 +440,8 @@ exports.createUsuario = async (req, res) => {
         tipo: tipo || 'admin',
         status: 'ativo',
         empresa_id: req.empresa_id,
+        // [B1a] Usuário criado pelo admin nasce com senha provisória → força troca no 1º acesso.
+        senha_temporaria: true,
         telefone: telefone || null,
         cep: cep || null,
         endereco: endereco || null,
