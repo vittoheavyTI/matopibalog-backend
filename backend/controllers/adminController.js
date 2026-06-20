@@ -380,6 +380,12 @@ exports.createUsuario = async (req, res) => {
   if (senha && senha.length < 6) {
     return res.status(400).json({ message: 'A senha deve ter no mínimo 6 caracteres.' });
   }
+  // Defense-in-depth: este fluxo genérico cria apenas usuários administrativos. Motorista
+  // exige linha correspondente em `motoristas` (placa, comissão, etc.), criada só pelo fluxo
+  // próprio (createMotorista). Aceitar tipo='motorista' aqui geraria "motorista fantasma".
+  if (tipo === 'motorista') {
+    return res.status(400).json({ message: 'Motoristas devem ser cadastrados pelo fluxo de Motoristas.' });
+  }
 
   const senhaFinal = senha || '123456';
 
