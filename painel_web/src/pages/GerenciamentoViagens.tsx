@@ -37,6 +37,11 @@ export const GerenciamentoViagens: React.FC = () => {
   // Accordion da visualização por frete (detalhe do motorista).
   const [fretesExpandidos, setFretesExpandidos] = useState<Set<string>>(new Set());
   const [semFreteExpandido, setSemFreteExpandido] = useState(false);
+  // Combobox digitável de motorista no modal de frete (paridade de UX com o Dashboard).
+  const [buscaMotorista, setBuscaMotorista] = useState('');
+  const [motoristaAberto, setMotoristaAberto] = useState(false);
+  // Limpa busca/dropdown do combobox ao abrir/fechar o modal de frete.
+  useEffect(() => { setBuscaMotorista(''); setMotoristaAberto(false); }, [showModal]);
 
   const [formData, setFormData] = useState({
     motorista_id: '',
@@ -482,6 +487,13 @@ export const GerenciamentoViagens: React.FC = () => {
   // tipo real da empresa (empresaTipo), nunca pelo nome.
   const motoristaIdNoModal = editingFrete?.motorista_id ?? formData.motorista_id;
   const isAutonomoNoModal = motoristas.find(m => m.uid === motoristaIdNoModal)?.empresaTipo === 'autonomo';
+  // Combobox de motorista: rótulo do selecionado e lista filtrada pela busca digitada.
+  const motoristaSelecionadoModal = motoristas.find(m => m.uid === formData.motorista_id);
+  const motoristaSelecionadoLabel = motoristaSelecionadoModal ? `${motoristaSelecionadoModal.nome} - ${motoristaSelecionadoModal.placa}` : '';
+  const buscaMotNorm = buscaMotorista.trim().toLowerCase();
+  const listaMotoristasModal = buscaMotNorm
+    ? motoristas.filter(m => (m.nome || '').toLowerCase().includes(buscaMotNorm))
+    : motoristas;
 
   const mFretes = fretes.filter(f => f.motoristaUid === filterMot || f.motorista_id === filterMot);
   // Cancelados continuam visíveis na lista/badge (mFretes), mas ficam FORA de TODAS as agregações
@@ -945,50 +957,72 @@ export const GerenciamentoViagens: React.FC = () => {
       {showModal && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden max-h-[90vh] flex flex-col">
-            <div className="p-5 border-b flex justify-between items-center bg-gray-50">
+            <div className="p-5 border-b border-gray-100 flex justify-between items-center">
               <h3 className="text-lg font-bold text-gray-800"><Truck size={20} className="inline mr-2 text-blue-600" />{editingFrete ? 'Editar Frete' : 'Novo Frete'}</h3>
-              <button onClick={() => setShowModal(false)} className="p-1.5 hover:bg-gray-200 rounded-full transition-colors"><X size={20} /></button>
+              <button onClick={() => setShowModal(false)} className="p-2 hover:bg-gray-100 rounded-lg transition-colors"><X size={18} /></button>
             </div>
             <div className="p-5 overflow-y-auto space-y-4">
               {!editingFrete && (
-                <div>
-                  <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">Motorista</label>
-                  <select className="w-full border p-2.5 rounded-xl outline-none focus:border-blue-500 bg-white" value={formData.motorista_id} onChange={e => setFormData({...formData, motorista_id: e.target.value})}>
-                    <option value="">Selecione um motorista...</option>
-                    {motoristas.map(m => (<option key={m.uid} value={m.uid}>{m.nome} - {m.placa}</option>))}
-                  </select>
+                <div className="relative">
+                  <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Motorista *</label>
+                  <input
+                    type="text"
+                    value={motoristaAberto ? buscaMotorista : motoristaSelecionadoLabel}
+                    onChange={e => setBuscaMotorista(e.target.value)}
+                    onFocus={() => { setMotoristaAberto(true); setBuscaMotorista(''); }}
+                    onBlur={() => setMotoristaAberto(false)}
+                    placeholder="Digite ou selecione o motorista..."
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white outline-none focus:border-blue-500"
+                  />
+                  {motoristaAberto && (
+                    <ul className="absolute z-20 mt-1 w-full max-h-56 overflow-auto bg-white border border-gray-200 rounded-lg shadow-lg">
+                      {listaMotoristasModal.length === 0 ? (
+                        <li className="px-3 py-2 text-sm text-gray-400">Nenhum motorista encontrado</li>
+                      ) : (
+                        listaMotoristasModal.map(m => (
+                          <li
+                            key={m.uid}
+                            onMouseDown={() => { setFormData(prev => ({ ...prev, motorista_id: m.uid })); setMotoristaAberto(false); setBuscaMotorista(''); }}
+                            className="px-3 py-2 text-sm hover:bg-blue-50 cursor-pointer"
+                          >
+                            {m.nome} - {m.placa}
+                          </li>
+                        ))
+                      )}
+                    </ul>
+                  )}
                 </div>
               )}
               <div className="grid grid-cols-2 gap-3">
-                <div><label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">Origem</label><input className="w-full border p-2.5 rounded-xl outline-none focus:border-blue-500" value={formData.origem} onChange={e => setFormData({...formData, origem: e.target.value})} placeholder="Cidade de origem" /></div>
-                <div><label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">Destino</label><input className="w-full border p-2.5 rounded-xl outline-none focus:border-blue-500" value={formData.destino} onChange={e => setFormData({...formData, destino: e.target.value})} placeholder="Cidade de destino" /></div>
+                <div><label className="block text-xs font-bold text-gray-600 uppercase mb-1">Origem *</label><input className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" value={formData.origem} onChange={e => setFormData({...formData, origem: e.target.value})} placeholder="Cidade de origem" /></div>
+                <div><label className="block text-xs font-bold text-gray-600 uppercase mb-1">Destino *</label><input className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" value={formData.destino} onChange={e => setFormData({...formData, destino: e.target.value})} placeholder="Cidade de destino" /></div>
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <div><label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">Valor do Frete</label><input type="number" step="0.01" className="w-full border p-2.5 rounded-xl outline-none focus:border-blue-500" value={formData.valor_frete} onChange={e => setFormData({...formData, valor_frete: e.target.value})} placeholder="0,00" /></div>
-                <div><label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">Data</label><input type="date" className="w-full border p-2.5 rounded-xl outline-none focus:border-blue-500" value={formData.data} onChange={e => setFormData({...formData, data: e.target.value})} /></div>
+                <div><label className="block text-xs font-bold text-gray-600 uppercase mb-1">Valor do Frete *</label><input type="number" step="0.01" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" value={formData.valor_frete} onChange={e => setFormData({...formData, valor_frete: e.target.value})} placeholder="0,00" /></div>
+                <div><label className="block text-xs font-bold text-gray-600 uppercase mb-1">Data</label><input type="date" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" value={formData.data} onChange={e => setFormData({...formData, data: e.target.value})} /></div>
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <div><label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">KM Inicial</label><input type="number" className="w-full border p-2.5 rounded-xl outline-none focus:border-blue-500" value={formData.km_inicial} onChange={e => setFormData({...formData, km_inicial: e.target.value})} placeholder="0" /></div>
-                <div><label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">KM Final</label><input type="number" className="w-full border p-2.5 rounded-xl outline-none focus:border-blue-500" value={formData.km_final} onChange={e => setFormData({...formData, km_final: e.target.value})} placeholder="0" /></div>
+                <div><label className="block text-xs font-bold text-gray-600 uppercase mb-1">KM Inicial</label><input type="number" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" value={formData.km_inicial} onChange={e => setFormData({...formData, km_inicial: e.target.value})} placeholder="0" /></div>
+                <div><label className="block text-xs font-bold text-gray-600 uppercase mb-1">KM Final</label><input type="number" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" value={formData.km_final} onChange={e => setFormData({...formData, km_final: e.target.value})} placeholder="0" /></div>
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <div><label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">Quem Recebeu</label>
-                  <select className="w-full border p-2.5 rounded-xl outline-none focus:border-blue-500 bg-white disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed" value={editingFrete && isAutonomoNoModal ? 'motorista' : formData.quem_recebeu} disabled={!!(editingFrete && isAutonomoNoModal)} onChange={e => setFormData({...formData, quem_recebeu: e.target.value})}>
+                <div><label className="block text-xs font-bold text-gray-600 uppercase mb-1">Quem Recebeu</label>
+                  <select className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white outline-none focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed" value={editingFrete && isAutonomoNoModal ? 'motorista' : formData.quem_recebeu} disabled={!!(editingFrete && isAutonomoNoModal)} onChange={e => setFormData({...formData, quem_recebeu: e.target.value})}>
                     <option value="proprietario">Proprietário</option><option value="motorista">Motorista</option>
                   </select>
                 </div>
                 {editingFrete && (
-                  <div><label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">Status</label>
-                    <select className="w-full border p-2.5 rounded-xl outline-none focus:border-blue-500 bg-white" value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})}>
+                  <div><label className="block text-xs font-bold text-gray-600 uppercase mb-1">Status</label>
+                    <select className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white outline-none focus:border-blue-500" value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})}>
                       <option value="ativo">Ativo</option><option value="pendente">Pendente</option><option value="finalizado">Finalizado</option><option value="cancelado">Cancelado</option>
                     </select>
                   </div>
                 )}
               </div>
             </div>
-            <div className="p-5 bg-gray-50 border-t flex justify-end space-x-3">
-              <button onClick={() => setShowModal(false)} className="px-5 py-2.5 font-bold text-gray-500 hover:bg-gray-200 rounded-xl transition-all">Cancelar</button>
-              <button onClick={handleSave} disabled={isSubmitting} className="px-6 py-2.5 bg-blue-600 text-white font-bold rounded-xl shadow-lg hover:bg-blue-700 transition-all active:scale-95 flex items-center disabled:opacity-50">
+            <div className="p-5 pt-0 flex justify-end gap-3">
+              <button onClick={() => setShowModal(false)} className="px-4 py-2 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">Cancelar</button>
+              <button onClick={handleSave} disabled={isSubmitting} className="px-4 py-2 text-sm font-bold bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center">
                 <Check size={18} className="mr-2" />{isSubmitting ? 'Salvando...' : 'Salvar'}
               </button>
             </div>
