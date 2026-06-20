@@ -29,6 +29,7 @@ import { CadastroPublico } from './pages/CadastroPublico';
 import { Faturas } from './pages/Faturas';
 import { MinhasFaturas } from './pages/MinhasFaturas';
 import { RedefinirSenha } from './pages/RedefinirSenha';
+import { TrocarSenhaObrigatoria } from './pages/TrocarSenhaObrigatoria';
 
 const AppRoutes = () => {
   const { loading } = useAuth();
@@ -53,6 +54,10 @@ const AppRoutes = () => {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/reset-password" element={<RedefinirSenha />} />
+      {/* Troca obrigatória para usuário logado com senha_temporaria=true.
+          Fica FORA do ProtectedRoute (alvo do redirecionamento); a guarda de
+          sessão é feita dentro do próprio componente. */}
+      <Route path="/trocar-senha" element={<TrocarSenhaObrigatoria />} />
       <Route path="/planos" element={<PlanosPublicos />} />
       <Route path="/cadastro" element={<CadastroPublico />} />
       
