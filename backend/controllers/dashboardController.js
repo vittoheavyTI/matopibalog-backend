@@ -67,39 +67,58 @@ exports.getSummary = async (req, res) => {
       .order('data', { ascending: false });
     if (eFretes) throw eFretes;
 
+    // [PR-C2] Conjunto de fretes CANCELADOS no mesmo escopo (empresa/motoristas), SEM filtro de
+    // data: um lançamento do período pode estar vinculado a um frete cancelado de outro mês.
+    // Lançamentos vinculados a esses fretes ficam FORA de todas as somas; soltos (sem frete_id)
+    // são preservados. Os fretes cancelados em si já estão fora (fretes acima filtra 'finalizado').
+    const { data: canceladosRaw, error: eCancelados } = await comFiltroEmpresa(
+      supabase.from('fretes').select('id').eq('status', 'cancelado'));
+    if (eCancelados) throw eCancelados;
+    const fretesCanceladosIds = new Set((canceladosRaw || []).map(f => f.id));
+    const ehDeFreteCancelado = (item) => {
+      const fid = item.frete_id;
+      if (fid === null || fid === undefined || fid === '') return false; // sem frete_id → preserva
+      return fretesCanceladosIds.has(fid);
+    };
+    const naoCancelado = (item) => !ehDeFreteCancelado(item);
+
     // 2. Buscar deduções e abastecimentos FINALIZADOS
-    const { data: despesasRaw, error: eDespesas } = await comFiltroEmpresa(supabase.from('despesas').select('valor, motorista_id').eq('quem_pagou', 'proprietario').in('status', ['aprovado', 'finalizado']).gte('data', dataInicio).lte('data', dataFim));
+    const { data: despesasRaw, error: eDespesas } = await comFiltroEmpresa(supabase.from('despesas').select('valor, motorista_id, frete_id').eq('quem_pagou', 'proprietario').in('status', ['aprovado', 'finalizado']).gte('data', dataInicio).lte('data', dataFim));
     if (eDespesas) throw eDespesas;
 
-    const { data: abastecimentosOwnerRaw, error: eAbastOwner } = await comFiltroEmpresa(supabase.from('abastecimentos').select('valor_total, motorista_id').eq('quem_pagou', 'proprietario').in('status', ['aprovado', 'finalizado']).gte('data', dataInicio).lte('data', dataFim));
+    const { data: abastecimentosOwnerRaw, error: eAbastOwner } = await comFiltroEmpresa(supabase.from('abastecimentos').select('valor_total, motorista_id, frete_id').eq('quem_pagou', 'proprietario').in('status', ['aprovado', 'finalizado']).gte('data', dataInicio).lte('data', dataFim));
     if (eAbastOwner) throw eAbastOwner;
 
-    const { data: allAbastecimentosRaw, error: eAllAbast } = await comFiltroEmpresa(supabase.from('abastecimentos').select('litros, motorista_id').in('status', ['aprovado', 'finalizado']).gte('data', dataInicio).lte('data', dataFim));
+    const { data: allAbastecimentosRaw, error: eAllAbast } = await comFiltroEmpresa(supabase.from('abastecimentos').select('litros, motorista_id, frete_id').in('status', ['aprovado', 'finalizado']).gte('data', dataInicio).lte('data', dataFim));
     if (eAllAbast) throw eAllAbast;
 
-    const { data: valesRaw, error: eVales } = await comFiltroEmpresa(supabase.from('vales').select('valor, motorista_id').eq('quem_pagou', 'proprietario').in('status', ['aprovado', 'finalizado']).gte('data', dataInicio).lte('data', dataFim));
+    const { data: valesRaw, error: eVales } = await comFiltroEmpresa(supabase.from('vales').select('valor, motorista_id, frete_id').eq('quem_pagou', 'proprietario').in('status', ['aprovado', 'finalizado']).gte('data', dataInicio).lte('data', dataFim));
     if (eVales) throw eVales;
 
     // [PR2A] Lançamentos pagos pelo MOTORISTA — usados SÓ para gasto do autônomo.
     // Não entram em nenhum campo antigo nem em deducoes_vinculado.
-    const { data: despesasMotRaw, error: eDespesasMot } = await comFiltroEmpresaUuid(supabase.from('despesas').select('valor, motorista_id').eq('quem_pagou', 'motorista').in('status', ['aprovado', 'finalizado']).gte('data', dataInicio).lte('data', dataFim));
+    const { data: despesasMotRaw, error: eDespesasMot } = await comFiltroEmpresaUuid(supabase.from('despesas').select('valor, motorista_id, frete_id').eq('quem_pagou', 'motorista').in('status', ['aprovado', 'finalizado']).gte('data', dataInicio).lte('data', dataFim));
     if (eDespesasMot) throw eDespesasMot;
 
-    const { data: abastMotRaw, error: eAbastMot } = await comFiltroEmpresaUuid(supabase.from('abastecimentos').select('valor_total, motorista_id').eq('quem_pagou', 'motorista').in('status', ['aprovado', 'finalizado']).gte('data', dataInicio).lte('data', dataFim));
+    const { data: abastMotRaw, error: eAbastMot } = await comFiltroEmpresaUuid(supabase.from('abastecimentos').select('valor_total, motorista_id, frete_id').eq('quem_pagou', 'motorista').in('status', ['aprovado', 'finalizado']).gte('data', dataInicio).lte('data', dataFim));
     if (eAbastMot) throw eAbastMot;
 
-    const { data: valesMotRaw, error: eValesMot } = await comFiltroEmpresaUuid(supabase.from('vales').select('valor, motorista_id').eq('quem_pagou', 'motorista').in('status', ['aprovado', 'finalizado']).gte('data', dataInicio).lte('data', dataFim));
+    const { data: valesMotRaw, error: eValesMot } = await comFiltroEmpresaUuid(supabase.from('vales').select('valor, motorista_id, frete_id').eq('quem_pagou', 'motorista').in('status', ['aprovado', 'finalizado']).gte('data', dataInicio).lte('data', dataFim));
     if (eValesMot) throw eValesMot;
 
-    // Garantir arrays nunca nulos
+    // Garantir arrays nunca nulos.
+    // [PR-C2] Lançamentos vinculados a fretes cancelados são removidos AQUI (uma vez), antes de
+    // qualquer agregação — os pontos de consumo/somas abaixo permanecem intactos. Lançamentos sem
+    // frete_id passam pelo filtro (naoCancelado retorna true). `fretes` não é filtrado: já vem só
+    // com status 'finalizado'.
     const fretes = fretesRaw || [];
-    const despesas = despesasRaw || [];
-    const abastecimentosOwner = abastecimentosOwnerRaw || [];
-    const allAbastecimentos = allAbastecimentosRaw || [];
-    const vales = valesRaw || [];
-    const despesasMot = despesasMotRaw || [];
-    const abastMot = abastMotRaw || [];
-    const valesMot = valesMotRaw || [];
+    const despesas = (despesasRaw || []).filter(naoCancelado);
+    const abastecimentosOwner = (abastecimentosOwnerRaw || []).filter(naoCancelado);
+    const allAbastecimentos = (allAbastecimentosRaw || []).filter(naoCancelado);
+    const vales = (valesRaw || []).filter(naoCancelado);
+    const despesasMot = (despesasMotRaw || []).filter(naoCancelado);
+    const abastMot = (abastMotRaw || []).filter(naoCancelado);
+    const valesMot = (valesMotRaw || []).filter(naoCancelado);
 
     // Cálculos Globais
     let totalFretes = 0;
