@@ -97,7 +97,9 @@ class AuthProvider extends ChangeNotifier {
       return false;
     }
 
-    final userRole = res['user']['role'] as String;
+    // role lido de forma tolerante (String?): cobre null/undefined sem lançar no cast,
+    // permitindo rejeitá-los pela allowlist abaixo.
+    final userRole = res['user']['role']?.toString();
     final userStatus = res['user']['status'] as String;
 
     if (userStatus == 'pendente') {
@@ -108,10 +110,14 @@ class AuthProvider extends ChangeNotifier {
       return false;
     }
 
-    if (userRole == 'admin') {
+    // App é exclusivo de motorista (regra de produto). Allowlist explícita: somente
+    // role == 'motorista' entra. Admin, operador, auxiliar, roles futuros e null/undefined
+    // são rejeitados aqui — o painel é o canal de admin/auxiliar. NÃO usa empresas.tipo nem
+    // nome para decidir acesso: empresa.tipo serve só ao modelo financeiro (autônomo x vinculado).
+    if (userRole != 'motorista') {
       _status = AuthStatus.error;
-      _error = 'Acesso ao App restrito para motoristas.';
-      AppLogger.action('login_error', params: {'email': email, 'error': 'admin_blocked'});
+      _error = 'Este acesso é permitido apenas para motoristas no aplicativo.';
+      AppLogger.action('login_error', params: {'email': email, 'error': 'role_nao_motorista', 'role': userRole ?? 'null'});
       notifyListeners();
       return false;
     }
@@ -119,7 +125,7 @@ class AuthProvider extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     _token = res['token'];
     _nome = res['user']['nome'];
-    _role = userRole;
+    _role = userRole!; // garantido 'motorista' pela allowlist acima
     _uid = res['user']['uid'];
     _fotoUrl = res['user']['foto_url'] ?? '';
     _empresaTipo = res['user']['empresa_tipo'] as String? ?? '';
