@@ -311,6 +311,34 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
   }
 
   Widget _cardResumo(Map<String, dynamic> f) {
+    // Frete cancelado: NÃO exibir comissão/saldo/resultado — o frete não tem valor
+    // financeiro válido. Substitui o resumo financeiro por um aviso claro. Os dados do
+    // frete (_cardFrete) e os lançamentos seguem visíveis. Espelha a regra do
+    // finance_provider, que já exclui cancelados das somas gerais.
+    if ((f['status'] ?? '') == 'cancelado') {
+      return Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              const Icon(Icons.block, color: Colors.red),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Frete cancelado — fora dos cálculos financeiros.',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Theme.of(context).colorScheme.onSurface,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     final valorFrete = double.tryParse(f['valor_frete']?.toString() ?? '0') ?? 0.0;
 
     final despesasAprov = _soma(_despesas, 'valor', filtroStatus: 'aprovado');
