@@ -234,8 +234,8 @@ export const GerenciamentoViagens: React.FC = () => {
         // como "não enviado"); evita coagir a 0 e reprovar na validação de número positivo.
         km_inicial: Number(formData.km_inicial) > 0 ? parseInt(formData.km_inicial) : null,
         km_final: Number(formData.km_final) > 0 ? parseInt(formData.km_final) : null,
-        // Autônomo nunca recebe via 'proprietario': força 'motorista' (regra de produto). Na criação
-        // este campo é omitido logo abaixo; logo, isto trava apenas o PATCH de edição.
+        // Autônomo nunca recebe via 'proprietario': força 'motorista' (regra de produto). Vale na
+        // criação E na edição. Vinculado usa o valor escolhido no select (default 'proprietario').
         quem_recebeu: isAutonomoNoModal ? 'motorista' : formData.quem_recebeu,
         status: formData.status,
         data: formData.data
@@ -244,11 +244,10 @@ export const GerenciamentoViagens: React.FC = () => {
       if (editingFrete) {
         await api.patch('/fretes/' + editingFrete.id, {...payload});
       } else {
-        // Na CRIAÇÃO, não enviamos quem_recebeu nem status: o backend ignora status na criação
-        // (insert não inclui o campo) e deriva quem_recebeu pelo tipo real da empresa
-        // (autonomo → 'motorista'; demais → 'proprietario'). Enviar status aqui era inócuo.
-        // O override manual de ambos segue valendo só na edição (PATCH acima).
-        const { quem_recebeu: _quemRecebeuOmitido, status: _statusOmitido, ...payloadCriacao } = payload;
+        // Na CRIAÇÃO enviamos quem_recebeu (autônomo travado em 'motorista'; vinculado escolhe,
+        // default 'proprietario'). O backend ainda força 'motorista' p/ autônomo (defense-in-depth).
+        // status continua omitido: o backend o ignora na criação (insert não inclui o campo).
+        const { status: _statusOmitido, ...payloadCriacao } = payload;
         await api.post('/fretes', { ...payloadCriacao, motorista_id: formData.motorista_id });
       }
       if (filterMot !== 'todos') {
@@ -1007,7 +1006,7 @@ export const GerenciamentoViagens: React.FC = () => {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div><label className="block text-xs font-bold text-gray-600 uppercase mb-1">Quem Recebeu</label>
-                  <select className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white outline-none focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed" value={editingFrete && isAutonomoNoModal ? 'motorista' : formData.quem_recebeu} disabled={!!(editingFrete && isAutonomoNoModal)} onChange={e => setFormData({...formData, quem_recebeu: e.target.value})}>
+                  <select className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white outline-none focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed" value={isAutonomoNoModal ? 'motorista' : formData.quem_recebeu} disabled={isAutonomoNoModal} onChange={e => setFormData({...formData, quem_recebeu: e.target.value})}>
                     <option value="proprietario">Proprietário</option><option value="motorista">Motorista</option>
                   </select>
                 </div>
