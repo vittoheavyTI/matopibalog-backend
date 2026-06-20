@@ -448,9 +448,11 @@ export const Usuarios: React.FC = () => {
                       }}
                     >
                       <option value="admin">Administrador</option>
-                      <option value="motorista">Motorista</option>
                       <option value="operador">Operador</option>
                     </select>
+                    <p className="text-[10px] text-gray-400 mt-1 ml-1">
+                      Para cadastrar motoristas, use a tela de Motoristas.
+                    </p>
                   </div>
                   {editingUser && (
                     <div>
