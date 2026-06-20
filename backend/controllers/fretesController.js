@@ -194,9 +194,12 @@ exports.update = async (req, res) => {
   const { id } = req.params;
 
   try {
+    const isSuperAdmin = req.user.is_super_admin === true;
+    const isAdmin = req.user.role === 'admin';
+
     const { data: checkData, error: checkError } = await supabase
       .from('fretes')
-      .select('motorista_id')
+      .select('motorista_id, empresa_id')
       .eq('id', id)
       .single();
 
@@ -204,8 +207,18 @@ exports.update = async (req, res) => {
       return res.status(404).json({ message: 'Frete não encontrado.' });
     }
 
-    if (req.user.role !== 'admin' && checkData.motorista_id !== req.user.uid) {
-      return res.status(403).json({ message: 'Acesso negado.' });
+    // Ownership por perfil (espelha exports.finalizar):
+    //  - super-admin: sempre pode
+    //  - admin de empresa: só fretes da própria empresa (isolamento multi-tenant)
+    //  - motorista: só o próprio frete
+    if (!isSuperAdmin) {
+      if (isAdmin) {
+        if (checkData.empresa_id !== req.empresa_id) {
+          return res.status(403).json({ message: 'Acesso negado.' });
+        }
+      } else if (checkData.motorista_id !== req.user.uid) {
+        return res.status(403).json({ message: 'Acesso negado.' });
+      }
     }
 
     // Extrair APENAS campos permitidos (previne mass assignment)
@@ -331,6 +344,32 @@ exports.finalizar = async (req, res) => {
 exports.delete = async (req, res) => {
   const { id } = req.params;
   try {
+    const isSuperAdmin = req.user.is_super_admin === true;
+    const isAdmin = req.user.role === 'admin';
+
+    // Cancelar = marcar status 'cancelado' (nunca delete físico). Antes, verifica ownership
+    // por perfil (espelha exports.finalizar):
+    //  - super-admin: sempre pode
+    //  - admin de empresa: só fretes da própria empresa (isolamento multi-tenant)
+    //  - motorista: só o próprio frete
+    const { data: frete, error: freteError } = await supabase
+      .from('fretes')
+      .select('id, motorista_id, empresa_id')
+      .eq('id', id)
+      .single();
+
+    if (freteError || !frete) return res.status(404).json({ message: 'Frete não encontrado.' });
+
+    if (!isSuperAdmin) {
+      if (isAdmin) {
+        if (frete.empresa_id !== req.empresa_id) {
+          return res.status(403).json({ message: 'Acesso negado.' });
+        }
+      } else if (frete.motorista_id !== req.user.uid) {
+        return res.status(403).json({ message: 'Acesso negado.' });
+      }
+    }
+
     const { error } = await supabase
       .from('fretes')
       .update({ status: 'cancelado' })
