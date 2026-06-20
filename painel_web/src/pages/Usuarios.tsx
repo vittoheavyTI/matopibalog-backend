@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { UserPlus, Search, Shield, Phone, MapPin, Camera, X, Check, Trash2, AlertTriangle, Loader2, Key } from 'lucide-react';
+import { UserPlus, Search, Shield, Phone, MapPin, Camera, X, Check, Trash2, AlertTriangle, Loader2, Key, Copy, KeyRound } from 'lucide-react';
 import api from '../api';
 import { maskPhone, maskCEP } from '../utils/masks';
 import axios from 'axios';
@@ -23,6 +23,10 @@ export const Usuarios: React.FC = () => {
   const [novaSenha, setNovaSenha] = useState('');
   const [isResetting, setIsResetting] = useState(false);
   const [resetMessage, setResetMessage] = useState('');
+  // Senha temporária gerada pelo backend, exibida UMA única vez (estado efêmero,
+  // nunca localStorage/sessionStorage/log; some ao fechar o modal).
+  const [senhaGerada, setSenhaGerada] = useState<string | null>(null);
+  const [senhaCopiada, setSenhaCopiada] = useState(false);
 
   const [newUser, setNewUser] = useState({
     nome: '',
@@ -92,9 +96,8 @@ export const Usuarios: React.FC = () => {
           tipo: editingUser.nivel
         });
       } else {
-        await api.post('/admin/usuarios', {
+        const payload: any = {
           email: newUser.email,
-          senha: newUser.senha || '123456',
           nome: newUser.nome,
           telefone: newUser.celular,
           cep: newUser.cep,
@@ -104,7 +107,12 @@ export const Usuarios: React.FC = () => {
           foto_url: newUser.fotoUrl,
           permissoes: newUser.permissoes,
           tipo: newUser.nivel
-        });
+        };
+        // Só envia senha se o admin digitou; vazio → backend gera senha aleatória.
+        if (newUser.senha && newUser.senha.trim()) payload.senha = newUser.senha;
+        const resp = await api.post('/admin/usuarios', payload);
+        // Senha gerada pelo backend → exibe one-time (admin não informou senha).
+        if (resp?.data?.senha_temporaria_gerada) { setSenhaCopiada(false); setSenhaGerada(resp.data.senha_temporaria_gerada); }
       }
       await loadUsuarios();
       setShowModal(false);
@@ -638,6 +646,31 @@ export const Usuarios: React.FC = () => {
             <div className="p-4 bg-gray-50 flex justify-end space-x-2">
               <button onClick={() => { setResetUserId(null); setNovaSenha(''); setResetMessage(''); }} className="px-4 py-2 border rounded">Cancelar</button>
               <button onClick={handleResetSenha} disabled={isResetting} className="px-4 py-2 bg-orange-600 text-white rounded">{isResetting ? 'Processando...' : 'Confirmar Reset'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {senhaGerada && (
+        <div className="fixed inset-0 bg-black/70 z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+            <div className="p-6 flex flex-col items-center text-center space-y-3">
+              <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center"><KeyRound size={32} className="text-amber-600" /></div>
+              <h3 className="text-xl font-bold text-gray-800">Senha temporária</h3>
+              <p className="text-sm text-gray-500">Copie esta senha agora e entregue ao usuário. <strong className="text-gray-700">Ela será exibida somente uma vez.</strong></p>
+              <div className="w-full flex items-center gap-2 bg-gray-50 border-2 border-dashed border-gray-200 rounded-xl p-3">
+                <code className="flex-1 text-lg font-mono font-bold text-gray-800 break-all select-all">{senhaGerada}</code>
+                <button
+                  onClick={async () => { try { await navigator.clipboard.writeText(senhaGerada); setSenhaCopiada(true); } catch { setSenhaCopiada(false); } }}
+                  className="flex items-center px-3 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 flex-shrink-0"
+                >
+                  {senhaCopiada ? <><Check size={16} className="mr-1.5" /> Copiado</> : <><Copy size={16} className="mr-1.5" /> Copiar</>}
+                </button>
+              </div>
+              <p className="text-xs text-gray-400">O usuário será obrigado a trocar a senha no primeiro acesso.</p>
+            </div>
+            <div className="p-4 bg-gray-50 border-t flex justify-end">
+              <button onClick={() => { setSenhaGerada(null); setSenhaCopiada(false); }} className="px-6 py-2.5 bg-gray-800 text-white font-bold rounded-xl hover:bg-gray-900">Fechar</button>
             </div>
           </div>
         </div>

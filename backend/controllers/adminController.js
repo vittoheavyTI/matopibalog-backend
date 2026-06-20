@@ -1,4 +1,17 @@
 const supabase = require('../config/supabase');
+const crypto = require('crypto');
+
+// Gera senha temporária aleatória e forte (sem caracteres ambíguos: 0/O/1/l/I)
+// usando o crypto nativo do Node. Substitui o antigo default fixo '123456' em
+// createUsuario, que era previsível. Nunca é logada nem persistida em texto puro.
+function gerarSenhaTemporaria(tamanho = 14) {
+  const alfabeto = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+  let senha = '';
+  for (let i = 0; i < tamanho; i++) {
+    senha += alfabeto[crypto.randomInt(alfabeto.length)];
+  }
+  return senha;
+}
 
 // ─── Listar Motoristas Pendentes ──────────────────────────────────────────────
 exports.getPendentes = async (req, res) => {
@@ -408,7 +421,11 @@ exports.createUsuario = async (req, res) => {
     return res.status(400).json({ message: 'Empresa selecionada não encontrada.' });
   }
 
-  const senhaFinal = senha || '123456';
+  // Se o admin informou senha, usa a dele; senão gera uma aleatória forte.
+  // A gerada é devolvida UMA única vez no response (senha_temporaria_gerada) para
+  // o painel exibir ao admin; não é logada nem gravada em texto puro em `usuarios`.
+  const senhaInformada = typeof senha === 'string' && senha.trim().length > 0;
+  const senhaFinal = senhaInformada ? senha : gerarSenhaTemporaria();
 
   try {
     // 1. Criar no Supabase Auth
@@ -458,7 +475,10 @@ exports.createUsuario = async (req, res) => {
     }
 
     console.log(`[adminController:createUsuario] Usuário ${nome} criado com sucesso.`);
-    res.status(201).json({ message: 'Usuário criado com sucesso.', uid });
+    const resposta = { message: 'Usuário criado com sucesso.', uid };
+    // Só retorna a senha quando foi o backend que a gerou (admin não informou).
+    if (!senhaInformada) resposta.senha_temporaria_gerada = senhaFinal;
+    res.status(201).json(resposta);
   } catch (error) {
     console.error('[adminController:createUsuario] Erro geral:', error);
     res.status(500).json({ message: 'Erro inesperado ao criar administrador: ' + (error.message || error) });
