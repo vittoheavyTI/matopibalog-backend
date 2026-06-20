@@ -22,5 +22,13 @@ export const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ childr
     );
   }
 
+  // Senha temporária: bloqueia qualquer rota interna até a troca obrigatória.
+  // Vale para super-admin, admin comum e auxiliar — todos passam por aqui antes
+  // de renderizar o Layout (e o SuperAdminRoute aninhado). A rota /trocar-senha
+  // fica FORA do ProtectedRoute, então não entra em loop de redirecionamento.
+  if (user.senha_temporaria) {
+    return <Navigate to="/trocar-senha" replace />;
+  }
+
   return <>{children}</>;
 };

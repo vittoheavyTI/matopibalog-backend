@@ -12,6 +12,7 @@ export interface User {
   empresa_id?: string;
   empresa_tipo?: string;
   empresa_nome?: string;
+  senha_temporaria?: boolean;
 }
 
 interface AuthContextType {
@@ -60,6 +61,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           empresa_id: data.empresa_id,
           empresa_tipo: data.empresas?.tipo ?? undefined,
           empresa_nome: data.empresas?.nome ?? undefined,
+          // Sem isto, ao recarregar a página a flag se perderia e o usuário
+          // com senha temporária burlaria a troca obrigatória (gate do ProtectedRoute).
+          senha_temporaria: data.senha_temporaria ?? false,
         });
       })
       .catch(() => {
