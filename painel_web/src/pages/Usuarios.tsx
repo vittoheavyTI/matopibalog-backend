@@ -83,7 +83,7 @@ export const Usuarios: React.FC = () => {
     try {
       setIsSubmitting(true);
       if (editingUser) {
-        await api.put('/admin/usuarios/' + editingUser.uid, {
+        const payload: any = {
           nome: editingUser.nome,
           telefone: editingUser.celular,
           cep: editingUser.cep,
@@ -92,9 +92,14 @@ export const Usuarios: React.FC = () => {
           cidade: editingUser.cidade,
           foto_url: editingUser.fotoUrl,
           permissoes: editingUser.permissoes,
-          status: editingUser.status || 'ativo',
-          tipo: editingUser.nivel
-        });
+          status: editingUser.status || 'ativo'
+        };
+
+        if (editingUser.nivel !== 'operador') {
+          payload.tipo = editingUser.nivel;
+        }
+
+        await api.put('/admin/usuarios/' + editingUser.uid, payload);
       } else {
         const payload: any = {
           email: newUser.email,
@@ -441,27 +446,41 @@ export const Usuarios: React.FC = () => {
                       />
                     </div>
                   )}
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">Nível</label>
-                    <select 
-                      className="w-full border p-3 rounded-xl outline-none focus:border-blue-500 bg-white"
-                      value={editingUser ? editingUser.nivel : newUser.nivel}
-                      onChange={e => {
-                        const val = e.target.value;
-                        if (editingUser) {
-                          setEditingUser({...editingUser, nivel: val});
-                        } else {
-                          setNewUser({...newUser, nivel: val});
-                        }
-                      }}
-                    >
-                      <option value="admin">Administrador</option>
-                      <option value="operador">Operador</option>
-                    </select>
-                    <p className="text-[10px] text-gray-400 mt-1 ml-1">
-                      Para cadastrar motoristas, use a tela de Motoristas.
-                    </p>
-                  </div>
+                  {editingUser?.nivel === 'operador' ? (
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">Nível</label>
+                      <input
+                        type="text"
+                        readOnly
+                        className="w-full border p-3 rounded-xl bg-gray-100 text-gray-600"
+                        value="Operador legado - sem permissão funcional"
+                      />
+                      <p className="text-[10px] text-gray-400 mt-1 ml-1">
+                        Este papel é preservado apenas para usuário existente e não pode ser escolhido em novos cadastros.
+                      </p>
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">Nível</label>
+                      <select
+                        className="w-full border p-3 rounded-xl outline-none focus:border-blue-500 bg-white"
+                        value={editingUser ? editingUser.nivel : newUser.nivel}
+                        onChange={e => {
+                          const val = e.target.value;
+                          if (editingUser) {
+                            setEditingUser({...editingUser, nivel: val});
+                          } else {
+                            setNewUser({...newUser, nivel: val});
+                          }
+                        }}
+                      >
+                        <option value="admin">Administrador</option>
+                      </select>
+                      <p className="text-[10px] text-gray-400 mt-1 ml-1">
+                        Para cadastrar motoristas, use a tela de Motoristas.
+                      </p>
+                    </div>
+                  )}
                   {editingUser && (
                     <div>
                       <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">Status</label>
