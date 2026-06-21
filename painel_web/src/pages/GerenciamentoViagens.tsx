@@ -570,7 +570,7 @@ export const GerenciamentoViagens: React.FC = () => {
           </div>
           <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="border rounded-lg p-2 outline-none bg-white text-gray-600 text-xs">
             <option value="todos">Todos Status</option>
-            <option value="ativo">Ativo</option><option value="pendente">Pendente</option>
+            <option value="ativo">Ativo</option>
             <option value="finalizado">Finalizado</option><option value="cancelado">Cancelado</option>
           </select>
         </div>
