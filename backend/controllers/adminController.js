@@ -399,6 +399,9 @@ exports.createUsuario = async (req, res) => {
   if (tipo === 'motorista') {
     return res.status(400).json({ message: 'Motoristas devem ser cadastrados pelo fluxo de Motoristas.' });
   }
+  if (tipo === 'operador') {
+    return res.status(400).json({ message: 'Operador ainda não possui permissões no painel. Crie um administrador.' });
+  }
 
   // [B1a] Super-admin deve escolher a empresa-alvo explicitamente (?empresa_id=, que o
   // tenant.js resolve marcando req.impersonating). Sem isso, req.empresa_id seria a empresa
@@ -531,10 +534,11 @@ exports.updateUsuario = async (req, res) => {
   try {
     // Validar ownership (super-admin pula)
     const isSuperAdmin = req.user.is_super_admin === true;
+    let usuarioAtual = null;
     if (!isSuperAdmin) {
       const { data: pertence, error: pertenceError } = await supabase
         .from('usuarios')
-        .select('id')
+        .select('id, tipo')
         .eq('id', id)
         .eq('empresa_id', req.empresa_id)
         .single();
@@ -542,6 +546,25 @@ exports.updateUsuario = async (req, res) => {
       if (pertenceError || !pertence) {
         return res.status(403).json({ message: 'Acesso negado: usuário não pertence a esta empresa.' });
       }
+      usuarioAtual = pertence;
+    }
+
+    const tipoProtegidoSolicitado = tipo === 'motorista' || tipo === 'operador';
+    if (tipoProtegidoSolicitado && !usuarioAtual) {
+      const { data: usuario, error: usuarioError } = await supabase
+        .from('usuarios')
+        .select('id, tipo')
+        .eq('id', id)
+        .single();
+
+      if (usuarioError || !usuario) {
+        return res.status(404).json({ message: 'Usuário não encontrado.' });
+      }
+      usuarioAtual = usuario;
+    }
+
+    if (tipoProtegidoSolicitado && tipo !== usuarioAtual.tipo) {
+      return res.status(400).json({ message: 'Não é permitido alterar o tipo do usuário para motorista ou operador.' });
     }
 
     const updateData = {};
