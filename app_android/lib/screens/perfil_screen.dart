@@ -406,7 +406,7 @@ class _PerfilScreenState extends State<PerfilScreen> {
             const SizedBox(height: 16),
             _secao('Dados da Conta'),
             _linha('E-mail', p['email']),
-            _linha('CPF', _mascaraCpf(p['cpf'])),
+            _linha('CPF', _mascaraCpf(motorista?['cpf'])),
             _linha('Status', p['status'] ?? '--'),
             _linha('Tipo de conta', p['role'] ?? '--'),
             const SizedBox(height: 16),
