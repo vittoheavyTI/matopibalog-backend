@@ -117,7 +117,8 @@ export const Dashboard: React.FC = () => {
         kmInicial: f.km_inicial,
         kmFinal: f.km_final,
         criadoEm: f.data,
-        status: f.status
+        status: f.status,
+        quemRecebeu: f.quem_recebeu
       })));
       setDespesas(despesasData.filter((d: any) => d.status !== 'finalizado').map((d: any) => ({
         id: d.id,
@@ -559,6 +560,7 @@ export const Dashboard: React.FC = () => {
                                   <span className="text-orange-500 italic">KM Final Pendente</span>
                                 )}
                                 <span>{format(new Date(f.criadoEm), 'dd/MM/yyyy')}</span>
+                                <span className="bg-gray-100 px-1.5 py-0.5 rounded">Quem recebeu: {f.quemRecebeu === 'proprietario' ? 'Proprietário' : f.quemRecebeu === 'motorista' ? 'Motorista' : 'Não informado'}</span>
                                 {(() => {
                                   const litrosFrete = mAbast.filter(a => a.frete_id === f.id && a.status === 'aprovado').reduce((acc, a) => acc + (parseFloat(a.litros) || 0), 0);
                                   const dist = (f.kmFinal || 0) - (f.kmInicial || 0);
