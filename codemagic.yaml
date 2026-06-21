@@ -12,7 +12,11 @@ workflows:
     scripts:
       - name: Remover java.home local do gradle.properties
         script: |
-          sed -i '/org.gradle.java.home/d' app_android/android/gradle.properties
+          GRADLE_PROPS="app_android/android/gradle.properties"
+          if [ -f "$GRADLE_PROPS" ]; then
+            grep -v '^org.gradle.java.home=' "$GRADLE_PROPS" > "$GRADLE_PROPS.tmp" || true
+            mv "$GRADLE_PROPS.tmp" "$GRADLE_PROPS"
+          fi
 
       - name: Flutter clean, pub get, analyze e build debug
         script: |
@@ -37,7 +41,11 @@ workflows:
     scripts:
       - name: Remover java.home local do gradle.properties
         script: |
-          sed -i '/org.gradle.java.home/d' app_android/android/gradle.properties
+          GRADLE_PROPS="app_android/android/gradle.properties"
+          if [ -f "$GRADLE_PROPS" ]; then
+            grep -v '^org.gradle.java.home=' "$GRADLE_PROPS" > "$GRADLE_PROPS.tmp" || true
+            mv "$GRADLE_PROPS.tmp" "$GRADLE_PROPS"
+          fi
 
       - name: Flutter clean, pub get, analyze e build release
         script: |
