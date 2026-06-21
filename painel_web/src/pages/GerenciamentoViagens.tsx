@@ -534,7 +534,6 @@ export const GerenciamentoViagens: React.FC = () => {
   const mediaConsumo = totalLiters > 0 && totalKM > 0 ? (totalKM / totalLiters).toFixed(2) : '0.00';
 
   const filtered = fretes.filter(f => {
-    if (f.status === 'finalizado') return false;
     if (filterMot !== 'todos') return f.motoristaUid === filterMot || f.motorista_id === filterMot;
     const matchSearch = f.origem?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       f.destino?.toLowerCase().includes(searchTerm.toLowerCase()) ||
