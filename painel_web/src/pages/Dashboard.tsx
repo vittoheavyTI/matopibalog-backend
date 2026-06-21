@@ -614,7 +614,7 @@ export const Dashboard: React.FC = () => {
                                 {editingItem?.id === item.id ? (
                                   <button onClick={handleSaveEdit} className="p-1 bg-green-600 text-white rounded shadow-sm"><Save size={16} /></button>
                                 ) : (
-                                  <button onClick={() => { handleStartEdit(item, type); handleResetStatus(item.id, type as any); }} className="p-1 text-gray-400 hover:text-blue-600 transition-colors" title="Editar"><Edit size={16} /></button>
+                                  <button onClick={() => handleStartEdit(item, type)} className="p-1 text-gray-400 hover:text-blue-600 transition-colors" title="Editar"><Edit size={16} /></button>
                                 )}
                               </div>
                             )}
