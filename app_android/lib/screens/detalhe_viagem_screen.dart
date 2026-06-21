@@ -122,10 +122,11 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
     }
   }
 
-  double _soma(List<dynamic> items, String campo, {String? filtroStatus}) {
+  double _soma(List<dynamic> items, String campo, {String? filtroStatus, String? quemPagou}) {
     double total = 0.0;
     for (final item in items) {
       if (filtroStatus != null && item['status'] != filtroStatus) continue;
+      if (quemPagou != null && item['quem_pagou'] != quemPagou) continue;
       total += double.tryParse(item[campo]?.toString() ?? '0') ?? 0.0;
     }
     return total;
@@ -341,9 +342,12 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
 
     final valorFrete = double.tryParse(f['valor_frete']?.toString() ?? '0') ?? 0.0;
 
-    final despesasAprov = _soma(_despesas, 'valor', filtroStatus: 'aprovado');
-    final abastAprov = _soma(_abastecimentos, 'valor_total', filtroStatus: 'aprovado');
-    final valesAprov = _soma(_vales, 'valor', filtroStatus: 'aprovado');
+    // Alinhado com FinanceProvider: vinculado só deduz lancamentos pagos pelo
+    // proprietario (quem_pagou == 'proprietario'); autonomo deduz todos.
+    final quemPagouFilter = _isAutonomo ? null : 'proprietario';
+    final despesasAprov = _soma(_despesas, 'valor', filtroStatus: 'aprovado', quemPagou: quemPagouFilter);
+    final abastAprov = _soma(_abastecimentos, 'valor_total', filtroStatus: 'aprovado', quemPagou: quemPagouFilter);
+    final valesAprov = _soma(_vales, 'valor', filtroStatus: 'aprovado', quemPagou: quemPagouFilter);
     final totalDeducoes = despesasAprov + abastAprov + valesAprov;
 
     final pendentes = _despesas.where((i) => i['status'] == 'pendente').length +
