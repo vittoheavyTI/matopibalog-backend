@@ -818,7 +818,7 @@ export const ResumoMotorista: React.FC = () => {
         itens.forEach(item => {
           body.push(linhaPrincipal(item));
           const partes: string[] = [];
-          if (item.id) partes.push(`Ref: ${item.id}`);
+          if (item.id) partes.push(`Ref. interna: ${String(item.id).substring(0, 8)}`);
           if (item.status) partes.push(`Status: ${String(item.status).toUpperCase()}`);
           const obs = item.obsResolucao || (justificativaObrigatoria ? 'Sem justificativa informada' : '');
           if (obs) partes.push(`Justificativa: ${obs}`);
@@ -827,7 +827,7 @@ export const ResumoMotorista: React.FC = () => {
             else partes.push('Sem comprovante');
           }
           if (partes.length > 0) {
-            body.push([{ content: 'Evidência — ' + partes.join('   •   '), colSpan: colunas,
+            body.push([{ content: 'Comprovante — ' + partes.join('   •   '), colSpan: colunas,
               styles: { fontSize: 8, textColor: [100, 116, 139], fontStyle: 'italic' } }]);
           }
         });
