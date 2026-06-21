@@ -477,9 +477,9 @@ export const Dashboard: React.FC = () => {
         {!selectedMot && (
           <div className="flex justify-between items-center px-2 animate-fade-in">
             <button
-              onClick={() => window.open('/viagens', '_blank')}
+              onClick={() => navigate('/relatorios/viagens')}
               className="text-xl font-bold text-gray-700 flex items-center hover:text-blue-600 transition-colors cursor-pointer"
-              title="Abrir Gerenciamento de Fretes em nova aba"
+              title="Ir para Gerenciamento de Fretes"
             >
               <DollarSign size={20} className="mr-2 text-green-600" /> Motoristas em Frete
             </button>
@@ -742,9 +742,9 @@ export const Dashboard: React.FC = () => {
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
             <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50/30">
               <button
-                onClick={() => window.open('/resumo', '_blank')}
+                onClick={() => navigate('/relatorios/resumo')}
                 className="text-lg font-bold text-gray-800 flex items-center hover:text-blue-600 transition-colors cursor-pointer"
-                title="Abrir Histórico de Fretes em nova aba"
+                title="Ir para Histórico de Fretes"
               >
                 <Truck size={22} className="mr-2 text-blue-600" /> Histórico de Fretes
               </button>
