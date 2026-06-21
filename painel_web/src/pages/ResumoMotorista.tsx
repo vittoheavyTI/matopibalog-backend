@@ -12,6 +12,24 @@ const safeFmt = (d: any, fmt: string) => {
   try { const dt = new Date(d); if (isNaN(dt.getTime())) return '-'; return format(dt, fmt); } catch { return '-'; }
 };
 
+// Aguarda o carregamento/decodificação da imagem antes de calcular dimensões.
+// Evita usar naturalWidth=0 (imagem ainda não carregada) no cálculo de proporção,
+// que fazia a logo aparecer esticada nos PDFs.
+const loadLogoDims = (dataUrl: string, maxW = 35, maxH = 20): Promise<{ w: number; h: number }> =>
+  new Promise((resolve) => {
+    try {
+      const img = new Image();
+      img.onload = () => {
+        const nw = img.naturalWidth || maxW;
+        const nh = img.naturalHeight || maxH;
+        const ratio = Math.min(maxW / nw, maxH / nh);
+        resolve({ w: nw * ratio, h: nh * ratio });
+      };
+      img.onerror = () => resolve({ w: maxW, h: maxH });
+      img.src = dataUrl;
+    } catch { resolve({ w: maxW, h: maxH }); }
+  });
+
 class CatchError extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
   static getDerivedStateFromError(error: Error) { return { error }; }
@@ -308,13 +326,8 @@ export const ResumoMotorista: React.FC = () => {
 
       if (savedLogo) {
         try {
-          const img = new Image();
-          img.src = savedLogo;
-          const maxW = 35, maxH = 20;
-          const ratio = Math.min(maxW / (img.naturalWidth || maxW), maxH / (img.naturalHeight || maxH));
-          const w = (img.naturalWidth || maxW) * ratio;
-          const h = (img.naturalHeight || maxH) * ratio;
-          doc.addImage(savedLogo, 'PNG', 12, 8 + (maxH - h) / 2, w, h);
+          const { w, h } = await loadLogoDims(savedLogo);
+          doc.addImage(savedLogo, 'PNG', 12, 8 + (20 - h) / 2, w, h);
         } catch (e) {}
       }
 
@@ -494,13 +507,8 @@ export const ResumoMotorista: React.FC = () => {
 
       if (savedLogo) {
         try {
-          const img = new Image();
-          img.src = savedLogo;
-          const maxW = 35, maxH = 20;
-          const ratio = Math.min(maxW / (img.naturalWidth || maxW), maxH / (img.naturalHeight || maxH));
-          const w = (img.naturalWidth || maxW) * ratio;
-          const h = (img.naturalHeight || maxH) * ratio;
-          doc.addImage(savedLogo, 'PNG', 12, 8 + (maxH - h) / 2, w, h);
+          const { w, h } = await loadLogoDims(savedLogo);
+          doc.addImage(savedLogo, 'PNG', 12, 8 + (20 - h) / 2, w, h);
         } catch (e) {}
       }
 
@@ -848,11 +856,8 @@ export const ResumoMotorista: React.FC = () => {
       try { company = savedCompany ? JSON.parse(savedCompany) : null; } catch (e) {}
       if (savedLogo) {
         try {
-          const img = new Image(); img.src = savedLogo;
-          const maxW = 35, maxH = 20;
-          const ratio = Math.min(maxW / (img.naturalWidth || maxW), maxH / (img.naturalHeight || maxH));
-          doc.addImage(savedLogo, 'PNG', 12, 8 + (maxH - (img.naturalHeight || maxH) * ratio) / 2,
-            (img.naturalWidth || maxW) * ratio, (img.naturalHeight || maxH) * ratio);
+          const { w, h } = await loadLogoDims(savedLogo);
+          doc.addImage(savedLogo, 'PNG', 12, 8 + (20 - h) / 2, w, h);
         } catch (e) {}
       }
       doc.setFontSize(16).setFont("helvetica", "bold");
