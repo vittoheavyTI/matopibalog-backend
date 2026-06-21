@@ -8,7 +8,7 @@ workflows:
     max_build_duration: 60
     environment:
       flutter: stable
-      java: 17
+      java: 21
     scripts:
       - name: Remover java.home local do gradle.properties
         script: |
@@ -37,7 +37,7 @@ workflows:
     max_build_duration: 60
     environment:
       flutter: stable
-      java: 17
+      java: 21
     scripts:
       - name: Remover java.home local do gradle.properties
         script: |
