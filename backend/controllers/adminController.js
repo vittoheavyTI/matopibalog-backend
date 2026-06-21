@@ -510,7 +510,7 @@ exports.resetSenhaUsuario = async (req, res) => {
 
     const { error: dbError } = await supabase
       .from('usuarios')
-      .update({ senha_temporaria: false })
+      .update({ senha_temporaria: true })
       .eq('id', id);
 
     if (dbError) {
