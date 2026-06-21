@@ -482,10 +482,20 @@ export const Motoristas: React.FC = () => {
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1.5 ml-1">Comissão (%)</label>
-                  <input type="number" className="w-full border-gray-200 rounded-xl p-2.5 outline-none border focus:border-blue-500" value={editingMot.percentualComissao} onChange={e => setEditingMot({...editingMot, percentualComissao: Number(e.target.value)})} />
-                </div>
+                {editingMot?.empresaTipo === 'autonomo' ? (
+                  <div>
+                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1.5 ml-1">Comissão (%)</label>
+                    <input type="number" readOnly className="w-full border-gray-200 rounded-xl p-2.5 outline-none border bg-gray-100 text-gray-500" value={0} />
+                    <p className="text-[10px] text-gray-400 mt-1 ml-1">
+                      Motorista autônomo não usa comissão percentual. O resultado é calculado por faturamento menos gastos.
+                    </p>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1.5 ml-1">Comissão (%)</label>
+                    <input type="number" className="w-full border-gray-200 rounded-xl p-2.5 outline-none border focus:border-blue-500" value={editingMot.percentualComissao} onChange={e => setEditingMot({...editingMot, percentualComissao: Number(e.target.value)})} />
+                  </div>
+                )}
                 <div>
                   <label className="block text-xs font-bold text-gray-500 uppercase mb-1.5 ml-1">Status Cadastro</label>
                   <select className="w-full border-gray-200 rounded-xl p-2.5 outline-none border focus:border-blue-500 bg-white" value={editingMot.statusCadastro} onChange={e => setEditingMot({...editingMot, statusCadastro: e.target.value as any})}>
