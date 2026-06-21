@@ -477,7 +477,7 @@ export const Dashboard: React.FC = () => {
         {!selectedMot && (
           <div className="flex justify-between items-center px-2 animate-fade-in">
             <button
-              onClick={() => navigate('/relatorios/viagens')}
+              onClick={() => window.open('/relatorios/viagens', '_blank', 'noopener,noreferrer')}
               className="text-xl font-bold text-gray-700 flex items-center hover:text-blue-600 transition-colors cursor-pointer"
               title="Ir para Gerenciamento de Fretes"
             >
@@ -742,7 +742,7 @@ export const Dashboard: React.FC = () => {
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
             <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50/30">
               <button
-                onClick={() => navigate('/relatorios/resumo')}
+                onClick={() => window.open('/relatorios/resumo', '_blank', 'noopener,noreferrer')}
                 className="text-lg font-bold text-gray-800 flex items-center hover:text-blue-600 transition-colors cursor-pointer"
                 title="Ir para Histórico de Fretes"
               >
