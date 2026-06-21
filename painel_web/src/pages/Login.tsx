@@ -98,7 +98,7 @@ export const Login: React.FC = () => {
   const paddingHorizontal = Math.round(8 + (config.footerWidth - 20) * 52 / 80);
 
   useEffect(() => {
-    if (user && user.role === 'admin') {
+    if (user) {
       navigate('/');
     }
   }, [user, navigate]);
