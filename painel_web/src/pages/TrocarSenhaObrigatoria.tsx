@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useLoginConfig } from '../hooks/useLoginConfig';
 import api from '../api';
 import { Truck, Eye, EyeOff } from 'lucide-react';
 
@@ -9,6 +10,7 @@ import { Truck, Eye, EyeOff } from 'lucide-react';
 // esta usa o backend autenticado (POST /auth/trocar-senha), que zera senha_temporaria.
 export const TrocarSenhaObrigatoria: React.FC = () => {
   const { user, loading, login } = useAuth();
+  const config = useLoginConfig();
   const navigate = useNavigate();
 
   const [password, setPassword] = useState('');
@@ -47,12 +49,16 @@ export const TrocarSenhaObrigatoria: React.FC = () => {
   };
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#1a1a2e', padding: '16px' }}>
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: config.loginBg ? `url(${config.loginBg}) center/cover no-repeat` : '#1a1a2e', padding: '16px' }}>
       <div style={{ background: '#fff', borderRadius: '1rem', padding: '2rem', maxWidth: '400px', width: '100%', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)' }}>
         <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '24px' }}>
-          <div style={{ background: '#3b82f6', padding: '12px', borderRadius: '50%' }}>
-            <Truck size={32} color="#ffffff" />
-          </div>
+          {config.loginLogo ? (
+            <img src={config.loginLogo} alt="Logo" style={{ maxWidth: '100%', maxHeight: '64px', objectFit: 'contain' }} />
+          ) : (
+            <div style={{ background: '#3b82f6', padding: '12px', borderRadius: '50%' }}>
+              <Truck size={32} color="#ffffff" />
+            </div>
+          )}
         </div>
 
         <h1 style={{ fontSize: '20px', fontWeight: '700', color: '#111827', textAlign: 'center', margin: '0 0 8px' }}>Defina sua senha</h1>
@@ -79,7 +85,7 @@ export const TrocarSenhaObrigatoria: React.FC = () => {
                 autoComplete="new-password"
                 required
                 minLength={6}
-                style={{ width: '100%', height: '48px', padding: '12px 48px 12px 16px', fontSize: '14px', borderRadius: '10px', border: '2px solid #e5e7eb', outline: 'none', boxSizing: 'border-box' }}
+                style={{ width: '100%', height: '48px', padding: '12px 48px 12px 16px', fontSize: '14px', borderRadius: '10px', border: `2px solid ${config.inputBorderColor}`, backgroundColor: config.inputBgColor, outline: 'none', boxSizing: 'border-box' }}
               />
               <button
                 type="button"
@@ -103,7 +109,7 @@ export const TrocarSenhaObrigatoria: React.FC = () => {
               autoComplete="new-password"
               required
               minLength={6}
-              style={{ width: '100%', height: '48px', padding: '12px 16px', fontSize: '14px', borderRadius: '10px', border: '2px solid #e5e7eb', outline: 'none', boxSizing: 'border-box' }}
+              style={{ width: '100%', height: '48px', padding: '12px 16px', fontSize: '14px', borderRadius: '10px', border: `2px solid ${config.inputBorderColor}`, backgroundColor: config.inputBgColor, outline: 'none', boxSizing: 'border-box' }}
             />
           </div>
 
