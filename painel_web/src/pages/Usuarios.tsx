@@ -28,6 +28,13 @@ export const Usuarios: React.FC = () => {
   const [senhaGerada, setSenhaGerada] = useState<string | null>(null);
   const [senhaCopiada, setSenhaCopiada] = useState(false);
 
+  // Super-admin pode selecionar empresa alvo (dropdown pesquisável)
+  const [empresas, setEmpresas] = useState<any[]>([]);
+  const [selectedEmpresaId, setSelectedEmpresaId] = useState('');
+  const [empresaSearch, setEmpresaSearch] = useState('');
+  const [showEmpresaDropdown, setShowEmpresaDropdown] = useState(false);
+  const empresaDropdownRef = useRef<HTMLDivElement>(null);
+
   const [newUser, setNewUser] = useState({
     nome: '',
     email: '',
@@ -77,6 +84,22 @@ export const Usuarios: React.FC = () => {
 
   useEffect(() => {
     loadUsuarios();
+    if (currentUser?.is_super_admin) {
+      api.get('/painel-admin/empresas').then(res => {
+        setEmpresas((res.data || []).map((e: any) => ({ id: e.id, nome: e.nome })));
+      }).catch(() => {});
+    }
+  }, []);
+
+  // Fecha dropdown de empresa ao clicar fora
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (empresaDropdownRef.current && !empresaDropdownRef.current.contains(e.target as Node)) {
+        setShowEmpresaDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
   const handleSave = async () => {
@@ -100,6 +123,11 @@ export const Usuarios: React.FC = () => {
 
         await api.put('/admin/usuarios/' + editingUser.uid, payload);
       } else {
+        // Super-admin deve selecionar empresa alvo explicitamente
+        if (currentUser?.is_super_admin && !selectedEmpresaId) {
+          alert('Selecione a empresa para criar o usuário.');
+          return;
+        }
         const payload: any = {
           email: newUser.email,
           nome: newUser.nome,
@@ -114,13 +142,17 @@ export const Usuarios: React.FC = () => {
         };
         // Só envia senha se o admin digitou; vazio → backend gera senha aleatória.
         if (newUser.senha && newUser.senha.trim()) payload.senha = newUser.senha;
-        const resp = await api.post('/admin/usuarios', payload);
+        const params: any = {};
+        if (currentUser?.is_super_admin && selectedEmpresaId) params.empresa_id = selectedEmpresaId;
+        const resp = await api.post('/admin/usuarios', payload, { params });
         // Senha gerada pelo backend → exibe one-time (admin não informou senha).
         if (resp?.data?.senha_temporaria_gerada) { setSenhaCopiada(false); setSenhaGerada(resp.data.senha_temporaria_gerada); }
       }
       await loadUsuarios();
       setShowModal(false);
       setEditingUser(null);
+      setSelectedEmpresaId('');
+      setEmpresaSearch('');
       setNewUser({
         nome: '',
         email: '',
@@ -433,6 +465,36 @@ export const Usuarios: React.FC = () => {
                       disabled={!!editingUser}
                     />
                   </div>
+                  {!editingUser && currentUser?.is_super_admin && (
+                    <div ref={empresaDropdownRef} className="relative">
+                      <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">Empresa</label>
+                      <input
+                        className="w-full border p-3 rounded-xl outline-none focus:border-blue-500 bg-white"
+                        value={selectedEmpresaId ? (empresas.find(e => e.id === selectedEmpresaId)?.nome || '') : empresaSearch}
+                        onChange={e => { setEmpresaSearch(e.target.value); setSelectedEmpresaId(''); setShowEmpresaDropdown(true); }}
+                        onFocus={() => setShowEmpresaDropdown(true)}
+                        placeholder="Digite para buscar..."
+                      />
+                      {showEmpresaDropdown && (
+                        <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto">
+                          {empresas
+                            .filter(e => !empresaSearch || e.nome.toLowerCase().includes(empresaSearch.toLowerCase()))
+                            .map(e => (
+                              <div
+                                key={e.id}
+                                className="px-4 py-3 hover:bg-blue-50 cursor-pointer text-sm text-gray-700"
+                                onClick={() => { setSelectedEmpresaId(e.id); setEmpresaSearch(''); setShowEmpresaDropdown(false); }}
+                              >
+                                {e.nome}
+                              </div>
+                            ))}
+                          {empresas.filter(e => !empresaSearch || e.nome.toLowerCase().includes(empresaSearch.toLowerCase())).length === 0 && (
+                            <div className="px-4 py-3 text-sm text-gray-400">Nenhuma empresa encontrada</div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {!editingUser && (
                     <div>
                       <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">Senha Provisória</label>
