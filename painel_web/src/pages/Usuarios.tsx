@@ -95,9 +95,8 @@ export const Usuarios: React.FC = () => {
           status: editingUser.status || 'ativo'
         };
 
-        if (editingUser.nivel !== 'operador') {
-          payload.tipo = editingUser.nivel;
-        }
+        // NÃO envia tipo na edição: o tipo é definido na criação e não deve ser
+        // alterado por esta tela (evita promoção silenciosa de motorista para admin).
 
         await api.put('/admin/usuarios/' + editingUser.uid, payload);
       } else {
@@ -446,17 +445,17 @@ export const Usuarios: React.FC = () => {
                       />
                     </div>
                   )}
-                  {editingUser?.nivel === 'operador' ? (
+                  {editingUser ? (
                     <div>
                       <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">Nível</label>
                       <input
                         type="text"
                         readOnly
                         className="w-full border p-3 rounded-xl bg-gray-100 text-gray-600"
-                        value="Operador legado - sem permissão funcional"
+                        value={editingUser.nivel === 'operador' ? 'Operador legado — sem permissão funcional' : editingUser.empresaTipo === 'autonomo' ? 'Autônomo' : editingUser.nivel === 'motorista' ? 'Motorista' : 'Administrador'}
                       />
                       <p className="text-[10px] text-gray-400 mt-1 ml-1">
-                        Este papel é preservado apenas para usuário existente e não pode ser escolhido em novos cadastros.
+                        O nível do usuário é definido no cadastro e não pode ser alterado nesta tela.
                       </p>
                     </div>
                   ) : (
@@ -464,15 +463,8 @@ export const Usuarios: React.FC = () => {
                       <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">Nível</label>
                       <select
                         className="w-full border p-3 rounded-xl outline-none focus:border-blue-500 bg-white"
-                        value={editingUser ? editingUser.nivel : newUser.nivel}
-                        onChange={e => {
-                          const val = e.target.value;
-                          if (editingUser) {
-                            setEditingUser({...editingUser, nivel: val});
-                          } else {
-                            setNewUser({...newUser, nivel: val});
-                          }
-                        }}
+                        value={newUser.nivel}
+                        onChange={e => setNewUser({...newUser, nivel: e.target.value})}
                       >
                         <option value="admin">Administrador</option>
                       </select>
