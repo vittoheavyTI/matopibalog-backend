@@ -839,6 +839,11 @@ export const ResumoMotorista: React.FC = () => {
           doc.link(data.cell.x, data.cell.y, data.cell.width, data.cell.height, { url });
         }
       };
+      const chunkArray = <T,>(arr: T[], size: number): T[][] => {
+        const chunks: T[][] = [];
+        for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size));
+        return chunks;
+      };
       const resolvido = (s: string) => s === 'aprovado' || s === 'finalizado';
       const rejeitado = (s: string) => s === 'rejeitado';
       const mapDesp = (d: any) => ({ id: d.id, status: d.status, valor: parseFloat(d.valor), descricao: d.descricao, tipo: d.tipo,
@@ -885,18 +890,41 @@ export const ResumoMotorista: React.FC = () => {
       let nRejDesp = 0, nRejAbs = 0, nRejVale = 0, vRej = 0, nSemComp = 0, nViagensAlerta = 0;
       let primeiro = true;
 
+      // Fase 1: pré-carregar dados em batches (max 5 fretes por batch)
+      const tripsData = new Map<string, { despesas: any[], abastecimentos: any[], vales: any[], despRej: any[], absRej: any[], valesRej: any[] }>();
+      const batches = chunkArray(trips, 5);
+
+      for (const batch of batches) {
+        const results = await Promise.all(batch.map(trip =>
+          Promise.all([
+            api.get('/despesas?frete_id=' + trip.id),
+            api.get('/abastecimentos?frete_id=' + trip.id),
+            api.get('/vales?frete_id=' + trip.id),
+          ]).then(([rd, ra, rv]) => ({
+            id: trip.id,
+            despesas: (rd.data || []).filter((d: any) => resolvido(d.status)).map(mapDesp),
+            abastecimentos: (ra.data || []).filter((a: any) => resolvido(a.status)).map(mapAbs),
+            vales: (rv.data || []).filter((v: any) => resolvido(v.status)).map(mapVale),
+            despRej: (rd.data || []).filter((d: any) => rejeitado(d.status)).map(mapDesp),
+            absRej: (ra.data || []).filter((a: any) => rejeitado(a.status)).map(mapAbs),
+            valesRej: (rv.data || []).filter((v: any) => rejeitado(v.status)).map(mapVale),
+          }))
+        ));
+        for (const r of results) {
+          tripsData.set(r.id, { despesas: r.despesas, abastecimentos: r.abastecimentos, vales: r.vales, despRej: r.despRej, absRej: r.absRej, valesRej: r.valesRej });
+        }
+      }
+
+      // Fase 2: processar em ordem original (síncrono, sem chamadas de rede)
       for (const trip of trips) {
-        const [rd, ra, rv] = await Promise.all([
-          api.get('/despesas?frete_id=' + trip.id),
-          api.get('/abastecimentos?frete_id=' + trip.id),
-          api.get('/vales?frete_id=' + trip.id),
-        ]);
-        const fDesp: any[] = (rd.data || []).filter((d: any) => resolvido(d.status)).map(mapDesp);
-        const fAbs: any[] = (ra.data || []).filter((a: any) => resolvido(a.status)).map(mapAbs);
-        const fVales: any[] = (rv.data || []).filter((v: any) => resolvido(v.status)).map(mapVale);
-        const fDespRej: any[] = (rd.data || []).filter((d: any) => rejeitado(d.status)).map(mapDesp);
-        const fAbsRej: any[] = (ra.data || []).filter((a: any) => rejeitado(a.status)).map(mapAbs);
-        const fValesRej: any[] = (rv.data || []).filter((v: any) => rejeitado(v.status)).map(mapVale);
+        const data = tripsData.get(trip.id);
+        if (!data) continue;
+        const fDesp: any[] = data.despesas;
+        const fAbs: any[] = data.abastecimentos;
+        const fVales: any[] = data.vales;
+        const fDespRej: any[] = data.despRej;
+        const fAbsRej: any[] = data.absRej;
+        const fValesRej: any[] = data.valesRej;
 
         let y = 66;
         if (!primeiro) { doc.addPage(); y = 18; }
