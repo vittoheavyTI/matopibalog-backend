@@ -1,6 +1,18 @@
 const supabase = require('../config/supabase');
+const { createClient } = require('@supabase/supabase-js');
 const jwt = require('jsonwebtoken');
 const { criarEmpresaCompleta } = require('../services/empresaService');
+
+// Client ISOLADO só para autenticação (signInWithPassword no login). Mantido
+// separado do client admin (config/supabase.js) de propósito: assim a sessão do
+// usuário criada no login fica neste client e NUNCA contamina o client admin
+// usado por DB/Storage — evitando que uploads (foto/comprovantes) sejam rebaixados
+// de service_role para 'authenticated' e batam em RLS. Não usar para DB/Storage.
+const supabaseAuth = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_KEY,
+  { auth: { persistSession: false, autoRefreshToken: false } }
+);
 
 // Gera código de convite no formato MATO-XXXXXX
 function gerarCodigoConvite() {
@@ -140,8 +152,8 @@ exports.login = async (req, res) => {
   const { email, senha } = req.body;
 
   try {
-    // 1. Autenticar no Supabase Auth
-    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+    // 1. Autenticar no Supabase Auth (client isolado — não contamina o admin)
+    const { data: authData, error: authError } = await supabaseAuth.auth.signInWithPassword({
       email,
       password: senha
     });
