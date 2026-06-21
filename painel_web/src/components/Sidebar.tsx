@@ -93,6 +93,13 @@ export const Sidebar: React.FC = () => {
       localStorage.setItem('matopibalog_logo_y', tempY.toString());
     }
     setIsEditingLogo(false);
+
+    // Persiste no backend para sobreviver a troca de dispositivo / cache limpo
+    const payload: Record<string, any> = {};
+    for (const [chave, valor] of Object.entries({ sidebarLogo: tempLogo || null, sidebarLogoScale: tempScale, sidebarLogoY: tempY })) {
+      if (valor !== null && valor !== undefined) payload[chave] = valor;
+    }
+    api.put('/configuracoes', payload).catch(() => {});
   };
 
   const removeLogo = () => {
@@ -101,6 +108,9 @@ export const Sidebar: React.FC = () => {
     localStorage.removeItem('matopibalog_logo_scale');
     localStorage.removeItem('matopibalog_logo_y');
     setIsEditingLogo(false);
+
+    // Persiste remoção no backend (string vazia para apagar no servidor)
+    api.put('/configuracoes', { sidebarLogo: '', sidebarLogoScale: 100, sidebarLogoY: 0 }).catch(() => {});
   };
 
   const mainNav = [
