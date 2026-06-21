@@ -314,12 +314,18 @@ export const Dashboard: React.FC = () => {
     if (tipo === 'despesa' && (!newDespesa.descricao || !newDespesa.valor)) { alert('Preencha descrição e valor.'); return; }
     if (tipo === 'abastecimento' && (!newDespesa.posto || !newDespesa.litros || !newDespesa.valor_total)) { alert('Preencha posto, litros e valor total.'); return; }
     if (tipo === 'vale' && !newDespesa.valor) { alert('Preencha o valor do vale.'); return; }
+    // Validação local: só permite lançar se houver frete ativo/pendente para o motorista.
+    // O backend também rejeita (409) quando não há frete ativo — esta validação antecipada
+    // evita o erro no servidor e dá uma mensagem mais clara ao usuário.
+    const ativo = fretes.find(f => f.status === 'ativo' || f.status === 'pendente');
+    if (!ativo) {
+      alert('Este motorista não possui frete ativo. Inicie ou selecione um frete antes de lançar despesa, abastecimento ou vale.');
+      setSavingDespesa(false);
+      return;
+    }
+    const vinc = { frete_id: ativo.id };
     setSavingDespesa(true);
     try {
-      // Vincula o lançamento ao frete ativo/pendente do motorista — mesmo critério de handleFinalizarViagem.
-      // Sem frete ativo, mantém o lançamento solto (sem frete_id), preservando o comportamento atual.
-      const ativo = fretes.find(f => f.status === 'ativo' || f.status === 'pendente');
-      const vinc = ativo ? { frete_id: ativo.id } : {};
       if (tipo === 'abastecimento') {
         await api.post('/abastecimentos', { ...vinc, motorista_id: selectedMot.uid, posto: newDespesa.posto, litros: Number(newDespesa.litros), valor_total: Number(newDespesa.valor_total), quem_pagou: newDespesa.quem_pagou, data: newDespesa.data });
       } else if (tipo === 'vale') {

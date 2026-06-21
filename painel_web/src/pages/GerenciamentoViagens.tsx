@@ -390,7 +390,8 @@ export const GerenciamentoViagens: React.FC = () => {
         (f.status === 'ativo' || f.status === 'pendente'));
       const freteId = freteAtivo?.id;
       // Regra da tela: sem frete ativo/pendente, não lança (e nunca POST sem frete_id aqui).
-      // Backend permite frete_id=null por design (Dashboard/app/legado), então a trava é local.
+      // O backend também rejeita frete_id=null com 409 — a validação local é consistente com o servidor.
+      // (PR #28: resolverFreteParaLancamento exige viagem ativa para todo lançamento.)
       if (!freteId) {
         alert('Não há frete ativo para lançar.');
         return;
