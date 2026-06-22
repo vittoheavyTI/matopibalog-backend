@@ -1013,7 +1013,7 @@ export const GerenciamentoViagens: React.FC = () => {
                 {editingFrete && (
                   <div><label className="block text-xs font-bold text-gray-600 uppercase mb-1">Status</label>
                     <select className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white outline-none focus:border-blue-500" value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})}>
-                      <option value="ativo">Ativo</option><option value="pendente">Pendente</option><option value="finalizado">Finalizado</option><option value="cancelado">Cancelado</option>
+                      <option value="ativo">Ativo</option><option value="finalizado">Finalizado</option><option value="cancelado">Cancelado</option>
                     </select>
                   </div>
                 )}
