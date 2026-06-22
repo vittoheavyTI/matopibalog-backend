@@ -172,60 +172,21 @@ class _PerfilScreenState extends State<PerfilScreen> {
   Future<void> _alterarSenha() async {
     final novaSenhaCtrl   = TextEditingController();
     final confirmaSenhaCtrl = TextEditingController();
-    bool showNova    = false;
-    bool showConfirma = false;
 
     final confirmed = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          title: const Text('Alterar senha'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: novaSenhaCtrl,
-                obscureText: !showNova,
-                decoration: InputDecoration(
-                  labelText: 'Nova senha',
-                  prefixIcon: const Icon(Icons.lock_outline),
-                  suffixIcon: IconButton(
-                    icon: Icon(showNova ? Icons.visibility_off : Icons.visibility),
-                    onPressed: () => setDialogState(() => showNova = !showNova),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: confirmaSenhaCtrl,
-                obscureText: !showConfirma,
-                decoration: InputDecoration(
-                  labelText: 'Confirmar nova senha',
-                  prefixIcon: const Icon(Icons.lock_outline),
-                  suffixIcon: IconButton(
-                    icon: Icon(showConfirma ? Icons.visibility_off : Icons.visibility),
-                    onPressed: () => setDialogState(() => showConfirma = !showConfirma),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('CANCELAR'),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('SALVAR'),
-            ),
-          ],
-        ),
+      builder: (ctx) => _AlterarSenhaDialog(
+        novaSenhaCtrl: novaSenhaCtrl,
+        confirmaSenhaCtrl: confirmaSenhaCtrl,
       ),
     );
 
-    if (confirmed != true) return;
+    if (confirmed != true) {
+      novaSenhaCtrl.dispose();
+      confirmaSenhaCtrl.dispose();
+      return;
+    }
 
     final nova    = novaSenhaCtrl.text;
     final confirma = confirmaSenhaCtrl.text;
@@ -251,20 +212,34 @@ class _PerfilScreenState extends State<PerfilScreen> {
 
     AppLogger.action('alterar_senha_attempt');
     setState(() => _salvando = true);
-    final resultado = await ApiService.trocarSenha(nova);
-    if (!mounted) return;
-    setState(() => _salvando = false);
+    try {
+      final resultado = await ApiService.trocarSenha(nova);
+      if (!mounted) return;
+      setState(() => _salvando = false);
 
-    if (resultado['ok'] == true) {
-      AppLogger.action('alterar_senha_ok');
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Senha alterada com sucesso!'), backgroundColor: Colors.green),
-      );
-    } else {
-      AppLogger.action('alterar_senha_erro', params: {'msg': resultado['message']});
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(resultado['message'] as String? ?? 'Erro ao alterar senha.')),
-      );
+      if (resultado['ok'] == true) {
+        AppLogger.action('alterar_senha_ok');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Senha alterada com sucesso!'), backgroundColor: Colors.green),
+          );
+        }
+      } else {
+        AppLogger.action('alterar_senha_erro', params: {'msg': resultado['message']});
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(resultado['message'] as String? ?? 'Erro ao alterar senha.')),
+          );
+        }
+      }
+    } catch (e) {
+      AppLogger.error('PerfilScreen', 'alterarSenha', e);
+      if (mounted) {
+        setState(() => _salvando = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Erro inesperado ao alterar senha.')),
+        );
+      }
     }
   }
 
@@ -478,4 +453,72 @@ class _PerfilScreenState extends State<PerfilScreen> {
     keyboardType: tipo,
     decoration: InputDecoration(labelText: label),
   );
+}
+
+/// Dialog de alteração de senha como StatefulWidget separado para evitar
+/// problemas de StatefulBuilder + setState local que podem causar
+/// inconsistências de estado e exceções.
+class _AlterarSenhaDialog extends StatefulWidget {
+  final TextEditingController novaSenhaCtrl;
+  final TextEditingController confirmaSenhaCtrl;
+
+  const _AlterarSenhaDialog({
+    required this.novaSenhaCtrl,
+    required this.confirmaSenhaCtrl,
+  });
+
+  @override
+  State<_AlterarSenhaDialog> createState() => _AlterarSenhaDialogState();
+}
+
+class _AlterarSenhaDialogState extends State<_AlterarSenhaDialog> {
+  bool _showNova = false;
+  bool _showConfirma = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Alterar senha'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: widget.novaSenhaCtrl,
+            obscureText: !_showNova,
+            decoration: InputDecoration(
+              labelText: 'Nova senha',
+              prefixIcon: const Icon(Icons.lock_outline),
+              suffixIcon: IconButton(
+                icon: Icon(_showNova ? Icons.visibility_off : Icons.visibility),
+                onPressed: () => setState(() => _showNova = !_showNova),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: widget.confirmaSenhaCtrl,
+            obscureText: !_showConfirma,
+            decoration: InputDecoration(
+              labelText: 'Confirmar nova senha',
+              prefixIcon: const Icon(Icons.lock_outline),
+              suffixIcon: IconButton(
+                icon: Icon(_showConfirma ? Icons.visibility_off : Icons.visibility),
+                onPressed: () => setState(() => _showConfirma = !_showConfirma),
+              ),
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('CANCELAR'),
+        ),
+        ElevatedButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('SALVAR'),
+        ),
+      ],
+    );
+  }
 }
