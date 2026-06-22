@@ -182,13 +182,16 @@ class _PerfilScreenState extends State<PerfilScreen> {
       ),
     );
 
-    novaSenhaCtrl.dispose();
-    confirmaSenhaCtrl.dispose();
-
-    if (confirmed != true) return;
+    if (confirmed != true) {
+      novaSenhaCtrl.dispose();
+      confirmaSenhaCtrl.dispose();
+      return;
+    }
 
     final nova    = novaSenhaCtrl.text;
     final confirma = confirmaSenhaCtrl.text;
+    novaSenhaCtrl.dispose();
+    confirmaSenhaCtrl.dispose();
 
     if (nova.length < 6) {
       if (mounted) {
