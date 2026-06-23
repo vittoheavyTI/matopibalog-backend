@@ -34,6 +34,9 @@ export const GerenciamentoViagens: React.FC = () => {
   const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showFinalizarModal, setShowFinalizarModal] = useState(false);
+  // Fretes ativos/pendentes (2+) oferecidos no modal de seleção ao finalizar.
+  // Vazio = modal fechado. Substitui o antigo window.prompt numerado.
+  const [fretesParaFinalizar, setFretesParaFinalizar] = useState<any[]>([]);
   // Accordion da visualização por frete (detalhe do motorista).
   const [fretesExpandidos, setFretesExpandidos] = useState<Set<string>>(new Set());
   const [semFreteExpandido, setSemFreteExpandido] = useState(false);
@@ -446,25 +449,9 @@ export const GerenciamentoViagens: React.FC = () => {
       setShowFinalizarModal(true);
       return;
     }
-    // Seletor quando há 2+ ativos: constrói lista numerada no prompt
-    const linhas = ativos.map((f: any, i: number) => {
-      const pend = mDesp.some(d => d.frete_id === f.id && d.status === 'pendente') ||
-        mAbs.some(a => a.frete_id === f.id && a.status === 'pendente') ||
-        mVales.some(v => v.frete_id === f.id && v.status === 'pendente');
-      const pendLabel = pend ? ' [TEM PENDÊNCIA]' : '';
-      return `${i + 1}: ${f.origem || '-'} → ${f.destino || '-'} (${f.status} - R$ ${f.valorFrete ?? f.valor_frete ?? '0'})${pendLabel}`;
-    });
-    const msg = `Há ${ativos.length} fretes ativos para este motorista. Digite o número do frete que deseja finalizar:\n\n` +
-      linhas.join('\n') +
-      '\n\nCancelar para não finalizar.\n\nImportante: se o frete tiver pendências, a finalização será recusada pelo sistema.';
-    const escolha = window.prompt(msg);
-    if (escolha === null) return;
-    const idx = parseInt(escolha) - 1;
-    if (isNaN(idx) || idx < 0 || idx >= ativos.length) {
-      alert('Opção inválida.');
-      return;
-    }
-    handleFinalizarFreteEspecifico(ativos[idx]);
+    // 2+ ativos: abre modal de seleção visual (substitui o window.prompt).
+    // Nunca escolhe o primeiro silenciosamente — o usuário decide no modal.
+    setFretesParaFinalizar(ativos);
   };
 
   const confirmFinalizarViagem = async () => {
@@ -571,6 +558,12 @@ export const GerenciamentoViagens: React.FC = () => {
   const mDesp = despesas;
   const mAbs = abastecimentos;
   const mVales = vales;
+  // Pendência de um frete específico: algum lançamento (desp/abast/vale) pendente
+  // vinculado a ele. Mesma regra da trava de finalização, reusada no modal de seleção.
+  const fretePossuiPendencia = (freteId: string) =>
+    mDesp.some(d => d.frete_id === freteId && d.status === 'pendente') ||
+    mAbs.some(a => a.frete_id === freteId && a.status === 'pendente') ||
+    mVales.some(v => v.frete_id === freteId && v.status === 'pendente');
   const fretesCanceladosIds = new Set(mFretes.filter(f => f.status === 'cancelado').map(f => f.id));
   const isLancamentoDeFreteCancelado = (item: any) =>
     item.frete_id !== null && item.frete_id !== undefined && fretesCanceladosIds.has(item.frete_id);
@@ -1220,6 +1213,48 @@ export const GerenciamentoViagens: React.FC = () => {
               <button onClick={confirmFinalizarViagem} className="px-6 py-2.5 bg-green-600 text-white font-bold rounded-xl shadow hover:bg-green-700 transition-all active:scale-95 flex items-center">
                 <Check size={18} className="mr-2" />Confirmar Finalização
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {fretesParaFinalizar.length > 0 && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden max-h-[90vh] flex flex-col">
+            <div className="p-5 border-b border-gray-100">
+              <h3 className="text-lg font-bold text-gray-800"><Check size={20} className="inline mr-2 text-green-600" />Escolha o frete para finalizar</h3>
+              <p className="text-xs text-gray-500 mt-1">Este motorista tem mais de um frete ativo. Selecione qual deseja finalizar.</p>
+            </div>
+            <div className="p-4 space-y-3 overflow-y-auto">
+              {fretesParaFinalizar.map((f: any) => {
+                const pend = fretePossuiPendencia(f.id);
+                return (
+                  <div key={f.id} className="border border-gray-200 rounded-xl p-3 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-bold text-gray-800 truncate">{f.origem || '-'} → {f.destino || '-'}</p>
+                      <div className="flex items-center gap-2 mt-1 flex-wrap">
+                        <span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold ${getStatusBadge(f.status)}`}>{f.status}</span>
+                        <span className="text-sm font-bold text-blue-600">{formatCurrency(f.valorFrete ?? f.valor_frete)}</span>
+                        {pend && <span className="text-[11px] px-2 py-0.5 rounded-full font-semibold bg-yellow-100 text-yellow-700">TEM PENDÊNCIA</span>}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => {
+                        // Trava em camadas: aviso visual (label), guarda aqui, guarda em
+                        // handleFinalizarFreteEspecifico e a trava final do backend (409).
+                        if (pend) { alert('Este frete possui lançamentos pendentes. Aprove ou rejeite todos antes de finalizar.'); return; }
+                        setFretesParaFinalizar([]);
+                        handleFinalizarFreteEspecifico(f);
+                      }}
+                      className="shrink-0 px-3 py-2 bg-green-600 text-white font-bold rounded-lg text-sm shadow hover:bg-green-700 transition-all active:scale-95 flex items-center">
+                      <Check size={16} className="mr-1" />Finalizar
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="p-4 bg-gray-50 border-t flex justify-end">
+              <button onClick={() => setFretesParaFinalizar([])} className="px-5 py-2.5 font-bold text-gray-500 hover:bg-gray-200 rounded-xl transition-all">Cancelar</button>
             </div>
           </div>
         </div>
