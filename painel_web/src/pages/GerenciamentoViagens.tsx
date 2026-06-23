@@ -476,6 +476,36 @@ export const GerenciamentoViagens: React.FC = () => {
     }
   };
 
+  /// Finaliza um frete específico (passado explicitamente), sem depender de
+  /// getFreteAtivoSelecionado(). Verifica pendências apenas do frete alvo.
+  const handleFinalizarFreteEspecifico = async (frete: any) => {
+    if (!frete?.id) return;
+    const pendente = mDesp.some(d => d.frete_id === frete.id && d.status === 'pendente') ||
+      mAbs.some(a => a.frete_id === frete.id && a.status === 'pendente') ||
+      mVales.some(v => v.frete_id === frete.id && v.status === 'pendente');
+    if (pendente) {
+      alert('Este frete possui lançamentos pendentes. Aprove ou rejeite todos antes de finalizar.');
+      return;
+    }
+    try {
+      await api.post('/fretes/' + frete.id + '/finalizar');
+      const promises = [
+        ...despesas.filter(d => d.status === 'aprovado' && d.frete_id === frete.id).map(d => api.patch('/despesas/' + d.id, { status: 'finalizado' })),
+        ...abastecimentos.filter(a => a.status === 'aprovado' && a.frete_id === frete.id).map(a => api.patch('/abastecimentos/' + a.id, { status: 'finalizado' })),
+        ...vales.filter(v => v.status === 'aprovado' && v.frete_id === frete.id).map(v => api.patch('/vales/' + v.id, { status: 'finalizado' }))
+      ];
+      await Promise.all(promises);
+      if (filterMot !== 'todos') loadMotoristaData(filterMot);
+      else loadData();
+      alert('Frete finalizado com sucesso!');
+    } catch (err: any) {
+      const msg = err?.response?.status === 409
+        ? (err.response.data?.message || 'Há lançamentos pendentes deste frete.')
+        : 'Erro ao finalizar frete no servidor.';
+      alert(msg);
+    }
+  };
+
   const handleToggleBlock = async () => {
     if (!selectedMotorista) return;
     const newStatus = selectedMotorista.status === 'bloqueado' ? 'ativo' : 'bloqueado';
@@ -542,6 +572,7 @@ export const GerenciamentoViagens: React.FC = () => {
   const autResultado = opTotalFretes - autGastos;
   const temPendente = mDesp.some(d => d.status === 'pendente') || mAbs.some(a => a.status === 'pendente') || mVales.some(v => v.status === 'pendente');
   const temFreteAtivo = mFretes.some(f => f.status === 'ativo' || f.status === 'pendente');
+  const qtdFretesAtivos = mFretes.filter(f => f.status === 'ativo' || f.status === 'pendente').length;
   const totalLiters = abastecimentosParaCalculo.filter(a => a.status === 'aprovado').reduce((acc, a) => acc + (parseFloat(a.litros) || 0), 0);
   const totalKM = fretesParaCalculo.reduce((acc, f) => {
     if (f.kmFinal && f.kmInicial && f.kmFinal > f.kmInicial) return acc + (f.kmFinal - f.kmInicial);
@@ -865,6 +896,18 @@ export const GerenciamentoViagens: React.FC = () => {
                         {itensFrete.length === 0
                           ? <p className="text-gray-400 text-sm text-center py-3">Nenhum lançamento vinculado a este frete.</p>
                           : itensFrete.map(renderLancamentoItem)}
+                        {/* Botão de finalizar no próprio accordeon — só para fretes ativos/pendentes */}
+                        {(f.status === 'ativo' || f.status === 'pendente') && (
+                          <div className="pt-2 flex justify-end">
+                            <button
+                              onClick={() => handleFinalizarFreteEspecifico(f)}
+                              disabled={pendentesFrete > 0}
+                              className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg font-bold text-xs shadow hover:bg-green-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed active:scale-95"
+                            >
+                              <Check size={16} className="mr-1.5" /> FINALIZAR ESTE FRETE
+                            </button>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -953,9 +996,15 @@ export const GerenciamentoViagens: React.FC = () => {
               </>
             )}
           </div>
-          <button onClick={handleFinalizarViagem} disabled={temPendente || !temFreteAtivo}
+          <button onClick={handleFinalizarViagem}
+            disabled={temPendente || !temFreteAtivo || qtdFretesAtivos > 1}
+            title={qtdFretesAtivos > 1 ? 'Use o botão Finalizar no card de cada frete' : undefined}
             className="mt-3 w-full py-2.5 bg-green-600 text-white rounded-xl font-bold text-lg shadow-lg hover:bg-green-700 transition-all disabled:opacity-50 disabled:shadow-none active:scale-95 flex items-center justify-center">
-            {temFreteAtivo ? <><Check size={20} className="mr-2" /> FINALIZAR FRETE</> : <span className="flex items-center"><Check size={20} className="mr-2" /> FRETE FINALIZADO</span>}
+            {temFreteAtivo
+              ? (qtdFretesAtivos > 1
+                ? <span className="flex items-center"><Check size={20} className="mr-2" /> FINALIZAR POR FRETE</span>
+                : <><Check size={20} className="mr-2" /> FINALIZAR FRETE</>)
+              : <span className="flex items-center"><Check size={20} className="mr-2" /> FRETE FINALIZADO</span>}
           </button>
         </div>
       </div>
