@@ -28,6 +28,33 @@ export const Usuarios: React.FC = () => {
   const [senhaGerada, setSenhaGerada] = useState<string | null>(null);
   const [senhaCopiada, setSenhaCopiada] = useState(false);
 
+  // Tenta copiar via Clipboard API (moderna); falha → fallback execCommand (legado).
+  // Falha total → alerta orientando seleção manual.
+  const copiarSenha = async (senha: string) => {
+    if (!senha) return;
+    try {
+      await navigator.clipboard.writeText(senha);
+      setSenhaCopiada(true);
+      return;
+    } catch {
+      // Clipboard API indisponível — tentar fallback
+    }
+    try {
+      const el = document.createElement('textarea');
+      el.value = senha;
+      el.style.position = 'fixed';
+      el.style.opacity = '0';
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand('copy');
+      document.body.removeChild(el);
+      setSenhaCopiada(true);
+    } catch {
+      setSenhaCopiada(false);
+      alert('Não foi possível copiar automaticamente. Selecione a senha manualmente.');
+    }
+  };
+
   // Super-admin pode selecionar empresa alvo (dropdown pesquisável)
   const [empresas, setEmpresas] = useState<any[]>([]);
   const [selectedEmpresaId, setSelectedEmpresaId] = useState('');
@@ -734,7 +761,7 @@ export const Usuarios: React.FC = () => {
               <div className="w-full flex items-center gap-2 bg-gray-50 border-2 border-dashed border-gray-200 rounded-xl p-3">
                 <code className="flex-1 text-lg font-mono font-bold text-gray-800 break-all select-all">{senhaGerada}</code>
                 <button
-                  onClick={async () => { try { await navigator.clipboard.writeText(senhaGerada); setSenhaCopiada(true); } catch { setSenhaCopiada(false); } }}
+                  onClick={() => copiarSenha(senhaGerada!)}
                   className="flex items-center px-3 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 flex-shrink-0"
                 >
                   {senhaCopiada ? <><Check size={16} className="mr-1.5" /> Copiado</> : <><Copy size={16} className="mr-1.5" /> Copiar</>}
