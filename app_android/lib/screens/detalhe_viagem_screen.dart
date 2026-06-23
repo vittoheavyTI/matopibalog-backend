@@ -132,6 +132,20 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
     return total;
   }
 
+  /// Soma lançamentos EFETIVADOS (aprovado/finalizado) de um determinado pagador.
+  /// Usado no saldo do vinculado, que segue o painel: só conta o que foi aprovado
+  /// (e 'finalizado', estado dos aprovados após o encerramento do frete).
+  double _somaPorPagador(List<dynamic> items, String campo, String quemPagou) {
+    double total = 0.0;
+    for (final item in items) {
+      final status = item['status'];
+      if (status != 'aprovado' && status != 'finalizado') continue;
+      if (item['quem_pagou'] != quemPagou) continue;
+      total += double.tryParse(item[campo]?.toString() ?? '0') ?? 0.0;
+    }
+    return total;
+  }
+
   @override
   Widget build(BuildContext context) {
     final f = _frete;
@@ -383,10 +397,18 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
       );
     }
 
-    // Vinculado: comissão pelo percentual do perfil
+    // Vinculado (igual ao painel): comissão + reembolsos − adiantamentos.
+    //   • comissão = % do valor do frete (crédito);
+    //   • reembolso = despesas + abastecimentos pagos PELO MOTORISTA (crédito);
+    //   • adiantamentos = vales pagos PELA EMPRESA (desconto);
+    //   • despesas/abast pagos pela EMPRESA NÃO reduzem a comissão do motorista.
+    // Só entram lançamentos efetivados (aprovado/finalizado); pendentes/rejeitados ficam fora.
     final pct = _percentualComissao;
     final comissao = valorFrete * (pct / 100);
-    final saldoLiquido = comissao - totalDeducoes;
+    final reembolso = _somaPorPagador(_despesas, 'valor', 'motorista') +
+        _somaPorPagador(_abastecimentos, 'valor_total', 'motorista');
+    final adiantamentos = _somaPorPagador(_vales, 'valor', 'proprietario');
+    final saldoLiquido = comissao + reembolso - adiantamentos;
 
     return Card(
       // sem color explícita → segue tema (evita fundo escuro no dark mode), igual ao autônomo
@@ -399,9 +421,10 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
             const Divider(),
             _linhaResumo('Valor do Frete', valorFrete),
             _linhaResumo('Comissão ($pct%)', comissao, color: Colors.blue),
-            _linhaResumo('Despesas aprovadas', -despesasAprov, color: Colors.red),
-            _linhaResumo('Abastecimentos aprovados', -abastAprov, color: Colors.red),
-            _linhaResumo('Vales aprovados', -valesAprov, color: Colors.red),
+            if (reembolso > 0)
+              _linhaResumo('Reembolso (pago por você)', reembolso, color: Colors.green),
+            if (adiantamentos > 0)
+              _linhaResumo('Vales / adiantamentos', -adiantamentos, color: Colors.red),
             const Divider(),
             _linhaResumo('Saldo Líquido', saldoLiquido, color: saldoLiquido >= 0 ? Colors.green : Colors.red, bold: true),
             _avisosPendentes(pendentes, rejeitados),

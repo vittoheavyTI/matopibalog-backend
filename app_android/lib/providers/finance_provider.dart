@@ -84,6 +84,13 @@ class FinanceProvider extends ChangeNotifier {
     return fretesCanceladosIds.contains(freteId.toString());
   }
 
+  /// Lançamento "efetivado": entra no saldo do vinculado (igual ao painel, que
+  /// só considera aprovados). 'finalizado' também conta — é o estado em que o
+  /// painel coloca os aprovados ao encerrar o frete. Pendentes e rejeitados
+  /// ficam de fora. (Não altera a regra do autônomo.)
+  static bool _efetivado(dynamic status) =>
+      status == 'aprovado' || status == 'finalizado';
+
   Future<void> loadData() async {
     AppLogger.action('load_finance_data');
     _loading = true;
@@ -134,46 +141,53 @@ class FinanceProvider extends ChangeNotifier {
         tf += double.tryParse(f['valor_frete'].toString()) ?? 0.0;
       }
 
-      // Autônomo: todas as despesas contam (ele é o proprietário).
-      // Vinculado: apenas quem_pagou = 'proprietario' conta como dedução da comissão.
-      // Rejeitados não entram no cálculo em nenhum caso.
-      // Lançamentos vinculados a frete cancelado também são excluídos (itens sem
-      // frete_id — lançamentos soltos — são sempre preservados).
-      double td = 0.0;
+      // Regras de dedução (rejeitados e lançamentos de frete cancelado SEMPRE fora;
+      // itens sem frete_id — soltos — são preservados):
+      //   • Autônomo: deduz TODOS os lançamentos não-rejeitados (ele é o proprietário).
+      //   • Vinculado (igual ao painel): despesas/abast pagos pela EMPRESA não reduzem
+      //     a comissão; despesas/abast pagos pelo MOTORISTA entram como reembolso (crédito)
+      //     e vales/adiantamentos pagos pela EMPRESA entram como desconto.
+      double td = 0.0; // autônomo: soma de todos os gastos
+      double reembMot = 0.0; // vinculado: desp+abast pagos pelo motorista (crédito)
+      double adiantEmpresa = 0.0; // vinculado: vales pagos pela empresa (desconto)
       for (var d in despesas) {
         if (d['status'] == 'rejeitado') continue;
         if (_isLancamentoDeFreteCancelado(d, fretesCanceladosIds)) continue;
-        if (_isAutonomo || d['quem_pagou'] == 'proprietario') {
-          td += double.tryParse(d['valor'].toString()) ?? 0.0;
-        }
+        final valor = double.tryParse(d['valor'].toString()) ?? 0.0;
+        td += valor;
+        if (d['quem_pagou'] == 'motorista' && _efetivado(d['status'])) reembMot += valor;
       }
       for (var a in abastecimentos) {
         if (a['status'] == 'rejeitado') continue;
         if (_isLancamentoDeFreteCancelado(a, fretesCanceladosIds)) continue;
-        if (_isAutonomo || a['quem_pagou'] == 'proprietario') {
-          td += double.tryParse(a['valor_total'].toString()) ?? 0.0;
-        }
+        final valor = double.tryParse(a['valor_total'].toString()) ?? 0.0;
+        td += valor;
+        if (a['quem_pagou'] == 'motorista' && _efetivado(a['status'])) reembMot += valor;
       }
       for (var v in vales) {
         if (v['status'] == 'rejeitado') continue;
         if (_isLancamentoDeFreteCancelado(v, fretesCanceladosIds)) continue;
-        if (_isAutonomo || v['quem_pagou'] == 'proprietario') {
-          td += double.tryParse(v['valor'].toString()) ?? 0.0;
-        }
+        final valor = double.tryParse(v['valor'].toString()) ?? 0.0;
+        td += valor;
+        if (v['quem_pagou'] == 'proprietario' && _efetivado(v['status'])) adiantEmpresa += valor;
       }
 
       _totalFretes = tf;
-      _deducoes = td;
 
       if (_isAutonomo) {
         // Autônomo: sem comissão por percentual do cadastro
         // Resultado = faturamento - despesas
         _comissao = 0.0;
+        _deducoes = td;
         _saldo = tf - td;
       } else {
-        // Vinculado: comissão pelo percentual do cadastro
+        // Vinculado: comissão pelo percentual do cadastro.
+        // Saldo (igual ao painel) = comissão + reembolsos − adiantamentos.
+        // _deducoes guarda o desconto LÍQUIDO (adiantamentos − reembolsos) para manter
+        // a relação exibida no app: Saldo = Comissão − Deduções.
         _comissao = tf * (_percentualComissao / 100);
-        _saldo = _comissao - td;
+        _deducoes = adiantEmpresa - reembMot;
+        _saldo = _comissao - _deducoes;
       }
 
       // ─── Cálculo mensal (Resumo do Mês) ─────────────────────────────────────
@@ -197,8 +211,12 @@ class FinanceProvider extends ChangeNotifier {
         tfMes += double.tryParse(f['valor_frete'].toString()) ?? 0.0;
       }
 
-      // IDs de fretes cancelados para exclusão de lançamentos (já calculado acima)
-      double tdMes = 0.0;
+      // IDs de fretes cancelados para exclusão de lançamentos (já calculado acima).
+      // Mesmas regras de dedução do cálculo geral (autônomo x vinculado), aplicadas
+      // só aos lançamentos que entram no resumo do mês.
+      double tdMes = 0.0; // autônomo
+      double reembMotMes = 0.0; // vinculado: reembolso ao motorista
+      double adiantEmpresaMes = 0.0; // vinculado: adiantamentos da empresa
       for (var d in despesas) {
         if (d['status'] == 'rejeitado') continue;
         if (_isLancamentoDeFreteCancelado(d, fretesCanceladosIds)) continue;
@@ -210,9 +228,9 @@ class FinanceProvider extends ChangeNotifier {
           final data = (d['created_at'] ?? d['data'] ?? '').toString();
           if (!data.startsWith(ymAtual)) continue;
         }
-        if (_isAutonomo || d['quem_pagou'] == 'proprietario') {
-          tdMes += double.tryParse(d['valor'].toString()) ?? 0.0;
-        }
+        final valor = double.tryParse(d['valor'].toString()) ?? 0.0;
+        tdMes += valor;
+        if (d['quem_pagou'] == 'motorista' && _efetivado(d['status'])) reembMotMes += valor;
       }
       for (var a in abastecimentos) {
         if (a['status'] == 'rejeitado') continue;
@@ -223,9 +241,9 @@ class FinanceProvider extends ChangeNotifier {
           final data = (a['created_at'] ?? a['data'] ?? '').toString();
           if (!data.startsWith(ymAtual)) continue;
         }
-        if (_isAutonomo || a['quem_pagou'] == 'proprietario') {
-          tdMes += double.tryParse(a['valor_total'].toString()) ?? 0.0;
-        }
+        final valor = double.tryParse(a['valor_total'].toString()) ?? 0.0;
+        tdMes += valor;
+        if (a['quem_pagou'] == 'motorista' && _efetivado(a['status'])) reembMotMes += valor;
       }
       for (var v in vales) {
         if (v['status'] == 'rejeitado') continue;
@@ -236,19 +254,22 @@ class FinanceProvider extends ChangeNotifier {
           final data = (v['created_at'] ?? v['data'] ?? '').toString();
           if (!data.startsWith(ymAtual)) continue;
         }
-        if (_isAutonomo || v['quem_pagou'] == 'proprietario') {
-          tdMes += double.tryParse(v['valor'].toString()) ?? 0.0;
-        }
+        final valor = double.tryParse(v['valor'].toString()) ?? 0.0;
+        tdMes += valor;
+        if (v['quem_pagou'] == 'proprietario' && _efetivado(v['status'])) adiantEmpresaMes += valor;
       }
 
       _totalFretesMes = tfMes;
-      _deducoesMes = tdMes;
       if (_isAutonomo) {
         _comissaoMes = 0.0;
+        _deducoesMes = tdMes;
         _saldoMes = tfMes - tdMes;
       } else {
+        // Igual ao painel: comissão + reembolsos − adiantamentos.
+        // _deducoesMes = desconto líquido (mantém Saldo = Comissão − Deduções no card).
         _comissaoMes = tfMes * (_percentualComissao / 100);
-        _saldoMes = _comissaoMes - tdMes;
+        _deducoesMes = adiantEmpresaMes - reembMotMes;
+        _saldoMes = _comissaoMes - _deducoesMes;
       }
 
       AppLogger.action('load_finance_data', params: {
