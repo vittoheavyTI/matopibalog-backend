@@ -64,7 +64,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     // 1 frete ativo → fluxo atual, sem mudança
     if (ativos.length == 1) {
-      _mostrarBottomSheetLançamento(ativos.first['id']?.toString());
+      _mostrarBottomSheetLancamento(ativos.first['id']?.toString());
       return;
     }
 
@@ -117,7 +117,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 subtitle: Text('$status · R\$ ${valor.toStringAsFixed(2)}'),
                 onTap: () {
                   Navigator.pop(ctx);
-                  _mostrarBottomSheetLançamento(f['id']?.toString());
+                  _mostrarBottomSheetLancamento(f['id']?.toString());
                 },
               );
             }),
@@ -129,7 +129,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   /// Bottom sheet de tipo de lançamento, extraído com [freteId] por parâmetro.
-  void _mostrarBottomSheetLançamento(String? freteId) {
+  void _mostrarBottomSheetLancamento(String? freteId) {
     AppLogger.action('novo_lancamento_sheet_open');
     final isAutonomo = context.read<AuthProvider>().isAutonomo;
     final finance = context.read<FinanceProvider>();
