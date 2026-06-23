@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import '../config.dart';
 import 'app_logger.dart';
@@ -7,10 +8,13 @@ import 'app_logger.dart';
 class ApiService {
   static final String _baseUrl = Config.apiBaseUrl;
 
-  /// Token JWT da sessão atual, mantido apenas em memória.
+  /// Chave do token no secure storage — deve casar com AuthProvider._tokenKey.
+  static const _tokenKey = 'token';
+  static const FlutterSecureStorage _secureStorage = FlutterSecureStorage();
+
+  /// Token JWT da sessão atual, mantido em memória.
   /// A persistência segura (quando o usuário marca "Manter conectado neste
   /// aparelho") é responsabilidade do AuthProvider, via flutter_secure_storage.
-  /// Aqui ficamos só com o token em memória para as requisições da sessão.
   static String? _sessionToken;
 
   /// Define o token usado nas requisições autenticadas da sessão atual.
@@ -20,9 +24,30 @@ class ApiService {
   static void clearSessionToken() => _sessionToken = null;
 
   // Mantido como Future para não alterar os ~15 call sites que fazem
-  // `await _getHeaders()`; o token agora vem da memória, não do disco.
+  // `await _getHeaders()`.
+  //
+  // Fonte do token, em ordem:
+  // 1. _sessionToken em memória (foreground / sessão já autenticada);
+  // 2. fallback no secure storage quando a memória está vazia.
+  //
+  // O fallback é essencial para o sync offline: o callbackDispatcher do
+  // Workmanager roda em OUTRO isolate, onde os estáticos (_sessionToken)
+  // nascem null. Sem isso, as requisições de OfflineSync iriam sem
+  // Authorization e tomariam 401. O secure storage é acessível entre
+  // isolates (backed por Keystore/EncryptedSharedPreferences no Android),
+  // então recuperamos o token persistido quando "Manter conectado" está
+  // marcado. Se o usuário não persistiu a sessão, não há token e a
+  // requisição segue sem Authorization (comportamento aceitável).
   static Future<Map<String, String>> _getHeaders() async {
-    final token = _sessionToken;
+    var token = _sessionToken;
+    if (token == null || token.isEmpty) {
+      token = await _secureStorage.read(key: _tokenKey);
+      // Aproveita para popular a memória deste isolate, evitando reler o
+      // secure storage a cada requisição subsequente.
+      if (token != null && token.isNotEmpty) {
+        _sessionToken = token;
+      }
+    }
     return {
       'Content-Type': 'application/json',
       if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
@@ -41,7 +66,13 @@ class ApiService {
           )
           .timeout(const Duration(seconds: 20));
 
-      debugPrint('[ApiService.login] status=${response.statusCode} body=${response.body}');
+      // NÃO logar response.body: em sucesso ele contém o token JWT.
+      // Só o body de erro (statusCode != 200) é logado, para diagnóstico.
+      if (response.statusCode != 200) {
+        debugPrint('[ApiService.login] status=${response.statusCode} body=${response.body}');
+      } else {
+        debugPrint('[ApiService.login] status=${response.statusCode} (ok)');
+      }
 
       if (response.statusCode == 200) {
         AppLogger.action('login_success', params: {'email': email});
