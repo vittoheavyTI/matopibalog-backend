@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
@@ -184,7 +186,11 @@ class _PerfilScreenState extends State<PerfilScreen> {
     if (!mounted) return;
     if (ok == true) {
       setState(() => _salvando = true);
-      await _fetchPerfil();
+      try {
+        await _fetchPerfil();
+      } finally {
+        if (mounted) setState(() => _salvando = false);
+      }
     }
   }
 
@@ -448,18 +454,29 @@ class _AlterarSenhaPageState extends State<_AlterarSenhaPage> {
     AppLogger.action('alterar_senha_attempt');
 
     try {
-      final resultado = await ApiService.trocarSenha(nova);
+      final resultado = await ApiService.trocarSenha(nova)
+          .timeout(const Duration(seconds: 20));
       if (!mounted) return;
 
       if (resultado['ok'] == true) {
         AppLogger.action('alterar_senha_ok');
+        // Garante que o botão volte ao normal antes de fechar a tela.
+        setState(() => _salvando = false);
         // Retorna true para PerfilScreen saber que houve sucesso.
-        Navigator.pop(context, true);
+        if (mounted) Navigator.pop(context, true);
       } else {
         setState(() => _salvando = false);
         AppLogger.action('alterar_senha_erro', params: {'msg': resultado['message']});
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(resultado['message'] as String? ?? 'Erro ao alterar senha.')),
+        );
+      }
+    } on TimeoutException {
+      AppLogger.error('AlterarSenhaPage', 'trocar', 'timeout');
+      if (mounted) {
+        setState(() => _salvando = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Tempo esgotado. Verifique sua conexão e tente novamente.')),
         );
       }
     } catch (e) {
