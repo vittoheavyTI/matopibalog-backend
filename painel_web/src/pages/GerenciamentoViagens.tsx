@@ -384,17 +384,32 @@ export const GerenciamentoViagens: React.FC = () => {
   const handleAddItem = async () => {
     if (!selectedMotorista || !showAddModal) return;
     try {
-      // Vincula o lançamento ao frete ativo do motorista (mesma regra do finalize)
-      const freteAtivo = fretes.find(f =>
+      // Resolve o frete ativo: 0 → bloqueia, 1 → usa direto, >1 → solicita seleção.
+      // Evita escolher o primeiro silenciosamente quando há múltiplos ativos.
+      const ativos = fretes.filter(f =>
         (f.motoristaUid === filterMot || f.motorista_id === filterMot) &&
         (f.status === 'ativo' || f.status === 'pendente'));
-      const freteId = freteAtivo?.id;
-      // Regra da tela: sem frete ativo/pendente, não lança (e nunca POST sem frete_id aqui).
-      // O backend também rejeita frete_id=null com 409 — a validação local é consistente com o servidor.
-      // (PR #28: resolverFreteParaLancamento exige viagem ativa para todo lançamento.)
-      if (!freteId) {
+      let freteId: string | undefined;
+      if (ativos.length === 0) {
         alert('Não há frete ativo para lançar.');
         return;
+      } else if (ativos.length === 1) {
+        freteId = ativos[0].id;
+      } else {
+        const escolha = window.prompt(
+          `Há ${ativos.length} fretes ativos para este motorista. Digite o número do frete desejado:\n\n` +
+          ativos.map((f: any, i: number) =>
+            `${i + 1}: ${f.origem || '-'} → ${f.destino || '-'} (${f.status} - R$ ${f.valorFrete ?? f.valor_frete ?? '0'})`
+          ).join('\n') +
+          '\n\nCancelar para não lançar.'
+        );
+        if (escolha === null) return;
+        const idx = parseInt(escolha) - 1;
+        if (isNaN(idx) || idx < 0 || idx >= ativos.length) {
+          alert('Opção inválida.');
+          return;
+        }
+        freteId = ativos[idx].id;
       }
       if (showAddModal === 'despesa' || showAddModal === 'manutencao') {
         await api.post('/despesas', { motorista_id: filterMot, frete_id: freteId, tipo: showAddModal === 'manutencao' ? 'manutencao' : 'geral', descricao: newItemData.descricao, valor: Number(newItemData.valor), quem_pagou: newItemData.quemPagou || 'proprietario' });
