@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
-import '../providers/theme_provider.dart';
 import '../services/api_service.dart';
 import '../services/app_logger.dart';
 import 'cadastro_screen.dart';
@@ -17,6 +16,8 @@ class _LoginScreenState extends State<LoginScreen> {
   final _emailCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
   bool _showPass = false;
+  // Pré-marcado: preserva o comportamento atual de manter a sessão salva.
+  bool _manterConectado = true;
   String _lastShownError = '';
 
   @override
@@ -37,6 +38,7 @@ class _LoginScreenState extends State<LoginScreen> {
     await context.read<AuthProvider>().login(
       _emailCtrl.text.trim(),
       _passCtrl.text,
+      manterConectado: _manterConectado,
     );
   }
 
@@ -92,7 +94,6 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
 
     return Scaffold(
       body: Consumer<AuthProvider>(
@@ -115,20 +116,8 @@ class _LoginScreenState extends State<LoginScreen> {
             });
           }
 
-          return Stack(
-            children: [
-              // Toggle de tema no canto superior direito
-              Positioned(
-                top: 48,
-                right: 16,
-                child: IconButton(
-                  icon: Icon(isDark ? Icons.wb_sunny_outlined : Icons.dark_mode_outlined),
-                  onPressed: () => context.read<ThemeProvider>().toggleTheme(),
-                  tooltip: isDark ? 'Modo claro' : 'Modo escuro',
-                ),
-              ),
-
-              Center(
+          // Controle de tema fica no Drawer (AppShell), não na tela de login.
+          return Center(
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 80),
                   child: Column(
@@ -187,6 +176,22 @@ class _LoginScreenState extends State<LoginScreen> {
                                   child: const Text('Esqueceu a senha?'),
                                 ),
                               ),
+                              // Mantém a sessão salva neste aparelho (token em
+                              // armazenamento seguro). Não salva a senha.
+                              CheckboxListTile(
+                                value: _manterConectado,
+                                onChanged: (v) =>
+                                    setState(() => _manterConectado = v ?? false),
+                                controlAffinity:
+                                    ListTileControlAffinity.leading,
+                                contentPadding: EdgeInsets.zero,
+                                dense: true,
+                                title: const Text('Manter conectado neste aparelho'),
+                                subtitle: const Text(
+                                  'Mantém sua sessão neste aparelho. Sua senha não é salva.',
+                                  style: TextStyle(fontSize: 12),
+                                ),
+                              ),
                               const SizedBox(height: 4),
                               SizedBox(
                                 height: 50,
@@ -227,9 +232,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     ],
                   ),
                 ),
-              ),
-            ],
-          );
+              );
         },
       ),
     );

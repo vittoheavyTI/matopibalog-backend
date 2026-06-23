@@ -1,19 +1,31 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
 import '../config.dart';
 import 'app_logger.dart';
 
 class ApiService {
   static final String _baseUrl = Config.apiBaseUrl;
 
+  /// Token JWT da sessão atual, mantido apenas em memória.
+  /// A persistência segura (quando o usuário marca "Manter conectado neste
+  /// aparelho") é responsabilidade do AuthProvider, via flutter_secure_storage.
+  /// Aqui ficamos só com o token em memória para as requisições da sessão.
+  static String? _sessionToken;
+
+  /// Define o token usado nas requisições autenticadas da sessão atual.
+  static void setSessionToken(String token) => _sessionToken = token;
+
+  /// Limpa o token em memória (logout ou falha de auto-login).
+  static void clearSessionToken() => _sessionToken = null;
+
+  // Mantido como Future para não alterar os ~15 call sites que fazem
+  // `await _getHeaders()`; o token agora vem da memória, não do disco.
   static Future<Map<String, String>> _getHeaders() async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('token');
+    final token = _sessionToken;
     return {
       'Content-Type': 'application/json',
-      if (token != null) 'Authorization': 'Bearer $token',
+      if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
     };
   }
 
