@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { UserPlus, Search, Shield, Phone, MapPin, Camera, X, Check, Trash2, AlertTriangle, Loader2, Key, Copy, KeyRound } from 'lucide-react';
+import { UserPlus, Search, Shield, Phone, MapPin, Camera, X, Check, Trash2, AlertTriangle, Loader2, Key, Copy, KeyRound, Eye, EyeOff } from 'lucide-react';
 import api from '../api';
 import { maskPhone, maskCEP } from '../utils/masks';
 import axios from 'axios';
@@ -24,6 +24,9 @@ export const Usuarios: React.FC = () => {
   const [novaSenha, setNovaSenha] = useState('');
   const [isResetting, setIsResetting] = useState(false);
   const [resetMessage, setResetMessage] = useState('');
+  // Estado para mostrar/ocultar senha no modal de reset.
+  // Reseta ao fechar o modal (setResetUserId(null) + setMostrarSenhaReset(false)).
+  const [mostrarSenhaReset, setMostrarSenhaReset] = useState(false);
   // Senha temporária gerada pelo backend, exibida UMA única vez (estado efêmero,
   // nunca localStorage/sessionStorage/log; some ao fechar o modal).
   const [senhaGerada, setSenhaGerada] = useState<string | null>(null);
@@ -232,6 +235,7 @@ export const Usuarios: React.FC = () => {
       setResetMessage('Senha resetada com sucesso.');
       setResetUserId(null);
       setNovaSenha('');
+      setMostrarSenhaReset(false);
       await loadUsuarios();
     } catch (err: any) {
       console.error('Erro ao resetar senha:', err);
@@ -786,21 +790,32 @@ export const Usuarios: React.FC = () => {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
             <div className="p-6 border-b flex justify-between items-center">
               <h3 className="text-lg font-bold">Resetar Senha do Usuário</h3>
-              <button onClick={() => setResetUserId(null)} className="p-2 hover:bg-gray-200 rounded-full"><X size={20} /></button>
+              <button onClick={() => { setResetUserId(null); setMostrarSenhaReset(false); }} className="p-2 hover:bg-gray-200 rounded-full"><X size={20} /></button>
             </div>
             <div className="p-6 space-y-4">
               <p className="text-sm text-gray-600">Informe a nova senha para o usuário selecionado. A senha deve ter ao menos 6 caracteres.</p>
-              <input
-                type="password"
-                value={novaSenha}
-                onChange={e => setNovaSenha(e.target.value)}
-                placeholder="Nova senha (mín. 6 caracteres)"
-                className="w-full border rounded px-3 py-2"
-              />
+              <div className="relative">
+                <input
+                  type={mostrarSenhaReset ? 'text' : 'password'}
+                  value={novaSenha}
+                  onChange={e => setNovaSenha(e.target.value)}
+                  placeholder="Nova senha (mín. 6 caracteres)"
+                  className="w-full border rounded px-3 py-2 pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setMostrarSenhaReset(!mostrarSenhaReset)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700 p-1"
+                  title={mostrarSenhaReset ? 'Ocultar senha' : 'Mostrar senha'}
+                  aria-label={mostrarSenhaReset ? 'Ocultar senha' : 'Mostrar senha'}
+                >
+                  {mostrarSenhaReset ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
               {resetMessage && <p className="text-sm text-green-600">{resetMessage}</p>}
             </div>
             <div className="p-4 bg-gray-50 flex justify-end space-x-2">
-              <button onClick={() => { setResetUserId(null); setNovaSenha(''); setResetMessage(''); }} className="px-4 py-2 border rounded">Cancelar</button>
+              <button onClick={() => { setResetUserId(null); setNovaSenha(''); setResetMessage(''); setMostrarSenhaReset(false); }} className="px-4 py-2 border rounded">Cancelar</button>
               <button onClick={handleResetSenha} disabled={isResetting} className="px-4 py-2 bg-orange-600 text-white rounded">{isResetting ? 'Processando...' : 'Confirmar Reset'}</button>
             </div>
           </div>
