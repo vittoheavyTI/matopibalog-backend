@@ -437,12 +437,34 @@ export const GerenciamentoViagens: React.FC = () => {
 
   const handleFinalizarViagem = () => {
     if (!selectedMotorista) return;
-    // Defesa em camada de handler: sem frete ativo/pendente, não abre o modal.
-    if (!getFreteAtivoSelecionado()) {
+    const ativos = mFretes.filter(f => f.status === 'ativo' || f.status === 'pendente');
+    if (ativos.length === 0) {
       alert('Nenhum frete ativo encontrado para finalizar.');
       return;
     }
-    setShowFinalizarModal(true);
+    if (ativos.length === 1) {
+      setShowFinalizarModal(true);
+      return;
+    }
+    // Seletor quando há 2+ ativos: constrói lista numerada no prompt
+    const linhas = ativos.map((f: any, i: number) => {
+      const pend = mDesp.some(d => d.frete_id === f.id && d.status === 'pendente') ||
+        mAbs.some(a => a.frete_id === f.id && a.status === 'pendente') ||
+        mVales.some(v => v.frete_id === f.id && v.status === 'pendente');
+      const pendLabel = pend ? ' [TEM PENDÊNCIA]' : '';
+      return `${i + 1}: ${f.origem || '-'} → ${f.destino || '-'} (${f.status} - R$ ${f.valorFrete ?? f.valor_frete ?? '0'})${pendLabel}`;
+    });
+    const msg = `Há ${ativos.length} fretes ativos para este motorista. Digite o número do frete que deseja finalizar:\n\n` +
+      linhas.join('\n') +
+      '\n\nCancelar para não finalizar.\n\nImportante: se o frete tiver pendências, a finalização será recusada pelo sistema.';
+    const escolha = window.prompt(msg);
+    if (escolha === null) return;
+    const idx = parseInt(escolha) - 1;
+    if (isNaN(idx) || idx < 0 || idx >= ativos.length) {
+      alert('Opção inválida.');
+      return;
+    }
+    handleFinalizarFreteEspecifico(ativos[idx]);
   };
 
   const confirmFinalizarViagem = async () => {
@@ -570,9 +592,7 @@ export const GerenciamentoViagens: React.FC = () => {
     abastecimentosParaCalculo.filter(a => a.status === 'aprovado').reduce((acc, a) => acc + (parseFloat(a.valorTotal) || 0), 0) +
     valesParaCalculo.filter(v => v.status === 'aprovado').reduce((acc, v) => acc + (parseFloat(v.valor) || 0), 0);
   const autResultado = opTotalFretes - autGastos;
-  const temPendente = mDesp.some(d => d.status === 'pendente') || mAbs.some(a => a.status === 'pendente') || mVales.some(v => v.status === 'pendente');
   const temFreteAtivo = mFretes.some(f => f.status === 'ativo' || f.status === 'pendente');
-  const qtdFretesAtivos = mFretes.filter(f => f.status === 'ativo' || f.status === 'pendente').length;
   const totalLiters = abastecimentosParaCalculo.filter(a => a.status === 'aprovado').reduce((acc, a) => acc + (parseFloat(a.litros) || 0), 0);
   const totalKM = fretesParaCalculo.reduce((acc, f) => {
     if (f.kmFinal && f.kmInicial && f.kmFinal > f.kmInicial) return acc + (f.kmFinal - f.kmInicial);
@@ -896,18 +916,6 @@ export const GerenciamentoViagens: React.FC = () => {
                         {itensFrete.length === 0
                           ? <p className="text-gray-400 text-sm text-center py-3">Nenhum lançamento vinculado a este frete.</p>
                           : itensFrete.map(renderLancamentoItem)}
-                        {/* Botão de finalizar no próprio accordeon — só para fretes ativos/pendentes */}
-                        {(f.status === 'ativo' || f.status === 'pendente') && (
-                          <div className="pt-2 flex justify-end">
-                            <button
-                              onClick={() => handleFinalizarFreteEspecifico(f)}
-                              disabled={pendentesFrete > 0}
-                              className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg font-bold text-xs shadow hover:bg-green-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed active:scale-95"
-                            >
-                              <Check size={16} className="mr-1.5" /> FINALIZAR ESTE FRETE
-                            </button>
-                          </div>
-                        )}
                       </div>
                     )}
                   </div>
@@ -997,13 +1005,10 @@ export const GerenciamentoViagens: React.FC = () => {
             )}
           </div>
           <button onClick={handleFinalizarViagem}
-            disabled={temPendente || !temFreteAtivo || qtdFretesAtivos > 1}
-            title={qtdFretesAtivos > 1 ? 'Use o botão Finalizar no card de cada frete' : undefined}
+            disabled={!temFreteAtivo}
             className="mt-3 w-full py-2.5 bg-green-600 text-white rounded-xl font-bold text-lg shadow-lg hover:bg-green-700 transition-all disabled:opacity-50 disabled:shadow-none active:scale-95 flex items-center justify-center">
             {temFreteAtivo
-              ? (qtdFretesAtivos > 1
-                ? <span className="flex items-center"><Check size={20} className="mr-2" /> FINALIZAR POR FRETE</span>
-                : <><Check size={20} className="mr-2" /> FINALIZAR FRETE</>)
+              ? <><Check size={20} className="mr-2" /> FINALIZAR FRETE</>
               : <span className="flex items-center"><Check size={20} className="mr-2" /> FRETE FINALIZADO</span>}
           </button>
         </div>
