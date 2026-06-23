@@ -600,13 +600,23 @@ export const GerenciamentoViagens: React.FC = () => {
   }, 0);
   const mediaConsumo = totalLiters > 0 && totalKM > 0 ? (totalKM / totalLiters).toFixed(2) : '0.00';
 
+  // Recorte de exibição da lista principal (não altera dados nem cálculos):
+  // o default "Todos Status" prioriza o mês vigente + fretes ativos/pendentes de
+  // qualquer mês (carry-over). Finalizados/cancelados de meses anteriores saem do
+  // default, mas continuam acessíveis ao escolher o status correspondente.
+  const ymAtual = format(new Date(), 'yyyy-MM');
+  const isFreteAtivoOuPendente = (f: any) => f.status === 'ativo' || f.status === 'pendente';
+  const isFreteDoMesAtual = (f: any) => typeof f.data === 'string' && f.data.slice(0, 7) === ymAtual;
+
   const filtered = fretes.filter(f => {
     if (filterMot !== 'todos') return f.motoristaUid === filterMot || f.motorista_id === filterMot;
     const matchSearch = f.origem?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       f.destino?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       f.motoristas?.usuarios?.nome?.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchStatus = filterStatus === 'todos' || f.status === filterStatus;
-    return matchSearch && matchStatus;
+    if (filterStatus === 'todos') {
+      return matchSearch && (isFreteDoMesAtual(f) || isFreteAtivoOuPendente(f));
+    }
+    return matchSearch && f.status === filterStatus;
   });
 
   const renderLista = () => (
