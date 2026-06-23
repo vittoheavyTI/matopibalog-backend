@@ -14,6 +14,7 @@ export const Usuarios: React.FC = () => {
   const [showModal, setShowModal] = useState(false);
   const [editingUser, setEditingUser] = useState<any | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [categoriaFiltro, setCategoriaFiltro] = useState<'todos' | 'admins' | 'vinculados' | 'autonomos' | 'superadmins' | 'outros'>('todos');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
@@ -303,10 +304,37 @@ export const Usuarios: React.FC = () => {
     return 'bg-gray-100 text-gray-700';
   };
 
-  const filtered = usuarios.filter(u => 
-    u.nome.toLowerCase().includes(searchTerm.toLowerCase()) || 
+  // Categoria do usuário para o filtro por grupos. Mesma ordem de prioridade de
+  // getTipoLabel (super → autônomo → admin → motorista). 'outros' é fallback para
+  // não esconder usuário legado/órfão (ex.: nivel 'operador').
+  const getCategoriaUsuario = (user: any): 'admins' | 'vinculados' | 'autonomos' | 'superadmins' | 'outros' => {
+    if (user.is_super_admin === true) return 'superadmins';
+    if (user.empresaTipo === 'autonomo') return 'autonomos';
+    if (user.nivel === 'admin') return 'admins';
+    if (user.nivel === 'motorista') return 'vinculados';
+    return 'outros';
+  };
+
+  // Estágio 1: busca por nome/email (base para os contadores).
+  const buscados = usuarios.filter(u =>
+    u.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
     u.email.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  // Contadores por categoria, sempre refletindo a busca atual.
+  const contagem = {
+    todos: buscados.length,
+    admins: buscados.filter(u => getCategoriaUsuario(u) === 'admins').length,
+    vinculados: buscados.filter(u => getCategoriaUsuario(u) === 'vinculados').length,
+    autonomos: buscados.filter(u => getCategoriaUsuario(u) === 'autonomos').length,
+    superadmins: buscados.filter(u => getCategoriaUsuario(u) === 'superadmins').length,
+    outros: buscados.filter(u => getCategoriaUsuario(u) === 'outros').length,
+  };
+
+  // Estágio 2: aplica o filtro de categoria por cima da busca.
+  const filtered = categoriaFiltro === 'todos'
+    ? buscados
+    : buscados.filter(u => getCategoriaUsuario(u) === categoriaFiltro);
 
   return (
     <div className="space-y-6 pb-20">
@@ -322,13 +350,37 @@ export const Usuarios: React.FC = () => {
 
       <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-center">
         <Search className="text-gray-400 mr-2" size={20} />
-        <input 
-          type="text" 
-          placeholder="Buscar por nome ou e-mail..." 
+        <input
+          type="text"
+          placeholder="Buscar por nome ou e-mail..."
           className="flex-1 outline-none text-gray-700"
           value={searchTerm}
           onChange={e => setSearchTerm(e.target.value)}
         />
+      </div>
+
+      {/* Filtro por categoria (client-side, sobre a busca). Não altera /admin/usuarios. */}
+      <div className="flex flex-wrap gap-2">
+        {([
+          ['todos', 'Todos'],
+          ['admins', 'Empresas/Admins'],
+          ['vinculados', 'Motoristas vinculados'],
+          ['autonomos', 'Autônomos'],
+          ['superadmins', 'Super Admins'],
+          ...(contagem.outros > 0 ? [['outros', 'Outros'] as const] : []),
+        ] as const).map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => setCategoriaFiltro(key)}
+            className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-colors ${
+              categoriaFiltro === key
+                ? 'bg-blue-600 text-white border-blue-600'
+                : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+            }`}
+          >
+            {label} <span className="opacity-70">({contagem[key]})</span>
+          </button>
+        ))}
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
@@ -348,6 +400,9 @@ export const Usuarios: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
+                {filtered.length === 0 && (
+                  <tr><td colSpan={6} className="p-8 text-center text-gray-400">Nenhum usuário neste grupo.</td></tr>
+                )}
                 {filtered.map(user => (
                   <tr key={user.uid} className="hover:bg-gray-50/50 transition-colors">
                     <td className="p-3">
