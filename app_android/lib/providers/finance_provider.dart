@@ -7,6 +7,11 @@ class FinanceProvider extends ChangeNotifier {
   double _comissao = 0.0;
   double _deducoes = 0.0;
   double _saldo = 0.0;
+  // Campos mensais para o card "Resumo do Mês"
+  double _totalFretesMes = 0.0;
+  double _comissaoMes = 0.0;
+  double _deducoesMes = 0.0;
+  double _saldoMes = 0.0;
   double _percentualComissao = 12.0;
   bool _isAutonomo = false;
   bool _loading = false;
@@ -20,6 +25,10 @@ class FinanceProvider extends ChangeNotifier {
   double get comissao => _comissao;
   double get deducoes => _deducoes;
   double get saldo => _saldo;
+  double get totalFretesMes => _totalFretesMes;
+  double get comissaoMes => _comissaoMes;
+  double get deducoesMes => _deducoesMes;
+  double get saldoMes => _saldoMes;
   double get percentualComissao => _percentualComissao;
   bool get isAutonomo => _isAutonomo;
   bool get loading => _loading;
@@ -165,6 +174,81 @@ class FinanceProvider extends ChangeNotifier {
         // Vinculado: comissão pelo percentual do cadastro
         _comissao = tf * (_percentualComissao / 100);
         _saldo = _comissao - td;
+      }
+
+      // ─── Cálculo mensal (Resumo do Mês) ─────────────────────────────────────
+      // Fretes que entram no resumo: ativos (qualquer mês) + finalizados do mês vigente.
+      final ymAtual = DateTime.now().toString().substring(0, 7); // yyyy-MM
+      final fretesResumoIds = <String>{};
+      for (var f in fretes) {
+        final status = (f['status'] ?? '').toString();
+        if (status == 'cancelado') continue;
+        final data = f['data']?.toString() ?? '';
+        final isAtivo = _statusAtivoPrioritario.contains(status) || status == _statusAtivoFallback;
+        final isMesVigente = data.startsWith(ymAtual);
+        if (isAtivo || isMesVigente) {
+          fretesResumoIds.add(f['id']?.toString() ?? '');
+        }
+      }
+
+      double tfMes = 0.0;
+      for (var f in fretes) {
+        if (!fretesResumoIds.contains(f['id']?.toString())) continue;
+        tfMes += double.tryParse(f['valor_frete'].toString()) ?? 0.0;
+      }
+
+      // IDs de fretes cancelados para exclusão de lançamentos (já calculado acima)
+      double tdMes = 0.0;
+      for (var d in despesas) {
+        if (d['status'] == 'rejeitado') continue;
+        if (_isLancamentoDeFreteCancelado(d, fretesCanceladosIds)) continue;
+        // Lançamento vinculado a frete não incluso: pula
+        final freteId = d['frete_id']?.toString() ?? '';
+        if (freteId.isNotEmpty && !fretesResumoIds.contains(freteId)) continue;
+        // Lançamento solto sem frete_id: só entra se for do mês vigente
+        if (freteId.isEmpty) {
+          final data = (d['created_at'] ?? d['data'] ?? '').toString();
+          if (!data.startsWith(ymAtual)) continue;
+        }
+        if (_isAutonomo || d['quem_pagou'] == 'proprietario') {
+          tdMes += double.tryParse(d['valor'].toString()) ?? 0.0;
+        }
+      }
+      for (var a in abastecimentos) {
+        if (a['status'] == 'rejeitado') continue;
+        if (_isLancamentoDeFreteCancelado(a, fretesCanceladosIds)) continue;
+        final freteId = a['frete_id']?.toString() ?? '';
+        if (freteId.isNotEmpty && !fretesResumoIds.contains(freteId)) continue;
+        if (freteId.isEmpty) {
+          final data = (a['created_at'] ?? a['data'] ?? '').toString();
+          if (!data.startsWith(ymAtual)) continue;
+        }
+        if (_isAutonomo || a['quem_pagou'] == 'proprietario') {
+          tdMes += double.tryParse(a['valor_total'].toString()) ?? 0.0;
+        }
+      }
+      for (var v in vales) {
+        if (v['status'] == 'rejeitado') continue;
+        if (_isLancamentoDeFreteCancelado(v, fretesCanceladosIds)) continue;
+        final freteId = v['frete_id']?.toString() ?? '';
+        if (freteId.isNotEmpty && !fretesResumoIds.contains(freteId)) continue;
+        if (freteId.isEmpty) {
+          final data = (v['created_at'] ?? v['data'] ?? '').toString();
+          if (!data.startsWith(ymAtual)) continue;
+        }
+        if (_isAutonomo || v['quem_pagou'] == 'proprietario') {
+          tdMes += double.tryParse(v['valor'].toString()) ?? 0.0;
+        }
+      }
+
+      _totalFretesMes = tfMes;
+      _deducoesMes = tdMes;
+      if (_isAutonomo) {
+        _comissaoMes = 0.0;
+        _saldoMes = tfMes - tdMes;
+      } else {
+        _comissaoMes = tfMes * (_percentualComissao / 100);
+        _saldoMes = _comissaoMes - tdMes;
       }
 
       AppLogger.action('load_finance_data', params: {
