@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:workmanager/workmanager.dart';
 import 'providers/auth_provider.dart';
@@ -19,6 +20,12 @@ void callbackDispatcher() {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Série 1: app apenas em retrato. Paisagem causava overflows (seletor de
+  // frete, drawer, bottom sheets). Suporte a paisagem/tablet fica no backlog.
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+  ]);
 
   try {
     await Workmanager().initialize(callbackDispatcher, isInDebugMode: false);
