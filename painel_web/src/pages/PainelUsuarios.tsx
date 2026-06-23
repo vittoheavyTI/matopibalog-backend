@@ -27,19 +27,20 @@ export const PainelUsuarios: React.FC = () => {
     } catch {
       // Clipboard API indisponível — tentar fallback
     }
+    const el = document.createElement('textarea');
     try {
-      const el = document.createElement('textarea');
       el.value = senha;
       el.style.position = 'fixed';
       el.style.opacity = '0';
       document.body.appendChild(el);
       el.select();
-      document.execCommand('copy');
-      document.body.removeChild(el);
+      if (!document.execCommand('copy')) throw new Error('execCommand copy returned false');
       setSenhaCopiada(true);
     } catch {
       setSenhaCopiada(false);
       alert('Não foi possível copiar automaticamente. Selecione a senha manualmente.');
+    } finally {
+      if (el.parentNode) document.body.removeChild(el);
     }
   };
 
