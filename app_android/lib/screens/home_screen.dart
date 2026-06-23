@@ -41,10 +41,100 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _abrirNovoLancamento() {
     AppLogger.action('novo_lancamento_sheet_open');
+    final finance = context.read<FinanceProvider>();
+    final ativos = finance.fretesAtivos;
+
+    // 0 fretes ativos → bloquear localmente
+    if (ativos.isEmpty) {
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Nenhum frete ativo'),
+          content: const Text('Não há frete ativo para lançar. Inicie um frete antes de registrar despesas, abastecimentos ou vales.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    // 1 frete ativo → fluxo atual, sem mudança
+    if (ativos.length == 1) {
+      _mostrarBottomSheetLançamento(ativos.first['id']?.toString());
+      return;
+    }
+
+    // 2+ fretes ativos → exibir seletor antes do bottom sheet
+    _mostrarSeletorFrete(ativos);
+  }
+
+  /// Seletor modal quando há mais de um frete ativo.
+  void _mostrarSeletorFrete(List<Map<String, dynamic>> ativos) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Container(
+              width: 40, height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Selecione o Frete',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Há mais de um frete ativo. Escolha em qual deseja lançar.',
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            ...ativos.map((f) {
+              final origem = f['origem'] ?? '-';
+              final destino = f['destino'] ?? '-';
+              final status = f['status'] ?? 'pendente';
+              final valor = double.tryParse(f['valor_frete']?.toString() ?? '') ?? 0.0;
+              return ListTile(
+                leading: const Icon(Icons.local_shipping_outlined, color: Color(0xFF1B5E20)),
+                title: Text(
+                  '$origem → $destino',
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: Text('$status · R\$ ${valor.toStringAsFixed(2)}'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _mostrarBottomSheetLançamento(f['id']?.toString());
+                },
+              );
+            }),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Bottom sheet de tipo de lançamento, extraído com [freteId] por parâmetro.
+  void _mostrarBottomSheetLançamento(String? freteId) {
+    AppLogger.action('novo_lancamento_sheet_open');
     final isAutonomo = context.read<AuthProvider>().isAutonomo;
     final finance = context.read<FinanceProvider>();
     final freteAtivo = finance.freteAtivo;
-    final freteAtivoId = finance.freteAtivoId;
+
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
@@ -77,29 +167,29 @@ class _HomeScreenState extends State<HomeScreen> {
             ListTile(
               leading: const Icon(Icons.receipt_outlined, color: Color(0xFF1B5E20)),
               title: const Text('Despesa'),
-              onTap: () { Navigator.pop(ctx); _navegarERefresh(AddDespesaScreen(freteId: freteAtivoId)); },
+              onTap: () { Navigator.pop(ctx); _navegarERefresh(AddDespesaScreen(freteId: freteId)); },
             ),
             ListTile(
               leading: const Icon(Icons.local_gas_station_outlined, color: Color(0xFF1B5E20)),
               title: const Text('Abastecimento'),
-              onTap: () { Navigator.pop(ctx); _navegarERefresh(AddAbastecimentoScreen(freteId: freteAtivoId)); },
+              onTap: () { Navigator.pop(ctx); _navegarERefresh(AddAbastecimentoScreen(freteId: freteId)); },
             ),
             ListTile(
               leading: const Icon(Icons.build_outlined, color: Color(0xFF1B5E20)),
               title: const Text('Manutenção'),
-              onTap: () { Navigator.pop(ctx); _navegarERefresh(AddDespesaScreen(freteId: freteAtivoId, tipoInicial: 'Manutenção')); },
+              onTap: () { Navigator.pop(ctx); _navegarERefresh(AddDespesaScreen(freteId: freteId, tipoInicial: 'Manutenção')); },
             ),
             ListTile(
               leading: const Icon(Icons.more_horiz, color: Color(0xFF1B5E20)),
               title: const Text('Outro'),
-              onTap: () { Navigator.pop(ctx); _navegarERefresh(AddDespesaScreen(freteId: freteAtivoId, tipoInicial: 'Outros')); },
+              onTap: () { Navigator.pop(ctx); _navegarERefresh(AddDespesaScreen(freteId: freteId, tipoInicial: 'Outros')); },
             ),
             // Vale: oculto para autônomo (ele é proprietário, não faz sentido)
             if (!isAutonomo)
               ListTile(
                 leading: const Icon(Icons.payments_outlined, color: Color(0xFF1B5E20)),
                 title: const Text('Vale'),
-                onTap: () { Navigator.pop(ctx); _navegarERefresh(AddValeScreen(freteId: freteAtivoId)); },
+                onTap: () { Navigator.pop(ctx); _navegarERefresh(AddValeScreen(freteId: freteId)); },
               ),
             const SizedBox(height: 8),
           ],
