@@ -53,6 +53,19 @@ class FinanceProvider extends ChangeNotifier {
   /// id do frete ativo, ou null quando não há frete em execução (lançamento solto).
   String? get freteAtivoId => freteAtivo?['id']?.toString();
 
+  /// Todos os fretes considerados ativos (mesma definição de [freteAtivo]),
+  /// mas sem limitar ao primeiro — útil quando há mais de um frete aberto
+  /// e o app precisa exibir um seletor.
+  List<Map<String, dynamic>> get fretesAtivos {
+    return _fretes
+        .where((f) {
+          final s = (f['status'] ?? '').toString();
+          return _statusAtivoPrioritario.contains(s) || s == _statusAtivoFallback;
+        })
+        .map((f) => Map<String, dynamic>.from(f as Map))
+        .toList();
+  }
+
   /// Verdadeiro quando o lançamento pertence a um frete cancelado.
   /// Lançamentos sem frete_id (lançamentos soltos) são SEMPRE preservados.
   bool _isLancamentoDeFreteCancelado(
