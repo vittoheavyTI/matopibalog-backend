@@ -202,6 +202,20 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final finance = context.watch<FinanceProvider>();
 
+    // Filtro para "Últimos Fretes": fretes ativos (qualquer mês) + fretes do mês vigente.
+    // Finalizados/cancelados de meses anteriores ficam só no Histórico.
+    final ymAtual = DateFormat('yyyy-MM').format(DateTime.now());
+    final idsAtivos = finance.fretesAtivos
+        .map((f) => f['id']?.toString())
+        .where((id) => id != null)
+        .toSet();
+    final fretesHome = finance.fretes.where((f) {
+      final id = f['id']?.toString();
+      if (id != null && idsAtivos.contains(id)) return true;
+      final data = f['data']?.toString() ?? '';
+      return data.startsWith(ymAtual);
+    }).toList();
+
     return RefreshIndicator(
       onRefresh: _refresh,
       child: finance.loading
@@ -271,8 +285,33 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   const SizedBox(height: 20),
 
-                  // Últimos fretes
-                  if (finance.fretes.isNotEmpty) ...[
+                  // Últimos fretes: mostra apenas fretes ativos (qualquer mês) + fretes do mês vigente.
+                  // Finalizados/cancelados de meses anteriores ficam só no Histórico.
+                  if (finance.fretes.isNotEmpty && fretesHome.isEmpty) ...[
+                    // Existem fretes no geral, mas nenhum se encaixa nos critérios da Home
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Column(
+                          children: [
+                            Icon(Icons.search_off, size: 48, color: Colors.grey.shade400),
+                            const SizedBox(height: 8),
+                            Text(
+                              'Sem fretes ativos ou do mês atual.',
+                              style: TextStyle(color: Colors.grey.shade600),
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Consulte o Histórico de Fretes para ver registros anteriores.',
+                              style: TextStyle(color: Colors.grey.shade500, fontSize: 12),
+                              textAlign: TextAlign.center,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ] else if (fretesHome.isNotEmpty) ...[
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
@@ -288,7 +327,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ],
                     ),
                     const SizedBox(height: 8),
-                    ...finance.fretes.take(3).map((f) => _buildViagemCard(f)),
+                    ...fretesHome.take(3).map((f) => _buildViagemCard(f)),
                   ] else ...[
                     Card(
                       child: Padding(
