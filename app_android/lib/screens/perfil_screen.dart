@@ -170,76 +170,21 @@ class _PerfilScreenState extends State<PerfilScreen> {
   }
 
   Future<void> _alterarSenha() async {
-    final novaSenhaCtrl   = TextEditingController();
-    final confirmaSenhaCtrl = TextEditingController();
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => _AlterarSenhaDialog(
-        novaSenhaCtrl: novaSenhaCtrl,
-        confirmaSenhaCtrl: confirmaSenhaCtrl,
+    // Usa Navigator.push com rota MaterialPageRoute em vez de showDialog
+    // para evitar o erro framework _dependents.isEmpty causado pelo
+    // ciclo de vida do InheritedWidget no OverlayEntry do AlertDialog.
+    final ok = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => const _AlterarSenhaPage(),
       ),
     );
 
-    if (confirmed != true) {
-      novaSenhaCtrl.dispose();
-      confirmaSenhaCtrl.dispose();
-      return;
-    }
-
-    final nova    = novaSenhaCtrl.text;
-    final confirma = confirmaSenhaCtrl.text;
-    novaSenhaCtrl.dispose();
-    confirmaSenhaCtrl.dispose();
-
-    if (nova.length < 6) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('A senha deve ter pelo menos 6 caracteres.')),
-        );
-      }
-      return;
-    }
-    if (nova != confirma) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('As senhas não coincidem.')),
-        );
-      }
-      return;
-    }
-
-    AppLogger.action('alterar_senha_attempt');
-    setState(() => _salvando = true);
-    try {
-      final resultado = await ApiService.trocarSenha(nova);
-      if (!mounted) return;
-      setState(() => _salvando = false);
-
-      if (resultado['ok'] == true) {
-        AppLogger.action('alterar_senha_ok');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Senha alterada com sucesso!'), backgroundColor: Colors.green),
-          );
-        }
-      } else {
-        AppLogger.action('alterar_senha_erro', params: {'msg': resultado['message']});
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(resultado['message'] as String? ?? 'Erro ao alterar senha.')),
-          );
-        }
-      }
-    } catch (e) {
-      AppLogger.error('PerfilScreen', 'alterarSenha', e);
-      if (mounted) {
-        setState(() => _salvando = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Erro inesperado ao alterar senha.')),
-        );
-      }
+    if (!mounted) return;
+    if (ok == true) {
+      setState(() => _salvando = true);
+      await _fetchPerfil();
     }
   }
 
@@ -455,70 +400,165 @@ class _PerfilScreenState extends State<PerfilScreen> {
   );
 }
 
-/// Dialog de alteração de senha como StatefulWidget separado para evitar
-/// problemas de StatefulBuilder + setState local que podem causar
-/// inconsistências de estado e exceções.
-class _AlterarSenhaDialog extends StatefulWidget {
-  final TextEditingController novaSenhaCtrl;
-  final TextEditingController confirmaSenhaCtrl;
-
-  const _AlterarSenhaDialog({
-    required this.novaSenhaCtrl,
-    required this.confirmaSenhaCtrl,
-  });
+/// Tela cheia de alteração de senha, navegada via Navigator.push
+/// em vez de showDialog, para evitar o erro _dependents.isEmpty
+/// causado pelo InheritedWidget no OverlayEntry dos diálogos.
+///
+/// A tela faz toda a validação e chamada API internamente,
+/// retornando true (sucesso) ou null (cancelado/erro) para a tela Perfil.
+class _AlterarSenhaPage extends StatefulWidget {
+  const _AlterarSenhaPage();
 
   @override
-  State<_AlterarSenhaDialog> createState() => _AlterarSenhaDialogState();
+  State<_AlterarSenhaPage> createState() => _AlterarSenhaPageState();
 }
 
-class _AlterarSenhaDialogState extends State<_AlterarSenhaDialog> {
-  bool _showNova = false;
+class _AlterarSenhaPageState extends State<_AlterarSenhaPage> {
+  final _novaSenhaCtrl = TextEditingController();
+  final _confirmaCtrl  = TextEditingController();
+  bool _showNova    = false;
   bool _showConfirma = false;
+  bool _salvando    = false;
+
+  @override
+  void dispose() {
+    _novaSenhaCtrl.dispose();
+    _confirmaCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _trocar() async {
+    final nova    = _novaSenhaCtrl.text;
+    final confirma = _confirmaCtrl.text;
+
+    if (nova.length < 6) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('A senha deve ter pelo menos 6 caracteres.')),
+      );
+      return;
+    }
+    if (nova != confirma) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('As senhas não coincidem.')),
+      );
+      return;
+    }
+
+    setState(() => _salvando = true);
+    AppLogger.action('alterar_senha_attempt');
+
+    try {
+      final resultado = await ApiService.trocarSenha(nova);
+      if (!mounted) return;
+
+      if (resultado['ok'] == true) {
+        AppLogger.action('alterar_senha_ok');
+        // Retorna true para PerfilScreen saber que houve sucesso.
+        Navigator.pop(context, true);
+      } else {
+        setState(() => _salvando = false);
+        AppLogger.action('alterar_senha_erro', params: {'msg': resultado['message']});
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(resultado['message'] as String? ?? 'Erro ao alterar senha.')),
+        );
+      }
+    } catch (e) {
+      AppLogger.error('AlterarSenhaPage', 'trocar', e);
+      if (mounted) {
+        setState(() => _salvando = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Erro inesperado ao alterar senha.')),
+        );
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Alterar senha'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TextField(
-            controller: widget.novaSenhaCtrl,
-            obscureText: !_showNova,
-            decoration: InputDecoration(
-              labelText: 'Nova senha',
-              prefixIcon: const Icon(Icons.lock_outline),
-              suffixIcon: IconButton(
-                icon: Icon(_showNova ? Icons.visibility_off : Icons.visibility),
-                onPressed: () => setState(() => _showNova = !_showNova),
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: widget.confirmaSenhaCtrl,
-            obscureText: !_showConfirma,
-            decoration: InputDecoration(
-              labelText: 'Confirmar nova senha',
-              prefixIcon: const Icon(Icons.lock_outline),
-              suffixIcon: IconButton(
-                icon: Icon(_showConfirma ? Icons.visibility_off : Icons.visibility),
-                onPressed: () => setState(() => _showConfirma = !_showConfirma),
-              ),
-            ),
-          ),
-        ],
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Alterar senha'),
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context, false),
-          child: const Text('CANCELAR'),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const SizedBox(height: 16),
+            Icon(Icons.lock_reset_outlined, size: 64, color: Theme.of(context).colorScheme.primary),
+            const SizedBox(height: 24),
+            Text(
+              'Alterar senha do perfil',
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Digite sua nova senha pessoal.',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.grey.shade600),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 32),
+            Card(
+              elevation: 2,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  children: [
+                    TextField(
+                      controller: _novaSenhaCtrl,
+                      obscureText: !_showNova,
+                      decoration: InputDecoration(
+                        labelText: 'Nova senha',
+                        prefixIcon: const Icon(Icons.lock_outline),
+                        suffixIcon: IconButton(
+                          icon: Icon(_showNova ? Icons.visibility_off : Icons.visibility),
+                          onPressed: () => setState(() => _showNova = !_showNova),
+                        ),
+                      ),
+                      textInputAction: TextInputAction.next,
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: _confirmaCtrl,
+                      obscureText: !_showConfirma,
+                      decoration: InputDecoration(
+                        labelText: 'Confirmar nova senha',
+                        prefixIcon: const Icon(Icons.lock_outline),
+                        suffixIcon: IconButton(
+                          icon: Icon(_showConfirma ? Icons.visibility_off : Icons.visibility),
+                          onPressed: () => setState(() => _showConfirma = !_showConfirma),
+                        ),
+                      ),
+                      textInputAction: TextInputAction.done,
+                      onSubmitted: _salvando ? null : (_) => _trocar(),
+                    ),
+                    const SizedBox(height: 24),
+                    SizedBox(
+                      height: 50,
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: _salvando ? null : _trocar,
+                        child: _salvando
+                            ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                              )
+                            : const Text(
+                                'ALTERAR SENHA',
+                                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                              ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ),
-        ElevatedButton(
-          onPressed: () => Navigator.pop(context, true),
-          child: const Text('SALVAR'),
-        ),
-      ],
+      ),
     );
   }
 }
