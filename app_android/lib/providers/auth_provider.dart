@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
 import '../services/app_logger.dart';
@@ -7,6 +8,21 @@ import '../services/app_logger.dart';
 enum AuthStatus { initial, loading, authenticated, unauthenticated, error }
 
 class AuthProvider extends ChangeNotifier {
+  // Token JWT vive no secure storage (Keystore/EncryptedSharedPreferences),
+  // não mais em SharedPreferences (texto claro). Só é persistido quando o
+  // usuário marca "Manter conectado neste aparelho".
+  static const _tokenKey = 'token';
+  final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
+
+  // Chaves não sensíveis (nome/role/uid/tipo) seguem em SharedPreferences,
+  // apenas para restaurar a UI no auto-login. A senha NUNCA é salva.
+  static const _prefKeysSessao = [
+    'user_nome',
+    'user_role',
+    'user_uid',
+    'user_empresa_tipo',
+  ];
+
   AuthStatus _status = AuthStatus.initial;
   String _token = '';
   String _nome = '';
@@ -36,8 +52,20 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
 
     final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('token');
-    if (token == null) {
+
+    // Migração única: versões antigas guardavam o token em SharedPreferences
+    // (texto claro). Move para o secure storage e apaga o resíduo antigo.
+    final legacyToken = prefs.getString('token');
+    if (legacyToken != null && legacyToken.isNotEmpty) {
+      final existente = await _secureStorage.read(key: _tokenKey);
+      if (existente == null) {
+        await _secureStorage.write(key: _tokenKey, value: legacyToken);
+      }
+      await prefs.remove('token');
+    }
+
+    final token = await _secureStorage.read(key: _tokenKey);
+    if (token == null || token.isEmpty) {
       AppLogger.action('try_auto_login', params: {'result': 'no_token'});
       _status = AuthStatus.unauthenticated;
       notifyListeners();
@@ -45,6 +73,7 @@ class AuthProvider extends ChangeNotifier {
     }
 
     _token = token;
+    ApiService.setSessionToken(token);
     _nome = prefs.getString('user_nome') ?? '';
     _role = prefs.getString('user_role') ?? '';
     _uid = prefs.getString('user_uid') ?? '';
@@ -62,7 +91,7 @@ class AuthProvider extends ChangeNotifier {
       _status = AuthStatus.authenticated;
       AppLogger.action('try_auto_login', params: {'result': 'success', 'user': _nome});
     } else {
-      await prefs.clear();
+      await _limparSessao(prefs);
       _token = '';
       _status = AuthStatus.unauthenticated;
       AppLogger.action('try_auto_login', params: {'result': 'api_failed'});
@@ -70,7 +99,19 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<bool> login(String email, String senha) async {
+  /// Remove a sessão persistida (token seguro + chaves não sensíveis + resíduo
+  /// legado), sem usar prefs.clear() para não apagar preferências de outros
+  /// módulos, como o tema (theme_mode).
+  Future<void> _limparSessao(SharedPreferences prefs) async {
+    ApiService.clearSessionToken();
+    await _secureStorage.delete(key: _tokenKey);
+    await prefs.remove('token'); // legado em texto claro
+    for (final k in _prefKeysSessao) {
+      await prefs.remove(k);
+    }
+  }
+
+  Future<bool> login(String email, String senha, {bool manterConectado = true}) async {
     AppLogger.action('login_attempt', params: {'email': email});
     _status = AuthStatus.loading;
     _error = '';
@@ -131,11 +172,25 @@ class AuthProvider extends ChangeNotifier {
     _empresaTipo = res['user']['empresa_tipo'] as String? ?? '';
     _senhaTemporaria = res['user']['senha_temporaria'] == true;
 
-    await prefs.setString('token', _token);
-    await prefs.setString('user_role', _role);
-    await prefs.setString('user_nome', _nome);
-    await prefs.setString('user_uid', _uid);
-    await prefs.setString('user_empresa_tipo', _empresaTipo);
+    // Token disponível em memória para a sessão atual, independentemente de
+    // persistir ou não. A senha NUNCA é armazenada.
+    ApiService.setSessionToken(_token);
+
+    if (manterConectado) {
+      // Persiste a sessão de forma segura: token no secure storage,
+      // dados não sensíveis em SharedPreferences (para restaurar a UI).
+      await _secureStorage.write(key: _tokenKey, value: _token);
+      await prefs.setString('user_role', _role);
+      await prefs.setString('user_nome', _nome);
+      await prefs.setString('user_uid', _uid);
+      await prefs.setString('user_empresa_tipo', _empresaTipo);
+    } else {
+      // Não persiste sessão: ao fechar/sair do app não haverá auto-login.
+      // Garante que nada de uma sessão anterior fique salvo neste aparelho.
+      await _limparSessao(prefs);
+      // Mantém o token em memória só para esta sessão (limpo por _limparSessao acima).
+      ApiService.setSessionToken(_token);
+    }
 
     _status = AuthStatus.authenticated;
     AppLogger.action('login_success', params: {'email': email, 'user': _nome});
@@ -160,7 +215,7 @@ class AuthProvider extends ChangeNotifier {
   Future<void> logout() async {
     AppLogger.action('logout', params: {'user': _nome});
     final prefs = await SharedPreferences.getInstance();
-    await prefs.clear();
+    await _limparSessao(prefs);
     _token = '';
     _nome = '';
     _role = '';
