@@ -20,6 +20,12 @@ void callbackDispatcher() {
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // Série 1: app apenas em retrato. Paisagem causava overflows (seletor de
+  // frete, drawer, bottom sheets). Suporte a paisagem/tablet fica no backlog.
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+  ]);
+
   try {
     await Workmanager().initialize(callbackDispatcher, isInDebugMode: false);
   } catch (_) {}
