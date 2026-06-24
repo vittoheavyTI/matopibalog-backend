@@ -86,7 +86,7 @@ const AppRoutes = () => {
           <Route path="notificacoes" element={<SuperAdminRoute><PainelNotificacoes /></SuperAdminRoute>} />
           <Route path="faturas" element={<SuperAdminRoute><Faturas /></SuperAdminRoute>} />
         </Route>
-        <Route path="integracoes" element={<ProtectedRoute><Integracoes /></ProtectedRoute>} />
+        <Route path="integracoes" element={<SuperAdminRoute><Integracoes /></SuperAdminRoute>} />
         <Route path="minhas-faturas" element={<MinhasFaturas />} />
         <Route path="configuracoes" element={<Configuracoes />} />
       </Route>
