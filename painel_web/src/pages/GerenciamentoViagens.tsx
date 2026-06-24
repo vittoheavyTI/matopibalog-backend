@@ -911,6 +911,19 @@ export const GerenciamentoViagens: React.FC = () => {
                         {editandoFrete
                           ? <button onClick={handleSaveEdit} className="p-1 bg-green-600 text-white rounded shadow-sm"><Save size={16} /></button>
                           : <button onClick={() => handleStartEdit(f, 'frete')} className="p-1 text-gray-400 hover:text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity"><Edit size={16} /></button>}
+                        {/* Cancelar frete: só para fretes ativos/pendentes e fora do modo edição.
+                            Reusa o fluxo de confirmação (setDeleteTarget → modal → handleDelete),
+                            que faz soft-cancel (status 'cancelado', nunca delete físico). */}
+                        {!editandoFrete && (f.status === 'ativo' || f.status === 'pendente') && (
+                          <button
+                            onClick={() => setDeleteTarget(f)}
+                            className="p-1 text-red-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                            title="Cancelar frete"
+                            aria-label="Cancelar frete"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        )}
                       </div>
                     </div>
 
@@ -1267,7 +1280,7 @@ export const GerenciamentoViagens: React.FC = () => {
               <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center"><AlertTriangle size={32} className="text-red-600" /></div>
               <h3 className="text-xl font-bold text-gray-800">Cancelar Frete</h3>
               <p className="text-gray-500">Tem certeza que deseja cancelar o frete de <strong>{deleteTarget.origem} → {deleteTarget.destino}</strong>?</p>
-              <p className="text-xs text-red-500 bg-red-50 p-3 rounded-xl w-full">⚠️ O frete será marcado como cancelado no sistema.</p>
+              <p className="text-xs text-red-500 bg-red-50 p-3 rounded-xl w-full">⚠️ O frete será marcado como cancelado e ficará fora de todos os cálculos.</p>
             </div>
             <div className="p-4 bg-gray-50 border-t flex justify-end space-x-3">
               <button onClick={() => setDeleteTarget(null)} disabled={isDeleting} className="px-5 py-2.5 font-bold text-gray-500 hover:bg-gray-200 rounded-xl transition-all">Voltar</button>
