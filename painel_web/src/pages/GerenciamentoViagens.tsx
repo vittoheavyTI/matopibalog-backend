@@ -662,7 +662,14 @@ export const GerenciamentoViagens: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {filtered.map(frete => (
+                {[...filtered].sort((a: any, b: any) => {
+                  const prioA = a.status === 'ativo' || a.status === 'pendente' ? 0 : 1;
+                  const prioB = b.status === 'ativo' || b.status === 'pendente' ? 0 : 1;
+                  if (prioA !== prioB) return prioA - prioB;
+                  const tsA = new Date(a.data || a.criadoEm).getTime();
+                  const tsB = new Date(b.data || b.criadoEm).getTime();
+                  return tsB - tsA;
+                }).map(frete => (
                   <tr key={frete.id} className="hover:bg-gray-50/50 transition-colors">
                     <td className="p-4">
                       <span className="text-sm text-gray-700 flex items-center">
@@ -741,9 +748,8 @@ export const GerenciamentoViagens: React.FC = () => {
           <p className="text-xs text-gray-500">Pago por: {item.quemPagou} • {gvFmt(item.data, 'dd/MM HH:mm')}</p>
           {type !== 'vale' && (
             item.fotoUrl ? (
-              <p className="text-xs mt-0.5 flex items-center gap-3">
-                <a href={item.fotoUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Abrir comprovante</a>
-                <button type="button" onClick={() => baixarComprovante(item.fotoUrl, item.id)} className="text-blue-600 hover:underline">Baixar</button>
+              <p className="text-xs mt-0.5">
+                <button type="button" onClick={() => baixarComprovante(item.fotoUrl, item.id)} className="text-blue-600 hover:underline">Baixar comprovante</button>
               </p>
             ) : (
               <p className="text-xs text-gray-400 mt-0.5">Sem comprovante</p>
@@ -854,8 +860,16 @@ export const GerenciamentoViagens: React.FC = () => {
               {mFretes.length === 0 && mDesp.length === 0 && mAbs.length === 0 && mVales.length === 0 &&
                 <p className="text-gray-500 text-center py-8">Nenhum lançamento.</p>}
 
-              {/* Um card/accordion por frete, do mais recente para o mais antigo */}
-              {[...mFretes].sort((a: any, b: any) => tsFrete(b) - tsFrete(a)).map((f: any) => {
+              {/* Fretes ordenados: ativos/pendentes no topo, depois finalizados, do mais recente para o mais antigo */}
+              {[...mFretes]
+                .filter((f: any) => f.status !== 'cancelado')
+                .sort((a: any, b: any) => {
+                  const prioA = a.status === 'ativo' || a.status === 'pendente' ? 0 : 1;
+                  const prioB = b.status === 'ativo' || b.status === 'pendente' ? 0 : 1;
+                  if (prioA !== prioB) return prioA - prioB;
+                  return tsFrete(b) - tsFrete(a);
+                })
+                .map((f: any) => {
                 const despFrete = mDesp.filter((d: any) => d.frete_id === f.id);
                 const abastFrete = mAbs.filter((a: any) => a.frete_id === f.id);
                 const valesFrete = mVales.filter((v: any) => v.frete_id === f.id);
@@ -938,8 +952,10 @@ export const GerenciamentoViagens: React.FC = () => {
                 );
               })}
 
-              {/* Grupo legado: lançamentos sem frete_id (não podem sumir) */}
-              {(() => {
+              {/* Grupo legado: lançamentos sem frete_id — ocultos da visão operacional
+                  (não deletados, permanecem no banco). Se necessário no futuro, reativar
+                  em seção técnica/admin separada. */}
+              {false && (() => {
                 const itensSemFrete = ordenarLancamentos([
                   ...mDesp.filter((d: any) => !d.frete_id),
                   ...mAbs.filter((a: any) => !a.frete_id),
