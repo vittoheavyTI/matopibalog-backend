@@ -279,7 +279,7 @@ exports.finalizar = async (req, res) => {
     // Busca o frete e verifica ownership
     const { data: frete, error: freteError } = await supabase
       .from('fretes')
-      .select('id, motorista_id, empresa_id, status')
+      .select('id, motorista_id, empresa_id, status, km_inicial')
       .eq('id', id)
       .single();
 
@@ -325,9 +325,49 @@ exports.finalizar = async (req, res) => {
       return res.status(409).json({ message: MSG_PENDENCIAS });
     }
 
+    // Série 1.5 (KM na finalização): o app NOVO envia km_inicial/km_final no corpo;
+    // quando vierem, validamos (positivos, km_final > km_inicial) e persistimos junto da
+    // finalização. App/cliente ANTIGO não manda KM → finaliza como antes (compatibilidade;
+    // a trava obrigatória rígida fica para um PR posterior, após o APK novo validado).
+    const updatePayload = { status: 'finalizado' };
+    const { km_inicial: kmIniBody, km_final: kmFinBody } = req.body || {};
+    const temKmIni = kmIniBody !== undefined && kmIniBody !== null && kmIniBody !== '';
+    const temKmFin = kmFinBody !== undefined && kmFinBody !== null && kmFinBody !== '';
+
+    if (temKmFin) {
+      const kmFinal = Number(kmFinBody);
+      if (!Number.isFinite(kmFinal) || kmFinal <= 0) {
+        return res.status(422).json({ message: 'KM final inválido.' });
+      }
+      // KM inicial efetivo: o enviado agora (se houver) ou o já gravado no frete.
+      let kmInicialEfetivo = frete.km_inicial;
+      if (temKmIni) {
+        const kmIni = Number(kmIniBody);
+        if (!Number.isFinite(kmIni) || kmIni <= 0) {
+          return res.status(422).json({ message: 'KM inicial inválido.' });
+        }
+        kmInicialEfetivo = kmIni;
+        updatePayload.km_inicial = kmIni;
+      }
+      if (kmInicialEfetivo === null || kmInicialEfetivo === undefined) {
+        return res.status(422).json({ message: 'Informe o KM inicial para finalizar.' });
+      }
+      if (kmFinal <= Number(kmInicialEfetivo)) {
+        return res.status(422).json({ message: 'KM final deve ser maior que o KM inicial.' });
+      }
+      updatePayload.km_final = kmFinal;
+    } else if (temKmIni) {
+      // KM inicial enviado isolado (sem km_final): valida e salva, mas não finaliza com média.
+      const kmIni = Number(kmIniBody);
+      if (!Number.isFinite(kmIni) || kmIni <= 0) {
+        return res.status(422).json({ message: 'KM inicial inválido.' });
+      }
+      updatePayload.km_inicial = kmIni;
+    }
+
     const { data, error } = await supabase
       .from('fretes')
-      .update({ status: 'finalizado' })
+      .update(updatePayload)
       .eq('id', id)
       .select()
       .single();
