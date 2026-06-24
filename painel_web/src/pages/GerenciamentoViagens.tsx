@@ -823,7 +823,7 @@ export const GerenciamentoViagens: React.FC = () => {
               <Fuel size={18} className="mr-2" />
               <div className="text-left">
                 <p className="text-[10px] uppercase font-bold text-blue-100">Média Consumo</p>
-                <p className="font-bold">{mediaConsumo} KM/L</p>
+                <p className="font-bold">{totalKM > 0 ? `${mediaConsumo} KM/L` : 'Pendente de KM'}</p>
               </div>
             </div>
             <button onClick={handleToggleBlock} className="p-2 rounded-lg transition-colors bg-white/20 hover:bg-white/30 border border-white/10">
