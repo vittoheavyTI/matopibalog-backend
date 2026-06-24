@@ -210,11 +210,16 @@ class _HomeScreenState extends State<HomeScreen> {
         .where((id) => id != null)
         .toSet();
     final fretesHome = finance.fretes.where((f) {
+      // Cancelados não aparecem na Home (ficam só no Histórico).
+      if ((f['status'] ?? '').toString() == 'cancelado') return false;
       final id = f['id']?.toString();
       if (id != null && idsAtivos.contains(id)) return true;
       final data = f['data']?.toString() ?? '';
       return data.startsWith(ymAtual);
     }).toList();
+    // Ativos/pendentes no topo, finalizados depois; dentro do grupo, data desc.
+    // Apenas reordena a lista de exibição — não altera nenhum cálculo.
+    _ordenarFretesPorPrioridade(fretesHome);
 
     return RefreshIndicator(
       onRefresh: _refresh,
@@ -532,4 +537,38 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
+}
+
+/// Prioridade de exibição por status: ativos/pendentes no topo, finalizados
+/// depois, cancelados por último. Não influencia nenhum cálculo financeiro.
+int _prioridadeStatusFrete(String status) {
+  switch (status) {
+    case 'ativo':
+      return 0;
+    case 'pendente':
+      return 1;
+    case 'em_viagem':
+    case 'em_andamento':
+      return 2;
+    case 'finalizado':
+      return 3;
+    case 'cancelado':
+      return 5;
+    default:
+      return 4;
+  }
+}
+
+/// Ordena a lista (in-place) por prioridade de status e, dentro da mesma
+/// prioridade, por data decrescente (mais recente primeiro). Reordena apenas
+/// a lista de exibição; não altera valores nem cálculos.
+void _ordenarFretesPorPrioridade(List<dynamic> fretes) {
+  fretes.sort((a, b) {
+    final pa = _prioridadeStatusFrete((a['status'] ?? '').toString());
+    final pb = _prioridadeStatusFrete((b['status'] ?? '').toString());
+    if (pa != pb) return pa.compareTo(pb);
+    final da = (a['data'] ?? a['criadoEm'] ?? a['created_at'] ?? '').toString();
+    final db = (b['data'] ?? b['criadoEm'] ?? b['created_at'] ?? '').toString();
+    return db.compareTo(da);
+  });
 }

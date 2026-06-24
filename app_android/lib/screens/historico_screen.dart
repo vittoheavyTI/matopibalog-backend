@@ -50,6 +50,9 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
     setState(() { _loading = true; _error = ''; });
     try {
       final data = await ApiService.getFretesComFiltro(_dataInicio, _dataFim);
+      // Ativos/pendentes no topo, finalizados depois, cancelados por último
+      // (mantidos para auditoria); dentro do grupo, data desc. Não altera cálculo.
+      _ordenarFretesPorPrioridade(data);
       if (mounted) {
         setState(() { _fretes = data; _loading = false; });
         AppLogger.action('historico_fetch_ok', params: {'total': data.length, 'mes': _mesSelecionado, 'ano': _anoSelecionado});
@@ -274,4 +277,38 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
       default: return Colors.orange;
     }
   }
+}
+
+/// Prioridade de exibição por status: ativos/pendentes no topo, finalizados
+/// depois, cancelados por último. Não influencia nenhum cálculo financeiro.
+int _prioridadeStatusFrete(String status) {
+  switch (status) {
+    case 'ativo':
+      return 0;
+    case 'pendente':
+      return 1;
+    case 'em_viagem':
+    case 'em_andamento':
+      return 2;
+    case 'finalizado':
+      return 3;
+    case 'cancelado':
+      return 5;
+    default:
+      return 4;
+  }
+}
+
+/// Ordena a lista (in-place) por prioridade de status e, dentro da mesma
+/// prioridade, por data decrescente (mais recente primeiro). Reordena apenas
+/// a lista de exibição; não altera valores nem cálculos.
+void _ordenarFretesPorPrioridade(List<dynamic> fretes) {
+  fretes.sort((a, b) {
+    final pa = _prioridadeStatusFrete((a['status'] ?? '').toString());
+    final pb = _prioridadeStatusFrete((b['status'] ?? '').toString());
+    if (pa != pb) return pa.compareTo(pb);
+    final da = (a['data'] ?? a['criadoEm'] ?? a['created_at'] ?? '').toString();
+    final db = (b['data'] ?? b['criadoEm'] ?? b['created_at'] ?? '').toString();
+    return db.compareTo(da);
+  });
 }
