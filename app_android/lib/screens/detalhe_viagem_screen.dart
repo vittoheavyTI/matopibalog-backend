@@ -93,13 +93,97 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
     ) ?? 12.0;
   }
 
+  /// Modal de coleta de KM antes de finalizar (Série 1.5). Pede o KM final e,
+  /// se o frete ainda não tem KM inicial, pede os dois. Valida números positivos
+  /// e km_final > km_inicial. Retorna null se o usuário cancelar.
+  Future<Map<String, int>?> _coletarKmFinalizacao(int? kmInicialExistente) {
+    final precisaKmInicial = kmInicialExistente == null;
+    final kmIniCtrl = TextEditingController();
+    final kmFimCtrl = TextEditingController();
+    return showDialog<Map<String, int>>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        String? erro;
+        return StatefulBuilder(
+          builder: (ctx, setLocal) => AlertDialog(
+            title: const Text('Finalizar Frete'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text('Informe a quilometragem para registrar a média de consumo.'),
+                const SizedBox(height: 12),
+                if (precisaKmInicial)
+                  TextField(
+                    controller: kmIniCtrl,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'KM Inicial'),
+                  ),
+                TextField(
+                  controller: kmFimCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: 'KM Final'),
+                ),
+                if (erro != null) ...[
+                  const SizedBox(height: 8),
+                  Text(erro!, style: const TextStyle(color: Colors.red, fontSize: 13)),
+                ],
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancelar'),
+              ),
+              ElevatedButton(
+                onPressed: () {
+                  final kmFim = int.tryParse(kmFimCtrl.text.trim());
+                  final kmIni = int.tryParse(kmIniCtrl.text.trim());
+                  if (kmFim == null || kmFim <= 0) {
+                    setLocal(() => erro = 'KM final inválido. Use apenas números.');
+                    return;
+                  }
+                  if (precisaKmInicial && (kmIni == null || kmIni <= 0)) {
+                    setLocal(() => erro = 'KM inicial inválido. Use apenas números.');
+                    return;
+                  }
+                  final kmIniEfetivo = precisaKmInicial ? kmIni! : kmInicialExistente;
+                  if (kmFim <= kmIniEfetivo) {
+                    setLocal(() => erro = 'KM final deve ser maior que o KM inicial.');
+                    return;
+                  }
+                  final result = <String, int>{'km_final': kmFim};
+                  if (precisaKmInicial) result['km_inicial'] = kmIni!;
+                  Navigator.pop(ctx, result);
+                },
+                child: const Text('Finalizar'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> _finalizarFrete() async {
     final freteId = _frete['id']?.toString() ?? '';
     if (freteId.isEmpty) return;
+
+    // Coleta de KM antes de finalizar (Série 1.5). Cancelar o modal não finaliza.
+    final kmInicialExistente = int.tryParse(_frete['km_inicial']?.toString() ?? '');
+    final kmColetado = await _coletarKmFinalizacao(kmInicialExistente);
+    if (kmColetado == null) return;
+    if (!mounted) return;
+
     AppLogger.action('finalizar_frete', params: {'frete_id': freteId});
     setState(() => _finalizando = true);
     try {
-      final result = await ApiService.finalizarViagem(freteId);
+      final result = await ApiService.finalizarViagem(
+        freteId,
+        kmInicial: kmColetado['km_inicial'],
+        kmFinal: kmColetado['km_final'],
+      );
       if (!mounted) return;
       if (result != null && result['_error'] != true) {
         AppLogger.action('finalizar_frete_ok', params: {'frete_id': freteId});

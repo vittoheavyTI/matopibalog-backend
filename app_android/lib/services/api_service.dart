@@ -285,12 +285,22 @@ class ApiService {
     } catch (_) {}
   }
 
-  static Future<Map<String, dynamic>?> finalizarViagem(String freteId) async {
+  static Future<Map<String, dynamic>?> finalizarViagem(
+    String freteId, {
+    int? kmInicial,
+    int? kmFinal,
+  }) async {
     try {
+      // Série 1.5: envia KM no corpo quando o app coletou. Corpo vazio mantém
+      // compatibilidade com o backend (finaliza como antes, sem KM).
+      final payload = <String, dynamic>{};
+      if (kmInicial != null) payload['km_inicial'] = kmInicial;
+      if (kmFinal != null) payload['km_final'] = kmFinal;
       final response = await http
           .post(
             Uri.parse('$_baseUrl/fretes/$freteId/finalizar'),
             headers: await _getHeaders(),
+            body: jsonEncode(payload),
           )
           .timeout(_timeoutPostJson);
       AppLogger.api('ApiService', 'POST /fretes/$freteId/finalizar', response.statusCode);
