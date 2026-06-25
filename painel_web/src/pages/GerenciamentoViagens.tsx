@@ -592,6 +592,9 @@ export const GerenciamentoViagens: React.FC = () => {
     return acc;
   }, 0);
   const mediaConsumo = totalLiters > 0 && totalKM > 0 ? (totalKM / totalLiters).toFixed(2) : '0.00';
+  // Avisos de média (apenas visuais — NÃO alteram totalKM/totalLiters/mediaConsumo nem cálculos financeiros).
+  const mediaForaEsperado = totalKM > 0 && totalLiters > 0 && (totalKM / totalLiters) > 8;
+  const temAbastPendente = mAbs.some(a => a.status === 'pendente');
 
   // Recorte de exibição da lista principal (não altera dados nem cálculos):
   // o default "Todos Status" prioriza o mês vigente + fretes ativos/pendentes de
@@ -829,7 +832,13 @@ export const GerenciamentoViagens: React.FC = () => {
               <Fuel size={18} className="mr-2" />
               <div className="text-left">
                 <p className="text-[10px] uppercase font-bold text-blue-100">Média Consumo</p>
-                <p className="font-bold">{totalKM > 0 ? `${mediaConsumo} KM/L` : 'Pendente de KM'}</p>
+                <p className="font-bold">
+                  {totalKM > 0 && totalLiters > 0
+                    ? `${mediaConsumo} KM/L`
+                    : totalKM > 0 ? 'Sem abastecimento aprovado' : 'Pendente de KM'}
+                </p>
+                {mediaForaEsperado && <p className="text-[10px] text-yellow-200 font-semibold mt-0.5">Média fora do esperado — conferir KM/abastecimentos</p>}
+                {totalKM > 0 && totalLiters > 0 && temAbastPendente && <p className="text-[10px] text-orange-200 font-semibold mt-0.5">Média parcial — há abastecimentos pendentes</p>}
               </div>
             </div>
             <button onClick={handleToggleBlock} className="p-2 rounded-lg transition-colors bg-white/20 hover:bg-white/30 border border-white/10">
