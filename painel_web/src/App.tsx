@@ -31,6 +31,7 @@ import { Faturas } from './pages/Faturas';
 import { MinhasFaturas } from './pages/MinhasFaturas';
 import { RedefinirSenha } from './pages/RedefinirSenha';
 import { TrocarSenhaObrigatoria } from './pages/TrocarSenhaObrigatoria';
+import { TermosPendentes } from './pages/TermosPendentes';
 
 const AppRoutes = () => {
   const { loading } = useAuth();
@@ -59,6 +60,10 @@ const AppRoutes = () => {
           Fica FORA do ProtectedRoute (alvo do redirecionamento); a guarda de
           sessão é feita dentro do próprio componente. */}
       <Route path="/trocar-senha" element={<TrocarSenhaObrigatoria />} />
+      {/* Termos LGPD pendentes: fica FORA do ProtectedRoute para evitar loop.
+          A guarda de sessão + redirecionamento é feita no ProtectedRoute e
+          no próprio componente. */}
+      <Route path="/termos-pendentes" element={<TermosPendentes />} />
       <Route path="/planos" element={<PlanosPublicos />} />
       <Route path="/cadastro" element={<CadastroPublico />} />
       
