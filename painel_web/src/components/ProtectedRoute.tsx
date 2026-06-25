@@ -30,5 +30,13 @@ export const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ childr
     return <Navigate to="/trocar-senha" replace />;
   }
 
+  // Termos LGPD pendentes: bloqueia o painel até o usuário aceitar os termos.
+  // Fica DEPOIS de senha_temporaria, então se o usuário tem ambos, primeiro troca
+  // a senha, depois (se ainda houver pendências) é redirecionado para /termos-pendentes.
+  // A rota /termos-pendentes fica FORA do ProtectedRoute, evitando loop.
+  if (user.termos_pendentes) {
+    return <Navigate to="/termos-pendentes" replace />;
+  }
+
   return <>{children}</>;
 };
