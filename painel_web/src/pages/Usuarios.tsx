@@ -369,8 +369,10 @@ export const Usuarios: React.FC = () => {
           ['todos', 'Todos'],
           ['admins', 'Empresas/Admins'],
           ['vinculados', 'Motoristas vinculados'],
-          ['autonomos', 'Autônomos'],
-          ['superadmins', 'Super Admins'],
+          // Autônomos e Super Admins são conceitos de plataforma → só super-admin.
+          ...(currentUser?.is_super_admin
+            ? [['autonomos', 'Autônomos'] as const, ['superadmins', 'Super Admins'] as const]
+            : []),
           ...(contagem.outros > 0 ? [['outros', 'Outros'] as const] : []),
         ] as const).map(([key, label]) => (
           <button
@@ -456,7 +458,7 @@ export const Usuarios: React.FC = () => {
                         >
                           Editar
                         </button>
-                        {(currentUser?.is_super_admin || user.tipo === 'motorista') && (
+                        {(currentUser?.is_super_admin || user.nivel === 'motorista') && (
                           <button
                             onClick={() => setResetUserId(user.uid)}
                             className="text-orange-600 hover:bg-orange-50 px-3 py-1.5 rounded-lg font-bold text-sm transition-colors"
