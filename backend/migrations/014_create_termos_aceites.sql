@@ -114,3 +114,43 @@ FROM (VALUES
   )
 ) AS t(tipo, titulo, conteudo, resumo, base_legal, obrigatorio_para)
 ON CONFLICT (tipo, versao) DO NOTHING;
+
+-- ─── RLS: deny-by-default (proteção de dados pessoais/auditáveis) ────────────
+-- Como `termos_aceites` guarda dados pessoais e trilha de auditoria, as tabelas
+-- nascem com RLS habilitado e SEM política permissiva: clientes com anon/JWT
+-- não conseguem ler/escrever direto. O backend usa service_role (BYPASSRLS),
+-- então continua operando normalmente por trás da API.
+ALTER TABLE termos          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE termos_aceites  ENABLE ROW LEVEL SECURITY;
+
+-- Policies deny-all idempotentes (CREATE POLICY não tem IF NOT EXISTS em todas
+-- as versões — consultamos pg_policies antes de criar).
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename  = 'termos'
+      AND policyname = 'termos_deny_all'
+  ) THEN
+    CREATE POLICY termos_deny_all ON termos
+      FOR ALL
+      USING (false)
+      WITH CHECK (false);
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename  = 'termos_aceites'
+      AND policyname = 'termos_aceites_deny_all'
+  ) THEN
+    CREATE POLICY termos_aceites_deny_all ON termos_aceites
+      FOR ALL
+      USING (false)
+      WITH CHECK (false);
+  END IF;
+END $$;
