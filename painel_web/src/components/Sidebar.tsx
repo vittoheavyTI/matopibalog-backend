@@ -133,6 +133,7 @@ export const Sidebar: React.FC = () => {
     { to: '/painel-administrativo/financeiro', label: 'Financeiro' },
     { to: '/painel-administrativo/configuracoes', label: 'Config. Sistema' },
     { to: '/painel-administrativo/notificacoes', label: 'Notificações' },
+    { to: '/painel-administrativo/termos-lgpd', label: 'Termos LGPD' },
   ];
 
   const linkClass = ({ isActive }: { isActive: boolean }) =>

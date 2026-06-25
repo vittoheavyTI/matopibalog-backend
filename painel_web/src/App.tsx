@@ -24,6 +24,7 @@ import { PainelRelatorios } from './pages/PainelRelatorios';
 import { PainelFinanceiro } from './pages/PainelFinanceiro';
 import { PainelConfigSistema } from './pages/PainelConfigSistema';
 import { PainelNotificacoes } from './pages/PainelNotificacoes';
+import { PainelTermosLGPD } from './pages/PainelTermosLGPD';
 import { PlanosPublicos } from './pages/PlanosPublicos';
 import { CadastroPublico } from './pages/CadastroPublico';
 import { Faturas } from './pages/Faturas';
@@ -84,6 +85,7 @@ const AppRoutes = () => {
           <Route path="financeiro" element={<SuperAdminRoute><PainelFinanceiro /></SuperAdminRoute>} />
           <Route path="configuracoes" element={<SuperAdminRoute><PainelConfigSistema /></SuperAdminRoute>} />
           <Route path="notificacoes" element={<SuperAdminRoute><PainelNotificacoes /></SuperAdminRoute>} />
+          <Route path="termos-lgpd" element={<SuperAdminRoute><PainelTermosLGPD /></SuperAdminRoute>} />
           <Route path="faturas" element={<SuperAdminRoute><Faturas /></SuperAdminRoute>} />
         </Route>
         <Route path="integracoes" element={<SuperAdminRoute><Integracoes /></SuperAdminRoute>} />
