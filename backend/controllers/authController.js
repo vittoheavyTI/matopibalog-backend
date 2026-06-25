@@ -2,6 +2,7 @@ const supabase = require('../config/supabase');
 const { createClient } = require('@supabase/supabase-js');
 const jwt = require('jsonwebtoken');
 const { criarEmpresaCompleta } = require('../services/empresaService');
+const { getTermosPendentes } = require('./termosController');
 
 // Client ISOLADO só para autenticação (signInWithPassword no login). Mantido
 // separado do client admin (config/supabase.js) de propósito: assim a sessão do
@@ -300,7 +301,24 @@ exports.getMe = async (req, res) => {
       .single();
 
     if (error) throw error;
-    res.status(200).json(data);
+
+    // LGPD (aditivo): sinaliza termos pendentes. Falha na consulta de termos
+    // NÃO pode derrubar /auth/me (login / restauração de sessão) → fallback false/0.
+    let termos_pendentes = false;
+    let termos_pendentes_count = 0;
+    try {
+      const { count } = await getTermosPendentes(
+        data.id,
+        data.tipo,
+        data.is_super_admin === true
+      );
+      termos_pendentes_count = count;
+      termos_pendentes = count > 0;
+    } catch (termosErr) {
+      console.error('[getMe] Falha ao calcular termos pendentes:', termosErr.message || termosErr);
+    }
+
+    res.status(200).json({ ...data, termos_pendentes, termos_pendentes_count });
   } catch (error) {
     res.status(500).json({ message: 'Erro ao buscar dados do usuário.' });
   }

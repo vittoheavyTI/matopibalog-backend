@@ -14,6 +14,8 @@ const dashboardRoutes = require('./routes/dashboard');
 const relatoriosRoutes = require('./routes/relatorios');
 const configRoutes = require('./routes/config');
 const notificacoesRoutes = require('./routes/notificacoes');
+const termosRoutes = require('./routes/termos');
+const adminTermosRoutes = require('./routes/adminTermos');
 
 const app = express();
 
@@ -71,6 +73,8 @@ app.get('/health', (req, res) => {
 app.use(apiLimiter);
 app.use('/auth/login', loginLimiter);
 app.use('/auth', authRoutes);
+// /admin/termos ANTES de /admin para o router genérico não capturar o prefixo.
+app.use('/admin/termos', adminTermosRoutes);
 app.use('/admin', adminRoutes);
 app.use('/fretes', fretesRoutes);
 app.use('/despesas', despesasRoutes);
@@ -84,6 +88,7 @@ app.use('/integracoes', require('./routes/integracoes'));
 app.use('/painel-admin', require('./routes/painel-admin'));
 app.use('/pagamentos', require('./routes/pagamentos'));
 app.use('/notificacoes', notificacoesRoutes);
+app.use('/termos', termosRoutes);
 
 require('./jobs/expirarTrials');
 
