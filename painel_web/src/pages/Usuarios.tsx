@@ -355,7 +355,9 @@ export const Usuarios: React.FC = () => {
       <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-center">
         <Search className="text-gray-400 mr-2" size={20} />
         <input
-          type="text"
+          type="search"
+          name="usuarios_busca_filtro"
+          autoComplete="off"
           placeholder="Buscar por nome ou e-mail..."
           className="flex-1 outline-none text-gray-700"
           value={searchTerm}
@@ -369,8 +371,10 @@ export const Usuarios: React.FC = () => {
           ['todos', 'Todos'],
           ['admins', 'Empresas/Admins'],
           ['vinculados', 'Motoristas vinculados'],
-          ['autonomos', 'Autônomos'],
-          ['superadmins', 'Super Admins'],
+          // Autônomos e Super Admins são conceitos de plataforma → só super-admin.
+          ...(currentUser?.is_super_admin
+            ? [['autonomos', 'Autônomos'] as const, ['superadmins', 'Super Admins'] as const]
+            : []),
           ...(contagem.outros > 0 ? [['outros', 'Outros'] as const] : []),
         ] as const).map(([key, label]) => (
           <button
@@ -448,33 +452,33 @@ export const Usuarios: React.FC = () => {
                         ))}
                       </div>
                     </td>
-                    <td className="p-3 text-center align-top">
-                       <div className="flex items-center justify-center space-x-1">
-                        <button 
+                    <td className="p-3 text-right align-top">
+                      <div className="flex items-center justify-end gap-2">
+                        <button
                           onClick={() => { setEditingUser(user); setShowModal(true); }}
-                          className="text-blue-600 hover:bg-blue-50 px-2 py-1 rounded-lg font-bold text-sm transition-colors"
+                          className="inline-flex items-center text-blue-600 hover:bg-blue-50 px-2.5 py-1.5 rounded-lg font-bold text-sm transition-colors"
                         >
                           Editar
                         </button>
-                        {currentUser?.is_super_admin && (
+                        {(currentUser?.is_super_admin || user.nivel === 'motorista') && (
                           <button
                             onClick={() => setResetUserId(user.uid)}
-                            className="text-orange-600 hover:bg-orange-50 px-3 py-1.5 rounded-lg font-bold text-sm transition-colors"
+                            className="inline-flex items-center text-orange-600 hover:bg-orange-50 px-2.5 py-1.5 rounded-lg font-bold text-sm transition-colors"
                             title="Resetar Senha"
                           >
-                            <Key size={14} className="mr-2 inline" /> Resetar Senha
+                            <Key size={14} className="mr-1.5" /> Resetar Senha
                           </button>
                         )}
                         {user.uid !== currentUserId && (
-                          <button 
+                          <button
                             onClick={() => setDeleteTarget(user)}
-                            className="text-red-500 hover:bg-red-50 p-1.5 rounded-lg transition-colors"
-                             title="Excluir usuário"
+                            className="inline-flex items-center text-red-500 hover:bg-red-50 p-1.5 rounded-lg transition-colors"
+                            title="Excluir usuário"
                           >
                             <Trash2 size={16} />
                           </button>
                         )}
-                       </div>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -784,19 +788,21 @@ export const Usuarios: React.FC = () => {
         </div>
       )}
 
-      {/* Modal Resetar Senha (super-admin) */}
+      {/* Modal Resetar Senha (admin p/ motoristas, super-admin p/ qualquer um) */}
       {resetUserId && (
         <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 animate-fade-in">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
             <div className="p-6 border-b flex justify-between items-center">
               <h3 className="text-lg font-bold">Resetar Senha do Usuário</h3>
-              <button onClick={() => { setResetUserId(null); setMostrarSenhaReset(false); }} className="p-2 hover:bg-gray-200 rounded-full"><X size={20} /></button>
+              <button onClick={() => { setResetUserId(null); setNovaSenha(''); setResetMessage(''); setMostrarSenhaReset(false); }} className="p-2 hover:bg-gray-200 rounded-full"><X size={20} /></button>
             </div>
             <div className="p-6 space-y-4">
               <p className="text-sm text-gray-600">Informe a nova senha para o usuário selecionado. A senha deve ter ao menos 6 caracteres.</p>
               <div className="relative">
                 <input
                   type={mostrarSenhaReset ? 'text' : 'password'}
+                  name="reset_usuario_nova_senha"
+                  autoComplete="new-password"
                   value={novaSenha}
                   onChange={e => setNovaSenha(e.target.value)}
                   placeholder="Nova senha (mín. 6 caracteres)"
