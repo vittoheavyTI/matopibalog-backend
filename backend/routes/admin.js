@@ -22,6 +22,6 @@ router.get('/usuarios', verificarEmpresa, adminController.getUsuarios);
 router.post('/usuarios', verificarEmpresa, adminController.createUsuario);
 router.put('/usuarios/:id', verificarEmpresa, adminController.updateUsuario);
 router.delete('/usuarios/:id', verificarEmpresa, adminController.deleteUsuario);
-router.post('/usuarios/:id/reset-senha', isSuperAdmin, validate(resetSenhaSchema), adminController.resetSenhaUsuario);
+router.post('/usuarios/:id/reset-senha', verificarEmpresa, validate(resetSenhaSchema), adminController.resetSenhaUsuario);
 
 module.exports = router;

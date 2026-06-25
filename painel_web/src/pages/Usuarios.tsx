@@ -456,7 +456,7 @@ export const Usuarios: React.FC = () => {
                         >
                           Editar
                         </button>
-                        {currentUser?.is_super_admin && (
+                        {(currentUser?.is_super_admin || user.tipo === 'motorista') && (
                           <button
                             onClick={() => setResetUserId(user.uid)}
                             className="text-orange-600 hover:bg-orange-50 px-3 py-1.5 rounded-lg font-bold text-sm transition-colors"
@@ -784,7 +784,7 @@ export const Usuarios: React.FC = () => {
         </div>
       )}
 
-      {/* Modal Resetar Senha (super-admin) */}
+      {/* Modal Resetar Senha (admin p/ motoristas, super-admin p/ qualquer um) */}
       {resetUserId && (
         <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 animate-fade-in">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">

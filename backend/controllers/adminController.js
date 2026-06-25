@@ -499,6 +499,26 @@ exports.resetSenhaUsuario = async (req, res) => {
   }
 
   try {
+    // Ownership: super-admin pode resetar qualquer um;
+    // admin comum só pode resetar motorista da própria empresa.
+    const isSuperAdmin = req.user.is_super_admin === true;
+    if (!isSuperAdmin) {
+      const { data: pertence, error: pertenceError } = await supabase
+        .from('usuarios')
+        .select('id, tipo')
+        .eq('id', id)
+        .eq('empresa_id', req.empresa_id)
+        .single();
+
+      if (pertenceError || !pertence) {
+        return res.status(403).json({ message: 'Acesso negado: usuário não pertence a esta empresa.' });
+      }
+      // Admin de empresa NÃO pode resetar senha de outro admin ou super-admin.
+      if (pertence.tipo !== 'motorista') {
+        return res.status(403).json({ message: 'Acesso negado: você só pode resetar senha de motoristas.' });
+      }
+    }
+
     const { data, error } = await supabase.auth.admin.updateUserById(id, {
       password: nova_senha
     });
