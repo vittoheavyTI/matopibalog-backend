@@ -11,7 +11,7 @@ async function getTermosPendentes(usuarioId, role, isSuperAdmin = false) {
   // 1) termos ativos cujo obrigatorio_para CONTÉM o papel do usuário (text[] @>)
   const { data: ativos, error: errAtivos } = await supabase
     .from('termos')
-    .select('id, tipo, versao, titulo, resumo, conteudo_hash, obrigatorio_para, publicado_em')
+    .select('id, tipo, versao, titulo, conteudo, resumo, conteudo_hash, obrigatorio_para, publicado_em')
     .eq('ativo', true)
     .contains('obrigatorio_para', [role]);
 
