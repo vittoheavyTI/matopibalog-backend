@@ -12,7 +12,7 @@ A configuração do banco de dados e do ambiente administrativo do CHOFER LOG fo
 
 ## Credenciais do Administrador
 - **Email**: `admin@choferlog.com.br`
-- **Senha**: `Admin@123!`
+- **Senha**: `<SENHA_REMOVIDA>`
 - **URL do Painel**: `http://localhost:5174` (Ambiente Local)
 
 ## Próximos Passos
