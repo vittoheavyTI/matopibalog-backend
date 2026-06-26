@@ -26,12 +26,12 @@
 1. Abra o terminal na pasta backend
 2. Execute: node setup_admin.js
 3. Deve aparecer: "✅ Administrador criado com sucesso!"
-4. Anote as credenciais: admin@choferlog.com.br / Admin@123!
+4. Anote as credenciais: admin@choferlog.com.br / <SENHA_REMOVIDA>
 
 ## Passo 4: Testar o login
 1. Certifique-se de que o backend está rodando (node server.js)
 2. Acesse o painel web (http://localhost:5174)
-3. Faça login com admin@choferlog.com.br / Admin@123!
+3. Faça login com admin@choferlog.com.br / <SENHA_REMOVIDA>
 4. Você deve ser redirecionado ao Dashboard
 
 ## Passo 5: Testar funcionalidades principais

@@ -53,7 +53,7 @@ npx vite build
 Netlify CLI hangs on this machine. Use the API deploy script:
 
 ```powershell
-$token = "nfp_pLWxbgbp4PiXptne6V99wRH5F6Ker98628e2"
+$token = "<TOKEN_REMOVIDO>"
 $siteId = "d827f06f-7185-48a4-bd9c-252e18a3272f"
 $distPath = "$PWD\dist"
 
@@ -232,10 +232,10 @@ backend: backend/
   stack: Express
 netlify:
   site_id: d827f06f-7185-48a4-bd9c-252e18a3272f
-  token: nfp_pLWxbgbp4PiXptne6V99wRH5F6Ker98628e2
+  token: <TOKEN_REMOVIDO>
   url: https://dazzling-fudge-f38a2c.netlify.app
 admin_login:
   email: admin@choferlog.com.br
-  password: Admin@123!
+  password: <SENHA_REMOVIDA>
 persistence: localStorage (prefix: choferlog_)
 ```

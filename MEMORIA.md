@@ -69,17 +69,17 @@ C:\Users\Jordão Vittor\Documents\APP-CHOFERLOG\APP-CHOFER LOG\
 - **Produção**: `https://matopibalog.com.br` (GitHub Pages)
 - **GitHub Pages fallback**: `https://vittoheavyTI.github.io/matopibalog-backend/`
 - **Netlify (desativado, sem créditos)**: `https://dazzling-fudge-f38a2c.netlify.app`
-- **Admin login**: `admin@choferlog.com.br` / `Admin@123!`
+- **Admin login**: `admin@choferlog.com.br` / `<SENHA_REMOVIDA>`
 
 ### Backend (backend)
 - **Dev**: `http://localhost:3000`
 - **Produção**: `https://matopibalog-api.onrender.com` (NÃO IMPLANTADO AINDA)
 - **Supabase**: `https://rjahjogidyndphdxevom.supabase.co`
-- **JWT Secret**: `dc28024f-3b47-460e-897f-98802ed4a5ee`
+- **JWT Secret**: `<JWT_SECRET_ROTACIONADO_NO_RAILWAY>`
 
 ### Netlify (créditos esgotados)
 - **Site ID**: `d827f06f-7185-48a4-bd9c-252e18a3272f`
-- **Token**: `nfp_pLWxbgbp4PiXptne6V99wRH5F6Ker98628e2`
+- **Token**: `<TOKEN_REMOVIDO>`
 
 ---
 
@@ -333,7 +333,7 @@ npx vite build  # NÃO use npm run build (tsc -b trava)
 ### Netlify (sem créditos no momento)
 - API deploy script no SKILL devops (PowerShell, ~90 linhas)
 - URL: `https://dazzling-fudge-f38a2c.netlify.app`
-- Token: `nfp_pLWxbgbp4PiXptne6V99wRH5F6Ker98628e2`
+- Token: `<TOKEN_REMOVIDO>`
 - Site ID: `d827f06f-7185-48a4-bd9c-252e18a3272f`
 
 ---

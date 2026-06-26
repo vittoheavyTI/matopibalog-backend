@@ -11,7 +11,7 @@
 | **Backend (Render)** | `https://matopibalog-api.onrender.com` | ⬜ Pendente |
 | **Frontend (Netlify)** | `https://matopibalog.netlify.app` | ⬜ Pendente |
 | **Banco (Supabase)** | `https://rjahjogidyndphdxevom.supabase.co` | ✅ Ativo |
-| **Admin** | `admin@matopibalog.com.br` / `Admin@123!` | ✅ Criado |
+| **Admin** | `admin@matopibalog.com.br` / `<SENHA_REMOVIDA>` | ✅ Criado |
 
 ---
 
@@ -72,7 +72,7 @@ git push -u origin main
 |----------|-------|
 | `SUPABASE_URL` | `https://rjahjogidyndphdxevom.supabase.co` |
 | `SUPABASE_SERVICE_KEY` | (service_role key do Supabase) |
-| `JWT_SECRET` | `dc28024f-3b47-460e-897f-98802ed4a5ee` |
+| `JWT_SECRET` | `<JWT_SECRET_ROTACIONADO_NO_RAILWAY>` |
 | `FRONTEND_URL` | `https://matopibalog.netlify.app` |
 | `NODE_ENV` | `production` |
 
