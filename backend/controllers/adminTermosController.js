@@ -154,16 +154,41 @@ exports.publicar = async (req, res) => {
 };
 
 // GET /admin/termos/:id/aceites  (super-admin) — lista aceites de um termo.
+// Enriquece cada aceite com nome/email do usuário (vínculo termos_aceites.usuario_id
+// → usuarios.id). Sem alterar a tabela, o POST de aceite, hash, RLS ou publicação.
 exports.listarAceitesDoTermo = async (req, res) => {
   const { id } = req.params;
   try {
-    const { data, error } = await supabase
+    const { data: aceites, error } = await supabase
       .from('termos_aceites')
       .select('*')
       .eq('termo_id', id)
       .order('aceito_em', { ascending: false });
     if (error) throw error;
-    res.status(200).json(data);
+
+    // Busca os usuários correspondentes em uma única query (ids únicos).
+    const ids = [...new Set((aceites || []).map((a) => a.usuario_id).filter(Boolean))];
+    let mapaUsuarios = {};
+    if (ids.length > 0) {
+      const { data: usuarios, error: errUsuarios } = await supabase
+        .from('usuarios')
+        .select('id, nome, email')
+        .in('id', ids);
+      if (errUsuarios) throw errUsuarios;
+      mapaUsuarios = Object.fromEntries((usuarios || []).map((u) => [u.id, u]));
+    }
+
+    // Se o usuário não for encontrado, mantém o usuario_id e nome/email = null.
+    const enriquecidos = (aceites || []).map((a) => {
+      const u = mapaUsuarios[a.usuario_id];
+      return {
+        ...a,
+        usuario_nome: u ? u.nome : null,
+        usuario_email: u ? u.email : null,
+      };
+    });
+
+    res.status(200).json(enriquecidos);
   } catch (error) {
     console.error('[adminTermos.listarAceitesDoTermo]', error.message || error);
     res.status(500).json({ message: 'Erro ao listar aceites do termo.' });

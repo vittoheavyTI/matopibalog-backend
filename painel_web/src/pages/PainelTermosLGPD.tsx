@@ -25,8 +25,8 @@ interface Termo {
 interface Aceite {
   id: string;
   usuario_id?: string;
-  nome?: string;
-  email?: string;
+  usuario_nome?: string | null;
+  usuario_email?: string | null;
   aceito_em?: string;
   origem?: string;
   ip?: string | null;
@@ -502,8 +502,15 @@ export const PainelTermosLGPD: React.FC = () => {
                   <tbody className="divide-y divide-gray-50">
                     {aceites.map((a) => (
                       <tr key={a.id}>
-                        <td className="px-2 py-2 text-gray-700">{a.nome || a.usuario_id || '—'}</td>
-                        <td className="px-2 py-2 text-gray-500">{a.email || '—'}</td>
+                        <td className="px-2 py-2">
+                          <div className="font-medium text-gray-700">
+                            {a.usuario_nome || 'Usuário não identificado'}
+                          </div>
+                          <div className="font-mono text-[11px] text-gray-400">
+                            {a.usuario_id || '—'}
+                          </div>
+                        </td>
+                        <td className="px-2 py-2 text-gray-500">{a.usuario_email || '—'}</td>
                         <td className="px-2 py-2 text-gray-500">
                           {a.aceito_em ? new Date(a.aceito_em).toLocaleString('pt-BR') : '—'}
                         </td>
