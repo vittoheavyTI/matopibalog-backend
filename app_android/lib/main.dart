@@ -8,6 +8,7 @@ import 'providers/theme_provider.dart';
 import 'screens/login_screen.dart';
 import 'screens/app_shell.dart';
 import 'screens/trocar_senha_screen.dart';
+import 'screens/termos_pendentes_screen.dart';
 import 'services/offline_sync.dart';
 
 @pragma('vm:entry-point')
@@ -176,7 +177,9 @@ class _SplashScreenState extends State<SplashScreen> {
       builder: (context, auth, _) {
         switch (auth.status) {
           case AuthStatus.authenticated:
+            // Ordem do gate: senha temporária SEMPRE tem prioridade sobre termos.
             if (auth.senhaTemporaria) return const TrocarSenhaScreen();
+            if (auth.termosPendentes) return const TermosPendentesScreen();
             return const AppShell();
           case AuthStatus.unauthenticated:
             return const LoginScreen();
