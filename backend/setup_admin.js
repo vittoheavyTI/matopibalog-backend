@@ -7,9 +7,14 @@ const supabase = createClient(
 );
 
 async function criarAdmin() {
-  const email = 'admin@choferlog.com.br';
-  const password = 'Admin@123!';
+  const email = process.env.ADMIN_EMAIL || 'admin@choferlog.com.br';
+  const password = process.env.ADMIN_PASSWORD;
   const nome = 'Administrador';
+
+  if (!password) {
+    console.error('❌ ADMIN_PASSWORD obrigatório. Defina a senha fora do código.');
+    process.exit(1);
+  }
 
   try {
     // 1. Tentar criar ou obter usuário no Auth
@@ -57,8 +62,8 @@ async function criarAdmin() {
       console.error('Erro ao inserir/atualizar em usuarios:', insertError.message);
     } else {
       console.log('✅ Administrador configurado com sucesso!');
-      console.log('   Email: admin@choferlog.com.br');
-      console.log('   Senha: Admin@123! (ou a senha já definida)');
+      console.log(`   Email: ${email}`);
+      console.log('   Senha: (definida via ADMIN_PASSWORD)');
     }
   } catch (err) {
     console.error('❌ Erro inesperado:', err.message);
