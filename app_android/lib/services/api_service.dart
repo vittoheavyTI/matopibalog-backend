@@ -227,6 +227,54 @@ class ApiService {
     }
   }
 
+  // TERMOS LGPD
+  /// GET /termos/pendentes — retorna o corpo {pendentes, count} ou null em erro.
+  /// Cada termo traz id, tipo, versao, titulo, conteudo, resumo, conteudo_hash,
+  /// obrigatorio_para, publicado_em.
+  static Future<Map<String, dynamic>?> buscarTermosPendentes() async {
+    try {
+      final response = await http
+          .get(
+            Uri.parse('$_baseUrl/termos/pendentes'),
+            headers: await _getHeaders(),
+          )
+          .timeout(_timeoutGet);
+      AppLogger.api('ApiService', 'GET /termos/pendentes', response.statusCode);
+      if (response.statusCode == 200) return jsonDecode(response.body);
+      return null;
+    } catch (e) {
+      AppLogger.error('ApiService', 'GET /termos/pendentes exception', e);
+      return null;
+    }
+  }
+
+  /// POST /termos/:id/aceitar com { origem: "app" }. Retorna {ok, status, message}.
+  /// 201 (novo) e 200 (idempotente / já aceito) são tratados como sucesso.
+  static Future<Map<String, dynamic>> aceitarTermo(String termoId) async {
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$_baseUrl/termos/$termoId/aceitar'),
+            headers: await _getHeaders(),
+            body: jsonEncode({'origem': 'app'}),
+          )
+          .timeout(_timeoutPostJson);
+      AppLogger.api('ApiService', 'POST /termos/$termoId/aceitar', response.statusCode);
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        return {'ok': true, 'status': response.statusCode};
+      }
+      String msg = 'Erro ao registrar aceite.';
+      try {
+        final body = jsonDecode(response.body);
+        msg = body['message'] ?? body['error'] ?? msg;
+      } catch (_) {}
+      return {'ok': false, 'status': response.statusCode, 'message': msg};
+    } catch (e) {
+      AppLogger.error('ApiService', 'POST /termos/aceitar exception', e);
+      return {'ok': false, 'status': 0, 'message': _mensagemErroRede(e)};
+    }
+  }
+
   // FRETES
   static Future<List<dynamic>> getFretes() async {
     try {

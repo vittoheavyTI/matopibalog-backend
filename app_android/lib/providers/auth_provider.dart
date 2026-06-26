@@ -32,6 +32,8 @@ class AuthProvider extends ChangeNotifier {
   String _fotoUrl = '';
   String _empresaTipo = '';
   bool _senhaTemporaria = false;
+  bool _termosPendentes = false;
+  int _termosPendentesCount = 0;
 
   AuthStatus get status => _status;
   String get token => _token;
@@ -43,6 +45,8 @@ class AuthProvider extends ChangeNotifier {
   String get empresaTipo => _empresaTipo;
   bool get isAutonomo => _empresaTipo == 'autonomo';
   bool get senhaTemporaria => _senhaTemporaria;
+  bool get termosPendentes => _termosPendentes;
+  int get termosPendentesCount => _termosPendentesCount;
   bool get isLoggedIn => _status == AuthStatus.authenticated;
   bool get isMotorista => _role == 'motorista';
 
@@ -88,6 +92,9 @@ class AuthProvider extends ChangeNotifier {
       // Restaura senha_temporaria do perfil: sem isso, ao reabrir o app com token
       // salvo o flag seria false e o motorista pularia a tela de troca de senha.
       _senhaTemporaria = profile['senha_temporaria'] == true;
+      // Termos LGPD pendentes (gate após a troca de senha temporária).
+      _termosPendentes = profile['termos_pendentes'] == true;
+      _termosPendentesCount = (profile['termos_pendentes_count'] as num?)?.toInt() ?? 0;
       _status = AuthStatus.authenticated;
       AppLogger.action('try_auto_login', params: {'result': 'success', 'user': _nome});
     } else {
@@ -192,6 +199,16 @@ class AuthProvider extends ChangeNotifier {
       ApiService.setSessionToken(_token);
     }
 
+    // O /auth/login NÃO retorna termos_pendentes (só /auth/me calcula). Busca o
+    // perfil para acionar o gate de termos sem depender de reabrir o app. Feito
+    // ANTES de marcar autenticado para evitar piscar o AppShell antes do gate.
+    final profile = await ApiService.getMe();
+    if (profile != null) {
+      _senhaTemporaria = profile['senha_temporaria'] == true;
+      _termosPendentes = profile['termos_pendentes'] == true;
+      _termosPendentesCount = (profile['termos_pendentes_count'] as num?)?.toInt() ?? 0;
+    }
+
     _status = AuthStatus.authenticated;
     AppLogger.action('login_success', params: {'email': email, 'user': _nome});
     notifyListeners();
@@ -212,6 +229,14 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Chamado pela TermosPendentesScreen quando todos os termos obrigatórios
+  /// foram aceitos. O Consumer<AuthProvider> em main.dart troca para o AppShell.
+  void marcarTermosAceitos() {
+    _termosPendentes = false;
+    _termosPendentesCount = 0;
+    notifyListeners();
+  }
+
   Future<void> logout() async {
     AppLogger.action('logout', params: {'user': _nome});
     final prefs = await SharedPreferences.getInstance();
@@ -222,6 +247,8 @@ class AuthProvider extends ChangeNotifier {
     _uid = '';
     _empresaTipo = '';
     _senhaTemporaria = false;
+    _termosPendentes = false;
+    _termosPendentesCount = 0;
     _status = AuthStatus.unauthenticated;
     notifyListeners();
   }
