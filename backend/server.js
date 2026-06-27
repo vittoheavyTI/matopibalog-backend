@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
 const cookieParser = require('cookie-parser');
 const rateLimit = require('express-rate-limit');
 
@@ -21,6 +22,14 @@ const app = express();
 
 // Necessário para o Railway (proxy reverso) — corrige o express-rate-limit
 app.set('trust proxy', 1);
+
+// Hardening HTTP básico.
+// - Remove o header "x-powered-by: Express" (não revelar a stack).
+// - Helmet adiciona headers de segurança (x-content-type-options, hsts, etc.).
+//   CSP desabilitado neste primeiro PR para não arriscar quebrar o frontend
+//   (SPA servida por este mesmo backend) nem chamadas cross-origin do app/painel.
+app.disable('x-powered-by');
+app.use(helmet({ contentSecurityPolicy: false }));
 
 const FRONTEND_URL = process.env.FRONTEND_URL || 'https://matopibalog.com.br';
 const allowedOrigins = [
@@ -62,8 +71,10 @@ app.use(cors({
   credentials: true,
 }));
 
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+// Uploads (foto/comprovante) usam multer/multipart e NÃO passam por aqui,
+// então um limite conservador para JSON/urlencoded é seguro e mitiga DoS por payload.
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ limit: '2mb', extended: true }));
 app.use(cookieParser());
 
 app.get('/health', (req, res) => {
