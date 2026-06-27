@@ -179,9 +179,21 @@ exports.getById = async (req, res) => {
       .eq('id', id)
       .single();
 
-    if (error) throw error;
-    if (req.user.role !== 'admin' && data.motorista_id !== req.user.uid) {
-      return res.status(403).json({ message: 'Acesso negado.' });
+    if (error || !data) {
+      return res.status(404).json({ message: 'Frete não encontrado.' });
+    }
+
+    // Isolamento por tenant: super-admin acessa tudo; admin só a própria
+    // empresa; motorista só os próprios fretes.
+    const isSuperAdmin = req.user.is_super_admin === true;
+    if (!isSuperAdmin) {
+      if (req.user.role === 'admin') {
+        if (data.empresa_id !== req.empresa_id) {
+          return res.status(403).json({ message: 'Acesso negado.' });
+        }
+      } else if (data.motorista_id !== req.user.uid) {
+        return res.status(403).json({ message: 'Acesso negado.' });
+      }
     }
 
     res.status(200).json(data);
