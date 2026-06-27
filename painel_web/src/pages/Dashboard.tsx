@@ -314,16 +314,36 @@ export const Dashboard: React.FC = () => {
     if (tipo === 'despesa' && (!newDespesa.descricao || !newDespesa.valor)) { alert('Preencha descrição e valor.'); return; }
     if (tipo === 'abastecimento' && (!newDespesa.posto || !newDespesa.litros || !newDespesa.valor_total)) { alert('Preencha posto, litros e valor total.'); return; }
     if (tipo === 'vale' && !newDespesa.valor) { alert('Preencha o valor do vale.'); return; }
-    // Validação local: só permite lançar se houver frete ativo/pendente para o motorista.
-    // O backend também rejeita (409) quando não há frete ativo — esta validação antecipada
-    // evita o erro no servidor e dá uma mensagem mais clara ao usuário.
-    const ativo = fretes.find(f => f.status === 'ativo' || f.status === 'pendente');
-    if (!ativo) {
+    // Resolve o frete ativo/pendente do motorista: 0 → bloqueia, 1 → usa direto,
+    // 2+ → solicita seleção. Evita escolher o primeiro silenciosamente quando há
+    // múltiplos fretes ativos (mesma regra do Gerenciamento de Fretes). O backend
+    // também rejeita (409) quando não há frete ativo — esta validação é antecipada.
+    const ativos = fretes.filter(f =>
+      f.motoristaUid === selectedMot.uid &&
+      (f.status === 'ativo' || f.status === 'pendente'));
+    let freteId: string | undefined;
+    if (ativos.length === 0) {
       alert('Este motorista não possui frete ativo. Inicie ou selecione um frete antes de lançar despesa, abastecimento ou vale.');
-      setSavingDespesa(false);
       return;
+    } else if (ativos.length === 1) {
+      freteId = ativos[0].id;
+    } else {
+      const escolha = window.prompt(
+        `Há ${ativos.length} fretes ativos para este motorista. Digite o número do frete desejado:\n\n` +
+        ativos.map((f: any, i: number) =>
+          `${i + 1}: ${f.origem || '-'} → ${f.destino || '-'} (${f.status} - R$ ${f.valorFrete ?? '0'})`
+        ).join('\n') +
+        '\n\nCancelar para não lançar.'
+      );
+      if (escolha === null) return;
+      const idx = parseInt(escolha) - 1;
+      if (isNaN(idx) || idx < 0 || idx >= ativos.length) {
+        alert('Opção inválida.');
+        return;
+      }
+      freteId = ativos[idx].id;
     }
-    const vinc = { frete_id: ativo.id };
+    const vinc = { frete_id: freteId };
     setSavingDespesa(true);
     try {
       if (tipo === 'abastecimento') {
