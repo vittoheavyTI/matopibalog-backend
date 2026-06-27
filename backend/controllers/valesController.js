@@ -94,8 +94,21 @@ exports.getById = async (req, res) => {
   const { id } = req.params;
   try {
     const { data, error } = await supabase.from('vales').select('*, motoristas(usuarios(nome))').eq('id', id).single();
-    if (error) throw error;
-    if (req.user.role !== 'admin' && data.motorista_id !== req.user.uid) return res.status(403).json({ message: 'Acesso negado.' });
+    if (error || !data) {
+      return res.status(404).json({ message: 'Vale não encontrado.' });
+    }
+    // Isolamento por tenant: super-admin acessa tudo; admin só a própria
+    // empresa; motorista só os próprios lançamentos.
+    const isSuperAdmin = req.user.is_super_admin === true;
+    if (!isSuperAdmin) {
+      if (req.user.role === 'admin') {
+        if (data.empresa_id !== req.empresa_id) {
+          return res.status(403).json({ message: 'Acesso negado.' });
+        }
+      } else if (data.motorista_id !== req.user.uid) {
+        return res.status(403).json({ message: 'Acesso negado.' });
+      }
+    }
     res.status(200).json(data);
   } catch (error) {
     res.status(500).json({ message: 'Erro ao buscar vale.' });
@@ -107,9 +120,21 @@ exports.update = async (req, res) => {
   const { valor, status, descricao, posto, litros, obs_resolucao } = req.body;
 
   try {
-    const { data: checkData } = await supabase.from('vales').select('motorista_id').eq('id', id).single();
-    if (req.user.role !== 'admin' && checkData.motorista_id !== req.user.uid) {
-      return res.status(403).json({ message: 'Acesso negado.' });
+    const { data: checkData, error: checkError } = await supabase.from('vales').select('motorista_id, empresa_id').eq('id', id).single();
+    if (checkError || !checkData) {
+      return res.status(404).json({ message: 'Vale não encontrado.' });
+    }
+    // Isolamento por tenant: super-admin acessa tudo; admin só a própria
+    // empresa; motorista só os próprios lançamentos.
+    const isSuperAdmin = req.user.is_super_admin === true;
+    if (!isSuperAdmin) {
+      if (req.user.role === 'admin') {
+        if (checkData.empresa_id !== req.empresa_id) {
+          return res.status(403).json({ message: 'Acesso negado.' });
+        }
+      } else if (checkData.motorista_id !== req.user.uid) {
+        return res.status(403).json({ message: 'Acesso negado.' });
+      }
     }
 
     const updateData = {};

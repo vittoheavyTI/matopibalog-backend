@@ -149,10 +149,23 @@ exports.getById = async (req, res) => {
       .eq('id', id)
       .single();
 
-    if (error) throw error;
-    if (req.user.role !== 'admin' && data.motorista_id !== req.user.uid) {
-      return res.status(403).json({ message: 'Acesso negado.' });
+    if (error || !data) {
+      return res.status(404).json({ message: 'Despesa não encontrada.' });
     }
+
+    // Isolamento por tenant: super-admin acessa tudo; admin só a própria
+    // empresa; motorista só os próprios lançamentos.
+    const isSuperAdmin = req.user.is_super_admin === true;
+    if (!isSuperAdmin) {
+      if (req.user.role === 'admin') {
+        if (data.empresa_id !== req.empresa_id) {
+          return res.status(403).json({ message: 'Acesso negado.' });
+        }
+      } else if (data.motorista_id !== req.user.uid) {
+        return res.status(403).json({ message: 'Acesso negado.' });
+      }
+    }
+
     res.status(200).json(data);
   } catch (error) {
     res.status(500).json({ message: 'Erro ao buscar despesa.' });
@@ -166,7 +179,7 @@ exports.update = async (req, res) => {
   try {
     const { data: checkData, error: checkError } = await supabase
       .from('despesas')
-      .select('motorista_id')
+      .select('motorista_id, empresa_id')
       .eq('id', id)
       .single();
 
@@ -174,8 +187,17 @@ exports.update = async (req, res) => {
       return res.status(404).json({ message: 'Despesa não encontrada.' });
     }
 
-    if (req.user.role !== 'admin' && checkData.motorista_id !== req.user.uid) {
-      return res.status(403).json({ message: 'Acesso negado.' });
+    // Isolamento por tenant: super-admin acessa tudo; admin só a própria
+    // empresa; motorista só os próprios lançamentos.
+    const isSuperAdmin = req.user.is_super_admin === true;
+    if (!isSuperAdmin) {
+      if (req.user.role === 'admin') {
+        if (checkData.empresa_id !== req.empresa_id) {
+          return res.status(403).json({ message: 'Acesso negado.' });
+        }
+      } else if (checkData.motorista_id !== req.user.uid) {
+        return res.status(403).json({ message: 'Acesso negado.' });
+      }
     }
 
     // Apenas campos explicitamente permitidos
