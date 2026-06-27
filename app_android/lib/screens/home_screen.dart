@@ -58,7 +58,13 @@ class _HomeScreenState extends State<HomeScreen> {
     AppLogger.action('novo_lancamento_sheet_open');
     final isAutonomo = context.read<AuthProvider>().isAutonomo;
     final finance = context.read<FinanceProvider>();
-    final freteAtivo = finance.freteAtivo;
+    // Resolve o frete realmente escolhido pelo freteId (pode não ser o mais
+    // recente quando há 2+ ativos). Antes usava finance.freteAtivo, que mostrava
+    // sempre o mais recente — texto podia divergir do frete em que o lançamento cai.
+    final freteEscolhido = finance.fretesAtivos.firstWhere(
+      (f) => f['id']?.toString() == freteId,
+      orElse: () => finance.freteAtivo ?? <String, dynamic>{},
+    );
 
     showModalBottomSheet(
       context: context,
@@ -73,12 +79,12 @@ class _HomeScreenState extends State<HomeScreen> {
             Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2))),
             const SizedBox(height: 16),
             const Text('Novo Lançamento', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            if (freteAtivo != null)
+            if (freteEscolhido.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
                 child: Text(
                   'Despesa/Abastecimento/Vale serão vinculados ao frete ativo: '
-                  '${freteAtivo['origem'] ?? '-'} → ${freteAtivo['destino'] ?? '-'}',
+                  '${freteEscolhido['origem'] ?? '-'} → ${freteEscolhido['destino'] ?? '-'}',
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
                 ),
