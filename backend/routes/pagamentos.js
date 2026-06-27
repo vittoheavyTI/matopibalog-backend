@@ -155,51 +155,92 @@ router.post('/webhook/asaas', async (req, res) => {
       return res.status(401).json({ message: 'Unauthorized' });
     }
 
-    const event = req.body;
-
-    if (!event?.payment?.id) {
-      return res.status(200).json({ received: true });
+    // Validação mínima de payload (sem logar o corpo). Malformado → 400.
+    const body = req.body;
+    const eventType = body?.event;
+    const payment = body?.payment;
+    if (typeof eventType !== 'string' || !payment || typeof payment.id !== 'string') {
+      return res.status(400).json({ message: 'Payload inválido.' });
     }
+    const asaasId = payment.id;
 
-    const asaasId = event.payment.id;
-    const statusAsaas = event.event;
-
-    let novoStatus = 'pendente';
-    if (statusAsaas === 'PAYMENT_CONFIRMED' || statusAsaas === 'PAYMENT_RECEIVED') {
+    // Mapeia o evento para o status interno. Evento desconhecido → null
+    // (ignorado adiante, sem tocar na fatura — antes virava 'pendente').
+    let novoStatus = null;
+    if (eventType === 'PAYMENT_CONFIRMED' || eventType === 'PAYMENT_RECEIVED') {
       novoStatus = 'pago';
-    } else if (statusAsaas === 'PAYMENT_OVERDUE') {
+    } else if (eventType === 'PAYMENT_OVERDUE') {
       novoStatus = 'vencido';
-    } else if (statusAsaas === 'PAYMENT_CANCELED') {
+    } else if (eventType === 'PAYMENT_CANCELED') {
       novoStatus = 'cancelado';
-    } else if (statusAsaas === 'PAYMENT_REFUNDED') {
+    } else if (eventType === 'PAYMENT_REFUNDED') {
       novoStatus = 'estornado';
     }
 
-    const { data: fatura } = await supabase
+    if (novoStatus === null) {
+      return res.status(200).json({ received: true, ignored: true });
+    }
+
+    // Busca a fatura atual ANTES de alterar, para idempotência e ordem de eventos.
+    const { data: fatura, error: fetchError } = await supabase
       .from('faturas')
-      .update({ status: novoStatus, pago_em: novoStatus === 'pago' ? new Date().toISOString() : null })
+      .select('id, empresa_id, status, pago_em')
       .eq('asaas_id', asaasId)
-      .select('empresa_id')
       .single();
 
-    if (novoStatus === 'pago' && fatura?.empresa_id) {
+    if (fetchError) {
+      // PGRST116 = nenhuma linha: cobrança não é nossa → ignora com 200.
+      // Qualquer outro erro é falha real de banco → propaga p/ o catch (retry Asaas).
+      if (fetchError.code === 'PGRST116') {
+        return res.status(200).json({ received: true, ignored: true });
+      }
+      throw fetchError;
+    }
+    if (!fatura) {
+      return res.status(200).json({ received: true, ignored: true });
+    }
+
+    // Ordem de eventos: fatura já paga NÃO pode ser rebaixada para vencido/cancelado
+    // por evento fora de ordem (ex.: OVERDUE chegando após CONFIRMED). Estorno é
+    // transição legítima e segue (comportamento preservado).
+    if (fatura.status === 'pago' && (novoStatus === 'vencido' || novoStatus === 'cancelado')) {
+      return res.status(200).json({ received: true, ignored: true });
+    }
+
+    // Monta o update preservando pago_em (W1): só preenche na primeira confirmação;
+    // nunca sobrescreve em replay e nunca zera em eventos não-pago.
+    const updatePayload = { status: novoStatus };
+    if (novoStatus === 'pago' && !fatura.pago_em) {
+      updatePayload.pago_em = new Date().toISOString();
+    }
+
+    const { error: updateError } = await supabase
+      .from('faturas')
+      .update(updatePayload)
+      .eq('id', fatura.id);
+
+    if (updateError) throw updateError;
+
+    // Efeitos na empresa (mantidos): pago → ativo; vencido → suspenso.
+    if (novoStatus === 'pago' && fatura.empresa_id) {
       await supabase
         .from('empresas')
         .update({ status: 'ativo' })
         .eq('id', fatura.empresa_id);
     }
 
-    if (novoStatus === 'vencido' && fatura?.empresa_id) {
+    if (novoStatus === 'vencido' && fatura.empresa_id) {
       await supabase
         .from('empresas')
         .update({ status: 'suspenso' })
         .eq('id', fatura.empresa_id);
     }
 
-    res.status(200).json({ received: true });
+    return res.status(200).json({ received: true });
   } catch (err) {
+    // Retorno honesto (W4): erro interno real → 500 para o Asaas reenviar.
     console.error('Webhook Asaas error:', err.message);
-    res.status(200).json({ received: true });
+    return res.status(500).json({ message: 'Erro ao processar webhook.' });
   }
 });
 
