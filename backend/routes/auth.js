@@ -1,12 +1,10 @@
 const express = require('express');
 const router = express.Router();
-const multer = require('multer');
 const authController = require('../controllers/authController');
 const { verifyToken } = require('../middlewares/auth');
 const validate = require('../middlewares/validate');
+const upload = require('../middlewares/upload');
 const { loginSchema, registerSchema, esqueceuSenhaSchema, resetSenhaSchema, registerEmpresaSchema } = require('../schemas/auth');
-
-const upload = multer({ storage: multer.memoryStorage() });
 
 router.post('/register', validate(registerSchema), authController.register);
 router.post('/login', validate(loginSchema), authController.login);

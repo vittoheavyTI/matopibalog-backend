@@ -2,9 +2,11 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
+const multer = require('multer');
 const cookieParser = require('cookie-parser');
 const rateLimit = require('express-rate-limit');
 
+const upload = require('./middlewares/upload');
 const authRoutes = require('./routes/auth');
 const adminRoutes = require('./routes/admin');
 const fretesRoutes = require('./routes/fretes');
@@ -100,6 +102,21 @@ app.use('/painel-admin', require('./routes/painel-admin'));
 app.use('/pagamentos', require('./routes/pagamentos'));
 app.use('/notificacoes', notificacoesRoutes);
 app.use('/termos', termosRoutes);
+
+// Tratamento de erros de upload (multer). Mapeia tamanho/MIME para respostas
+// JSON controladas; erros não relacionados seguem para o próximo handler.
+app.use((err, req, res, next) => {
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({ message: `Arquivo muito grande. Limite: ${upload.MAX_UPLOAD_SIZE_MB} MB.` });
+    }
+    return res.status(400).json({ message: 'Erro no upload do arquivo.' });
+  }
+  if (err && err.code === 'INVALID_FILE_TYPE') {
+    return res.status(400).json({ message: 'Formato de arquivo não permitido. Use JPEG, PNG ou WebP.' });
+  }
+  return next(err);
+});
 
 require('./jobs/expirarTrials');
 
