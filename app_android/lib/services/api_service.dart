@@ -218,11 +218,18 @@ class ApiService {
   /// Retorna {ok: true, foto_url: String} em sucesso, {ok: false, message: String} em erro.
   static Future<Map<String, dynamic>> uploadFotoPerfil(String filePath) async {
     try {
+      // Valida e resolve o MIME antes de montar o multipart. Extensão não
+      // suportada → aborta sem POST, com mensagem amigável (mesma do backend).
+      final contentType = _contentTypeImagem(filePath);
+      if (contentType == null) {
+        AppLogger.warning('ApiService', 'upload de foto abortado: extensão não suportada ($filePath)');
+        return {'ok': false, 'message': 'Formato de arquivo não permitido. Use JPEG, PNG ou WebP.'};
+      }
       final headers = await _getHeaders();
       var request = http.MultipartRequest('POST', Uri.parse('$_baseUrl/auth/me/foto'));
       request.headers.addAll(headers);
       request.headers.remove('Content-Type');
-      request.files.add(await http.MultipartFile.fromPath('foto', filePath));
+      request.files.add(await http.MultipartFile.fromPath('foto', filePath, contentType: contentType));
       final response = await request.send().timeout(_timeoutUpload);
       AppLogger.api('ApiService', 'POST /auth/me/foto', response.statusCode);
       if (response.statusCode == 200) {
