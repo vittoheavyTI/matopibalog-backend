@@ -1,13 +1,11 @@
 const express = require('express');
 const router = express.Router();
-const multer = require('multer');
 const valesController = require('../controllers/valesController');
 const { verifyToken } = require('../middlewares/auth');
 const { verificarEmpresa } = require('../middlewares/tenant');
 const validate = require('../middlewares/validate');
+const upload = require('../middlewares/upload');
 const { createValeSchema } = require('../schemas/vales');
-
-const upload = multer({ storage: multer.memoryStorage() });
 
 router.use(verifyToken, verificarEmpresa);
 
