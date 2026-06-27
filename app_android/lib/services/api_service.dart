@@ -3,11 +3,28 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 import '../config.dart';
 import 'app_logger.dart';
 
 class ApiService {
   static final String _baseUrl = Config.apiBaseUrl;
+
+  /// Detecta o Content-Type da imagem pela extensão do arquivo. O backend só
+  /// aceita JPEG, PNG e WebP; retorna null para qualquer outra extensão (ou
+  /// caminho sem extensão), permitindo abortar o envio antes do POST.
+  /// Sem isto, http.MultipartFile.fromPath usa application/octet-stream por
+  /// padrão (o pacote http NÃO infere o MIME), e o backend rejeita com
+  /// "Formato de arquivo não permitido".
+  static MediaType? _contentTypeImagem(String path) {
+    final lower = path.toLowerCase();
+    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) {
+      return MediaType('image', 'jpeg');
+    }
+    if (lower.endsWith('.png')) return MediaType('image', 'png');
+    if (lower.endsWith('.webp')) return MediaType('image', 'webp');
+    return null;
+  }
 
   /// Chave do token no secure storage — deve casar com AuthProvider._tokenKey.
   static const _tokenKey = 'token';
@@ -398,11 +415,18 @@ class ApiService {
   static Future<Map<String, dynamic>> createMovementWithPhoto(
       String endpoint, Map<String, String> fields, String filePath) async {
     try {
+      // Valida e resolve o MIME antes de montar o multipart. Extensão não
+      // suportada → aborta sem POST, com mensagem amigável (mesma do backend).
+      final contentType = _contentTypeImagem(filePath);
+      if (contentType == null) {
+        AppLogger.warning('ApiService', 'upload abortado: extensão não suportada ($filePath)');
+        return {'ok': false, 'message': 'Formato de arquivo não permitido. Use JPEG, PNG ou WebP.'};
+      }
       var request = http.MultipartRequest('POST', Uri.parse('$_baseUrl/$endpoint'));
       request.headers.addAll(await _getHeaders());
       request.headers.remove('Content-Type');
       fields.forEach((key, value) => request.fields[key] = value);
-      request.files.add(await http.MultipartFile.fromPath('foto', filePath));
+      request.files.add(await http.MultipartFile.fromPath('foto', filePath, contentType: contentType));
       var response = await request.send().timeout(_timeoutUpload);
       AppLogger.api('ApiService', 'POST /$endpoint (foto)', response.statusCode);
       if (response.statusCode == 201) return {'ok': true};
