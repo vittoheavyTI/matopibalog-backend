@@ -6,6 +6,7 @@ const multer = require('multer');
 const cookieParser = require('cookie-parser');
 const rateLimit = require('express-rate-limit');
 
+const upload = require('./middlewares/upload');
 const authRoutes = require('./routes/auth');
 const adminRoutes = require('./routes/admin');
 const fretesRoutes = require('./routes/fretes');
@@ -107,7 +108,7 @@ app.use('/termos', termosRoutes);
 app.use((err, req, res, next) => {
   if (err instanceof multer.MulterError) {
     if (err.code === 'LIMIT_FILE_SIZE') {
-      return res.status(413).json({ message: 'Arquivo muito grande. Limite: 5 MB.' });
+      return res.status(413).json({ message: `Arquivo muito grande. Limite: ${upload.MAX_UPLOAD_SIZE_MB} MB.` });
     }
     return res.status(400).json({ message: 'Erro no upload do arquivo.' });
   }
