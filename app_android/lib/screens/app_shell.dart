@@ -4,6 +4,7 @@ import '../providers/auth_provider.dart';
 import '../providers/finance_provider.dart';
 import '../providers/theme_provider.dart';
 import '../services/app_logger.dart';
+import '../widgets/seletor_frete.dart';
 import 'home_screen.dart';
 import 'historico_screen.dart';
 import 'add_frete_screen.dart';
@@ -25,25 +26,23 @@ class AppShell extends StatelessWidget {
   }
 
   /// Abre uma tela de lançamento (Despesa/Abastecimento/Vale) garantindo que o
-  /// frete ativo já esteja resolvido. O drawer fica acessível pela AppBar mesmo
-  /// enquanto a Home carrega, então _fretes pode ainda estar vazio: se não houver
-  /// freteAtivoId, recarrega os dados antes de decidir. Se continuar nulo, não há
-  /// frete ativo → lançamento solto (intencional).
+  /// frete ativo já esteja resolvido. Usa o helper compartilhado SeletorFrete
+  /// para lidar com 0/1/2+ fretes ativos, igual à Home.
   Future<void> _novoLancamentoComFrete(
     BuildContext context,
     Widget Function(String? freteId) builder,
   ) async {
     final finance = context.read<FinanceProvider>();
     Navigator.of(context).pop(); // fecha o drawer
-    var freteId = finance.freteAtivoId;
-    if (freteId == null) {
+    // Recarrega dados se o frete ativo ainda não foi carregado
+    if (finance.fretesAtivos.isEmpty) {
       await finance.loadData();
-      freteId = finance.freteAtivoId;
     }
     if (!context.mounted) return;
-    // Só recarrega se o lançamento foi salvo (a tela retorna true). Antes havia
-    // load duplo: o pré-load (fallback acima) + este pós-load incondicional.
-    final alterou = await Navigator.of(context).push(MaterialPageRoute(builder: (_) => builder(freteId)));
+    final freteId = await SeletorFrete.resolver(context, finance.fretesAtivos);
+    if (freteId == null || !context.mounted) return;
+    final alterou = await Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => builder(freteId)));
     if (alterou == true && context.mounted) finance.loadData();
   }
 

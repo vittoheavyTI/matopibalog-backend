@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../providers/auth_provider.dart';
 import '../providers/finance_provider.dart';
 import '../services/app_logger.dart';
+import '../widgets/seletor_frete.dart';
 import 'add_frete_screen.dart';
 import 'add_despesa_screen.dart';
 import 'add_abastecimento_screen.dart';
@@ -42,92 +43,16 @@ class _HomeScreenState extends State<HomeScreen> {
   void _abrirNovoLancamento() {
     AppLogger.action('novo_lancamento_sheet_open');
     final finance = context.read<FinanceProvider>();
-    final ativos = finance.fretesAtivos;
-
-    // 0 fretes ativos → bloquear localmente
-    if (ativos.isEmpty) {
-      showDialog(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Nenhum frete ativo'),
-          content: const Text('Não há frete ativo para lançar. Inicie um frete antes de registrar despesas, abastecimentos ou vales.'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('OK'),
-            ),
-          ],
-        ),
-      );
-      return;
-    }
-
-    // 1 frete ativo → fluxo atual, sem mudança
-    if (ativos.length == 1) {
-      _mostrarBottomSheetLancamento(ativos.first['id']?.toString());
-      return;
-    }
-
-    // 2+ fretes ativos → exibir seletor antes do bottom sheet
-    _mostrarSeletorFrete(ativos);
+    // Usa o helper compartilhado para resolver 0/1/2+ fretes ativos.
+    // O seletor modal é o mesmo bottom sheet usado pelo drawer.
+    SeletorFrete.resolver(context, finance.fretesAtivos).then((freteId) {
+      if (freteId != null && mounted) {
+        _mostrarBottomSheetLancamento(freteId);
+      }
+    });
   }
 
   /// Seletor modal quando há mais de um frete ativo.
-  void _mostrarSeletorFrete(List<Map<String, dynamic>> ativos) {
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 8),
-            Container(
-              width: 40, height: 4,
-              decoration: BoxDecoration(
-                color: Colors.grey.shade300,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'Selecione o Frete',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Há mais de um frete ativo. Escolha em qual deseja lançar.',
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 8),
-            ...ativos.map((f) {
-              final origem = f['origem'] ?? '-';
-              final destino = f['destino'] ?? '-';
-              final status = f['status'] ?? 'pendente';
-              final valor = double.tryParse(f['valor_frete']?.toString() ?? '') ?? 0.0;
-              return ListTile(
-                leading: const Icon(Icons.local_shipping_outlined, color: Color(0xFF1B5E20)),
-                title: Text(
-                  '$origem → $destino',
-                  overflow: TextOverflow.ellipsis,
-                ),
-                subtitle: Text('$status · R\$ ${valor.toStringAsFixed(2)}'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _mostrarBottomSheetLancamento(f['id']?.toString());
-                },
-              );
-            }),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
-  }
-
   /// Bottom sheet de tipo de lançamento, extraído com [freteId] por parâmetro.
   void _mostrarBottomSheetLancamento(String? freteId) {
     AppLogger.action('novo_lancamento_sheet_open');
