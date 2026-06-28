@@ -44,8 +44,24 @@ exports.getAll = async (req, res) => {
 };
 
 exports.create = async (req, res) => {
-  const { valor, quem_pagou, descricao, posto, litros, frete_id, motorista_id } = req.body;
+  const { valor, quem_pagou, descricao, posto, litros, frete_id, motorista_id, client_request_id } = req.body;
   const motorista_id_final = req.user.role === 'admin' ? (motorista_id || req.user.uid) : req.user.uid;
+
+  // Idempotência: reenvio da mesma tentativa (mesmo client_request_id) após
+  // timeout não cancelado devolve o vale já criado, sem duplicar. Checado ANTES
+  // do upload (quando houver) para não gerar arquivo órfão. Campo opcional.
+  const clientRequestId = client_request_id || null;
+  if (clientRequestId) {
+    const { data: existente, error: dupError } = await supabase
+      .from('vales')
+      .select('*, motoristas(usuarios(nome))')
+      .eq('motorista_id', motorista_id_final)
+      .eq('client_request_id', clientRequestId)
+      .maybeSingle();
+    if (!dupError && existente) {
+      return res.status(201).json({ ...existente, idempotent: true });
+    }
+  }
 
   // Trava antifraude: todo lançamento exige viagem aberta (vincula automaticamente se houver só uma)
   const freteResolvido = await resolverFreteParaLancamento(frete_id, motorista_id_final);
@@ -76,7 +92,8 @@ exports.create = async (req, res) => {
         motorista_id: motorista_id_final, empresa_id: userData.empresa_id, frete_id: freteResolvido.freteId, valor: parseFloat(valor),
         quem_pagou, descricao, posto, litros: litros ? parseFloat(litros) : 0,
         foto_url: publicUrl,
-        status: req.user.role === 'admin' ? 'aprovado' : 'pendente'
+        status: req.user.role === 'admin' ? 'aprovado' : 'pendente',
+        client_request_id: clientRequestId
       })
       .select().single();
 
@@ -86,6 +103,18 @@ exports.create = async (req, res) => {
     }
     res.status(201).json(data);
   } catch (error) {
+    // Corrida concorrente: outro request com o mesmo client_request_id inseriu
+    // primeiro (violação do índice único parcial → Postgres 23505). Devolve o
+    // registro existente como reuso idempotente em vez de erro.
+    if (clientRequestId && (error?.code === '23505' || String(error?.message || '').includes('23505'))) {
+      const { data: existente } = await supabase
+        .from('vales')
+        .select('*, motoristas(usuarios(nome))')
+        .eq('motorista_id', motorista_id_final)
+        .eq('client_request_id', clientRequestId)
+        .maybeSingle();
+      if (existente) return res.status(201).json({ ...existente, idempotent: true });
+    }
     res.status(500).json({ message: 'Erro ao registrar vale.' });
   }
 };

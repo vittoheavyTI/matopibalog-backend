@@ -49,12 +49,30 @@ exports.getAll = async (req, res) => {
 };
 
 exports.create = async (req, res) => {
-  const { tipo, descricao, valor, quem_pagou, frete_id } = req.body;
+  const { tipo, descricao, valor, quem_pagou, frete_id, client_request_id } = req.body;
 
   // Admin pode lançar para qualquer motorista; motorista usa seu próprio uid
   const motorista_id = req.user.role === 'admin'
     ? (req.body.motorista_id || req.user.uid)
     : req.user.uid;
+
+  // Idempotência: se o app reenviar a MESMA tentativa (mesmo client_request_id)
+  // após um timeout que não cancelou o request original, devolvemos o
+  // lançamento já criado em vez de duplicar. A checagem é feita ANTES do upload
+  // do comprovante para não gerar arquivo órfão no Storage. Campo opcional:
+  // sem ele, o fluxo segue idêntico ao anterior (painel/APK antigo).
+  const clientRequestId = client_request_id || null;
+  if (clientRequestId) {
+    const { data: existente, error: dupError } = await supabase
+      .from('despesas')
+      .select('*, motoristas(usuarios(nome))')
+      .eq('motorista_id', motorista_id)
+      .eq('client_request_id', clientRequestId)
+      .maybeSingle();
+    if (!dupError && existente) {
+      return res.status(201).json({ ...existente, idempotent: true });
+    }
+  }
 
   // Trava antifraude: todo lançamento exige viagem aberta (vincula automaticamente se houver só uma)
   const freteResolvido = await resolverFreteParaLancamento(frete_id, motorista_id);
@@ -127,6 +145,7 @@ exports.create = async (req, res) => {
         quem_pagou,
         foto_url: publicUrl,
         status: statusLancamento,
+        client_request_id: clientRequestId,
         sincronizado: true
       })
       .select()
@@ -135,6 +154,18 @@ exports.create = async (req, res) => {
     if (error) throw error;
     res.status(201).json(data);
   } catch (error) {
+    // Corrida concorrente: outro request com o mesmo client_request_id inseriu
+    // primeiro (violação do índice único parcial → Postgres 23505). Devolve o
+    // registro existente como reuso idempotente em vez de erro.
+    if (clientRequestId && (error?.code === '23505' || String(error?.message || '').includes('23505'))) {
+      const { data: existente } = await supabase
+        .from('despesas')
+        .select('*, motoristas(usuarios(nome))')
+        .eq('motorista_id', motorista_id)
+        .eq('client_request_id', clientRequestId)
+        .maybeSingle();
+      if (existente) return res.status(201).json({ ...existente, idempotent: true });
+    }
     console.error('Erro ao registrar despesa:', error);
     res.status(500).json({ message: 'Erro ao registrar despesa.' });
   }
