@@ -54,10 +54,44 @@ uma fase posterior, após a validação manual do processo.
 
 ### 2.4 Migrations (importante)
 
-| Item | Local |
-|------|-------|
-| SQLs versionados | `backend/migrations/` (18 arquivos, 001 a 018) |
-| Aplicação | Manual no Supabase SQL Editor — **sem controle automatizado** |
+> ⚠️ **Os SQLs versionados ajudam, mas NÃO são a fonte da verdade.** O estado real
+> do schema vive **no banco de produção (Supabase)**, não nos arquivos do repositório.
+
+Os SQLs versionados estão **distribuídos em mais de uma pasta**, e **não** formam uma
+sequência contínua:
+
+| Local | Conteúdo |
+|-------|----------|
+| `database/migrations/` | Migrations antigas (ex.: criação de tabelas, RLS inicial, colunas adicionais, configurações). |
+| `backend/migrations/` | Migrations mais recentes (ex.: notificações, termos/LGPD, RLS de tabelas críticas, `client_request_id`). |
+| `backend/sql/` | SQLs auxiliares (ex.: setup inicial, seed de planos, faturas). Não são "migrations" numeradas. |
+
+**Lacunas históricas na numeração:** a sequência **não é contínua** — há números
+ausentes (por exemplo 005, 006 e 010 não existem como arquivo). Isso é esperado:
+algumas mudanças foram aplicadas direto no banco sem versionar. **Não tente "preencher"
+as lacunas inventando migrations** — elas não existem e o banco real pode já refletir
+essas mudanças.
+
+| Item | Situação |
+|------|----------|
+| Aplicação | Manual no Supabase SQL Editor — **sem controle automatizado** (sem migration runner). |
+| Sincronização repo × produção | **Não garantida.** Trate o repositório como referência parcial, nunca como espelho fiel do banco. |
+
+**No restore, NÃO confie na lista de arquivos.** Depois de restaurar o dump, valide o
+schema **contra o banco real** rodando as queries/checks do próprio runbook
+(seções 5.4 e 6.2), confirmando pelo menos:
+
+- **Colunas críticas** (ex.: `despesas.client_request_id`, `faturas.created_at`)
+- **Índices** (ex.: índice parcial "1 termo ativo por tipo")
+- **RLS habilitado** nas tabelas críticas (`pg_tables.rowsecurity`)
+- **Policies** corretas (`pg_policies` — ex.: `faturas_superadmin_all`, `faturas_empresa_select`)
+- **Funções auxiliares** de RLS (`pg_proc` — ex.: `rls_is_super_admin`)
+- **`client_request_id`** presente nas tabelas de lançamentos (migration 018)
+- **Faturas** com RLS aplicado (migration 017)
+- **Termos/LGPD** (`termos`, `termos_aceites`) presentes (migration 014)
+
+Se um desses checks falhar, a migration correspondente pode não estar no dump — aplique-a
+manualmente a partir do arquivo versionado, confirmando antes se o objeto já não existe.
 
 ### 2.5 Deploy (importante)
 
