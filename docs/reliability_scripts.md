@@ -35,8 +35,10 @@ Só executa se `SUPABASE_URL` + `SUPABASE_SERVICE_KEY` estiverem no ambiente
 reportados como SKIP com o SQL de verificação manual.
 
 ### `smoke_idempotencia_lancamentos.mjs`
-Valida a idempotência do backend (PR #175). **Dry-run por padrão.** O modo real
-exige `MATOPIBA_TOKEN` e **cria** lançamentos (use conta de teste, valor baixo,
+Valida a idempotência do backend (PR #175). **Dry-run por padrão** — só envia com
+a flag explícita **`--send`** (ou `--real`). Sem `--send`, mesmo com
+`MATOPIBA_TOKEN` no ambiente, **nada** é enviado. O envio real exige `--send`
+**e** `MATOPIBA_TOKEN`, e **cria** lançamentos (use conta de teste, valor baixo,
 marcador `[smoke]`). Limpeza é manual (sem DELETE no backend).
 
 ## Variáveis de ambiente
@@ -61,6 +63,9 @@ npm run smoke:idempotencia:dry
 # schema-check (opt-in)
 SUPABASE_URL=... SUPABASE_SERVICE_KEY=... node scripts/reliability/check_db_schema.mjs
 
-# idempotência real (cria dados — conta de teste)
-MATOPIBA_TOKEN=... node scripts/reliability/smoke_idempotencia_lancamentos.mjs --endpoint=despesas --valor=1.00
+# idempotência: dry-run (padrão, não envia, não exige token)
+node scripts/reliability/smoke_idempotencia_lancamentos.mjs --endpoint=despesas
+
+# idempotência REAL (cria dados — exige --send e conta de teste)
+MATOPIBA_TOKEN=... node scripts/reliability/smoke_idempotencia_lancamentos.mjs --send --endpoint=despesas --valor=1.00
 ```

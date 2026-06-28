@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // smoke_idempotencia_lancamentos.mjs — Smoke do PR #175 (idempotência backend).
-// CRIA DADOS no modo real → DRY-RUN É O PADRÃO. Não contém segredo: o token vem
-// de env e NUNCA é impresso.
+// DRY-RUN É O PADRÃO: só envia POST (cria dados) com a flag explícita --send.
+// Sem --send, mesmo com MATOPIBA_TOKEN no ambiente, NADA é enviado. Não contém
+// segredo: o token vem de env e NUNCA é impresso.
 //
 // Testa que o backend deduplica POSTs com o mesmo client_request_id:
 //   POST 1 (client_request_id = X) -> 201, cria o lançamento
@@ -11,12 +12,14 @@
 // Requisitos: Node 20+ (fetch e crypto.randomUUID nativos). Sem dependências.
 //
 // ─── Variáveis de ambiente ───────────────────────────────────────────────────
-//   MATOPIBA_TOKEN    (obrigatório p/ envio real) JWT Bearer do motorista/admin.
+//   MATOPIBA_TOKEN    (obrigatório SÓ com --send) JWT Bearer do motorista/admin.
 //   MATOPIBA_API_URL  (opcional) base da API. Default: produção Railway.
 //
 // ─── Uso ─────────────────────────────────────────────────────────────────────
-//   node backend/scripts/reliability/smoke_idempotencia_lancamentos.mjs --dry-run
-//   MATOPIBA_TOKEN=... node backend/scripts/reliability/smoke_idempotencia_lancamentos.mjs --endpoint=despesas --valor=1.50
+//   # dry-run (padrão; não envia, não exige token):
+//   node backend/scripts/reliability/smoke_idempotencia_lancamentos.mjs
+//   # envio REAL (cria dados — exige --send E MATOPIBA_TOKEN):
+//   MATOPIBA_TOKEN=... node backend/scripts/reliability/smoke_idempotencia_lancamentos.mjs --send --endpoint=despesas --valor=1.50
 //
 //   Flags:
 //     --endpoint=despesas|abastecimentos|vales   (default: despesas)
@@ -28,11 +31,12 @@
 //     --frete-id=UUID                             (opcional; frete ativo)
 //     --motorista-id=UUID                         (opcional; só admin lançando p/ outro)
 //     --client-request-id=UUID                    (opcional; default: gerado)
-//     --no-idempotency                            (1 POST sem o campo — teste de compat)
-//     --dry-run                                   (monta e imprime payload; NÃO envia; não exige token)
+//     --no-idempotency                            (1 POST sem o campo — teste de compat; exige --send)
+//     --send | --real                             (ENVIO REAL — cria dados; exige MATOPIBA_TOKEN)
+//     --dry-run                                   (redundante: sem --send já é dry-run)
 //     --verbose                                   (imprime corpo das respostas; nunca o token)
 //
-// NOTA: o modo real CRIA lançamentos de verdade na conta do token. Use conta de
+// NOTA: o envio real (--send) CRIA lançamentos de verdade na conta do token. Use conta de
 // teste, valor baixo e marcador na descrição. O backend não tem DELETE de
 // lançamento — limpeza é manual (neutralizar por status no painel).
 
@@ -47,7 +51,11 @@ for (const a of args) {
   }
 }
 
-const DRY_RUN = !!flags['dry-run'];
+// DRY-RUN É O PADRÃO REAL: só envia POST com a flag explícita --send (ou --real).
+// Assim, mesmo com MATOPIBA_TOKEN no ambiente, rodar sem --send NUNCA cria dados.
+// --dry-run continua aceito (e é redundante: sem --send já é dry-run).
+const REAL = !!flags.send || !!flags.real;
+const DRY_RUN = !REAL;
 const VERBOSE = !!flags['verbose'];
 const NO_IDEMPOTENCY = !!flags['no-idempotency'];
 
@@ -98,7 +106,7 @@ async function post(payload, label) {
 console.log(`API_URL: ${API_URL}`);
 console.log(`endpoint: ${endpoint}`);
 console.log(`token: ${TOKEN ? 'present (hidden)' : 'AUSENTE'}`);
-console.log(`modo: ${DRY_RUN ? 'DRY-RUN (não envia)' : NO_IDEMPOTENCY ? 'COMPAT (sem client_request_id)' : 'IDEMPOTÊNCIA (2 POSTs com mesmo id)'}`);
+console.log(`modo: ${DRY_RUN ? 'DRY-RUN (padrão; não envia — use --send para enviar)' : NO_IDEMPOTENCY ? 'COMPAT REAL (sem client_request_id)' : 'IDEMPOTÊNCIA REAL (2 POSTs com mesmo id)'}`);
 
 if (NO_IDEMPOTENCY) {
   const payload = buildPayload(false);
