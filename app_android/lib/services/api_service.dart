@@ -48,7 +48,11 @@ class ApiService {
   /// HandshakeException) → falha de conexão.
   static String _mensagemErroRede(Object e) {
     if (e is TimeoutException) {
-      return 'O servidor demorou a responder. Verifique sua conexão e tente novamente.';
+      // Todos os call sites deste helper são POST/upload (envios). No timeout, a
+      // escrita PODE ter chegado ao servidor — sugerir "tente novamente" levaria a
+      // reenvio cego e duplicata. Orientamos a conferir a lista antes de repetir.
+      return 'O envio demorou mais que o esperado. Ele pode ter sido concluído — '
+          'verifique a lista antes de tentar novamente.';
     }
     return 'Não foi possível conectar ao servidor. Verifique sua internet.';
   }

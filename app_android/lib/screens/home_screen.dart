@@ -154,7 +154,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return RefreshIndicator(
       onRefresh: _refresh,
-      child: finance.loading
+      // Spinner central só na PRIMEIRA carga (sem dados ainda). Nos refreshes
+      // seguintes mantemos o conteúdo já carregado visível — o feedback do
+      // pull-to-refresh fica por conta do próprio RefreshIndicator, evitando a
+      // sensação de "recarregou tudo do zero".
+      child: finance.loading && !finance.hasLoadedOnce
           ? const Center(child: CircularProgressIndicator())
           : SingleChildScrollView(
               physics: const AlwaysScrollableScrollPhysics(),

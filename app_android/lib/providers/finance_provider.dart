@@ -15,6 +15,10 @@ class FinanceProvider extends ChangeNotifier {
   double _percentualComissao = 12.0;
   bool _isAutonomo = false;
   bool _loading = false;
+  // Vira true após o primeiro loadData (com ou sem dados). Usado pela Home para
+  // mostrar o spinner central só na carga inicial; nos refreshes seguintes o
+  // conteúdo já carregado permanece visível (feedback fica a cargo do RefreshIndicator).
+  bool _hasLoadedOnce = false;
   String _error = '';
   List<dynamic> _fretes = [];
   List<dynamic> _despesas = [];
@@ -32,6 +36,7 @@ class FinanceProvider extends ChangeNotifier {
   double get percentualComissao => _percentualComissao;
   bool get isAutonomo => _isAutonomo;
   bool get loading => _loading;
+  bool get hasLoadedOnce => _hasLoadedOnce;
   String get error => _error;
   List<dynamic> get fretes => _fretes;
   List<dynamic> get despesas => _despesas;
@@ -97,6 +102,9 @@ class FinanceProvider extends ChangeNotifier {
     _error = '';
     notifyListeners();
 
+    // Mede só a onda de rede (5 GETs paralelos), para diagnosticar se a lentidão
+    // percebida é rede/cold start ou render. Não loga dados sensíveis — apenas ms.
+    final cronometro = Stopwatch()..start();
     try {
       // Perfil + 4 listas são independentes entre si — busca tudo em paralelo
       // (1 onda de rede). Antes o getMe era serial e bloqueava as outras 4.
@@ -107,6 +115,7 @@ class FinanceProvider extends ChangeNotifier {
         ApiService.getList('abastecimentos'),
         ApiService.getList('vales'),
       ]);
+      cronometro.stop();
 
       final profile        = results[0] as Map<String, dynamic>?;
       final fretes         = results[1] as List<dynamic>;
@@ -278,12 +287,14 @@ class FinanceProvider extends ChangeNotifier {
         'comissao': _comissao,
         'deducoes': td,
         'saldo': _saldo,
+        'duracao_ms': cronometro.elapsedMilliseconds,
       });
     } catch (e) {
       _error = 'Erro ao carregar dados. Verifique sua conexão.';
       AppLogger.error('FinanceProvider', 'loadData exception', e);
     } finally {
       _loading = false;
+      _hasLoadedOnce = true;
       notifyListeners();
     }
   }
