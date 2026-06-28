@@ -74,7 +74,16 @@ class _AddDespesaScreenState extends State<AddDespesaScreen> {
   Future<void> _pickPhoto(ImageSource source) async {
     try {
       final picker = ImagePicker();
-      final pickedFile = await picker.pickImage(source: source, imageQuality: 70);
+      // Downscale na seleção: limita o lado maior a 1600px (legível para
+      // comprovantes) e mantém imageQuality: 70. Reduz uploads de vários MB de
+      // fotos modernas. Não muda extensão/MIME — o re-encode já ocorria via
+      // imageQuality; o caminho de MIME (_contentTypeImagem) continua válido.
+      final pickedFile = await picker.pickImage(
+        source: source,
+        imageQuality: 70,
+        maxWidth: 1600,
+        maxHeight: 1600,
+      );
       if (pickedFile != null) setState(() => _image = File(pickedFile.path));
     } catch (e) {
       AppLogger.error('AddDespesa', 'erro_foto', e);
