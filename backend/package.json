@@ -8,7 +8,10 @@
   },
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js"
+    "dev": "nodemon server.js",
+    "smoke:health": "node scripts/reliability/smoke_health.mjs",
+    "reliability": "node scripts/reliability/reliability_report.mjs",
+    "smoke:idempotencia:dry": "node scripts/reliability/smoke_idempotencia_lancamentos.mjs --dry-run"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",
