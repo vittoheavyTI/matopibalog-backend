@@ -14,6 +14,12 @@ para garantir continuidade operacional antes e durante o primeiro cliente real.
 **Não automatiza nada.** A automação (backup diário, cron, GitHub Action) fica para
 uma fase posterior, após a validação manual do processo.
 
+> ⚠️ **Cache não substitui backup.** O cache (CDN/HTTP, cache offline do app,
+> respostas em memória) apenas **acelera leitura** — ele NÃO é cópia de segurança
+> e some/expira sem aviso. A **fonte de verdade** é sempre o **banco (Supabase)**
+> e o **Storage (buckets)**. Um restore completo precisa recuperar **banco +
+> arquivos do Storage + variáveis de ambiente** — nenhum cache reconstrói esses dados.
+
 ---
 
 ## 2. O que precisa ser protegido
@@ -241,7 +247,7 @@ Após o deploy do Railway:
 
 ```bash
 curl https://matopibalog-backend-production.up.railway.app/health
-# Esperado: {"status":"ok"}
+# Esperado: {"status":"UP","timestamp":"..."}
 ```
 
 #### 5.7 Testar painel web
@@ -298,9 +304,12 @@ curl https://matopibalog-backend-production.up.railway.app/health
 | Login admin | Autenticar no painel |
 | Fretes listados | GET /fretes retorna dados |
 | Despesas com comprovante | GET /despesas → foto_url não nula |
+| Abastecimentos listados | GET /abastecimentos retorna dados |
+| Vales listados | GET /vales retorna dados |
 | Criação de despesa | POST /despesas → 201 |
+| Idempotência ativa | POST /despesas repetido com mesmo `client_request_id` → não duplica |
 | Relatório PDF | Gerar PDF no painel |
-| Webhook Asaas | POST /pagamentos/webhook/asaas → 401 sem token (esperado) |
+| Webhook Asaas | POST /pagamentos/webhook/asaas → 401 sem token (esperado; rota confirmada em backend/routes/pagamentos.js) |
 
 ---
 
