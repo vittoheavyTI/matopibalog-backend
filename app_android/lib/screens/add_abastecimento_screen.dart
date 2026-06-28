@@ -31,6 +31,12 @@ class _AddAbastecimentoScreenState extends State<AddAbastecimentoScreen> {
   File? _image;
   bool _loading = false;
 
+  // Idempotência: gerado UMA vez por abertura da tela. Reenvio após timeout (na
+  // mesma tela) reutiliza o mesmo id → o backend deduplica e não duplica o
+  // lançamento. Nova abertura = novo State = novo id. NÃO gerar em _save nem no
+  // ApiService (mudaria a cada tentativa, anulando a idempotência).
+  final String _clientRequestId = const Uuid().v4();
+
   @override
   void initState() {
     super.initState();
@@ -128,6 +134,7 @@ class _AddAbastecimentoScreenState extends State<AddAbastecimentoScreen> {
       'arla_valor': _arlaValorCtrl.text.replaceAll(',', '.'),
       'posto': _postoCtrl.text,
       'quem_pagou': quemPagou,
+      'client_request_id': _clientRequestId,
       if (widget.freteId != null && widget.freteId!.isNotEmpty) 'frete_id': widget.freteId!,
     };
 
@@ -143,6 +150,7 @@ class _AddAbastecimentoScreenState extends State<AddAbastecimentoScreen> {
             'litros': litrosText,
             'valor_total': valorText,
             'quem_pagou': quemPagou,
+            'client_request_id': _clientRequestId,
             if (_arlaLitrosCtrl.text.isNotEmpty) 'arla_litros': _arlaLitrosCtrl.text.replaceAll(',', '.'),
             if (_arlaValorCtrl.text.isNotEmpty) 'arla_valor': _arlaValorCtrl.text.replaceAll(',', '.'),
             if (_postoCtrl.text.isNotEmpty) 'posto': _postoCtrl.text,

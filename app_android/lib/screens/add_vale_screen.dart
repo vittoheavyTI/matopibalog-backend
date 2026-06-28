@@ -26,6 +26,12 @@ class _AddValeScreenState extends State<AddValeScreen> {
   final _descCtrl = TextEditingController();
   bool _loading = false;
 
+  // Idempotência: gerado UMA vez por abertura da tela. Reenvio após timeout (na
+  // mesma tela) reutiliza o mesmo id → o backend deduplica e não duplica o
+  // lançamento. Nova abertura = novo State = novo id. NÃO gerar em _save nem no
+  // ApiService (mudaria a cada tentativa, anulando a idempotência).
+  final String _clientRequestId = const Uuid().v4();
+
   @override
   void initState() {
     super.initState();
@@ -63,6 +69,7 @@ class _AddValeScreenState extends State<AddValeScreen> {
       'valor': valorText,
       'descricao': descricao,
       'quem_pagou': 'proprietario', // fixo: sem campo visual (regra financeira)
+      'client_request_id': _clientRequestId,
       if (widget.freteId != null && widget.freteId!.isNotEmpty) 'frete_id': widget.freteId!,
     };
 
