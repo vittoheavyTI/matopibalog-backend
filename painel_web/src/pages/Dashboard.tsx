@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { formatCurrency } from '../utils';
@@ -6,7 +6,7 @@ import {
   DollarSign, AlertCircle, FileText, Check, X,
   Save, Edit, Unlock, Lock, ChevronLeft, Plus, Fuel, TrendingUp, Truck
 } from 'lucide-react';
-import api from '../api';
+import api, { newClientRequestId } from '../api';
 
 // [PR2B] Card de métrica reutilizável. Recebe as classes de cor como strings
 // literais (nunca interpoladas) para não quebrar o purge do Tailwind.
@@ -55,6 +55,9 @@ export const Dashboard: React.FC = () => {
   const [showAddDespesaModal, setShowAddDespesaModal] = useState(false);
   const [newDespesa, setNewDespesa] = useState({ tipo: 'despesa', descricao: '', valor: '', quem_pagou: 'proprietario', posto: '', litros: '', valor_total: '', data: '' });
   const [savingDespesa, setSavingDespesa] = useState(false);
+  // Idempotência: id estável por sessão do modal de lançamento. Gerado ao abrir o
+  // modal; reusado em retry do mesmo envio; limpo após sucesso. (Ver newClientRequestId.)
+  const reqIdDespesaRef = useRef<string | null>(null);
 
   const loadDashboardData = async () => {
     try {
@@ -343,7 +346,10 @@ export const Dashboard: React.FC = () => {
       }
       freteId = ativos[idx].id;
     }
-    const vinc = { frete_id: freteId };
+    // Idempotência: garante um id mesmo se o modal foi aberto por caminho atípico.
+    // O mesmo id é reusado em retry do mesmo envio (limpo só após sucesso).
+    if (!reqIdDespesaRef.current) reqIdDespesaRef.current = newClientRequestId();
+    const vinc = { frete_id: freteId, client_request_id: reqIdDespesaRef.current };
     setSavingDespesa(true);
     try {
       if (tipo === 'abastecimento') {
@@ -353,6 +359,7 @@ export const Dashboard: React.FC = () => {
       } else {
         await api.post('/despesas', { ...vinc, motorista_id: selectedMot.uid, tipo: 'geral', descricao: newDespesa.descricao, valor: Number(newDespesa.valor), quem_pagou: newDespesa.quem_pagou, data: newDespesa.data });
       }
+      reqIdDespesaRef.current = null; // sucesso: próximo lançamento recebe id novo
       setShowAddDespesaModal(false);
       setNewDespesa({ tipo: 'despesa', descricao: '', valor: '', quem_pagou: 'proprietario', posto: '', litros: '', valor_total: '', data: '' });
       loadMotoristaData(selectedMot.uid);
@@ -563,7 +570,7 @@ export const Dashboard: React.FC = () => {
                   <div className="bg-gray-50 p-4 border-b border-gray-100 font-bold text-gray-700 flex items-center justify-between">
                     <span className="flex items-center"><FileText className="mr-2" size={18} /> Lançamentos</span>
                     <button
-                      onClick={() => { setShowAddDespesaModal(true); setNewDespesa({ tipo: 'despesa', descricao: '', valor: '', quem_pagou: 'proprietario', posto: '', litros: '', valor_total: '', data: new Date().toISOString().split('T')[0] }); }}
+                      onClick={() => { reqIdDespesaRef.current = newClientRequestId(); setShowAddDespesaModal(true); setNewDespesa({ tipo: 'despesa', descricao: '', valor: '', quem_pagou: 'proprietario', posto: '', litros: '', valor_total: '', data: new Date().toISOString().split('T')[0] }); }}
                       className="flex items-center px-3 py-1.5 bg-blue-100 text-blue-600 rounded-lg hover:bg-blue-200 transition-colors font-bold text-xs shadow-sm"
                     >
                       <Plus size={14} className="mr-1" /> Nova Despesa

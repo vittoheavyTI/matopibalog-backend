@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { Plus, X, Search, Filter, Truck, MapPin, Calendar, DollarSign, Gauge, Trash2, Edit, Check, AlertTriangle, ChevronLeft, ChevronDown, ChevronRight, Fuel, FileText, TrendingUp, Save, Unlock, Lock } from 'lucide-react';
 import { format } from 'date-fns';
 import { formatCurrency } from '../utils';
-import api from '../api';
+import api, { newClientRequestId } from '../api';
 
 const gvFmt = (d: any, fmt: string) => {
   if (!d) return '-';
@@ -384,8 +384,15 @@ export const GerenciamentoViagens: React.FC = () => {
     }
   };
 
+  // Idempotência do lançamento: id estável por sessão do modal (gerado na abertura),
+  // reusado em retry do mesmo envio e limpo só após sucesso. savingItem evita o
+  // clique duplo (o botão "Lançar Registro" não era desabilitado durante o envio).
+  const reqIdItemRef = useRef<string | null>(null);
+  const [savingItem, setSavingItem] = useState(false);
+
   const handleAddItem = async () => {
-    if (!selectedMotorista || !showAddModal) return;
+    if (!selectedMotorista || !showAddModal || savingItem) return;
+    setSavingItem(true);
     try {
       // Resolve o frete ativo: 0 → bloqueia, 1 → usa direto, >1 → solicita seleção.
       // Evita escolher o primeiro silenciosamente quando há múltiplos ativos.
@@ -414,13 +421,18 @@ export const GerenciamentoViagens: React.FC = () => {
         }
         freteId = ativos[idx].id;
       }
+      // Idempotência: garante um id mesmo se o modal foi aberto por caminho atípico.
+      // Reusado em retry do mesmo envio; limpo só após sucesso.
+      if (!reqIdItemRef.current) reqIdItemRef.current = newClientRequestId();
+      const clientRequestId = reqIdItemRef.current;
       if (showAddModal === 'despesa' || showAddModal === 'manutencao') {
-        await api.post('/despesas', { motorista_id: filterMot, frete_id: freteId, tipo: showAddModal === 'manutencao' ? 'manutencao' : 'geral', descricao: newItemData.descricao, valor: Number(newItemData.valor), quem_pagou: newItemData.quemPagou || 'proprietario' });
+        await api.post('/despesas', { motorista_id: filterMot, frete_id: freteId, tipo: showAddModal === 'manutencao' ? 'manutencao' : 'geral', descricao: newItemData.descricao, valor: Number(newItemData.valor), quem_pagou: newItemData.quemPagou || 'proprietario', client_request_id: clientRequestId });
       } else if (showAddModal === 'abastecimento') {
-        await api.post('/abastecimentos', { motorista_id: filterMot, frete_id: freteId, posto: newItemData.posto, litros: Number(newItemData.litros), valor_total: Number(newItemData.valorTotal), quem_pagou: newItemData.quemPagou || 'proprietario' });
+        await api.post('/abastecimentos', { motorista_id: filterMot, frete_id: freteId, posto: newItemData.posto, litros: Number(newItemData.litros), valor_total: Number(newItemData.valorTotal), quem_pagou: newItemData.quemPagou || 'proprietario', client_request_id: clientRequestId });
       } else if (showAddModal === 'vale') {
-        await api.post('/vales', { motorista_id: filterMot, frete_id: freteId, descricao: newItemData.descricao, valor: Number(newItemData.valor), quem_pagou: newItemData.quemPagou || 'proprietario' });
+        await api.post('/vales', { motorista_id: filterMot, frete_id: freteId, descricao: newItemData.descricao, valor: Number(newItemData.valor), quem_pagou: newItemData.quemPagou || 'proprietario', client_request_id: clientRequestId });
       }
+      reqIdItemRef.current = null; // sucesso: próximo lançamento recebe id novo
       if (filterMot !== 'todos') loadMotoristaData(filterMot);
       setShowAddModal(null);
       setNewItemData({});
@@ -428,6 +440,8 @@ export const GerenciamentoViagens: React.FC = () => {
       alert(err?.response?.status === 409
         ? (err.response.data?.message || 'Não é possível lançar em uma viagem encerrada.')
         : 'Erro ao adicionar item.');
+    } finally {
+      setSavingItem(false);
     }
   };
 
@@ -854,13 +868,13 @@ export const GerenciamentoViagens: React.FC = () => {
             <div className="bg-gray-50 p-4 border-b border-gray-100 font-bold text-gray-700 flex items-center justify-between">
               <span className="flex items-center"><FileText className="mr-2" size={18} /> Lançamentos</span>
               <div className="flex space-x-2">
-                <button onClick={() => setShowAddModal('despesa')} disabled={!temFreteAtivo} title={!temFreteAtivo ? 'Não há frete ativo para lançar' : undefined} className="flex items-center px-3 py-1.5 bg-blue-100 text-blue-600 rounded-lg hover:bg-blue-200 transition-colors font-bold text-xs shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">
+                <button onClick={() => { reqIdItemRef.current = newClientRequestId(); setShowAddModal('despesa'); }} disabled={!temFreteAtivo} title={!temFreteAtivo ? 'Não há frete ativo para lançar' : undefined} className="flex items-center px-3 py-1.5 bg-blue-100 text-blue-600 rounded-lg hover:bg-blue-200 transition-colors font-bold text-xs shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">
                   <Plus size={14} className="mr-1" /> Despesa
                 </button>
-                <button onClick={() => setShowAddModal('abastecimento')} disabled={!temFreteAtivo} title={!temFreteAtivo ? 'Não há frete ativo para lançar' : undefined} className="flex items-center px-3 py-1.5 bg-blue-100 text-blue-600 rounded-lg hover:bg-blue-200 transition-colors font-bold text-xs shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">
+                <button onClick={() => { reqIdItemRef.current = newClientRequestId(); setShowAddModal('abastecimento'); }} disabled={!temFreteAtivo} title={!temFreteAtivo ? 'Não há frete ativo para lançar' : undefined} className="flex items-center px-3 py-1.5 bg-blue-100 text-blue-600 rounded-lg hover:bg-blue-200 transition-colors font-bold text-xs shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">
                   <Plus size={14} className="mr-1" /> Abast.
                 </button>
-                <button onClick={() => setShowAddModal('vale')} disabled={!temFreteAtivo} title={!temFreteAtivo ? 'Não há frete ativo para lançar' : undefined} className="flex items-center px-3 py-1.5 bg-blue-100 text-blue-600 rounded-lg hover:bg-blue-200 transition-colors font-bold text-xs shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">
+                <button onClick={() => { reqIdItemRef.current = newClientRequestId(); setShowAddModal('vale'); }} disabled={!temFreteAtivo} title={!temFreteAtivo ? 'Não há frete ativo para lançar' : undefined} className="flex items-center px-3 py-1.5 bg-blue-100 text-blue-600 rounded-lg hover:bg-blue-200 transition-colors font-bold text-xs shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">
                   <Plus size={14} className="mr-1" /> Vale
                 </button>
               </div>
@@ -1182,7 +1196,7 @@ export const GerenciamentoViagens: React.FC = () => {
             </div>
             <div className="p-5 bg-gray-50 flex justify-end space-x-3 border-t">
               <button onClick={() => setShowAddModal(null)} className="px-5 py-2.5 font-bold text-gray-500 hover:text-gray-700 transition-colors">Cancelar</button>
-              <button onClick={handleAddItem} className="px-8 py-2.5 bg-blue-600 text-white rounded-xl font-bold shadow-lg shadow-blue-200 hover:bg-blue-700 transition-all active:scale-95">Lançar Registro</button>
+              <button onClick={handleAddItem} disabled={savingItem} className="px-8 py-2.5 bg-blue-600 text-white rounded-xl font-bold shadow-lg shadow-blue-200 hover:bg-blue-700 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">{savingItem ? 'Lançando...' : 'Lançar Registro'}</button>
             </div>
           </div>
         </div>
