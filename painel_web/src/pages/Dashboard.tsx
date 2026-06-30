@@ -19,14 +19,14 @@ const StatCard: React.FC<{
   iconColor: string;
   valueColor: string;
 }> = ({ label, value, icon: Icon, boxBorder, iconBg, iconColor, valueColor }) => (
-  <div className={`bg-white p-6 rounded-xl shadow-sm border ${boxBorder}`}>
-    <div className="flex items-center space-x-3 mb-3">
-      <div className={`w-10 h-10 ${iconBg} rounded-lg flex items-center justify-center`}>
-        <Icon size={20} className={iconColor} />
+  <div className={`bg-white p-4 rounded-xl shadow-sm border ${boxBorder}`}>
+    <div className="flex items-center space-x-3 mb-2">
+      <div className={`w-9 h-9 ${iconBg} rounded-lg flex items-center justify-center`}>
+        <Icon size={18} className={iconColor} />
       </div>
       <p className="text-sm text-gray-600 font-medium">{label}</p>
     </div>
-    <p className={`text-3xl font-bold ${valueColor}`}>{value}</p>
+    <p className={`text-2xl font-bold ${valueColor}`}>{value}</p>
   </div>
 );
 
@@ -451,7 +451,7 @@ export const Dashboard: React.FC = () => {
     : allMotoristas.slice(0, 5);
 
   return (
-    <div className="space-y-6 pb-10">
+    <div className="space-y-5 pb-10">
       {!selectedMot && (
         <div className="flex justify-between items-center animate-fade-in">
           <h2 className="text-2xl font-bold text-gray-800">Dashboard</h2>
@@ -465,7 +465,7 @@ export const Dashboard: React.FC = () => {
       )}
 
       {!selectedMot && summary && (
-        <div className="space-y-6 animate-fade-in">
+        <div className="space-y-5 animate-fade-in">
           {/* [PR2B] Vinculado-only: visual atual preservado (campos antigos). */}
           {soVinculado && (
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -529,11 +529,11 @@ export const Dashboard: React.FC = () => {
         )}
 
         {selectedMot ? (
-          <div className="animate-fade-in space-y-6">
+          <div className="animate-fade-in space-y-5">
             <button onClick={() => setSelectedMot(null)} className="flex items-center text-blue-600 hover:text-blue-800 font-bold transition-colors">
               <ChevronLeft size={20} className="mr-1" /> Voltar para Lista
             </button>
-            <div className="bg-blue-600 p-6 rounded-xl shadow-lg flex flex-wrap justify-between items-center gap-4 text-white">
+            <div className="bg-blue-600 p-4 rounded-xl shadow-lg flex flex-wrap justify-between items-center gap-4 text-white">
               <div className="flex items-center space-x-4">
                 <div className="bg-white w-12 h-12 rounded-lg flex items-center justify-center text-blue-600 font-bold text-xl">{selectedMot.nomeCompleto?.charAt(0) || '?'}</div>
                 <div>
@@ -565,7 +565,7 @@ export const Dashboard: React.FC = () => {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-              <div className="lg:col-span-2 space-y-6">
+              <div className="lg:col-span-2 space-y-5">
                 <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
                   <div className="bg-gray-50 p-4 border-b border-gray-100 font-bold text-gray-700 flex items-center justify-between">
                     <span className="flex items-center"><FileText className="mr-2" size={18} /> Lançamentos</span>
@@ -668,7 +668,7 @@ export const Dashboard: React.FC = () => {
                 </div>
               </div>
 
-              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 h-fit sticky top-6">
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 h-fit sticky top-6">
                 <h4 className="flex items-center text-gray-800 mb-6 font-bold text-lg"><DollarSign className="mr-2 text-green-600" /> Balanço Atual</h4>
                 <div className="space-y-4">
                   {isAutonomo ? (
@@ -780,9 +780,9 @@ export const Dashboard: React.FC = () => {
       </div>
 
       {!selectedMot && summary?.fretes_por_motorista && (
-        <div className="space-y-6 mt-6 animate-fade-in">
+        <div className="space-y-5 mt-6 animate-fade-in">
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-            <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50/30">
+            <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/30">
               <button
                 onClick={() => window.open('/relatorios/resumo', '_blank', 'noopener,noreferrer')}
                 className="text-lg font-bold text-gray-800 flex items-center hover:text-blue-600 transition-colors cursor-pointer"
