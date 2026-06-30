@@ -49,8 +49,62 @@ exports.getSummary = async (req, res) => {
     if (idsPermitidos !== null) {
       motTipoQuery = motTipoQuery.in('id', idsPermitidos.length ? idsPermitidos : [UUID_IMPOSSIVEL]);
     }
-    const { data: motsTipoRaw, error: eMotsTipo } = await motTipoQuery;
+
+    // Todas as consultas abaixo dependem apenas de `idsPermitidos` (já resolvido acima) e
+    // NÃO uma da outra. Antes eram ~10 awaits sequenciais (latência somada de 10 round-trips
+    // ao Supabase). Agora vão em um único Promise.all → tempo ≈ o da consulta mais lenta.
+    // Filtros, selects, escopo de empresa, cálculos e shape da resposta seguem idênticos.
+    // Cada query supabase-js resolve para { data, error }; os erros são checados logo após,
+    // na mesma ordem, preservando o "throw na falha" → catch → 500.
+    const [
+      { data: motsTipoRaw, error: eMotsTipo },
+      { data: fretesRaw, error: eFretes },
+      { data: canceladosRaw, error: eCancelados },
+      { data: despesasRaw, error: eDespesas },
+      { data: abastecimentosOwnerRaw, error: eAbastOwner },
+      { data: allAbastecimentosRaw, error: eAllAbast },
+      { data: valesRaw, error: eVales },
+      { data: despesasMotRaw, error: eDespesasMot },
+      { data: abastMotRaw, error: eAbastMot },
+      { data: valesMotRaw, error: eValesMot }
+    ] = await Promise.all([
+      motTipoQuery,
+      // 1. Todos os fretes do período (finalizados)
+      comFiltroEmpresa(supabase.from('fretes')
+        .select('*, motoristas(usuarios(nome), percentual_comissao)')
+        .eq('status', 'finalizado')
+        .gte('data', dataInicio)
+        .lte('data', dataFim))
+        .order('data', { ascending: false }),
+      // [PR-C2] Conjunto de fretes CANCELADOS no mesmo escopo (empresa/motoristas), SEM filtro de
+      // data: um lançamento do período pode estar vinculado a um frete cancelado de outro mês.
+      // Lançamentos vinculados a esses fretes ficam FORA de todas as somas; soltos (sem frete_id)
+      // são preservados. Os fretes cancelados em si já estão fora (fretes acima filtra 'finalizado').
+      comFiltroEmpresa(supabase.from('fretes').select('id').eq('status', 'cancelado')),
+      // 2. Deduções e abastecimentos FINALIZADOS (pagos pelo proprietário)
+      comFiltroEmpresa(supabase.from('despesas').select('valor, motorista_id, frete_id').eq('quem_pagou', 'proprietario').in('status', ['aprovado', 'finalizado']).gte('data', dataInicio).lte('data', dataFim)),
+      comFiltroEmpresa(supabase.from('abastecimentos').select('valor_total, motorista_id, frete_id').eq('quem_pagou', 'proprietario').in('status', ['aprovado', 'finalizado']).gte('data', dataInicio).lte('data', dataFim)),
+      comFiltroEmpresa(supabase.from('abastecimentos').select('litros, motorista_id, frete_id').in('status', ['aprovado', 'finalizado']).gte('data', dataInicio).lte('data', dataFim)),
+      comFiltroEmpresa(supabase.from('vales').select('valor, motorista_id, frete_id').eq('quem_pagou', 'proprietario').in('status', ['aprovado', 'finalizado']).gte('data', dataInicio).lte('data', dataFim)),
+      // [PR2A] Lançamentos pagos pelo MOTORISTA — usados SÓ para gasto do autônomo.
+      // Não entram em nenhum campo antigo nem em deducoes_vinculado.
+      comFiltroEmpresaUuid(supabase.from('despesas').select('valor, motorista_id, frete_id').eq('quem_pagou', 'motorista').in('status', ['aprovado', 'finalizado']).gte('data', dataInicio).lte('data', dataFim)),
+      comFiltroEmpresaUuid(supabase.from('abastecimentos').select('valor_total, motorista_id, frete_id').eq('quem_pagou', 'motorista').in('status', ['aprovado', 'finalizado']).gte('data', dataInicio).lte('data', dataFim)),
+      comFiltroEmpresaUuid(supabase.from('vales').select('valor, motorista_id, frete_id').eq('quem_pagou', 'motorista').in('status', ['aprovado', 'finalizado']).gte('data', dataInicio).lte('data', dataFim))
+    ]);
+
+    // Checagem de erros na mesma ordem das queries (preserva o "throw na 1ª falha" → 500).
     if (eMotsTipo) throw eMotsTipo;
+    if (eFretes) throw eFretes;
+    if (eCancelados) throw eCancelados;
+    if (eDespesas) throw eDespesas;
+    if (eAbastOwner) throw eAbastOwner;
+    if (eAllAbast) throw eAllAbast;
+    if (eVales) throw eVales;
+    if (eDespesasMot) throw eDespesasMot;
+    if (eAbastMot) throw eAbastMot;
+    if (eValesMot) throw eValesMot;
+
     const tipoDe = {};
     (motsTipoRaw || []).forEach(m => {
       const t = Array.isArray(m.empresas) ? m.empresas[0]?.tipo : m.empresas?.tipo;
@@ -58,22 +112,6 @@ exports.getSummary = async (req, res) => {
     });
     const isAuto = (id) => tipoDe[id] === 'autonomo';
 
-    // 1. Buscar todos os fretes do período
-    const { data: fretesRaw, error: eFretes } = await comFiltroEmpresa(supabase.from('fretes')
-      .select('*, motoristas(usuarios(nome), percentual_comissao)')
-      .eq('status', 'finalizado')
-      .gte('data', dataInicio)
-      .lte('data', dataFim))
-      .order('data', { ascending: false });
-    if (eFretes) throw eFretes;
-
-    // [PR-C2] Conjunto de fretes CANCELADOS no mesmo escopo (empresa/motoristas), SEM filtro de
-    // data: um lançamento do período pode estar vinculado a um frete cancelado de outro mês.
-    // Lançamentos vinculados a esses fretes ficam FORA de todas as somas; soltos (sem frete_id)
-    // são preservados. Os fretes cancelados em si já estão fora (fretes acima filtra 'finalizado').
-    const { data: canceladosRaw, error: eCancelados } = await comFiltroEmpresa(
-      supabase.from('fretes').select('id').eq('status', 'cancelado'));
-    if (eCancelados) throw eCancelados;
     const fretesCanceladosIds = new Set((canceladosRaw || []).map(f => f.id));
     const ehDeFreteCancelado = (item) => {
       const fid = item.frete_id;
@@ -81,30 +119,6 @@ exports.getSummary = async (req, res) => {
       return fretesCanceladosIds.has(fid);
     };
     const naoCancelado = (item) => !ehDeFreteCancelado(item);
-
-    // 2. Buscar deduções e abastecimentos FINALIZADOS
-    const { data: despesasRaw, error: eDespesas } = await comFiltroEmpresa(supabase.from('despesas').select('valor, motorista_id, frete_id').eq('quem_pagou', 'proprietario').in('status', ['aprovado', 'finalizado']).gte('data', dataInicio).lte('data', dataFim));
-    if (eDespesas) throw eDespesas;
-
-    const { data: abastecimentosOwnerRaw, error: eAbastOwner } = await comFiltroEmpresa(supabase.from('abastecimentos').select('valor_total, motorista_id, frete_id').eq('quem_pagou', 'proprietario').in('status', ['aprovado', 'finalizado']).gte('data', dataInicio).lte('data', dataFim));
-    if (eAbastOwner) throw eAbastOwner;
-
-    const { data: allAbastecimentosRaw, error: eAllAbast } = await comFiltroEmpresa(supabase.from('abastecimentos').select('litros, motorista_id, frete_id').in('status', ['aprovado', 'finalizado']).gte('data', dataInicio).lte('data', dataFim));
-    if (eAllAbast) throw eAllAbast;
-
-    const { data: valesRaw, error: eVales } = await comFiltroEmpresa(supabase.from('vales').select('valor, motorista_id, frete_id').eq('quem_pagou', 'proprietario').in('status', ['aprovado', 'finalizado']).gte('data', dataInicio).lte('data', dataFim));
-    if (eVales) throw eVales;
-
-    // [PR2A] Lançamentos pagos pelo MOTORISTA — usados SÓ para gasto do autônomo.
-    // Não entram em nenhum campo antigo nem em deducoes_vinculado.
-    const { data: despesasMotRaw, error: eDespesasMot } = await comFiltroEmpresaUuid(supabase.from('despesas').select('valor, motorista_id, frete_id').eq('quem_pagou', 'motorista').in('status', ['aprovado', 'finalizado']).gte('data', dataInicio).lte('data', dataFim));
-    if (eDespesasMot) throw eDespesasMot;
-
-    const { data: abastMotRaw, error: eAbastMot } = await comFiltroEmpresaUuid(supabase.from('abastecimentos').select('valor_total, motorista_id, frete_id').eq('quem_pagou', 'motorista').in('status', ['aprovado', 'finalizado']).gte('data', dataInicio).lte('data', dataFim));
-    if (eAbastMot) throw eAbastMot;
-
-    const { data: valesMotRaw, error: eValesMot } = await comFiltroEmpresaUuid(supabase.from('vales').select('valor, motorista_id, frete_id').eq('quem_pagou', 'motorista').in('status', ['aprovado', 'finalizado']).gte('data', dataInicio).lte('data', dataFim));
-    if (eValesMot) throw eValesMot;
 
     // Garantir arrays nunca nulos.
     // [PR-C2] Lançamentos vinculados a fretes cancelados são removidos AQUI (uma vez), antes de
