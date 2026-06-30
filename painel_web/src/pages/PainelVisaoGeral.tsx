@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Building2, Users, Truck, DollarSign, AlertTriangle, Clock } from 'lucide-react';
+import { Building2, Users, Truck, DollarSign, AlertTriangle, Clock } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import api from '../api';
 
@@ -37,12 +37,9 @@ export const PainelVisaoGeral: React.FC = () => {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center space-x-3 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-        <div className="bg-gray-800 p-2 rounded-lg text-white"><Shield size={24} /></div>
-        <div>
-          <h1 className="text-2xl font-bold text-gray-800">Visão Geral</h1>
-          <p className="text-sm text-gray-500">Resumo da plataforma Matopiba Log</p>
-        </div>
+      <div>
+        <h2 className="text-2xl font-bold text-gray-800">Visão Geral</h2>
+        <p className="text-gray-600 text-sm">Resumo da plataforma Matopiba Log</p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

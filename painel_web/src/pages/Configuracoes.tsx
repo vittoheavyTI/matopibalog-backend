@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  Settings, Building2, Printer, Save, Check, Image,
+  Building2, Printer, Save, Check, Image,
   Palette, X, Upload, Trash2, Truck, Search, Plus, Move
 } from 'lucide-react';
 import { maskPhone, maskCNPJ, maskCEP } from '../utils/masks';
@@ -406,9 +406,9 @@ export const Configuracoes: React.FC = () => {
       <input ref={logoFileRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) processFile(f, 'logo'); e.target.value = ''; }} />
       <input ref={bgFileRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) processFile(f, 'bg'); e.target.value = ''; }} />
 
-      <div className="flex items-center space-x-3 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-        <div className="bg-gray-800 p-2 rounded-lg text-white"><Settings size={24} /></div>
-        <h1 className="text-2xl font-bold text-gray-800">Configurações do Sistema</h1>
+      <div>
+        <h2 className="text-2xl font-bold text-gray-800">Configurações do Sistema</h2>
+        <p className="text-gray-600 text-sm">Personalize sua empresa e as preferências do sistema.</p>
       </div>
 
       <div className="flex space-x-1 bg-gray-100 p-1 rounded-xl w-fit">
