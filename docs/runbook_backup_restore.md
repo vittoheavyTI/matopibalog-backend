@@ -1,8 +1,9 @@
 # Runbook de Backup e Restore — Matopiba Log
 
-> **Data:** 2026-06-28
-> **Versão:** 1.0
-> **Status:** Esboço inicial — pendente de primeiro teste real.
+> **Data:** 2026-06-29
+> **Versão:** 1.1
+> **Status:** Restore do **banco** validado em 2026-06-29 (teste real em instância PostgreSQL 18
+> temporária). Backup do banco automatizado localmente. Storage e env vars seguem manuais.
 
 ---
 
@@ -11,8 +12,11 @@
 Este runbook documenta os procedimentos manuais de backup e restauração do Matopiba Log
 para garantir continuidade operacional antes e durante o primeiro cliente real.
 
-**Não automatiza nada.** A automação (backup diário, cron, GitHub Action) fica para
-uma fase posterior, após a validação manual do processo.
+**Foco em procedimentos manuais.** Desde 2026-06-29 já existe **automação local** do backup
+do **banco** (tarefa agendada do Windows + `pg_dump`) — ver seção 10. As demais automações
+(backup do Storage, cron/GitHub Action, export de env vars) seguem para fase posterior. Os
+passos manuais abaixo continuam válidos como referência de restore e para os itens ainda
+não automatizados.
 
 > ⚠️ **Cache não substitui backup.** O cache (CDN/HTTP, cache offline do app,
 > respostas em memória) apenas **acelera leitura** — ele NÃO é cópia de segurança
@@ -157,6 +161,18 @@ pg_dump \
 supabase db dump --linked > backup_$(date +%Y-%m-%d).sql
 ```
 
+**Opção D — automação local (em uso desde 2026-06-29):**
+
+Script PowerShell (`backup_matopiba.ps1`, fora do repo) + tarefa agendada do Windows que rodam
+`pg_dump` periodicamente. Detalhes na seção 10.
+
+> **Como foi feito o backup validado de 2026-06-29:** conexão pelo **Session pooler** do Supabase
+> (porta 5432), com `pg_dump` **18.4** contra o servidor **PostgreSQL 17.6**. Importante: o
+> `pg_dump` precisa ser **igual ou mais novo** que a versão do servidor (17.x) — usar um `pg_dump`
+> mais antigo (ex.: 16) falha com *server version mismatch*. Foram gerados três artefatos:
+> `*_schema_*.sql` (estrutura), `*_data_*.sql` (dados) e `*_full_*.dump` (formato **custom**,
+> usado no restore). A senha do banco fica em `pgpass.conf` (fora do repo), **nunca** no script.
+
 ### 4.2 Storage
 
 **Bucket `comprovantes`:**
@@ -230,9 +246,34 @@ psql \
   --file=backup_<DATA>.sql
 ```
 
+Para o dump **custom** (`*_full_*.dump`), restaurar com `pg_restore` em vez de `psql`:
+
+```bash
+pg_restore \
+  --host=<NOVO_SUPABASE_DB_HOST> --port=5432 --username=postgres \
+  --dbname=postgres --no-owner --no-privileges \
+  backup_<DATA>.dump
+```
+
 Erros comuns:
 - `role "postgres" does not exist` → usar `--no-owner` no dump
 - `permission denied` → criar o schema antes se o dump não incluir
+
+> ⚠️ **Gotcha confirmado no teste de 2026-06-29 (Postgres comum, fora do Supabase):**
+> algumas tabelas usam `DEFAULT extensions.uuid_generate_v4()`. Se o schema `extensions` e a
+> extensão não existirem **antes** do restore, tabelas como `empresas` e `planos` **não são
+> criadas** (e seus dados ficam de fora, silenciosamente). Num Postgres comum, rodar antes:
+>
+> ```sql
+> CREATE SCHEMA IF NOT EXISTS extensions;
+> CREATE EXTENSION IF NOT EXISTS "uuid-ossp" SCHEMA extensions;
+> CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA extensions;
+> ```
+>
+> Num **novo projeto Supabase**, esse schema já existe — o ajuste é necessário sobretudo ao
+> restaurar fora do Supabase (teste local). Erros residuais sobre o schema `auth` ou o papel
+> `authenticated` são **esperados** num Postgres comum (objetos internos do Supabase) e não
+> afetam a integridade dos dados de aplicação.
 
 #### 5.3 Restaurar Storage
 
@@ -374,6 +415,33 @@ Para validar que o backup funciona **antes** de precisar dele:
 **Não usar dados reais de clientes no teste.**
 Usar apenas as contas de teste (Alfa, Bravo, autônomos).
 
+### 8.1 Teste de restore realizado — 2026-06-29 (banco)
+
+Primeira validação real do restore do **banco**, feita numa instância **PostgreSQL 18
+temporária e descartável** (criada com `initdb`/`pg_ctl`, sem tocar em produção e sem custo).
+
+**Integridade do dump custom** (`pg_restore --list`):
+
+| Campo | Valor |
+|-------|-------|
+| Formato | CUSTOM |
+| Compressão | gzip |
+| TOC Entries | 513 |
+| Versão do servidor de origem | 17.6 |
+| Versão do `pg_dump` | 18.4 |
+
+**Resultado:** **17 tabelas** de `public` recuperadas com dados íntegros (ex.: `despesas` 77,
+`fretes` 37, `abastecimentos` 37, `vales` 18, `empresas` 13, `usuarios` 13, `motoristas` 5).
+
+**Ressalvas técnicas confirmadas:**
+- Foi necessário criar o schema `extensions` + `uuid-ossp`/`pgcrypto` **antes** do restore
+  (ver seção 5.2), senão `empresas` e `planos` não restauravam.
+- Erros residuais sobre `auth`/`authenticated` (objetos internos do Supabase) são esperados
+  num Postgres comum e não comprometem os dados de aplicação.
+
+**Ainda não exercitado neste teste:** restore do **Storage** (`comprovantes`/`avatars`) e
+restauração da tabela `auth.users` (senhas) — ver riscos na seção 9.
+
 ---
 
 ## 9. Riscos conhecidos
@@ -388,12 +456,27 @@ Usar apenas as contas de teste (Alfa, Bravo, autônomos).
 
 ---
 
-## 10. O que fica para automação futura
+## 10. Automação de backup
+
+### 10.1 Já implementado — backup local do banco (2026-06-29)
+
+- **Script:** `backup_matopiba.ps1` (PowerShell, mantido **fora do repositório**).
+- **O que faz:** roda `pg_dump` (formato custom) com nome por timestamp, grava log e aplica
+  **retenção de 30 dias** (remove backups antigos automaticamente).
+- **Credencial:** lida de `pgpass.conf` (perfil do usuário, fora do repo) — **sem senha no script**.
+- **Agendamento:** tarefa do Windows `Backup MatopibaLog`, diária às 02:00, com
+  `StartWhenAvailable` (recupera a execução se a máquina estava desligada no horário).
+- **Cobertura:** apenas o **banco**. Storage e env vars do Railway continuam manuais.
+- **Operação:** após rotação da senha do Supabase, atualizar o `pgpass.conf` e a automação volta
+  a funcionar; o backend (`/health`) respondeu `status: UP` após a troca da senha. Nenhuma
+  connection string com senha fica exposta nas env vars do Railway.
+
+### 10.2 O que ainda fica para automação futura
 
 | Item | Prioridade |
 |------|-----------|
-| Script `scripts/backup.sh` — executa pg_dump + storage dump | Alta |
-| GitHub Action semanal de backup | Alta |
+| Backup automatizado do **Storage** (`comprovantes`/`avatars`) | Alta |
+| GitHub Action semanal de backup (off-site, fora da máquina local) | Alta |
 | GitHub Action mensal de restore test | Média |
 | Migration runner automatizado | Média |
 | Export automático de env vars | Baixa |
