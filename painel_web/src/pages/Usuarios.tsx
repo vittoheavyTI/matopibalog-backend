@@ -346,7 +346,7 @@ export const Usuarios: React.FC = () => {
         <h2 className="text-2xl font-bold text-gray-800">Gestão de Usuários</h2>
         <button 
           onClick={() => { setEditingUser(null); setShowModal(true); }}
-          className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all shadow-md active:scale-95 font-bold"
+          className="flex items-center px-4 py-2 bg-green-700 text-white rounded-lg hover:bg-green-800 transition-all shadow-md active:scale-95 font-bold"
         >
           <UserPlus size={20} className="mr-2" /> Novo Usuário
         </button>
@@ -742,7 +742,7 @@ export const Usuarios: React.FC = () => {
               <button 
                 onClick={handleSave}
                 disabled={isSubmitting}
-                className="px-8 py-2.5 bg-blue-600 text-white font-bold rounded-xl shadow-lg shadow-blue-100 hover:bg-blue-700 transition-all active:scale-95 flex items-center disabled:opacity-50"
+                className="px-8 py-2.5 bg-green-700 text-white font-bold rounded-xl shadow-lg shadow-green-100 hover:bg-green-800 transition-all active:scale-95 flex items-center disabled:opacity-50"
               >
                 <Check size={20} className="mr-2" /> {isSubmitting ? 'Salvando...' : 'Salvar'}
               </button>
