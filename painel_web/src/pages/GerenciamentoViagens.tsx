@@ -542,7 +542,7 @@ export const GerenciamentoViagens: React.FC = () => {
 
   const getStatusBadge = (status: string) => {
     const config: Record<string, string> = {
-      ativo: 'bg-blue-100 text-blue-700', pendente: 'bg-yellow-100 text-yellow-700',
+      ativo: 'bg-slate-100 text-slate-700', pendente: 'bg-yellow-100 text-yellow-700',
       finalizado: 'bg-green-100 text-green-700', cancelado: 'bg-red-100 text-red-700',
       aprovado: 'bg-green-100 text-green-700', rejeitado: 'bg-red-100 text-red-700'
     };
@@ -636,7 +636,7 @@ export const GerenciamentoViagens: React.FC = () => {
           <h2 className="text-2xl font-bold text-gray-800">Gerenciamento de Fretes</h2>
           <p className="text-gray-600 text-sm">Cadastro e acompanhamento de fretes</p>
         </div>
-        <button onClick={() => openNewModal()} className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all shadow-md active:scale-95 font-bold">
+        <button onClick={() => openNewModal()} className="flex items-center px-4 py-2 bg-green-700 text-white rounded-lg hover:bg-green-800 transition-all shadow-md active:scale-95 font-bold">
           <Plus size={20} className="mr-2" /> Novo Frete
         </button>
       </div>
@@ -1145,7 +1145,7 @@ export const GerenciamentoViagens: React.FC = () => {
             </div>
             <div className="p-5 pt-0 flex justify-end gap-3">
               <button onClick={() => setShowModal(false)} className="px-4 py-2 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">Cancelar</button>
-              <button onClick={handleSave} disabled={isSubmitting} className="px-4 py-2 text-sm font-bold bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center">
+              <button onClick={handleSave} disabled={isSubmitting} className="px-4 py-2 text-sm font-bold bg-green-700 text-white rounded-lg hover:bg-green-800 transition-colors disabled:opacity-50 flex items-center">
                 <Check size={18} className="mr-2" />{isSubmitting ? 'Salvando...' : 'Salvar'}
               </button>
             </div>
@@ -1196,7 +1196,7 @@ export const GerenciamentoViagens: React.FC = () => {
             </div>
             <div className="p-5 bg-gray-50 flex justify-end space-x-3 border-t">
               <button onClick={() => setShowAddModal(null)} className="px-5 py-2.5 font-bold text-gray-600 hover:text-gray-700 transition-colors">Cancelar</button>
-              <button onClick={handleAddItem} disabled={savingItem} className="px-8 py-2.5 bg-blue-600 text-white rounded-xl font-bold shadow-lg shadow-blue-200 hover:bg-blue-700 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">{savingItem ? 'Lançando...' : 'Lançar Registro'}</button>
+              <button onClick={handleAddItem} disabled={savingItem} className="px-8 py-2.5 bg-green-700 text-white rounded-xl font-bold shadow-lg shadow-green-200 hover:bg-green-800 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">{savingItem ? 'Lançando...' : 'Lançar Registro'}</button>
             </div>
           </div>
         </div>
