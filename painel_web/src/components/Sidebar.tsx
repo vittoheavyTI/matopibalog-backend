@@ -137,10 +137,10 @@ export const Sidebar: React.FC = () => {
   ];
 
   const linkClass = ({ isActive }: { isActive: boolean }) =>
-    `flex items-center space-x-3 rounded-lg transition-colors ${collapsed ? 'justify-center px-0 py-3' : 'px-4 py-3'} ${isActive ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-gray-800'}`;
+    `flex items-center space-x-3 rounded-lg transition-colors ${collapsed ? 'justify-center px-0 py-3' : 'px-4 py-3'} ${isActive ? 'bg-green-700 text-white' : 'text-gray-300 hover:bg-gray-800'}`;
 
   const subLinkClass = ({ isActive }: { isActive: boolean }) =>
-    `block px-3 py-2 rounded-lg text-sm transition-colors ${isActive ? 'bg-blue-600/30 text-white font-medium' : 'text-gray-400 hover:text-white hover:bg-gray-800'}`;
+    `block px-3 py-2 rounded-lg text-sm transition-colors ${isActive ? 'bg-green-700/30 text-white font-medium' : 'text-gray-400 hover:text-white hover:bg-gray-800'}`;
 
   return (
     <>
