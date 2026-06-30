@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  Building2, Printer, Save, Check, Image,
-  Palette, X, Upload, Trash2, Truck, Search, Plus, Move
+  Building2, Save, Check, Image,
+  Palette, X, Upload, Trash2, Truck, Move
 } from 'lucide-react';
 import { maskPhone, maskCNPJ, maskCEP } from '../utils/masks';
 import api from '../api';
@@ -75,10 +75,6 @@ interface CompanyData {
   estado: string; telefone: string; email: string;
 }
 
-interface PrinterData {
-  id: string; nome: string; tipo: string;
-  status: 'online' | 'offline'; localizacao?: string; data_instalacao?: string;
-}
 
 function getContrastTextColor(hexColor: string): string {
   const hex = hexColor.replace('#', '');
@@ -90,7 +86,7 @@ function getContrastTextColor(hexColor: string): string {
 }
 
 export const Configuracoes: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'empresa' | 'impressora' | 'aparencia'>('empresa');
+  const [activeTab, setActiveTab] = useState<'empresa' | 'aparencia'>('empresa');
   const { user } = useAuth();
   const [codigoConvite, setCodigoConvite] = useState<string | null>(null);
   const [regenerandoCodigo, setRegenerandoCodigo] = useState(false);
@@ -99,17 +95,11 @@ export const Configuracoes: React.FC = () => {
     complemento: '', pontoReferencia: '', cidade: '', estado: '', telefone: '', email: '',
   });
 
-  const [printers, setPrinters] = useState<PrinterData[]>([]);
-  const [showPrinterSearch, setShowPrinterSearch] = useState(false);
-  const [foundPrinters, setFoundPrinters] = useState<any[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [testingPrinter, setTestingPrinter] = useState<string | null>(null);
-  const [showSaved, setShowSaved] = useState(false);
 
   // Estados de aparência — inicializados do localStorage diretamente
   const [loginLogo, setLoginLogo] = useState<string | null>(() => localStorage.getItem(`${PREFIX}login_logo`) || null);
   const [loginBg, setLoginBg] = useState<string | null>(() => localStorage.getItem(`${PREFIX}login_bg`) || null);
+  const [showSaved, setShowSaved] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState(() => localStorage.getItem(`${PREFIX}login_template`) || 'classico');
   const [footerText, setFooterText] = useState(() => localStorage.getItem(`${PREFIX}login_footer`) || '');
   const [contactPhone, setContactPhone] = useState(() => localStorage.getItem(`${PREFIX}contact_phone`) || '');
@@ -156,15 +146,11 @@ export const Configuracoes: React.FC = () => {
     }
   };
 
-  // Carrega dados da empresa e impressoras do localStorage
+  // Carrega dados da empresa do localStorage
   useEffect(() => {
     const savedCompany = localStorage.getItem(`${PREFIX}company`);
     if (savedCompany) {
       try { setCompany(JSON.parse(savedCompany)); } catch { }
-    }
-    const savedPrinters = localStorage.getItem(`${PREFIX}printers`);
-    if (savedPrinters) {
-      try { setPrinters(JSON.parse(savedPrinters)); } catch { }
     }
   }, []);
 
@@ -174,7 +160,6 @@ export const Configuracoes: React.FC = () => {
       .then((response) => {
         const d = response.data;
         if (!d) return;
-        if (d.printers) setPrinters(d.printers);
         if (d.loginLogo !== undefined) setLoginLogo(d.loginLogo);
         if (d.loginBg !== undefined) setLoginBg(d.loginBg);
         if (d.footerText !== undefined) setFooterText(d.footerText);
@@ -217,7 +202,6 @@ export const Configuracoes: React.FC = () => {
   const syncConfigToServer = async (overrides: Record<string, any> = {}) => {
     const dados: Record<string, any> = {
       company,
-      printers,
       loginLogo,
       loginBg,
       footerText,
@@ -275,49 +259,6 @@ export const Configuracoes: React.FC = () => {
       console.error('Erro ao salvar dados da empresa:', err);
     }
     showSavedFeedback();
-  };
-
-  const handleRemovePrinter = (id: string) => {
-    const updated = printers.filter(p => p.id !== id);
-    setPrinters(updated);
-    localStorage.setItem(`${PREFIX}printers`, JSON.stringify(updated));
-  };
-
-  const handleBuscarImpressoras = async () => {
-    setShowPrinterSearch(true);
-    setIsSearching(true);
-    setFoundPrinters([]);
-    setSearchTerm('');
-    try {
-      const response = await api.get('/impressoras/todas');
-      setFoundPrinters(response.data || []);
-    } catch {
-      setFoundPrinters([]);
-    }
-    setIsSearching(false);
-  };
-
-  const handleSearchByName = async () => {
-    if (!searchTerm.trim()) return;
-    setIsSearching(true);
-    try {
-      const response = await api.get('/impressoras/todas?nome=' + encodeURIComponent(searchTerm));
-      setFoundPrinters(response.data || []);
-    } catch {
-      setFoundPrinters([]);
-    }
-    setIsSearching(false);
-  };
-
-  const handleTestPrinter = async (printer: PrinterData) => {
-    setTestingPrinter(printer.id);
-    try {
-      await api.post('/impressoras/testar', { nome: printer.nome });
-      alert('Impressora testada com sucesso!');
-    } catch {
-      alert('Falha ao testar impressora.');
-    }
-    setTestingPrinter(null);
   };
 
   const processFile = (file: File, target: 'logo' | 'bg') => {
@@ -412,7 +353,7 @@ export const Configuracoes: React.FC = () => {
       </div>
 
       <div className="flex space-x-1 bg-gray-100 p-1 rounded-xl w-fit">
-        {(['empresa', 'impressora', 'aparencia'] as const)
+        {(['empresa', 'aparencia'] as const)
           .filter((tab) => tab !== 'aparencia' || user?.is_super_admin)
           .map((tab) => (
           <button
@@ -421,7 +362,6 @@ export const Configuracoes: React.FC = () => {
             className={`flex items-center px-6 py-2.5 rounded-lg font-bold text-sm transition-all ${activeTab === tab ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
           >
             {tab === 'empresa' && <><Building2 size={18} className="mr-2" />Dados da Empresa</>}
-            {tab === 'impressora' && <><Printer size={18} className="mr-2" />Impressoras</>}
             {tab === 'aparencia' && <><Palette size={18} className="mr-2" />Aparência</>}
           </button>
         ))}
@@ -521,47 +461,7 @@ export const Configuracoes: React.FC = () => {
         </div>
       )}
 
-      {/* ── ABA IMPRESSORAS ── */}
-      {activeTab === 'impressora' && (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 space-y-6">
-          <h3 className="text-lg font-bold text-gray-800 flex items-center"><Printer size={20} className="mr-2" /> Impressoras</h3>
-          <button onClick={handleBuscarImpressoras} className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-xl font-medium text-sm hover:bg-blue-700 transition-colors">
-            <Search size={16} className="mr-1" /> Buscar Impressoras
-          </button>
-          {printers.length === 0 ? (
-            <div className="text-center py-12 bg-gray-50 rounded-2xl border-2 border-dashed border-gray-200">
-              <Printer size={48} className="mx-auto text-gray-300 mb-3" />
-              <p className="text-gray-500 font-medium">Nenhuma impressora configurada.</p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {printers.map(p => (
-                <div key={p.id} className="flex items-center justify-between p-4 border border-gray-100 rounded-xl bg-gray-50/50">
-                  <div className="flex items-center space-x-3">
-                    <div className={`p-2 rounded-lg ${p.tipo === 'fiscal' ? 'bg-purple-50 text-purple-600' : 'bg-gray-100 text-gray-600'}`}>
-                      <Printer size={20} />
-                    </div>
-                    <div>
-                      <p className="font-bold text-gray-800">{p.nome}</p>
-                      <p className="text-xs text-gray-500">{p.tipo === 'fiscal' ? 'Fiscal' : p.tipo}{p.localizacao === 'rede' ? ' • Rede' : p.localizacao === 'local' ? ' • USB' : ''}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <button onClick={() => handleTestPrinter(p)} disabled={testingPrinter === p.id} className={`flex items-center px-3 py-2 rounded-lg text-xs font-medium transition-all ${testingPrinter === p.id ? 'bg-gray-100 text-gray-400 cursor-wait' : 'bg-green-50 text-green-700 hover:bg-green-100'}`}>
-                      {testingPrinter === p.id ? <span className="w-3 h-3 border-2 border-gray-400 border-t-transparent rounded-full animate-spin mr-1.5" /> : <span className="mr-1.5">▶</span>}
-                      Testar
-                    </button>
-                    <button onClick={() => handleRemovePrinter(p.id)} className="text-gray-400 hover:text-red-600 p-2 hover:bg-red-50 rounded-lg transition-colors">
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
+      
       {/* ── ABA APARÊNCIA ── */}
       {activeTab === 'aparencia' && (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 space-y-8">
@@ -891,65 +791,6 @@ export const Configuracoes: React.FC = () => {
         </div>
       )}
 
-      {/* Modal de busca de impressoras */}
-      {showPrinterSearch && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={(e) => { if (e.target === e.currentTarget) setShowPrinterSearch(false); }}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden">
-            <div className="flex justify-between items-center p-6 border-b border-gray-100">
-              <div>
-                <h3 className="font-bold text-lg text-gray-800">Buscar Impressoras</h3>
-                <p className="text-sm text-gray-500 mt-0.5">Digite o nome ou veja os resultados abaixo</p>
-              </div>
-              <button onClick={() => setShowPrinterSearch(false)} className="p-1 hover:bg-gray-100 rounded"><X size={20} className="text-gray-500" /></button>
-            </div>
-            <div className="p-6 space-y-4">
-              <div className="flex space-x-2">
-                <input type="text" placeholder="Nome da impressora" className="flex-1 border-2 border-gray-200 rounded-xl p-3 text-sm outline-none focus:border-blue-500" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleSearchByName(); }} />
-                <button onClick={handleSearchByName} disabled={!searchTerm.trim() || isSearching} className={`px-5 py-3 rounded-xl font-bold text-sm transition-all ${searchTerm.trim() && !isSearching ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}>Buscar</button>
-              </div>
-              {isSearching ? (
-                <div className="flex flex-col items-center justify-center py-8 space-y-3">
-                  <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                  <p className="text-gray-500 text-sm font-medium">Buscando impressoras...</p>
-                </div>
-              ) : foundPrinters.length === 0 ? (
-                <div className="text-center py-8"><Printer size={40} className="mx-auto text-gray-300 mb-3" /><p className="text-gray-500 text-sm">Nenhuma impressora encontrada</p></div>
-              ) : (
-                <div className="space-y-3 max-h-72 overflow-y-auto">
-                  {foundPrinters.map((printer, idx) => (
-                    <div key={idx} className="flex items-center justify-between p-4 border border-gray-100 rounded-xl hover:border-blue-200 hover:bg-blue-50/30 transition-all">
-                      <div className="flex items-center space-x-4">
-                        <div className={`p-2.5 rounded-lg ${printer.tipo === 'fiscal' ? 'bg-purple-50 text-purple-600' : printer.tipo === 'termica' ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-600'}`}>
-                          <Printer size={22} />
-                        </div>
-                        <div>
-                          <p className="font-bold text-gray-800">{printer.nome}</p>
-                          <p className="text-xs text-gray-500">{printer.tipo} {printer.ip && `• ${printer.ip}`}</p>
-                        </div>
-                      </div>
-                      <button onClick={() => {
-                        if (printer.jaCadastrada) { alert('Esta impressora já está cadastrada.'); return; }
-                        const newPrinter = { id: Date.now().toString(), nome: printer.nome, tipo: printer.tipo, status: 'online' as const, localizacao: printer.origem || 'local', data_instalacao: new Date().toISOString().split('T')[0] };
-                        const updated = [...printers, newPrinter];
-                        setPrinters(updated);
-                        localStorage.setItem(`${PREFIX}printers`, JSON.stringify(updated));
-                        syncConfigToServer();
-                        setFoundPrinters(foundPrinters.filter((_, i) => i !== idx));
-                      }} className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg font-medium text-sm hover:bg-blue-700 transition-colors">
-                        <Plus size={16} className="mr-1" /> Adicionar
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div className="p-4 bg-gray-50 border-t border-gray-100 flex justify-between items-center">
-              <p className="text-xs text-gray-400">{isSearching ? 'Buscando...' : `${foundPrinters.length} impressora(s) encontrada(s)`}</p>
-              <p className="text-xs text-gray-300">Clique fora para fechar</p>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
