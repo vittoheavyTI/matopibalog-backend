@@ -240,14 +240,9 @@ export const Integracoes: React.FC = () => {
         </div>
       )}
 
-      <div className="flex items-center space-x-3 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-        <div className="bg-gray-800 p-2 rounded-lg text-white">
-          <Plug size={24} />
-        </div>
-        <div>
-          <h1 className="text-2xl font-bold text-gray-800">Integrações Externas</h1>
-          <p className="text-sm text-gray-500">Gerencie as APIs e serviços conectados ao sistema</p>
-        </div>
+      <div>
+        <h2 className="text-2xl font-bold text-gray-800">Integrações Externas</h2>
+        <p className="text-gray-600 text-sm">Gerencie as APIs e serviços conectados ao sistema</p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
