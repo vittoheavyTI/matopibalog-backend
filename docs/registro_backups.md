@@ -25,13 +25,21 @@ Este arquivo é **versionado no Git**. Por isso, registre **apenas metadados**:
 
 | Data/hora | Item | Nome do arquivo | Tamanho aprox. | Cofre (ref. genérica) | Pós-backup OK? |
 |-----------|------|-----------------|----------------|------------------------|----------------|
-| _(preencher)_ | Banco (dump SQL) | `backup_AAAA-MM-DD.sql` | — | — | ☐ |
+| 2026-06-29 22:17 | Banco (schema) | `matopibalog_schema_2026-06-29.sql` | ~183 KB | Pasta local de backups (fora do repo) | ✅ |
+| 2026-06-29 22:17 | Banco (dados) | `matopibalog_data_2026-06-29.sql` | ~424 KB | Pasta local de backups (fora do repo) | ✅ |
+| 2026-06-29 22:17 | Banco (dump custom) | `matopibalog_full_2026-06-29.dump` | ~460 KB | Pasta local de backups (fora do repo) | ✅ |
 | _(preencher)_ | Storage `comprovantes` | `backup_comprovantes_AAAA-MM-DD.zip` | — | — | ☐ |
 | _(preencher)_ | Storage `avatars` (se existir) | `backup_avatars_AAAA-MM-DD.zip` | — | — | ☐ |
 | _(preencher)_ | Env vars Railway | `railway_envvars_AAAA-MM-DD.txt` | — | — | ☐ |
 | _(preencher)_ | Lista de migrations | `migrations_aplicadas_AAAA-MM-DD.txt` | — | — | ☐ |
 
-> Copie o bloco de 5 linhas acima a cada novo backup, com a data preenchida.
+> Copie o bloco de linhas acima a cada novo backup, com a data preenchida.
+
+**Notas do backup de 2026-06-29 (banco):**
+- Gerado com PostgreSQL tools **18.4** contra o servidor Supabase **PostgreSQL 17.6**.
+- O `.dump` (formato custom) é o arquivo de restauração; os `.sql` (schema/dados) são auxiliares.
+- Restauração **validada de verdade** — ver registro do teste no runbook (seção 8).
+- A partir desta data o backup do **banco** roda **automatizado localmente** (tarefa agendada do Windows); ver runbook (seção 10). Os backups automáticos não são logados linha a linha aqui — esta tabela registra marcos manuais e validações.
 
 ---
 
@@ -61,5 +69,11 @@ policies). Salve essa saída como `migrations_aplicadas_AAAA-MM-DD.txt` no cofre
 
 ## Próximo passo após o primeiro backup
 
-Validar o restore num **projeto Supabase separado** (seção 8 do runbook), usando só contas de
-teste (Alfa, Bravo, autônomos) — nunca dados reais de cliente.
+✅ **Restore do banco validado em 2026-06-29** numa instância PostgreSQL 18 temporária e
+descartável (não em produção) — 17 tabelas recuperadas, dados principais íntegros. Detalhes
+e ressalvas técnicas na seção 8 do runbook.
+
+Pendentes (itens separados, ainda manuais): backup do **Storage** (`comprovantes`/`avatars`)
+e exportação das **env vars do Railway** para o cofre. A validação de restore em um
+**projeto Supabase separado** com Storage continua recomendada quando esses itens forem
+cobertos — usando só contas de teste (Alfa, Bravo, autônomos), nunca dados reais de cliente.
