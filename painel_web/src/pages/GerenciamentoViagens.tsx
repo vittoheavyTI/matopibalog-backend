@@ -1237,10 +1237,12 @@ export const GerenciamentoViagens: React.FC = () => {
                       <span className="text-gray-500">Total de Fretes:</span>
                       <span className="font-bold text-gray-800">{formatCurrency(opTotalFretes)}</span>
                     </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-500">Comissão ({selectedMotorista?.comissao || 0}%):</span>
-                      <span className="font-bold text-blue-600">{formatCurrency(opComissao)}</span>
-                    </div>
+                    {!isAutonomo && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-500">Comissão ({selectedMotorista?.comissao || 0}%):</span>
+                        <span className="font-bold text-blue-600">{formatCurrency(opComissao)}</span>
+                      </div>
+                    )}
                     <div className="border-t border-gray-200 pt-2">
                       <p className="text-xs text-gray-400 font-medium mb-2">Despesas</p>
                       <div className="flex justify-between text-sm">
