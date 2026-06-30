@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, X, Users, MessageCircle, Trash2, AlertTriangle, Camera, MapPin, Loader2 } from 'lucide-react';
+import { Plus, X, MessageCircle, Trash2, AlertTriangle, Camera, MapPin, Loader2 } from 'lucide-react';
 import api from '../api';
 import { maskPhone, maskCPF, maskCEP } from '../utils/masks';
 import axios from 'axios';
@@ -203,26 +203,22 @@ export const Motoristas: React.FC = () => {
 
   return (
     <div className="space-y-8 pb-20">
-      <div className="flex items-center space-x-3 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-        <div className="bg-blue-600 p-2 rounded-lg text-white">
-          <Users size={24} />
+      <div className="flex justify-between items-center">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-800">Motoristas</h2>
+          <p className="text-gray-600 text-sm">Cadastre e gerencie motoristas da operação.</p>
         </div>
-        <h1 className="text-2xl font-bold text-gray-800">Cadastro de Motoristas</h1>
+        <button
+          onClick={() => setShowNewModal(true)}
+          className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all shadow-md active:scale-95"
+        >
+          <Plus size={20} className="mr-2" /> Adicionar Motorista
+        </button>
       </div>
       
-      {/* SEÇÃO: MOTORISTAS CADASTRADOS */}
-      <section className="space-y-6 pt-4">
-        <div className="flex justify-between items-center px-2">
-          <h2 className="text-xl font-bold text-gray-700 flex items-center">
-            <Users size={20} className="mr-2 text-blue-600" /> Motoristas Cadastrados
-          </h2>
-          <button 
-            onClick={() => setShowNewModal(true)}
-            className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all shadow-md active:scale-95"
-          >
-            <Plus size={20} className="mr-2" /> Adicionar Motorista
-          </button>
-        </div>
+      {/* SEÇÃO: LISTA DE MOTORISTAS */}
+      <section className="space-y-6">
+
 
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
           <div className="overflow-x-auto">
