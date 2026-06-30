@@ -281,7 +281,7 @@ export const Sidebar: React.FC = () => {
               <button onClick={removeLogo} className="flex items-center space-x-2 px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors text-sm font-medium"><Trash2 size={16} /><span>Excluir Logo</span></button>
               <div className="flex space-x-2">
                 <button onClick={() => setIsEditingLogo(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded-lg transition-colors text-sm font-medium">Cancelar</button>
-                <button onClick={saveLogoSettings} className="flex items-center space-x-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors text-sm font-medium"><Check size={16} /><span>Salvar Alterações</span></button>
+                <button onClick={saveLogoSettings} className="flex items-center space-x-2 px-4 py-2 bg-green-700 hover:bg-green-800 text-white rounded-lg transition-colors text-sm font-medium"><Check size={16} /><span>Salvar Alterações</span></button>
               </div>
             </div>
           </div>

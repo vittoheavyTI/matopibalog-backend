@@ -1352,7 +1352,7 @@ export const ResumoMotorista: React.FC = () => {
           <button
             onClick={() => gerarPDFViagem(trip)}
             disabled={isGenerating || tripLoading}
-            className="flex items-center px-6 py-3 bg-blue-600 text-white rounded-xl font-bold shadow-lg hover:bg-blue-700 transition-all active:scale-95 disabled:opacity-50"
+            className="flex items-center px-6 py-3 bg-green-700 text-white rounded-xl font-bold shadow-lg hover:bg-green-800 transition-all active:scale-95 disabled:opacity-50"
           >
             <Printer size={20} className="mr-2" />
             {tripLoading ? 'Carregando lançamentos...' : isGenerating ? 'Gerando...' : 'Imprimir Relatório deste Frete'}
@@ -1578,7 +1578,7 @@ export const ResumoMotorista: React.FC = () => {
             <button
               onClick={generatePDF}
               disabled={isGenerating}
-              className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all shadow-md active:scale-95 font-bold text-sm disabled:opacity-50"
+              className="flex items-center px-4 py-2 bg-green-700 text-white rounded-lg hover:bg-green-800 transition-all shadow-md active:scale-95 font-bold text-sm disabled:opacity-50"
             >
               <Download size={18} className="mr-2" />
               {isGenerating ? 'Gerando...' : 'PDF Resumo'}

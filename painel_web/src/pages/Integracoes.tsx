@@ -375,7 +375,7 @@ export const Integracoes: React.FC = () => {
                 <button
                   onClick={salvarConfig}
                   disabled={salvando}
-                  className="flex items-center px-5 py-2 bg-blue-600 text-white rounded-lg font-medium text-sm hover:bg-blue-700 transition-colors disabled:opacity-50"
+                  className="flex items-center px-5 py-2 bg-green-700 text-white rounded-lg font-medium text-sm hover:bg-green-800 transition-colors disabled:opacity-50"
                 >
                   <Check size={16} className="mr-1.5" />
                   {salvando ? 'Salvando...' : 'Salvar'}
@@ -480,7 +480,7 @@ export const Integracoes: React.FC = () => {
               <button
                 onClick={adicionarNovaIntegracao}
                 disabled={!novaIntegracao.nome.trim()}
-                className="flex items-center px-5 py-2 bg-blue-600 text-white rounded-lg font-medium text-sm hover:bg-blue-700 transition-colors disabled:opacity-50"
+                className="flex items-center px-5 py-2 bg-green-700 text-white rounded-lg font-medium text-sm hover:bg-green-800 transition-colors disabled:opacity-50"
               >
                 <Plus size={16} className="mr-1.5" /> Adicionar
               </button>

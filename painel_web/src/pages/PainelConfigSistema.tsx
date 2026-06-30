@@ -56,7 +56,7 @@ export const PainelConfigSistema: React.FC = () => {
             </label>
           </div>
         ))}
-        <div className="pt-2"><button onClick={salvar} className="flex items-center px-6 py-3 bg-blue-600 text-white rounded-xl font-bold text-sm hover:bg-blue-700"><Save size={18} className="mr-2" /> Salvar Configurações</button></div>
+        <div className="pt-2"><button onClick={salvar} className="flex items-center px-6 py-3 bg-green-700 text-white rounded-xl font-bold text-sm hover:bg-green-800"><Save size={18} className="mr-2" /> Salvar Configurações</button></div>
       </div>
     </div>
   );

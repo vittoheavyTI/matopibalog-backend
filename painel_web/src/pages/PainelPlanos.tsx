@@ -67,7 +67,7 @@ export const PainelPlanos: React.FC = () => {
       </div>
 
       <div className="flex justify-end">
-        <button onClick={() => { setEditing(null); setForm({ nome: '', preco_mensal: '', descricao: '', recursos: '' }); setShowModal(true); }} className="flex items-center px-4 py-2.5 bg-blue-600 text-white rounded-xl font-medium text-sm hover:bg-blue-700"><Plus size={18} className="mr-1.5" /> Novo Plano</button>
+        <button onClick={() => { setEditing(null); setForm({ nome: '', preco_mensal: '', descricao: '', recursos: '' }); setShowModal(true); }} className="flex items-center px-4 py-2.5 bg-green-700 text-white rounded-xl font-medium text-sm hover:bg-green-800"><Plus size={18} className="mr-1.5" /> Novo Plano</button>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -110,7 +110,7 @@ export const PainelPlanos: React.FC = () => {
             </div>
             <div className="p-4 bg-gray-50 border-t flex justify-end gap-3">
               <button onClick={() => setShowModal(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded-lg text-sm font-medium">Cancelar</button>
-              <button onClick={handleSalvar} className="flex items-center px-5 py-2 bg-blue-600 text-white rounded-lg font-medium text-sm hover:bg-blue-700"><Check size={16} className="mr-1.5" /> Salvar</button>
+              <button onClick={handleSalvar} className="flex items-center px-5 py-2 bg-green-700 text-white rounded-lg font-medium text-sm hover:bg-green-800"><Check size={16} className="mr-1.5" /> Salvar</button>
             </div>
           </div>
         </div>

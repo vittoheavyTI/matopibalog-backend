@@ -521,7 +521,7 @@ export const Dashboard: React.FC = () => {
             </button>
             <button
               onClick={() => { setShowAddFreteModal(true); setNewFrete({ motorista_id: '', origem: '', destino: '', valor_frete: '', km_inicial: '' }); }}
-              className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all shadow-md active:scale-95 font-bold text-sm"
+              className="flex items-center px-4 py-2 bg-green-700 text-white rounded-lg hover:bg-green-800 transition-all shadow-md active:scale-95 font-bold text-sm"
             >
               <Plus size={18} className="mr-1" /> Adicionar Frete
             </button>
@@ -766,7 +766,7 @@ export const Dashboard: React.FC = () => {
                       <td className="p-5 text-center">
                         <button
                           onClick={() => navigate('/relatorios/viagens?motorista=' + mot.uid)}
-                          className="px-5 py-2.5 bg-blue-600 text-white rounded-xl font-bold text-sm hover:bg-blue-700 shadow-md transition-all active:scale-95"
+                          className="px-5 py-2.5 bg-green-700 text-white rounded-xl font-bold text-sm hover:bg-green-800 shadow-md transition-all active:scale-95"
                         >
                           Gerenciar Frete
                         </button>
@@ -956,7 +956,7 @@ export const Dashboard: React.FC = () => {
             </div>
             <div className="p-5 pt-0 flex justify-end gap-3">
               <button onClick={() => setShowAddFreteModal(false)} className="px-4 py-2 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">Cancelar</button>
-              <button onClick={handleSubmitFrete} disabled={savingFrete} className="px-4 py-2 text-sm font-bold bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50">
+              <button onClick={handleSubmitFrete} disabled={savingFrete} className="px-4 py-2 text-sm font-bold bg-green-700 text-white rounded-lg hover:bg-green-800 transition-colors disabled:opacity-50">
                 {savingFrete ? 'Salvando...' : 'Adicionar Frete'}
               </button>
             </div>
@@ -1049,7 +1049,7 @@ export const Dashboard: React.FC = () => {
             </div>
             <div className="p-5 pt-0 flex justify-end gap-3">
               <button onClick={() => setShowAddDespesaModal(false)} className="px-4 py-2 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">Cancelar</button>
-              <button onClick={handleSubmitDespesa} disabled={savingDespesa} className="px-4 py-2 text-sm font-bold bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50">
+              <button onClick={handleSubmitDespesa} disabled={savingDespesa} className="px-4 py-2 text-sm font-bold bg-green-700 text-white rounded-lg hover:bg-green-800 transition-colors disabled:opacity-50">
                 {savingDespesa ? 'Salvando...' : 'Adicionar'}
               </button>
             </div>

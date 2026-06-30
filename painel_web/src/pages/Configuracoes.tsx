@@ -453,7 +453,7 @@ export const Configuracoes: React.FC = () => {
           </div>
 
           <div className="flex justify-end pt-4 border-t border-gray-50">
-            <button onClick={handleSaveCompany} className="flex items-center px-8 py-3 bg-blue-600 text-white rounded-xl font-bold shadow-lg shadow-blue-100 hover:bg-blue-700 transition-all active:scale-95">
+            <button onClick={handleSaveCompany} className="flex items-center px-8 py-3 bg-green-700 text-white rounded-xl font-bold shadow-lg shadow-green-100 hover:bg-green-800 transition-all active:scale-95">
               {showSaved ? <Check size={20} className="mr-2" /> : <Save size={20} className="mr-2" />}
               {showSaved ? 'Salvo!' : 'Salvar Configurações'}
             </button>
@@ -732,7 +732,7 @@ export const Configuracoes: React.FC = () => {
               <input type="text" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" placeholder="© 2026 Minha Transportadora. Todos os direitos reservados." value={footerText} onChange={e => { setFooterText(e.target.value); localStorage.setItem(`${PREFIX}login_footer`, e.target.value); }} />
             </div>
 
-            <button onClick={handleSaveFooter} className={`flex items-center px-6 py-3 rounded-xl font-bold transition-all ${showSaved ? 'bg-green-600 text-white' : 'bg-blue-600 text-white hover:bg-blue-700'}`}>
+            <button onClick={handleSaveFooter} className={`flex items-center px-6 py-3 rounded-xl font-bold transition-all ${showSaved ? 'bg-green-600 text-white' : 'bg-green-700 text-white hover:bg-green-800'}`}>
               {showSaved ? <Check size={18} className="mr-1" /> : <Save size={18} className="mr-1" />}
               {showSaved ? 'Salvo!' : 'Salvar Aparência'}
             </button>
@@ -782,7 +782,7 @@ export const Configuracoes: React.FC = () => {
               </button>
               <div className="flex space-x-2">
                 <button onClick={() => setEditingTarget(null)} className="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded-lg transition-colors text-sm font-medium">Cancelar</button>
-                <button onClick={saveImageSettings} disabled={!tempImg} className="flex items-center space-x-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 text-white rounded-lg transition-colors text-sm font-medium">
+                <button onClick={saveImageSettings} disabled={!tempImg} className="flex items-center space-x-2 px-4 py-2 bg-green-700 hover:bg-green-800 disabled:bg-gray-300 text-white rounded-lg transition-colors text-sm font-medium">
                   <Check size={16} /><span>Salvar</span>
                 </button>
               </div>

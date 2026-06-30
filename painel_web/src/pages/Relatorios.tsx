@@ -1048,7 +1048,7 @@ export const Relatorios: React.FC = () => {
                 className={`w-full font-bold py-3 rounded-xl shadow-lg transition-all flex items-center justify-center ${
                   isGenerating || (fretes.length === 0 && despesas.length === 0)
                   ? 'bg-gray-100 text-gray-400 cursor-not-allowed shadow-none' 
-                  : 'bg-blue-600 text-white shadow-blue-100 hover:bg-blue-700 active:scale-95'
+                  : 'bg-green-700 text-white shadow-green-100 hover:bg-green-800 active:scale-95'
                 }`}
               >
                 {isGenerating ? (
@@ -1449,7 +1449,7 @@ export const Relatorios: React.FC = () => {
                                               e.stopPropagation();
                                               generatePDFSelected();
                                             }}
-                                            className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-lg font-bold text-xs hover:bg-blue-700 transition-all active:scale-95 shadow-md"
+                                            className="flex items-center gap-1.5 px-4 py-2 bg-green-700 text-white rounded-lg font-bold text-xs hover:bg-green-800 transition-all active:scale-95 shadow-md"
                                           >
                                             <Download size={14} /> Gerar Relatório de Frete
                                           </button>
@@ -1498,7 +1498,7 @@ export const Relatorios: React.FC = () => {
                       className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold shadow-lg transition-all active:scale-95 ${
                         isGenerating
                           ? 'bg-gray-100 text-gray-400 cursor-not-allowed shadow-none'
-                          : 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-100'
+                          : 'bg-green-700 text-white hover:bg-green-800 shadow-green-100'
                       }`}
                     >
                       {isGenerating ? (

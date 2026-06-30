@@ -120,7 +120,7 @@ export const PainelUsuarios: React.FC = () => {
           <Search size={18} className="text-gray-400 mr-2 flex-shrink-0" />
           <input type="text" placeholder="Buscar..." className="flex-1 outline-none text-gray-700 text-sm" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
         </div>
-        <button onClick={() => { setEditing(null); setForm({ nome: '', email: '', empresa_id: '', tipo: 'admin' }); setShowModal(true); }} className="flex items-center px-4 py-2.5 bg-blue-600 text-white rounded-xl font-medium text-sm hover:bg-blue-700"><Plus size={18} className="mr-1.5" /> Novo Usuário</button>
+        <button onClick={() => { setEditing(null); setForm({ nome: '', email: '', empresa_id: '', tipo: 'admin' }); setShowModal(true); }} className="flex items-center px-4 py-2.5 bg-green-700 text-white rounded-xl font-medium text-sm hover:bg-green-800"><Plus size={18} className="mr-1.5" /> Novo Usuário</button>
       </div>
 
       <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
@@ -172,7 +172,7 @@ export const PainelUsuarios: React.FC = () => {
             </div>
             <div className="p-4 bg-gray-50 border-t flex justify-end gap-3">
               <button onClick={() => setShowModal(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded-lg text-sm font-medium">Cancelar</button>
-              <button onClick={handleSalvar} className="flex items-center px-5 py-2 bg-blue-600 text-white rounded-lg font-medium text-sm hover:bg-blue-700"><Check size={16} className="mr-1.5" /> Salvar</button>
+              <button onClick={handleSalvar} className="flex items-center px-5 py-2 bg-green-700 text-white rounded-lg font-medium text-sm hover:bg-green-800"><Check size={16} className="mr-1.5" /> Salvar</button>
             </div>
           </div>
         </div>

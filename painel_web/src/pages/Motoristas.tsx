@@ -210,7 +210,7 @@ export const Motoristas: React.FC = () => {
         </div>
         <button
           onClick={() => setShowNewModal(true)}
-          className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all shadow-md active:scale-95"
+          className="flex items-center px-4 py-2 bg-green-700 text-white rounded-lg hover:bg-green-800 transition-all shadow-md active:scale-95"
         >
           <Plus size={20} className="mr-2" /> Adicionar Motorista
         </button>
@@ -423,7 +423,7 @@ export const Motoristas: React.FC = () => {
             </div>
             <div className="p-5 bg-gray-50/80 border-t flex justify-end space-x-3">
               <button onClick={() => setShowNewModal(false)} className="px-5 py-2.5 text-gray-600 hover:bg-gray-200 rounded-xl font-bold text-sm">Cancelar</button>
-              <button onClick={handleAddMotorista} disabled={isSubmitting} className="px-6 py-2.5 bg-blue-600 text-white hover:bg-blue-700 rounded-xl font-bold text-sm shadow-md disabled:opacity-50">
+              <button onClick={handleAddMotorista} disabled={isSubmitting} className="px-6 py-2.5 bg-green-700 text-white hover:bg-green-800 rounded-xl font-bold text-sm shadow-md disabled:opacity-50">
                 {isSubmitting ? 'Cadastrando...' : 'Cadastrar'}
               </button>
             </div>
