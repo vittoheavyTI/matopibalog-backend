@@ -634,7 +634,7 @@ export const GerenciamentoViagens: React.FC = () => {
       <div className="flex flex-wrap justify-between items-center gap-4">
         <div>
           <h2 className="text-2xl font-bold text-gray-800">Gerenciamento de Fretes</h2>
-          <p className="text-gray-500 text-sm">Cadastro e acompanhamento de fretes</p>
+          <p className="text-gray-600 text-sm">Cadastro e acompanhamento de fretes</p>
         </div>
         <button onClick={() => openNewModal()} className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all shadow-md active:scale-95 font-bold">
           <Plus size={20} className="mr-2" /> Novo Frete
@@ -664,7 +664,7 @@ export const GerenciamentoViagens: React.FC = () => {
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="overflow-x-auto">
-          {loading ? (<p className="p-8 text-center text-gray-500">Carregando fretes...</p>)
+          {loading ? (<p className="p-8 text-center text-gray-600">Carregando fretes...</p>)
           : (
             <table className="w-full text-left border-collapse">
               <thead>
@@ -762,7 +762,7 @@ export const GerenciamentoViagens: React.FC = () => {
             {type === 'manutencao' && <span className="text-[10px] bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded mr-2 font-bold">MANUTENÇÃO</span>}
             {item.descricao || item.posto || 'Vale/Adiantamento'} {item.litros && <span className="text-xs text-blue-600">({item.litros}L)</span>}
           </p>
-          <p className="text-xs text-gray-500">Pago por: {item.quemPagou} • {gvFmt(item.data, 'dd/MM HH:mm')}</p>
+          <p className="text-xs text-gray-600">Pago por: {item.quemPagou} • {gvFmt(item.data, 'dd/MM HH:mm')}</p>
           {type !== 'vale' && (
             item.fotoUrl ? (
               <p className="text-xs mt-0.5">
@@ -814,7 +814,7 @@ export const GerenciamentoViagens: React.FC = () => {
   const renderDetalheMotorista = () => {
     if (!selectedMotorista) {
       return (
-        <div className="py-20 text-center text-gray-500">
+        <div className="py-20 text-center text-gray-600">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
           Carregando dados do motorista...
         </div>
@@ -862,7 +862,7 @@ export const GerenciamentoViagens: React.FC = () => {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-4">
         <div className="space-y-6 order-2 lg:order-1">
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
             <div className="bg-gray-50 p-4 border-b border-gray-100 font-bold text-gray-700 flex items-center justify-between">
@@ -881,7 +881,7 @@ export const GerenciamentoViagens: React.FC = () => {
             </div>
             <div className="p-4 space-y-3">
               {mFretes.length === 0 && mDesp.length === 0 && mAbs.length === 0 && mVales.length === 0 &&
-                <p className="text-gray-500 text-center py-8">Nenhum lançamento.</p>}
+                <p className="text-gray-600 text-center py-8">Nenhum lançamento.</p>}
 
               {/* Fretes ordenados: ativos/pendentes no topo, depois finalizados, do mais recente para o mais antigo */}
               {[...mFretes]
@@ -929,7 +929,7 @@ export const GerenciamentoViagens: React.FC = () => {
                             <p className="font-bold text-gray-800">{f.origem} ➔ {f.destino}</p>
                             <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide ${getStatusBadge(f.status)}`}>{f.status}</span>
                           </div>
-                          <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-gray-500 mt-1 pl-6">
+                          <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-gray-600 mt-1 pl-6">
                             <span>{gvFmt(f.criadoEm || f.data, 'dd/MM/yyyy')}</span>
                             {f.placa && <span className="bg-gray-100 px-1.5 py-0.5 rounded">{f.placa}</span>}
                             {f.kmInicial && f.kmFinal ? (
@@ -938,7 +938,7 @@ export const GerenciamentoViagens: React.FC = () => {
                             {litrosFrete > 0 && distFrete > 0 &&
                               <span className="text-blue-600 font-bold bg-blue-50 px-1.5 py-0.5 rounded">Média: {(distFrete / litrosFrete).toFixed(2)} KM/L</span>}
                             <span className="bg-gray-100 px-1.5 py-0.5 rounded">{despFrete.length} desp · {abastFrete.length} abast · {valesFrete.length} vale</span>
-                            {deducoesAprov > 0 && <span className="text-gray-500">Deduções aprov.: {formatCurrency(deducoesAprov)}</span>}
+                            {deducoesAprov > 0 && <span className="text-gray-600">Deduções aprov.: {formatCurrency(deducoesAprov)}</span>}
                             {pendentesFrete > 0 && <span className="bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded font-bold">{pendentesFrete} pendente(s)</span>}
                           </div>
                         </button>
@@ -989,7 +989,7 @@ export const GerenciamentoViagens: React.FC = () => {
                   <div className="border border-gray-200 rounded-lg overflow-hidden">
                     <button type="button" onClick={() => setSemFreteExpandido(v => !v)} className="w-full flex justify-between items-center gap-3 p-3 bg-gray-50 text-left">
                       <div className="flex items-center gap-2">
-                        {semFreteExpandido ? <ChevronDown size={16} className="text-gray-500 flex-shrink-0" /> : <ChevronRight size={16} className="text-gray-500 flex-shrink-0" />}
+                        {semFreteExpandido ? <ChevronDown size={16} className="text-gray-600 flex-shrink-0" /> : <ChevronRight size={16} className="text-gray-600 flex-shrink-0" />}
                         <div>
                           <p className="font-bold text-gray-700">Lançamentos sem frete vinculado</p>
                           <p className="text-[10px] text-gray-400">Itens legados, anteriores ao vínculo obrigatório</p>
@@ -1015,11 +1015,11 @@ export const GerenciamentoViagens: React.FC = () => {
             {isAutonomo ? (
               <>
                 <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-sm border-b border-gray-50 pb-1">
-                  <span className="text-gray-500 min-w-0">Faturamento:</span>
+                  <span className="text-gray-600 min-w-0">Faturamento:</span>
                   <span className="font-bold text-gray-800 text-right whitespace-nowrap tabular-nums min-w-[96px]">{formatCurrency(opTotalFretes)}</span>
                 </div>
                 <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-sm border-b border-gray-50 pb-1">
-                  <span className="text-gray-500 min-w-0">Gastos:</span>
+                  <span className="text-gray-600 min-w-0">Gastos:</span>
                   <span className="font-bold text-red-600 text-right whitespace-nowrap tabular-nums min-w-[96px]">-{formatCurrency(autGastos)}</span>
                 </div>
                 <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-base font-extrabold bg-gray-50 -mx-2 px-2 py-2 rounded-lg">
@@ -1030,19 +1030,19 @@ export const GerenciamentoViagens: React.FC = () => {
             ) : (
               <>
                 <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-sm border-b border-gray-50 pb-1">
-                  <span className="text-gray-500 min-w-0">Valor Total do Frete:</span>
+                  <span className="text-gray-600 min-w-0">Valor Total do Frete:</span>
                   <span className="font-bold text-gray-800 text-right whitespace-nowrap tabular-nums min-w-[96px]">{formatCurrency(opTotalFretes)}</span>
                 </div>
                 <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-sm border-b border-gray-50 pb-1">
-                  <span className="text-gray-500 min-w-0">Porcentagem Motorista ({selectedMotorista?.comissao || 0}%):</span>
+                  <span className="text-gray-600 min-w-0">Porcentagem Motorista ({selectedMotorista?.comissao || 0}%):</span>
                   <span className="font-bold text-blue-600 text-right whitespace-nowrap tabular-nums min-w-[96px]">+{formatCurrency(opComissao)}</span>
                 </div>
                 <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-sm border-b border-gray-50 pb-1">
-                  <span className="text-gray-500 min-w-0">Desp./Abast. (Motorista):</span>
+                  <span className="text-gray-600 min-w-0">Desp./Abast. (Motorista):</span>
                   <span className="font-bold text-green-600 text-right whitespace-nowrap tabular-nums min-w-[96px]">+{formatCurrency(opDespMot + opAbastMot)}</span>
                 </div>
                 <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-sm border-b border-gray-50 pb-1">
-                  <span className="text-gray-500 min-w-0">Vales / Adiantamentos:</span>
+                  <span className="text-gray-600 min-w-0">Vales / Adiantamentos:</span>
                   <span className="font-bold text-red-600 text-right whitespace-nowrap tabular-nums min-w-[96px]">-{formatCurrency(opValesOwner)}</span>
                 </div>
                 <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-base font-extrabold bg-gray-50 -mx-2 px-2 py-2 rounded-lg">
@@ -1195,7 +1195,7 @@ export const GerenciamentoViagens: React.FC = () => {
               </div>
             </div>
             <div className="p-5 bg-gray-50 flex justify-end space-x-3 border-t">
-              <button onClick={() => setShowAddModal(null)} className="px-5 py-2.5 font-bold text-gray-500 hover:text-gray-700 transition-colors">Cancelar</button>
+              <button onClick={() => setShowAddModal(null)} className="px-5 py-2.5 font-bold text-gray-600 hover:text-gray-700 transition-colors">Cancelar</button>
               <button onClick={handleAddItem} disabled={savingItem} className="px-8 py-2.5 bg-blue-600 text-white rounded-xl font-bold shadow-lg shadow-blue-200 hover:bg-blue-700 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">{savingItem ? 'Lançando...' : 'Lançar Registro'}</button>
             </div>
           </div>
@@ -1210,7 +1210,7 @@ export const GerenciamentoViagens: React.FC = () => {
                 <Check size={28} className="text-green-600" />
               </div>
               <h3 className="text-xl font-bold text-gray-800">Confirmar Finalização do Frete</h3>
-              <p className="text-sm text-gray-500">Confira o resumo antes de finalizar:</p>
+              <p className="text-sm text-gray-600">Confira o resumo antes de finalizar:</p>
             </div>
             <div className="px-6 pb-4 space-y-3">
               <div className="bg-gray-50 rounded-xl p-4 space-y-3">
@@ -1219,11 +1219,11 @@ export const GerenciamentoViagens: React.FC = () => {
                   // Espelha o card "Balanço Atual"; reusa opTotalFretes/autGastos/autResultado.
                   <>
                     <div className="flex justify-between text-sm">
-                      <span className="text-gray-500">Total de Fretes (Faturamento):</span>
+                      <span className="text-gray-600">Total de Fretes (Faturamento):</span>
                       <span className="font-bold text-gray-800">{formatCurrency(opTotalFretes)}</span>
                     </div>
                     <div className="flex justify-between text-sm">
-                      <span className="text-gray-500">Gastos (desp. + abast. + vales):</span>
+                      <span className="text-gray-600">Gastos (desp. + abast. + vales):</span>
                       <span className="font-bold text-red-600">{formatCurrency(autGastos)}</span>
                     </div>
                     <div className="border-t border-gray-200 pt-3 flex justify-between text-base font-extrabold">
@@ -1234,23 +1234,23 @@ export const GerenciamentoViagens: React.FC = () => {
                 ) : (
                   <>
                     <div className="flex justify-between text-sm">
-                      <span className="text-gray-500">Total de Fretes:</span>
+                      <span className="text-gray-600">Total de Fretes:</span>
                       <span className="font-bold text-gray-800">{formatCurrency(opTotalFretes)}</span>
                     </div>
                     {!isAutonomo && (
                       <div className="flex justify-between text-sm">
-                        <span className="text-gray-500">Comissão ({selectedMotorista?.comissao || 0}%):</span>
+                        <span className="text-gray-600">Comissão ({selectedMotorista?.comissao || 0}%):</span>
                         <span className="font-bold text-blue-600">{formatCurrency(opComissao)}</span>
                       </div>
                     )}
                     <div className="border-t border-gray-200 pt-2">
                       <p className="text-xs text-gray-400 font-medium mb-2">Despesas</p>
                       <div className="flex justify-between text-sm">
-                        <span className="text-gray-500">Desp./Abast.:</span>
+                        <span className="text-gray-600">Desp./Abast.:</span>
                         <span className="font-bold text-orange-600">{formatCurrency(opDespMot + opAbastMot)}</span>
                       </div>
                       <div className="flex justify-between text-sm">
-                        <span className="text-gray-500">Vales:</span>
+                        <span className="text-gray-600">Vales:</span>
                         <span className="font-bold text-red-600">{formatCurrency(opValesOwner)}</span>
                       </div>
                     </div>
@@ -1263,7 +1263,7 @@ export const GerenciamentoViagens: React.FC = () => {
               </div>
             </div>
             <div className="p-4 bg-gray-50 border-t flex justify-end space-x-3">
-              <button onClick={() => setShowFinalizarModal(false)} className="px-5 py-2.5 font-bold text-gray-500 hover:bg-gray-200 rounded-xl transition-all">Cancelar</button>
+              <button onClick={() => setShowFinalizarModal(false)} className="px-5 py-2.5 font-bold text-gray-600 hover:bg-gray-200 rounded-xl transition-all">Cancelar</button>
               <button onClick={confirmFinalizarViagem} className="px-6 py-2.5 bg-green-600 text-white font-bold rounded-xl shadow hover:bg-green-700 transition-all active:scale-95 flex items-center">
                 <Check size={18} className="mr-2" />Confirmar Finalização
               </button>
@@ -1277,7 +1277,7 @@ export const GerenciamentoViagens: React.FC = () => {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden max-h-[90vh] flex flex-col">
             <div className="p-5 border-b border-gray-100">
               <h3 className="text-lg font-bold text-gray-800"><Check size={20} className="inline mr-2 text-green-600" />Escolha o frete para finalizar</h3>
-              <p className="text-xs text-gray-500 mt-1">Este motorista tem mais de um frete ativo. Selecione qual deseja finalizar.</p>
+              <p className="text-xs text-gray-600 mt-1">Este motorista tem mais de um frete ativo. Selecione qual deseja finalizar.</p>
             </div>
             <div className="p-4 space-y-3 overflow-y-auto">
               {fretesParaFinalizar.map((f: any) => {
@@ -1308,7 +1308,7 @@ export const GerenciamentoViagens: React.FC = () => {
               })}
             </div>
             <div className="p-4 bg-gray-50 border-t flex justify-end">
-              <button onClick={() => setFretesParaFinalizar([])} className="px-5 py-2.5 font-bold text-gray-500 hover:bg-gray-200 rounded-xl transition-all">Cancelar</button>
+              <button onClick={() => setFretesParaFinalizar([])} className="px-5 py-2.5 font-bold text-gray-600 hover:bg-gray-200 rounded-xl transition-all">Cancelar</button>
             </div>
           </div>
         </div>
@@ -1320,11 +1320,11 @@ export const GerenciamentoViagens: React.FC = () => {
             <div className="p-6 flex flex-col items-center text-center space-y-4">
               <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center"><AlertTriangle size={32} className="text-red-600" /></div>
               <h3 className="text-xl font-bold text-gray-800">Cancelar Frete</h3>
-              <p className="text-gray-500">Tem certeza que deseja cancelar o frete de <strong>{deleteTarget.origem} → {deleteTarget.destino}</strong>?</p>
+              <p className="text-gray-600">Tem certeza que deseja cancelar o frete de <strong>{deleteTarget.origem} → {deleteTarget.destino}</strong>?</p>
               <p className="text-xs text-red-500 bg-red-50 p-3 rounded-xl w-full">⚠️ O frete será marcado como cancelado e ficará fora de todos os cálculos.</p>
             </div>
             <div className="p-4 bg-gray-50 border-t flex justify-end space-x-3">
-              <button onClick={() => setDeleteTarget(null)} disabled={isDeleting} className="px-5 py-2.5 font-bold text-gray-500 hover:bg-gray-200 rounded-xl transition-all">Voltar</button>
+              <button onClick={() => setDeleteTarget(null)} disabled={isDeleting} className="px-5 py-2.5 font-bold text-gray-600 hover:bg-gray-200 rounded-xl transition-all">Voltar</button>
               <button onClick={handleDelete} disabled={isDeleting} className="px-6 py-2.5 bg-red-600 text-white font-bold rounded-xl shadow hover:bg-red-700 transition-all active:scale-95 flex items-center disabled:opacity-50">
                 <Trash2 size={18} className="mr-2" />{isDeleting ? 'Cancelando...' : 'Sim, Cancelar'}
               </button>

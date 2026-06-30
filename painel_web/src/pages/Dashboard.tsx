@@ -24,7 +24,7 @@ const StatCard: React.FC<{
       <div className={`w-10 h-10 ${iconBg} rounded-lg flex items-center justify-center`}>
         <Icon size={20} className={iconColor} />
       </div>
-      <p className="text-sm text-gray-500 font-medium">{label}</p>
+      <p className="text-sm text-gray-600 font-medium">{label}</p>
     </div>
     <p className={`text-3xl font-bold ${valueColor}`}>{value}</p>
   </div>
@@ -468,7 +468,7 @@ export const Dashboard: React.FC = () => {
         <div className="space-y-6 animate-fade-in">
           {/* [PR2B] Vinculado-only: visual atual preservado (campos antigos). */}
           {soVinculado && (
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <StatCard label="Total de Fretes" value={formatCurrency(summary.total_fretes)} icon={DollarSign} boxBorder="border-blue-100" iconBg="bg-blue-100" iconColor="text-blue-600" valueColor="text-blue-600" />
               <StatCard label="Comissão" value={formatCurrency(summary.total_comissoes)} icon={TrendingUp} boxBorder="border-green-100" iconBg="bg-green-100" iconColor="text-green-600" valueColor="text-green-600" />
               <StatCard label="Despesas" value={formatCurrency(summary.total_deducoes)} icon={Fuel} boxBorder="border-orange-100" iconBg="bg-orange-100" iconColor="text-orange-600" valueColor="text-orange-600" />
@@ -478,7 +478,7 @@ export const Dashboard: React.FC = () => {
 
           {/* [PR2B] Autônomo-only: Faturamento / Gastos / Resultado (sem comissão, sem saldo a pagar). */}
           {soAutonomo && (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <StatCard label="Faturamento" value={formatCurrency(summary.faturamento_autonomos)} icon={DollarSign} boxBorder="border-blue-100" iconBg="bg-blue-100" iconColor="text-blue-600" valueColor="text-blue-600" />
               <StatCard label="Gastos" value={formatCurrency(summary.gastos_autonomos)} icon={Fuel} boxBorder="border-orange-100" iconBg="bg-orange-100" iconColor="text-orange-600" valueColor="text-orange-600" />
               <StatCard label="Resultado" value={formatCurrency(summary.resultado_autonomos)} icon={TrendingUp} boxBorder="border-green-100" iconBg="bg-green-100" iconColor="text-green-600" valueColor={summary.resultado_autonomos >= 0 ? 'text-green-600' : 'text-red-600'} />
@@ -490,7 +490,7 @@ export const Dashboard: React.FC = () => {
             <>
               <div>
                 <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Motoristas Vinculados</p>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <StatCard label="Comissão" value={formatCurrency(summary.total_comissoes_vinculados)} icon={TrendingUp} boxBorder="border-green-100" iconBg="bg-green-100" iconColor="text-green-600" valueColor="text-green-600" />
                   <StatCard label="Despesas" value={formatCurrency(summary.deducoes_vinculados)} icon={Fuel} boxBorder="border-orange-100" iconBg="bg-orange-100" iconColor="text-orange-600" valueColor="text-orange-600" />
                   <StatCard label="Saldo" value={formatCurrency(summary.saldo_a_pagar_vinculados)} icon={Truck} boxBorder="border-purple-100" iconBg="bg-purple-100" iconColor="text-purple-600" valueColor={summary.saldo_a_pagar_vinculados >= 0 ? 'text-purple-600' : 'text-red-600'} />
@@ -498,7 +498,7 @@ export const Dashboard: React.FC = () => {
               </div>
               <div>
                 <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Motoristas Autônomos</p>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <StatCard label="Faturamento" value={formatCurrency(summary.faturamento_autonomos)} icon={DollarSign} boxBorder="border-blue-100" iconBg="bg-blue-100" iconColor="text-blue-600" valueColor="text-blue-600" />
                   <StatCard label="Gastos" value={formatCurrency(summary.gastos_autonomos)} icon={Fuel} boxBorder="border-orange-100" iconBg="bg-orange-100" iconColor="text-orange-600" valueColor="text-orange-600" />
                   <StatCard label="Resultado" value={formatCurrency(summary.resultado_autonomos)} icon={TrendingUp} boxBorder="border-green-100" iconBg="bg-green-100" iconColor="text-green-600" valueColor={summary.resultado_autonomos >= 0 ? 'text-green-600' : 'text-red-600'} />
@@ -564,7 +564,7 @@ export const Dashboard: React.FC = () => {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
               <div className="lg:col-span-2 space-y-6">
                 <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
                   <div className="bg-gray-50 p-4 border-b border-gray-100 font-bold text-gray-700 flex items-center justify-between">
@@ -577,7 +577,7 @@ export const Dashboard: React.FC = () => {
                     </button>
                   </div>
                   <div className="p-4 space-y-4">
-                    {mFretes.length === 0 && mDespesas.length === 0 && mAbast.length === 0 && mVales.length === 0 && <p className="text-gray-500 text-center py-8">Nenhum lançamento.</p>}
+                    {mFretes.length === 0 && mDespesas.length === 0 && mAbast.length === 0 && mVales.length === 0 && <p className="text-gray-600 text-center py-8">Nenhum lançamento.</p>}
 
                     {mFretes.map(f => (
                       <div key={f.id} className="group flex justify-between items-center p-3 border rounded-lg bg-blue-50/30 border-blue-100 transition-all">
@@ -594,7 +594,7 @@ export const Dashboard: React.FC = () => {
                           ) : (
                             <div>
                               <p className="font-medium text-gray-800">Frete: {f.origem} ➔ {f.destino}</p>
-                              <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-gray-500 mt-1">
+                              <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-gray-600 mt-1">
                                 {f.kmInicial && f.kmFinal ? (
                                   <span className="bg-gray-100 px-1.5 py-0.5 rounded">KM: {f.kmInicial} - {f.kmFinal} ({f.kmFinal - f.kmInicial} km)</span>
                                 ) : (
@@ -630,7 +630,7 @@ export const Dashboard: React.FC = () => {
                               {type === 'manutencao' && <span className="text-[10px] bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded mr-2 font-bold">MANUTENÇÃO</span>}
                               {item.descricao || item.posto || 'Vale/Adiantamento'} {item.litros && <span className="text-xs text-blue-600">({item.litros}L)</span>}
                             </p>
-                            <p className="text-xs text-gray-500">Pago por: {item.quemPagou} • {format(new Date(item.data), 'dd/MM HH:mm')}</p>
+                            <p className="text-xs text-gray-600">Pago por: {item.quemPagou} • {format(new Date(item.data), 'dd/MM HH:mm')}</p>
                             {type !== 'vale' && item.fotoUrl && (
                               <p className="text-xs mt-0.5">
                                 <a href={item.fotoUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Ver comprovante</a>
@@ -674,11 +674,11 @@ export const Dashboard: React.FC = () => {
                   {isAutonomo ? (
                     <>
                       <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
-                        <span className="text-gray-500">Faturamento:</span>
+                        <span className="text-gray-600">Faturamento:</span>
                         <span className="font-bold text-gray-800">{formatCurrency(opTotalFretes)}</span>
                       </div>
                       <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
-                        <span className="text-gray-500">Gastos:</span>
+                        <span className="text-gray-600">Gastos:</span>
                         <span className="font-bold text-red-600">-{formatCurrency(autGastos)}</span>
                       </div>
                       <div className="flex justify-between items-center text-base font-extrabold bg-gray-50 p-3 rounded-lg">
@@ -689,19 +689,19 @@ export const Dashboard: React.FC = () => {
                   ) : (
                     <>
                       <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
-                        <span className="text-gray-500">Valor Total do Frete:</span>
+                        <span className="text-gray-600">Valor Total do Frete:</span>
                         <span className="font-bold text-gray-800">{formatCurrency(opTotalFretes)}</span>
                       </div>
                       <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
-                        <span className="text-gray-500">Porcentagem Motorista ({selectedMot?.percentualComissao || 0}%):</span>
+                        <span className="text-gray-600">Porcentagem Motorista ({selectedMot?.percentualComissao || 0}%):</span>
                         <span className="font-bold text-blue-600">+{formatCurrency(opComissao)}</span>
                       </div>
                       <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
-                        <span className="text-gray-500">Desp./Abast. (Motorista):</span>
+                        <span className="text-gray-600">Desp./Abast. (Motorista):</span>
                         <span className="font-bold text-green-600">+{formatCurrency(opDespMot + opAbastMot)}</span>
                       </div>
                       <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
-                        <span className="text-gray-500">Vales / Adiantamentos:</span>
+                        <span className="text-gray-600">Vales / Adiantamentos:</span>
                         <span className="font-bold text-red-600">-{formatCurrency(opValesOwner)}</span>
                       </div>
                       <div className="flex justify-between items-center text-base font-extrabold bg-gray-50 p-3 rounded-lg">
@@ -729,7 +729,7 @@ export const Dashboard: React.FC = () => {
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden mb-8 animate-fade-in">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="bg-gray-50 text-gray-500 text-xs uppercase font-bold tracking-wider">
+                <tr className="bg-gray-50 text-gray-600 text-xs uppercase font-bold tracking-wider">
                   <th className="p-5 border-b">Motorista (Em Curso/Pendente)</th>
                   <th className="p-5 border-b">Placa</th>
                   <th className="p-5 border-b">Status</th>
@@ -739,7 +739,7 @@ export const Dashboard: React.FC = () => {
               <tbody className="divide-y divide-gray-50">
                 {motoristasEmViagem.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="p-10 text-center text-gray-500 italic">
+                    <td colSpan={4} className="p-10 text-center text-gray-600 italic">
                       Nenhum motorista em frete ativo no momento.
                     </td>
                   </tr>
@@ -808,7 +808,7 @@ export const Dashboard: React.FC = () => {
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
-                  <tr className="bg-gray-50/50 text-gray-500 text-[10px] font-bold uppercase tracking-widest border-b border-gray-100">
+                  <tr className="bg-gray-50/50 text-gray-600 text-[10px] font-bold uppercase tracking-widest border-b border-gray-100">
                     <th className="p-4">Motorista</th>
                     <th className="p-4">Última Rota</th>
                     <th className="p-4 text-center">KM Total</th>
@@ -839,7 +839,7 @@ export const Dashboard: React.FC = () => {
                           </div>
                         </td>
                         <td className="p-4">
-                          <span className="text-[11px] font-medium text-gray-500 bg-gray-100 px-2 py-1 rounded-md">{m.ultima_rota || '-'}</span>
+                          <span className="text-[11px] font-medium text-gray-600 bg-gray-100 px-2 py-1 rounded-md">{m.ultima_rota || '-'}</span>
                         </td>
                         <td className="p-4 text-center">
                           <span className="text-xs font-bold text-gray-600">{m.total_km} KM</span>
