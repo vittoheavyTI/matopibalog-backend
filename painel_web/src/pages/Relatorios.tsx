@@ -920,7 +920,7 @@ export const Relatorios: React.FC = () => {
   }).map(f => f.id);
 
   return (
-    <div className="space-y-6 animate-fade-in pb-20">
+    <div className="space-y-5 animate-fade-in pb-20">
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-2xl font-bold text-gray-800">Centro de Relatórios</h2>
@@ -929,10 +929,10 @@ export const Relatorios: React.FC = () => {
         <FileText size={40} className="text-blue-500 opacity-20" />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         {/* Filtros */}
-        <div className="lg:col-span-1 space-y-6">
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+        <div className="lg:col-span-1 space-y-5">
+          <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
             <h3 className="text-sm font-bold text-gray-400 uppercase tracking-widest mb-4 flex items-center">
               <Filter size={16} className="mr-2" /> Parâmetros
             </h3>
@@ -1067,8 +1067,8 @@ export const Relatorios: React.FC = () => {
         </div>
 
         {/* Preview / Resumo */}
-        <div className="lg:col-span-2 space-y-6">
-          <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-100 min-h-[400px]">
+        <div className="lg:col-span-2 space-y-5">
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 min-h-[400px]">
             <div className="flex items-center justify-between mb-8 border-b pb-4">
               <h3 className="font-bold text-gray-800">Prévia do Relatório</h3>
               <div className="flex items-center text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1 rounded-full uppercase">
