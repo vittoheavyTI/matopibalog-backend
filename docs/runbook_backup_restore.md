@@ -175,6 +175,9 @@ Script PowerShell (`backup_matopiba.ps1`, fora do repo) + tarefa agendada do Win
 
 ### 4.2 Storage
 
+> 📋 **Rotina manual recorrente (checklist) + verificação mensal:** ver
+> [backup_storage_env_vars.md](backup_storage_env_vars.md). Os comandos detalhados ficam abaixo.
+
 **Bucket `comprovantes`:**
 
 ```bash
@@ -188,6 +191,9 @@ supabase storage download comprovantes ./backup_comprovantes/
 Bucket `avatars` segue o mesmo padrão, mas o risco de perda é menor.
 
 ### 4.3 Variáveis de ambiente
+
+> 📋 **Rotina manual recorrente (checklist):** ver
+> [backup_storage_env_vars.md](backup_storage_env_vars.md) (seção 4).
 
 Lista **(sem valores)** das variáveis que devem estar configuradas:
 
