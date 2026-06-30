@@ -1130,7 +1130,7 @@ export const GerenciamentoViagens: React.FC = () => {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div><label className="block text-xs font-bold text-gray-600 uppercase mb-1">Quem Recebeu</label>
-                  <select className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white outline-none focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-600 disabled:cursor-not-allowed" value={isAutonomoNoModal ? 'motorista' : formData.quem_recebeu} disabled={isAutonomoNoModal} onChange={e => setFormData({...formData, quem_recebeu: e.target.value})}>
+                  <select className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white outline-none focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed" value={isAutonomoNoModal ? 'motorista' : formData.quem_recebeu} disabled={isAutonomoNoModal} onChange={e => setFormData({...formData, quem_recebeu: e.target.value})}>
                     <option value="proprietario">Proprietário</option><option value="motorista">Motorista</option>
                   </select>
                 </div>
