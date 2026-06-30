@@ -74,6 +74,7 @@ descartável (não em produção) — 17 tabelas recuperadas, dados principais �
 e ressalvas técnicas na seção 8 do runbook.
 
 Pendentes (itens separados, ainda manuais): backup do **Storage** (`comprovantes`/`avatars`)
-e exportação das **env vars do Railway** para o cofre. A validação de restore em um
-**projeto Supabase separado** com Storage continua recomendada quando esses itens forem
+e exportação das **env vars do Railway** para o cofre. A rotina manual (checklist + verificação
+mensal) está em [backup_storage_env_vars.md](backup_storage_env_vars.md). A validação de restore
+em um **projeto Supabase separado** com Storage continua recomendada quando esses itens forem
 cobertos — usando só contas de teste (Alfa, Bravo, autônomos), nunca dados reais de cliente.
