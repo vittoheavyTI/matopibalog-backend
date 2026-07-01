@@ -1152,7 +1152,7 @@ export const Relatorios: React.FC = () => {
                           </div>
                         )}
                         {nVinc === 0 && nAut === 0 && (
-                          <p className="text-sm text-gray-400 text-center py-4">Nenhum dado no período.</p>
+                          <p className="text-sm text-gray-400 text-center py-4">Nenhum dado no período. Selecione outro período nos parâmetros do relatório.</p>
                         )}
                       </div>
                     );
@@ -1480,7 +1480,7 @@ export const Relatorios: React.FC = () => {
                             {autoAberto && pageControls(curAuto, motsAuto.length, setPageAuto, 'auto')}
                             {fretes.length === 0 && (
                               <tr>
-                                <td colSpan={4} className="p-6 text-center text-gray-400 text-sm">Nenhum frete encontrado neste período.</td>
+                                <td colSpan={4} className="p-6 text-center text-gray-400 text-sm">Nenhum frete encontrado neste período. Selecione outro período nos parâmetros do relatório.</td>
                               </tr>
                             )}
                           </>
