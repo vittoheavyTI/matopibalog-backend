@@ -14,6 +14,9 @@ interface Integracao {
   // Integração nativa do sistema (ViaCEP/Supabase): não requer credenciais nem teste manual.
   // Evita exibir status falso "conectado agora".
   nativo?: boolean;
+  // Metadados vindos do backend mascarado (GET /integracoes):
+  configurado?: boolean;        // há credencial/config salva no backend
+  camposCadastrados?: string[]; // chaves sensíveis que já possuem credencial cadastrada
 }
 
 const iconeMap: Record<string, React.ElementType> = {
@@ -168,6 +171,34 @@ export const Integracoes: React.FC = () => {
     }
   }, []);
 
+  // Fonte de verdade das integrações configuradas: backend mascarado (GET /integracoes).
+  // Nunca traz segredo em claro; só metadados (configurado + configPublica + camposMascarados).
+  // Prevalece sobre o fallback local; 401/403/erro de rede mantêm a tela sem quebrar.
+  const carregarIntegracoesBackend = async () => {
+    try {
+      const resp = await api.get('/integracoes');
+      const lista = Array.isArray(resp.data) ? resp.data : [];
+      const porServico: Record<string, any> = {};
+      lista.forEach((it: any) => { if (it?.servico) porServico[it.servico] = it; });
+      setIntegracoes(prev => prev.map(p => {
+        const back = porServico[p.id];
+        if (!back || p.nativo) return p;
+        return {
+          ...p,
+          // Só metadados não sensíveis (ex.: environment) entram no config visível/editável.
+          config: { ...p.config, ...(back.configPublica || {}) },
+          configurado: !!back.configurado,
+          // Apenas as CHAVES mascaradas — nunca os valores (que vêm como "****").
+          camposCadastrados: Object.keys(back.camposMascarados || {}),
+        };
+      }));
+    } catch {
+      // Mantém o fallback local; não expõe erro/segredo.
+    }
+  };
+
+  useEffect(() => { carregarIntegracoesBackend(); }, []);
+
   const persistirIntegracoes = (novas: Integracao[]) => {
     const obj: Record<string, any> = {};
     // Só metadados não sensíveis vão para o localStorage (config sanitizada, sem segredos).
@@ -218,15 +249,28 @@ export const Integracoes: React.FC = () => {
 
   const salvarConfig = async () => {
     if (!servicoSelecionado) return;
+    // O backend substitui o objeto de config inteiro ao salvar e as credenciais nunca são
+    // exibidas de volta (vêm mascaradas do GET). Por isso exigimos reinseri-las para não
+    // apagá-las — e NUNCA reenviamos o valor mascarado como se fosse a credencial real.
+    const sensiveis = (camposPorServico[servicoSelecionado.id] || []).filter(c => c.tipo === 'password');
+    const faltando = sensiveis.filter(c => !(configEdit[c.chave] || '').trim());
+    if (faltando.length) {
+      setMensagemTeste({ tipo: 'erro', texto: `Por segurança, as credenciais não são exibidas. Reinsira para salvar: ${faltando.map(c => c.label).join(', ')}.` });
+      return;
+    }
     setSalvando(true);
     try {
       await api.post('/integracoes/salvar', { servico: servicoSelecionado.id, config: configEdit });
-      // Só persiste localmente (metadados sanitizados) após o backend confirmar o salvamento.
-      const novas = integracoes.map(i => i.id === servicoSelecionado.id ? { ...i, config: { ...configEdit } } : i);
+      // Estado local só com metadados não sensíveis (o segredo é descartado após o POST).
+      const novas = integracoes.map(i => i.id === servicoSelecionado.id
+        ? { ...i, config: { ...i.config, ...sanitizarConfig(servicoSelecionado.id, configEdit) }, configurado: true }
+        : i);
       persistirIntegracoes(novas);
       mostrarToast('sucesso', `${servicoSelecionado.nome}: configuração salva.`);
       setMensagemTeste(null);
       setShowModal(false);
+      // Reflete o estado mascarado do backend (fonte de verdade).
+      carregarIntegracoesBackend();
     } catch (err: any) {
       // Erro não é silencioso: mostra toast, mantém o modal aberto e não dá falso sucesso.
       const statusCode = err?.response?.status;
@@ -279,9 +323,10 @@ export const Integracoes: React.FC = () => {
                   servico.nativo ? 'bg-gray-50 text-gray-600' :
                   servico.status === 'conectado' ? 'bg-green-50 text-green-700' :
                   servico.status === 'erro' ? 'bg-red-50 text-red-700' :
+                  servico.configurado ? 'bg-blue-50 text-blue-700' :
                   'bg-gray-50 text-gray-600'
                 }`}>
-                  {servico.nativo ? 'Nativo do sistema' : servico.status === 'conectado' ? '● Conectado' : servico.status === 'erro' ? '● Erro' : '○ Não configurado'}
+                  {servico.nativo ? 'Nativo do sistema' : servico.status === 'conectado' ? '● Conectado' : servico.status === 'erro' ? '● Erro' : servico.configurado ? '● Configurado' : '○ Não configurado'}
                 </span>
               </div>
 
@@ -357,7 +402,9 @@ export const Integracoes: React.FC = () => {
                       className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50"
                       value={configEdit[campo.chave] || ''}
                       onChange={e => setConfigEdit({ ...configEdit, [campo.chave]: e.target.value })}
-                      placeholder={`Digite ${campo.label.toLowerCase()}`}
+                      placeholder={campo.tipo === 'password' && (servicoSelecionado.camposCadastrados || []).includes(campo.chave)
+                        ? 'Credencial cadastrada — preencha para substituir'
+                        : `Digite ${campo.label.toLowerCase()}`}
                     />
                   )}
                 </div>
