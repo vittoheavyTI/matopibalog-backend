@@ -112,12 +112,10 @@ exports.get = async (req, res) => {
     // Aparência + preview + empresa + impressoras (nunca os segredos por padrão)
     const resposta = pick(dados, [...APPEARANCE_KEYS, ...ADMIN_EXTRA_KEYS]);
 
-    // Segredos de integração + config de sistema SÓ para super-admin
+    // Config de sistema SÓ para super-admin.
+    // Não expor integracao_*/segredos aqui; Integrações terá endpoint mascarado próprio.
     if (req.user?.is_super_admin) {
       Object.assign(resposta, pick(dados, SYSTEM_KEYS));
-      for (const k of Object.keys(dados)) {
-        if (k.startsWith('integracao_')) resposta[k] = dados[k];
-      }
     }
 
     res.json(resposta);
