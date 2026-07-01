@@ -19,6 +19,8 @@ export const GerenciamentoViagens: React.FC = () => {
   // A URL (?motorista=<id>) é a fonte de verdade do motorista em foco; filterMot é sincronizado a partir dela.
   const [searchParams, setSearchParams] = useSearchParams();
   const motoristaQuery = searchParams.get('motorista');
+  // ?novoFrete=1 (vindo do botão "Adicionar Frete" do Dashboard) abre o modal "Novo Frete".
+  const novoFreteQuery = searchParams.get('novoFrete');
   const [filterMot, setFilterMot] = useState(() => motoristaQuery || 'todos');
 
   // Troca de motorista (dropdown / clique na lista / "Voltar para Lista"): mantém URL e filterMot juntos.
@@ -201,6 +203,18 @@ export const GerenciamentoViagens: React.FC = () => {
     });
     setShowModal(true);
   };
+
+  // Abre o modal "Novo Frete" automaticamente quando o Dashboard navega com ?novoFrete=1.
+  // Após abrir, remove o parâmetro (replace) preservando ?motorista — assim não reabre em loop.
+  useEffect(() => {
+    if (novoFreteQuery === '1') {
+      openNewModal();
+      const next = new URLSearchParams(searchParams);
+      next.delete('novoFrete');
+      setSearchParams(next, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [novoFreteQuery]);
 
   const openEditModal = (frete: any) => {
     setEditingFrete(frete);
