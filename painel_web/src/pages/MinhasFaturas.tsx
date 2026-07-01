@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Receipt, AlertCircle } from 'lucide-react';
+import { Receipt, AlertCircle, ExternalLink } from 'lucide-react';
 import api from '../api';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -84,7 +84,15 @@ export const MinhasFaturas: React.FC = () => {
         </div>
       )}
 
-      {!loading && !erro && (
+      {!loading && !erro && faturas.length === 0 && (
+        <div className="rounded-xl p-8 bg-white border border-gray-100 text-center">
+          <Receipt className="mx-auto text-gray-300 mb-3" size={40} />
+          <p className="text-gray-600 font-medium">Nenhuma fatura gerada para sua empresa ainda.</p>
+          <p className="text-gray-400 text-sm mt-1">Quando uma cobrança for emitida, ela aparecerá nesta página.</p>
+        </div>
+      )}
+
+      {!loading && !erro && faturas.length > 0 && (
         <>
           {proximaFatura ? (
             <div className={`rounded-xl p-6 border-2 shadow-sm ${
@@ -111,6 +119,19 @@ export const MinhasFaturas: React.FC = () => {
                   {statusMap[proximaFatura.status]?.label}
                 </span>
               </div>
+              {proximaFatura.invoice_url && (
+                <div className="mt-4">
+                  <a
+                    href={proximaFatura.invoice_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 px-5 py-2.5 bg-green-700 hover:bg-green-800 text-white rounded-xl font-bold text-sm transition-colors"
+                  >
+                    <ExternalLink size={16} /> Pagar fatura
+                  </a>
+                  <p className="text-[11px] text-gray-400 mt-2">Os pagamentos são processados em ambiente seguro pelo Asaas.</p>
+                </div>
+              )}
             </div>
           ) : (
             <div className="rounded-xl p-5 bg-green-50 border border-green-200 text-green-700 text-sm font-medium">
@@ -135,6 +156,7 @@ export const MinhasFaturas: React.FC = () => {
                         <th className="p-4 border-b">Valor</th>
                         <th className="p-4 border-b">Status</th>
                         <th className="p-4 border-b">Pago em</th>
+                        <th className="p-4 border-b">Fatura</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
@@ -160,6 +182,25 @@ export const MinhasFaturas: React.FC = () => {
                               {f.pago_em
                                 ? new Date(f.pago_em).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })
                                 : '—'}
+                            </td>
+                            <td className="p-4 text-sm">
+                              {f.invoice_url ? (
+                                <a
+                                  href={f.invoice_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className={`inline-flex items-center gap-1 font-medium ${
+                                    f.status === 'pendente' || f.status === 'vencido'
+                                      ? 'text-green-700 hover:text-green-800'
+                                      : 'text-blue-600 hover:text-blue-700'
+                                  }`}
+                                >
+                                  <ExternalLink size={14} />
+                                  {f.status === 'pendente' || f.status === 'vencido' ? 'Abrir fatura' : 'Ver fatura'}
+                                </a>
+                              ) : (
+                                <span className="text-gray-300">—</span>
+                              )}
                             </td>
                           </tr>
                         );
