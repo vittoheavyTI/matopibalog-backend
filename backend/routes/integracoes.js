@@ -1,6 +1,13 @@
 const express = require('express');
 const router = express.Router();
 const { verifyToken, isSuperAdmin } = require('../middlewares/auth');
+const { z } = require('zod');
+
+// Validação simples do corpo de /salvar (servico obrigatório + config objeto).
+const salvarIntegracaoSchema = z.object({
+  servico: z.string().min(1),
+  config: z.record(z.string(), z.any()).default({}),
+});
 
 router.post('/testar/asaas', verifyToken, isSuperAdmin, async (req, res) => {
   try {
@@ -94,22 +101,44 @@ router.post('/testar/supabase', verifyToken, isSuperAdmin, async (req, res) => {
 });
 
 router.post('/salvar', verifyToken, isSuperAdmin, async (req, res) => {
+  const parsed = salvarIntegracaoSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ message: 'Dados inválidos' });
+  }
+  const { servico, config } = parsed.data;
+  const supabase = require('../config/supabase');
+
   try {
-    const { servico, config } = req.body;
-    const supabase = require('../config/supabase');
+    // Read-merge-write: preserva as demais chaves de configuracoes.dados
+    // (aparência, sistema, outras integrações) e evita clobber do blob id=1.
+    const { data: atual, error: readError } = await supabase
+      .from('configuracoes')
+      .select('dados')
+      .eq('id', 1)
+      .single();
+
+    // PGRST116 = linha ainda não existe → parte de {}. Outro erro = falha real.
+    if (readError && readError.code !== 'PGRST116') throw readError;
+
+    const dadosAtualizados = {
+      ...(atual?.dados || {}),
+      [`integracao_${servico}`]: config,
+    };
 
     const { error } = await supabase
       .from('configuracoes')
       .upsert({
         id: 1,
-        dados: { [`integracao_${servico}`]: config },
+        dados: dadosAtualizados,
         atualizado_em: new Date()
       });
 
     if (error) throw error;
     res.json({ message: 'Configuração salva com sucesso.' });
   } catch (err) {
-    res.status(500).json({ message: 'Erro ao salvar configuração.' });
+    // Só a mensagem técnica — nunca req.body/config (evita vazar segredo).
+    console.error('Erro ao salvar integração:', err.message);
+    res.status(500).json({ message: 'Erro ao salvar integração' });
   }
 });
 
