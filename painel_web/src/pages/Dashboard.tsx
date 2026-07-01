@@ -45,7 +45,10 @@ export const Dashboard: React.FC = () => {
   const [loadingEmViagem, setLoadingEmViagem] = useState(true);
   const [loadingSummary, setLoadingSummary] = useState(true);
 
-  const [selectedMonth, setSelectedMonth] = useState(new Date());
+  // Dashboard é visão automática do mês atual. O seletor de data foi removido da UI;
+  // a consulta por período vive em Relatórios e Histórico de Fretes. Mantemos o valor
+  // em estado (identidade estável) para não disparar o useEffect em loop.
+  const [selectedMonth] = useState(new Date());
   const [selectedMot, setSelectedMot] = useState<any | null>(null);
   const [editingItem, setEditingItem] = useState<{ id: string, type: 'despesa' | 'manutencao' | 'abastecimento' | 'vale' | 'frete', data: any } | null>(null);
 
@@ -475,14 +478,9 @@ export const Dashboard: React.FC = () => {
   return (
     <div className="space-y-5 pb-10">
       {!selectedMot && (
-        <div className="flex justify-between items-center animate-fade-in">
+        <div className="flex justify-between items-center gap-3 animate-fade-in">
           <h2 className="text-2xl font-bold text-gray-800">Dashboard</h2>
-          <input
-            type="month"
-            value={format(selectedMonth, 'yyyy-MM')}
-            onChange={(e) => setSelectedMonth(new Date(e.target.value + '-01T12:00:00'))}
-            className="px-4 py-2 border border-gray-300 rounded-lg outline-none focus:border-blue-500 bg-white shadow-sm"
-          />
+          <p className="text-xs text-gray-500 text-right">Visão do mês atual • Para outros períodos, use Relatórios ou Histórico</p>
         </div>
       )}
 
