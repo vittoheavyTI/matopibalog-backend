@@ -27,6 +27,8 @@ export const Usuarios: React.FC = () => {
   // Estado para mostrar/ocultar senha no modal de reset.
   // Reseta ao fechar o modal (setResetUserId(null) + setMostrarSenhaReset(false)).
   const [mostrarSenhaReset, setMostrarSenhaReset] = useState(false);
+  // Mostrar/ocultar a "Senha Provisória" do modal Novo Usuário (separado do reset).
+  const [showSenhaNovoUsuario, setShowSenhaNovoUsuario] = useState(false);
   // Senha temporária gerada pelo backend, exibida UMA única vez (estado efêmero,
   // nunca localStorage/sessionStorage/log; some ao fechar o modal).
   const [senhaGerada, setSenhaGerada] = useState<string | null>(null);
@@ -589,13 +591,25 @@ export const Usuarios: React.FC = () => {
                   {!editingUser && (
                     <div>
                       <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">Senha Provisória</label>
-                      <input 
-                        type="password"
-                        className="w-full border p-3 rounded-xl outline-none focus:border-blue-500 bg-gray-50/50" 
-                        value={newUser.senha}
-                        onChange={e => setNewUser({...newUser, senha: e.target.value})}
-                        placeholder="123456"
-                      />
+                      <div className="relative">
+                        <input
+                          type={showSenhaNovoUsuario ? 'text' : 'password'}
+                          autoComplete="new-password"
+                          className="w-full border p-3 pr-10 rounded-xl outline-none focus:border-blue-500 bg-gray-50/50"
+                          value={newUser.senha}
+                          onChange={e => setNewUser({...newUser, senha: e.target.value})}
+                          placeholder="Mín. 6 caracteres"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowSenhaNovoUsuario(!showSenhaNovoUsuario)}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700 p-1"
+                          title={showSenhaNovoUsuario ? 'Ocultar senha' : 'Mostrar senha'}
+                          aria-label={showSenhaNovoUsuario ? 'Ocultar senha' : 'Mostrar senha'}
+                        >
+                          {showSenhaNovoUsuario ? <EyeOff size={18} /> : <Eye size={18} />}
+                        </button>
+                      </div>
                     </div>
                   )}
                   {editingUser ? (
