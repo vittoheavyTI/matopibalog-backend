@@ -33,7 +33,6 @@ const StatCard: React.FC<{
 export const Dashboard: React.FC = () => {
   const navigate = useNavigate();
   const [motoristasEmViagem, setMotoristasEmViagem] = useState<any[]>([]);
-  const [allMotoristas, setAllMotoristas] = useState<any[]>([]);
   const [fretes, setFretes] = useState<any[]>([]);
   const [despesas, setDespesas] = useState<any[]>([]);
   const [abastecimentos, setAbastecimentos] = useState<any[]>([]);
@@ -52,14 +51,8 @@ export const Dashboard: React.FC = () => {
   const [selectedMot, setSelectedMot] = useState<any | null>(null);
   const [editingItem, setEditingItem] = useState<{ id: string, type: 'despesa' | 'manutencao' | 'abastecimento' | 'vale' | 'frete', data: any } | null>(null);
 
-  const [showAddFreteModal, setShowAddFreteModal] = useState(false);
-  const [newFrete, setNewFrete] = useState({ motorista_id: '', origem: '', destino: '', valor_frete: '', km_inicial: '' });
-  const [savingFrete, setSavingFrete] = useState(false);
-  // Combobox de motorista no modal "Adicionar Frete". Limpa busca e dropdown ao abrir/fechar.
-  const [buscaMotoristaFrete, setBuscaMotoristaFrete] = useState('');
-  const [motoristaFreteAberto, setMotoristaFreteAberto] = useState(false);
-  useEffect(() => { setBuscaMotoristaFrete(''); setMotoristaFreteAberto(false); }, [showAddFreteModal]);
-
+  // Criação de frete foi centralizada no Gerenciamento de Fretes (fonte de verdade).
+  // O botão "Adicionar Frete" do Dashboard apenas navega para lá e abre o modal "Novo Frete".
   const [showAddDespesaModal, setShowAddDespesaModal] = useState(false);
   const [newDespesa, setNewDespesa] = useState({ tipo: 'despesa', descricao: '', valor: '', quem_pagou: 'proprietario', posto: '', litros: '', valor_total: '', data: '' });
   const [savingDespesa, setSavingDespesa] = useState(false);
@@ -97,7 +90,6 @@ export const Dashboard: React.FC = () => {
         };
       };
 
-      setAllMotoristas(motoristasData.map(mapMotorista));
       setMotoristasEmViagem(emViagemData.map(mapMotorista));
     }).catch((err) => {
       console.error('Erro ao carregar motoristas/em-viagem', err);
@@ -315,27 +307,6 @@ export const Dashboard: React.FC = () => {
     }
   };
 
-  const handleSubmitFrete = async () => {
-    if (!newFrete.motorista_id || !newFrete.origem || !newFrete.destino || !newFrete.valor_frete) {
-      alert('Preencha motorista, origem, destino e valor.'); return;
-    }
-    setSavingFrete(true);
-    try {
-      await api.post('/fretes', {
-        motorista_id: newFrete.motorista_id,
-        origem: newFrete.origem,
-        destino: newFrete.destino,
-        valor_frete: Number(newFrete.valor_frete),
-        ...(newFrete.km_inicial ? { km_inicial: Number(newFrete.km_inicial) } : {}),
-      });
-      setShowAddFreteModal(false);
-      setNewFrete({ motorista_id: '', origem: '', destino: '', valor_frete: '', km_inicial: '' });
-      loadDashboardData();
-    } catch (err: any) {
-      alert(err.response?.data?.message || 'Erro ao adicionar frete.');
-    } finally { setSavingFrete(false); }
-  };
-
   const handleSubmitDespesa = async () => {
     if (!selectedMot) return;
     const tipo = newDespesa.tipo;
@@ -462,19 +433,6 @@ export const Dashboard: React.FC = () => {
   // soVinculado é o padrão: cobre vinculado-only e o caso sem motoristas (4 cards zerados, como hoje).
   const soVinculado = !soAutonomo && !misto;
 
-  // Combobox "Adicionar Frete": rótulo do selecionado e lista (busca vazia → 5 primeiros).
-  const motFreteSelecionado = allMotoristas.find(m => m.uid === newFrete.motorista_id);
-  const nomeMotoristaFreteSelecionado = motFreteSelecionado
-    ? `${motFreteSelecionado.nomeCompleto} — ${motFreteSelecionado.placaVeiculo}`
-    : '';
-  const termoMotoristaFrete = buscaMotoristaFrete.trim().toLowerCase();
-  const listaMotoristasFrete = termoMotoristaFrete
-    ? allMotoristas.filter(m =>
-        (m.nomeCompleto || '').toLowerCase().includes(termoMotoristaFrete) ||
-        (m.placaVeiculo || '').toLowerCase().includes(termoMotoristaFrete) ||
-        (m.email || '').toLowerCase().includes(termoMotoristaFrete))
-    : allMotoristas.slice(0, 5);
-
   return (
     <div className="space-y-5 pb-10">
       {!selectedMot && (
@@ -546,7 +504,7 @@ export const Dashboard: React.FC = () => {
               <DollarSign size={20} className="mr-2 text-green-600" /> Motoristas em Frete
             </button>
             <button
-              onClick={() => { setShowAddFreteModal(true); setNewFrete({ motorista_id: '', origem: '', destino: '', valor_frete: '', km_inicial: '' }); }}
+              onClick={() => navigate('/relatorios/viagens?novoFrete=1')}
               className="flex items-center px-4 py-2 bg-green-700 text-white rounded-lg hover:bg-green-800 transition-all shadow-md active:scale-95 font-bold text-sm"
             >
               <Plus size={18} className="mr-1" /> Adicionar Frete
@@ -924,74 +882,6 @@ export const Dashboard: React.FC = () => {
                 </div>
               </div>
             )}
-          </div>
-        </div>
-      )}
-
-      {showAddFreteModal && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={e => { if (e.target === e.currentTarget) setShowAddFreteModal(false); }}>
-          <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl">
-            <div className="p-5 border-b border-gray-100 flex justify-between items-center">
-              <h3 className="text-lg font-bold text-gray-800">Adicionar Frete</h3>
-              <button onClick={() => setShowAddFreteModal(false)} className="p-2 hover:bg-gray-100 rounded-lg transition-colors"><X size={18} /></button>
-            </div>
-            <div className="p-5 space-y-4">
-              <div className="relative">
-                <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Motorista *</label>
-                <input
-                  type="text"
-                  value={motoristaFreteAberto ? buscaMotoristaFrete : nomeMotoristaFreteSelecionado}
-                  onChange={e => setBuscaMotoristaFrete(e.target.value)}
-                  onFocus={() => { setMotoristaFreteAberto(true); setBuscaMotoristaFrete(''); }}
-                  onBlur={() => setMotoristaFreteAberto(false)}
-                  placeholder="Digite ou selecione o motorista..."
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500"
-                />
-                {motoristaFreteAberto && (
-                  <ul className="absolute z-20 mt-1 w-full max-h-56 overflow-auto bg-white border border-gray-200 rounded-lg shadow-lg">
-                    {listaMotoristasFrete.length === 0 ? (
-                      <li className="px-3 py-2 text-sm text-gray-400">Nenhum motorista encontrado</li>
-                    ) : (
-                      listaMotoristasFrete.map(m => (
-                        <li
-                          key={m.uid}
-                          onMouseDown={() => { setNewFrete(p => ({ ...p, motorista_id: m.uid })); setMotoristaFreteAberto(false); setBuscaMotoristaFrete(''); }}
-                          className="px-3 py-2 text-sm hover:bg-blue-50 cursor-pointer"
-                        >
-                          {m.nomeCompleto} — {m.placaVeiculo}
-                        </li>
-                      ))
-                    )}
-                  </ul>
-                )}
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Origem *</label>
-                  <input value={newFrete.origem} onChange={e => setNewFrete(p => ({ ...p, origem: e.target.value }))} placeholder="Ex: São Paulo" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Destino *</label>
-                  <input value={newFrete.destino} onChange={e => setNewFrete(p => ({ ...p, destino: e.target.value }))} placeholder="Ex: Brasília" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">Valor do Frete (R$) *</label>
-                  <input type="number" min="0" step="0.01" value={newFrete.valor_frete} onChange={e => setNewFrete(p => ({ ...p, valor_frete: e.target.value }))} placeholder="0,00" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-gray-600 mb-1 uppercase">KM Inicial</label>
-                  <input type="number" min="0" value={newFrete.km_inicial} onChange={e => setNewFrete(p => ({ ...p, km_inicial: e.target.value }))} placeholder="Opcional" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" />
-                </div>
-              </div>
-            </div>
-            <div className="p-5 pt-0 flex justify-end gap-3">
-              <button onClick={() => setShowAddFreteModal(false)} className="px-4 py-2 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">Cancelar</button>
-              <button onClick={handleSubmitFrete} disabled={savingFrete} className="px-4 py-2 text-sm font-bold bg-green-700 text-white rounded-lg hover:bg-green-800 transition-colors disabled:opacity-50">
-                {savingFrete ? 'Salvando...' : 'Adicionar Frete'}
-              </button>
-            </div>
           </div>
         </div>
       )}
