@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { CreditCard, FileSignature, MapPin, Mail, Database, Plug, Plus, X, Check, AlertTriangle, Loader2 } from 'lucide-react';
+import { CreditCard, FileSignature, MapPin, Mail, Database, Plug, X, Check, AlertTriangle, Loader2 } from 'lucide-react';
 import api from '../api';
 
 interface Integracao {
@@ -11,6 +11,9 @@ interface Integracao {
   status: 'conectado' | 'desconectado' | 'erro';
   config: Record<string, string>;
   ultimaVerificacao: string | null;
+  // Integração nativa do sistema (ViaCEP/Supabase): não requer credenciais nem teste manual.
+  // Evita exibir status falso "conectado agora".
+  nativo?: boolean;
 }
 
 const iconeMap: Record<string, React.ElementType> = {
@@ -53,9 +56,10 @@ const integracoesPadrao: Integracao[] = [
     tipo: 'consulta',
     descricao: 'Consulta automática de endereço por CEP',
     icone: 'MapPin',
-    status: 'conectado',
+    status: 'desconectado',
     config: {},
-    ultimaVerificacao: new Date().toISOString()
+    ultimaVerificacao: null,
+    nativo: true
   },
   {
     id: 'smtp',
@@ -73,9 +77,10 @@ const integracoesPadrao: Integracao[] = [
     tipo: 'banco',
     descricao: 'Banco de dados, autenticação e storage (conexão principal do sistema)',
     icone: 'Database',
-    status: 'conectado',
+    status: 'desconectado',
     config: {},
-    ultimaVerificacao: new Date().toISOString()
+    ultimaVerificacao: null,
+    nativo: true
   }
 ];
 
@@ -107,6 +112,20 @@ const camposPorServico: Record<string, CampoConfig[]> = {
 
 const LS_KEY = 'matopibalog_integracoes';
 
+// Remove campos sensíveis (senha/token/apiKey — os de tipo 'password') antes de
+// QUALQUER persistência local. Segredos NUNCA vão para o localStorage: a persistência
+// segura de credenciais será feita no backend em fase futura (arquitetura de provedores).
+const sanitizarConfig = (servicoId: string, config: Record<string, string>): Record<string, string> => {
+  const sensiveis = new Set(
+    (camposPorServico[servicoId] || []).filter(c => c.tipo === 'password').map(c => c.chave)
+  );
+  const limpo: Record<string, string> = {};
+  Object.entries(config || {}).forEach(([chave, valor]) => {
+    if (!sensiveis.has(chave)) limpo[chave] = valor;
+  });
+  return limpo;
+};
+
 export const Integracoes: React.FC = () => {
   const [integracoes, setIntegracoes] = useState<Integracao[]>(integracoesPadrao);
   const [showModal, setShowModal] = useState(false);
@@ -117,14 +136,8 @@ export const Integracoes: React.FC = () => {
   // Toast global para feedback fora do modal
   const [toast, setToast] = useState<{ tipo: 'sucesso' | 'erro'; texto: string } | null>(null);
   const [salvando, setSalvando] = useState(false);
-  const [showNovaIntegracao, setShowNovaIntegracao] = useState(false);
-  const [novaIntegracao, setNovaIntegracao] = useState({
-    nome: '',
-    tipo: 'outro' as Integracao['tipo'],
-    descricao: '',
-    config: {} as Record<string, string>
-  });
-  const [camposDinamicos, setCamposDinamicos] = useState<{ chave: string; valor: string }[]>([]);
+  // Estado para o card "Adicionar Nova Integração" foi removido nesta fase de higiene.
+
 
   useEffect(() => {
     // Tenta ler da chave nova; se não existir, migra da chave legada (rebranding)
@@ -132,15 +145,24 @@ export const Integracoes: React.FC = () => {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        setIntegracoes(prev => prev.map(p => {
+        // Carrega apenas metadados não sensíveis (config já sanitizada); nunca restaura segredos.
+        const merged = integracoesPadrao.map(p => {
           const savedConfig = parsed[p.id];
           if (savedConfig) {
-            return { ...p, config: { ...p.config, ...savedConfig.config }, status: savedConfig.status || p.status, ultimaVerificacao: savedConfig.ultimaVerificacao || p.ultimaVerificacao };
+            return {
+              ...p,
+              config: { ...p.config, ...sanitizarConfig(p.id, savedConfig.config || {}) },
+              status: savedConfig.status || p.status,
+              ultimaVerificacao: savedConfig.ultimaVerificacao || p.ultimaVerificacao,
+            };
           }
           return p;
-        }));
-        // Garante que a chave nova existe (migração silenciosa)
-        localStorage.setItem(LS_KEY, saved);
+        });
+        setIntegracoes(merged);
+        // Re-grava já sanitizado na chave nova e remove a legada (limpa segredos antigos do storage).
+        const obj: Record<string, any> = {};
+        merged.forEach(i => { obj[i.id] = { config: sanitizarConfig(i.id, i.config), status: i.status, ultimaVerificacao: i.ultimaVerificacao }; });
+        localStorage.setItem(LS_KEY, JSON.stringify(obj));
         localStorage.removeItem('choferlog_integracoes');
       } catch {}
     }
@@ -148,7 +170,8 @@ export const Integracoes: React.FC = () => {
 
   const persistirIntegracoes = (novas: Integracao[]) => {
     const obj: Record<string, any> = {};
-    novas.forEach(i => { obj[i.id] = { config: i.config, status: i.status, ultimaVerificacao: i.ultimaVerificacao }; });
+    // Só metadados não sensíveis vão para o localStorage (config sanitizada, sem segredos).
+    novas.forEach(i => { obj[i.id] = { config: sanitizarConfig(i.id, i.config), status: i.status, ultimaVerificacao: i.ultimaVerificacao }; });
     localStorage.setItem(LS_KEY, JSON.stringify(obj));
     setIntegracoes(novas);
   };
@@ -169,7 +192,7 @@ export const Integracoes: React.FC = () => {
     setTestando(servico.id);
     setMensagemTeste(null);
     const config = configOverride || servico.config;
-    localStorage.setItem(`matopibalog_integracao_config_${servico.id}`, JSON.stringify(config));
+    // Credenciais usadas só em memória para o teste; NUNCA persistidas no navegador.
     try {
       const resp = await api.post('/integracoes/testar/' + servico.id, config);
       const msgSucesso = resp.data?.message || 'Conexão estabelecida com sucesso.';
@@ -196,37 +219,28 @@ export const Integracoes: React.FC = () => {
   const salvarConfig = async () => {
     if (!servicoSelecionado) return;
     setSalvando(true);
-    const novas = integracoes.map(i => i.id === servicoSelecionado.id ? { ...i, config: { ...configEdit } } : i);
-    persistirIntegracoes(novas);
     try {
       await api.post('/integracoes/salvar', { servico: servicoSelecionado.id, config: configEdit });
-    } catch {}
-    setShowModal(false);
-    setMensagemTeste(null);
+      // Só persiste localmente (metadados sanitizados) após o backend confirmar o salvamento.
+      const novas = integracoes.map(i => i.id === servicoSelecionado.id ? { ...i, config: { ...configEdit } } : i);
+      persistirIntegracoes(novas);
+      mostrarToast('sucesso', `${servicoSelecionado.nome}: configuração salva.`);
+      setMensagemTeste(null);
+      setShowModal(false);
+    } catch (err: any) {
+      // Erro não é silencioso: mostra toast, mantém o modal aberto e não dá falso sucesso.
+      const statusCode = err?.response?.status;
+      const msgErro = statusCode === 403
+        ? 'Apenas super-admin pode salvar esta integração.'
+        : (err?.response?.data?.message || 'Falha ao salvar. Tente novamente.');
+      setMensagemTeste({ tipo: 'erro', texto: msgErro });
+      mostrarToast('erro', `${servicoSelecionado.nome}: ${msgErro}`);
+    }
     setSalvando(false);
   };
 
-  const adicionarNovaIntegracao = () => {
-    const campos: Record<string, string> = {};
-    camposDinamicos.forEach(c => { if (c.chave.trim()) campos[c.chave.trim()] = c.valor; });
-
-    const nova: Integracao = {
-      id: `custom_${Date.now()}`,
-      nome: novaIntegracao.nome,
-      tipo: novaIntegracao.tipo,
-      descricao: novaIntegracao.descricao,
-      icone: 'Plug',
-      status: 'desconectado',
-      config: campos,
-      ultimaVerificacao: null
-    };
-
-    const novas = [...integracoes, nova];
-    persistirIntegracoes(novas);
-    setShowNovaIntegracao(false);
-    setNovaIntegracao({ nome: '', tipo: 'outro', descricao: '', config: {} });
-    setCamposDinamicos([]);
-  };
+  // Fase de higiene: o fluxo "Adicionar Nova Integração" foi removido (não há backend para
+  // suportá-lo). O card correspondente virou um placeholder "Em breve", não clicável.
 
   return (
     <div className="space-y-6 pb-20">
@@ -262,11 +276,12 @@ export const Integracoes: React.FC = () => {
                   </div>
                 </div>
                 <span className={`px-3 py-1 rounded-full text-xs font-bold ${
+                  servico.nativo ? 'bg-gray-50 text-gray-600' :
                   servico.status === 'conectado' ? 'bg-green-50 text-green-700' :
                   servico.status === 'erro' ? 'bg-red-50 text-red-700' :
                   'bg-gray-50 text-gray-600'
                 }`}>
-                  {servico.status === 'conectado' ? '● Conectado' : servico.status === 'erro' ? '● Erro' : '○ Não configurado'}
+                  {servico.nativo ? 'Nativo do sistema' : servico.status === 'conectado' ? '● Conectado' : servico.status === 'erro' ? '● Erro' : '○ Não configurado'}
                 </span>
               </div>
 
@@ -301,16 +316,13 @@ export const Integracoes: React.FC = () => {
           );
         })}
 
-        <div
-          onClick={() => setShowNovaIntegracao(true)}
-          className="bg-white rounded-2xl border-2 border-dashed border-gray-200 p-6 hover:border-blue-400 hover:bg-blue-50/30 transition-all cursor-pointer flex flex-col items-center justify-center min-h-[200px]"
-        >
-          <div className="p-3 rounded-xl bg-blue-50 text-blue-600 mb-3">
-            <Plus size={28} />
+        <div className="bg-white rounded-2xl border-2 border-dashed border-gray-200 p-6 hover:border-blue-400 hover:bg-blue-50/30 transition-all flex flex-col items-center justify-center min-h-[200px] opacity-50 cursor-not-allowed">
+            <div className="p-3 rounded-xl bg-blue-50 text-blue-600 mb-3">
+              <Plug size={28} />
+            </div>
+            <p className="font-bold text-gray-700">Em breve</p>
+            <p className="text-xs text-gray-400 mt-1">Próxima fase: integração configurável</p>
           </div>
-          <p className="font-bold text-gray-700">Adicionar Nova Integração</p>
-          <p className="text-xs text-gray-400 mt-1">Conecte novos serviços ao sistema</p>
-        </div>
       </div>
 
       {showModal && servicoSelecionado && (
@@ -322,6 +334,10 @@ export const Integracoes: React.FC = () => {
             </div>
 
             <div className="p-6 space-y-5">
+              <div className="flex items-start space-x-2 p-3 rounded-xl bg-amber-50 text-amber-700 text-xs">
+                <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+                <span>As credenciais não serão mantidas no navegador. A persistência segura será tratada nas próximas fases.</span>
+              </div>
               {(camposPorServico[servicoSelecionado.id] || []).map(campo => (
                 <div key={campo.chave}>
                   <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">{campo.label}</label>
@@ -381,109 +397,6 @@ export const Integracoes: React.FC = () => {
                   {salvando ? 'Salvando...' : 'Salvar'}
                 </button>
               </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showNovaIntegracao && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden max-h-[90vh] flex flex-col">
-            <div className="p-6 border-b flex justify-between items-center bg-gray-50">
-              <h3 className="text-xl font-bold text-gray-800">Nova Integração</h3>
-              <button onClick={() => setShowNovaIntegracao(false)} className="p-2 hover:bg-gray-200 rounded-full transition-colors"><X size={24} /></button>
-            </div>
-
-            <div className="p-6 overflow-y-auto space-y-5">
-              <div>
-                <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Nome do Serviço</label>
-                <input
-                  type="text"
-                  className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50"
-                  value={novaIntegracao.nome}
-                  onChange={e => setNovaIntegracao({ ...novaIntegracao, nome: e.target.value })}
-                  placeholder="Ex: Mercado Pago"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Tipo</label>
-                <select
-                  className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-white"
-                  value={novaIntegracao.tipo}
-                  onChange={e => setNovaIntegracao({ ...novaIntegracao, tipo: e.target.value as Integracao['tipo'] })}
-                >
-                  <option value="pagamento">Pagamento</option>
-                  <option value="assinatura">Assinatura Digital</option>
-                  <option value="consulta">Consulta</option>
-                  <option value="email">Email</option>
-                  <option value="outro">Outro</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Descrição</label>
-                <input
-                  type="text"
-                  className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50"
-                  value={novaIntegracao.descricao}
-                  onChange={e => setNovaIntegracao({ ...novaIntegracao, descricao: e.target.value })}
-                  placeholder="O que esta integração faz?"
-                />
-              </div>
-
-              <div className="border-t border-gray-100 pt-4">
-                <label className="block text-xs font-bold text-gray-400 uppercase mb-3 ml-1">Campos Personalizados</label>
-                {camposDinamicos.map((campo, idx) => (
-                  <div key={idx} className="flex items-center space-x-2 mb-2">
-                    <input
-                      type="text"
-                      className="flex-1 border-2 border-gray-50 rounded-xl p-2.5 outline-none focus:border-blue-500 bg-gray-50/50 text-sm"
-                      placeholder="Nome do campo"
-                      value={campo.chave}
-                      onChange={e => {
-                        const novos = [...camposDinamicos];
-                        novos[idx].chave = e.target.value;
-                        setCamposDinamicos(novos);
-                      }}
-                    />
-                    <input
-                      type="text"
-                      className="flex-1 border-2 border-gray-50 rounded-xl p-2.5 outline-none focus:border-blue-500 bg-gray-50/50 text-sm"
-                      placeholder="Valor padrão"
-                      value={campo.valor}
-                      onChange={e => {
-                        const novos = [...camposDinamicos];
-                        novos[idx].valor = e.target.value;
-                        setCamposDinamicos(novos);
-                      }}
-                    />
-                    <button
-                      onClick={() => setCamposDinamicos(camposDinamicos.filter((_, i) => i !== idx))}
-                      className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                    >
-                      <X size={18} />
-                    </button>
-                  </div>
-                ))}
-                <button
-                  onClick={() => setCamposDinamicos([...camposDinamicos, { chave: '', valor: '' }])}
-                  className="flex items-center text-sm text-blue-600 hover:text-blue-700 font-medium mt-2"
-                >
-                  <Plus size={16} className="mr-1" /> Adicionar Campo
-                </button>
-              </div>
-            </div>
-
-            <div className="p-4 bg-gray-50 border-t flex justify-end space-x-3">
-              <button onClick={() => setShowNovaIntegracao(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded-lg transition-colors text-sm font-medium">Cancelar</button>
-              <button
-                onClick={adicionarNovaIntegracao}
-                disabled={!novaIntegracao.nome.trim()}
-                className="flex items-center px-5 py-2 bg-green-700 text-white rounded-lg font-medium text-sm hover:bg-green-800 transition-colors disabled:opacity-50"
-              >
-                <Plus size={16} className="mr-1.5" /> Adicionar
-              </button>
             </div>
           </div>
         </div>
