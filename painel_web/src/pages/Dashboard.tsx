@@ -39,6 +39,11 @@ export const Dashboard: React.FC = () => {
   const [abastecimentos, setAbastecimentos] = useState<any[]>([]);
   const [vales, setVales] = useState<any[]>([]);
   const [summary, setSummary] = useState<any>(null);
+  // Loadings por seção: a lista "Motoristas em Frete" (rápida) não pode ficar presa
+  // esperando o /dashboard/summary (lento — várias queries sequenciais no backend).
+  // Cada área tem seu próprio loading e atualiza assim que sua resposta chega.
+  const [loadingEmViagem, setLoadingEmViagem] = useState(true);
+  const [loadingSummary, setLoadingSummary] = useState(true);
 
   const [selectedMonth, setSelectedMonth] = useState(new Date());
   const [selectedMot, setSelectedMot] = useState<any | null>(null);
@@ -60,14 +65,16 @@ export const Dashboard: React.FC = () => {
   const reqIdDespesaRef = useRef<string | null>(null);
 
   const loadDashboardData = async () => {
-    try {
-      // 1. Busca os motoristas e motoristas em viagem (com tratamento de erro individual)
-      const [resMot, resEmViagem, resSum] = await Promise.all([
-        api.get('/admin/motoristas').catch(() => ({ data: [] })),
-        api.get('/admin/motoristas/em-viagem').catch(() => ({ data: [] })),
-        api.get(`/dashboard/summary?mes=${selectedMonth.getMonth() + 1}&ano=${selectedMonth.getFullYear()}`).catch(() => ({ data: null }))
-      ]);
+    setLoadingEmViagem(true);
+    setLoadingSummary(true);
 
+    // Motoristas + Em Viagem: a lista "em viagem" é enriquecida com a foto/empresa
+    // vinda de /admin/motoristas (fonte de verdade), então essas duas chamadas rápidas
+    // andam juntas — mas SEM esperar o /dashboard/summary (lento).
+    const motoristasEmViagemPromise = Promise.all([
+      api.get('/admin/motoristas').catch(() => ({ data: [] })),
+      api.get('/admin/motoristas/em-viagem').catch(() => ({ data: [] }))
+    ]).then(([resMot, resEmViagem]) => {
       const motoristasData = resMot.data || [];
       const emViagemData = resEmViagem.data || [];
 
@@ -89,11 +96,26 @@ export const Dashboard: React.FC = () => {
 
       setAllMotoristas(motoristasData.map(mapMotorista));
       setMotoristasEmViagem(emViagemData.map(mapMotorista));
+    }).catch((err) => {
+      console.error('Erro ao carregar motoristas/em-viagem', err);
+    }).finally(() => {
+      setLoadingEmViagem(false);
+    });
 
-      setSummary(resSum.data || null);
-    } catch (err) {
-      console.error('Erro geral ao carregar dashboard', err);
-    }
+    // Resumo financeiro (cards): independente — não bloqueia a lista acima.
+    const summaryPromise = api.get(`/dashboard/summary?mes=${selectedMonth.getMonth() + 1}&ano=${selectedMonth.getFullYear()}`)
+      .then((resSum) => {
+        setSummary(resSum.data || null);
+      })
+      .catch((err) => {
+        console.error('Erro ao carregar resumo do dashboard', err);
+        setSummary(null);
+      })
+      .finally(() => {
+        setLoadingSummary(false);
+      });
+
+    await Promise.allSettled([motoristasEmViagemPromise, summaryPromise]);
   };
 
   const loadMotoristaData = async (motId: string) => {
@@ -464,6 +486,12 @@ export const Dashboard: React.FC = () => {
         </div>
       )}
 
+      {!selectedMot && !summary && loadingSummary && (
+        <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 text-center text-gray-500 italic animate-fade-in">
+          Carregando resumo financeiro...
+        </div>
+      )}
+
       {!selectedMot && summary && (
         <div className="space-y-5 animate-fade-in">
           {/* [PR2B] Vinculado-only: visual atual preservado (campos antigos). */}
@@ -737,7 +765,13 @@ export const Dashboard: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {motoristasEmViagem.length === 0 ? (
+                {loadingEmViagem ? (
+                  <tr>
+                    <td colSpan={4} className="p-10 text-center text-gray-600 italic">
+                      Carregando motoristas em frete...
+                    </td>
+                  </tr>
+                ) : motoristasEmViagem.length === 0 ? (
                   <tr>
                     <td colSpan={4} className="p-10 text-center text-gray-600 italic">
                       Nenhum motorista em frete ativo no momento.
