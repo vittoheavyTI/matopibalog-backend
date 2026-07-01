@@ -9,6 +9,20 @@ const salvarIntegracaoSchema = z.object({
   config: z.record(z.string(), z.any()).default({}),
 });
 
+// --- Leitura mascarada de integrações (GET /integracoes) ---
+// Campo sensível: qualquer chave que contenha (case-insensitive) um destes termos.
+// Preferimos mascarar demais a vazar — melhor um campo público mascarado que um segredo exposto.
+const TERMOS_SENSIVEIS = ['apikey', 'token', 'password', 'pass', 'secret', 'clientsecret', 'senha', 'key'];
+function isCampoSensivel(chave) {
+  const c = String(chave).toLowerCase();
+  return TERMOS_SENSIVEIS.some(t => c.includes(t));
+}
+// Máscara: revela só os 4 últimos caracteres; valores curtos/ausentes viram '****'.
+function mascararValor(valor) {
+  if (typeof valor !== 'string' || valor.length <= 4) return '****';
+  return '****' + valor.slice(-4);
+}
+
 router.post('/testar/asaas', verifyToken, isSuperAdmin, async (req, res) => {
   try {
     const { apiKey, environment } = req.body;
@@ -139,6 +153,48 @@ router.post('/salvar', verifyToken, isSuperAdmin, async (req, res) => {
     // Só a mensagem técnica — nunca req.body/config (evita vazar segredo).
     console.error('Erro ao salvar integração:', err.message);
     res.status(500).json({ message: 'Erro ao salvar integração' });
+  }
+});
+
+// GET /integracoes — retorna SOMENTE metadados mascarados das integrações
+// configuradas (nunca apiKey/token/pass em claro). Super-admin.
+router.get('/', verifyToken, isSuperAdmin, async (req, res) => {
+  const supabase = require('../config/supabase');
+  try {
+    const { data, error } = await supabase
+      .from('configuracoes')
+      .select('dados')
+      .eq('id', 1)
+      .single();
+
+    // PGRST116 = linha inexistente → nenhuma integração configurada.
+    if (error && error.code !== 'PGRST116') throw error;
+    const dados = data?.dados || {};
+
+    const integracoes = Object.keys(dados)
+      .filter(k => k.startsWith('integracao_'))
+      .map(k => {
+        const servico = k.replace('integracao_', '');
+        const config = (dados[k] && typeof dados[k] === 'object') ? dados[k] : {};
+        const configPublica = {};
+        const camposMascarados = {};
+        for (const [chave, valor] of Object.entries(config)) {
+          if (isCampoSensivel(chave)) camposMascarados[chave] = mascararValor(valor);
+          else configPublica[chave] = valor;
+        }
+        return {
+          servico,
+          configurado: Object.keys(config).length > 0,
+          configPublica,
+          camposMascarados,
+        };
+      });
+
+    res.json(integracoes);
+  } catch (err) {
+    // Só a mensagem técnica — nunca dados/config/segredos.
+    console.error('Erro ao carregar integrações:', err.message);
+    res.status(500).json({ message: 'Erro ao carregar integrações' });
   }
 });
 
