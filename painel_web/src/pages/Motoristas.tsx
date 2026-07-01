@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, X, MessageCircle, Trash2, AlertTriangle, Camera, MapPin, Loader2 } from 'lucide-react';
+import { Plus, X, MessageCircle, Trash2, AlertTriangle, Camera, MapPin, Loader2, Eye, EyeOff } from 'lucide-react';
 import api from '../api';
 import { maskPhone, maskCPF, maskCEP } from '../utils/masks';
 import axios from 'axios';
@@ -10,6 +10,8 @@ export const Motoristas: React.FC = () => {
 
   // Modal Novo Motorista
   const [showNewModal, setShowNewModal] = useState(false);
+  // Mostrar/ocultar o campo "Senha Inicial" do cadastro de motorista.
+  const [showSenhaMotorista, setShowSenhaMotorista] = useState(false);
   const [newMot, setNewMot] = useState({ 
     nomeCompleto: '', cpf: '', email: '', senha: '', placaVeiculo: '', 
     telefone: '', cep: '', endereco: '', bairro: '', cidade: '', fotoUrl: '',
@@ -355,7 +357,12 @@ export const Motoristas: React.FC = () => {
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-gray-500 uppercase mb-1.5 ml-1">Senha Inicial</label>
-                  <input type="password" className="w-full border-gray-200 rounded-xl p-2.5 outline-none border focus:border-blue-500" value={newMot.senha} onChange={e => setNewMot({...newMot, senha: e.target.value})} placeholder="123456" />
+                  <div className="relative">
+                    <input type={showSenhaMotorista ? 'text' : 'password'} autoComplete="new-password" className="w-full border-gray-200 rounded-xl p-2.5 pr-10 outline-none border focus:border-blue-500" value={newMot.senha} onChange={e => setNewMot({...newMot, senha: e.target.value})} placeholder="Mín. 6 caracteres" />
+                    <button type="button" onClick={() => setShowSenhaMotorista(!showSenhaMotorista)} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700 p-1" title={showSenhaMotorista ? 'Ocultar senha' : 'Mostrar senha'} aria-label={showSenhaMotorista ? 'Ocultar senha' : 'Mostrar senha'}>
+                      {showSenhaMotorista ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
