@@ -1662,7 +1662,8 @@ export const ResumoMotorista: React.FC = () => {
       ) : stats.length === 0 && fretesDetalhados.length === 0 ? (
         <div className="bg-white p-12 rounded-2xl shadow-sm border border-gray-100 text-center text-gray-400">
           <Truck size={48} className="mx-auto mb-3 text-gray-300" />
-          <p className="text-lg font-medium">Nenhum dado encontrado para este período.</p>
+          <p className="text-lg font-medium">Nenhum dado encontrado para {format(new Date(selectedDate + '-01T12:00:00'), "MMMM 'de' yyyy", { locale: ptBR })}.</p>
+          <p className="text-sm mt-2">Para consultar outro período, selecione mês e ano nos filtros acima.</p>
         </div>
       ) : (
         <>
