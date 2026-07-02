@@ -23,6 +23,34 @@ function mascararValor(valor) {
   return '****' + valor.slice(-4);
 }
 
+// --- Visibilidade de integrações na tela (Fase 3A) ---
+// Só estas podem ser ocultadas/reexibidas (opcionais, sem fluxo crítico consumindo-as).
+const INTEGRACOES_REMOVIVEIS = new Set(['clicksign', 'smtp']);
+// Protegidas: asaas = provedor de pagamento atual; viacep/supabase = nativas do sistema.
+const INTEGRACOES_PROTEGIDAS = new Set(['asaas', 'viacep', 'supabase']);
+
+// Normaliza o :servico da rota: minúsculas, sem espaços, só [a-z0-9_-] (evita path traversal).
+function normalizarServico(servico) {
+  const s = String(servico || '').trim().toLowerCase();
+  return /^[a-z0-9_-]+$/.test(s) ? s : null;
+}
+
+// Read-merge-write de configuracoes.dados.integracoes_ocultas, preservando as demais chaves.
+async function atualizarOcultas(supabase, mutar) {
+  const { data: atual, error: readError } = await supabase
+    .from('configuracoes').select('dados').eq('id', 1).single();
+  // PGRST116 = linha inexistente → parte de {}. Outro erro = falha real.
+  if (readError && readError.code !== 'PGRST116') throw readError;
+  const dados = atual?.dados || {};
+  const ocultasAtuais = Array.isArray(dados.integracoes_ocultas) ? dados.integracoes_ocultas : [];
+  const novaLista = mutar(ocultasAtuais);
+  const { error } = await supabase
+    .from('configuracoes')
+    .upsert({ id: 1, dados: { ...dados, integracoes_ocultas: novaLista }, atualizado_em: new Date() });
+  if (error) throw error;
+  return novaLista;
+}
+
 router.post('/testar/asaas', verifyToken, isSuperAdmin, async (req, res) => {
   try {
     const { apiKey, environment } = req.body;
@@ -195,6 +223,60 @@ router.get('/', verifyToken, isSuperAdmin, async (req, res) => {
     // Só a mensagem técnica — nunca dados/config/segredos.
     console.error('Erro ao carregar integrações:', err.message);
     res.status(500).json({ message: 'Erro ao carregar integrações' });
+  }
+});
+
+// GET /integracoes/estado — lista de serviços ocultos da tela (super-admin). Sem segredos.
+router.get('/estado', verifyToken, isSuperAdmin, async (req, res) => {
+  const supabase = require('../config/supabase');
+  try {
+    const { data, error } = await supabase
+      .from('configuracoes').select('dados').eq('id', 1).single();
+    if (error && error.code !== 'PGRST116') throw error;
+    const ocultas = Array.isArray(data?.dados?.integracoes_ocultas) ? data.dados.integracoes_ocultas : [];
+    res.json({ ocultas });
+  } catch (err) {
+    console.error('Erro ao carregar estado de integrações:', err.message);
+    res.status(500).json({ message: 'Erro ao carregar estado de integrações' });
+  }
+});
+
+// PATCH /integracoes/:servico/ocultar — remove da tela uma integração opcional conhecida.
+router.patch('/:servico/ocultar', verifyToken, isSuperAdmin, async (req, res) => {
+  const servico = normalizarServico(req.params.servico);
+  if (!servico) return res.status(400).json({ message: 'Integração inválida.' });
+  if (INTEGRACOES_PROTEGIDAS.has(servico)) {
+    return res.status(403).json({ message: 'Esta integração não pode ser removida por ser nativa ou crítica do sistema.' });
+  }
+  if (!INTEGRACOES_REMOVIVEIS.has(servico)) {
+    return res.status(400).json({ message: 'Integração não permitida para remoção.' });
+  }
+  const supabase = require('../config/supabase');
+  try {
+    // Apenas oculta da tela — NÃO apaga integracao_<servico> nem credenciais.
+    await atualizarOcultas(supabase, (ocultas) =>
+      ocultas.includes(servico) ? ocultas : [...ocultas, servico]);
+    res.json({ message: 'Integração removida da tela com sucesso', servico });
+  } catch (err) {
+    console.error('Erro ao ocultar integração:', err.message);
+    res.status(500).json({ message: 'Erro ao ocultar integração' });
+  }
+});
+
+// PATCH /integracoes/:servico/exibir — reexibe uma integração previamente ocultada.
+router.patch('/:servico/exibir', verifyToken, isSuperAdmin, async (req, res) => {
+  const servico = normalizarServico(req.params.servico);
+  if (!servico) return res.status(400).json({ message: 'Integração inválida.' });
+  if (!INTEGRACOES_REMOVIVEIS.has(servico)) {
+    return res.status(400).json({ message: 'Integração não permitida.' });
+  }
+  const supabase = require('../config/supabase');
+  try {
+    await atualizarOcultas(supabase, (ocultas) => ocultas.filter(s => s !== servico));
+    res.json({ message: 'Integração reexibida com sucesso', servico });
+  } catch (err) {
+    console.error('Erro ao reexibir integração:', err.message);
+    res.status(500).json({ message: 'Erro ao reexibir integração' });
   }
 });
 
