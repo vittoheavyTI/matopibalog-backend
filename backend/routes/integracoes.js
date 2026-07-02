@@ -35,6 +35,71 @@ function normalizarServico(servico) {
   return /^[a-z0-9_-]+$/.test(s) ? s : null;
 }
 
+// --- Catálogo de integrações personalizadas (Fase 3C) ---
+// Serviços conhecidos do sistema (têm handler de teste próprio e/ou automação).
+const SERVICOS_PADRAO = new Set(['asaas', 'clicksign', 'viacep', 'smtp', 'supabase']);
+// Nomes internos usados como caminhos de rota — não podem virar slug de custom.
+const NOMES_INTERNOS_RESERVADOS = new Set(['estado', 'catalogo', 'customizadas', 'salvar', 'testar', 'ocultar', 'exibir']);
+// Um slug é reservado se for um serviço padrão OU um nome interno de rota.
+function isServicoReservado(servico) {
+  return SERVICOS_PADRAO.has(servico) || NOMES_INTERNOS_RESERVADOS.has(servico);
+}
+
+const CATEGORIAS_PERMITIDAS = ['pagamento', 'assinatura', 'consulta', 'email', 'banco', 'outro'];
+const TIPOS_CAMPO_PERMITIDOS = ['text', 'password', 'select'];
+const MAX_CUSTOMIZADAS = 20;
+const MAX_CAMPOS = 10;
+
+// Definição de UM campo — só metadados (chave/label/tipo[/options]). NUNCA valor/segredo.
+// Zod descarta chaves desconhecidas (não .passthrough()), então um eventual "valor" é removido.
+const campoCustomizadoSchema = z.object({
+  chave: z.string().trim().min(1).max(40),
+  label: z.string().trim().min(1).max(60),
+  tipo: z.enum(TIPOS_CAMPO_PERMITIDOS),
+  options: z.array(z.object({
+    value: z.string().max(60),
+    label: z.string().max(60),
+  })).max(20).optional(),
+});
+
+// Corpo de POST /customizadas.
+const criarCustomizadaSchema = z.object({
+  servico: z.string().trim().min(1).max(40),
+  nome: z.string().trim().min(1).max(60),
+  categoria: z.enum(CATEGORIAS_PERMITIDAS).default('outro'),
+  descricao: z.string().trim().max(200).optional().default(''),
+  campos: z.array(campoCustomizadoSchema).max(MAX_CAMPOS).default([]),
+});
+
+// Sanitiza uma entrada do catálogo para saída/persistência: só metadados/definição de
+// campos, nunca valores de credenciais. Blinda contra qualquer chave inesperada no blob.
+function sanitizarCustomizada(item) {
+  if (!item || typeof item !== 'object' || typeof item.servico !== 'string') return null;
+  const campos = Array.isArray(item.campos) ? item.campos
+    .filter(c => c && typeof c === 'object')
+    .map(c => {
+      const campo = {
+        chave: String(c.chave || ''),
+        label: String(c.label || ''),
+        tipo: TIPOS_CAMPO_PERMITIDOS.includes(c.tipo) ? c.tipo : 'text',
+      };
+      if (campo.tipo === 'select' && Array.isArray(c.options)) {
+        campo.options = c.options
+          .filter(o => o && typeof o === 'object')
+          .map(o => ({ value: String(o.value ?? ''), label: String(o.label ?? '') }));
+      }
+      return campo;
+    }) : [];
+  return {
+    servico: item.servico,
+    nome: String(item.nome || ''),
+    categoria: CATEGORIAS_PERMITIDAS.includes(item.categoria) ? item.categoria : 'outro',
+    descricao: String(item.descricao || ''),
+    campos,
+    criado_em: item.criado_em || null,
+  };
+}
+
 // Read-merge-write de configuracoes.dados.integracoes_ocultas, preservando as demais chaves.
 async function atualizarOcultas(supabase, mutar) {
   const { data: atual, error: readError } = await supabase
@@ -148,6 +213,10 @@ router.post('/salvar', verifyToken, isSuperAdmin, async (req, res) => {
     return res.status(400).json({ message: 'Dados inválidos' });
   }
   const { servico, config } = parsed.data;
+  const servicoNorm = normalizarServico(servico);
+  if (!servicoNorm) {
+    return res.status(400).json({ message: 'Integração inválida.' });
+  }
   const supabase = require('../config/supabase');
 
   try {
@@ -162,9 +231,20 @@ router.post('/salvar', verifyToken, isSuperAdmin, async (req, res) => {
     // PGRST116 = linha ainda não existe → parte de {}. Outro erro = falha real.
     if (readError && readError.code !== 'PGRST116') throw readError;
 
+    const dadosAtuais = atual?.dados || {};
+
+    // Allowlist: só salva config de serviço padrão conhecido OU customizada já cadastrada.
+    // Fecha o buraco de aceitar slug arbitrário (que criaria integracao_<qualquer-coisa>).
+    const customizadas = Array.isArray(dadosAtuais.integracoes_customizadas) ? dadosAtuais.integracoes_customizadas : [];
+    const ehPadrao = SERVICOS_PADRAO.has(servicoNorm);
+    const ehCustomCadastrada = customizadas.some(c => c && c.servico === servicoNorm);
+    if (!ehPadrao && !ehCustomCadastrada) {
+      return res.status(400).json({ message: 'Integração não cadastrada.' });
+    }
+
     const dadosAtualizados = {
-      ...(atual?.dados || {}),
-      [`integracao_${servico}`]: config,
+      ...dadosAtuais,
+      [`integracao_${servicoNorm}`]: config,
     };
 
     const { error } = await supabase
@@ -277,6 +357,137 @@ router.patch('/:servico/exibir', verifyToken, isSuperAdmin, async (req, res) => 
   } catch (err) {
     console.error('Erro ao reexibir integração:', err.message);
     res.status(500).json({ message: 'Erro ao reexibir integração' });
+  }
+});
+
+// GET /integracoes/catalogo — lista as integrações personalizadas cadastradas (super-admin).
+// Só metadados/definição de campos; nunca valores de credenciais.
+router.get('/catalogo', verifyToken, isSuperAdmin, async (req, res) => {
+  const supabase = require('../config/supabase');
+  try {
+    const { data, error } = await supabase
+      .from('configuracoes').select('dados').eq('id', 1).single();
+    if (error && error.code !== 'PGRST116') throw error;
+    const lista = Array.isArray(data?.dados?.integracoes_customizadas) ? data.dados.integracoes_customizadas : [];
+    const customizadas = lista.map(sanitizarCustomizada).filter(Boolean);
+    res.json({ customizadas });
+  } catch (err) {
+    console.error('Erro ao carregar catálogo de integrações:', err.message);
+    res.status(500).json({ message: 'Erro ao carregar catálogo de integrações' });
+  }
+});
+
+// POST /integracoes/customizadas — cadastra uma integração personalizada (super-admin).
+// Apenas metadados administrativos: sem teste automático, sem automação, sem segredos.
+router.post('/customizadas', verifyToken, isSuperAdmin, async (req, res) => {
+  const parsed = criarCustomizadaSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ message: 'Dados inválidos' });
+  }
+  const entrada = parsed.data;
+
+  const servico = normalizarServico(entrada.servico);
+  if (!servico) {
+    return res.status(400).json({ message: 'Identificador (slug) inválido. Use apenas letras minúsculas, números, hífen ou underline.' });
+  }
+  if (isServicoReservado(servico)) {
+    return res.status(400).json({ message: 'Este identificador é reservado e não pode ser usado.' });
+  }
+
+  // Normaliza e valida as chaves dos campos (mesma regra de slug) + unicidade interna.
+  const campos = [];
+  const chavesVistas = new Set();
+  for (const campo of entrada.campos) {
+    const chave = normalizarServico(campo.chave);
+    if (!chave) {
+      return res.status(400).json({ message: 'Chave de campo inválida. Use apenas letras minúsculas, números, hífen ou underline.' });
+    }
+    if (chavesVistas.has(chave)) {
+      return res.status(400).json({ message: 'Há campos com a mesma chave.' });
+    }
+    chavesVistas.add(chave);
+    const campoLimpo = { chave, label: campo.label, tipo: campo.tipo };
+    if (campo.tipo === 'select' && Array.isArray(campo.options)) {
+      campoLimpo.options = campo.options;
+    }
+    campos.push(campoLimpo);
+  }
+
+  const novaIntegracao = {
+    servico,
+    nome: entrada.nome,
+    categoria: entrada.categoria,
+    descricao: entrada.descricao || '',
+    campos,
+    criado_em: new Date().toISOString(),
+  };
+
+  const supabase = require('../config/supabase');
+  try {
+    const { data: atual, error: readError } = await supabase
+      .from('configuracoes').select('dados').eq('id', 1).single();
+    if (readError && readError.code !== 'PGRST116') throw readError;
+    const dados = atual?.dados || {};
+    const customizadas = Array.isArray(dados.integracoes_customizadas) ? dados.integracoes_customizadas : [];
+
+    if (customizadas.some(c => c && c.servico === servico)) {
+      return res.status(409).json({ message: 'Já existe uma integração com este identificador.' });
+    }
+    if (customizadas.length >= MAX_CUSTOMIZADAS) {
+      return res.status(400).json({ message: `Limite de ${MAX_CUSTOMIZADAS} integrações personalizadas atingido.` });
+    }
+
+    const novosDados = { ...dados, integracoes_customizadas: [...customizadas, novaIntegracao] };
+    const { error } = await supabase
+      .from('configuracoes')
+      .upsert({ id: 1, dados: novosDados, atualizado_em: new Date() });
+    if (error) throw error;
+
+    res.status(201).json({ message: 'Integração personalizada criada com sucesso', integracao: sanitizarCustomizada(novaIntegracao) });
+  } catch (err) {
+    console.error('Erro ao criar integração personalizada:', err.message);
+    res.status(500).json({ message: 'Erro ao criar integração personalizada' });
+  }
+});
+
+// DELETE /integracoes/customizadas/:servico — exclui uma integração PERSONALIZADA (super-admin).
+// Só atua sobre customizadas: remove a entrada do catálogo, o blob integracao_<slug> e o slug
+// de integracoes_ocultas — preservando todas as demais chaves. Nunca toca serviços padrão.
+router.delete('/customizadas/:servico', verifyToken, isSuperAdmin, async (req, res) => {
+  const servico = normalizarServico(req.params.servico);
+  if (!servico) return res.status(400).json({ message: 'Integração inválida.' });
+  if (isServicoReservado(servico)) {
+    return res.status(400).json({ message: 'Esta integração não pode ser excluída por esta rota.' });
+  }
+  const supabase = require('../config/supabase');
+  try {
+    const { data: atual, error: readError } = await supabase
+      .from('configuracoes').select('dados').eq('id', 1).single();
+    if (readError && readError.code !== 'PGRST116') throw readError;
+    const dados = atual?.dados || {};
+    const customizadas = Array.isArray(dados.integracoes_customizadas) ? dados.integracoes_customizadas : [];
+
+    if (!customizadas.some(c => c && c.servico === servico)) {
+      return res.status(404).json({ message: 'Integração personalizada não encontrada.' });
+    }
+
+    // Preserva todo o resto; remove só o que pertence a este slug.
+    const novosDados = { ...dados };
+    novosDados.integracoes_customizadas = customizadas.filter(c => !(c && c.servico === servico));
+    delete novosDados[`integracao_${servico}`];
+    if (Array.isArray(novosDados.integracoes_ocultas)) {
+      novosDados.integracoes_ocultas = novosDados.integracoes_ocultas.filter(s => s !== servico);
+    }
+
+    const { error } = await supabase
+      .from('configuracoes')
+      .upsert({ id: 1, dados: novosDados, atualizado_em: new Date() });
+    if (error) throw error;
+
+    res.json({ message: 'Integração personalizada excluída com sucesso', servico });
+  } catch (err) {
+    console.error('Erro ao excluir integração personalizada:', err.message);
+    res.status(500).json({ message: 'Erro ao excluir integração personalizada' });
   }
 });
 
