@@ -113,6 +113,11 @@ const camposPorServico: Record<string, CampoConfig[]> = {
   supabase: []
 };
 
+// Visibilidade de cards (espelha o backend Fase 3A): SÓ estas podem ser ocultadas/reexibidas.
+const INTEGRACOES_REMOVIVEIS = new Set(['clicksign', 'smtp']);
+// Nativas/críticas: ficam SEMPRE visíveis na UI, mesmo que por algum bug venham em "ocultas".
+const INTEGRACOES_PROTEGIDAS = new Set(['asaas', 'viacep', 'supabase']);
+
 const LS_KEY = 'matopibalog_integracoes';
 
 // Remove campos sensíveis (senha/token/apiKey — os de tipo 'password') antes de
@@ -139,7 +144,8 @@ export const Integracoes: React.FC = () => {
   // Toast global para feedback fora do modal
   const [toast, setToast] = useState<{ tipo: 'sucesso' | 'erro'; texto: string } | null>(null);
   const [salvando, setSalvando] = useState(false);
-  // Estado para o card "Adicionar Nova Integração" foi removido nesta fase de higiene.
+  // Serviços atualmente ocultos da tela (fonte de verdade: GET /integracoes/estado).
+  const [integracoesOcultas, setIntegracoesOcultas] = useState<string[]>([]);
 
 
   useEffect(() => {
@@ -198,6 +204,66 @@ export const Integracoes: React.FC = () => {
   };
 
   useEffect(() => { carregarIntegracoesBackend(); }, []);
+
+  // Estado de visibilidade dos cards (GET /integracoes/estado). Sem segredos: só a lista
+  // de serviços ocultos. 401/403/erro de rede mantêm a tela sem quebrar (nada oculto).
+  const carregarEstadoIntegracoes = async () => {
+    try {
+      const resp = await api.get('/integracoes/estado');
+      const bruto = Array.isArray(resp.data?.ocultas) ? resp.data.ocultas : [];
+      // Normaliza para strings minúsculas e NUNCA oculta integrações protegidas na UI,
+      // mesmo que o backend por algum bug devolva uma delas.
+      const ocultas = bruto
+        .filter((s: any) => typeof s === 'string')
+        .map((s: string) => s.toLowerCase())
+        .filter((s: string) => !INTEGRACOES_PROTEGIDAS.has(s));
+      setIntegracoesOcultas(ocultas);
+    } catch {
+      // Mantém o fallback (nada oculto); não expõe erro/segredo.
+    }
+  };
+
+  useEffect(() => { carregarEstadoIntegracoes(); }, []);
+
+  // Oculta um card opcional (clicksign/smtp). NÃO apaga a configuração/credencial salva.
+  const ocultarIntegracao = async (servico: Integracao) => {
+    if (!INTEGRACOES_REMOVIVEIS.has(servico.id)) return;
+    const ok = window.confirm(
+      'Deseja remover esta integração da tela? A configuração salva será mantida e você poderá adicioná-la novamente depois.'
+    );
+    if (!ok) return;
+    try {
+      await api.patch(`/integracoes/${servico.id}/ocultar`);
+      mostrarToast('sucesso', `${servico.nome}: removida da tela.`);
+      setIntegracoesOcultas(prev => (prev.includes(servico.id) ? prev : [...prev, servico.id]));
+      // Reflete a fonte de verdade (backend).
+      carregarEstadoIntegracoes();
+    } catch (err: any) {
+      // Não altera o estado visual se a API falhar.
+      const statusCode = err?.response?.status;
+      const msg = statusCode === 403
+        ? 'Apenas super-admin pode remover esta integração.'
+        : (err?.response?.data?.message || 'Falha ao remover da tela. Tente novamente.');
+      mostrarToast('erro', `${servico.nome}: ${msg}`);
+    }
+  };
+
+  // Reexibe um card previamente ocultado (clicksign/smtp).
+  const reexibirIntegracao = async (servico: Integracao) => {
+    if (!INTEGRACOES_REMOVIVEIS.has(servico.id)) return;
+    try {
+      await api.patch(`/integracoes/${servico.id}/exibir`);
+      mostrarToast('sucesso', `${servico.nome}: adicionada de volta à tela.`);
+      setIntegracoesOcultas(prev => prev.filter(s => s !== servico.id));
+      carregarEstadoIntegracoes();
+    } catch (err: any) {
+      const statusCode = err?.response?.status;
+      const msg = statusCode === 403
+        ? 'Apenas super-admin pode reexibir esta integração.'
+        : (err?.response?.data?.message || 'Falha ao reexibir. Tente novamente.');
+      mostrarToast('erro', `${servico.nome}: ${msg}`);
+    }
+  };
 
   const persistirIntegracoes = (novas: Integracao[]) => {
     const obj: Record<string, any> = {};
@@ -283,8 +349,14 @@ export const Integracoes: React.FC = () => {
     setSalvando(false);
   };
 
-  // Fase de higiene: o fluxo "Adicionar Nova Integração" foi removido (não há backend para
-  // suportá-lo). O card correspondente virou um placeholder "Em breve", não clicável.
+  // Cards visíveis: exclui os ocultos, mas NUNCA esconde integrações protegidas.
+  const integracoesVisiveis = integracoes.filter(
+    s => INTEGRACOES_PROTEGIDAS.has(s.id) || !integracoesOcultas.includes(s.id)
+  );
+  // Ocultas que podem voltar à tela (apenas as removíveis, defensivo).
+  const integracoesParaReexibir = integracoes.filter(
+    s => INTEGRACOES_REMOVIVEIS.has(s.id) && integracoesOcultas.includes(s.id)
+  );
 
   return (
     <div className="space-y-6 pb-20">
@@ -304,9 +376,10 @@ export const Integracoes: React.FC = () => {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-        {integracoes.map(servico => {
+        {integracoesVisiveis.map(servico => {
           const Icon = iconeMap[servico.icone] || Plug;
           const isNaoConfiguravel = servico.id === 'viacep' || servico.id === 'supabase';
+          const podeRemover = INTEGRACOES_REMOVIVEIS.has(servico.id);
           return (
             <div key={servico.id} className="bg-white rounded-2xl border border-gray-100 p-6 hover:border-blue-200 hover:shadow-md transition-all">
               <div className="flex items-center justify-between mb-4">
@@ -357,17 +430,52 @@ export const Integracoes: React.FC = () => {
                   Testar Conexão
                 </button>
               </div>
+
+              {podeRemover && (
+                <button
+                  onClick={() => ocultarIntegracao(servico)}
+                  className="mt-3 w-full text-xs font-medium text-gray-400 hover:text-red-600 transition-colors"
+                >
+                  Remover da tela
+                </button>
+              )}
             </div>
           );
         })}
 
-        <div className="bg-white rounded-2xl border-2 border-dashed border-gray-200 p-6 hover:border-blue-400 hover:bg-blue-50/30 transition-all flex flex-col items-center justify-center min-h-[200px] opacity-50 cursor-not-allowed">
+        {/* Área "Adicionar integração": reexibe integrações opcionais que foram removidas.
+            Sem nada oculto, mantém o placeholder "Em breve". */}
+        {integracoesParaReexibir.length > 0 ? (
+          integracoesParaReexibir.map(servico => {
+            const Icon = iconeMap[servico.icone] || Plug;
+            return (
+              <div
+                key={`reexibir-${servico.id}`}
+                className="bg-white rounded-2xl border-2 border-dashed border-gray-200 p-6 hover:border-blue-400 hover:bg-blue-50/30 transition-all flex flex-col items-center justify-center min-h-[200px]"
+              >
+                <div className="p-3 rounded-xl bg-blue-50 text-blue-600 mb-3">
+                  <Icon size={28} />
+                </div>
+                <p className="font-bold text-gray-700">{servico.nome}</p>
+                <p className="text-xs text-gray-400 mt-1 mb-4 text-center">Removida da tela — configuração preservada</p>
+                <button
+                  onClick={() => reexibirIntegracao(servico)}
+                  className="px-4 py-2 rounded-lg font-medium text-sm bg-green-50 text-green-700 hover:bg-green-100 transition-colors"
+                >
+                  Reexibir {servico.nome}
+                </button>
+              </div>
+            );
+          })
+        ) : (
+          <div className="bg-white rounded-2xl border-2 border-dashed border-gray-200 p-6 hover:border-blue-400 hover:bg-blue-50/30 transition-all flex flex-col items-center justify-center min-h-[200px] opacity-50 cursor-not-allowed">
             <div className="p-3 rounded-xl bg-blue-50 text-blue-600 mb-3">
               <Plug size={28} />
             </div>
             <p className="font-bold text-gray-700">Em breve</p>
             <p className="text-xs text-gray-400 mt-1">Próxima fase: integração configurável</p>
           </div>
+        )}
       </div>
 
       {showModal && servicoSelecionado && (
