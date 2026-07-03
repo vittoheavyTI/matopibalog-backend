@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const supabase = require('../config/supabase');
 const { verifyToken, isAdmin, isSuperAdmin } = require('../middlewares/auth');
 const { verificarEmpresa } = require('../middlewares/tenant');
+const { resolveAsaasApiKey } = require('../utils/asaasConfig');
 
 // Comparação em tempo constante (hash de tamanho fixo evita vazar comprimento)
 function safeEqual(a, b) {
@@ -21,7 +22,10 @@ async function getAsaasConfig() {
     .single();
   
   const integracoes = data?.dados?.['integracao_asaas'] || {};
-  const apiKey = integracoes.apiKey || process.env.ASAAS_API_KEY;
+  // Descriptografa a apiKey armazenada (criptografia em repouso do PR #211) antes
+  // de usá-la como access_token. Valor legado em texto puro passa direto; valor
+  // enc:v1 sem chave lança e impede o envio de ciphertext ao Asaas.
+  const apiKey = resolveAsaasApiKey(integracoes);
   const environment = integracoes.environment || 'sandbox';
   const baseURL = environment === 'production'
     ? 'https://api.asaas.com/v3'
