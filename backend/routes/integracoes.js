@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { verifyToken, isSuperAdmin } = require('../middlewares/auth');
+const cryptoHelper = require('../utils/integrationsCrypto');
 const { z } = require('zod');
 
 // Validação simples do corpo de /salvar (servico obrigatório + config objeto).
@@ -242,9 +243,26 @@ router.post('/salvar', verifyToken, isSuperAdmin, async (req, res) => {
       return res.status(400).json({ message: 'Integração não cadastrada.' });
     }
 
+    // Criptografia em repouso: cifra os campos sensíveis (apiKey/token/senha/etc.)
+    // antes de persistir; campos não sensíveis permanecem em claro. Se a criptografia
+    // falhar (ex.: INTEGRATIONS_SECRET_KEY ausente), aborta com 500 genérico — nunca
+    // grava o segredo em texto puro por engano.
+    let configCriptografado;
+    try {
+      configCriptografado = {};
+      for (const [chave, valor] of Object.entries(config)) {
+        const sensivel = isCampoSensivel(chave);
+        configCriptografado[chave] = cryptoHelper.maybeEncryptIntegrationField(chave, valor, sensivel);
+      }
+    } catch (cryptoErr) {
+      // Só a mensagem técnica (sem valor/chave/segredo).
+      console.error('Falha ao criptografar credenciais de integração:', cryptoErr.message);
+      return res.status(500).json({ message: 'Erro ao salvar integração' });
+    }
+
     const dadosAtualizados = {
       ...dadosAtuais,
-      [`integracao_${servicoNorm}`]: config,
+      [`integracao_${servicoNorm}`]: configCriptografado,
     };
 
     const { error } = await supabase
@@ -287,8 +305,20 @@ router.get('/', verifyToken, isSuperAdmin, async (req, res) => {
         const configPublica = {};
         const camposMascarados = {};
         for (const [chave, valor] of Object.entries(config)) {
-          if (isCampoSensivel(chave)) camposMascarados[chave] = mascararValor(valor);
-          else configPublica[chave] = valor;
+          if (isCampoSensivel(chave)) {
+            // Descriptografa antes de mascarar (valor legado em claro passa direto).
+            // Se a descriptografia falhar (ex.: chave ausente), mascara genérico:
+            // nunca vaza o segredo nem derruba o GET inteiro.
+            let valorTratado;
+            try {
+              valorTratado = cryptoHelper.maybeDecryptIntegrationField(chave, valor, true);
+            } catch (_) {
+              valorTratado = null;
+            }
+            camposMascarados[chave] = mascararValor(valorTratado);
+          } else {
+            configPublica[chave] = valor;
+          }
         }
         return {
           servico,
