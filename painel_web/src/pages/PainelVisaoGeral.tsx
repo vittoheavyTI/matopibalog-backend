@@ -37,11 +37,11 @@ export const PainelVisaoGeral: React.FC = () => {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div className="flex items-center space-x-3 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-        <div className="bg-gray-800 p-2 rounded-lg text-white"><Shield size={24} /></div>
+      <div className="flex items-center gap-2.5">
+        <div className="bg-gray-800 p-1.5 rounded-lg text-white"><Shield size={18} /></div>
         <div>
-          <h1 className="text-2xl font-bold text-gray-800">Visão Geral</h1>
-          <p className="text-sm text-gray-500">Resumo geral da plataforma Matopiba Log</p>
+          <h1 className="text-2xl font-bold text-gray-800 leading-tight">Visão Geral</h1>
+          <p className="text-sm text-gray-500">Resumo da plataforma Matopiba Log</p>
         </div>
       </div>
 
