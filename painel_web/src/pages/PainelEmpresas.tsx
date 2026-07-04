@@ -13,6 +13,15 @@ export const PainelEmpresas: React.FC = () => {
 
   useEffect(() => { carregar(); }, []);
 
+  // Auto-dismiss do toast: some sozinho após 3,5s. Cada novo toast reinicia o
+  // timer (o cleanup limpa o anterior) e o unmount também limpa — evita a
+  // notificação ficar fixa indefinidamente. Fechar manual: botão X no toast.
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 3500);
+    return () => clearTimeout(timer);
+  }, [toast]);
+
   async function carregar() {
     const response = await api.get('/painel-admin/empresas');
     setEmpresas(response.data || []);
@@ -71,6 +80,7 @@ export const PainelEmpresas: React.FC = () => {
         <div className={`fixed top-6 right-6 z-[100] flex items-center space-x-2 px-5 py-3 rounded-xl shadow-2xl text-sm font-bold ${toast.tipo === 'sucesso' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
           {toast.tipo === 'sucesso' ? <Check size={18} /> : <AlertTriangle size={18} />}
           <span>{toast.message}</span>
+          <button onClick={() => setToast(null)} title="Fechar" aria-label="Fechar notificação" className="ml-1 p-0.5 rounded-full hover:bg-white/20"><X size={16} /></button>
         </div>
       )}
 
@@ -106,10 +116,10 @@ export const PainelEmpresas: React.FC = () => {
                 <td className="p-4"><span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest ${e.status === 'ativo' ? 'bg-green-50 text-green-700' : e.status === 'trial' ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-700'}`}>{e.status}</span></td>
                 <td className="p-4">
                   <div className="flex items-center justify-center gap-1">
-                    <button onClick={() => { setEditing(e); setFormDados({ nome: e.nome || '', cnpj: e.cnpj || '', email: e.email_contato || '', telefone: e.telefone_contato || '', plano_id: e.plano_id || '' }); setShowModal(true); }} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg"><Eye size={16} /></button>
-                    <button onClick={() => suspender(e.id)} className="p-1.5 text-orange-500 hover:bg-orange-50 rounded-lg">{e.status === 'suspenso' ? <Unlock size={16} /> : <Ban size={16} />}</button>
-                    <button onClick={() => resetSenhaAdmin(e.id, e.nome)} className="p-1.5 text-gray-500 hover:bg-gray-100 rounded-lg" title="Resetar senha do admin"><KeyRound size={16} /></button>
-                    <button onClick={() => setDeleteTarget(e)} className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg"><Trash2 size={16} /></button>
+                    <button onClick={() => { setEditing(e); setFormDados({ nome: e.nome || '', cnpj: e.cnpj || '', email: e.email_contato || '', telefone: e.telefone_contato || '', plano_id: e.plano_id || '' }); setShowModal(true); }} title="Editar empresa" aria-label="Editar empresa" className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg"><Eye size={16} /></button>
+                    <button onClick={() => suspender(e.id)} title={e.status === 'suspenso' ? 'Reativar empresa' : 'Suspender empresa'} aria-label={e.status === 'suspenso' ? 'Reativar empresa' : 'Suspender empresa'} className="p-1.5 text-orange-500 hover:bg-orange-50 rounded-lg">{e.status === 'suspenso' ? <Unlock size={16} /> : <Ban size={16} />}</button>
+                    <button onClick={() => resetSenhaAdmin(e.id, e.nome)} className="p-1.5 text-gray-500 hover:bg-gray-100 rounded-lg" title="Resetar senha do admin" aria-label="Resetar senha do admin"><KeyRound size={16} /></button>
+                    <button onClick={() => setDeleteTarget(e)} title="Excluir empresa" aria-label="Excluir empresa" className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg"><Trash2 size={16} /></button>
                   </div>
                 </td>
               </tr>
