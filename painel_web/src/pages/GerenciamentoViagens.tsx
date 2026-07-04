@@ -1,13 +1,25 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Plus, X, Search, Filter, Truck, MapPin, Calendar, DollarSign, Gauge, Trash2, Edit, Check, AlertTriangle, ChevronLeft, ChevronDown, ChevronRight, Fuel, FileText, TrendingUp, Save, Unlock, Lock } from 'lucide-react';
 import { format } from 'date-fns';
 import { formatCurrency } from '../utils';
 import api, { newClientRequestId } from '../api';
+import { PlanoBloqueadoCard } from '../components/PlanoBloqueadoCard';
 
 const gvFmt = (d: any, fmt: string) => {
   if (!d) return '-';
   try { const dt = new Date(d); if (isNaN(dt.getTime())) return '-'; return format(dt, fmt); } catch { return '-'; }
+};
+
+// Detecta o 403 de plano bloqueado / trial expirado (middleware verificarPlano) e
+// extrai a mensagem amigável do backend. Token expirado (error: 'Token inválido ou
+// expirado.') NÃO entra aqui — esse fluxo é do api.ts (PR #219, dispara logout).
+const extrairMensagemPlano = (err: any): string | null => {
+  const resp = err?.response;
+  if (resp?.status !== 403) return null;
+  const data = resp.data;
+  if (data?.error === 'Token inválido ou expirado.') return null;
+  return typeof data?.message === 'string' ? data.message : null;
 };
 
 export const GerenciamentoViagens: React.FC = () => {
@@ -19,6 +31,11 @@ export const GerenciamentoViagens: React.FC = () => {
   // por sessão expirada, 500) ou quando o motorista não vem em /admin/motoristas
   // (fora do escopo do usuário / removido). Sem isso o spinner ficava infinito.
   const [erroCarregamento, setErroCarregamento] = useState(false);
+  // Mensagem de plano bloqueado / trial expirado (403 do verificarPlano). Quando
+  // definida, a tela mostra o card de regularização no lugar da lista/detalhe —
+  // evita "Nenhum frete encontrado" quando a causa real é o bloqueio comercial.
+  const [planoBloqueadoMsg, setPlanoBloqueadoMsg] = useState<string | null>(null);
+  const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('todos');
   // A URL (?motorista=<id>) é a fonte de verdade do motorista em foco; filterMot é sincronizado a partir dela.
@@ -76,6 +93,7 @@ export const GerenciamentoViagens: React.FC = () => {
     try {
       setLoading(true);
       setErroCarregamento(false);
+      setPlanoBloqueadoMsg(null);
       const [resFretes, resMots] = await Promise.all([
         api.get('/fretes'),
         api.get('/admin/motoristas')
@@ -93,7 +111,9 @@ export const GerenciamentoViagens: React.FC = () => {
       })));
     } catch (err) {
       console.error('Erro ao carregar fretes:', err);
-      setErroCarregamento(true);
+      const msgPlano = extrairMensagemPlano(err);
+      if (msgPlano) setPlanoBloqueadoMsg(msgPlano);
+      else setErroCarregamento(true);
     } finally {
       setLoading(false);
     }
@@ -102,6 +122,7 @@ export const GerenciamentoViagens: React.FC = () => {
   const loadMotoristaData = async (motId: string) => {
     try {
       setErroCarregamento(false);
+      setPlanoBloqueadoMsg(null);
       const [resF, resD, resA, resV] = await Promise.all([
         api.get('/fretes?motorista_id=' + motId),
         api.get('/despesas?motorista_id=' + motId),
@@ -143,7 +164,9 @@ export const GerenciamentoViagens: React.FC = () => {
       })));
     } catch (err) {
       console.error('Erro ao carregar dados do motorista', err);
-      setErroCarregamento(true);
+      const msgPlano = extrairMensagemPlano(err);
+      if (msgPlano) setPlanoBloqueadoMsg(msgPlano);
+      else setErroCarregamento(true);
     }
   };
 
@@ -1117,7 +1140,11 @@ export const GerenciamentoViagens: React.FC = () => {
   return (
 
     <div className="space-y-3 pb-20 px-6">
-      {filterMot === 'todos' ? renderLista() : renderDetalheMotorista()}
+      {planoBloqueadoMsg ? (
+        <div className="pt-10">
+          <PlanoBloqueadoCard message={planoBloqueadoMsg} onRegularizar={() => navigate('/minhas-faturas')} />
+        </div>
+      ) : filterMot === 'todos' ? renderLista() : renderDetalheMotorista()}
 
       {showModal && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
