@@ -14,6 +14,11 @@ export const GerenciamentoViagens: React.FC = () => {
   const [fretes, setFretes] = useState<any[]>([]);
   const [motoristas, setMotoristas] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  // Estado terminal de erro/vazio do detalhe do motorista. Evita que a tela fique
+  // presa em "Carregando dados do motorista..." quando o carregamento falha (ex.: 403
+  // por sessão expirada, 500) ou quando o motorista não vem em /admin/motoristas
+  // (fora do escopo do usuário / removido). Sem isso o spinner ficava infinito.
+  const [erroCarregamento, setErroCarregamento] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('todos');
   // A URL (?motorista=<id>) é a fonte de verdade do motorista em foco; filterMot é sincronizado a partir dela.
@@ -70,6 +75,7 @@ export const GerenciamentoViagens: React.FC = () => {
   const loadData = async () => {
     try {
       setLoading(true);
+      setErroCarregamento(false);
       const [resFretes, resMots] = await Promise.all([
         api.get('/fretes'),
         api.get('/admin/motoristas')
@@ -87,6 +93,7 @@ export const GerenciamentoViagens: React.FC = () => {
       })));
     } catch (err) {
       console.error('Erro ao carregar fretes:', err);
+      setErroCarregamento(true);
     } finally {
       setLoading(false);
     }
@@ -94,6 +101,7 @@ export const GerenciamentoViagens: React.FC = () => {
 
   const loadMotoristaData = async (motId: string) => {
     try {
+      setErroCarregamento(false);
       const [resF, resD, resA, resV] = await Promise.all([
         api.get('/fretes?motorista_id=' + motId),
         api.get('/despesas?motorista_id=' + motId),
@@ -135,6 +143,7 @@ export const GerenciamentoViagens: React.FC = () => {
       })));
     } catch (err) {
       console.error('Erro ao carregar dados do motorista', err);
+      setErroCarregamento(true);
     }
   };
 
@@ -826,11 +835,30 @@ export const GerenciamentoViagens: React.FC = () => {
     });
 
   const renderDetalheMotorista = () => {
-    if (!selectedMotorista) {
+    // Enquanto o carregamento inicial está em andamento, mantém o spinner.
+    if (loading) {
       return (
         <div className="py-20 text-center text-gray-600">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
           Carregando dados do motorista...
+        </div>
+      );
+    }
+    // Estado terminal: carregamento terminou mas o motorista não veio na lista
+    // (fora do escopo / removido / sessão expirada gerando 403) ou uma chamada falhou.
+    // Mostra mensagem amigável com saída para a lista, em vez de spinner infinito.
+    if (erroCarregamento || !selectedMotorista) {
+      return (
+        <div className="py-16 px-6 text-center">
+          <div className="mx-auto w-12 h-12 rounded-full bg-yellow-100 flex items-center justify-center mb-4">
+            <AlertTriangle size={24} className="text-yellow-600" />
+          </div>
+          <h3 className="text-lg font-bold text-gray-800 mb-1">Motorista não encontrado, sem acesso ou sessão expirada.</h3>
+          <p className="text-sm text-gray-500 mb-6">Volte para a lista e tente novamente. Se o problema continuar, faça login novamente.</p>
+          <button onClick={() => selecionarMotorista('todos')}
+            className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition-colors">
+            <ChevronLeft size={18} className="mr-1" /> Voltar para lista
+          </button>
         </div>
       );
     }
