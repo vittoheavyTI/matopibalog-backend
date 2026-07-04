@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Building2, Save, Check, Image,
-  Palette, X, Upload, Trash2, Truck, Move
+  Palette, X, Upload, Trash2, Truck, Move, Settings, FileText
 } from 'lucide-react';
 import { maskPhone, maskCNPJ, maskCEP } from '../utils/masks';
 import api from '../api';
@@ -347,9 +347,16 @@ export const Configuracoes: React.FC = () => {
       <input ref={logoFileRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) processFile(f, 'logo'); e.target.value = ''; }} />
       <input ref={bgFileRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) processFile(f, 'bg'); e.target.value = ''; }} />
 
-      <div>
-        <h2 className="text-2xl font-bold text-gray-800">Configurações do Sistema</h2>
-        <p className="text-gray-600 text-sm">Personalize sua empresa e as preferências do sistema.</p>
+      <div className="flex items-center gap-3">
+        <div className="bg-green-700 p-2.5 rounded-xl text-white shadow-sm shadow-green-100">
+          <Settings size={24} />
+        </div>
+        <div>
+          <h2 className="text-2xl font-bold text-gray-800">Configurações</h2>
+          <p className="text-gray-600 text-sm">
+            Mantenha os dados da sua empresa ou conta atualizados — eles são usados nos relatórios e PDFs.
+          </p>
+        </div>
       </div>
 
       <div className="flex space-x-1 bg-gray-100 p-1 rounded-xl w-fit">
@@ -362,7 +369,7 @@ export const Configuracoes: React.FC = () => {
             className={`flex items-center px-6 py-2.5 rounded-lg font-bold text-sm transition-all ${activeTab === tab ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
           >
             {tab === 'empresa' && <><Building2 size={18} className="mr-2" />Dados da Empresa</>}
-            {tab === 'aparencia' && <><Palette size={18} className="mr-2" />Aparência</>}
+            {tab === 'aparencia' && <><Palette size={18} className="mr-2" />Aparência do Sistema</>}
           </button>
         ))}
       </div>
@@ -370,10 +377,14 @@ export const Configuracoes: React.FC = () => {
       {/* ── ABA EMPRESA ── */}
       {activeTab === 'empresa' && (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 space-y-6">
+          <div className="flex items-start gap-2.5 bg-green-50 border border-green-100 text-green-800 rounded-xl p-3.5 text-sm">
+            <FileText size={18} className="mt-0.5 flex-shrink-0" />
+            <span>Esses dados serão usados nos relatórios e PDFs da sua empresa ou conta. Mantenha-os corretos e completos.</span>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-4">
               {[
-                { label: 'Razão Social / Nome Fantasia', field: 'nome', placeholder: 'Nome da sua transportadora', type: 'text' },
+                { label: 'Razão Social / Nome', field: 'nome', placeholder: 'Nome da empresa ou do transportador', type: 'text' },
                 { label: 'CNPJ', field: 'cnpj', placeholder: '00.000.000/0000-00', type: 'text', mask: maskCNPJ },
                 { label: 'Telefone de Contato', field: 'telefone', placeholder: '(00) 0 0000-0000', type: 'text', mask: maskPhone },
                 { label: 'Email Corporativo', field: 'email', placeholder: 'contato@empresa.com', type: 'email' },
@@ -382,7 +393,7 @@ export const Configuracoes: React.FC = () => {
                   <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">{label}</label>
                   <input
                     type={type}
-                    className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50"
+                    className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-green-700 bg-gray-50/50"
                     value={(company as any)[field]}
                     onChange={(e) => setCompany({ ...company, [field]: mask ? mask(e.target.value) : e.target.value })}
                     placeholder={placeholder}
@@ -394,31 +405,31 @@ export const Configuracoes: React.FC = () => {
               <div className="grid grid-cols-3 gap-4">
                 <div className="col-span-2">
                   <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Endereço</label>
-                  <input type="text" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" value={company.endereco} onChange={(e) => setCompany({ ...company, endereco: e.target.value })} placeholder="Av. Brasil, 1000 - Centro" />
+                  <input type="text" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-green-700 bg-gray-50/50" value={company.endereco} onChange={(e) => setCompany({ ...company, endereco: e.target.value })} placeholder="Av. Brasil, 1000 - Centro" />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">CEP</label>
-                  <input type="text" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" value={company.cep} onChange={(e) => setCompany({ ...company, cep: maskCEP(e.target.value) })} placeholder="00000-000" />
+                  <input type="text" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-green-700 bg-gray-50/50" value={company.cep} onChange={(e) => setCompany({ ...company, cep: maskCEP(e.target.value) })} placeholder="00000-000" />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Complemento</label>
-                  <input type="text" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" value={company.complemento} onChange={(e) => setCompany({ ...company, complemento: e.target.value })} placeholder="Sala 201" />
+                  <input type="text" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-green-700 bg-gray-50/50" value={company.complemento} onChange={(e) => setCompany({ ...company, complemento: e.target.value })} placeholder="Sala 201" />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Ponto de Referência</label>
-                  <input type="text" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" value={company.pontoReferencia} onChange={(e) => setCompany({ ...company, pontoReferencia: e.target.value })} placeholder="Próximo a..." />
+                  <input type="text" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-green-700 bg-gray-50/50" value={company.pontoReferencia} onChange={(e) => setCompany({ ...company, pontoReferencia: e.target.value })} placeholder="Próximo a..." />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Cidade</label>
-                  <input type="text" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" value={company.cidade} onChange={(e) => setCompany({ ...company, cidade: e.target.value })} />
+                  <input type="text" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-green-700 bg-gray-50/50" value={company.cidade} onChange={(e) => setCompany({ ...company, cidade: e.target.value })} />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Estado (UF)</label>
-                  <input type="text" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" value={company.estado} maxLength={2} onChange={(e) => setCompany({ ...company, estado: e.target.value.toUpperCase() })} placeholder="BA" />
+                  <input type="text" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-green-700 bg-gray-50/50" value={company.estado} maxLength={2} onChange={(e) => setCompany({ ...company, estado: e.target.value.toUpperCase() })} placeholder="BA" />
                 </div>
               </div>
             </div>
@@ -479,7 +490,7 @@ export const Configuracoes: React.FC = () => {
                     onClick={() => handleImageAreaClick(target)}
                     onDragOver={(e) => e.preventDefault()}
                     onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) processFile(f, target); }}
-                    className="relative w-full h-40 border-2 border-dashed border-gray-200 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:border-blue-400 hover:bg-blue-50/30 transition-all overflow-hidden"
+                    className="relative w-full h-40 border-2 border-dashed border-gray-200 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:border-green-500 hover:bg-green-50/30 transition-all overflow-hidden"
                   >
                     {current ? (
                       <img src={current} alt={label} className={target === 'logo' ? 'max-w-full max-h-full object-contain p-4' : 'w-full h-full object-cover'} />
@@ -493,7 +504,7 @@ export const Configuracoes: React.FC = () => {
                   </div>
                   {current && (
                     <div className="flex space-x-2 mt-2">
-                      <button onClick={() => handleImageAreaClick(target)} className="text-xs px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 font-medium transition-colors">
+                      <button onClick={() => handleImageAreaClick(target)} className="text-xs px-3 py-1.5 bg-green-50 text-green-700 rounded-lg hover:bg-green-100 font-medium transition-colors">
                         <Image size={14} className="inline mr-1" />Ajustar
                       </button>
                       <button onClick={async () => {
@@ -611,7 +622,7 @@ export const Configuracoes: React.FC = () => {
                     localStorage.setItem(`${PREFIX}login_template`, template.id);
                     syncConfigToServer();
                   }}
-                  className={`cursor-pointer rounded-xl p-4 border-2 transition-all text-center ${selectedTemplate === template.id ? 'border-blue-500 bg-blue-50 shadow-md' : 'border-gray-200 bg-white hover:border-gray-300'}`}
+                  className={`cursor-pointer rounded-xl p-4 border-2 transition-all text-center ${selectedTemplate === template.id ? 'border-green-600 bg-green-50 shadow-md' : 'border-gray-200 bg-white hover:border-gray-300'}`}
                 >
                   <div style={{
                     width: '60px', height: '80px', margin: '0 auto 8px',
@@ -640,14 +651,14 @@ export const Configuracoes: React.FC = () => {
                   <span className="font-medium text-gray-700">Deslocamento Horizontal (X)</span>
                   <span className="text-gray-500">{cardOffsetX}px</span>
                 </div>
-                <input type="range" min="-200" max="200" value={cardOffsetX} onChange={e => { const v = Number(e.target.value); setCardOffsetX(v); localStorage.setItem(`${PREFIX}card_offset_x`, v.toString()); }} className="w-full accent-blue-600" />
+                <input type="range" min="-200" max="200" value={cardOffsetX} onChange={e => { const v = Number(e.target.value); setCardOffsetX(v); localStorage.setItem(`${PREFIX}card_offset_x`, v.toString()); }} className="w-full accent-green-700" />
               </div>
               <div>
                 <div className="flex justify-between text-sm mb-1">
                   <span className="font-medium text-gray-700">Deslocamento Vertical (Y)</span>
                   <span className="text-gray-500">{cardOffsetY}px</span>
                 </div>
-                <input type="range" min="-150" max="150" value={cardOffsetY} onChange={e => { const v = Number(e.target.value); setCardOffsetY(v); localStorage.setItem(`${PREFIX}card_offset_y`, v.toString()); }} className="w-full accent-blue-600" />
+                <input type="range" min="-150" max="150" value={cardOffsetY} onChange={e => { const v = Number(e.target.value); setCardOffsetY(v); localStorage.setItem(`${PREFIX}card_offset_y`, v.toString()); }} className="w-full accent-green-700" />
               </div>
             </div>
           </div>
@@ -686,25 +697,25 @@ export const Configuracoes: React.FC = () => {
               </div>
               <div>
                 <div className="flex justify-between text-sm mb-1"><span className="font-medium text-gray-700">Transparência</span><span className="text-gray-500">{footerOpacity}%</span></div>
-                <input type="range" min="0" max="100" value={footerOpacity} onChange={e => { const v = Number(e.target.value); setFooterOpacity(v); localStorage.setItem(`${PREFIX}footer_opacity`, v.toString()); }} className="w-full accent-blue-600" />
+                <input type="range" min="0" max="100" value={footerOpacity} onChange={e => { const v = Number(e.target.value); setFooterOpacity(v); localStorage.setItem(`${PREFIX}footer_opacity`, v.toString()); }} className="w-full accent-green-700" />
               </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
                 <div className="flex justify-between text-sm mb-1"><span className="font-medium text-gray-700">Tamanho da Fonte</span><span className="text-gray-500">{footerFontSize}px</span></div>
-                <input type="range" min="10" max="24" value={footerFontSize} onChange={e => { const v = Number(e.target.value); setFooterFontSize(v); localStorage.setItem(`${PREFIX}footer_font_size`, v.toString()); }} className="w-full accent-blue-600" />
+                <input type="range" min="10" max="24" value={footerFontSize} onChange={e => { const v = Number(e.target.value); setFooterFontSize(v); localStorage.setItem(`${PREFIX}footer_font_size`, v.toString()); }} className="w-full accent-green-700" />
               </div>
               <div>
                 <div className="text-sm mb-1"><span className="font-medium text-gray-700">Fonte</span></div>
-                <select value={footerFontFamily} onChange={e => { setFooterFontFamily(e.target.value); localStorage.setItem(`${PREFIX}footer_font_family`, e.target.value); }} className="w-full border-2 border-gray-50 rounded-xl p-2.5 outline-none focus:border-blue-500 bg-gray-50/50 text-sm">
+                <select value={footerFontFamily} onChange={e => { setFooterFontFamily(e.target.value); localStorage.setItem(`${PREFIX}footer_font_family`, e.target.value); }} className="w-full border-2 border-gray-50 rounded-xl p-2.5 outline-none focus:border-green-700 bg-gray-50/50 text-sm">
                   {['Arial', 'Times New Roman', 'Georgia', 'Verdana', 'Courier New'].map(f => <option key={f} value={f}>{f}</option>)}
                 </select>
               </div>
               <div>
                 <div className="text-sm mb-1"><span className="font-medium text-gray-700">Negrito</span></div>
                 <button onClick={() => { const v = !footerBold; setFooterBold(v); localStorage.setItem(`${PREFIX}footer_bold`, v.toString()); }}
-                  style={{ width: '100%', padding: '10px', borderRadius: '12px', border: footerBold ? '2px solid #3b82f6' : '2px solid #e5e7eb', background: footerBold ? '#eff6ff' : '#f9fafb', fontWeight: footerBold ? 'bold' : 'normal', color: footerBold ? '#3b82f6' : '#6b7280', cursor: 'pointer', fontSize: '14px' }}>
+                  style={{ width: '100%', padding: '10px', borderRadius: '12px', border: footerBold ? '2px solid #15803d' : '2px solid #e5e7eb', background: footerBold ? '#f0fdf4' : '#f9fafb', fontWeight: footerBold ? 'bold' : 'normal', color: footerBold ? '#15803d' : '#6b7280', cursor: 'pointer', fontSize: '14px' }}>
                   {footerBold ? '✓ Negrito' : 'Normal'}
                 </button>
               </div>
@@ -713,23 +724,23 @@ export const Configuracoes: React.FC = () => {
             <div>
               <div className="flex justify-between text-sm mb-1"><span className="font-medium text-gray-700">Respiro do Rodapé</span><span className="text-gray-500">{footerWidth}</span></div>
               <p className="text-xs text-gray-500 mb-2">Controla o espaço entre o texto e a borda do rodapé.</p>
-              <input type="range" min="20" max="100" value={footerWidth} onChange={e => { const v = Number(e.target.value); setFooterWidth(v); localStorage.setItem(`${PREFIX}footer_width`, v.toString()); }} className="w-full accent-blue-600" />
+              <input type="range" min="20" max="100" value={footerWidth} onChange={e => { const v = Number(e.target.value); setFooterWidth(v); localStorage.setItem(`${PREFIX}footer_width`, v.toString()); }} className="w-full accent-green-700" />
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Telefone</label>
-                <input type="text" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" placeholder="(11) 99999-9999" value={contactPhone} onChange={e => { setContactPhone(e.target.value); localStorage.setItem(`${PREFIX}contact_phone`, e.target.value); }} />
+                <input type="text" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-green-700 bg-gray-50/50" placeholder="(11) 99999-9999" value={contactPhone} onChange={e => { setContactPhone(e.target.value); localStorage.setItem(`${PREFIX}contact_phone`, e.target.value); }} />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">E-mail</label>
-                <input type="text" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" placeholder="contato@transportadora.com" value={contactEmail} onChange={e => { setContactEmail(e.target.value); localStorage.setItem(`${PREFIX}contact_email`, e.target.value); }} />
+                <input type="text" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-green-700 bg-gray-50/50" placeholder="contato@transportadora.com" value={contactEmail} onChange={e => { setContactEmail(e.target.value); localStorage.setItem(`${PREFIX}contact_email`, e.target.value); }} />
               </div>
             </div>
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Texto do Rodapé</label>
-              <input type="text" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" placeholder="© 2026 Minha Transportadora. Todos os direitos reservados." value={footerText} onChange={e => { setFooterText(e.target.value); localStorage.setItem(`${PREFIX}login_footer`, e.target.value); }} />
+              <input type="text" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-green-700 bg-gray-50/50" placeholder="© 2026 Minha Transportadora. Todos os direitos reservados." value={footerText} onChange={e => { setFooterText(e.target.value); localStorage.setItem(`${PREFIX}login_footer`, e.target.value); }} />
             </div>
 
             <button onClick={handleSaveFooter} className={`flex items-center px-6 py-3 rounded-xl font-bold transition-all ${showSaved ? 'bg-green-600 text-white' : 'bg-green-700 text-white hover:bg-green-800'}`}>
@@ -761,17 +772,17 @@ export const Configuracoes: React.FC = () => {
                 <div className="space-y-3">
                   <div>
                     <div className="flex justify-between text-sm mb-1"><span className="font-medium text-gray-700">Escala</span><span className="text-gray-500">{tempScale}%</span></div>
-                    <input type="range" min="10" max="200" value={tempScale} onChange={e => setTempScale(Number(e.target.value))} className="w-full accent-blue-600" />
+                    <input type="range" min="10" max="200" value={tempScale} onChange={e => setTempScale(Number(e.target.value))} className="w-full accent-green-700" />
                   </div>
                   <div>
                     <div className="flex justify-between text-sm mb-1"><span className="font-medium text-gray-700">Posição vertical</span><span className="text-gray-500">{tempY}px</span></div>
-                    <input type="range" min="-100" max="100" value={tempY} onChange={e => setTempY(Number(e.target.value))} className="w-full accent-blue-600" />
+                    <input type="range" min="-100" max="100" value={tempY} onChange={e => setTempY(Number(e.target.value))} className="w-full accent-green-700" />
                   </div>
                 </div>
               )}
 
               <input type="file" accept="image/*" className="hidden" id="modalFileInput" onChange={(e) => { const file = e.target.files?.[0]; if (file && editingTarget) processFile(file, editingTarget); e.target.value = ''; }} />
-              <button onClick={() => document.getElementById('modalFileInput')?.click()} className="w-full px-4 py-2 border-2 border-dashed border-gray-300 rounded-lg text-gray-500 hover:border-blue-400 hover:text-blue-600 transition-colors text-sm font-medium">
+              <button onClick={() => document.getElementById('modalFileInput')?.click()} className="w-full px-4 py-2 border-2 border-dashed border-gray-300 rounded-lg text-gray-500 hover:border-green-500 hover:text-green-700 transition-colors text-sm font-medium">
                 <Upload size={16} className="inline mr-1" /> Selecionar outra imagem
               </button>
             </div>
