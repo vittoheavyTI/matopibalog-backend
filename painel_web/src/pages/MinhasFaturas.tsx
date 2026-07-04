@@ -17,6 +17,18 @@ interface Fatura {
   created_at: string;
 }
 
+interface PlanoStatus {
+  status: string;
+  trial_ends_at: string | null;
+  trial_expirado: boolean;
+  plano_id: string | null;
+  plano: {
+    nome: string;
+    preco_mensal: number;
+    limite_motoristas: number;
+  } | null;
+}
+
 const statusMap: Record<string, { label: string; color: string }> = {
   pendente: { label: 'Pendente', color: 'bg-yellow-100 text-yellow-800' },
   pago:     { label: 'Pago',     color: 'bg-green-100 text-green-800'  },
@@ -30,19 +42,25 @@ export const MinhasFaturas: React.FC = () => {
   const [faturas, setFaturas] = useState<Fatura[]>([]);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
+  const [planoStatus, setPlanoStatus] = useState<PlanoStatus | null>(null);
+  const [erroPlano, setErroPlano] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user?.uid) return;
     setLoading(true);
     setErro(null);
+    setErroPlano(null);
     setFaturas([]);
+    setPlanoStatus(null);
 
-    const carregarFaturas = async () => {
-      try {
-        // :empresa_id é ignorado pelo backend para admin comum —
-        // verificarEmpresa usa sempre a empresa do token JWT.
-        const res = await api.get(`/pagamentos/cobrancas/${user.uid}`);
-        const dados: Fatura[] = res.data || [];
+    const carregarDados = async () => {
+      const [resultadoFaturas, resultadoPlano] = await Promise.allSettled([
+        api.get(`/pagamentos/cobrancas/${user.uid}`),
+        api.get('/pagamentos/plano-status'),
+      ]);
+
+      if (resultadoFaturas.status === 'fulfilled') {
+        const dados: Fatura[] = resultadoFaturas.value.data || [];
         // Ordenar por due_date antes de separar próxima/histórico
         dados.sort((a, b) => {
           if (!a.due_date) return 1;
@@ -50,18 +68,71 @@ export const MinhasFaturas: React.FC = () => {
           return new Date(a.due_date).getTime() - new Date(b.due_date).getTime();
         });
         setFaturas(dados);
-      } catch (err) {
+      } else {
         setErro('Não foi possível carregar suas faturas.');
-      } finally {
-        setLoading(false);
       }
+
+      if (resultadoPlano.status === 'fulfilled') {
+        setPlanoStatus(resultadoPlano.value.data);
+      } else {
+        const mensagem = resultadoPlano.reason?.response?.data?.message;
+        setErroPlano(mensagem || 'Não foi possível carregar o status do plano.');
+      }
+
+      setLoading(false);
     };
 
-    carregarFaturas();
+    carregarDados();
   }, [user?.uid]);
 
   const proximaFatura = faturas.find(f => f.status === 'pendente' || f.status === 'vencido');
   const historico     = faturas.filter(f => f !== proximaFatura);
+  const requerRegularizacao = ['suspenso', 'expirado', 'bloqueado'].includes(planoStatus?.status || '') || planoStatus?.trial_expirado;
+
+  const obterBannerPlano = () => {
+    const status = planoStatus?.status;
+    if (status === 'ativo') return {
+      titulo: 'Plano ativo',
+      texto: 'Seu plano está ativo.',
+      classes: 'bg-green-50 border-green-200 text-green-800',
+    };
+    if (status === 'trial') {
+      const data = planoStatus?.trial_ends_at
+        ? new Date(planoStatus.trial_ends_at).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })
+        : null;
+      return planoStatus?.trial_expirado ? {
+        titulo: 'Período de teste expirado',
+        texto: data ? `Seu teste expirou em ${data}.` : 'Seu período de teste expirou.',
+        classes: 'bg-red-50 border-red-200 text-red-800',
+      } : {
+        titulo: 'Período de teste',
+        texto: data ? `Seu teste expira em ${data}.` : 'Sua empresa está no período de teste.',
+        classes: 'bg-blue-50 border-blue-200 text-blue-800',
+      };
+    }
+    if (status === 'suspenso') return {
+      titulo: 'Plano suspenso',
+      texto: 'Regularize sua situação para recuperar o acesso aos recursos operacionais.',
+      classes: 'bg-red-50 border-red-200 text-red-800',
+    };
+    if (status === 'expirado') return {
+      titulo: 'Plano expirado',
+      texto: 'Seu plano expirou. Verifique suas faturas ou entre em contato com o suporte.',
+      classes: 'bg-red-50 border-red-200 text-red-800',
+    };
+    if (status === 'bloqueado') return {
+      titulo: 'Plano bloqueado',
+      texto: 'Seu acesso operacional está bloqueado. Entre em contato com o suporte.',
+      classes: 'bg-red-50 border-red-200 text-red-800',
+    };
+    return {
+      titulo: 'Status do plano',
+      texto: status ? `Status atual: ${status}.` : 'Status não informado.',
+      classes: 'bg-gray-50 border-gray-200 text-gray-700',
+    };
+  };
+
+  const bannerPlano = planoStatus ? obterBannerPlano() : null;
 
   return (
     <div className="space-y-6 pb-20 px-6">
@@ -84,11 +155,42 @@ export const MinhasFaturas: React.FC = () => {
         </div>
       )}
 
+      {!loading && erroPlano && (
+        <div className="flex items-center gap-2 p-4 bg-amber-50 text-amber-800 border border-amber-200 rounded-xl">
+          <AlertCircle size={18} /> {erroPlano}
+        </div>
+      )}
+
+      {!loading && bannerPlano && (
+        <div className={`rounded-xl border p-5 ${bannerPlano.classes}`}>
+          <div className="flex items-start gap-3">
+            <AlertCircle size={20} className="shrink-0 mt-0.5" />
+            <div>
+              <h3 className="font-bold">{bannerPlano.titulo}</h3>
+              <p className="text-sm mt-1">{bannerPlano.texto}</p>
+              {planoStatus?.plano && (
+                <p className="text-xs mt-2 opacity-80">
+                  {planoStatus.plano.nome} · R$ {Number(planoStatus.plano.preco_mensal).toFixed(2)}/mês · até {planoStatus.plano.limite_motoristas} motoristas
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {!loading && !erro && faturas.length === 0 && (
         <div className="rounded-xl p-8 bg-white border border-gray-100 text-center">
           <Receipt className="mx-auto text-gray-300 mb-3" size={40} />
-          <p className="text-gray-600 font-medium">Nenhuma fatura gerada para sua empresa ainda.</p>
-          <p className="text-gray-400 text-sm mt-1">Quando uma cobrança for emitida, ela aparecerá nesta página.</p>
+          <p className="text-gray-600 font-medium">
+            {requerRegularizacao
+              ? 'Não há fatura disponível para regularização no momento.'
+              : 'Nenhuma fatura disponível no momento.'}
+          </p>
+          <p className="text-gray-400 text-sm mt-1">
+            {requerRegularizacao
+              ? 'Entre em contato com o suporte para emissão da cobrança.'
+              : 'Quando uma cobrança for emitida, ela aparecerá aqui.'}
+          </p>
         </div>
       )}
 
@@ -134,8 +236,14 @@ export const MinhasFaturas: React.FC = () => {
               )}
             </div>
           ) : (
-            <div className="rounded-xl p-5 bg-green-50 border border-green-200 text-green-700 text-sm font-medium">
-              ✅ Nenhuma fatura pendente. Tudo em dia!
+            <div className={`rounded-xl p-5 border text-sm font-medium ${
+              requerRegularizacao
+                ? 'bg-red-50 border-red-200 text-red-700'
+                : 'bg-green-50 border-green-200 text-green-700'
+            }`}>
+              {requerRegularizacao
+                ? 'Não há fatura pendente disponível. Entre em contato com o suporte para regularizar.'
+                : '✅ Nenhuma fatura pendente. Tudo em dia!'}
             </div>
           )}
 

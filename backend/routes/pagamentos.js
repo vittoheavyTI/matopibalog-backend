@@ -128,6 +128,51 @@ router.get('/cobrancas/all', verifyToken, isSuperAdmin, async (req, res) => {
   }
 });
 
+// Estado read-only do plano da empresa escopada pelo token.
+// Admin comum sempre usa a própria empresa; super-admin precisa selecionar
+// explicitamente uma empresa via ?empresa_id= (tratado por verificarEmpresa).
+router.get('/plano-status', verifyToken, isAdmin, verificarEmpresa, async (req, res) => {
+  if (!req.empresa_id) {
+    const message = req.user.is_super_admin === true
+      ? 'Selecione uma empresa para consultar o status do plano.'
+      : 'Empresa não identificada.';
+    return res.status(400).json({ message });
+  }
+
+  try {
+    const { data: empresa, error } = await supabase
+      .from('empresas')
+      .select('status, trial_ends_at, plano_id, planos(nome, preco_mensal, limite_motoristas)')
+      .eq('id', req.empresa_id)
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return res.status(404).json({ message: 'Empresa não encontrada.' });
+      }
+      throw error;
+    }
+    if (!empresa) {
+      return res.status(404).json({ message: 'Empresa não encontrada.' });
+    }
+
+    const trialExpirado = empresa.status === 'trial' && Boolean(
+      empresa.trial_ends_at && new Date(empresa.trial_ends_at) < new Date()
+    );
+
+    return res.json({
+      status: empresa.status,
+      trial_ends_at: empresa.trial_ends_at,
+      trial_expirado: trialExpirado,
+      plano_id: empresa.plano_id,
+      plano: empresa.planos || null,
+    });
+  } catch (err) {
+    console.error('Erro ao carregar status do plano:', err.message);
+    return res.status(500).json({ message: 'Erro ao carregar status do plano.' });
+  }
+});
+
 router.get('/cobrancas/:empresa_id', verifyToken, isAdmin, verificarEmpresa, async (req, res) => {
   try {
     // Admin comum: IGNORA o :empresa_id da URL e usa SEMPRE a própria empresa.
