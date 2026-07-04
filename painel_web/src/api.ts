@@ -20,13 +20,25 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// Mantemos apenas o interceptor de resposta para avisar o sistema caso o login expire (Erro 401)
+// Interceptor de resposta: avisa o sistema quando a SESSÃO expira, para acionar o
+// logout automático (AuthContext escuta 'auth:unauthorized').
+// - 401: comportamento original (sessão sem token / não autenticada).
+// - 403 com body { error: 'Token inválido ou expirado.' }: o backend (auth.js)
+//   devolve ESSE 403 específico quando o JWT expira/é inválido. Sem isto a sessão
+//   expirava silenciosamente (a tela travava sem deslogar). Os demais 403 (permissão/
+//   negócio) usam a chave `message`, então NÃO são tratados como logout.
 api.interceptors.response.use((response) => {
   return response;
 }, (error) => {
-  if (error.response && error.response.status === 401) {
+  const response = error.response;
+  if (response) {
     const url: string = error.config?.url ?? '';
-    if (!url.includes('/auth/me') && !url.includes('/auth/login')) {
+    const data: any = response.data;
+    const isAuthRoute = url.includes('/auth/me') || url.includes('/auth/login');
+    const sessaoExpirada =
+      response.status === 401 ||
+      (response.status === 403 && data?.error === 'Token inválido ou expirado.');
+    if (sessaoExpirada && !isAuthRoute) {
       window.dispatchEvent(new Event('auth:unauthorized'));
     }
   }
