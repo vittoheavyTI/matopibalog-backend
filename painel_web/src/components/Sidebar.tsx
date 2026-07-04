@@ -138,10 +138,10 @@ export const Sidebar: React.FC = () => {
   ];
 
   const linkClass = ({ isActive }: { isActive: boolean }) =>
-    `flex items-center space-x-3 rounded-lg transition-colors ${collapsed ? 'justify-center px-0 py-3' : 'px-4 py-3'} ${isActive ? 'bg-green-700 text-white' : 'text-gray-300 hover:bg-gray-800'}`;
+    `flex items-center space-x-3 rounded-lg transition-colors ${collapsed ? 'justify-center px-0 py-3' : 'px-4 py-3'} ${isActive ? 'bg-green-700 text-white' : 'text-gray-300 hover:bg-white/15'}`;
 
   const subLinkClass = ({ isActive }: { isActive: boolean }) =>
-    `block px-3 py-2 rounded-lg text-sm transition-colors ${isActive ? 'bg-green-700/30 text-white font-medium' : 'text-gray-400 hover:text-white hover:bg-gray-800'}`;
+    `block px-3 py-2 rounded-lg text-sm transition-colors ${isActive ? 'bg-green-700/30 text-white font-medium' : 'text-gray-400 hover:text-white hover:bg-white/15'}`;
 
   return (
     <>
@@ -150,7 +150,7 @@ export const Sidebar: React.FC = () => {
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
-        background: '#1e293b',
+        background: '#103B34',
         color: 'white',
         width: collapsed ? 80 : 256,
         transition: 'width 0.3s'
@@ -207,7 +207,7 @@ export const Sidebar: React.FC = () => {
             <div>
               <button
                 onClick={() => setPainelOpen(!painelOpen)}
-                className={`flex items-center w-full rounded-lg transition-colors ${collapsed ? 'justify-center px-0 py-3' : 'px-4 py-3'} text-gray-300 hover:bg-gray-800`}
+                className={`flex items-center w-full rounded-lg transition-colors ${collapsed ? 'justify-center px-0 py-3' : 'px-4 py-3'} text-gray-300 hover:bg-white/15`}
                 title={collapsed ? 'Painel Admin.' : undefined}
               >
                 <Shield size={20} className="flex-shrink-0" />
@@ -249,7 +249,7 @@ export const Sidebar: React.FC = () => {
         <div style={{ flexShrink: 0, padding: '8px', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
           <button
             onClick={() => setCollapsed(!collapsed)}
-            className="flex items-center justify-center w-full p-2 text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors"
+            className="flex items-center justify-center w-full p-2 text-gray-400 hover:text-white hover:bg-white/15 rounded-lg transition-colors"
           >
             {collapsed ? <ChevronRight size={20} /> : <ChevronLeft size={20} />}
             {!collapsed && <span className="ml-2 text-sm">Recolher</span>}
