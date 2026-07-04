@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Users, FileText, Truck, ChevronLeft, ChevronRight, Upload, X, Check, Trash2, Settings, UserCircle, Plug, Shield, ChevronDown, Receipt, History } from 'lucide-react';
+import { LayoutDashboard, Users, FileText, Truck, ChevronLeft, ChevronRight, Upload, X, Check, Trash2, Settings, UserCircle, Shield, ChevronDown, Receipt, History } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../api';
 
@@ -124,13 +124,14 @@ export const Sidebar: React.FC = () => {
 
   const painelSubItems = [
     { to: '/painel-administrativo/visao-geral', label: 'Visão Geral' },
-    { to: '/painel-administrativo/empresas', label: 'Empresas' },
+    { to: '/painel-administrativo/empresas', label: 'Empresas / Contas' },
     { to: '/painel-administrativo/planos', label: 'Planos' },
     { to: '/painel-administrativo/assinaturas', label: 'Assinaturas' },
-    { to: '/painel-administrativo/usuarios', label: 'Usuários do Painel' },
+    { to: '/painel-administrativo/faturas', label: 'Faturas Todas' },
+    { to: '/painel-administrativo/usuarios', label: 'Usuários Globais' },
     { to: '/painel-administrativo/motoristas', label: 'Motoristas' },
-    { to: '/painel-administrativo/relatorios', label: 'Relatórios' },
     { to: '/painel-administrativo/financeiro', label: 'Financeiro' },
+    { to: '/integracoes', label: 'Integrações' },
     { to: '/painel-administrativo/configuracoes', label: 'Config. Sistema' },
     { to: '/painel-administrativo/notificacoes', label: 'Notificações' },
     { to: '/painel-administrativo/termos-lgpd', label: 'Termos LGPD' },
@@ -212,13 +213,6 @@ export const Sidebar: React.FC = () => {
                 </div>
               )}
             </div>
-            )}
-
-            {user?.is_super_admin && (
-              <NavLink to="/integracoes" className={linkClass} title={collapsed ? 'Integrações' : undefined}>
-                <Plug size={20} className="flex-shrink-0" />
-                {!collapsed && <span>Integrações</span>}
-              </NavLink>
             )}
 
             <NavLink
