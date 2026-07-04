@@ -200,7 +200,7 @@ export const PainelPlanos: React.FC = () => {
   }
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-4 animate-fade-in">
       {toast && (
         <div className={`fixed top-6 right-6 z-[100] flex items-center space-x-2 px-5 py-3 rounded-xl shadow-2xl text-sm font-bold ${toast.tipo === 'sucesso' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`} role="status">
           {toast.tipo === 'sucesso' ? <Check size={18} /> : <AlertTriangle size={18} />}
@@ -209,16 +209,15 @@ export const PainelPlanos: React.FC = () => {
         </div>
       )}
 
-      <div className="flex items-center gap-2.5">
-        <div className="bg-gray-800 p-1.5 rounded-lg text-white"><Shield size={18} /></div>
-        <div>
-          <h1 className="text-2xl font-bold text-gray-800 leading-tight">Planos</h1>
-          <p className="text-sm text-gray-500">Gerenciar planos de assinatura</p>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <div className="bg-gray-800 p-1.5 rounded-lg text-white"><Shield size={18} /></div>
+          <div>
+            <h1 className="text-2xl font-bold text-gray-800 leading-tight">Planos</h1>
+            <p className="text-sm text-gray-500">Gerenciar planos de assinatura</p>
+          </div>
         </div>
-      </div>
-
-      <div className="flex justify-end">
-        <button onClick={abrirNovoPlano} title="Criar novo plano" aria-label="Criar novo plano" className="flex items-center px-4 py-2.5 bg-green-700 text-white rounded-xl font-medium text-sm hover:bg-green-800 active:scale-95"><Plus size={18} className="mr-1.5" /> Novo Plano</button>
+        <button onClick={abrirNovoPlano} title="Criar novo plano" aria-label="Criar novo plano" className="flex items-center shrink-0 px-4 py-2.5 bg-green-700 text-white rounded-xl font-medium text-sm hover:bg-green-800 active:scale-95"><Plus size={18} className="mr-1.5" /> Novo Plano</button>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
