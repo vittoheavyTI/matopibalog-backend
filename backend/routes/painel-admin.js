@@ -13,7 +13,7 @@ router.get('/dashboard', async (req, res) => {
     const { count: totalMotoristas } = await supabase.from('motoristas').select('*', { count: 'exact', head: true });
     const { count: totalFretes } = await supabase.from('fretes').select('*', { count: 'exact', head: true });
     const { data: empresas } = await supabase.from('empresas').select('status');
-    const ativas = (empresas || []).filter(e => e.status === 'ativa').length;
+    const ativas = (empresas || []).filter(e => e.status === 'ativo').length;
     const trial = (empresas || []).filter(e => e.status === 'trial').length;
     res.json({ totalEmpresas: totalEmpresas || 0, totalMotoristas: totalMotoristas || 0, totalFretes: totalFretes || 0, empresasAtivas: ativas, empresasTrial: trial });
   } catch (err) {

@@ -21,7 +21,7 @@ export const PainelVisaoGeral: React.FC = () => {
       const { totalMotoristas, totalFretes } = dashboardRes.data;
       const empresasData = empresasRes.data;
       setEmpresas(empresasData || []);
-      const ativas = (empresasData || []).filter((e: any) => e.status === 'ativa').length;
+      const ativas = (empresasData || []).filter((e: any) => e.status === 'ativo').length;
       const trial = (empresasData || []).filter((e: any) => e.status === 'trial').length;
       setStats([
         { label: 'Empresas Ativas', value: String(ativas), change: 'Cadastradas', icon: Building2, color: 'bg-blue-50 text-blue-600' },
