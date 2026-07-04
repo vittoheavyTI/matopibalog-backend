@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { verifyToken, isSuperAdmin } = require('../middlewares/auth');
 const cryptoHelper = require('../utils/integrationsCrypto');
+const { resolveAsaasApiKey } = require('../utils/asaasConfig');
 const { z } = require('zod');
 
 // Validação simples do corpo de /salvar (servico obrigatório + config objeto).
@@ -138,8 +139,18 @@ async function atualizarOcultas(supabase, req, mutar) {
 }
 
 router.post('/testar/asaas', verifyToken, isSuperAdmin, async (req, res) => {
+  let environment = req.body?.environment === 'production' ? 'production' : 'sandbox';
   try {
-    const { apiKey, environment } = req.body;
+    let { apiKey } = req.body;
+    if (!apiKey) {
+      const supabase = require('../config/supabase');
+      const { data, error } = await supabase
+        .from('configuracoes').select('dados').eq('id', 1).single();
+      if (error) throw error;
+      const configSalva = data?.dados?.integracao_asaas || {};
+      apiKey = resolveAsaasApiKey(configSalva);
+      environment = configSalva.environment === 'production' ? 'production' : 'sandbox';
+    }
     const axios = require('axios');
     const baseURL = environment === 'production'
       ? 'https://api.asaas.com/v3'
