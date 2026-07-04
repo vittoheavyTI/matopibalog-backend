@@ -150,7 +150,7 @@ export const Sidebar: React.FC = () => {
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
-        background: '#475569',
+        background: '#103B34',
         color: 'white',
         width: collapsed ? 80 : 256,
         transition: 'width 0.3s'
