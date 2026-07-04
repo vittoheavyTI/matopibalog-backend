@@ -22,16 +22,69 @@ const FORM_VAZIO: FormPlano = {
   recursos: '',
 };
 
+const LABELS_RECURSOS: Record<string, string> = {
+  api: 'Api',
+  gestao: 'Gestão',
+  integracao: 'Integração',
+  multiusuario: 'Multiusuário',
+  personalizacao: 'Personalização',
+  relatorios: 'Relatórios',
+  suporte: 'Suporte',
+  usuarios: 'Usuários',
+};
+
+const VALORES_RECURSOS: Record<string, string> = {
+  prioritario: 'prioritário',
+};
+
+function removerAcentos(texto: string): string {
+  return texto.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('pt-BR');
+}
+
 function labelRecurso(chave: string): string {
-  const texto = chave.replace(/[_-]+/g, ' ').trim();
-  return texto ? texto.charAt(0).toUpperCase() + texto.slice(1) : '';
+  const palavras = chave.replace(/[_-]+/g, ' ').trim().split(/\s+/).filter(Boolean);
+  return palavras.map((palavra, indice) => {
+    const normalizada = removerAcentos(palavra);
+    const conhecida = LABELS_RECURSOS[normalizada];
+    if (conhecida) return conhecida;
+    return indice === 0 ? palavra.charAt(0).toUpperCase() + palavra.slice(1) : palavra.toLocaleLowerCase('pt-BR');
+  }).join(' ');
+}
+
+function valorRecurso(valor: string): string {
+  const limpo = valor.trim();
+  return VALORES_RECURSOS[removerAcentos(limpo)] || limpo;
+}
+
+function formatarRecursoTexto(item: string): string {
+  const limpo = item.trim().replace(/[{}\[\]"]/g, '').replace(/^'+|'+$/g, '').trim();
+  if (!limpo || ['true', 'false', 'null'].includes(limpo.toLocaleLowerCase('pt-BR'))) return '';
+  const separador = limpo.indexOf(':');
+  if (separador < 0) return labelRecurso(limpo);
+
+  const chave = limpo.slice(0, separador).trim().replace(/^'+|'+$/g, '');
+  const valor = limpo.slice(separador + 1).trim().replace(/^'+|'+$/g, '');
+  if (!chave || !valor || valor === 'false' || valor === 'null') return '';
+  if (valor === 'true') return labelRecurso(chave);
+  return `${labelRecurso(chave)}: ${valorRecurso(valor)}`;
 }
 
 function normalizarRecursosParaLista(recursos: unknown): string[] {
   let itens: string[] = [];
 
   if (typeof recursos === 'string') {
-    itens = recursos.split(/[,\n]/).map((item) => item.trim());
+    const texto = recursos.trim();
+    if (!texto) return [];
+
+    if ((texto.startsWith('{') && texto.endsWith('}')) || (texto.startsWith('[') && texto.endsWith(']'))) {
+      try {
+        return normalizarRecursosParaLista(JSON.parse(texto));
+      } catch {
+        // JSON legado inválido segue como texto comum, sem interromper a tela.
+      }
+    }
+
+    itens = texto.split(/[,\n]/).map(formatarRecursoTexto);
   } else if (Array.isArray(recursos)) {
     itens = recursos.flatMap((item) => normalizarRecursosParaLista(item));
   } else if (recursos && typeof recursos === 'object') {
@@ -44,7 +97,7 @@ function normalizarRecursosParaLista(recursos: unknown): string[] {
         return detalhes ? [`${label}: ${detalhes}`] : [];
       }
       if (typeof valor === 'object') return normalizarRecursosParaLista(valor);
-      return label ? [`${label}: ${String(valor)}`] : [String(valor)];
+      return label ? [`${label}: ${valorRecurso(String(valor))}`] : [valorRecurso(String(valor))];
     });
   }
 
