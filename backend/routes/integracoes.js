@@ -101,19 +101,39 @@ function sanitizarCustomizada(item) {
   };
 }
 
+// A tabela configuracoes exige empresa_id NOT NULL. A configuração é GLOBAL (todos os
+// reads usam id=1); ao gravar, preservamos o empresa_id dono da linha e, se ela ainda
+// não existir, usamos a empresa do super-admin autenticado — espelhando
+// configController.update. Nunca grava empresa_id nulo; marca a etapa da falha no erro
+// (empresa_id/upsert) para diagnóstico no log, sem expor segredos.
+async function upsertConfigGlobal(supabase, req, novosDados, empresaIdAtual) {
+  let empresaId = empresaIdAtual;
+  if (!empresaId) {
+    const { data: usuario } = await supabase
+      .from('usuarios').select('empresa_id').eq('id', req.user.uid).single();
+    empresaId = usuario?.empresa_id || null;
+  }
+  if (!empresaId) {
+    const erro = new Error('Nao foi possivel determinar empresa_id para salvar configuracoes.');
+    erro.etapa = 'empresa_id';
+    throw erro;
+  }
+  const { error } = await supabase
+    .from('configuracoes')
+    .upsert({ id: 1, dados: novosDados, atualizado_em: new Date(), empresa_id: empresaId });
+  if (error) { error.etapa = 'upsert'; throw error; }
+}
+
 // Read-merge-write de configuracoes.dados.integracoes_ocultas, preservando as demais chaves.
-async function atualizarOcultas(supabase, mutar) {
+async function atualizarOcultas(supabase, req, mutar) {
   const { data: atual, error: readError } = await supabase
-    .from('configuracoes').select('dados').eq('id', 1).single();
+    .from('configuracoes').select('dados, empresa_id').eq('id', 1).single();
   // PGRST116 = linha inexistente → parte de {}. Outro erro = falha real.
   if (readError && readError.code !== 'PGRST116') throw readError;
   const dados = atual?.dados || {};
   const ocultasAtuais = Array.isArray(dados.integracoes_ocultas) ? dados.integracoes_ocultas : [];
   const novaLista = mutar(ocultasAtuais);
-  const { error } = await supabase
-    .from('configuracoes')
-    .upsert({ id: 1, dados: { ...dados, integracoes_ocultas: novaLista }, atualizado_em: new Date() });
-  if (error) throw error;
+  await upsertConfigGlobal(supabase, req, { ...dados, integracoes_ocultas: novaLista }, atual?.empresa_id);
   return novaLista;
 }
 
@@ -225,7 +245,7 @@ router.post('/salvar', verifyToken, isSuperAdmin, async (req, res) => {
     // (aparência, sistema, outras integrações) e evita clobber do blob id=1.
     const { data: atual, error: readError } = await supabase
       .from('configuracoes')
-      .select('dados')
+      .select('dados, empresa_id')
       .eq('id', 1)
       .single();
 
@@ -265,19 +285,11 @@ router.post('/salvar', verifyToken, isSuperAdmin, async (req, res) => {
       [`integracao_${servicoNorm}`]: configCriptografado,
     };
 
-    const { error } = await supabase
-      .from('configuracoes')
-      .upsert({
-        id: 1,
-        dados: dadosAtualizados,
-        atualizado_em: new Date()
-      });
-
-    if (error) throw error;
+    await upsertConfigGlobal(supabase, req, dadosAtualizados, atual?.empresa_id);
     res.json({ message: 'Configuração salva com sucesso.' });
   } catch (err) {
-    // Só a mensagem técnica — nunca req.body/config (evita vazar segredo).
-    console.error('Erro ao salvar integração:', err.message);
+    // Só a mensagem técnica + etapa (empresa_id/upsert) — nunca req.body/config (evita vazar segredo).
+    console.error(`Erro ao salvar integração (etapa: ${err?.etapa || 'desconhecida'}):`, err.message);
     res.status(500).json({ message: 'Erro ao salvar integração' });
   }
 });
@@ -364,7 +376,7 @@ router.patch('/:servico/ocultar', verifyToken, isSuperAdmin, async (req, res) =>
   const supabase = require('../config/supabase');
   try {
     // Apenas oculta da tela — NÃO apaga integracao_<servico> nem credenciais.
-    await atualizarOcultas(supabase, (ocultas) =>
+    await atualizarOcultas(supabase, req, (ocultas) =>
       ocultas.includes(servico) ? ocultas : [...ocultas, servico]);
     res.json({ message: 'Integração removida da tela com sucesso', servico });
   } catch (err) {
@@ -382,7 +394,7 @@ router.patch('/:servico/exibir', verifyToken, isSuperAdmin, async (req, res) => 
   }
   const supabase = require('../config/supabase');
   try {
-    await atualizarOcultas(supabase, (ocultas) => ocultas.filter(s => s !== servico));
+    await atualizarOcultas(supabase, req, (ocultas) => ocultas.filter(s => s !== servico));
     res.json({ message: 'Integração reexibida com sucesso', servico });
   } catch (err) {
     console.error('Erro ao reexibir integração:', err.message);
@@ -455,7 +467,7 @@ router.post('/customizadas', verifyToken, isSuperAdmin, async (req, res) => {
   const supabase = require('../config/supabase');
   try {
     const { data: atual, error: readError } = await supabase
-      .from('configuracoes').select('dados').eq('id', 1).single();
+      .from('configuracoes').select('dados, empresa_id').eq('id', 1).single();
     if (readError && readError.code !== 'PGRST116') throw readError;
     const dados = atual?.dados || {};
     const customizadas = Array.isArray(dados.integracoes_customizadas) ? dados.integracoes_customizadas : [];
@@ -468,10 +480,7 @@ router.post('/customizadas', verifyToken, isSuperAdmin, async (req, res) => {
     }
 
     const novosDados = { ...dados, integracoes_customizadas: [...customizadas, novaIntegracao] };
-    const { error } = await supabase
-      .from('configuracoes')
-      .upsert({ id: 1, dados: novosDados, atualizado_em: new Date() });
-    if (error) throw error;
+    await upsertConfigGlobal(supabase, req, novosDados, atual?.empresa_id);
 
     res.status(201).json({ message: 'Integração personalizada criada com sucesso', integracao: sanitizarCustomizada(novaIntegracao) });
   } catch (err) {
@@ -492,7 +501,7 @@ router.delete('/customizadas/:servico', verifyToken, isSuperAdmin, async (req, r
   const supabase = require('../config/supabase');
   try {
     const { data: atual, error: readError } = await supabase
-      .from('configuracoes').select('dados').eq('id', 1).single();
+      .from('configuracoes').select('dados, empresa_id').eq('id', 1).single();
     if (readError && readError.code !== 'PGRST116') throw readError;
     const dados = atual?.dados || {};
     const customizadas = Array.isArray(dados.integracoes_customizadas) ? dados.integracoes_customizadas : [];
@@ -509,10 +518,7 @@ router.delete('/customizadas/:servico', verifyToken, isSuperAdmin, async (req, r
       novosDados.integracoes_ocultas = novosDados.integracoes_ocultas.filter(s => s !== servico);
     }
 
-    const { error } = await supabase
-      .from('configuracoes')
-      .upsert({ id: 1, dados: novosDados, atualizado_em: new Date() });
-    if (error) throw error;
+    await upsertConfigGlobal(supabase, req, novosDados, atual?.empresa_id);
 
     res.json({ message: 'Integração personalizada excluída com sucesso', servico });
   } catch (err) {
