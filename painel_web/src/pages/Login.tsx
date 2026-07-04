@@ -80,6 +80,9 @@ export const Login: React.FC = () => {
   const [error, setError] = useState('');
   const [loadingLocal, setLoadingLocal] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  // Mensagem exibida quando a sessão anterior expirou por inatividade
+  // (flag gravada pelo SessionTimeoutWatcher antes de deslogar).
+  const [sessionNotice, setSessionNotice] = useState('');
 
   // Modal esqueceu a senha
   const [showForgotModal, setShowForgotModal] = useState(false);
@@ -102,6 +105,16 @@ export const Login: React.FC = () => {
       navigate('/');
     }
   }, [user, navigate]);
+
+  // Lê (e limpa) a flag de sessão expirada por inatividade para avisar o usuário.
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem('matopibalog_session_expired_reason') === 'idle') {
+        setSessionNotice('Sua sessão expirou por inatividade. Faça login novamente.');
+        sessionStorage.removeItem('matopibalog_session_expired_reason');
+      }
+    } catch (e) { /* ignore */ }
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -197,6 +210,13 @@ export const Login: React.FC = () => {
                 </div>
               )}
             </div>
+
+            {/* Aviso de sessão expirada por inatividade */}
+            {sessionNotice && (
+              <div style={{ background: '#fffbeb', color: '#92400e', border: '1px solid #fde68a', padding: '12px', borderRadius: '8px', fontSize: '14px', textAlign: 'center', marginBottom: '16px' }}>
+                {sessionNotice}
+              </div>
+            )}
 
             {/* Erro */}
             {error && (
