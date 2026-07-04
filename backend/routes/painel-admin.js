@@ -80,10 +80,10 @@ router.post('/planos', async (req, res) => {
     nome: req.body.nome,
     preco_mensal: Number(req.body.preco_mensal) || 0,
     descricao: req.body.descricao || '',
-    recursos: req.body.recursos || '',
-    limite_motoristas: Number(req.body.limite_motoristas) || 5,
-    dias_trial: Number(req.body.dias_trial) || 7,
-    ativo: true
+    recursos: req.body.recursos || [],
+    limite_motoristas: req.body.limite_motoristas !== undefined ? Number(req.body.limite_motoristas) : 5,
+    dias_trial: req.body.dias_trial !== undefined ? Number(req.body.dias_trial) : 7,
+    ativo: req.body.ativo !== undefined ? req.body.ativo === true : true
   }).select().single();
   if (error) return res.status(500).json({ message: 'Erro ao criar plano.' });
   res.status(201).json(data);
@@ -97,7 +97,8 @@ router.put('/planos/:id', async (req, res) => {
   if (req.body.recursos !== undefined) upd.recursos = req.body.recursos;
   if (req.body.limite_motoristas !== undefined) upd.limite_motoristas = Number(req.body.limite_motoristas);
   if (req.body.dias_trial !== undefined) upd.dias_trial = Number(req.body.dias_trial);
-  if (req.body.status !== undefined) upd.ativo = req.body.status === 'ativo';
+  if (req.body.ativo !== undefined) upd.ativo = req.body.ativo === true;
+  else if (req.body.status !== undefined) upd.ativo = req.body.status === 'ativo';
   const { data, error } = await supabase.from('planos').update(upd).eq('id', req.params.id).select().single();
   if (error) return res.status(500).json({ message: 'Erro ao atualizar plano.' });
   res.json(data);
