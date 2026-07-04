@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Outlet } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
+import { SessionTimeoutWatcher } from './SessionTimeoutWatcher';
 import { useAuth } from '../contexts/AuthContext';
 import { LogOut, User as UserIcon, ChevronDown } from 'lucide-react';
 
@@ -28,6 +29,8 @@ export const Layout: React.FC = () => {
 
   return (
     <div className="flex h-screen bg-gray-50 overflow-hidden" style={{ zoom: 1, maxWidth: '100vw' }}>
+      {/* Logout automático por inatividade — ativo apenas no painel autenticado. */}
+      <SessionTimeoutWatcher />
       <Sidebar />
       
       <div className="flex-1 flex flex-col h-full overflow-hidden">
