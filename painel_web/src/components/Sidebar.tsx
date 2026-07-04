@@ -178,8 +178,22 @@ export const Sidebar: React.FC = () => {
           </div>
         </div>
 
-        {/* Menu scrollável */}
-        <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: collapsed ? '8px 4px' : '8px' }}>
+        {/* Menu scrollável — scrollbar oculta com Painel Admin fechado, fina/discreta quando aberto */}
+        <div
+          className={
+            painelOpen
+              ? '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb]:rounded-full'
+              : '[&::-webkit-scrollbar]:hidden'
+          }
+          style={{
+            flex: 1,
+            overflowY: 'auto',
+            overflowX: 'hidden',
+            padding: collapsed ? '8px 4px' : '8px',
+            scrollbarWidth: painelOpen ? 'thin' : 'none',
+            scrollbarColor: painelOpen ? 'rgba(255,255,255,0.25) transparent' : undefined,
+          }}
+        >
           <nav className="space-y-1">
             {mainNav.map(item => (
               <NavLink key={item.to} to={item.to} end={item.to === '/' || item.to === '/relatorios'} className={linkClass} title={collapsed ? item.label : undefined}>
