@@ -68,6 +68,83 @@ router.delete('/empresas/:id', async (req, res) => {
   res.json({ message: 'Empresa excluída.' });
 });
 
+// TRIAL — prorrogar/liberar trial de uma empresa (super-admin only, herda do router.use)
+// Aceita { dias: 7|15 } (prorrogação relativa) OU { trial_ends_at: 'YYYY-MM-DD' } (data personalizada).
+// Não altera plano_id, faturas, cobrança ou Asaas. Limite: no máximo hoje + 90 dias.
+router.patch('/empresas/:id/trial', async (req, res) => {
+  const MS_DIA = 24 * 60 * 60 * 1000;
+  const { dias, trial_ends_at } = req.body || {};
+
+  // Exatamente uma das opções deve vir preenchida
+  const temDias = dias !== undefined && dias !== null && dias !== '';
+  const temData = trial_ends_at !== undefined && trial_ends_at !== null && trial_ends_at !== '';
+  if (temDias === temData) {
+    return res.status(400).json({ message: 'Informe "dias" (7 ou 15) ou "trial_ends_at" (data), mas não ambos.' });
+  }
+
+  // Empresa precisa existir
+  const { data: empresa, error: findErr } = await supabase
+    .from('empresas')
+    .select('id, status, trial_started_at, trial_ends_at')
+    .eq('id', req.params.id)
+    .maybeSingle();
+  if (findErr) return res.status(500).json({ message: 'Erro ao buscar empresa.' });
+  if (!empresa) return res.status(404).json({ message: 'Empresa não encontrada.' });
+
+  const agora = new Date();
+  // Teto: fim do 90º dia a partir de hoje (permite escolher exatamente o dia 90)
+  const limiteMax = new Date(agora.getTime() + 90 * MS_DIA);
+  limiteMax.setHours(23, 59, 59, 999);
+  let novaData;
+
+  if (temDias) {
+    const n = Number(dias);
+    if (n !== 7 && n !== 15) {
+      return res.status(400).json({ message: 'O parâmetro "dias" deve ser 7 ou 15.' });
+    }
+    // Base = maior data entre hoje e o trial atual, se ainda futuro
+    let base = agora;
+    if (empresa.trial_ends_at) {
+      const atual = new Date(empresa.trial_ends_at);
+      if (!isNaN(atual.getTime()) && atual > agora) base = atual;
+    }
+    novaData = new Date(base.getTime() + n * MS_DIA);
+  } else {
+    // Data personalizada. 'YYYY-MM-DD' (input date) → fim daquele dia, para o trial
+    // valer o dia inteiro e exibir a data correta no fuso local.
+    let raw = String(trial_ends_at).trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) raw += 'T23:59:59';
+    const parsed = new Date(raw);
+    if (isNaN(parsed.getTime())) {
+      return res.status(400).json({ message: 'Data de trial inválida.' });
+    }
+    if (parsed <= agora) {
+      return res.status(400).json({ message: 'A data de trial deve ser futura.' });
+    }
+    novaData = parsed;
+  }
+
+  // Teto de 90 dias a partir de hoje (vale para prorrogação relativa e data personalizada)
+  if (novaData > limiteMax) {
+    return res.status(400).json({ message: 'A data de trial não pode passar de 90 dias a partir de hoje.' });
+  }
+
+  const upd = {
+    status: 'trial',
+    trial_ends_at: novaData.toISOString(),
+    trial_started_at: empresa.trial_started_at || agora.toISOString(),
+  };
+
+  const { data, error } = await supabase
+    .from('empresas')
+    .update(upd)
+    .eq('id', req.params.id)
+    .select('id, status, trial_started_at, trial_ends_at')
+    .single();
+  if (error) return res.status(500).json({ message: 'Erro ao atualizar trial.' });
+  res.json(data);
+});
+
 // PLANOS
 router.get('/planos', async (req, res) => {
   const { data, error } = await supabase.from('planos').select('*').order('preco_mensal', { ascending: true });
