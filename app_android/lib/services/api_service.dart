@@ -4,7 +4,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../config.dart';
+import '../models/plano_publico.dart';
 import 'app_logger.dart';
 
 class ApiService {
@@ -42,6 +44,10 @@ class ApiService {
   static const Duration _timeoutGet = Duration(seconds: 30);
   static const Duration _timeoutPostJson = Duration(seconds: 35);
   static const Duration _timeoutUpload = Duration(seconds: 60);
+  static const Duration _planosCacheTtl = Duration(hours: 6);
+  static const Duration _planosCacheMaxAge = Duration(days: 7);
+  static const String _planosCacheKey = 'planos_publicos_cache';
+  static const String _planosCacheAtKey = 'planos_publicos_cache_at';
 
   /// Converte exceções de rede em mensagem amigável ao usuário (sem vazar stack).
   /// TimeoutException → servidor lento; demais (SocketException, ClientException,
@@ -129,13 +135,94 @@ class ApiService {
     }
   }
 
-  static Future<bool> register(Map<String, dynamic> data) async {
+  static Future<List<PlanoPublico>> getPlanosPublicos() async {
+    final prefs = await SharedPreferences.getInstance();
+    final agora = DateTime.now();
+    final cacheRaw = prefs.getString(_planosCacheKey);
+    final cacheAtRaw = prefs.getInt(_planosCacheAtKey);
+    List<PlanoPublico>? cache;
+    Duration? cacheAge;
+
+    if (cacheRaw != null && cacheAtRaw != null) {
+      try {
+        final decoded = jsonDecode(cacheRaw);
+        if (decoded is List) {
+          cache = decoded
+              .whereType<Map>()
+              .map((item) => PlanoPublico.fromJson(Map<String, dynamic>.from(item)))
+              .where((plano) => plano.id.isNotEmpty)
+              .toList();
+          cacheAge = agora.difference(DateTime.fromMillisecondsSinceEpoch(cacheAtRaw));
+        }
+      } catch (_) {
+        cache = null;
+        cacheAge = null;
+      }
+    }
+
+    if (cache != null && cacheAge != null && !cacheAge.isNegative && cacheAge <= _planosCacheTtl) {
+      return cache;
+    }
+
     try {
+      final response = await http
+          .get(
+            Uri.parse('$_baseUrl/planos/publicos'),
+            headers: {'Content-Type': 'application/json'},
+          )
+          .timeout(_timeoutGet);
+
+      if (response.statusCode != 200) {
+        throw Exception('Catálogo indisponível (${response.statusCode}).');
+      }
+
+      final decoded = jsonDecode(response.body);
+      final planosRaw = decoded is Map<String, dynamic> ? decoded['planos'] : null;
+      if (planosRaw is! List) {
+        throw Exception('Resposta inválida do catálogo de planos.');
+      }
+
+      final planos = planosRaw
+          .whereType<Map>()
+          .map((item) => PlanoPublico.fromJson(Map<String, dynamic>.from(item)))
+          .where((plano) => plano.id.isNotEmpty)
+          .toList();
+
+      await prefs.setString(
+        _planosCacheKey,
+        jsonEncode(planos.map((plano) => plano.toJson()).toList()),
+      );
+      await prefs.setInt(_planosCacheAtKey, agora.millisecondsSinceEpoch);
+      return planos;
+    } catch (_) {
+      if (cache != null && cacheAge != null && !cacheAge.isNegative && cacheAge <= _planosCacheMaxAge) {
+        return cache;
+      }
+      throw Exception('Não foi possível carregar os planos. Verifique sua internet.');
+    }
+  }
+
+  static Future<bool> register(
+    Map<String, dynamic> data, {
+    String? planoId,
+  }) async {
+    try {
+      final payload = Map<String, dynamic>.from(data);
+      final codigoConvite = payload['codigo_convite']?.toString().trim() ?? '';
+      final planoSelecionado = planoId?.trim() ?? '';
+
+      if (codigoConvite.isEmpty && planoSelecionado.isNotEmpty) {
+        payload['plano_id'] = planoSelecionado;
+      } else {
+        // Defesa adicional: motorista vinculado sempre usa o plano da empresa.
+        payload.remove('plano_id');
+      }
+
       final response = await http
           .post(
             Uri.parse('$_baseUrl/auth/register'),
             headers: {'Content-Type': 'application/json'},
-            body: jsonEncode(data),
+            body: jsonEncode(payload),
           )
           .timeout(_timeoutPostJson);
       return response.statusCode == 201;

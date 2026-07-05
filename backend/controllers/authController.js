@@ -26,7 +26,7 @@ function gerarCodigoConvite() {
 }
 
 exports.register = async (req, res) => {
-  const { nome, email, senha, codigo_convite, cpf, placa_veiculo } = req.body;
+  const { nome, email, senha, codigo_convite, plano_id, cpf, placa_veiculo } = req.body;
 
   if (!nome || !email || !senha) {
     return res.status(400).json({ message: 'Campos obrigatórios: nome, email, senha.' });
@@ -54,11 +54,26 @@ exports.register = async (req, res) => {
       empresa_id = empresa.id;
     } else {
       // --- Fluxo autônomo: criar empresa própria ---
-      const { data: planoData } = await supabase
+      let planoQuery = supabase
         .from('planos')
-        .select('id, dias_trial')
-        .eq('nome', 'Plano Básico')
-        .single();
+        .select('id, dias_trial, ativo');
+
+      planoQuery = plano_id
+        ? planoQuery.eq('id', plano_id)
+        : planoQuery.eq('nome', 'Plano Básico');
+
+      const { data: planoData, error: planoError } = await planoQuery.maybeSingle();
+
+      if (planoError) {
+        console.error('[register] Falha ao validar plano do autônomo:', planoError.message);
+        return res.status(500).json({ message: 'Erro ao validar plano. Tente novamente.' });
+      }
+
+      // Quando o app envia um plano, ele precisa continuar disponível no
+      // momento do cadastro. Preço, limite e trial nunca vêm do cliente.
+      if (plano_id && (!planoData || planoData.ativo !== true)) {
+        return res.status(400).json({ message: 'Plano selecionado inválido ou indisponível.' });
+      }
 
       const trialEnd = new Date(
         Date.now() + ((planoData?.dias_trial || 7) * 24 * 60 * 60 * 1000)

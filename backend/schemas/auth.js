@@ -1,5 +1,13 @@
 const { z } = require('zod');
 
+// O catálogo legado contém IDs UUID-shaped sem bits RFC de versão/variante
+// (ex.: 00000000-0000-0000-0000-000000000002). Validamos o formato completo
+// sem rejeitar esses IDs já publicados.
+const planoIdSchema = z.string().regex(
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+  'Plano inválido.'
+);
+
 const loginSchema = z.object({
   email: z.string().email('E-mail inválido.'),
   senha: z.string().min(6, 'Senha deve ter pelo menos 6 caracteres.'),
@@ -11,6 +19,7 @@ const registerSchema = z.object({
   senha: z.string().min(6, 'Senha deve ter pelo menos 6 caracteres.').max(100),
   tipo: z.enum(['motorista', 'proprietario', 'admin']).optional(),
   codigo_convite: z.string().max(20).optional(),
+  plano_id: planoIdSchema.optional(),
   cpf: z.string().max(20).optional(),
   placa_veiculo: z.string().max(20).optional(),
 });
@@ -31,7 +40,7 @@ const registerEmpresaSchema = z.object({
   cnpj: z.string().max(20).optional(),
   telefone: z.string().max(20).optional(),
   // plano_id (UUID do catálogo público) tem precedência; `plano` (alias legado) é fallback.
-  plano_id: z.string().uuid('Plano inválido.').optional(),
+  plano_id: planoIdSchema.optional(),
   plano: z.enum(['basico', 'profissional', 'empresarial']).optional(),
 });
 
