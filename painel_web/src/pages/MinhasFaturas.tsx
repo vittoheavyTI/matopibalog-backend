@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Navigate } from 'react-router-dom';
 import { Receipt, AlertCircle, ExternalLink } from 'lucide-react';
 import api from '../api';
 import { useAuth } from '../contexts/AuthContext';
@@ -47,6 +48,8 @@ export const MinhasFaturas: React.FC = () => {
 
   useEffect(() => {
     if (!user?.uid) return;
+    // Super-admin não é cliente: não busca faturas/plano próprios (redireciona no render).
+    if (user?.is_super_admin) return;
     setLoading(true);
     setErro(null);
     setErroPlano(null);
@@ -84,6 +87,11 @@ export const MinhasFaturas: React.FC = () => {
 
     carregarDados();
   }, [user?.uid]);
+
+  // Super-admin gerencia faturas dos clientes em Painel Admin → Faturas Todas.
+  if (user?.is_super_admin) {
+    return <Navigate to="/painel-administrativo/faturas" replace />;
+  }
 
   const proximaFatura = faturas.find(f => f.status === 'pendente' || f.status === 'vencido');
   const historico     = faturas.filter(f => f !== proximaFatura);
