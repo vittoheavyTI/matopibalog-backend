@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/finance_provider.dart';
 import '../providers/theme_provider.dart';
+import '../services/api_service.dart';
 import '../services/app_logger.dart';
 import '../widgets/seletor_frete.dart';
 import 'home_screen.dart';
@@ -14,8 +15,38 @@ import 'add_vale_screen.dart';
 import 'perfil_screen.dart';
 import 'notificacoes_screen.dart';
 
-class AppShell extends StatelessWidget {
+class AppShell extends StatefulWidget {
   const AppShell({super.key});
+
+  @override
+  State<AppShell> createState() => _AppShellState();
+}
+
+class _AppShellState extends State<AppShell> {
+  int _naoLidas = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _carregarContador();
+  }
+
+  /// Busca o contador remoto de não lidas para o badge do sino.
+  /// Só atualiza o estado se ainda montado; falhas retornam 0 (sem badge falso).
+  Future<void> _carregarContador() async {
+    final count = await ApiService.contarNotificacoesNaoLidas();
+    if (mounted) setState(() => _naoLidas = count);
+  }
+
+  /// Abre a tela de notificações e, ao voltar, recarrega o contador
+  /// (o usuário pode ter marcado itens como lidos lá dentro).
+  Future<void> _abrirNotificacoes() async {
+    AppLogger.action('menu_nav', params: {'destino': 'notificacoes'});
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const NotificacoesScreen()),
+    );
+    if (mounted) _carregarContador();
+  }
 
   Future<void> _navegarPara(BuildContext context, Widget tela) async {
     Navigator.of(context).pop();
@@ -65,6 +96,18 @@ class AppShell extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: Text(auth.nome),
+        actions: [
+          IconButton(
+            tooltip: 'Notificações',
+            onPressed: _abrirNotificacoes,
+            icon: Badge(
+              isLabelVisible: _naoLidas > 0,
+              label: Text(_naoLidas > 99 ? '99+' : '$_naoLidas'),
+              child: const Icon(Icons.notifications_outlined),
+            ),
+          ),
+          const SizedBox(width: 4),
+        ],
       ),
       drawer: Drawer(
         child: Column(
@@ -134,9 +177,12 @@ class AppShell extends StatelessWidget {
             ListTile(
               leading: const Icon(Icons.notifications_outlined),
               title: const Text('Notificações'),
+              trailing: _naoLidas > 0
+                  ? Badge(label: Text(_naoLidas > 99 ? '99+' : '$_naoLidas'))
+                  : null,
               onTap: () {
-                AppLogger.action('menu_nav', params: {'destino': 'notificacoes'});
-                _navegarPara(context, const NotificacoesScreen());
+                Navigator.of(context).pop();
+                _abrirNotificacoes();
               },
             ),
             ListTile(
