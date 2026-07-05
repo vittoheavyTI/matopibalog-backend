@@ -39,7 +39,17 @@ class AppShell extends StatelessWidget {
       await finance.loadData();
     }
     if (!context.mounted) return;
-    final freteId = await SeletorFrete.resolver(context, finance.fretesAtivos);
+    final freteId = await SeletorFrete.resolver(
+      context,
+      finance.fretesAtivos,
+      // Drawer já foi fechado acima; navega direto (sem o pop inicial de _navegarPara).
+      onIniciarFrete: () async {
+        final criou = await Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const AddFreteScreen()),
+        );
+        if (criou == true && context.mounted) finance.loadData();
+      },
+    );
     if (freteId == null || !context.mounted) return;
     final alterou = await Navigator.of(context)
         .push(MaterialPageRoute(builder: (_) => builder(freteId)));

@@ -47,6 +47,30 @@ void main() async {
   );
 }
 
+// Tipografia central com fontes maiores para legibilidade — pensado em
+// motoristas com baixa visão de perto. Sem cor (o ColorScheme aplica onSurface),
+// só tamanhos/pesos; entradas não citadas caem no default do Material 3.
+const TextTheme _appTextTheme = TextTheme(
+  titleLarge: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+  titleMedium: TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+  bodyLarge: TextStyle(fontSize: 17),
+  bodyMedium: TextStyle(fontSize: 15),
+  bodySmall: TextStyle(fontSize: 13),
+  labelLarge: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+);
+
+// Botão primário maior e mais alto (toque/leitura mais fáceis). Compartilhado
+// pelos temas claro e escuro — a cor vem do ColorScheme/tema.
+final ElevatedButtonThemeData _elevatedButtonTheme = ElevatedButtonThemeData(
+  style: ElevatedButton.styleFrom(
+    backgroundColor: const Color(0xFF1B5E20),
+    foregroundColor: Colors.white,
+    minimumSize: const Size(0, 52),
+    textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+  ),
+);
+
 class MatopibaLogApp extends StatelessWidget {
   const MatopibaLogApp({super.key});
 
@@ -71,18 +95,19 @@ class MatopibaLogApp extends StatelessWidget {
           onSurface: Colors.black,
         ),
         scaffoldBackgroundColor: const Color(0xFFF3F4F6),
+        textTheme: _appTextTheme,
         appBarTheme: const AppBarTheme(
           backgroundColor: Color(0xFF1B5E20),
           foregroundColor: Colors.white,
           elevation: 0,
         ),
-        elevatedButtonTheme: ElevatedButtonThemeData(
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF1B5E20),
-            foregroundColor: Colors.white,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
+        elevatedButtonTheme: _elevatedButtonTheme,
+        // Links/botões de texto legíveis no claro: verde da marca (bom contraste
+        // sobre fundo claro) e fonte maior.
+        textButtonTheme: TextButtonThemeData(
+          style: TextButton.styleFrom(
+            foregroundColor: const Color(0xFF1B5E20),
+            textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
           ),
         ),
         inputDecorationTheme: InputDecorationTheme(
@@ -118,18 +143,19 @@ class MatopibaLogApp extends StatelessWidget {
           onSurface: Colors.white,
         ),
         scaffoldBackgroundColor: const Color(0xFF121212),
+        textTheme: _appTextTheme,
         appBarTheme: const AppBarTheme(
           backgroundColor: Color(0xFF1B5E20),
           foregroundColor: Colors.white,
           elevation: 0,
         ),
-        elevatedButtonTheme: ElevatedButtonThemeData(
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF1B5E20),
+        elevatedButtonTheme: _elevatedButtonTheme,
+        // No escuro o verde da marca fica ilegível sobre o fundo quase-preto.
+        // Links/botões de texto (ex.: "Ver histórico completo") ficam BRANCOS.
+        textButtonTheme: TextButtonThemeData(
+          style: TextButton.styleFrom(
             foregroundColor: Colors.white,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
+            textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
           ),
         ),
         inputDecorationTheme: InputDecorationTheme(

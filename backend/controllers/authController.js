@@ -123,14 +123,21 @@ exports.register = async (req, res) => {
       email_confirm: true
     });
 
-    if (authError) return res.status(400).json({ message: authError.message });
+    if (authError) {
+      // E-mail já cadastrado no Auth → mensagem específica (não vazar texto cru em inglês).
+      const authMsg = (authError.message || '').toLowerCase();
+      if (authError.status === 422 || authMsg.includes('already') || authMsg.includes('registered')) {
+        return res.status(409).json({ message: 'Este e-mail já está cadastrado. Faça login ou use "Esqueci minha senha".' });
+      }
+      return res.status(400).json({ message: 'Não foi possível criar a conta. Verifique o e-mail informado.' });
+    }
 
-    // Autônomo (sem código de convite) não tem admin para aprovar:
-    // já nasce ativo e aprovado para poder usar o app imediatamente.
-    // Motorista via convite permanece pendente até aprovação do admin da empresa.
-    const isAutonomo = !codigo_convite || codigo_convite.trim() === '';
-    const statusUsuario = isAutonomo ? 'ativo' : 'pendente';
-    const statusCadastro = isAutonomo ? 'aprovado' : 'pendente';
+    // Acesso imediato em ambos os fluxos:
+    //  - Autônomo (sem convite): empresa própria em trial, nasce ativo/aprovado.
+    //  - Motorista com convite VÁLIDO: autoaprovado — o convite é a autorização da
+    //    empresa (já validada acima: existe e não está expirada/bloqueada).
+    const statusUsuario = 'ativo';
+    const statusCadastro = 'aprovado';
 
     // Criar perfil na tabela usuarios
     const { error: insertError } = await supabase.from('usuarios').insert({
@@ -148,14 +155,27 @@ exports.register = async (req, res) => {
       return res.status(500).json({ message: 'Erro ao criar perfil. Tente novamente.' });
     }
 
-    // Criar registro na tabela motoristas
-    await supabase.from('motoristas').insert({
+    // Criar registro na tabela motoristas (cpf vazio → null para não colidir no UNIQUE)
+    const { error: motoristaError } = await supabase.from('motoristas').insert({
       id: authData.user.id,
       empresa_id,
-      cpf: cpf || '',
+      cpf: cpf && cpf.trim() !== '' ? cpf.trim() : null,
       placa_veiculo: placa_veiculo || '',
       status_cadastro: statusCadastro
     });
+
+    if (motoristaError) {
+      console.error('[register] Falha ao inserir em motoristas, revertendo:', motoristaError.message);
+      try {
+        await supabase.from('usuarios').delete().eq('id', authData.user.id);
+        await supabase.auth.admin.deleteUser(authData.user.id);
+      } catch (_) { /* rollback best-effort */ }
+      // 23505 = unique_violation (Postgres) → CPF já cadastrado
+      if (motoristaError.code === '23505' || (motoristaError.message || '').toLowerCase().includes('duplicate')) {
+        return res.status(409).json({ message: 'Este CPF já está cadastrado. Verifique os dados ou contate o suporte.' });
+      }
+      return res.status(500).json({ message: 'Não foi possível concluir o cadastro. Tente novamente.' });
+    }
 
     res.status(201).json({ message: 'Usuário criado com sucesso!' });
   } catch (error) {

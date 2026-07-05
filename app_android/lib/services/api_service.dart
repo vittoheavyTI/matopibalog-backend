@@ -228,7 +228,11 @@ class ApiService {
     }
   }
 
-  static Future<bool> register(
+  /// Cadastra o motorista. Retorna { 'ok': bool, 'message': String? }.
+  /// Em erro (400/409/500), 'message' traz a mensagem específica do backend
+  /// (e-mail/CPF já cadastrado, código inválido, etc.) para a tela exibir; em
+  /// falha de rede, uma mensagem amigável genérica.
+  static Future<Map<String, dynamic>> register(
     Map<String, dynamic> data, {
     String? planoId,
   }) async {
@@ -251,9 +255,27 @@ class ApiService {
             body: jsonEncode(payload),
           )
           .timeout(_timeoutPostJson);
-      return response.statusCode == 201;
+
+      if (response.statusCode == 201) return {'ok': true};
+
+      String? mensagem;
+      try {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map && decoded['message'] is String) {
+          mensagem = (decoded['message'] as String).trim();
+        }
+      } catch (_) {/* body não-JSON */}
+      return {
+        'ok': false,
+        'message': (mensagem != null && mensagem.isNotEmpty)
+            ? mensagem
+            : 'Não foi possível concluir o cadastro. Tente novamente em instantes.',
+      };
     } catch (e) {
-      return false;
+      return {
+        'ok': false,
+        'message': 'Não foi possível concluir o cadastro. Tente novamente em instantes.',
+      };
     }
   }
 
