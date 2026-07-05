@@ -518,6 +518,27 @@ class ApiService {
     }
   }
 
+  /// Contador de não lidas para o badge do topo. Retorna 0 em qualquer falha,
+  /// para nunca exibir um badge falso quando o backend estiver indisponível.
+  static Future<int> contarNotificacoesNaoLidas() async {
+    try {
+      final response = await http
+          .get(Uri.parse('$_baseUrl/notificacoes/nao-lidas/count'), headers: await _getHeaders())
+          .timeout(_timeoutGet);
+      AppLogger.api('ApiService', 'GET /notificacoes/nao-lidas/count', response.statusCode);
+      if (response.statusCode == 200) {
+        final body = jsonDecode(response.body);
+        final valor = body is Map ? body['count'] : null;
+        if (valor is int) return valor;
+        return int.tryParse('$valor') ?? 0;
+      }
+      return 0;
+    } catch (e) {
+      AppLogger.error('ApiService', 'GET /notificacoes/nao-lidas/count exception', e);
+      return 0;
+    }
+  }
+
   static Future<Map<String, dynamic>?> finalizarViagem(
     String freteId, {
     int? kmInicial,

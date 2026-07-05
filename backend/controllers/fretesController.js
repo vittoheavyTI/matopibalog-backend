@@ -184,7 +184,7 @@ exports.create = async (req, res) => {
       throw error;
     }
 
-    notificacaoService.notificarFreteCriado(data).catch(() => {});
+    notificacaoService.notificarFreteCriado(data, { actorId: req.user?.uid }).catch(() => {});
     res.status(201).json({ ...data, comissao_calculada: comissao });
   } catch (error) {
     console.error(error);
@@ -407,7 +407,7 @@ exports.finalizar = async (req, res) => {
       .single();
 
     if (error) throw error;
-    notificacaoService.notificarViagemFinalizada(data).catch(() => {});
+    notificacaoService.notificarViagemFinalizada(data, { actorId: req.user?.uid }).catch(() => {});
     res.status(200).json(data);
   } catch (error) {
     console.error('Erro ao finalizar frete:', error);

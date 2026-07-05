@@ -213,6 +213,18 @@ exports.register = async (req, res) => {
       dedupe_key: `cadastro:${authData.user.id}`,
     }).catch(() => {});
 
+    // Motorista entrou por convite → os admins da empresa também são avisados no painel.
+    if (comConvite) {
+      notificacaoService.criarParaEmpresa(empresa_id, {
+        tipo: 'conta_vinculada',
+        titulo: 'Novo motorista vinculado',
+        mensagem: `${nome} entrou na empresa.`,
+        entidade_tipo: 'usuario',
+        entidade_id: authData.user.id,
+        dedupe_key: `conta_vinculada_admin:${authData.user.id}`,
+      }, { somenteAdmins: true, excluir_usuario_id: authData.user.id }).catch(() => {});
+    }
+
     res.status(201).json({ message: 'Usuário criado com sucesso!' });
   } catch (error) {
     console.error('Erro no registro:', error.message);

@@ -73,7 +73,7 @@ async function criarParaUsuario(usuario_id, dados) {
   return criarNotificacao({ ...dados, usuario_id });
 }
 
-async function criarParaEmpresa(empresa_id, dados, { somenteAdmins = false } = {}) {
+async function criarParaEmpresa(empresa_id, dados, { somenteAdmins = false, excluir_usuario_id = null } = {}) {
   if (!empresa_id) return [];
 
   try {
@@ -84,6 +84,8 @@ async function criarParaEmpresa(empresa_id, dados, { somenteAdmins = false } = {
       .eq('status', 'ativo');
 
     if (somenteAdmins) query = query.eq('tipo', 'admin');
+    // Evita notificar quem executou a acao (ex.: o admin que criou o frete no painel).
+    if (excluir_usuario_id) query = query.neq('id', excluir_usuario_id);
 
     const { data: usuarios, error } = await query;
     if (error) throw error;
@@ -98,8 +100,8 @@ async function criarParaEmpresa(empresa_id, dados, { somenteAdmins = false } = {
   }
 }
 
-async function notificarFreteCriado(frete) {
-  return criarParaUsuario(frete.motorista_id, {
+async function notificarFreteCriado(frete, { actorId = null } = {}) {
+  const paraMotorista = criarParaUsuario(frete.motorista_id, {
     empresa_id: frete.empresa_id,
     tipo: 'frete_criado',
     titulo: 'Frete criado',
@@ -108,10 +110,21 @@ async function notificarFreteCriado(frete) {
     entidade_tipo: 'frete',
     dedupe_key: `frete_criado:${frete.id}`,
   });
+  // O painel dos admins tambem recebe o evento (menos quem criou, para nao notificar a propria acao).
+  const paraAdmins = criarParaEmpresa(frete.empresa_id, {
+    tipo: 'frete_criado',
+    titulo: 'Novo frete criado',
+    mensagem: `Frete de ${frete.origem} para ${frete.destino} foi criado.`,
+    entidade_id: frete.id,
+    entidade_tipo: 'frete',
+    dedupe_key: `frete_criado_admin:${frete.id}`,
+  }, { somenteAdmins: true, excluir_usuario_id: actorId });
+  const [, resultadoAdmins] = await Promise.all([paraMotorista, paraAdmins]);
+  return resultadoAdmins;
 }
 
-async function notificarViagemFinalizada(frete) {
-  return criarParaUsuario(frete.motorista_id, {
+async function notificarViagemFinalizada(frete, { actorId = null } = {}) {
+  const paraMotorista = criarParaUsuario(frete.motorista_id, {
     empresa_id: frete.empresa_id,
     tipo: 'frete_finalizado',
     titulo: 'Frete finalizado',
@@ -120,6 +133,16 @@ async function notificarViagemFinalizada(frete) {
     entidade_tipo: 'frete',
     dedupe_key: `frete_finalizado:${frete.id}`,
   });
+  const paraAdmins = criarParaEmpresa(frete.empresa_id, {
+    tipo: 'frete_finalizado',
+    titulo: 'Frete finalizado',
+    mensagem: `Frete de ${frete.origem} para ${frete.destino} foi finalizado.`,
+    entidade_id: frete.id,
+    entidade_tipo: 'frete',
+    dedupe_key: `frete_finalizado_admin:${frete.id}`,
+  }, { somenteAdmins: true, excluir_usuario_id: actorId });
+  const [, resultadoAdmins] = await Promise.all([paraMotorista, paraAdmins]);
+  return resultadoAdmins;
 }
 
 async function notificarLancamentoCriado(lancamento, tipo) {
