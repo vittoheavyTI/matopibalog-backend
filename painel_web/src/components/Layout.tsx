@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Outlet } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { SessionTimeoutWatcher } from './SessionTimeoutWatcher';
+import { NotificacoesDropdown } from './NotificacoesDropdown';
 import { useAuth } from '../contexts/AuthContext';
 import { LogOut, User as UserIcon, ChevronDown } from 'lucide-react';
 
@@ -36,7 +37,9 @@ export const Layout: React.FC = () => {
       <div className="flex-1 flex flex-col h-full overflow-hidden">
         {/* Cabeçalho Superior */}
         <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-end px-6 shadow-sm z-10">
-          <div className="relative" ref={dropdownRef}>
+          <div className="flex items-center gap-3">
+            <NotificacoesDropdown />
+            <div className="relative" ref={dropdownRef}>
             <button 
               onClick={() => setIsDropdownOpen(!isDropdownOpen)}
               className="flex items-center space-x-3 hover:bg-gray-50 p-2 rounded-lg transition-colors border border-transparent hover:border-gray-200"
@@ -72,6 +75,7 @@ export const Layout: React.FC = () => {
                 </button>
               </div>
             )}
+            </div>
           </div>
         </header>
 

@@ -152,6 +152,7 @@ exports.create = async (req, res) => {
       .single();
 
     if (error) throw error;
+    notificacaoService.notificarLancamentoCriado(data, 'despesa').catch(() => {});
     res.status(201).json(data);
   } catch (error) {
     // Corrida concorrente: outro request com o mesmo client_request_id inseriu

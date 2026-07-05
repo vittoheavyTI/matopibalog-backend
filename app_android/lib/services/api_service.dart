@@ -481,22 +481,41 @@ class ApiService {
     }
   }
 
-  static Future<List<dynamic>> getNotificacoes() async {
+  static Future<List<dynamic>> getNotificacoes({bool? lida, int limite = 50}) async {
     try {
-      final response = await http.get(Uri.parse('$_baseUrl/notificacoes'), headers: await _getHeaders()).timeout(_timeoutGet);
+      final params = <String, String>{'limite': limite.clamp(1, 100).toString()};
+      if (lida != null) params['lida'] = lida.toString();
+      final uri = Uri.parse('$_baseUrl/notificacoes').replace(queryParameters: params);
+      final response = await http.get(uri, headers: await _getHeaders()).timeout(_timeoutGet);
       AppLogger.api('ApiService', 'GET /notificacoes', response.statusCode);
       if (response.statusCode == 200) return jsonDecode(response.body);
-      return [];
+      throw ApiException(_mensagemErroHttpGet(response), statusCode: response.statusCode);
     } catch (e) {
       AppLogger.error('ApiService', 'GET /notificacoes exception', e);
-      return [];
+      rethrow;
     }
   }
 
-  static Future<void> marcarNotificacaoLida(String id) async {
+  static Future<bool> marcarNotificacaoLida(String id) async {
     try {
-      await http.patch(Uri.parse('$_baseUrl/notificacoes/$id/lida'), headers: await _getHeaders()).timeout(_timeoutGet);
-    } catch (_) {}
+      final response = await http.patch(Uri.parse('$_baseUrl/notificacoes/$id/lida'), headers: await _getHeaders()).timeout(_timeoutGet);
+      AppLogger.api('ApiService', 'PATCH /notificacoes/$id/lida', response.statusCode);
+      return response.statusCode == 200;
+    } catch (e) {
+      AppLogger.error('ApiService', 'PATCH /notificacoes/$id/lida exception', e);
+      return false;
+    }
+  }
+
+  static Future<bool> marcarTodasNotificacoesLidas() async {
+    try {
+      final response = await http.patch(Uri.parse('$_baseUrl/notificacoes/lidas'), headers: await _getHeaders()).timeout(_timeoutGet);
+      AppLogger.api('ApiService', 'PATCH /notificacoes/lidas', response.statusCode);
+      return response.statusCode == 200;
+    } catch (e) {
+      AppLogger.error('ApiService', 'PATCH /notificacoes/lidas exception', e);
+      return false;
+    }
   }
 
   static Future<Map<String, dynamic>?> finalizarViagem(

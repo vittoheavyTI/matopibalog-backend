@@ -184,6 +184,7 @@ exports.create = async (req, res) => {
       throw error;
     }
 
+    notificacaoService.notificarFreteCriado(data).catch(() => {});
     res.status(201).json({ ...data, comissao_calculada: comissao });
   } catch (error) {
     console.error(error);
