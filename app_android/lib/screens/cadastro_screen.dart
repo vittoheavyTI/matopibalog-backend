@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // TextInputFormatter
 import '../models/plano_publico.dart';
 import '../services/api_service.dart';
 
@@ -153,25 +154,32 @@ class _CadastroScreenState extends State<CadastroScreen> {
     });
 
     try {
-      final codigo = _codigoConviteCtrl.text.trim().toUpperCase();
-      final success = await ApiService.register({
+      // Normaliza o código antes de enviar (uppercase, sem espaços). O traço é
+      // mantido como digitado — o backend aceita com ou sem. Reduz erro do motorista.
+      final codigo = _codigoConviteCtrl.text.toUpperCase().replaceAll(RegExp(r'\s'), '');
+      final comConvite = codigo.isNotEmpty;
+      final resultado = await ApiService.register({
         'nome': _nomeCtrl.text.trim(),
         'placa_veiculo': _placaCtrl.text.trim().toUpperCase(),
         'cpf': _cpfCtrl.text.trim().replaceAll(RegExp(r'\D'), ''),
         'email': _emailCtrl.text.trim(),
         'senha': _passCtrl.text,
-        if (codigo.isNotEmpty) 'codigo_convite': codigo,
-      }, planoId: codigo.isEmpty ? _planoSelecionado?.id : null);
+        if (comConvite) 'codigo_convite': codigo,
+      }, planoId: comConvite ? null : _planoSelecionado?.id);
 
-      if (success && mounted) {
+      if (resultado['ok'] == true && mounted) {
+        // Mensagem específica por fluxo (nenhum passa por análise manual):
+        //  - com convite: motorista autoaprovado, vinculado à empresa;
+        //  - sem convite: autônomo em trial com acesso imediato.
+        final mensagemSucesso = comConvite
+            ? 'Cadastro realizado com sucesso. Você já pode acessar sua conta vinculada à empresa.'
+            : 'Cadastro realizado com sucesso. Seu período de teste foi iniciado e você já pode usar o app.';
         showDialog(
           context: context,
           barrierDismissible: false,
           builder: (_) => AlertDialog(
-            title: const Text('Sucesso'),
-            content: const Text(
-              'Cadastro realizado com sucesso. Sua conta passará por análise para aprovação.',
-            ),
+            title: const Text('Cadastro concluído'),
+            content: Text(mensagemSucesso, style: const TextStyle(fontSize: 15)),
             actions: [
               TextButton(
                 onPressed: () {
@@ -185,11 +193,13 @@ class _CadastroScreenState extends State<CadastroScreen> {
         );
       } else {
         setState(() {
-          _error = 'Erro ao realizar cadastro. Verifique os dados ou tente novamente.';
+          // Mensagem real do backend (e-mail/CPF já cadastrado, código inválido, etc.)
+          _error = (resultado['message'] as String?) ??
+              'Não foi possível concluir o cadastro. Tente novamente em instantes.';
         });
       }
     } catch (e) {
-      setState(() => _error = 'Erro de conexão com o servidor.');
+      setState(() => _error = 'Não foi possível concluir o cadastro. Tente novamente em instantes.');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -362,10 +372,19 @@ class _CadastroScreenState extends State<CadastroScreen> {
                 controller: _codigoConviteCtrl,
                 decoration: const InputDecoration(
                   labelText: 'Código da empresa (opcional)',
-                  hintText: 'Ex: MATO-AB1234 — deixe vazio se autônomo',
+                  hintText: 'Ex.: MATO-AB1234 ou MATOAB1234',
+                  helperText: 'Digite com ou sem traço. Deixe vazio se autônomo.',
                   prefixIcon: Icon(Icons.business_outlined),
                 ),
                 textCapitalization: TextCapitalization.characters,
+                // Uppercase enquanto digita (o traço não é obrigatório; o backend
+                // normaliza de qualquer forma). Não bloqueia nem exige formato.
+                inputFormatters: [
+                  TextInputFormatter.withFunction(
+                    (oldValue, newValue) =>
+                        newValue.copyWith(text: newValue.text.toUpperCase()),
+                  ),
+                ],
                 textInputAction: TextInputAction.next,
               ),
               const SizedBox(height: 4),

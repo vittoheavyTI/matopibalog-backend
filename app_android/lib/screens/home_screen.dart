@@ -45,7 +45,11 @@ class _HomeScreenState extends State<HomeScreen> {
     final finance = context.read<FinanceProvider>();
     // Usa o helper compartilhado para resolver 0/1/2+ fretes ativos.
     // O seletor modal é o mesmo bottom sheet usado pelo drawer.
-    SeletorFrete.resolver(context, finance.fretesAtivos).then((freteId) {
+    SeletorFrete.resolver(
+      context,
+      finance.fretesAtivos,
+      onIniciarFrete: () => _navegarERefresh(const AddFreteScreen()),
+    ).then((freteId) {
       if (freteId != null && mounted) {
         _mostrarBottomSheetLancamento(freteId);
       }
@@ -86,7 +90,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   'Despesa/Abastecimento/Vale serão vinculados ao frete ativo: '
                   '${freteEscolhido['origem'] ?? '-'} → ${freteEscolhido['destino'] ?? '-'}',
                   textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                  style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
                 ),
               ),
             const SizedBox(height: 8),
@@ -230,25 +234,37 @@ class _HomeScreenState extends State<HomeScreen> {
                   Card(
                     child: Padding(
                       padding: const EdgeInsets.all(16),
-                      child: Row(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Icon(Icons.history, color: Theme.of(context).colorScheme.primary),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text('Histórico de Fretes',
-                                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                                const SizedBox(height: 2),
-                                Text('Consulte fretes de meses anteriores',
-                                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-                              ],
-                            ),
+                          Row(
+                            children: [
+                              Icon(Icons.history, color: Theme.of(context).colorScheme.primary, size: 26),
+                              const SizedBox(width: 10),
+                              const Expanded(
+                                child: Text('Histórico de Fretes',
+                                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                              ),
+                            ],
                           ),
-                          TextButton(
-                            onPressed: () => _navegarERefresh(const HistoricoScreen()),
-                            child: const Text('Ver histórico completo'),
+                          const SizedBox(height: 4),
+                          Text('Consulte fretes de meses anteriores',
+                              style: TextStyle(fontSize: 14, color: Colors.grey.shade600)),
+                          const SizedBox(height: 12),
+                          // Botão grande e de alto contraste: onSurface = preto no claro,
+                          // branco no escuro (resolve o verde ilegível no dark).
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton.icon(
+                              onPressed: () => _navegarERefresh(const HistoricoScreen()),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: Theme.of(context).colorScheme.onSurface,
+                                minimumSize: const Size(0, 48),
+                                textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                              ),
+                              icon: const Icon(Icons.history, size: 20),
+                              label: const Text('Ver histórico completo'),
+                            ),
                           ),
                         ],
                       ),
@@ -292,7 +308,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             const SizedBox(height: 8),
                             Text('Nenhum frete ainda.', style: TextStyle(color: Colors.grey.shade600)),
                             const SizedBox(height: 4),
-                            Text('Toque em NOVO LANÇAMENTO para começar.', style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
+                            Text('Toque em NOVO LANÇAMENTO para começar.', style: TextStyle(color: Colors.grey.shade500, fontSize: 13)),
                           ],
                         ),
                       ),

@@ -69,34 +69,49 @@ class SeletorFrete {
     );
   }
 
-  /// Exibe diálogo informando que não há frete ativo.
-  static void mostrarSemFrete(BuildContext context) {
+  /// Exibe diálogo informando que não há frete ativo. Quando [onIniciarFrete] é
+  /// fornecido, oferece o botão "Iniciar frete agora" que fecha o diálogo e
+  /// executa a ação (abrir a tela de criação de frete). Não permite lançar sem
+  /// frete — apenas facilita o caminho.
+  static void mostrarSemFrete(BuildContext context, {VoidCallback? onIniciarFrete}) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Nenhum frete ativo'),
         content: const Text(
-          'Não há frete ativo para lançar. Inicie um frete antes de '
-          'registrar despesas, abastecimentos ou vales.',
+          'Você precisa iniciar um frete antes de lançar despesas, '
+          'abastecimentos ou vales.',
+          style: TextStyle(fontSize: 15),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('OK'),
+            child: const Text('Agora não'),
           ),
+          if (onIniciarFrete != null)
+            ElevatedButton.icon(
+              onPressed: () {
+                Navigator.pop(ctx);
+                onIniciarFrete();
+              },
+              icon: const Icon(Icons.local_shipping_outlined, size: 20),
+              label: const Text('Iniciar frete agora'),
+            ),
         ],
       ),
     );
   }
 
   /// Resolve o frete ativo: 0 → mostra diálogo (retorna null),
-  /// 1 → retorna o único id, 2+ → mostra seletor.
+  /// 1 → retorna o único id, 2+ → mostra seletor. [onIniciarFrete] é repassado
+  /// ao diálogo de "nenhum frete ativo" para oferecer o atalho de criação.
   static Future<String?> resolver(
     BuildContext context,
-    List<Map<String, dynamic>> fretesAtivos,
-  ) async {
+    List<Map<String, dynamic>> fretesAtivos, {
+    VoidCallback? onIniciarFrete,
+  }) async {
     if (fretesAtivos.isEmpty) {
-      mostrarSemFrete(context);
+      mostrarSemFrete(context, onIniciarFrete: onIniciarFrete);
       return null;
     }
     if (fretesAtivos.length == 1) {
