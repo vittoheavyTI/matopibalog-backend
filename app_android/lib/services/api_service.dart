@@ -9,6 +9,18 @@ import '../config.dart';
 import '../models/plano_publico.dart';
 import 'app_logger.dart';
 
+/// Erro de carregamento (GET) com mensagem já pronta para o usuário. Serve para
+/// o caminho da Home distinguir "erro real" (403/500/rede/timeout) de "lista
+/// vazia legítima" (200 com []). Não substitui o retorno [] dos GETs de listas
+/// que devem degradar silenciosamente — só é lançado onde a Home precisa saber.
+class ApiException implements Exception {
+  final String message;
+  final int? statusCode;
+  const ApiException(this.message, {this.statusCode});
+  @override
+  String toString() => message;
+}
+
 class ApiService {
   static final String _baseUrl = Config.apiBaseUrl;
 
@@ -61,6 +73,20 @@ class ApiService {
           'verifique a lista antes de tentar novamente.';
     }
     return 'Não foi possível conectar ao servidor. Verifique sua internet.';
+  }
+
+  /// Mensagem amigável para falha HTTP num GET de carregamento. Quando o backend
+  /// envia mensagem clara (ex.: plano vencido/bloqueio em 403), ela é exibida;
+  /// caso contrário, mensagem genérica de "tente novamente".
+  static String _mensagemErroHttpGet(http.Response response) {
+    try {
+      final decoded = jsonDecode(response.body);
+      if (decoded is Map) {
+        final msg = decoded['message'] ?? decoded['error'];
+        if (msg is String && msg.trim().isNotEmpty) return msg.trim();
+      }
+    } catch (_) {/* body não-JSON: usa mensagem genérica */}
+    return 'Não foi possível carregar seus dados agora. Tente novamente em instantes.';
   }
 
   /// Define o token usado nas requisições autenticadas da sessão atual.
@@ -391,6 +417,8 @@ class ApiService {
   }
 
   // FRETES
+  // Diferente dos GETs silenciosos: em falha, LANÇA ApiException para o chamador
+  // (Home/loadData) distinguir erro real de lista vazia. 200 com [] retorna [].
   static Future<List<dynamic>> getFretes() async {
     try {
       final response = await http
@@ -399,15 +427,16 @@ class ApiService {
             headers: await _getHeaders(),
           )
           .timeout(_timeoutGet);
+      AppLogger.api('ApiService', 'GET /fretes', response.statusCode);
       if (response.statusCode == 200) {
-        AppLogger.api('ApiService', 'GET /fretes', response.statusCode);
         return jsonDecode(response.body);
       }
-      AppLogger.api('ApiService', 'GET /fretes', response.statusCode);
-      return [];
+      throw ApiException(_mensagemErroHttpGet(response), statusCode: response.statusCode);
+    } on ApiException {
+      rethrow;
     } catch (e) {
       AppLogger.error('ApiService', 'GET /fretes exception', e);
-      return [];
+      throw const ApiException('Não foi possível carregar seus dados agora. Tente novamente em instantes.');
     }
   }
 
@@ -580,6 +609,9 @@ class ApiService {
     }
   }
 
+  // Diferente do getListComFiltro (silencioso): em falha, LANÇA ApiException para
+  // o chamador (Home/loadData) distinguir erro real de lista vazia. Único uso é
+  // no loadData; telas com filtro usam getListComFiltro. 200 com [] retorna [].
   static Future<List<dynamic>> getList(String endpoint) async {
     try {
       final response = await http
@@ -588,15 +620,16 @@ class ApiService {
             headers: await _getHeaders(),
           )
           .timeout(_timeoutGet);
+      AppLogger.api('ApiService', 'GET /$endpoint', response.statusCode);
       if (response.statusCode == 200) {
-        AppLogger.api('ApiService', 'GET /$endpoint', response.statusCode);
         return jsonDecode(response.body);
       }
-      AppLogger.api('ApiService', 'GET /$endpoint', response.statusCode);
-      return [];
+      throw ApiException(_mensagemErroHttpGet(response), statusCode: response.statusCode);
+    } on ApiException {
+      rethrow;
     } catch (e) {
       AppLogger.error('ApiService', 'GET /$endpoint exception', e);
-      return [];
+      throw const ApiException('Não foi possível carregar seus dados agora. Tente novamente em instantes.');
     }
   }
 }

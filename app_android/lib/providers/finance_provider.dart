@@ -12,7 +12,9 @@ class FinanceProvider extends ChangeNotifier {
   double _comissaoMes = 0.0;
   double _deducoesMes = 0.0;
   double _saldoMes = 0.0;
-  double _percentualComissao = 12.0;
+  // Sem fallback de 12%: percentual ausente/desconhecido = 0% (espelha o backend,
+  // que nunca assume 12). Autônomo já usa comissão 0 e resultado (faturamento−gastos).
+  double _percentualComissao = 0.0;
   bool _isAutonomo = false;
   bool _loading = false;
   // Vira true após o primeiro loadData (com ou sem dados). Usado pela Home para
@@ -127,7 +129,7 @@ class FinanceProvider extends ChangeNotifier {
       if (profile != null) {
         _percentualComissao = double.tryParse(
           profile['motoristas']?['percentual_comissao']?.toString() ?? '',
-        ) ?? 12.0;
+        ) ?? 0.0; // ausente/desconhecido → 0% (nunca assume 12)
         _isAutonomo = (profile['empresas'] as Map?)?['tipo'] == 'autonomo';
       }
       _fretes = fretes;
@@ -290,7 +292,12 @@ class FinanceProvider extends ChangeNotifier {
         'duracao_ms': cronometro.elapsedMilliseconds,
       });
     } catch (e) {
-      _error = 'Erro ao carregar dados. Verifique sua conexão.';
+      // Erro real de carga (403/500/rede/timeout via ApiException dos GETs) → sinaliza
+      // _error para a Home mostrar mensagem clara em vez de falso "Nenhum frete".
+      // Mensagem do backend (ex.: plano/bloqueio) é preservada quando existir.
+      _error = e is ApiException
+          ? e.message
+          : 'Não foi possível carregar seus dados agora. Tente novamente em instantes.';
       AppLogger.error('FinanceProvider', 'loadData exception', e);
     } finally {
       _loading = false;
