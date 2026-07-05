@@ -4,6 +4,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
 import '../services/app_logger.dart';
+import '../services/push_service.dart';
 
 enum AuthStatus { initial, loading, authenticated, unauthenticated, error }
 
@@ -96,6 +97,8 @@ class AuthProvider extends ChangeNotifier {
       _termosPendentes = profile['termos_pendentes'] == true;
       _termosPendentesCount = (profile['termos_pendentes_count'] as num?)?.toInt() ?? 0;
       _status = AuthStatus.authenticated;
+      // Registra o token de push para este aparelho (best-effort, não bloqueia).
+      PushService.registrarTokenAposLogin();
       AppLogger.action('try_auto_login', params: {'result': 'success', 'user': _nome});
     } else {
       await _limparSessao(prefs);
@@ -210,6 +213,8 @@ class AuthProvider extends ChangeNotifier {
     }
 
     _status = AuthStatus.authenticated;
+    // Registra o token de push para este aparelho (best-effort, não bloqueia o login).
+    PushService.registrarTokenAposLogin();
     AppLogger.action('login_success', params: {'email': email, 'user': _nome});
     notifyListeners();
     return true;
@@ -239,6 +244,10 @@ class AuthProvider extends ChangeNotifier {
 
   Future<void> logout() async {
     AppLogger.action('logout', params: {'user': _nome});
+    // Desativa o token de push deste aparelho antes de limpar a sessão.
+    // Best-effort: se falhar (offline), o backend desativa no primeiro envio
+    // que retornar token inválido.
+    await PushService.removerTokenNoLogout();
     final prefs = await SharedPreferences.getInstance();
     await _limparSessao(prefs);
     _token = '';

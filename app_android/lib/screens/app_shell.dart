@@ -5,6 +5,7 @@ import '../providers/finance_provider.dart';
 import '../providers/theme_provider.dart';
 import '../services/api_service.dart';
 import '../services/app_logger.dart';
+import '../services/push_service.dart';
 import '../widgets/seletor_frete.dart';
 import 'home_screen.dart';
 import 'historico_screen.dart';
@@ -29,6 +30,17 @@ class _AppShellState extends State<AppShell> {
   void initState() {
     super.initState();
     _carregarContador();
+    // Ao receber um push em primeiro plano, atualiza o badge do sino na hora.
+    PushService.onPushRecebido = _carregarContador;
+  }
+
+  @override
+  void dispose() {
+    // Evita segurar referência a este State após ser descartado.
+    if (PushService.onPushRecebido == _carregarContador) {
+      PushService.onPushRecebido = null;
+    }
+    super.dispose();
   }
 
   /// Busca o contador remoto de não lidas para o badge do sino.
@@ -100,13 +112,22 @@ class _AppShellState extends State<AppShell> {
           IconButton(
             tooltip: 'Notificações',
             onPressed: _abrirNotificacoes,
+            // Sino maior e mais visível (pedido de UX). O AppBar é sempre verde,
+            // então o ícone branco tem bom contraste no tema claro e no escuro.
+            iconSize: 30,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
             icon: Badge(
               isLabelVisible: _naoLidas > 0,
-              label: Text(_naoLidas > 99 ? '99+' : '$_naoLidas'),
-              child: const Icon(Icons.notifications_outlined),
+              backgroundColor: const Color(0xFFD32F2F),
+              textColor: Colors.white,
+              label: Text(
+                _naoLidas > 99 ? '99+' : '$_naoLidas',
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+              ),
+              child: const Icon(Icons.notifications),
             ),
           ),
-          const SizedBox(width: 4),
+          const SizedBox(width: 8),
         ],
       ),
       drawer: Drawer(

@@ -539,6 +539,44 @@ class ApiService {
     }
   }
 
+  // PUSH (FCM)
+  /// Registra/atualiza o token FCM do aparelho no backend (após login / refresh).
+  /// Best-effort: retorna false em qualquer falha, sem lançar.
+  static Future<bool> registrarPushToken(String token, {String platform = 'android'}) async {
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$_baseUrl/push/tokens'),
+            headers: await _getHeaders(),
+            body: jsonEncode({'token': token, 'platform': platform}),
+          )
+          .timeout(_timeoutPostJson);
+      AppLogger.api('ApiService', 'POST /push/tokens', response.statusCode);
+      return response.statusCode == 201 || response.statusCode == 200;
+    } catch (e) {
+      AppLogger.error('ApiService', 'POST /push/tokens exception', e);
+      return false;
+    }
+  }
+
+  /// Desativa o token FCM no backend (logout). Best-effort.
+  static Future<bool> removerPushToken(String token) async {
+    try {
+      final response = await http
+          .delete(
+            Uri.parse('$_baseUrl/push/tokens'),
+            headers: await _getHeaders(),
+            body: jsonEncode({'token': token}),
+          )
+          .timeout(_timeoutPostJson);
+      AppLogger.api('ApiService', 'DELETE /push/tokens', response.statusCode);
+      return response.statusCode == 200;
+    } catch (e) {
+      AppLogger.error('ApiService', 'DELETE /push/tokens exception', e);
+      return false;
+    }
+  }
+
   static Future<Map<String, dynamic>?> finalizarViagem(
     String freteId, {
     int? kmInicial,

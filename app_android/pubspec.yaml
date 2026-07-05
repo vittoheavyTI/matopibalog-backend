@@ -24,6 +24,14 @@ dependencies:
   sqflite: ^2.3.0
   path_provider: ^2.1.2
   path: ^1.9.1
+  # Push (FCM). O app compila e roda mesmo sem google-services.json: o
+  # PushService trata Firebase.initializeApp de forma tolerante (ver push_service.dart).
+  firebase_core: ^3.8.0
+  firebase_messaging: ^15.1.5
+  # Exibe a notificacao quando o app esta em primeiro plano (o FCM so mostra
+  # automaticamente em background/terminado). Requer coreLibraryDesugaring no
+  # android/app/build.gradle.kts (habilitado neste PR; minSdk 21 usa java.time).
+  flutter_local_notifications: ^17.2.3
 
 dev_dependencies:
   flutter_test:
