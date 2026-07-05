@@ -1,6 +1,13 @@
 const supabase = require('../config/supabase');
 
 const verificarPlano = async (req, res, next) => {
+  // Super-admin não pode ser bloqueado pelo plano de uma empresa cliente.
+  if (req.user?.is_super_admin === true) return next();
+
+  // Consultas são read-only: preservam acesso ao histórico mesmo quando o
+  // plano está suspenso, expirado ou bloqueado. Escritas seguem verificadas.
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+
   // Admin não tem empresa, pula verificação
   if (!req.empresa_id) return next();
 

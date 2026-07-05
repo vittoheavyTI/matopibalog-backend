@@ -1,5 +1,6 @@
 const supabase = require('../config/supabase');
 const notificacaoService = require('../services/notificacaoService');
+const { calcularComissao } = require('../utils/comissao');
 
 // Helper para validar status do motorista
 const checkMotoristaStatus = async (uid) => {
@@ -15,6 +16,23 @@ const checkMotoristaStatus = async (uid) => {
 
 // Mensagem única da trava de pendências (reuso nas duas travas)
 const MSG_PENDENCIAS = 'Não é possível finalizar: há lançamentos pendentes desta viagem. Aprove ou rejeite todos antes de finalizar.';
+
+// Datas simples representam o último dia incluído pelo cliente. Converte esse
+// dia no limite exclusivo seguinte; datetimes já expressam o limite desejado.
+const normalizarDataFimExclusiva = (dataFim) => {
+  if (typeof dataFim !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(dataFim)) return dataFim;
+
+  const [ano, mes, dia] = dataFim.split('-').map(Number);
+  const data = new Date(Date.UTC(ano, mes - 1, dia));
+  const dataValida = data.getUTCFullYear() === ano
+    && data.getUTCMonth() === mes - 1
+    && data.getUTCDate() === dia;
+
+  if (!dataValida) return dataFim;
+
+  data.setUTCDate(data.getUTCDate() + 1);
+  return data.toISOString().slice(0, 10);
+};
 
 // Retorna true se o FRETE tem algum lançamento pendente (despesa/abast/vale).
 // Escopo por frete_id: bloqueia só a viagem atual, não outras viagens do motorista.
@@ -88,7 +106,7 @@ exports.getAll = async (req, res) => {
     }
 
     if (data_inicio) query = query.gte('data', data_inicio);
-    if (data_fim) query = query.lte('data', data_fim);
+    if (data_fim) query = query.lt('data', normalizarDataFimExclusiva(data_fim));
     if (status) query = query.eq('status', status);
 
     const { data, error } = await query.order('data', { ascending: false });
@@ -120,8 +138,6 @@ exports.create = async (req, res) => {
 
     if (motError || !motData) throw motError || new Error('Dados do motorista não encontrados');
 
-    const comissao = valor_frete * (motData.percentual_comissao / 100);
-
     // 2b. Definir quem_recebeu por tipo de empresa (TAC vs CLT):
     //  - autonomo (TAC) → SEMPRE 'motorista' (recebe direto, é dono do veículo); o body NÃO
     //    sobrescreve — defense-in-depth contra requisição forjada (espelha a trava do frontend).
@@ -141,6 +157,11 @@ exports.create = async (req, res) => {
     } else if (!quemRecebeuFinal) {
       quemRecebeuFinal = 'proprietario';
     }
+
+    // Comissão só para VINCULADO (empresa.tipo conhecido e ≠ 'autonomo'). Autônomo e
+    // tipo desconhecido → 0 (nunca assume 12%). Campo comissao_calculada mantido no
+    // contrato da resposta, apenas zerado quando não há comissão fixa.
+    const comissao = calcularComissao(valor_frete, motData.percentual_comissao, empData?.tipo);
 
     // 3. Inserir frete
     const { data, error } = await supabase

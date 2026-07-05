@@ -13,6 +13,12 @@ function gerarSenhaTemporaria(tamanho = 14) {
   return senha;
 }
 
+// Default de comissão ao criar/aprovar motorista, conforme o tipo da empresa.
+// Autônomo NÃO usa comissão fixa → default 0. Só zeramos com evidência positiva
+// (tipo === 'autonomo'); tipo desconhecido/não resolvido mantém a regra atual (12%)
+// para não regredir a criação de motoristas vinculados.
+const defaultComissaoPorTipo = (empresaTipo) => (empresaTipo === 'autonomo' ? 0 : 12.0);
+
 // ─── Listar Motoristas Pendentes ──────────────────────────────────────────────
 exports.getPendentes = async (req, res) => {
   console.log('[adminController:getPendentes] Buscando motoristas pendentes...');
@@ -76,12 +82,22 @@ exports.approveMotorista = async (req, res) => {
       throw userError;
     }
 
+    // Tipo da empresa do motorista → define o default de comissão (autônomo → 0).
+    const { data: motEmpresa } = await supabase
+      .from('motoristas')
+      .select('empresas!left(tipo)')
+      .eq('id', id)
+      .single();
+    const tipoEmpresa = Array.isArray(motEmpresa?.empresas)
+      ? motEmpresa.empresas[0]?.tipo
+      : motEmpresa?.empresas?.tipo;
+
     // 2. Atualizar motorista
     const { error: motError } = await supabase
       .from('motoristas')
       .update({
         status_cadastro: 'aprovado',
-        percentual_comissao: percentual_comissao || 12.0
+        percentual_comissao: percentual_comissao || defaultComissaoPorTipo(tipoEmpresa)
       })
       .eq('id', id);
 
@@ -193,6 +209,14 @@ exports.createMotorista = async (req, res) => {
       return res.status(500).json({ message: `Erro ao salvar motorista no banco: ${userError.message}` });
     }
 
+    // Tipo da empresa do admin → define o default de comissão (autônomo → 0).
+    const { data: empresaRow } = await supabase
+      .from('empresas')
+      .select('tipo')
+      .eq('id', req.empresa_id)
+      .single();
+    const tipoEmpresa = empresaRow?.tipo || null;
+
     // 3. Inserir em motoristas (cpf vazio → null para não colidir no UNIQUE)
     const { error: motError } = await supabase
       .from('motoristas')
@@ -201,7 +225,7 @@ exports.createMotorista = async (req, res) => {
         empresa_id: req.empresa_id,
         cpf: cpf && cpf.trim() !== '' ? cpf.trim() : null,
         placa_veiculo: placa_veiculo || '',
-        percentual_comissao: percentual_comissao || 12.0,
+        percentual_comissao: percentual_comissao || defaultComissaoPorTipo(tipoEmpresa),
         status_cadastro: 'aprovado'
       });
 
