@@ -1,4 +1,5 @@
 const supabase = require('../config/supabase');
+const { calcularComissao } = require('../utils/comissao');
 
 exports.getFichaViagem = async (req, res) => {
   const { motorista_id, fretes_ids } = req.query;
@@ -29,7 +30,7 @@ exports.getFichaViagem = async (req, res) => {
     // 1. Dados do Motorista
     const { data: motorista, error: motError } = await supabase
       .from('motoristas')
-      .select('*, usuarios(nome)')
+      .select('*, usuarios(nome), empresas!left(tipo)')
       .eq('id', motorista_id)
       .single();
 
@@ -85,7 +86,13 @@ exports.getFichaViagem = async (req, res) => {
       freteBruto += parseFloat(f.valor_frete) || 0;
     });
 
-    const comissao = freteBruto * ((motorista.percentual_comissao || 0) / 100);
+    // Comissão só para vinculado (empresa.tipo conhecido e ≠ 'autonomo'). Autônomo e
+    // tipo desconhecido → 0 (nunca assume percentual). `percentual` no retorno mantém o
+    // valor cadastral; apenas o cálculo (comissao/saldo_liquido) respeita a regra.
+    const empresaTipo = Array.isArray(motorista.empresas)
+      ? motorista.empresas[0]?.tipo
+      : motorista.empresas?.tipo;
+    const comissao = calcularComissao(freteBruto, motorista.percentual_comissao, empresaTipo);
 
     [...abastecimentos, ...despesas, ...vales].forEach(d => {
       if (d.quem_pagou === 'proprietario') {
