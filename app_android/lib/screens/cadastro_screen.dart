@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // TextInputFormatter
 import '../models/plano_publico.dart';
 import '../services/api_service.dart';
 
@@ -153,7 +154,9 @@ class _CadastroScreenState extends State<CadastroScreen> {
     });
 
     try {
-      final codigo = _codigoConviteCtrl.text.trim().toUpperCase();
+      // Normaliza o código antes de enviar (uppercase, sem espaços). O traço é
+      // mantido como digitado — o backend aceita com ou sem. Reduz erro do motorista.
+      final codigo = _codigoConviteCtrl.text.toUpperCase().replaceAll(RegExp(r'\s'), '');
       final comConvite = codigo.isNotEmpty;
       final resultado = await ApiService.register({
         'nome': _nomeCtrl.text.trim(),
@@ -369,10 +372,19 @@ class _CadastroScreenState extends State<CadastroScreen> {
                 controller: _codigoConviteCtrl,
                 decoration: const InputDecoration(
                   labelText: 'Código da empresa (opcional)',
-                  hintText: 'Ex: MATO-AB1234 — deixe vazio se autônomo',
+                  hintText: 'Ex.: MATO-AB1234 ou MATOAB1234',
+                  helperText: 'Digite com ou sem traço. Deixe vazio se autônomo.',
                   prefixIcon: Icon(Icons.business_outlined),
                 ),
                 textCapitalization: TextCapitalization.characters,
+                // Uppercase enquanto digita (o traço não é obrigatório; o backend
+                // normaliza de qualquer forma). Não bloqueia nem exige formato.
+                inputFormatters: [
+                  TextInputFormatter.withFunction(
+                    (oldValue, newValue) =>
+                        newValue.copyWith(text: newValue.text.toUpperCase()),
+                  ),
+                ],
                 textInputAction: TextInputAction.next,
               ),
               const SizedBox(height: 4),
