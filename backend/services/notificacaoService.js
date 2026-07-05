@@ -1,45 +1,160 @@
 const supabase = require('../config/supabase');
 
-async function criar(usuarioId, empresaId, tipo, titulo, mensagem, referenciaId = null, referenciaTipo = null) {
+function logFalha(contexto, error) {
+  console.error('[notificacaoService] Falha controlada', {
+    contexto,
+    codigo: error?.code || null,
+    erro: error?.message || String(error),
+  });
+}
+
+function metadataSegura(metadata) {
+  return metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+    ? metadata
+    : {};
+}
+
+async function criarNotificacao({
+  empresa_id = null,
+  usuario_id,
+  tipo,
+  titulo,
+  mensagem,
+  entidade_tipo = null,
+  entidade_id = null,
+  metadata = {},
+  dedupe_key = null,
+}) {
+  if (!usuario_id || !tipo || !titulo || !mensagem) {
+    logFalha('payload_invalido', new Error('usuario_id, tipo, titulo e mensagem sao obrigatorios'));
+    return null;
+  }
+
+  const chaveDedupe = dedupe_key ? `${usuario_id}:${dedupe_key}` : null;
+
   try {
-    await supabase.from('notificacoes').insert({
-      usuario_id: usuarioId,
-      empresa_id: empresaId,
-      tipo,
-      titulo,
-      mensagem,
-      referencia_id: referenciaId,
-      referencia_tipo: referenciaTipo,
-    });
-  } catch (e) {
-    console.error('[notificacaoService] Erro ao criar notificação:', e);
+    if (chaveDedupe) {
+      const { data: existente, error: buscaError } = await supabase
+        .from('notificacoes')
+        .select('id, usuario_id, empresa_id, tipo, titulo, mensagem, referencia_tipo, referencia_id, lida, metadata, created_at, read_at')
+        .eq('dedupe_key', chaveDedupe)
+        .maybeSingle();
+      if (buscaError) throw buscaError;
+      if (existente) return existente;
+    }
+
+    const { data, error } = await supabase
+      .from('notificacoes')
+      .insert({
+        usuario_id,
+        empresa_id,
+        tipo,
+        titulo,
+        mensagem,
+        referencia_tipo: entidade_tipo,
+        referencia_id: entidade_id,
+        metadata: metadataSegura(metadata),
+        dedupe_key: chaveDedupe,
+      })
+      .select('id, usuario_id, empresa_id, tipo, titulo, mensagem, referencia_tipo, referencia_id, lida, metadata, created_at, read_at')
+      .single();
+
+    if (error) throw error;
+    return data;
+  } catch (error) {
+    // Uma corrida no mesmo evento pode atingir o indice unico. O evento principal
+    // continua valido; a notificacao duplicada e simplesmente descartada.
+    if (error?.code !== '23505') logFalha(tipo, error);
+    return null;
   }
 }
 
-async function notificarViagemFinalizada(frete, motoristaNome) {
-  await criar(
-    frete.motorista_id,
-    frete.empresa_id,
-    'viagem_finalizada',
-    'Viagem finalizada',
-    `Sua viagem de ${frete.origem} para ${frete.destino} foi finalizada.`,
-    frete.id,
-    'frete'
-  );
+async function criarParaUsuario(usuario_id, dados) {
+  return criarNotificacao({ ...dados, usuario_id });
 }
 
-async function notificarLancamentoResolvido(lancamento, tipo, aprovado, motoristaNome) {
+async function criarParaEmpresa(empresa_id, dados, { somenteAdmins = false } = {}) {
+  if (!empresa_id) return [];
+
+  try {
+    let query = supabase
+      .from('usuarios')
+      .select('id')
+      .eq('empresa_id', empresa_id)
+      .eq('status', 'ativo');
+
+    if (somenteAdmins) query = query.eq('tipo', 'admin');
+
+    const { data: usuarios, error } = await query;
+    if (error) throw error;
+
+    const resultados = await Promise.all((usuarios || []).map((usuario) =>
+      criarParaUsuario(usuario.id, { ...dados, empresa_id })
+    ));
+    return resultados.filter(Boolean);
+  } catch (error) {
+    logFalha('empresa', error);
+    return [];
+  }
+}
+
+async function notificarFreteCriado(frete) {
+  return criarParaUsuario(frete.motorista_id, {
+    empresa_id: frete.empresa_id,
+    tipo: 'frete_criado',
+    titulo: 'Frete criado',
+    mensagem: `Seu frete de ${frete.origem} para ${frete.destino} foi criado.`,
+    entidade_id: frete.id,
+    entidade_tipo: 'frete',
+    dedupe_key: `frete_criado:${frete.id}`,
+  });
+}
+
+async function notificarViagemFinalizada(frete) {
+  return criarParaUsuario(frete.motorista_id, {
+    empresa_id: frete.empresa_id,
+    tipo: 'frete_finalizado',
+    titulo: 'Frete finalizado',
+    mensagem: `Seu frete de ${frete.origem} para ${frete.destino} foi finalizado.`,
+    entidade_id: frete.id,
+    entidade_tipo: 'frete',
+    dedupe_key: `frete_finalizado:${frete.id}`,
+  });
+}
+
+async function notificarLancamentoCriado(lancamento, tipo) {
+  if (lancamento.status !== 'pendente') return [];
+  const label = { despesa: 'Despesa', abastecimento: 'Abastecimento', vale: 'Vale' }[tipo] || 'Lancamento';
+  return criarParaEmpresa(lancamento.empresa_id, {
+    tipo: 'lancamento_criado',
+    titulo: 'Novo lancamento pendente',
+    mensagem: `${label} aguardando aprovacao.`,
+    entidade_id: lancamento.id,
+    entidade_tipo: tipo,
+    dedupe_key: `lancamento_criado:${tipo}:${lancamento.id}`,
+  }, { somenteAdmins: true });
+}
+
+async function notificarLancamentoResolvido(lancamento, tipo, aprovado) {
   const acao = aprovado ? 'aprovado' : 'rejeitado';
-  const label = { despesa: 'Despesa', abastecimento: 'Abastecimento', vale: 'Vale' }[tipo] || 'Lançamento';
-  await criar(
-    lancamento.motorista_id,
-    lancamento.empresa_id,
-    aprovado ? 'lancamento_aprovado' : 'lancamento_rejeitado',
-    `${label} ${acao}`,
-    `Seu lançamento foi ${acao}.`,
-    lancamento.id,
-    tipo
-  );
+  const label = { despesa: 'Despesa', abastecimento: 'Abastecimento', vale: 'Vale' }[tipo] || 'Lancamento';
+  return criarParaUsuario(lancamento.motorista_id, {
+    empresa_id: lancamento.empresa_id,
+    tipo: aprovado ? 'lancamento_aprovado' : 'lancamento_rejeitado',
+    titulo: `${label} ${acao}`,
+    mensagem: `Seu lancamento foi ${acao}.`,
+    entidade_id: lancamento.id,
+    entidade_tipo: tipo,
+    dedupe_key: `lancamento_${acao}:${tipo}:${lancamento.id}`,
+  });
 }
 
-module.exports = { criar, notificarViagemFinalizada, notificarLancamentoResolvido };
+module.exports = {
+  criarNotificacao,
+  criarParaUsuario,
+  criarParaEmpresa,
+  notificarFreteCriado,
+  notificarViagemFinalizada,
+  notificarLancamentoCriado,
+  notificarLancamentoResolvido,
+};

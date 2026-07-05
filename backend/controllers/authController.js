@@ -2,6 +2,7 @@ const supabase = require('../config/supabase');
 const { createClient } = require('@supabase/supabase-js');
 const jwt = require('jsonwebtoken');
 const { criarEmpresaCompleta } = require('../services/empresaService');
+const notificacaoService = require('../services/notificacaoService');
 const { getTermosPendentes } = require('./termosController');
 
 // Client ISOLADO só para autenticação (signInWithPassword no login). Mantido
@@ -198,6 +199,19 @@ exports.register = async (req, res) => {
       }
       return res.status(500).json({ message: 'Não foi possível concluir o cadastro. Tente novamente.' });
     }
+
+    const comConvite = Boolean(codigo_convite && codigo_convite.trim() !== '');
+    notificacaoService.criarParaUsuario(authData.user.id, {
+      empresa_id,
+      tipo: comConvite ? 'conta_vinculada' : 'conta_criada',
+      titulo: comConvite ? 'Conta vinculada' : 'Conta criada',
+      mensagem: comConvite
+        ? 'Sua conta foi vinculada à empresa.'
+        : 'Seu período de teste foi iniciado.',
+      entidade_tipo: 'usuario',
+      entidade_id: authData.user.id,
+      dedupe_key: `cadastro:${authData.user.id}`,
+    }).catch(() => {});
 
     res.status(201).json({ message: 'Usuário criado com sucesso!' });
   } catch (error) {

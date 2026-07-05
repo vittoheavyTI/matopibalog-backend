@@ -124,6 +124,7 @@ exports.create = async (req, res) => {
       console.error('[abastecimentosController:create] Erro ao inserir abastecimento:', error);
       throw error;
     }
+    notificacaoService.notificarLancamentoCriado(data, 'abastecimento').catch(() => {});
     res.status(201).json(data);
   } catch (error) {
     // Corrida concorrente: outro request com o mesmo client_request_id inseriu

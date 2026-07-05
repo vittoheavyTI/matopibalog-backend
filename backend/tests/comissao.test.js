@@ -80,7 +80,9 @@ const criarControllerCreate = (tipoEmpresa) => {
   try {
     Module._load = function (request, parent, isMain) {
       if (request === '../config/supabase') return supabaseMock;
-      if (request === '../services/notificacaoService') return {};
+      if (request === '../services/notificacaoService') {
+        return { notificarFreteCriado: async () => null };
+      }
       return originalLoad.call(this, request, parent, isMain);
     };
     return require(controllerPath);

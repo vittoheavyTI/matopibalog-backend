@@ -101,6 +101,7 @@ exports.create = async (req, res) => {
       console.error('[valesController:create] Erro ao inserir vale:', error);
       throw error;
     }
+    notificacaoService.notificarLancamentoCriado(data, 'vale').catch(() => {});
     res.status(201).json(data);
   } catch (error) {
     // Corrida concorrente: outro request com o mesmo client_request_id inseriu
