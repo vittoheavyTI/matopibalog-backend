@@ -1,6 +1,21 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Search, Plus, X, Check, AlertTriangle, Eye, Ban, Unlock, Trash2, KeyRound } from 'lucide-react';
+import { Shield, Search, Plus, X, Check, AlertTriangle, Eye, Ban, Unlock, Trash2, KeyRound, CalendarClock } from 'lucide-react';
 import api from '../api';
+
+// Formata ISO → DD/MM/AAAA (pt-BR). Retorna '-' se inválido.
+function formatData(iso?: string) {
+  if (!iso) return '-';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '-';
+  return d.toLocaleDateString('pt-BR');
+}
+
+// Trial vencido = data no passado.
+function trialVencido(iso?: string) {
+  if (!iso) return false;
+  const d = new Date(iso);
+  return !isNaN(d.getTime()) && d < new Date();
+}
 
 export const PainelEmpresas: React.FC = () => {
   const [empresas, setEmpresas] = useState<any[]>([]);
@@ -9,6 +24,9 @@ export const PainelEmpresas: React.FC = () => {
   const [editing, setEditing] = useState<any>(null);
   const [formDados, setFormDados] = useState({ nome: '', cnpj: '', email: '', telefone: '', plano_id: '' });
   const [deleteTarget, setDeleteTarget] = useState<any>(null);
+  const [trialTarget, setTrialTarget] = useState<any>(null);
+  const [customDate, setCustomDate] = useState('');
+  const [confirmAtivo, setConfirmAtivo] = useState(false);
   const [toast, setToast] = useState<{ message: string; tipo: 'sucesso' | 'erro' } | null>(null);
 
   useEffect(() => { carregar(); }, []);
@@ -72,6 +90,19 @@ export const PainelEmpresas: React.FC = () => {
     setDeleteTarget(null); carregar();
   }
 
+  // Prorroga/libera trial via endpoint dedicado. body = { dias: 7|15 } ou { trial_ends_at: 'YYYY-MM-DD' }.
+  async function aplicarTrial(body: { dias?: number; trial_ends_at?: string }) {
+    if (!trialTarget) return;
+    try {
+      const resp = await api.patch('/painel-admin/empresas/' + trialTarget.id + '/trial', body);
+      setToast({ message: 'Trial atualizado até ' + formatData(resp.data?.trial_ends_at) + '!', tipo: 'sucesso' });
+      setTrialTarget(null); setCustomDate(''); setConfirmAtivo(false); carregar();
+    } catch (err: any) {
+      const msg = err?.response?.data?.message || 'Erro ao atualizar trial';
+      setToast({ message: msg, tipo: 'erro' });
+    }
+  }
+
   const filtered = empresas.filter(e => (e.nome || '').toLowerCase().includes(searchTerm.toLowerCase()) || (e.cnpj || '').includes(searchTerm));
 
   return (
@@ -113,11 +144,21 @@ export const PainelEmpresas: React.FC = () => {
                 <td className="p-4 font-bold text-gray-800">{e.nome}</td>
                 <td className="p-4 text-sm text-gray-600">{e.cnpj}</td>
                 <td className="p-4"><span className="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest bg-blue-50 text-blue-700">{e.planos?.nome || e.plano_id || '-'}</span></td>
-                <td className="p-4"><span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest ${e.status === 'ativo' ? 'bg-green-50 text-green-700' : e.status === 'trial' ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-700'}`}>{e.status}</span></td>
+                <td className="p-4">
+                  <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest ${e.status === 'ativo' ? 'bg-green-50 text-green-700' : e.status === 'trial' ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-700'}`}>{e.status}</span>
+                  <div className="mt-1 text-[10px] font-semibold">
+                    {e.trial_ends_at
+                      ? (trialVencido(e.trial_ends_at)
+                          ? <span className="text-red-500">Trial vencido</span>
+                          : <span className="text-amber-600">Trial até {formatData(e.trial_ends_at)}</span>)
+                      : <span className="text-gray-300">Sem trial definido</span>}
+                  </div>
+                </td>
                 <td className="p-4">
                   <div className="flex items-center justify-center gap-1">
                     <button onClick={() => { setEditing(e); setFormDados({ nome: e.nome || '', cnpj: e.cnpj || '', email: e.email_contato || '', telefone: e.telefone_contato || '', plano_id: e.plano_id || '' }); setShowModal(true); }} title="Editar empresa" aria-label="Editar empresa" className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg"><Eye size={16} /></button>
                     <button onClick={() => suspender(e.id)} title={e.status === 'suspenso' ? 'Reativar empresa' : 'Suspender empresa'} aria-label={e.status === 'suspenso' ? 'Reativar empresa' : 'Suspender empresa'} className="p-1.5 text-orange-500 hover:bg-orange-50 rounded-lg">{e.status === 'suspenso' ? <Unlock size={16} /> : <Ban size={16} />}</button>
+                    <button onClick={() => { setTrialTarget(e); setCustomDate(''); setConfirmAtivo(false); }} title="Gerenciar trial" aria-label="Gerenciar trial da empresa" className="p-1.5 text-amber-600 hover:bg-amber-50 rounded-lg"><CalendarClock size={16} /></button>
                     <button onClick={() => resetSenhaAdmin(e.id, e.nome)} className="p-1.5 text-gray-500 hover:bg-gray-100 rounded-lg" title="Resetar senha do admin" aria-label="Resetar senha do admin"><KeyRound size={16} /></button>
                     <button onClick={() => setDeleteTarget(e)} title="Excluir empresa" aria-label="Excluir empresa" className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg"><Trash2 size={16} /></button>
                   </div>
@@ -171,6 +212,61 @@ export const PainelEmpresas: React.FC = () => {
           </div>
         </div>
       )}
+
+      {trialTarget && (() => {
+        const hojeStr = new Date().toISOString().slice(0, 10);
+        const max90Str = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+        const bloqueado = trialTarget.status === 'ativo' && !confirmAtivo;
+        return (
+          <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-fade-in">
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
+              <div className="p-6 border-b flex justify-between items-center bg-gray-50">
+                <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2"><CalendarClock size={20} className="text-amber-600" /> Trial · {trialTarget.nome}</h3>
+                <button onClick={() => setTrialTarget(null)} title="Fechar" aria-label="Fechar" className="p-2 hover:bg-gray-200 rounded-full"><X size={22} /></button>
+              </div>
+              <div className="p-6 space-y-4">
+                <div className="text-sm text-gray-600">
+                  Status atual: <span className="font-bold">{trialTarget.status}</span><br />
+                  {trialTarget.trial_ends_at
+                    ? (trialVencido(trialTarget.trial_ends_at)
+                        ? <>Trial <span className="font-bold text-red-600">vencido</span> em {formatData(trialTarget.trial_ends_at)}</>
+                        : <>Trial até <span className="font-bold text-amber-600">{formatData(trialTarget.trial_ends_at)}</span></>)
+                    : <span className="text-gray-400">Sem trial definido</span>}
+                </div>
+
+                {trialTarget.status === 'ativo' && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle size={16} className="flex-shrink-0 mt-0.5" />
+                      <span>Esta empresa está <strong>ATIVA</strong>. Liberar trial vai alterar o status para <strong>trial</strong>.</span>
+                    </div>
+                    <label className="flex items-center gap-2 mt-2 cursor-pointer font-semibold">
+                      <input type="checkbox" checked={confirmAtivo} onChange={ev => setConfirmAtivo(ev.target.checked)} />
+                      <span>Confirmo liberar trial para esta empresa ativa</span>
+                    </label>
+                  </div>
+                )}
+
+                <div className="flex gap-2">
+                  <button disabled={bloqueado} onClick={() => aplicarTrial({ dias: 7 })} title="Prorrogar trial por 7 dias" aria-label="Prorrogar trial por 7 dias" className="flex-1 px-3 py-2.5 bg-green-700 text-white rounded-xl font-medium text-sm hover:bg-green-800 disabled:opacity-40 disabled:cursor-not-allowed">+7 dias</button>
+                  <button disabled={bloqueado} onClick={() => aplicarTrial({ dias: 15 })} title="Prorrogar trial por 15 dias" aria-label="Prorrogar trial por 15 dias" className="flex-1 px-3 py-2.5 bg-green-700 text-white rounded-xl font-medium text-sm hover:bg-green-800 disabled:opacity-40 disabled:cursor-not-allowed">+15 dias</button>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Data personalizada (máx. 90 dias)</label>
+                  <div className="flex gap-2">
+                    <input type="date" min={hojeStr} max={max90Str} value={customDate} onChange={ev => setCustomDate(ev.target.value)} className="flex-1 border-2 border-gray-50 rounded-xl p-2.5 outline-none focus:border-blue-500 bg-gray-50/50 text-sm" />
+                    <button disabled={!customDate || bloqueado} onClick={() => aplicarTrial({ trial_ends_at: customDate })} title="Aplicar data personalizada de trial" aria-label="Aplicar data personalizada de trial" className="px-4 py-2.5 bg-blue-600 text-white rounded-xl font-medium text-sm hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed">Aplicar</button>
+                  </div>
+                </div>
+              </div>
+              <div className="p-4 bg-gray-50 border-t flex justify-end">
+                <button onClick={() => setTrialTarget(null)} className="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded-lg text-sm font-medium">Fechar</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };
