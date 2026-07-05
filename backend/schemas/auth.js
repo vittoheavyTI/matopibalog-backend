@@ -30,6 +30,8 @@ const registerEmpresaSchema = z.object({
   empresa: z.string().min(2, 'Nome da empresa obrigatório.').max(150),
   cnpj: z.string().max(20).optional(),
   telefone: z.string().max(20).optional(),
+  // plano_id (UUID do catálogo público) tem precedência; `plano` (alias legado) é fallback.
+  plano_id: z.string().uuid('Plano inválido.').optional(),
   plano: z.enum(['basico', 'profissional', 'empresarial']).optional(),
 });
 

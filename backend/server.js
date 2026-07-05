@@ -99,6 +99,7 @@ app.use('/configuracoes', configRoutes);
 app.use('/impressoras', require('./routes/impressoras'));
 app.use('/integracoes', require('./routes/integracoes'));
 app.use('/painel-admin', require('./routes/painel-admin'));
+app.use('/planos', require('./routes/planos'));
 app.use('/pagamentos', require('./routes/pagamentos'));
 app.use('/notificacoes', notificacoesRoutes);
 app.use('/termos', termosRoutes);
