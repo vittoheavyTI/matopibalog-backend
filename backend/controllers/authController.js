@@ -384,19 +384,38 @@ exports.esqueceuSenha = async (req, res) => {
 };
 
 exports.registerEmpresa = async (req, res) => {
-  const { nome, email, senha, empresa, cnpj, telefone, plano } = req.body;
+  const { nome, email, senha, empresa, cnpj, telefone, plano, plano_id } = req.body;
 
   if (!nome || !email || !senha || !empresa) {
     return res.status(400).json({ message: 'Campos obrigatórios: nome, email, senha, empresa.' });
   }
 
   try {
-    // 1. Criar empresa via helper (gera código, plano padrão, trial automático)
+    // Se veio plano_id do catálogo público, exigir que exista e esteja ativo.
+    // O alias legado (`plano`) continua aceito como fallback quando não há plano_id.
+    if (plano_id) {
+      const { data: planoSel, error: planoErr } = await supabase
+        .from('planos')
+        .select('id, ativo')
+        .eq('id', plano_id)
+        .maybeSingle();
+      if (planoErr) {
+        console.error('[registerEmpresa] Erro ao validar plano_id:', planoErr.message);
+        return res.status(500).json({ message: 'Erro ao validar plano.' });
+      }
+      if (!planoSel || planoSel.ativo !== true) {
+        return res.status(400).json({ message: 'Plano selecionado inválido ou indisponível.' });
+      }
+    }
+
+    // 1. Criar empresa via helper (gera código, trial automático). plano_id tem
+    // precedência sobre o alias legado dentro do criarEmpresaCompleta.
     const { empresa: empresaData, error: empresaError } = await criarEmpresaCompleta({
       nome: empresa,
       cnpj,
       email_contato: email,
       telefone,
+      plano_id,
       planoAlias: plano,
       tipo: 'transportadora',
     });
