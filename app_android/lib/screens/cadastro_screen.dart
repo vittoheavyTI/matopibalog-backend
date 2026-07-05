@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../models/plano_publico.dart';
 import '../services/api_service.dart';
 
 class CadastroScreen extends StatefulWidget {
@@ -18,12 +19,61 @@ class _CadastroScreenState extends State<CadastroScreen> {
   final _confirmPassCtrl = TextEditingController();
   final _codigoConviteCtrl = TextEditingController();
   bool _loading = false;
+  bool _carregandoPlanos = true;
   String _error = '';
+  String _erroPlanos = '';
   bool _showPass = false;
   bool _showConfirmPass = false;
+  List<PlanoPublico> _planos = const [];
+  PlanoPublico? _planoSelecionado;
+
+  bool get _temCodigoConvite => _codigoConviteCtrl.text.trim().isNotEmpty;
+
+  @override
+  void initState() {
+    super.initState();
+    _codigoConviteCtrl.addListener(_aoAlterarCodigoConvite);
+    _carregarPlanos();
+  }
+
+  void _aoAlterarCodigoConvite() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _carregarPlanos() async {
+    try {
+      final planos = await ApiService.getPlanosPublicos();
+      PlanoPublico? padrao;
+      for (final plano in planos) {
+        if (plano.nome.trim().toLowerCase() == 'plano básico') {
+          padrao = plano;
+          break;
+        }
+      }
+      padrao ??= planos.isNotEmpty ? planos.first : null;
+
+      if (!mounted) return;
+      setState(() {
+        _planos = planos;
+        _planoSelecionado = padrao;
+        _carregandoPlanos = false;
+        _erroPlanos = planos.isEmpty
+            ? 'Nenhum plano disponível agora. O Plano Básico será usado no cadastro.'
+            : '';
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _carregandoPlanos = false;
+        _erroPlanos = 'Não foi possível carregar os planos. Você pode continuar; '
+            'o Plano Básico será usado.';
+      });
+    }
+  }
 
   @override
   void dispose() {
+    _codigoConviteCtrl.removeListener(_aoAlterarCodigoConvite);
     _nomeCtrl.dispose();
     _placaCtrl.dispose();
     _cpfCtrl.dispose();
@@ -111,7 +161,7 @@ class _CadastroScreenState extends State<CadastroScreen> {
         'email': _emailCtrl.text.trim(),
         'senha': _passCtrl.text,
         if (codigo.isNotEmpty) 'codigo_convite': codigo,
-      });
+      }, planoId: codigo.isEmpty ? _planoSelecionado?.id : null);
 
       if (success && mounted) {
         showDialog(
@@ -143,6 +193,110 @@ class _CadastroScreenState extends State<CadastroScreen> {
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  String _formatarPreco(double valor) {
+    return 'R\$ ${valor.toStringAsFixed(2).replaceAll('.', ',')}/mês';
+  }
+
+  Widget _buildSelecaoPlanos() {
+    if (_temCodigoConvite) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.blue.shade50,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.blue.shade100),
+        ),
+        child: const Text(
+          'Motorista vinculado usa o plano da empresa do convite.',
+          style: TextStyle(fontSize: 13),
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Escolha seu plano', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        if (_carregandoPlanos)
+          const Center(
+            child: Padding(padding: EdgeInsets.all(12), child: CircularProgressIndicator()),
+          )
+        else if (_erroPlanos.isNotEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.orange.shade50,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.orange.shade200),
+            ),
+            child: Text(_erroPlanos, style: const TextStyle(fontSize: 13)),
+          )
+        else
+          ..._planos.map(_buildPlanoCard),
+      ],
+    );
+  }
+
+  Widget _buildPlanoCard(PlanoPublico plano) {
+    final selecionado = _planoSelecionado?.id == plano.id;
+    final detalhes = <String>[
+      if (plano.diasTrial != null) '${plano.diasTrial} dias de teste grátis',
+      if (plano.limiteMotoristas != null) 'Até ${plano.limiteMotoristas} motorista(s)',
+      ...plano.recursos.take(3),
+    ];
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: () => setState(() => _planoSelecionado = plano),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: selecionado ? Theme.of(context).colorScheme.primary : Colors.grey.shade300,
+              width: selecionado ? 2 : 1,
+            ),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                selecionado ? Icons.radio_button_checked : Icons.radio_button_off,
+                color: selecionado ? Theme.of(context).colorScheme.primary : Colors.grey,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(plano.nome, style: const TextStyle(fontWeight: FontWeight.bold)),
+                    Text(
+                      _formatarPreco(plano.precoMensal),
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    if (plano.descricao.isNotEmpty)
+                      Text(plano.descricao, style: const TextStyle(fontSize: 12)),
+                    for (final detalhe in detalhes)
+                      Text('• $detalhe', style: const TextStyle(fontSize: 12)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -222,6 +376,8 @@ class _CadastroScreenState extends State<CadastroScreen> {
                   style: TextStyle(fontSize: 12, color: Colors.grey),
                 ),
               ),
+              const SizedBox(height: 16),
+              _buildSelecaoPlanos(),
               const SizedBox(height: 16),
               TextFormField(
                 controller: _emailCtrl,

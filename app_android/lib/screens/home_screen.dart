@@ -225,10 +225,46 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   const SizedBox(height: 20),
 
-                  // Últimos fretes: mostra apenas fretes ativos (qualquer mês) + fretes do mês vigente.
-                  // Finalizados/cancelados de meses anteriores ficam só no Histórico.
-                  if (finance.fretes.isNotEmpty && fretesHome.isEmpty) ...[
-                    // Existem fretes no geral, mas nenhum se encaixa nos critérios da Home
+                  // Histórico de Fretes — acesso PERMANENTE, independe de haver frete no
+                  // mês. Fica visualmente separado do bloco "Últimos Fretes" abaixo.
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Row(
+                        children: [
+                          Icon(Icons.history, color: Theme.of(context).colorScheme.primary),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('Histórico de Fretes',
+                                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                                const SizedBox(height: 2),
+                                Text('Consulte fretes de meses anteriores',
+                                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                              ],
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: () => _navegarERefresh(const HistoricoScreen()),
+                            child: const Text('Ver histórico completo'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // Últimos Fretes: só quando houver fretes recentes (ativos/mês vigente).
+                  // Em erro de carga NÃO mostramos "Nenhum frete" (o banner de erro acima
+                  // já avisa) — evita falso vazio quando a API falhou.
+                  if (fretesHome.isNotEmpty) ...[
+                    const Text('Últimos Fretes', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 8),
+                    ...fretesHome.take(3).map((f) => _buildViagemCard(f)),
+                  ] else if (finance.error.isEmpty && finance.fretes.isNotEmpty) ...[
+                    // Há fretes no geral, mas nenhum ativo/do mês atual (carga OK).
                     Card(
                       child: Padding(
                         padding: const EdgeInsets.all(24),
@@ -241,34 +277,12 @@ class _HomeScreenState extends State<HomeScreen> {
                               style: TextStyle(color: Colors.grey.shade600),
                               textAlign: TextAlign.center,
                             ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'Consulte o Histórico de Fretes para ver registros anteriores.',
-                              style: TextStyle(color: Colors.grey.shade500, fontSize: 12),
-                              textAlign: TextAlign.center,
-                            ),
                           ],
                         ),
                       ),
                     ),
-                  ] else if (fretesHome.isNotEmpty) ...[
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text('Últimos Fretes', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                        TextButton(
-                          onPressed: () => _navegarERefresh(const HistoricoScreen()),
-                          style: TextButton.styleFrom(
-                            foregroundColor: Theme.of(context).colorScheme.onSurface,
-                            textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                          ),
-                          child: const Text('Histórico de Fretes'),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    ...fretesHome.take(3).map((f) => _buildViagemCard(f)),
-                  ] else ...[
+                  ] else if (finance.error.isEmpty) ...[
+                    // Carga OK e nenhum frete → conta realmente vazia.
                     Card(
                       child: Padding(
                         padding: const EdgeInsets.all(24),

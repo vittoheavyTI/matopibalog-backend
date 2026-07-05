@@ -88,9 +88,11 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
   }
 
   double get _percentualComissao {
+    // Sem fallback de 12%: percentual ausente/desconhecido → 0% (nunca assume 12).
+    // Usado só no ramo vinculado; autônomo tem cálculo próprio (faturamento−gastos).
     return double.tryParse(
       _perfilCache?['motoristas']?['percentual_comissao']?.toString() ?? '',
-    ) ?? 12.0;
+    ) ?? 0.0;
   }
 
   /// Converte valor para quilômetro inteiro positivo. Aceita int, double ou

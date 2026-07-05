@@ -4,8 +4,22 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../config.dart';
+import '../models/plano_publico.dart';
 import 'app_logger.dart';
+
+/// Erro de carregamento (GET) com mensagem já pronta para o usuário. Serve para
+/// o caminho da Home distinguir "erro real" (403/500/rede/timeout) de "lista
+/// vazia legítima" (200 com []). Não substitui o retorno [] dos GETs de listas
+/// que devem degradar silenciosamente — só é lançado onde a Home precisa saber.
+class ApiException implements Exception {
+  final String message;
+  final int? statusCode;
+  const ApiException(this.message, {this.statusCode});
+  @override
+  String toString() => message;
+}
 
 class ApiService {
   static final String _baseUrl = Config.apiBaseUrl;
@@ -42,6 +56,10 @@ class ApiService {
   static const Duration _timeoutGet = Duration(seconds: 30);
   static const Duration _timeoutPostJson = Duration(seconds: 35);
   static const Duration _timeoutUpload = Duration(seconds: 60);
+  static const Duration _planosCacheTtl = Duration(hours: 6);
+  static const Duration _planosCacheMaxAge = Duration(days: 7);
+  static const String _planosCacheKey = 'planos_publicos_cache';
+  static const String _planosCacheAtKey = 'planos_publicos_cache_at';
 
   /// Converte exceções de rede em mensagem amigável ao usuário (sem vazar stack).
   /// TimeoutException → servidor lento; demais (SocketException, ClientException,
@@ -55,6 +73,20 @@ class ApiService {
           'verifique a lista antes de tentar novamente.';
     }
     return 'Não foi possível conectar ao servidor. Verifique sua internet.';
+  }
+
+  /// Mensagem amigável para falha HTTP num GET de carregamento. Quando o backend
+  /// envia mensagem clara (ex.: plano vencido/bloqueio em 403), ela é exibida;
+  /// caso contrário, mensagem genérica de "tente novamente".
+  static String _mensagemErroHttpGet(http.Response response) {
+    try {
+      final decoded = jsonDecode(response.body);
+      if (decoded is Map) {
+        final msg = decoded['message'] ?? decoded['error'];
+        if (msg is String && msg.trim().isNotEmpty) return msg.trim();
+      }
+    } catch (_) {/* body não-JSON: usa mensagem genérica */}
+    return 'Não foi possível carregar seus dados agora. Tente novamente em instantes.';
   }
 
   /// Define o token usado nas requisições autenticadas da sessão atual.
@@ -129,13 +161,94 @@ class ApiService {
     }
   }
 
-  static Future<bool> register(Map<String, dynamic> data) async {
+  static Future<List<PlanoPublico>> getPlanosPublicos() async {
+    final prefs = await SharedPreferences.getInstance();
+    final agora = DateTime.now();
+    final cacheRaw = prefs.getString(_planosCacheKey);
+    final cacheAtRaw = prefs.getInt(_planosCacheAtKey);
+    List<PlanoPublico>? cache;
+    Duration? cacheAge;
+
+    if (cacheRaw != null && cacheAtRaw != null) {
+      try {
+        final decoded = jsonDecode(cacheRaw);
+        if (decoded is List) {
+          cache = decoded
+              .whereType<Map>()
+              .map((item) => PlanoPublico.fromJson(Map<String, dynamic>.from(item)))
+              .where((plano) => plano.id.isNotEmpty)
+              .toList();
+          cacheAge = agora.difference(DateTime.fromMillisecondsSinceEpoch(cacheAtRaw));
+        }
+      } catch (_) {
+        cache = null;
+        cacheAge = null;
+      }
+    }
+
+    if (cache != null && cacheAge != null && !cacheAge.isNegative && cacheAge <= _planosCacheTtl) {
+      return cache;
+    }
+
     try {
+      final response = await http
+          .get(
+            Uri.parse('$_baseUrl/planos/publicos'),
+            headers: {'Content-Type': 'application/json'},
+          )
+          .timeout(_timeoutGet);
+
+      if (response.statusCode != 200) {
+        throw Exception('Catálogo indisponível (${response.statusCode}).');
+      }
+
+      final decoded = jsonDecode(response.body);
+      final planosRaw = decoded is Map<String, dynamic> ? decoded['planos'] : null;
+      if (planosRaw is! List) {
+        throw Exception('Resposta inválida do catálogo de planos.');
+      }
+
+      final planos = planosRaw
+          .whereType<Map>()
+          .map((item) => PlanoPublico.fromJson(Map<String, dynamic>.from(item)))
+          .where((plano) => plano.id.isNotEmpty)
+          .toList();
+
+      await prefs.setString(
+        _planosCacheKey,
+        jsonEncode(planos.map((plano) => plano.toJson()).toList()),
+      );
+      await prefs.setInt(_planosCacheAtKey, agora.millisecondsSinceEpoch);
+      return planos;
+    } catch (_) {
+      if (cache != null && cacheAge != null && !cacheAge.isNegative && cacheAge <= _planosCacheMaxAge) {
+        return cache;
+      }
+      throw Exception('Não foi possível carregar os planos. Verifique sua internet.');
+    }
+  }
+
+  static Future<bool> register(
+    Map<String, dynamic> data, {
+    String? planoId,
+  }) async {
+    try {
+      final payload = Map<String, dynamic>.from(data);
+      final codigoConvite = payload['codigo_convite']?.toString().trim() ?? '';
+      final planoSelecionado = planoId?.trim() ?? '';
+
+      if (codigoConvite.isEmpty && planoSelecionado.isNotEmpty) {
+        payload['plano_id'] = planoSelecionado;
+      } else {
+        // Defesa adicional: motorista vinculado sempre usa o plano da empresa.
+        payload.remove('plano_id');
+      }
+
       final response = await http
           .post(
             Uri.parse('$_baseUrl/auth/register'),
             headers: {'Content-Type': 'application/json'},
-            body: jsonEncode(data),
+            body: jsonEncode(payload),
           )
           .timeout(_timeoutPostJson);
       return response.statusCode == 201;
@@ -304,6 +417,8 @@ class ApiService {
   }
 
   // FRETES
+  // Diferente dos GETs silenciosos: em falha, LANÇA ApiException para o chamador
+  // (Home/loadData) distinguir erro real de lista vazia. 200 com [] retorna [].
   static Future<List<dynamic>> getFretes() async {
     try {
       final response = await http
@@ -312,15 +427,16 @@ class ApiService {
             headers: await _getHeaders(),
           )
           .timeout(_timeoutGet);
+      AppLogger.api('ApiService', 'GET /fretes', response.statusCode);
       if (response.statusCode == 200) {
-        AppLogger.api('ApiService', 'GET /fretes', response.statusCode);
         return jsonDecode(response.body);
       }
-      AppLogger.api('ApiService', 'GET /fretes', response.statusCode);
-      return [];
+      throw ApiException(_mensagemErroHttpGet(response), statusCode: response.statusCode);
+    } on ApiException {
+      rethrow;
     } catch (e) {
       AppLogger.error('ApiService', 'GET /fretes exception', e);
-      return [];
+      throw const ApiException('Não foi possível carregar seus dados agora. Tente novamente em instantes.');
     }
   }
 
@@ -493,6 +609,9 @@ class ApiService {
     }
   }
 
+  // Diferente do getListComFiltro (silencioso): em falha, LANÇA ApiException para
+  // o chamador (Home/loadData) distinguir erro real de lista vazia. Único uso é
+  // no loadData; telas com filtro usam getListComFiltro. 200 com [] retorna [].
   static Future<List<dynamic>> getList(String endpoint) async {
     try {
       final response = await http
@@ -501,15 +620,16 @@ class ApiService {
             headers: await _getHeaders(),
           )
           .timeout(_timeoutGet);
+      AppLogger.api('ApiService', 'GET /$endpoint', response.statusCode);
       if (response.statusCode == 200) {
-        AppLogger.api('ApiService', 'GET /$endpoint', response.statusCode);
         return jsonDecode(response.body);
       }
-      AppLogger.api('ApiService', 'GET /$endpoint', response.statusCode);
-      return [];
+      throw ApiException(_mensagemErroHttpGet(response), statusCode: response.statusCode);
+    } on ApiException {
+      rethrow;
     } catch (e) {
       AppLogger.error('ApiService', 'GET /$endpoint exception', e);
-      return [];
+      throw const ApiException('Não foi possível carregar seus dados agora. Tente novamente em instantes.');
     }
   }
 }
