@@ -1,5 +1,6 @@
 const supabase = require('../config/supabase');
 const notificacaoService = require('../services/notificacaoService');
+const { calcularComissao } = require('../utils/comissao');
 
 // Helper para validar status do motorista
 const checkMotoristaStatus = async (uid) => {
@@ -137,8 +138,6 @@ exports.create = async (req, res) => {
 
     if (motError || !motData) throw motError || new Error('Dados do motorista não encontrados');
 
-    const comissao = valor_frete * (motData.percentual_comissao / 100);
-
     // 2b. Definir quem_recebeu por tipo de empresa (TAC vs CLT):
     //  - autonomo (TAC) → SEMPRE 'motorista' (recebe direto, é dono do veículo); o body NÃO
     //    sobrescreve — defense-in-depth contra requisição forjada (espelha a trava do frontend).
@@ -158,6 +157,11 @@ exports.create = async (req, res) => {
     } else if (!quemRecebeuFinal) {
       quemRecebeuFinal = 'proprietario';
     }
+
+    // Comissão só para VINCULADO (empresa.tipo conhecido e ≠ 'autonomo'). Autônomo e
+    // tipo desconhecido → 0 (nunca assume 12%). Campo comissao_calculada mantido no
+    // contrato da resposta, apenas zerado quando não há comissão fixa.
+    const comissao = calcularComissao(valor_frete, motData.percentual_comissao, empData?.tipo);
 
     // 3. Inserir frete
     const { data, error } = await supabase

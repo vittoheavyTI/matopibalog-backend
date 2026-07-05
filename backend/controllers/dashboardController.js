@@ -1,4 +1,5 @@
 const supabase = require('../config/supabase');
+const { calcularComissao } = require('../utils/comissao');
 
 exports.getSummary = async (req, res) => {
   const { mes, ano } = req.query;
@@ -148,9 +149,12 @@ exports.getSummary = async (req, res) => {
     fretes.forEach(f => {
       const valor = parseFloat(f.valor_frete);
       const comissaoPercent = f.motoristas.percentual_comissao;
-      const comissao = valor * (comissaoPercent / 100);
       const km = (f.km_final && f.km_inicial) ? (f.km_final - f.km_inicial) : 0;
       const auto = isAuto(f.motorista_id); // [PR2A]
+      // Comissão só para vinculado com tipo conhecido; autônomo/tipo desconhecido → 0
+      // (nunca assume 12%). Zera os campos legados (total_comissoes, saldo, comissao
+      // por motorista) para autônomo, sem remover os campos do contrato.
+      const comissao = calcularComissao(valor, comissaoPercent, tipoDe[f.motorista_id]);
 
       totalFretes += valor;
       totalComissoes += comissao;
