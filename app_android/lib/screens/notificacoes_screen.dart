@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../services/api_service.dart';
 import '../services/app_logger.dart';
+import '../services/push_service.dart';
 
 class NotificacoesScreen extends StatefulWidget {
   const NotificacoesScreen({super.key});
@@ -73,6 +74,8 @@ class _NotificacoesScreenState extends State<NotificacoesScreen> {
             .map((item) => {...item, 'lida': true})
             .toList();
       });
+      // Nada mais está não lido: limpa a bandeja/badge do sistema.
+      PushService.limparNotificacoesBandeja();
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(

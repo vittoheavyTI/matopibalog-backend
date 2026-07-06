@@ -5,6 +5,7 @@ import { format } from 'date-fns';
 import { formatCurrency } from '../utils';
 import api, { newClientRequestId } from '../api';
 import { PlanoBloqueadoCard } from '../components/PlanoBloqueadoCard';
+import { EVENTO_NOTIFICACOES_NOVAS } from '../components/NotificacoesDropdown';
 
 const gvFmt = (d: any, fmt: string) => {
   if (!d) return '-';
@@ -192,6 +193,18 @@ export const GerenciamentoViagens: React.FC = () => {
       loadData();
     }
     isFirstFilterRun.current = false;
+  }, [filterMot]);
+
+  // Refresh automático ao chegar notificação nova (evento global do sino):
+  // refaz o fetch conforme o modo atual (todos x motorista), sem recarregar a
+  // página. Listener limpo no unmount / a cada troca de filtro.
+  useEffect(() => {
+    const handler = () => {
+      if (filterMot !== 'todos') loadMotoristaData(filterMot);
+      else loadData();
+    };
+    window.addEventListener(EVENTO_NOTIFICACOES_NOVAS, handler);
+    return () => window.removeEventListener(EVENTO_NOTIFICACOES_NOVAS, handler);
   }, [filterMot]);
 
   // Default do accordion: ao trocar de motorista / recarregar dados, fretes
