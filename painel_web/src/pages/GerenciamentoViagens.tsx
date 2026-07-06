@@ -541,6 +541,13 @@ export const GerenciamentoViagens: React.FC = () => {
       (f.motoristaUid === filterMot || f.motorista_id === filterMot) &&
       (f.status === 'ativo' || f.status === 'pendente'));
 
+  // Frete por tonelada/km só pode ser finalizado com KM final (o valor é calculado
+  // nesse momento). Sem KM final, orienta a editar o frete antes — evita finalizar
+  // com valor 0 provisório e distância ausente (o backend também barra com 422).
+  const exigeKmFinalAntesDeFinalizar = (f: any) =>
+    f && f.modalidade_calculo === 'tonelada_km' && !(f.km_final ?? f.kmFinal);
+  const MSG_EXIGE_KM_FINAL = 'Para finalizar um frete por tonelada/km, informe o KM final. Edite o frete, preencha o KM final e salve antes de finalizar.';
+
   const handleFinalizarViagem = () => {
     if (!selectedMotorista) return;
     const ativos = mFretes.filter(f => f.status === 'ativo' || f.status === 'pendente');
@@ -564,6 +571,11 @@ export const GerenciamentoViagens: React.FC = () => {
     if (!ativo) {
       setShowFinalizarModal(false);
       alert('Nenhum frete ativo encontrado para finalizar.');
+      return;
+    }
+    if (exigeKmFinalAntesDeFinalizar(ativo)) {
+      setShowFinalizarModal(false);
+      alert(MSG_EXIGE_KM_FINAL);
       return;
     }
     try {
@@ -591,7 +603,7 @@ export const GerenciamentoViagens: React.FC = () => {
       }
       const msg = err?.response?.status === 409
         ? (err.response.data?.message || 'Há lançamentos pendentes deste motorista.')
-        : 'Erro ao finalizar frete no servidor.';
+        : (err?.response?.data?.message || 'Erro ao finalizar frete no servidor.');
       alert(msg);
     }
   };
@@ -605,6 +617,10 @@ export const GerenciamentoViagens: React.FC = () => {
       mVales.some(v => v.frete_id === frete.id && v.status === 'pendente');
     if (pendente) {
       alert('Este frete possui lançamentos pendentes. Aprove ou rejeite todos antes de finalizar.');
+      return;
+    }
+    if (exigeKmFinalAntesDeFinalizar(frete)) {
+      alert(MSG_EXIGE_KM_FINAL);
       return;
     }
     try {
@@ -627,7 +643,7 @@ export const GerenciamentoViagens: React.FC = () => {
       }
       const msg = err?.response?.status === 409
         ? (err.response.data?.message || 'Há lançamentos pendentes deste frete.')
-        : 'Erro ao finalizar frete no servidor.';
+        : (err?.response?.data?.message || 'Erro ao finalizar frete no servidor.');
       alert(msg);
     }
   };
@@ -819,9 +835,11 @@ export const GerenciamentoViagens: React.FC = () => {
                     <td className="p-4">
                       <span className="text-sm font-bold text-gray-800 flex items-center">
                         <DollarSign size={14} className="mr-0.5 text-green-600" />
-                        {/* Tonelada/km ainda não finalizado guarda 0 provisório no banco (coluna NOT NULL);
-                            mostra "a calcular" em vez de R$ 0,00 até a finalização computar o valor real. */}
-                        {frete.modalidade_calculo === 'tonelada_km' && frete.status !== 'finalizado'
+                        {/* Tonelada/km sem KM final guarda 0 provisório no banco (coluna NOT NULL):
+                            mostra "a calcular" em vez de R$ 0,00. Assim que o KM final é informado
+                            (na edição ou na finalização), o valor real é calculado e exibido — mesmo
+                            que o frete ainda esteja ativo. */}
+                        {frete.modalidade_calculo === 'tonelada_km' && !(frete.km_final ?? frete.kmFinal)
                           ? <span className="text-xs text-orange-400 italic">a calcular</span>
                           : ((frete.valor_frete ?? frete.valorFrete) != null ? formatCurrency(frete.valor_frete ?? frete.valorFrete) : <span className="text-xs text-orange-400 italic">a calcular</span>)}
                       </span>
