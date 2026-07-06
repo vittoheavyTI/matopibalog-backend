@@ -123,6 +123,7 @@ export const PainelMotoristas: React.FC = () => {
                 <td className="p-4">
                   {m.status === 'aprovado' ? <span className="flex items-center text-green-600 text-sm font-bold"><CheckCircle size={14} className="mr-1" />Aprovado</span> :
                    m.status === 'pendente' ? <span className="flex items-center text-amber-600 text-sm font-bold"><FileWarning size={14} className="mr-1" />Pendente</span> :
+                   m.status === 'bloqueado' ? <span className="flex items-center text-gray-600 text-sm font-bold"><XCircle size={14} className="mr-1" />Bloqueado</span> :
                    <span className="flex items-center text-red-600 text-sm font-bold"><XCircle size={14} className="mr-1" />Reprovado</span>}
                 </td>
                 <td className="p-4 text-center">
