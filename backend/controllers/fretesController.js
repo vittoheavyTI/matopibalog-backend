@@ -1,6 +1,7 @@
 const supabase = require('../config/supabase');
 const notificacaoService = require('../services/notificacaoService');
 const { calcularComissao } = require('../utils/comissao');
+const { normalizarModalidade, calcularValorToneladaKm } = require('../utils/calculoFrete');
 
 // Helper para validar status do motorista
 const checkMotoristaStatus = async (uid) => {
@@ -119,7 +120,10 @@ exports.getAll = async (req, res) => {
 };
 
 exports.create = async (req, res) => {
-  const { origem, destino, km_inicial, valor_frete, quem_recebeu } = req.body;
+  const { origem, destino, km_inicial, km_final, valor_frete, quem_recebeu, toneladas, valor_tonelada_km } = req.body;
+  // Modalidade: ausente/desconhecida → 'valor_fixo' (comportamento histórico e
+  // compatível com app/APK antigos que não enviam o campo).
+  const modalidade = normalizarModalidade(req.body.modalidade_calculo) || 'valor_fixo';
   const motorista_id = req.user.role === 'admin'
     ? (req.body.motorista_id || req.user.uid)
     : req.user.uid;
@@ -158,12 +162,30 @@ exports.create = async (req, res) => {
       quemRecebeuFinal = 'proprietario';
     }
 
+    // Valor do frete por modalidade:
+    //  - valor_fixo: usa o valor_frete digitado.
+    //  - tonelada_km: DERIVADO = toneladas * (km_final - km_inicial) * valor_tonelada_km.
+    //    Na criação o km_final normalmente ainda não existe → valor fica null
+    //    (provisório) e é calculado na finalização. Se ambos os KMs já vierem no
+    //    create, calcula desde já. valor_frete enviado no body é ignorado aqui.
+    let valorFreteFinal = valor_frete !== undefined ? Number(valor_frete) : null;
+    if (modalidade === 'tonelada_km') {
+      valorFreteFinal = calcularValorToneladaKm({
+        toneladas,
+        valorToneladaKm: valor_tonelada_km,
+        kmInicial: km_inicial,
+        kmFinal: km_final,
+      });
+    }
+
     // Comissão só para VINCULADO (empresa.tipo conhecido e ≠ 'autonomo'). Autônomo e
     // tipo desconhecido → 0 (nunca assume 12%). Campo comissao_calculada mantido no
-    // contrato da resposta, apenas zerado quando não há comissão fixa.
-    const comissao = calcularComissao(valor_frete, motData.percentual_comissao, empData?.tipo);
+    // contrato da resposta, apenas zerado quando não há comissão fixa (inclui
+    // tonelada_km ainda sem valor calculado).
+    const comissao = calcularComissao(valorFreteFinal, motData.percentual_comissao, empData?.tipo);
 
-    // 3. Inserir frete
+    // 3. Inserir frete. Campos de tonelada/km só são gravados na modalidade
+    // tonelada_km; no valor_fixo ficam null para não sujar o registro.
     const { data, error } = await supabase
       .from('fretes')
       .insert({
@@ -172,7 +194,10 @@ exports.create = async (req, res) => {
         origem,
         destino,
         km_inicial,
-        valor_frete,
+        valor_frete: valorFreteFinal,
+        modalidade_calculo: modalidade,
+        toneladas: modalidade === 'tonelada_km' && toneladas !== undefined ? Number(toneladas) : null,
+        valor_tonelada_km: modalidade === 'tonelada_km' && valor_tonelada_km !== undefined ? Number(valor_tonelada_km) : null,
         quem_recebeu: quemRecebeuFinal,
         placa: motData.placa_veiculo
       })
@@ -233,7 +258,7 @@ exports.update = async (req, res) => {
 
     const { data: checkData, error: checkError } = await supabase
       .from('fretes')
-      .select('motorista_id, empresa_id')
+      .select('motorista_id, empresa_id, modalidade_calculo, toneladas, valor_tonelada_km, km_inicial, km_final')
       .eq('id', id)
       .single();
 
@@ -257,7 +282,7 @@ exports.update = async (req, res) => {
 
     // Extrair APENAS campos permitidos (previne mass assignment)
     // data com alias (dataFrete) para não colidir com o const { data } do Supabase abaixo
-    const { origem, destino, km_inicial, km_final, valor_frete, status, quem_recebeu, data: dataFrete } = req.body;
+    const { origem, destino, km_inicial, km_final, valor_frete, status, quem_recebeu, data: dataFrete, modalidade_calculo, toneladas, valor_tonelada_km } = req.body;
     const allowedUpdate = {};
     if (origem !== undefined) allowedUpdate.origem = origem;
     if (destino !== undefined) allowedUpdate.destino = destino;
@@ -267,9 +292,35 @@ exports.update = async (req, res) => {
     if (status !== undefined) allowedUpdate.status = status;
     if (quem_recebeu !== undefined) allowedUpdate.quem_recebeu = quem_recebeu;
     if (dataFrete !== undefined) allowedUpdate.data = dataFrete;
+    if (modalidade_calculo !== undefined) allowedUpdate.modalidade_calculo = modalidade_calculo;
+    if (toneladas !== undefined) allowedUpdate.toneladas = Number(toneladas);
+    if (valor_tonelada_km !== undefined) allowedUpdate.valor_tonelada_km = Number(valor_tonelada_km);
 
     if (Object.keys(allowedUpdate).length === 0) {
       return res.status(400).json({ message: 'Nenhum campo válido para atualizar.' });
+    }
+
+    // Cálculo por modalidade (merge do que veio no body sobre o já gravado):
+    //  - tonelada_km: valor_frete é SEMPRE derivado; ignora valor manual. Se ainda
+    //    não dá para calcular (ex.: falta km_final), não deixa passar valor
+    //    inconsistente — remove valor_frete do update, preservando o valor atual.
+    //  - voltar para valor_fixo: limpa os campos de tonelada para não deixar resíduo.
+    const modalidadeEfetiva = allowedUpdate.modalidade_calculo ?? checkData.modalidade_calculo ?? 'valor_fixo';
+    if (modalidadeEfetiva === 'tonelada_km') {
+      const calc = calcularValorToneladaKm({
+        toneladas: allowedUpdate.toneladas ?? checkData.toneladas,
+        valorToneladaKm: allowedUpdate.valor_tonelada_km ?? checkData.valor_tonelada_km,
+        kmInicial: allowedUpdate.km_inicial ?? checkData.km_inicial,
+        kmFinal: allowedUpdate.km_final ?? checkData.km_final,
+      });
+      if (calc !== null) {
+        allowedUpdate.valor_frete = calc;
+      } else {
+        delete allowedUpdate.valor_frete;
+      }
+    } else if (allowedUpdate.modalidade_calculo === 'valor_fixo') {
+      allowedUpdate.toneladas = null;
+      allowedUpdate.valor_tonelada_km = null;
     }
 
     // Defense-in-depth: autônomo SEMPRE recebe via 'motorista'. Força o valor independentemente
@@ -313,7 +364,7 @@ exports.finalizar = async (req, res) => {
     // Busca o frete e verifica ownership
     const { data: frete, error: freteError } = await supabase
       .from('fretes')
-      .select('id, motorista_id, empresa_id, status, km_inicial')
+      .select('id, motorista_id, empresa_id, status, km_inicial, km_final, modalidade_calculo, toneladas, valor_tonelada_km')
       .eq('id', id)
       .single();
 
@@ -397,6 +448,20 @@ exports.finalizar = async (req, res) => {
         return res.status(422).json({ message: 'KM inicial inválido.' });
       }
       updatePayload.km_inicial = kmIni;
+    }
+
+    // Frete por tonelada/km: com o km_final agora conhecido, o valor definitivo é
+    // calculado = toneladas * (km_final - km_inicial) * valor_tonelada_km. Usa os
+    // KMs efetivos (os enviados nesta finalização têm prioridade sobre os gravados).
+    // Se ainda faltar algum insumo, mantém o valor atual (não fabrica número).
+    if (frete.modalidade_calculo === 'tonelada_km') {
+      const calc = calcularValorToneladaKm({
+        toneladas: frete.toneladas,
+        valorToneladaKm: frete.valor_tonelada_km,
+        kmInicial: updatePayload.km_inicial ?? frete.km_inicial,
+        kmFinal: updatePayload.km_final ?? frete.km_final,
+      });
+      if (calc !== null) updatePayload.valor_frete = calc;
     }
 
     const { data, error } = await supabase
