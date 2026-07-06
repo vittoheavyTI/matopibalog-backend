@@ -7,6 +7,8 @@ workflows:
     name: Android APK Debug
     max_build_duration: 60
     environment:
+      groups:
+        - firebase   # fornece GOOGLE_SERVICES_JSON_BASE64 (var segura no Codemagic)
       flutter: stable
       java: 21
     scripts:
@@ -49,6 +51,8 @@ workflows:
     name: Android APK Release (sem assinatura)
     max_build_duration: 60
     environment:
+      groups:
+        - firebase   # fornece GOOGLE_SERVICES_JSON_BASE64 (var segura no Codemagic)
       flutter: stable
       java: 21
     scripts:
