@@ -5,20 +5,37 @@ import api from '../api';
 export const PainelMotoristas: React.FC = () => {
   const [motoristas, setMotoristas] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [empresaFiltro, setEmpresaFiltro] = useState('todas');
+  const [vinculoFiltro, setVinculoFiltro] = useState('todos');
+  const [statusFiltro, setStatusFiltro] = useState('todos');
+  const [freteFiltro, setFreteFiltro] = useState('todos');
 
   useEffect(() => { carregar(); }, []);
 
   async function carregar() {
-    const response = await api.get('/painel-admin/motoristas');
-    setMotoristas(response.data || []);
+    const [response, emFreteResponse] = await Promise.all([
+      api.get('/painel-admin/motoristas'),
+      api.get('/admin/motoristas/em-viagem'),
+    ]);
+    const idsEmFrete = new Set((emFreteResponse.data || []).map((m: any) => m.id));
+    setMotoristas((response.data || []).map((m: any) => {
+      const empresa = Array.isArray(m.empresas) ? m.empresas[0] : m.empresas;
+      return {
+        ...m,
+        status: m.status_cadastro || m.status,
+        empresaNome: empresa?.nome || '-',
+        empresaTipo: empresa?.tipo || null,
+        temFreteAtivo: idsEmFrete.has(m.id),
+      };
+    }));
   }
 
   async function aprovar(id: string) {
-    try { await api.put('/painel-admin/motoristas/' + id + '/aprovar'); carregar(); } catch {}
+    try { await api.patch('/painel-admin/motoristas/' + id + '/aprovar'); carregar(); } catch {}
   }
 
   async function reprovar(id: string) {
-    try { await api.put('/painel-admin/motoristas/' + id + '/reprovar'); carregar(); } catch {}
+    try { await api.patch('/painel-admin/motoristas/' + id + '/reprovar'); carregar(); } catch {}
   }
 
   async function resetSenha(id: string, nome: string) {
@@ -32,7 +49,18 @@ export const PainelMotoristas: React.FC = () => {
     }
   }
 
-  const filtered = motoristas.filter(m => (m.nome || '').toLowerCase().includes(searchTerm.toLowerCase()) || (m.email || '').includes(searchTerm));
+  const empresas = Array.from(new Set(motoristas.map(m => m.empresaNome).filter(nome => nome && nome !== '-'))).sort();
+  const filtered = motoristas.filter(m => {
+    const porBusca = (m.usuarios?.nome || m.nome || '').toLowerCase().includes(searchTerm.toLowerCase())
+      || (m.usuarios?.email || m.email || '').toLowerCase().includes(searchTerm.toLowerCase());
+    const porEmpresa = empresaFiltro === 'todas' || m.empresaNome === empresaFiltro;
+    const porVinculo = vinculoFiltro === 'todos'
+      || (vinculoFiltro === 'autonomos' ? m.empresaTipo === 'autonomo' : m.empresaTipo !== 'autonomo');
+    const porStatus = statusFiltro === 'todos' || m.status === statusFiltro;
+    const porFrete = freteFiltro === 'todos'
+      || (freteFiltro === 'com' ? m.temFreteAtivo : !m.temFreteAtivo);
+    return porBusca && porEmpresa && porVinculo && porStatus && porFrete;
+  });
   const pendentes = filtered.filter(m => m.status === 'pendente');
   const aprovados = filtered.filter(m => m.status === 'aprovado');
 
@@ -41,8 +69,8 @@ export const PainelMotoristas: React.FC = () => {
       <div className="flex items-center space-x-3 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
         <div className="bg-gray-800 p-2 rounded-lg text-white"><Shield size={24} /></div>
         <div>
-          <h1 className="text-2xl font-bold text-gray-800">Motoristas</h1>
-          <p className="text-sm text-gray-500">Gerenciar motoristas cadastrados</p>
+          <h1 className="text-2xl font-bold text-gray-800">Motoristas / Autônomos</h1>
+          <p className="text-sm text-gray-500">Visão global por empresa, vínculo, status e frete ativo</p>
         </div>
       </div>
 
@@ -52,9 +80,32 @@ export const PainelMotoristas: React.FC = () => {
         <div className="bg-white rounded-2xl border border-gray-100 p-6 hover:shadow-md"><p className="text-3xl font-black text-amber-500">{pendentes.length}</p><p className="text-sm text-gray-500">Pendentes</p></div>
       </div>
 
-      <div className="bg-white p-3 rounded-xl shadow-sm border border-gray-100 flex items-center max-w-md">
-        <Search size={18} className="text-gray-400 mr-2 flex-shrink-0" />
-        <input type="text" placeholder="Buscar..." className="flex-1 outline-none text-gray-700 text-sm" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+      <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 grid grid-cols-1 md:grid-cols-5 gap-3">
+        <div className="flex items-center border border-gray-200 rounded-lg px-3">
+          <Search size={18} className="text-gray-400 mr-2 flex-shrink-0" />
+          <input type="text" placeholder="Nome ou e-mail" className="w-full py-2 outline-none text-gray-700 text-sm" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+        </div>
+        <select value={empresaFiltro} onChange={e => setEmpresaFiltro(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700">
+          <option value="todas">Todas as empresas</option>
+          {empresas.map(nome => <option key={nome} value={nome}>{nome}</option>)}
+        </select>
+        <select value={vinculoFiltro} onChange={e => setVinculoFiltro(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700">
+          <option value="todos">Todos os vínculos</option>
+          <option value="autonomos">Autônomos</option>
+          <option value="vinculados">Vinculados</option>
+        </select>
+        <select value={statusFiltro} onChange={e => setStatusFiltro(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700">
+          <option value="todos">Todos os status</option>
+          <option value="aprovado">Aprovados</option>
+          <option value="pendente">Pendentes</option>
+          <option value="reprovado">Reprovados</option>
+          <option value="bloqueado">Bloqueados</option>
+        </select>
+        <select value={freteFiltro} onChange={e => setFreteFiltro(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700">
+          <option value="todos">Com ou sem frete</option>
+          <option value="com">Com frete ativo</option>
+          <option value="sem">Sem frete ativo</option>
+        </select>
       </div>
 
       <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
@@ -63,12 +114,16 @@ export const PainelMotoristas: React.FC = () => {
           <tbody className="divide-y divide-gray-50">
             {filtered.map(m => (
               <tr key={m.id} className="hover:bg-gray-50/50">
-                <td className="p-4"><p className="font-bold text-gray-800">{m.nome}</p><p className="text-xs text-gray-400">{m.cpf}</p></td>
-                <td className="p-4 text-sm text-gray-600">{m.email}</td>
-                <td className="p-4 text-sm text-gray-600">{m.empresas?.nome || '-'}</td>
+                <td className="p-4"><p className="font-bold text-gray-800">{m.usuarios?.nome || m.nome}</p><p className="text-xs text-gray-400">{m.cpf}</p></td>
+                <td className="p-4 text-sm text-gray-600">{m.usuarios?.email || m.email}</td>
+                <td className="p-4 text-sm text-gray-600">
+                  <p>{m.empresaNome}</p>
+                  <span className="text-[10px] font-bold uppercase text-gray-400">{m.empresaTipo === 'autonomo' ? 'Autônomo' : 'Vinculado'} · {m.temFreteAtivo ? 'Com frete ativo' : 'Sem frete ativo'}</span>
+                </td>
                 <td className="p-4">
                   {m.status === 'aprovado' ? <span className="flex items-center text-green-600 text-sm font-bold"><CheckCircle size={14} className="mr-1" />Aprovado</span> :
                    m.status === 'pendente' ? <span className="flex items-center text-amber-600 text-sm font-bold"><FileWarning size={14} className="mr-1" />Pendente</span> :
+                   m.status === 'bloqueado' ? <span className="flex items-center text-gray-600 text-sm font-bold"><XCircle size={14} className="mr-1" />Bloqueado</span> :
                    <span className="flex items-center text-red-600 text-sm font-bold"><XCircle size={14} className="mr-1" />Reprovado</span>}
                 </td>
                 <td className="p-4 text-center">
@@ -77,7 +132,7 @@ export const PainelMotoristas: React.FC = () => {
                       <button onClick={() => aprovar(m.id)} className="px-3 py-1.5 text-xs font-bold bg-green-500 text-white rounded-lg hover:bg-green-600 flex items-center"><CheckCircle size={14} className="mr-1" />Aprovar</button>
                       <button onClick={() => reprovar(m.id)} className="px-3 py-1.5 text-xs font-bold bg-red-500 text-white rounded-lg hover:bg-red-600 flex items-center"><XCircle size={14} className="mr-1" />Reprovar</button>
                     </>}
-                    <button onClick={() => resetSenha(m.id, m.nome)} className="px-3 py-1.5 text-xs font-bold bg-gray-500 text-white rounded-lg hover:bg-gray-600 flex items-center"><KeyRound size={14} className="mr-1" />Resetar Senha</button>
+                    <button onClick={() => resetSenha(m.id, m.usuarios?.nome || m.nome)} className="px-3 py-1.5 text-xs font-bold bg-gray-500 text-white rounded-lg hover:bg-gray-600 flex items-center"><KeyRound size={14} className="mr-1" />Resetar Senha</button>
                   </div>
                 </td>
               </tr>

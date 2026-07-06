@@ -113,7 +113,7 @@ export const Sidebar: React.FC = () => {
     api.put('/configuracoes', { sidebarLogo: '', sidebarLogoScale: 100, sidebarLogoY: 0 }).catch(() => {});
   };
 
-  const mainNav = [
+  const commonMainNav = [
     { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
     { to: '/motoristas', icon: Users, label: 'Motoristas' },
     { to: '/relatorios/viagens', icon: Truck, label: 'Gerenciamento de Fretes' },
@@ -122,14 +122,26 @@ export const Sidebar: React.FC = () => {
     { to: '/admins', icon: UserCircle, label: 'Usuários' },
   ];
 
+  // O super-admin administra a plataforma; as telas operacionais por empresa
+  // continuam acessíveis pelas rotas existentes, mas não disputam espaço no menu.
+  // Para os demais perfis, a navegação anterior permanece inalterada.
+  const mainNav = user?.is_super_admin
+    ? [{ to: '/', icon: LayoutDashboard, label: 'Dashboard' }]
+    : commonMainNav;
+
+  const superAdminNav = [
+    { to: '/relatorios/resumo', icon: History, label: 'Histórico de Fretes' },
+    { to: '/painel-administrativo/usuarios', icon: UserCircle, label: 'Usuários Globais' },
+  ];
+
   const painelSubItems = [
     { to: '/painel-administrativo/visao-geral', label: 'Visão Geral' },
-    { to: '/painel-administrativo/empresas', label: 'Empresas / Contas' },
+    { to: '/painel-administrativo/empresas', label: 'Empresas e Autônomos' },
     { to: '/painel-administrativo/planos', label: 'Planos' },
     { to: '/painel-administrativo/assinaturas', label: 'Assinaturas' },
     { to: '/painel-administrativo/faturas', label: 'Faturas Todas' },
     { to: '/painel-administrativo/usuarios', label: 'Usuários Globais' },
-    { to: '/painel-administrativo/motoristas', label: 'Motoristas' },
+    { to: '/painel-administrativo/motoristas', label: 'Motoristas / Autônomos' },
     { to: '/painel-administrativo/financeiro', label: 'Financeiro' },
     { to: '/integracoes', label: 'Integrações' },
     { to: '/painel-administrativo/configuracoes', label: 'Config. Sistema' },
@@ -228,6 +240,13 @@ export const Sidebar: React.FC = () => {
               )}
             </div>
             )}
+
+            {user?.is_super_admin && superAdminNav.map(item => (
+              <NavLink key={item.to} to={item.to} className={linkClass} title={collapsed ? item.label : undefined}>
+                <item.icon size={20} className="flex-shrink-0" />
+                {!collapsed && <span>{item.label}</span>}
+              </NavLink>
+            ))}
 
             {/* Minhas Faturas é visão do cliente: super-admin usa Painel Admin → Faturas Todas */}
             {!user?.is_super_admin && (
