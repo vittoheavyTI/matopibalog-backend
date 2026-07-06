@@ -14,7 +14,13 @@ interface Fatura {
   due_date: string;
   pago_em: string;
   created_at: string;
-  empresas?: { nome: string };
+  empresas?: {
+    nome: string;
+    tipo: string;
+    status: string;
+    plano_id: string | null;
+    planos?: { nome: string } | null;
+  };
 }
 
 const statusMap: Record<string, { label: string; color: string }> = {
@@ -29,6 +35,10 @@ export const Faturas: React.FC = () => {
   const [faturas, setFaturas] = useState<Fatura[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [tipoFiltro, setTipoFiltro] = useState('todos');
+  const [statusFiltro, setStatusFiltro] = useState('todos');
+  const [vencimentoFiltro, setVencimentoFiltro] = useState('todos');
+  const [planoFiltro, setPlanoFiltro] = useState('todos');
 
   useEffect(() => {
     carregarFaturas();
@@ -45,10 +55,24 @@ export const Faturas: React.FC = () => {
     }
   };
 
-  const filtered = faturas.filter(f =>
-    f.empresas?.nome?.toLowerCase().includes(search.toLowerCase()) ||
-    f.asaas_id?.toLowerCase().includes(search.toLowerCase())
-  );
+  const planos = Array.from(new Set(faturas.map(f => f.empresas?.planos?.nome).filter(Boolean) as string[])).sort();
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
+  const filtered = faturas.filter(f => {
+    const busca = search.toLowerCase();
+    const porBusca = f.empresas?.nome?.toLowerCase().includes(busca) || f.asaas_id?.toLowerCase().includes(busca);
+    const porTipo = tipoFiltro === 'todos'
+      || (tipoFiltro === 'autonomos' ? f.empresas?.tipo === 'autonomo' : f.empresas?.tipo !== 'autonomo');
+    const porStatus = statusFiltro === 'todos' || f.status === statusFiltro;
+    const porPlano = planoFiltro === 'todos' || f.empresas?.planos?.nome === planoFiltro;
+    const vencimento = f.due_date ? new Date(`${f.due_date}T00:00:00`) : null;
+    const diasAteVencer = vencimento ? Math.ceil((vencimento.getTime() - hoje.getTime()) / 86400000) : null;
+    const porVencimento = vencimentoFiltro === 'todos'
+      || (vencimentoFiltro === 'vencidas' && diasAteVencer !== null && diasAteVencer < 0)
+      || (vencimentoFiltro === 'proximos7' && diasAteVencer !== null && diasAteVencer >= 0 && diasAteVencer <= 7)
+      || (vencimentoFiltro === 'sem_data' && !vencimento);
+    return Boolean(porBusca && porTipo && porStatus && porPlano && porVencimento);
+  });
 
   const totalPendente = faturas.filter(f => f.status === 'pendente').reduce((s, f) => s + Number(f.valor), 0);
   const totalPago = faturas.filter(f => f.status === 'pago').reduce((s, f) => s + Number(f.valor), 0);
@@ -76,16 +100,24 @@ export const Faturas: React.FC = () => {
         </div>
       </div>
 
-      {/* Busca */}
-      <div className="relative mb-4">
-        <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-        <input
-          type="text"
-          placeholder="Buscar por empresa ou ID..."
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-sm"
-        />
+      {/* Filtros globais — somente leitura, sem criar cobranças. */}
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-3 mb-4 bg-white p-4 rounded-xl border border-gray-100">
+        <div className="relative">
+          <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input type="text" placeholder="Empresa ou ID" value={search} onChange={e => setSearch(e.target.value)} className="w-full pl-10 pr-3 py-2.5 border border-gray-200 rounded-xl outline-none text-sm" />
+        </div>
+        <select value={tipoFiltro} onChange={e => setTipoFiltro(e.target.value)} className="border border-gray-200 rounded-xl px-3 py-2.5 text-sm">
+          <option value="todos">Empresas e autônomos</option><option value="autonomos">Autônomos</option><option value="vinculados">Empresas</option>
+        </select>
+        <select value={statusFiltro} onChange={e => setStatusFiltro(e.target.value)} className="border border-gray-200 rounded-xl px-3 py-2.5 text-sm">
+          <option value="todos">Todos os status</option>{Object.entries(statusMap).map(([value, item]) => <option key={value} value={value}>{item.label}</option>)}
+        </select>
+        <select value={vencimentoFiltro} onChange={e => setVencimentoFiltro(e.target.value)} className="border border-gray-200 rounded-xl px-3 py-2.5 text-sm">
+          <option value="todos">Todos os vencimentos</option><option value="vencidas">Vencidas</option><option value="proximos7">Próximos 7 dias</option><option value="sem_data">Sem vencimento</option>
+        </select>
+        <select value={planoFiltro} onChange={e => setPlanoFiltro(e.target.value)} className="border border-gray-200 rounded-xl px-3 py-2.5 text-sm">
+          <option value="todos">Todos os planos</option>{planos.map(plano => <option key={plano} value={plano}>{plano}</option>)}
+        </select>
       </div>
 
       {/* Tabela */}
@@ -113,7 +145,10 @@ export const Faturas: React.FC = () => {
                   const st = statusMap[f.status] || { label: f.status, color: 'bg-gray-100 text-gray-800' };
                   return (
                     <tr key={f.id} className="border-b border-gray-50 hover:bg-gray-50">
-                      <td className="p-4 font-medium text-gray-900">{f.empresas?.nome || '—'}</td>
+                      <td className="p-4 font-medium text-gray-900">
+                        <p>{f.empresas?.nome || '—'}</p>
+                        <p className="text-[10px] uppercase text-gray-400">{f.empresas?.tipo === 'autonomo' ? 'Autônomo' : 'Empresa'} · {f.empresas?.status || 'sem status'} · {f.empresas?.planos?.nome || 'sem plano'}</p>
+                      </td>
                       <td className="p-4 text-gray-700">R$ {Number(f.valor).toFixed(2)}</td>
                       <td className="p-4 text-gray-500">{f.tipo_pagamento || '—'}</td>
                       <td className="p-4"><span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${st.color}`}>{st.label}</span></td>

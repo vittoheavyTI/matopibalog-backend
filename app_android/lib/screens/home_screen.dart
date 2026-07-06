@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import '../providers/auth_provider.dart';
@@ -170,6 +171,33 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  if (finance.planoBloqueado)
+                    Card(
+                      color: Colors.red.shade50,
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Row(children: [Icon(Icons.lock_outline, color: Colors.red.shade700), const SizedBox(width: 8), const Expanded(child: Text('Regularização necessária', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)))]),
+                          const SizedBox(height: 8),
+                          Text(finance.mensagemRegularizacao, style: TextStyle(color: Colors.red.shade900)),
+                          if (finance.responsavelRegularizacao == 'autonomo' && finance.suporteEmail.isNotEmpty) ...[
+                            const SizedBox(height: 12),
+                            ElevatedButton.icon(
+                              icon: const Icon(Icons.support_agent),
+                              label: const Text('Falar com suporte'),
+                              onPressed: () async {
+                                await Clipboard.setData(ClipboardData(text: finance.suporteEmail));
+                                if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Contato copiado: ${finance.suporteEmail}')));
+                              },
+                            ),
+                          ] else if (finance.responsavelRegularizacao == 'autonomo') ...[
+                            const SizedBox(height: 10),
+                            Text('O contato de suporte ainda não está configurado. Tente novamente mais tarde.', style: TextStyle(color: Colors.red.shade700, fontSize: 12)),
+                          ],
+                        ]),
+                      ),
+                    ),
+                  if (finance.planoBloqueado) const SizedBox(height: 16),
                   if (finance.error.isNotEmpty)
                     Container(
                       padding: const EdgeInsets.all(12),
@@ -224,7 +252,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: ElevatedButton.icon(
                       icon: const Icon(Icons.add, size: 22),
                       label: const Text('NOVO LANÇAMENTO', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                      onPressed: _abrirNovoLancamento,
+                      onPressed: finance.planoBloqueado ? null : _abrirNovoLancamento,
                     ),
                   ),
                   const SizedBox(height: 20),

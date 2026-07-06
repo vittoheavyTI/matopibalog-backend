@@ -28,6 +28,11 @@ interface PlanoStatus {
     preco_mensal: number;
     limite_motoristas: number;
   } | null;
+  empresa_tipo?: string;
+  regularizacao?: {
+    responsavel: string;
+    suporte_email: string | null;
+  };
 }
 
 const statusMap: Record<string, { label: string; color: string }> = {
@@ -96,6 +101,10 @@ export const MinhasFaturas: React.FC = () => {
   const proximaFatura = faturas.find(f => f.status === 'pendente' || f.status === 'vencido');
   const historico     = faturas.filter(f => f !== proximaFatura);
   const requerRegularizacao = ['suspenso', 'expirado', 'bloqueado'].includes(planoStatus?.status || '') || planoStatus?.trial_expirado;
+  const suporteEmail = planoStatus?.regularizacao?.suporte_email;
+  const suporteHref = suporteEmail
+    ? `mailto:${suporteEmail}?subject=${encodeURIComponent('Solicitação de regularização do plano')}`
+    : null;
 
   const obterBannerPlano = () => {
     const status = planoStatus?.status;
@@ -148,8 +157,8 @@ export const MinhasFaturas: React.FC = () => {
       <div className="flex items-center gap-3">
         <Receipt className="text-blue-600" size={28} />
         <div>
-          <h2 className="text-2xl font-bold text-gray-800">Minhas Faturas</h2>
-          <p className="text-gray-500 text-sm">Acompanhe as faturas da sua empresa</p>
+          <h2 className="text-2xl font-bold text-gray-800">Faturas e Regularização</h2>
+          <p className="text-gray-500 text-sm">Consulte o plano, os vencimentos e o caminho seguro para regularizar</p>
         </div>
       </div>
 
@@ -181,6 +190,11 @@ export const MinhasFaturas: React.FC = () => {
                   {planoStatus.plano.nome} · R$ {Number(planoStatus.plano.preco_mensal).toFixed(2)}/mês · até {planoStatus.plano.limite_motoristas} motoristas
                 </p>
               )}
+              {requerRegularizacao && suporteHref && !proximaFatura && (
+                <a href={suporteHref} className="inline-flex items-center gap-2 mt-4 px-4 py-2 bg-green-700 hover:bg-green-800 text-white rounded-lg text-sm font-bold">
+                  <ExternalLink size={15} /> Solicitar regularização
+                </a>
+              )}
             </div>
           </div>
         </div>
@@ -196,7 +210,7 @@ export const MinhasFaturas: React.FC = () => {
           </p>
           <p className="text-gray-400 text-sm mt-1">
             {requerRegularizacao
-              ? 'Entre em contato com o suporte para emissão da cobrança.'
+              ? (suporteEmail ? `Solicite a regularização pelo suporte: ${suporteEmail}.` : 'Entre em contato com o suporte para emissão da cobrança.')
               : 'Quando uma cobrança for emitida, ela aparecerá aqui.'}
           </p>
         </div>

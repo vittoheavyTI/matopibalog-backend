@@ -26,6 +26,7 @@ class FinanceProvider extends ChangeNotifier {
   List<dynamic> _despesas = [];
   List<dynamic> _abastecimentos = [];
   List<dynamic> _vales = [];
+  Map<String, dynamic> _planoStatus = {};
 
   double get totalFretes => _totalFretes;
   double get comissao => _comissao;
@@ -44,6 +45,18 @@ class FinanceProvider extends ChangeNotifier {
   List<dynamic> get despesas => _despesas;
   List<dynamic> get abastecimentos => _abastecimentos;
   List<dynamic> get vales => _vales;
+  String get statusPlano => (_planoStatus['status'] ?? '').toString();
+  bool get planoBloqueado => _planoStatus['trial_expirado'] == true || const ['suspenso', 'expirado', 'bloqueado'].contains(statusPlano);
+  String get responsavelRegularizacao => ((_planoStatus['regularizacao'] as Map?)?['responsavel'] ?? '').toString();
+  String get suporteEmail => ((_planoStatus['regularizacao'] as Map?)?['suporte_email'] ?? '').toString();
+  String get mensagemRegularizacao {
+    switch (responsavelRegularizacao) {
+      case 'admin_empresa': return 'Sua empresa está com acesso temporariamente limitado. Procure o administrador.';
+      case 'admin_autonomo': return 'A regularização desta conta é feita pelo administrador responsável no painel web.';
+      case 'autonomo': return 'Seu acesso operacional está temporariamente limitado. Fale com o suporte para regularizar.';
+      default: return 'O acesso operacional está temporariamente limitado. Entre em contato com o suporte.';
+    }
+  }
 
   // Status considerados "frete em execução", em ordem de prioridade.
   static const List<String> _statusAtivoPrioritario = ['em_viagem', 'em_andamento', 'ativo'];
@@ -104,11 +117,11 @@ class FinanceProvider extends ChangeNotifier {
     _error = '';
     notifyListeners();
 
-    // Mede só a onda de rede (5 GETs paralelos), para diagnosticar se a lentidão
+    // Mede só a onda de rede (6 GETs paralelos), para diagnosticar se a lentidão
     // percebida é rede/cold start ou render. Não loga dados sensíveis — apenas ms.
     final cronometro = Stopwatch()..start();
     try {
-      // Perfil + 4 listas são independentes entre si — busca tudo em paralelo
+      // Perfil + status do plano + 4 listas são independentes — busca em paralelo
       // (1 onda de rede). Antes o getMe era serial e bloqueava as outras 4.
       final results = await Future.wait([
         ApiService.getMe(),
@@ -116,6 +129,7 @@ class FinanceProvider extends ChangeNotifier {
         ApiService.getList('despesas'),
         ApiService.getList('abastecimentos'),
         ApiService.getList('vales'),
+        ApiService.getPlanoStatus(),
       ]);
       cronometro.stop();
 
@@ -124,6 +138,7 @@ class FinanceProvider extends ChangeNotifier {
       final despesas       = results[2] as List<dynamic>;
       final abastecimentos = results[3] as List<dynamic>;
       final vales          = results[4] as List<dynamic>;
+      final planoStatus    = results[5] as Map<String, dynamic>?;
 
       // Cálculo de percentual/tipo de empresa só depois das respostas chegarem
       if (profile != null) {
@@ -136,6 +151,7 @@ class FinanceProvider extends ChangeNotifier {
       _despesas = despesas;
       _abastecimentos = abastecimentos;
       _vales = vales;
+      _planoStatus = planoStatus ?? {};
 
       // Fretes cancelados continuam VISÍVEIS nas listas (_fretes, Home, Histórico,
       // Detalhe), mas ficam FORA de todas as agregações financeiras: não entram no
