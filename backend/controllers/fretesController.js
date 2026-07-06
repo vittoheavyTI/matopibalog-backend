@@ -3,6 +3,103 @@ const notificacaoService = require('../services/notificacaoService');
 const { calcularComissao } = require('../utils/comissao');
 const { normalizarModalidade, calcularValorToneladaKm } = require('../utils/calculoFrete');
 
+const BUCKET_ODOMETRO = 'fretes-odometro';
+const SIGNED_URL_TTL_SECONDS = 300;
+const EXTENSAO_POR_MIME = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+};
+
+const acessoPermitidoAoFrete = (req, frete) => {
+  if (req.user.is_super_admin === true) return true;
+  if (req.user.role === 'admin') return frete.empresa_id === req.empresa_id;
+  return frete.motorista_id === req.user.uid;
+};
+
+const campoPathOdometro = (tipo) => tipo === 'inicial'
+  ? 'foto_odometro_inicial_path'
+  : tipo === 'final'
+    ? 'foto_odometro_final_path'
+    : null;
+
+const criarSignedUrlOdometro = async (path) => {
+  if (!path) return null;
+  const { data, error } = await supabase.storage
+    .from(BUCKET_ODOMETRO)
+    .createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
+  if (error) throw error;
+  return data?.signedUrl || data?.signedURL || null;
+};
+
+const uploadOdometro = async (req, res, tipo) => {
+  const campoPath = campoPathOdometro(tipo);
+  if (!campoPath) return res.status(400).json({ message: 'Tipo de foto de odômetro inválido.' });
+  if (!req.file) return res.status(400).json({ message: 'Foto do odômetro não enviada.' });
+
+  try {
+    const { data: frete, error: freteError } = await supabase
+      .from('fretes')
+      .select('id, motorista_id, empresa_id, status, foto_odometro_inicial_path, foto_odometro_final_path')
+      .eq('id', req.params.id)
+      .single();
+
+    if (freteError || !frete) return res.status(404).json({ message: 'Frete não encontrado.' });
+    if (!acessoPermitidoAoFrete(req, frete)) return res.status(403).json({ message: 'Acesso negado.' });
+    if (frete.status === 'finalizado' || frete.status === 'cancelado') {
+      return res.status(409).json({ message: 'Não é possível alterar fotos de um frete finalizado ou cancelado.' });
+    }
+
+    const extensao = EXTENSAO_POR_MIME[req.file.mimetype];
+    if (!extensao) return res.status(400).json({ message: 'Formato de arquivo não permitido. Use JPEG, PNG ou WebP.' });
+
+    const pathPrivado = `${frete.empresa_id}/fretes/${frete.id}/odometro-${tipo}.${extensao}`;
+    const pathAnterior = frete[campoPath] || null;
+    const { error: uploadError } = await supabase.storage
+      .from(BUCKET_ODOMETRO)
+      .upload(pathPrivado, req.file.buffer, {
+        contentType: req.file.mimetype,
+        upsert: true,
+      });
+    if (uploadError) {
+      console.error('[fretesController:uploadOdometro] Falha no upload privado', {
+        frete_id: frete.id,
+        empresa_id: frete.empresa_id,
+        tipo,
+        mimetype: req.file.mimetype,
+        size: req.file.size,
+        erro: uploadError.message || String(uploadError),
+      });
+      return res.status(502).json({ message: 'Erro ao salvar foto do odômetro.' });
+    }
+
+    const updatePayload = { [campoPath]: pathPrivado };
+    if (tipo === 'inicial' && frete.status === 'pendente') updatePayload.status = 'ativo';
+    const { data: atualizado, error: updateError } = await supabase
+      .from('fretes')
+      .update(updatePayload)
+      .eq('id', frete.id)
+      .select()
+      .single();
+    if (updateError) {
+      await supabase.storage.from(BUCKET_ODOMETRO).remove([pathPrivado]).catch(() => {});
+      throw updateError;
+    }
+
+    if (pathAnterior && pathAnterior !== pathPrivado) {
+      supabase.storage.from(BUCKET_ODOMETRO).remove([pathAnterior]).catch(() => {});
+    }
+
+    return res.status(200).json({
+      path: pathPrivado,
+      status: atualizado.status,
+    });
+  } catch (error) {
+    console.error('[fretesController:uploadOdometro] Erro inesperado:', error?.message || error);
+    return res.status(500).json({ message: 'Erro ao enviar foto do odômetro.' });
+  }
+};
+
 // Helper para validar status do motorista
 const checkMotoristaStatus = async (uid) => {
   const { data, error } = await supabase
@@ -120,7 +217,7 @@ exports.getAll = async (req, res) => {
 };
 
 exports.create = async (req, res) => {
-  const { origem, destino, km_inicial, km_final, valor_frete, quem_recebeu, toneladas, valor_tonelada_km } = req.body;
+  const { origem, destino, km_inicial, km_final, valor_frete, quem_recebeu, toneladas, valor_tonelada_km, odometro_obrigatorio } = req.body;
   // Modalidade: ausente/desconhecida → 'valor_fixo' (comportamento histórico e
   // compatível com app/APK antigos que não enviam o campo).
   const modalidade = normalizarModalidade(req.body.modalidade_calculo) || 'valor_fixo';
@@ -203,7 +300,10 @@ exports.create = async (req, res) => {
         toneladas: modalidade === 'tonelada_km' && toneladas !== undefined ? Number(toneladas) : null,
         valor_tonelada_km: modalidade === 'tonelada_km' && valor_tonelada_km !== undefined ? Number(valor_tonelada_km) : null,
         quem_recebeu: quemRecebeuFinal,
-        placa: motData.placa_veiculo
+        placa: motData.placa_veiculo,
+        // Novo fluxo de odômetro: o frete só fica ativo depois que a foto
+        // inicial é enviada. Registros antigos já ativos/finalizados não mudam.
+        status: odometro_obrigatorio === true ? 'pendente' : 'ativo'
       })
       .select()
       .single();
@@ -265,6 +365,32 @@ exports.getById = async (req, res) => {
   }
 };
 
+exports.uploadOdometroInicial = (req, res) => uploadOdometro(req, res, 'inicial');
+exports.uploadOdometroFinal = (req, res) => uploadOdometro(req, res, 'final');
+
+exports.getOdometroSignedUrl = async (req, res) => {
+  const campoPath = campoPathOdometro(req.params.tipo);
+  if (!campoPath) return res.status(400).json({ message: 'Tipo de foto de odômetro inválido.' });
+
+  try {
+    const { data: frete, error } = await supabase
+      .from('fretes')
+      .select('id, motorista_id, empresa_id, foto_odometro_inicial_path, foto_odometro_final_path')
+      .eq('id', req.params.id)
+      .single();
+    if (error || !frete) return res.status(404).json({ message: 'Frete não encontrado.' });
+    if (!acessoPermitidoAoFrete(req, frete)) return res.status(403).json({ message: 'Acesso negado.' });
+
+    const pathPrivado = frete[campoPath];
+    if (!pathPrivado) return res.status(404).json({ message: 'Foto do odômetro não enviada.' });
+    const signedUrl = await criarSignedUrlOdometro(pathPrivado);
+    return res.status(200).json({ signed_url: signedUrl, expires_in: SIGNED_URL_TTL_SECONDS });
+  } catch (error) {
+    console.error('[fretesController:getOdometroSignedUrl] Erro:', error?.message || error);
+    return res.status(500).json({ message: 'Erro ao gerar acesso temporário à foto.' });
+  }
+};
+
 exports.update = async (req, res) => {
   const { id } = req.params;
 
@@ -274,7 +400,7 @@ exports.update = async (req, res) => {
 
     const { data: checkData, error: checkError } = await supabase
       .from('fretes')
-      .select('motorista_id, empresa_id, modalidade_calculo, toneladas, valor_tonelada_km, km_inicial, km_final')
+      .select('motorista_id, empresa_id, status, modalidade_calculo, toneladas, valor_tonelada_km, km_inicial, km_final, foto_odometro_inicial_path, foto_odometro_final_path')
       .eq('id', id)
       .single();
 
@@ -355,6 +481,9 @@ exports.update = async (req, res) => {
     if (allowedUpdate.status === 'finalizado' && await freteTemPendencias(id)) {
       return res.status(409).json({ message: MSG_PENDENCIAS });
     }
+    if (allowedUpdate.status === 'ativo' && checkData.status === 'pendente' && !checkData.foto_odometro_inicial_path) {
+      return res.status(422).json({ message: 'Envie a foto do odômetro inicial para ativar o frete.' });
+    }
 
     const { data, error } = await supabase
       .from('fretes')
@@ -380,7 +509,7 @@ exports.finalizar = async (req, res) => {
     // Busca o frete e verifica ownership
     const { data: frete, error: freteError } = await supabase
       .from('fretes')
-      .select('id, motorista_id, empresa_id, status, km_inicial, km_final, modalidade_calculo, toneladas, valor_tonelada_km')
+      .select('id, motorista_id, empresa_id, status, km_inicial, km_final, modalidade_calculo, toneladas, valor_tonelada_km, foto_odometro_inicial_path, foto_odometro_final_path')
       .eq('id', id)
       .single();
 
@@ -420,10 +549,19 @@ exports.finalizar = async (req, res) => {
     if (frete.status === 'finalizado') {
       return res.status(400).json({ message: 'Esta viagem já está finalizada.' });
     }
+    if (frete.status === 'pendente' && !frete.foto_odometro_inicial_path) {
+      return res.status(422).json({ message: 'Envie a foto do odômetro inicial para ativar o frete.' });
+    }
 
     // Trava de finalização: bloqueia se a viagem tiver lançamentos pendentes (vale p/ todos, inclusive super-admin)
     if (await freteTemPendencias(frete.id)) {
       return res.status(409).json({ message: MSG_PENDENCIAS });
+    }
+
+    // Compatibilidade: a obrigação vale para o novo fluxo, identificado pela
+    // foto inicial. Fretes antigos sem path continuam finalizáveis.
+    if (frete.foto_odometro_inicial_path && !frete.foto_odometro_final_path) {
+      return res.status(422).json({ message: 'Envie a foto do odômetro final para finalizar o frete.' });
     }
 
     // Série 1.5 (KM na finalização): o app NOVO envia km_inicial/km_final no corpo;
@@ -434,6 +572,11 @@ exports.finalizar = async (req, res) => {
     const { km_inicial: kmIniBody, km_final: kmFinBody } = req.body || {};
     const temKmIni = kmIniBody !== undefined && kmIniBody !== null && kmIniBody !== '';
     const temKmFin = kmFinBody !== undefined && kmFinBody !== null && kmFinBody !== '';
+
+    if (frete.foto_odometro_inicial_path && !temKmFin
+      && (frete.km_final === null || frete.km_final === undefined || frete.km_final === '')) {
+      return res.status(422).json({ message: 'Informe o KM final para finalizar o frete.' });
+    }
 
     if (temKmFin) {
       const kmFinal = Number(kmFinBody);

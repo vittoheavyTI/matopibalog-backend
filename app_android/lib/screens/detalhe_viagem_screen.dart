@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../services/api_service.dart';
 import '../services/app_logger.dart';
+import 'dart:io';
+import 'package:image_picker/image_picker.dart';
 
 class DetalheViagemScreen extends StatefulWidget {
   final Map<String, dynamic> frete;
@@ -193,6 +195,29 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
     final freteId = _frete['id']?.toString() ?? '';
     if (freteId.isEmpty) return;
 
+    // Compatibilidade: a foto final é obrigatória no novo fluxo (que possui
+    // foto inicial). Fretes legados sem path inicial continuam finalizáveis.
+    File? fotoFinal;
+    final exigeFotoFinal = _frete['foto_odometro_inicial_path'] != null
+        && _frete['foto_odometro_inicial_path'].toString().isNotEmpty
+        && (_frete['foto_odometro_final_path'] == null
+            || _frete['foto_odometro_final_path'].toString().isEmpty);
+    if (exigeFotoFinal) {
+      try {
+        final picked = await ImagePicker().pickImage(
+          source: ImageSource.camera, imageQuality: 75, maxWidth: 1800, maxHeight: 1800,
+        );
+        if (picked == null) return;
+        fotoFinal = File(picked.path);
+      } catch (e) {
+        AppLogger.error('DetalheFrete', 'erro_foto_odometro_final', e);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Erro ao acessar a câmera.')));
+        }
+        return;
+      }
+    }
+
     // Coleta de KM antes de finalizar (Série 1.5). Cancelar o modal não finaliza.
     final kmInicialExistente = _parseKm(_frete['km_inicial']);
     final kmColetado = await _coletarKmFinalizacao(kmInicialExistente);
@@ -202,6 +227,16 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
     AppLogger.action('finalizar_frete', params: {'frete_id': freteId});
     setState(() => _finalizando = true);
     try {
+      if (fotoFinal != null) {
+        final upload = await ApiService.uploadFotoOdometro(freteId, 'final', fotoFinal.path);
+        if (!mounted) return;
+        if (upload['ok'] != true) {
+          final msg = upload['message']?.toString() ?? 'Erro ao enviar foto do odômetro final.';
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+          return;
+        }
+        setState(() => _frete['foto_odometro_final_path'] = upload['path']);
+      }
       final result = await ApiService.finalizarViagem(
         freteId,
         kmInicial: kmColetado['km_inicial'],

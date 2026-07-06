@@ -630,7 +630,8 @@ class ApiService {
           .timeout(_timeoutPostJson);
       AppLogger.api('ApiService', 'POST /fretes', response.statusCode);
       if (response.statusCode == 201) {
-        return {'ok': true};
+        final body = jsonDecode(response.body) as Map<String, dynamic>;
+        return {'ok': true, 'id': body['id'], 'frete': body};
       }
       final body = jsonDecode(response.body);
       // Zod retorna { message: 'Dados inválidos.', errors: [{campo, mensagem}] }
@@ -646,6 +647,35 @@ class ApiService {
       return {'ok': false, 'message': msg};
     } catch (e) {
       AppLogger.error('ApiService', 'POST /fretes exception', e);
+      return {'ok': false, 'message': _mensagemErroRede(e)};
+    }
+  }
+
+  /// Envia foto privada de odômetro. O backend valida ownership/tenant e
+  /// persiste somente o path no bucket privado.
+  static Future<Map<String, dynamic>> uploadFotoOdometro(
+      String freteId, String tipo, String filePath) async {
+    try {
+      if (tipo != 'inicial' && tipo != 'final') {
+        return {'ok': false, 'message': 'Tipo de foto do odômetro inválido.'};
+      }
+      final contentType = _contentTypeImagem(filePath);
+      if (contentType == null) {
+        return {'ok': false, 'message': 'Formato de arquivo não permitido. Use JPEG, PNG ou WebP.'};
+      }
+      final request = http.MultipartRequest('POST', Uri.parse('$_baseUrl/fretes/$freteId/odometro/$tipo'));
+      request.headers.addAll(await _getHeaders());
+      request.headers.remove('Content-Type');
+      request.files.add(await http.MultipartFile.fromPath('foto', filePath, contentType: contentType));
+      final response = await request.send().timeout(_timeoutUpload);
+      final bodyText = await response.stream.bytesToString();
+      AppLogger.api('ApiService', 'POST /fretes/$freteId/odometro/$tipo', response.statusCode);
+      Map<String, dynamic> body = {};
+      try { body = jsonDecode(bodyText) as Map<String, dynamic>; } catch (_) {}
+      if (response.statusCode == 200) return {'ok': true, ...body};
+      return {'ok': false, 'message': body['message'] ?? 'Erro ao enviar foto do odômetro.'};
+    } catch (e) {
+      AppLogger.error('ApiService', 'upload foto odometro exception', e);
       return {'ok': false, 'message': _mensagemErroRede(e)};
     }
   }

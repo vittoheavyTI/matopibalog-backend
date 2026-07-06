@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { Plus, X, Search, Filter, Truck, MapPin, Calendar, DollarSign, Gauge, Trash2, Edit, Check, AlertTriangle, ChevronLeft, ChevronDown, ChevronRight, Fuel, FileText, TrendingUp, Save, Unlock, Lock } from 'lucide-react';
+import { Plus, X, Search, Filter, Truck, MapPin, Calendar, DollarSign, Gauge, Trash2, Edit, Check, AlertTriangle, ChevronLeft, ChevronDown, ChevronRight, Fuel, FileText, TrendingUp, Save, Unlock, Lock, Camera, Upload } from 'lucide-react';
 import { format } from 'date-fns';
 import { formatCurrency } from '../utils';
 import api, { newClientRequestId } from '../api';
@@ -59,9 +59,19 @@ export const GerenciamentoViagens: React.FC = () => {
   const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showFinalizarModal, setShowFinalizarModal] = useState(false);
+  const [freteFinalizacao, setFreteFinalizacao] = useState<any | null>(null);
+  const [kmFinalizacao, setKmFinalizacao] = useState('');
+  const [fotoFinalizacao, setFotoFinalizacao] = useState<File | null>(null);
+  const [fotoFinalizacaoPreview, setFotoFinalizacaoPreview] = useState<string | null>(null);
+  const [finalizandoFrete, setFinalizandoFrete] = useState(false);
   // Fretes ativos/pendentes (2+) oferecidos no modal de seleção ao finalizar.
   // Vazio = modal fechado. Substitui o antigo window.prompt numerado.
   const [fretesParaFinalizar, setFretesParaFinalizar] = useState<any[]>([]);
+  // Recuperação: frete criado mas cuja foto inicial NÃO subiu. Em vez de um alerta
+  // sem saída, guardamos o frete + o arquivo + o motivo para oferecer reenvio direto
+  // ou abrir o frete pendente. null = modal de recuperação fechado.
+  const [freteFotoPendente, setFreteFotoPendente] = useState<{ frete: any; foto: File | null; motivo: string | null } | null>(null);
+  const [reenviandoFotoInicial, setReenviandoFotoInicial] = useState(false);
   // Accordion da visualização por frete (detalhe do motorista).
   const [fretesExpandidos, setFretesExpandidos] = useState<Set<string>>(new Set());
   const [semFreteExpandido, setSemFreteExpandido] = useState(false);
@@ -70,6 +80,31 @@ export const GerenciamentoViagens: React.FC = () => {
   const [motoristaAberto, setMotoristaAberto] = useState(false);
   // Limpa busca/dropdown do combobox ao abrir/fechar o modal de frete.
   useEffect(() => { setBuscaMotorista(''); setMotoristaAberto(false); }, [showModal]);
+
+  const [fotoInicial, setFotoInicial] = useState<File | null>(null);
+  const [fotoInicialPreview, setFotoInicialPreview] = useState<string | null>(null);
+
+  useEffect(() => () => {
+    if (fotoInicialPreview) URL.revokeObjectURL(fotoInicialPreview);
+  }, [fotoInicialPreview]);
+  useEffect(() => () => {
+    if (fotoFinalizacaoPreview) URL.revokeObjectURL(fotoFinalizacaoPreview);
+  }, [fotoFinalizacaoPreview]);
+
+  const selecionarFotoInicial = (file: File | null) => {
+    setFotoInicial(file);
+    setFotoInicialPreview(file ? URL.createObjectURL(file) : null);
+  };
+  const selecionarFotoFinal = (file: File | null) => {
+    setFotoFinalizacao(file);
+    setFotoFinalizacaoPreview(file ? URL.createObjectURL(file) : null);
+  };
+
+  const enviarFotoOdometro = async (freteId: string, tipo: 'inicial' | 'final', file: File) => {
+    const form = new FormData();
+    form.append('foto', file);
+    return api.post(`/fretes/${freteId}/odometro/${tipo}`, form);
+  };
 
   const [formData, setFormData] = useState({
     motorista_id: '',
@@ -240,6 +275,7 @@ export const GerenciamentoViagens: React.FC = () => {
 
   const openNewModal = (motId?: string) => {
     setEditingFrete(null);
+    selecionarFotoInicial(null);
     setFormData({
       motorista_id: motId || '',
       origem: '',
@@ -271,6 +307,7 @@ export const GerenciamentoViagens: React.FC = () => {
 
   const openEditModal = (frete: any) => {
     setEditingFrete(frete);
+    selecionarFotoInicial(null);
     setFormData({
       motorista_id: frete.motorista_id,
       origem: frete.origem,
@@ -295,6 +332,20 @@ export const GerenciamentoViagens: React.FC = () => {
     if (!editingFrete && !formData.motorista_id) { alert('Selecione um motorista.'); return; }
     if (!formData.origem || !formData.origem.trim()) { alert('Informe a origem.'); return; }
     if (!formData.destino || !formData.destino.trim()) { alert('Informe o destino.'); return; }
+    const novoFluxoSemFotoInicial = !editingFrete
+      || (editingFrete.status === 'pendente' && !editingFrete.foto_odometro_inicial_path);
+    if (novoFluxoSemFotoInicial && Number(formData.km_inicial) <= 0) {
+      alert('Informe o KM inicial para iniciar o frete.');
+      return;
+    }
+    if (novoFluxoSemFotoInicial && !fotoInicial) {
+      alert('Envie a foto do odômetro inicial para iniciar o frete.');
+      return;
+    }
+    if (fotoInicial && fotoInicial.size > 10 * 1024 * 1024) {
+      alert('A foto do odômetro deve ter no máximo 10 MB.');
+      return;
+    }
     // Validação por modalidade:
     //  - tonelada/km: exige toneladas > 0 e valor por tonelada/km > 0. O valor do
     //    frete é CALCULADO no backend (na finalização, com o km_final) — não é digitado.
@@ -333,14 +384,47 @@ export const GerenciamentoViagens: React.FC = () => {
         payload.valor_frete = parseFloat(formData.valor_frete);
       }
 
+      let freteId: string;
+      let freteResultante: any = editingFrete;
       if (editingFrete) {
+        // Frete pendente sem foto não pode ser ativado por PATCH. Mantém pendente
+        // até o endpoint de upload inicial gravar o path e ativá-lo atomicamente.
+        if (editingFrete.status === 'pendente' && !editingFrete.foto_odometro_inicial_path) {
+          payload.status = 'pendente';
+        }
         await api.patch('/fretes/' + editingFrete.id, {...payload});
+        freteId = editingFrete.id;
       } else {
         // Na CRIAÇÃO enviamos quem_recebeu (autônomo travado em 'motorista'; vinculado escolhe,
         // default 'proprietario'). O backend ainda força 'motorista' p/ autônomo (defense-in-depth).
         // status continua omitido: o backend o ignora na criação (insert não inclui o campo).
         const { status: _statusOmitido, ...payloadCriacao } = payload;
-        await api.post('/fretes', { ...payloadCriacao, motorista_id: formData.motorista_id });
+        const criado = await api.post('/fretes', {
+          ...payloadCriacao,
+          motorista_id: formData.motorista_id,
+          odometro_obrigatorio: true,
+        });
+        freteId = criado.data.id;
+        freteResultante = criado.data;
+      }
+      if (fotoInicial) {
+        try {
+          await enviarFotoOdometro(freteId, 'inicial', fotoInicial);
+        } catch (uploadErr: any) {
+          // O frete JÁ persistiu, mas a foto inicial não subiu (falha de rede/storage ou
+          // endpoint de upload ainda não disponível no backend). Em vez de um alerta sem
+          // saída, atualiza a lista e abre o modal de recuperação apontando para o frete
+          // correto — com o arquivo já selecionado para reenvio em um clique.
+          if (filterMot !== 'todos') { await loadMotoristaData(filterMot); } else { await loadData(); }
+          setShowModal(false);
+          setFreteFotoPendente({
+            frete: { ...(freteResultante || {}), id: freteId, foto_odometro_inicial_path: null },
+            foto: fotoInicial,
+            motivo: uploadErr?.response?.data?.message || null,
+          });
+          selecionarFotoInicial(null);
+          return;
+        }
       }
       if (filterMot !== 'todos') {
         await loadMotoristaData(filterMot);
@@ -348,6 +432,7 @@ export const GerenciamentoViagens: React.FC = () => {
         await loadData();
       }
       setShowModal(false);
+      selecionarFotoInicial(null);
     } catch (err: any) {
       // PR-G2: mostra o(s) campo(s) inválido(s) que o backend devolve em errors[], em vez de
       // só "Dados inválidos." — facilita diagnosticar qual campo reprovou.
@@ -358,6 +443,26 @@ export const GerenciamentoViagens: React.FC = () => {
       alert('Erro ao salvar frete: ' + (data?.message || err.message) + detalhe);
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  // Reenvia a foto inicial de um frete que ficou sem ela (fluxo de recuperação). Reaproveita
+  // o arquivo já selecionado; em sucesso, ativa o frete e fecha o modal. Em falha, mantém o
+  // modal aberto e mostra o motivo — o usuário ainda pode "Abrir frete pendente".
+  const reenviarFotoInicialPendente = async () => {
+    const alvo = freteFotoPendente;
+    if (!alvo?.frete?.id || !alvo.foto) return;
+    try {
+      setReenviandoFotoInicial(true);
+      await enviarFotoOdometro(alvo.frete.id, 'inicial', alvo.foto);
+      if (filterMot !== 'todos') { await loadMotoristaData(filterMot); } else { await loadData(); }
+      setFreteFotoPendente(null);
+      selecionarFotoInicial(null);
+      alert('Foto do odômetro inicial enviada. O frete foi ativado.');
+    } catch (err: any) {
+      alert('Ainda não foi possível enviar a foto: ' + (err?.response?.data?.message || err.message || 'erro desconhecido') + '.');
+    } finally {
+      setReenviandoFotoInicial(false);
     }
   };
 
@@ -534,19 +639,16 @@ export const GerenciamentoViagens: React.FC = () => {
     }
   };
 
-  // Localiza o frete ativo/pendente do motorista atualmente selecionado.
-  // Mesma regra de vínculo usada nos lançamentos: motorista do filtro + status ativo/pendente.
-  const getFreteAtivoSelecionado = () =>
-    fretes.find(f =>
-      (f.motoristaUid === filterMot || f.motorista_id === filterMot) &&
-      (f.status === 'ativo' || f.status === 'pendente'));
-
-  // Frete por tonelada/km só pode ser finalizado com KM final (o valor é calculado
-  // nesse momento). Sem KM final, orienta a editar o frete antes — evita finalizar
-  // com valor 0 provisório e distância ausente (o backend também barra com 422).
-  const exigeKmFinalAntesDeFinalizar = (f: any) =>
-    f && f.modalidade_calculo === 'tonelada_km' && !(f.km_final ?? f.kmFinal);
-  const MSG_EXIGE_KM_FINAL = 'Para finalizar um frete por tonelada/km, informe o KM final. Edite o frete, preencha o KM final e salve antes de finalizar.';
+  const abrirModalFinalizacao = (frete: any) => {
+    if (frete?.status === 'pendente' && !frete?.foto_odometro_inicial_path) {
+      alert('Envie a foto do odômetro inicial para ativar o frete antes de finalizar.');
+      return;
+    }
+    setFreteFinalizacao(frete);
+    setKmFinalizacao(frete?.km_final ? String(frete.km_final) : '');
+    selecionarFotoFinal(null);
+    setShowFinalizarModal(true);
+  };
 
   const handleFinalizarViagem = () => {
     if (!selectedMotorista) return;
@@ -556,7 +658,7 @@ export const GerenciamentoViagens: React.FC = () => {
       return;
     }
     if (ativos.length === 1) {
-      setShowFinalizarModal(true);
+      abrirModalFinalizacao(ativos[0]);
       return;
     }
     // 2+ ativos: abre modal de seleção visual (substitui o window.prompt).
@@ -566,21 +668,47 @@ export const GerenciamentoViagens: React.FC = () => {
 
   const confirmFinalizarViagem = async () => {
     if (!selectedMotorista) return;
-    // Defesa final: evita falso sucesso se o frete ativo sumiu entre abrir e confirmar.
-    const ativo = getFreteAtivoSelecionado();
+    const ativo = freteFinalizacao;
     if (!ativo) {
       setShowFinalizarModal(false);
       alert('Nenhum frete ativo encontrado para finalizar.');
       return;
     }
-    if (exigeKmFinalAntesDeFinalizar(ativo)) {
-      setShowFinalizarModal(false);
-      alert(MSG_EXIGE_KM_FINAL);
+    const novoFluxoOdometro = Boolean(ativo.foto_odometro_inicial_path);
+    const exigeKmFinal = novoFluxoOdometro || ativo.modalidade_calculo === 'tonelada_km';
+    const kmInicial = Number(ativo.km_inicial ?? ativo.kmInicial);
+    const kmFinal = Number(kmFinalizacao);
+    if (exigeKmFinal && (!Number.isFinite(kmInicial) || kmInicial <= 0)) {
+      alert('O frete não possui KM inicial válido. Edite-o antes de finalizar.');
+      return;
+    }
+    if (exigeKmFinal) {
+      // Distingue "KM final ausente" (mensagem por modalidade) de "KM final inválido".
+      const kmFinalVazio = String(kmFinalizacao).trim() === '' || !Number.isFinite(kmFinal);
+      if (kmFinalVazio) {
+        alert(ativo.modalidade_calculo === 'tonelada_km'
+          ? 'Informe o KM final para calcular e finalizar o frete por tonelada/km.'
+          : 'Informe o KM final para finalizar este frete.');
+        return;
+      }
+      if (kmFinal <= kmInicial) {
+        alert('Informe um KM final maior que o KM inicial.');
+        return;
+      }
+    }
+    if (ativo.foto_odometro_inicial_path && !ativo.foto_odometro_final_path && !fotoFinalizacao) {
+      alert('Envie a foto do odômetro final para concluir o frete.');
+      return;
+    }
+    if (fotoFinalizacao && fotoFinalizacao.size > 10 * 1024 * 1024) {
+      alert('A foto do odômetro deve ter no máximo 10 MB.');
       return;
     }
     try {
+      setFinalizandoFrete(true);
+      if (fotoFinalizacao) await enviarFotoOdometro(ativo.id, 'final', fotoFinalizacao);
       // Finaliza via rota dedicada — o backend é a trava final (409 se houver pendência)
-      await api.post('/fretes/' + ativo.id + '/finalizar');
+      await api.post('/fretes/' + ativo.id + '/finalizar', exigeKmFinal ? { km_final: kmFinal } : {});
       // Marca como finalizado SOMENTE os aprovados DESTA viagem (frete ativo), após sucesso
       const promises = [
         ...despesas.filter(d => d.status === 'aprovado' && d.frete_id === ativo.id).map(d => api.patch('/despesas/' + d.id, { status: 'finalizado' })),
@@ -589,8 +717,10 @@ export const GerenciamentoViagens: React.FC = () => {
       ];
       await Promise.all(promises);
       setShowFinalizarModal(false);
+      setFreteFinalizacao(null);
+      selecionarFotoFinal(null);
       setFilterMot('todos');
-      loadData();
+      await loadData();
       alert('Frete finalizado! Os dados foram movidos para o resumo histórico.');
     } catch (err: any) {
       // Plano suspenso/bloqueado/expirado (403 do verificarPlano): não é erro de
@@ -605,11 +735,12 @@ export const GerenciamentoViagens: React.FC = () => {
         ? (err.response.data?.message || 'Há lançamentos pendentes deste motorista.')
         : (err?.response?.data?.message || 'Erro ao finalizar frete no servidor.');
       alert(msg);
+    } finally {
+      setFinalizandoFrete(false);
     }
   };
 
-  /// Finaliza um frete específico (passado explicitamente), sem depender de
-  /// getFreteAtivoSelecionado(). Verifica pendências apenas do frete alvo.
+  /// Prepara a finalização de um frete específico e verifica suas pendências.
   const handleFinalizarFreteEspecifico = async (frete: any) => {
     if (!frete?.id) return;
     const pendente = mDesp.some(d => d.frete_id === frete.id && d.status === 'pendente') ||
@@ -619,33 +750,7 @@ export const GerenciamentoViagens: React.FC = () => {
       alert('Este frete possui lançamentos pendentes. Aprove ou rejeite todos antes de finalizar.');
       return;
     }
-    if (exigeKmFinalAntesDeFinalizar(frete)) {
-      alert(MSG_EXIGE_KM_FINAL);
-      return;
-    }
-    try {
-      await api.post('/fretes/' + frete.id + '/finalizar');
-      const promises = [
-        ...despesas.filter(d => d.status === 'aprovado' && d.frete_id === frete.id).map(d => api.patch('/despesas/' + d.id, { status: 'finalizado' })),
-        ...abastecimentos.filter(a => a.status === 'aprovado' && a.frete_id === frete.id).map(a => api.patch('/abastecimentos/' + a.id, { status: 'finalizado' })),
-        ...vales.filter(v => v.status === 'aprovado' && v.frete_id === frete.id).map(v => api.patch('/vales/' + v.id, { status: 'finalizado' }))
-      ];
-      await Promise.all(promises);
-      if (filterMot !== 'todos') loadMotoristaData(filterMot);
-      else loadData();
-      alert('Frete finalizado com sucesso!');
-    } catch (err: any) {
-      // Plano suspenso/bloqueado/expirado (403 do verificarPlano): caminho de regularização.
-      const planoMsg = extrairMensagemPlano(err);
-      if (planoMsg) {
-        setPlanoBloqueadoMsg(planoMsg);
-        return;
-      }
-      const msg = err?.response?.status === 409
-        ? (err.response.data?.message || 'Há lançamentos pendentes deste frete.')
-        : (err?.response?.data?.message || 'Erro ao finalizar frete no servidor.');
-      alert(msg);
-    }
+    abrirModalFinalizacao(frete);
   };
 
   const handleToggleBlock = async () => {
@@ -1316,8 +1421,26 @@ export const GerenciamentoViagens: React.FC = () => {
                 </div>
               )}
               <div className="grid grid-cols-2 gap-3">
-                <div><label className="block text-xs font-bold text-gray-600 uppercase mb-1">KM Inicial</label><input type="number" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" value={formData.km_inicial} onChange={e => setFormData({...formData, km_inicial: e.target.value})} placeholder="0" /></div>
+                <div><label className="block text-xs font-bold text-gray-600 uppercase mb-1">KM Inicial *</label><input type="number" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" value={formData.km_inicial} onChange={e => setFormData({...formData, km_inicial: e.target.value})} placeholder="0" /></div>
                 <div><label className="block text-xs font-bold text-gray-600 uppercase mb-1">KM Final</label><input type="number" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" value={formData.km_final} onChange={e => setFormData({...formData, km_final: e.target.value})} placeholder="0" /></div>
+              </div>
+              <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-3 space-y-2">
+                <label className="text-xs font-bold text-blue-800 uppercase flex items-center">
+                  <Camera size={15} className="mr-1.5" />Foto do odômetro inicial {!editingFrete || !editingFrete.foto_odometro_inicial_path ? '*' : '(substituir)'}
+                </label>
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={e => selecionarFotoInicial(e.target.files?.[0] || null)}
+                  className="block w-full text-xs text-gray-600 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-600 file:px-3 file:py-2 file:font-bold file:text-white hover:file:bg-blue-700"
+                />
+                {fotoInicialPreview ? (
+                  <img src={fotoInicialPreview} alt="Prévia do odômetro inicial" className="h-32 w-full rounded-lg object-cover border border-blue-100" />
+                ) : editingFrete?.foto_odometro_inicial_path ? (
+                  <p className="text-xs font-medium text-green-700">Foto inicial já enviada.</p>
+                ) : (
+                  <p className="text-xs text-blue-700">Obrigatória para ativar o frete. JPEG, PNG ou WebP, até 10 MB.</p>
+                )}
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div><label className="block text-xs font-bold text-gray-600 uppercase mb-1">Quem Recebeu</label>
@@ -1328,7 +1451,7 @@ export const GerenciamentoViagens: React.FC = () => {
                 {editingFrete && (
                   <div><label className="block text-xs font-bold text-gray-600 uppercase mb-1">Status</label>
                     <select className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white outline-none focus:border-blue-500" value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})}>
-                      <option value="ativo">Ativo</option><option value="finalizado">Finalizado</option><option value="cancelado">Cancelado</option>
+                      <option value="pendente">Pendente — aguardando foto inicial</option><option value="ativo">Ativo</option><option value="finalizado">Finalizado</option><option value="cancelado">Cancelado</option>
                     </select>
                   </div>
                 )}
@@ -1395,16 +1518,16 @@ export const GerenciamentoViagens: React.FC = () => {
 
       {showFinalizarModal && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
-            <div className="p-6 flex flex-col items-center text-center space-y-3">
-              <div className="w-14 h-14 bg-green-100 rounded-full flex items-center justify-center">
-                <Check size={28} className="text-green-600" />
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden max-h-[90vh] flex flex-col">
+            <div className="shrink-0 px-6 pt-5 pb-3 flex flex-col items-center text-center space-y-2 border-b border-gray-100">
+              <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
+                <Check size={24} className="text-green-600" />
               </div>
-              <h3 className="text-xl font-bold text-gray-800">Confirmar Finalização do Frete</h3>
-              <p className="text-sm text-gray-600">Confira o resumo antes de finalizar:</p>
+              <h3 className="text-lg font-bold text-gray-800">Confirmar Finalização do Frete</h3>
+              <p className="text-xs text-gray-500">Confira o resumo antes de finalizar.</p>
             </div>
-            <div className="px-6 pb-4 space-y-3">
-              <div className="bg-gray-50 rounded-xl p-4 space-y-3">
+            <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
+              <div className="bg-gray-50 rounded-xl p-3 space-y-2">
                 {isAutonomo ? (
                   // PR-G1: autônomo não usa comissão — resumo do modal = Faturamento − Gastos.
                   // Espelha o card "Balanço Atual"; reusa opTotalFretes/autGastos/autResultado.
@@ -1452,11 +1575,82 @@ export const GerenciamentoViagens: React.FC = () => {
                   </>
                 )}
               </div>
+              <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-3 space-y-2 text-left">
+                <div>
+                  <p className="text-xs font-bold text-blue-800 uppercase">Frete</p>
+                  <p className="text-sm font-semibold text-gray-800">{freteFinalizacao?.origem || '-'} → {freteFinalizacao?.destino || '-'}</p>
+                  <p className="text-xs text-gray-500">KM inicial: {freteFinalizacao?.km_inicial ?? freteFinalizacao?.kmInicial ?? 'não informado'}</p>
+                </div>
+                {freteFinalizacao && !freteFinalizacao.foto_odometro_inicial_path && freteFinalizacao.modalidade_calculo !== 'tonelada_km' && (
+                  <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-md px-2 py-1 leading-snug">
+                    <span className="font-bold">Legado:</span> frete criado antes do fluxo de odômetro. KM final e foto são opcionais.
+                  </p>
+                )}
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 uppercase mb-1">KM Final {freteFinalizacao?.foto_odometro_inicial_path || freteFinalizacao?.modalidade_calculo === 'tonelada_km' ? '*' : '(opcional — legado)'}</label>
+                  <input
+                    type="number"
+                    value={kmFinalizacao}
+                    onChange={e => setKmFinalizacao(e.target.value)}
+                    className="w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500"
+                    placeholder="Informe o KM final"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-gray-700 uppercase flex items-center">
+                    <Camera size={15} className="mr-1.5" />Foto do odômetro final {freteFinalizacao?.foto_odometro_inicial_path ? '*' : '(legado)'}
+                  </label>
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    onChange={e => selecionarFotoFinal(e.target.files?.[0] || null)}
+                    className="block w-full text-xs text-gray-600 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-600 file:px-3 file:py-2 file:font-bold file:text-white hover:file:bg-blue-700"
+                  />
+                  {fotoFinalizacaoPreview ? (
+                    <img src={fotoFinalizacaoPreview} alt="Prévia do odômetro final" className="h-32 w-full rounded-lg object-cover border border-blue-100" />
+                  ) : freteFinalizacao?.foto_odometro_final_path ? (
+                    <p className="text-xs font-medium text-green-700">Foto final já enviada.</p>
+                  ) : (
+                    <p className="text-xs text-blue-700">JPEG, PNG ou WebP, até 10 MB.</p>
+                  )}
+                </div>
+              </div>
             </div>
-            <div className="p-4 bg-gray-50 border-t flex justify-end space-x-3">
-              <button onClick={() => setShowFinalizarModal(false)} className="px-5 py-2.5 font-bold text-gray-600 hover:bg-gray-200 rounded-xl transition-all">Cancelar</button>
-              <button onClick={confirmFinalizarViagem} className="px-6 py-2.5 bg-green-600 text-white font-bold rounded-xl shadow hover:bg-green-700 transition-all active:scale-95 flex items-center">
-                <Check size={18} className="mr-2" />Confirmar Finalização
+            <div className="shrink-0 p-4 bg-gray-50 border-t flex justify-end space-x-3">
+              <button onClick={() => { setShowFinalizarModal(false); setFreteFinalizacao(null); selecionarFotoFinal(null); }} disabled={finalizandoFrete} className="px-5 py-2.5 font-bold text-gray-600 hover:bg-gray-200 rounded-xl transition-all disabled:opacity-50">Cancelar</button>
+              <button onClick={confirmFinalizarViagem} disabled={finalizandoFrete} className="px-6 py-2.5 bg-green-600 text-white font-bold rounded-xl shadow hover:bg-green-700 transition-all active:scale-95 flex items-center disabled:opacity-50">
+                {finalizandoFrete ? <Upload size={18} className="mr-2 animate-pulse" /> : <Check size={18} className="mr-2" />}{finalizandoFrete ? 'Enviando...' : 'Confirmar Finalização'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {freteFotoPendente && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden max-h-[90vh] flex flex-col">
+            <div className="shrink-0 px-6 pt-5 pb-3 flex flex-col items-center text-center space-y-2 border-b border-gray-100">
+              <div className="w-12 h-12 bg-amber-100 rounded-full flex items-center justify-center">
+                <Camera size={24} className="text-amber-600" />
+              </div>
+              <h3 className="text-lg font-bold text-gray-800">Foto do odômetro inicial pendente</h3>
+            </div>
+            <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3 text-sm text-gray-700">
+              <p>
+                {freteFotoPendente.frete?.status === 'pendente'
+                  ? 'O frete foi salvo como pendente porque a foto do odômetro inicial não foi enviada.'
+                  : 'O frete foi salvo, mas a foto do odômetro inicial não foi enviada.'}
+              </p>
+              <p className="text-xs text-gray-500">{freteFotoPendente.frete?.origem || '-'} → {freteFotoPendente.frete?.destino || '-'}</p>
+              {freteFotoPendente.motivo && (
+                <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-md px-2 py-1 leading-snug">Motivo: {freteFotoPendente.motivo}</p>
+              )}
+              <p className="text-xs text-gray-500">Reenvie a foto agora ou abra o frete pendente para enviá-la depois.</p>
+            </div>
+            <div className="shrink-0 p-4 bg-gray-50 border-t flex flex-col sm:flex-row justify-end gap-2">
+              <button onClick={() => { const f = freteFotoPendente.frete; setFreteFotoPendente(null); openEditModal(f); }} disabled={reenviandoFotoInicial} className="px-4 py-2.5 font-bold text-gray-600 hover:bg-gray-200 rounded-xl transition-all disabled:opacity-50">Abrir frete pendente</button>
+              <button onClick={reenviarFotoInicialPendente} disabled={reenviandoFotoInicial || !freteFotoPendente.foto} className="px-5 py-2.5 bg-green-600 text-white font-bold rounded-xl shadow hover:bg-green-700 transition-all active:scale-95 flex items-center justify-center disabled:opacity-50">
+                {reenviandoFotoInicial ? <Upload size={18} className="mr-2 animate-pulse" /> : <Camera size={18} className="mr-2" />}{reenviandoFotoInicial ? 'Enviando...' : 'Reenviar foto agora'}
               </button>
             </div>
           </div>

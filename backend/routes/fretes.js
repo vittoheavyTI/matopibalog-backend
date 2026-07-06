@@ -5,6 +5,7 @@ const { verifyToken, isAdmin } = require('../middlewares/auth');
 const { verificarEmpresa } = require('../middlewares/tenant');
 const { verificarPlano } = require('../middlewares/verificarPlano');
 const validate = require('../middlewares/validate');
+const upload = require('../middlewares/upload');
 const { createFreteSchema, updateFreteSchema } = require('../schemas/fretes');
 
 router.use(verifyToken, verificarEmpresa, verificarPlano);
@@ -12,6 +13,9 @@ router.use(verifyToken, verificarEmpresa, verificarPlano);
 router.get('/', fretesController.getAll);
 router.post('/', validate(createFreteSchema), fretesController.create);
 router.get('/:id', fretesController.getById);
+router.post('/:id/odometro/inicial', upload.single('foto'), fretesController.uploadOdometroInicial);
+router.post('/:id/odometro/final', upload.single('foto'), fretesController.uploadOdometroFinal);
+router.get('/:id/odometro/:tipo/url', fretesController.getOdometroSignedUrl);
 router.post('/:id/finalizar', fretesController.finalizar);
 router.patch('/:id', validate(updateFreteSchema), fretesController.update);
 router.delete('/:id', isAdmin, fretesController.delete);
