@@ -21,6 +21,7 @@ export interface LoginConfig {
   footerHeight: number;
   inputBgColor: string;
   inputBorderColor: string;
+  cardOpacity: number;
 }
 
 // Prefixo padronizado — matopibalog_
@@ -85,6 +86,7 @@ export function readFromLS(): LoginConfig {
     footerHeight: Number(localStorage.getItem(`${PREFIX}footer_height`)) || 60,
     inputBgColor: localStorage.getItem(`${PREFIX}input_bg`) || '#ffffff',
     inputBorderColor: localStorage.getItem(`${PREFIX}input_border`) || '#e5e7eb',
+    cardOpacity: Number(localStorage.getItem(`${PREFIX}card_opacity`)) || 100,
   };
 }
 
@@ -109,6 +111,7 @@ export function writeToLS(data: Record<string, any>) {
     footerHeight: `${PREFIX}footer_height`,
     inputBgColor: `${PREFIX}input_bg`,
     inputBorderColor: `${PREFIX}input_border`,
+    cardOpacity: `${PREFIX}card_opacity`,
   };
   for (const [key, lsKey] of Object.entries(map)) {
     if (data[key] !== undefined && data[key] !== null) {

@@ -1,13 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Users, FileText, Truck, ChevronLeft, ChevronRight, Upload, X, Check, Trash2, Settings, UserCircle, Shield, ChevronDown, Receipt, History } from 'lucide-react';
+import { LayoutDashboard, Users, FileText, Truck, ChevronLeft, ChevronRight, Upload, X, Check, Trash2, Settings, UserCircle, Receipt, History, Building2, DollarSign, Bell, Plug, ClipboardList } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../api';
 
 export const Sidebar: React.FC = () => {
   const { user } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
-  const [painelOpen, setPainelOpen] = useState(false);
   const [logoBase64, setLogoBase64] = useState<string | null>(null);
   const [logoScale, setLogoScale] = useState<number>(100);
   const [logoY, setLogoY] = useState<number>(0);
@@ -115,45 +114,37 @@ export const Sidebar: React.FC = () => {
 
   const commonMainNav = [
     { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
-    { to: '/motoristas', icon: Users, label: 'Motoristas' },
     { to: '/relatorios/viagens', icon: Truck, label: 'Gerenciamento de Fretes' },
     { to: '/relatorios/resumo', icon: History, label: 'Histórico de Fretes' },
     { to: '/relatorios', icon: FileText, label: 'Relatórios' },
+    { to: '/motoristas', icon: Users, label: 'Motoristas' },
     { to: '/admins', icon: UserCircle, label: 'Usuários' },
   ];
 
-  // O super-admin administra a plataforma; as telas operacionais por empresa
-  // continuam acessíveis pelas rotas existentes, mas não disputam espaço no menu.
+  // O super-admin administra a plataforma. Antes as páginas administrativas viviam
+  // dentro de um agrupador expansível "Painel Admin." (com Usuários Globais duplicado
+  // dentro e fora). Agora vão em sequência direta no menu — sem duplicidade e sem o
+  // grupo. "Visão Geral" foi fundida no Dashboard, por isso saiu do menu.
   // Para os demais perfis, a navegação anterior permanece inalterada.
   const mainNav = user?.is_super_admin
-    ? [{ to: '/', icon: LayoutDashboard, label: 'Dashboard' }]
+    ? [
+        { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
+        { to: '/painel-administrativo/empresas', icon: Building2, label: 'Empresas e Autônomos' },
+        { to: '/painel-administrativo/planos', icon: ClipboardList, label: 'Planos' },
+        { to: '/painel-administrativo/financeiro', icon: DollarSign, label: 'Financeiro' },
+        { to: '/relatorios/resumo', icon: History, label: 'Histórico de Fretes' },
+        { to: '/painel-administrativo/usuarios', icon: UserCircle, label: 'Usuários' },
+        { to: '/painel-administrativo/motoristas', icon: Users, label: 'Motoristas / Autônomos' },
+        { to: '/painel-administrativo/termos-lgpd', icon: FileText, label: 'Termos LGPD' },
+        { to: '/painel-administrativo/notificacoes', icon: Bell, label: 'Notificações' },
+        { to: '/integracoes', icon: Plug, label: 'Integrações' },
+      ]
     : commonMainNav;
 
-  const superAdminNav = [
-    { to: '/relatorios/resumo', icon: History, label: 'Histórico de Fretes' },
-    { to: '/painel-administrativo/usuarios', icon: UserCircle, label: 'Usuários Globais' },
-  ];
-
-  const painelSubItems = [
-    { to: '/painel-administrativo/visao-geral', label: 'Visão Geral' },
-    { to: '/painel-administrativo/empresas', label: 'Empresas e Autônomos' },
-    { to: '/painel-administrativo/planos', label: 'Planos' },
-    { to: '/painel-administrativo/assinaturas', label: 'Assinaturas' },
-    { to: '/painel-administrativo/faturas', label: 'Faturas Todas' },
-    { to: '/painel-administrativo/usuarios', label: 'Usuários Globais' },
-    { to: '/painel-administrativo/motoristas', label: 'Motoristas / Autônomos' },
-    { to: '/painel-administrativo/financeiro', label: 'Financeiro' },
-    { to: '/integracoes', label: 'Integrações' },
-    { to: '/painel-administrativo/configuracoes', label: 'Config. Sistema' },
-    { to: '/painel-administrativo/notificacoes', label: 'Notificações' },
-    { to: '/painel-administrativo/termos-lgpd', label: 'Termos LGPD' },
-  ];
-
+  // Item de menu uniforme: mesma fonte/peso/tamanho para todos, espaçamento vertical
+  // enxuto (py-2) e ícones alinhados. Evita que os itens fiquem soltos.
   const linkClass = ({ isActive }: { isActive: boolean }) =>
-    `flex items-center space-x-3 rounded-lg transition-colors ${collapsed ? 'justify-center px-0 py-3' : 'px-4 py-3'} ${isActive ? 'bg-green-700 text-white' : 'text-gray-300 hover:bg-gray-800'}`;
-
-  const subLinkClass = ({ isActive }: { isActive: boolean }) =>
-    `block px-3 py-2 rounded-lg text-sm transition-colors ${isActive ? 'bg-green-700/30 text-white font-medium' : 'text-gray-400 hover:text-white hover:bg-gray-800'}`;
+    `flex items-center gap-3 rounded-lg transition-colors text-sm font-medium ${collapsed ? 'justify-center px-0 py-2.5' : 'px-3 py-2.5'} ${isActive ? 'bg-green-700 text-white' : 'text-gray-300 hover:bg-gray-800'}`;
 
   return (
     <>
@@ -190,10 +181,11 @@ export const Sidebar: React.FC = () => {
           </div>
         </div>
 
-        {/* Menu scrollável — scrollbar oculta com Painel Admin fechado, fina/discreta quando aberto */}
+        {/* Menu scrollável — scrollbar fina/discreta para o super-admin (lista longa),
+            oculta nos demais perfis (menu curto). */}
         <div
           className={
-            painelOpen
+            user?.is_super_admin
               ? '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb]:rounded-full'
               : '[&::-webkit-scrollbar]:hidden'
           }
@@ -202,8 +194,8 @@ export const Sidebar: React.FC = () => {
             overflowY: 'auto',
             overflowX: 'hidden',
             padding: collapsed ? '8px 4px' : '8px',
-            scrollbarWidth: painelOpen ? 'thin' : 'none',
-            scrollbarColor: painelOpen ? 'rgba(255,255,255,0.25) transparent' : undefined,
+            scrollbarWidth: user?.is_super_admin ? 'thin' : 'none',
+            scrollbarColor: user?.is_super_admin ? 'rgba(255,255,255,0.25) transparent' : undefined,
           }}
         >
           <nav className="space-y-1">
@@ -214,41 +206,7 @@ export const Sidebar: React.FC = () => {
               </NavLink>
             ))}
 
-            {/* Painel Admin - Expansível (apenas super-admin) */}
-            {user?.is_super_admin && (
-            <div>
-              <button
-                onClick={() => setPainelOpen(!painelOpen)}
-                className={`flex items-center w-full rounded-lg transition-colors ${collapsed ? 'justify-center px-0 py-3' : 'px-4 py-3'} text-gray-300 hover:bg-gray-800`}
-                title={collapsed ? 'Painel Admin.' : undefined}
-              >
-                <Shield size={20} className="flex-shrink-0" />
-                {!collapsed && <span className="flex-1 text-left ml-3">Painel Admin.</span>}
-                {!collapsed && (
-                  <ChevronDown size={16} style={{ transform: painelOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
-                )}
-              </button>
-
-              {painelOpen && !collapsed && (
-                <div style={{ paddingLeft: '16px' }} className="mt-1 space-y-1">
-                  {painelSubItems.map(item => (
-                    <NavLink key={item.to} to={item.to} className={subLinkClass}>
-                      {item.label}
-                    </NavLink>
-                  ))}
-                </div>
-              )}
-            </div>
-            )}
-
-            {user?.is_super_admin && superAdminNav.map(item => (
-              <NavLink key={item.to} to={item.to} className={linkClass} title={collapsed ? item.label : undefined}>
-                <item.icon size={20} className="flex-shrink-0" />
-                {!collapsed && <span>{item.label}</span>}
-              </NavLink>
-            ))}
-
-            {/* Minhas Faturas é visão do cliente: super-admin usa Painel Admin → Faturas Todas */}
+            {/* Minhas Faturas é visão do cliente: super-admin usa o item Faturas acima */}
             {!user?.is_super_admin && user?.role === 'admin' && (
               <NavLink
                 to="/minhas-faturas"

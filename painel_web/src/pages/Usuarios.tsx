@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { UserPlus, Search, Shield, Phone, MapPin, Camera, X, Check, Trash2, AlertTriangle, Loader2, Key, Copy, KeyRound, Eye, EyeOff } from 'lucide-react';
+import { UserPlus, Search, Shield, Phone, MapPin, Camera, X, Check, Trash2, AlertTriangle, Loader2, Key, Copy, KeyRound, Eye, EyeOff, Edit3 } from 'lucide-react';
 import api from '../api';
 import { maskPhone, maskCEP } from '../utils/masks';
 import axios from 'axios';
@@ -12,8 +12,10 @@ export const Usuarios: React.FC = () => {
   const [usuarios, setUsuarios] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
+  const [somenteLeitura, setSomenteLeitura] = useState(false);
   const [editingUser, setEditingUser] = useState<any | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [empresaFiltro, setEmpresaFiltro] = useState('todas');
   const [categoriaFiltro, setCategoriaFiltro] = useState<'todos' | 'admins' | 'vinculados' | 'autonomos' | 'superadmins' | 'outros'>('todos');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -104,6 +106,7 @@ export const Usuarios: React.FC = () => {
         cidade: u.cidade || '',
         fotoUrl: u.foto_url || '',
         nivel: u.tipo || 'admin',
+        empresaId: u.empresa_id || null,
         empresaTipo: Array.isArray(u.empresas) ? u.empresas[0]?.tipo || null : u.empresas?.tipo || null,
         is_super_admin: !!u.is_super_admin,
         permissoes: u.permissoes || { dashboard: true, motoristas: true, relatorios: true, usuarios: false, configuracoes: false },
@@ -120,7 +123,7 @@ export const Usuarios: React.FC = () => {
     loadUsuarios();
     if (currentUser?.is_super_admin) {
       api.get('/painel-admin/empresas').then(res => {
-        setEmpresas((res.data || []).map((e: any) => ({ id: e.id, nome: e.nome })));
+        setEmpresas((res.data || []).map((e: any) => ({ id: e.id, nome: e.nome, tipo: e.tipo })));
       }).catch(() => {});
     }
   }, []);
@@ -295,16 +298,21 @@ export const Usuarios: React.FC = () => {
   };
 
   const getTipoLabel = (user: any) => {
-    if (user.is_super_admin) return 'Super Admin';
-    if (user.empresaTipo === 'autonomo') return 'Autônomo';
+    if (user.is_super_admin) return 'Super-admin';
+    if (user.nivel === 'motorista' && user.empresaTipo === 'autonomo') return 'Motorista autônomo';
+    if (user.nivel === 'motorista') return 'Motorista vinculado';
     if (user.nivel === 'admin') return 'Administrador';
-    if (user.nivel === 'motorista') return 'Motorista';
     return user.nivel ? `${user.nivel.charAt(0).toUpperCase()}${user.nivel.slice(1)}` : 'Usuário';
+  };
+
+  const getEmpresaLabel = (user: any) => {
+    if (user.is_super_admin) return 'Plataforma';
+    return empresas.find(e => e.id === user.empresaId)?.nome || 'Conta não identificada';
   };
 
   const getTipoBadgeClasses = (user: any) => {
     if (user.is_super_admin) return 'bg-yellow-100 text-yellow-800';
-    if (user.empresaTipo === 'autonomo') return 'bg-emerald-100 text-emerald-700';
+    if (user.nivel === 'motorista' && user.empresaTipo === 'autonomo') return 'bg-emerald-100 text-emerald-700';
     if (user.nivel === 'admin') return 'bg-purple-100 text-purple-700';
     if (user.nivel === 'motorista') return 'bg-blue-100 text-blue-700';
     return 'bg-gray-100 text-gray-700';
@@ -323,8 +331,9 @@ export const Usuarios: React.FC = () => {
 
   // Estágio 1: busca por nome/email (base para os contadores).
   const buscados = usuarios.filter(u =>
-    u.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    u.email.toLowerCase().includes(searchTerm.toLowerCase())
+    (u.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    u.email.toLowerCase().includes(searchTerm.toLowerCase())) &&
+    (empresaFiltro === 'todas' || u.empresaId === empresaFiltro)
   );
 
   // Contadores por categoria, sempre refletindo a busca atual.
@@ -345,26 +354,37 @@ export const Usuarios: React.FC = () => {
   return (
     <div className="space-y-6 pb-20">
       <div className="flex flex-wrap justify-between items-center gap-4">
-        <h2 className="text-2xl font-bold text-gray-800">Gestão de Usuários</h2>
+        <div>
+          <h2 className="text-2xl font-bold text-gray-800">Usuários</h2>
+          <p className="text-sm text-gray-500">Pessoas que acessam o sistema, vinculadas às contas da plataforma</p>
+        </div>
         <button 
-          onClick={() => { setEditingUser(null); setShowModal(true); }}
-          className="flex items-center px-4 py-2 bg-green-700 text-white rounded-lg hover:bg-green-800 transition-all shadow-md active:scale-95 font-bold"
+          onClick={() => { setEditingUser(null); setSomenteLeitura(false); setShowModal(true); }}
+          className="inline-flex items-center px-4 py-2.5 bg-green-700 text-white rounded-xl font-medium text-sm shadow-sm hover:bg-green-800 transition-all active:scale-95"
         >
-          <UserPlus size={20} className="mr-2" /> Novo Usuário
+          <UserPlus size={18} className="mr-2" /> Novo Usuário
         </button>
       </div>
 
-      <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex items-center">
-        <Search className="text-gray-400 mr-2" size={20} />
-        <input
-          type="search"
-          name="usuarios_busca_filtro"
-          autoComplete="off"
-          placeholder="Buscar por nome ou e-mail..."
-          className="flex-1 outline-none text-gray-700"
-          value={searchTerm}
-          onChange={e => setSearchTerm(e.target.value)}
-        />
+      <div className={`bg-white p-3 rounded-xl shadow-sm border border-gray-100 grid grid-cols-1 gap-3 ${currentUser?.is_super_admin ? 'md:grid-cols-[minmax(0,1fr)_minmax(220px,320px)]' : ''}`}>
+        <div className="flex items-center border border-gray-200 rounded-lg px-3">
+          <Search className="text-gray-400 mr-2" size={18} />
+          <input
+            type="search"
+            name="usuarios_busca_filtro"
+            autoComplete="off"
+            placeholder="Buscar por nome ou e-mail..."
+            className="flex-1 py-2 outline-none text-gray-700 text-sm"
+            value={searchTerm}
+            onChange={e => setSearchTerm(e.target.value)}
+          />
+        </div>
+        {currentUser?.is_super_admin && (
+          <select value={empresaFiltro} onChange={e => setEmpresaFiltro(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 bg-white">
+            <option value="todas">Todas as contas</option>
+            {empresas.map(e => <option key={e.id} value={e.id}>{e.nome}{e.tipo === 'autonomo' ? ' — Autônomo' : ''}</option>)}
+          </select>
+        )}
       </div>
 
       {/* Filtro por categoria (client-side, sobre a busca). Não altera /admin/usuarios. */}
@@ -423,6 +443,7 @@ export const Usuarios: React.FC = () => {
                         <div className="min-w-0">
                           <p className="font-bold text-gray-800 truncate">{user.nome}</p>
                           <p className="text-xs text-gray-500 truncate">{user.email}</p>
+                          {currentUser?.is_super_admin && <p className="text-[10px] font-semibold text-gray-400 truncate">Conta: {getEmpresaLabel(user)}</p>}
                         </div>
                       </div>
                     </td>
@@ -457,16 +478,27 @@ export const Usuarios: React.FC = () => {
                     <td className="p-3 text-right align-top">
                       <div className="flex items-center justify-end gap-2">
                         <button
-                          onClick={() => { setEditingUser(user); setShowModal(true); }}
-                          className="inline-flex items-center text-blue-600 hover:bg-blue-50 px-2.5 py-1.5 rounded-lg font-bold text-sm transition-colors"
+                          onClick={() => { setEditingUser(user); setSomenteLeitura(true); setShowModal(true); }}
+                          className="inline-flex items-center text-gray-600 hover:bg-gray-100 p-1.5 rounded-lg transition-colors"
+                          title="Ver"
+                          aria-label="Ver usuário"
                         >
-                          Editar
+                          <Eye size={16} />
+                        </button>
+                        <button
+                          onClick={() => { setEditingUser(user); setSomenteLeitura(false); setShowModal(true); }}
+                          className="inline-flex items-center text-blue-600 hover:bg-blue-50 p-1.5 rounded-lg transition-colors"
+                          title="Editar"
+                          aria-label="Editar usuário"
+                        >
+                          <Edit3 size={16} />
                         </button>
                         {(currentUser?.is_super_admin || user.nivel === 'motorista') && (
                           <button
                             onClick={() => setResetUserId(user.uid)}
                             className="inline-flex items-center text-orange-600 hover:bg-orange-50 px-2.5 py-1.5 rounded-lg font-bold text-sm transition-colors"
-                            title="Resetar Senha"
+                            title="Resetar senha"
+                            aria-label="Resetar senha"
                           >
                             <Key size={14} className="mr-1.5" /> Resetar Senha
                           </button>
@@ -475,7 +507,8 @@ export const Usuarios: React.FC = () => {
                           <button
                             onClick={() => setDeleteTarget(user)}
                             className="inline-flex items-center text-red-500 hover:bg-red-50 p-1.5 rounded-lg transition-colors"
-                            title="Excluir usuário"
+                            title="Excluir"
+                            aria-label="Excluir usuário"
                           >
                             <Trash2 size={16} />
                           </button>
@@ -492,14 +525,15 @@ export const Usuarios: React.FC = () => {
 
       {showModal && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden max-h-[90vh] flex flex-col">
-            <div className="p-6 border-b flex justify-between items-center bg-gray-50">
-              <h3 className="text-xl font-bold text-gray-800">{editingUser ? 'Editar Usuário' : 'Novo Usuário'}</h3>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl overflow-hidden max-h-[88vh] flex flex-col">
+            <div className="px-5 py-4 border-b flex justify-between items-center bg-gray-50 flex-shrink-0">
+              <h3 className="text-xl font-bold text-gray-800">{somenteLeitura ? 'Dados do Usuário' : editingUser ? 'Editar Usuário' : 'Novo Usuário'}</h3>
               <button onClick={() => setShowModal(false)} className="p-2 hover:bg-gray-200 rounded-full transition-colors"><X size={24} /></button>
             </div>
             
-            <div className="p-6 overflow-y-auto space-y-6">
-              <div className="flex flex-col items-center space-y-2 pb-4">
+            <fieldset disabled={somenteLeitura} className="contents">
+            <div className="p-4 overflow-y-auto space-y-4">
+              <div className="flex flex-col items-center space-y-1 pb-1">
                 <input 
                   type="file" 
                   ref={fileInputRef} 
@@ -508,8 +542,8 @@ export const Usuarios: React.FC = () => {
                   onChange={handleFileChange} 
                 />
                 <div 
-                  onClick={() => fileInputRef.current?.click()}
-                  className="w-24 h-24 rounded-2xl bg-gray-100 border-2 border-dashed border-gray-300 flex flex-col items-center justify-center text-gray-400 group hover:border-blue-400 hover:text-blue-500 cursor-pointer transition-all overflow-hidden relative"
+                  onClick={() => { if (!somenteLeitura) fileInputRef.current?.click(); }}
+                  className={`w-16 h-16 rounded-xl bg-gray-100 border-2 border-dashed border-gray-300 flex flex-col items-center justify-center text-gray-400 group transition-all overflow-hidden relative ${somenteLeitura ? 'cursor-default' : 'hover:border-blue-400 hover:text-blue-500 cursor-pointer'}`}
                 >
                   {(editingUser?.fotoUrl || newUser.fotoUrl) ? (
                     <>
@@ -524,12 +558,12 @@ export const Usuarios: React.FC = () => {
                     </>
                   ) : (
                     <>
-                      <Camera size={32} />
+                      <Camera size={24} />
                       <span className="text-[10px] font-bold uppercase mt-1">Foto</span>
                     </>
                   )}
                 </div>
-                {(editingUser?.fotoUrl || newUser.fotoUrl) && (
+                {!somenteLeitura && (editingUser?.fotoUrl || newUser.fotoUrl) && (
                   <button 
                     onClick={() => editingUser ? setEditingUser({...editingUser, fotoUrl: ''}) : setNewUser({...newUser, fotoUrl: ''})}
                     className="text-[10px] font-bold text-red-500 uppercase hover:underline"
@@ -540,7 +574,7 @@ export const Usuarios: React.FC = () => {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-4">
+                <div className="space-y-3">
                   <div>
                     <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">Nome Completo</label>
                     <input 
@@ -619,7 +653,7 @@ export const Usuarios: React.FC = () => {
                         type="text"
                         readOnly
                         className="w-full border p-3 rounded-xl bg-gray-100 text-gray-600"
-                        value={editingUser.nivel === 'operador' ? 'Operador legado — sem permissão funcional' : editingUser.empresaTipo === 'autonomo' ? 'Autônomo' : editingUser.nivel === 'motorista' ? 'Motorista' : 'Administrador'}
+                        value={editingUser.nivel === 'operador' ? 'Operador legado — sem permissão funcional' : getTipoLabel(editingUser)}
                       />
                       <p className="text-[10px] text-gray-400 mt-1 ml-1">
                         O nível do usuário é definido no cadastro e não pode ser alterado nesta tela.
@@ -655,7 +689,7 @@ export const Usuarios: React.FC = () => {
                   )}
                 </div>
 
-                <div className="space-y-4">
+                <div className="space-y-3">
                   <div>
                     <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">Celular</label>
                     <input 
@@ -669,7 +703,7 @@ export const Usuarios: React.FC = () => {
                     />
                   </div>
                   
-                  <div className="bg-gray-50 p-4 rounded-xl border border-gray-100 space-y-4">
+                  <div className="bg-gray-50 p-3 rounded-xl border border-gray-100 space-y-3">
                     <h4 className="text-xs font-bold text-gray-500 uppercase flex items-center">
                       <MapPin size={14} className="mr-1.5 text-gray-400" /> Localização
                     </h4>
@@ -726,9 +760,9 @@ export const Usuarios: React.FC = () => {
                 </div>
               </div>
 
-              <div className="bg-gray-50 p-4 rounded-xl border border-gray-100">
-                <h4 className="text-sm font-bold text-gray-700 mb-4 flex items-center"><Shield size={18} className="mr-2 text-blue-600" /> Permissões de Acesso</h4>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              <div className="bg-gray-50 p-3 rounded-xl border border-gray-100">
+                <h4 className="text-sm font-bold text-gray-700 mb-2 flex items-center"><Shield size={18} className="mr-2 text-blue-600" /> Permissões de Acesso</h4>
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
                   {Object.keys(newUser.permissoes || {}).map(key => (
                     <label key={key} className="flex items-center space-x-2 p-2 bg-white rounded-lg border border-gray-200 cursor-pointer hover:border-blue-300 transition-colors">
                       <input 
@@ -750,16 +784,17 @@ export const Usuarios: React.FC = () => {
                 </div>
               </div>
             </div>
+            </fieldset>
 
-            <div className="p-6 bg-gray-50 border-t flex justify-end space-x-3">
-              <button onClick={() => setShowModal(false)} className="px-6 py-2.5 font-bold text-gray-500 hover:bg-gray-200 rounded-xl transition-all">Cancelar</button>
-              <button 
+            <div className="p-4 bg-gray-50 border-t flex justify-end space-x-3 flex-shrink-0">
+              <button onClick={() => setShowModal(false)} className="px-4 py-2.5 font-medium text-sm text-gray-600 hover:bg-gray-200 rounded-xl transition-all">{somenteLeitura ? 'Fechar' : 'Cancelar'}</button>
+              {!somenteLeitura && <button
                 onClick={handleSave}
                 disabled={isSubmitting}
-                className="px-8 py-2.5 bg-green-700 text-white font-bold rounded-xl shadow-lg shadow-green-100 hover:bg-green-800 transition-all active:scale-95 flex items-center disabled:opacity-50"
+                className="inline-flex items-center px-4 py-2.5 bg-green-700 text-white rounded-xl font-medium text-sm shadow-sm hover:bg-green-800 transition-all active:scale-95 disabled:opacity-50"
               >
-                <Check size={20} className="mr-2" /> {isSubmitting ? 'Salvando...' : 'Salvar'}
-              </button>
+                <Check size={18} className="mr-2" /> {isSubmitting ? 'Salvando...' : 'Salvar'}
+              </button>}
             </div>
           </div>
         </div>

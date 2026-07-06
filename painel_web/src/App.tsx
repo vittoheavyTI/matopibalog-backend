@@ -17,17 +17,13 @@ import { Integracoes } from './pages/Integracoes';
 import { PainelVisaoGeral } from './pages/PainelVisaoGeral';
 import { PainelEmpresas } from './pages/PainelEmpresas';
 import { PainelPlanos } from './pages/PainelPlanos';
-import { PainelAssinaturas } from './pages/PainelAssinaturas';
-import { PainelUsuarios } from './pages/PainelUsuarios';
 import { PainelMotoristas } from './pages/PainelMotoristas';
 import { PainelRelatorios } from './pages/PainelRelatorios';
 import { PainelFinanceiro } from './pages/PainelFinanceiro';
-import { PainelConfigSistema } from './pages/PainelConfigSistema';
 import { PainelNotificacoes } from './pages/PainelNotificacoes';
 import { PainelTermosLGPD } from './pages/PainelTermosLGPD';
 import { PlanosPublicos } from './pages/PlanosPublicos';
 import { CadastroPublico } from './pages/CadastroPublico';
-import { Faturas } from './pages/Faturas';
 import { MinhasFaturas } from './pages/MinhasFaturas';
 import { RedefinirSenha } from './pages/RedefinirSenha';
 import { TrocarSenhaObrigatoria } from './pages/TrocarSenhaObrigatoria';
@@ -83,15 +79,17 @@ const AppRoutes = () => {
           <Route path="visao-geral" element={<SuperAdminRoute><PainelVisaoGeral /></SuperAdminRoute>} />
           <Route path="empresas" element={<SuperAdminRoute><PainelEmpresas /></SuperAdminRoute>} />
           <Route path="planos" element={<SuperAdminRoute><ErrorBoundary><PainelPlanos /></ErrorBoundary></SuperAdminRoute>} />
-          <Route path="assinaturas" element={<SuperAdminRoute><PainelAssinaturas /></SuperAdminRoute>} />
-          <Route path="usuarios" element={<SuperAdminRoute><PainelUsuarios /></SuperAdminRoute>} />
+          <Route path="assinaturas" element={<Navigate to="../financeiro?aba=assinaturas" replace />} />
+          <Route path="usuarios" element={<SuperAdminRoute><Usuarios /></SuperAdminRoute>} />
           <Route path="motoristas" element={<SuperAdminRoute><PainelMotoristas /></SuperAdminRoute>} />
           <Route path="relatorios" element={<SuperAdminRoute><PainelRelatorios /></SuperAdminRoute>} />
           <Route path="financeiro" element={<SuperAdminRoute><PainelFinanceiro /></SuperAdminRoute>} />
-          <Route path="configuracoes" element={<SuperAdminRoute><PainelConfigSistema /></SuperAdminRoute>} />
+          {/* Config. Sistema virou a aba "Sistema" dentro de Configurações. Rota antiga
+              redireciona para não quebrar links salvos. */}
+          <Route path="configuracoes" element={<Navigate to="/configuracoes" replace />} />
           <Route path="notificacoes" element={<SuperAdminRoute><PainelNotificacoes /></SuperAdminRoute>} />
           <Route path="termos-lgpd" element={<SuperAdminRoute><PainelTermosLGPD /></SuperAdminRoute>} />
-          <Route path="faturas" element={<SuperAdminRoute><Faturas /></SuperAdminRoute>} />
+          <Route path="faturas" element={<Navigate to="../financeiro?aba=faturas" replace />} />
         </Route>
         <Route path="integracoes" element={<SuperAdminRoute><Integracoes /></SuperAdminRoute>} />
         <Route path="minhas-faturas" element={<MinhasFaturas />} />

@@ -111,7 +111,7 @@ export const PainelUsuarios: React.FC = () => {
       <div className="flex items-center space-x-3 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
         <div className="bg-gray-800 p-2 rounded-lg text-white"><Shield size={24} /></div>
         <div>
-          <h1 className="text-2xl font-bold text-gray-800">Usuários Globais</h1>
+          <h1 className="text-2xl font-bold text-gray-800">Usuários</h1>
           <p className="text-sm text-gray-500">Administradores vinculados às empresas e contas autônomas</p>
         </div>
       </div>

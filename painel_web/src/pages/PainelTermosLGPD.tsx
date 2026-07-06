@@ -32,6 +32,21 @@ interface Aceite {
   ip?: string | null;
 }
 
+interface UsuarioTermo {
+  id: string;
+  nome?: string;
+  email?: string;
+  tipo?: string;
+  empresa_id?: string | null;
+  empresa_tipo?: string | null;
+}
+
+interface EmpresaTermo {
+  id: string;
+  nome: string;
+  tipo?: string;
+}
+
 const TIPOS: { value: string; label: string }[] = [
   { value: 'termos_uso', label: 'Termos de Uso' },
   { value: 'politica_privacidade', label: 'Política de Privacidade' },
@@ -75,6 +90,12 @@ export const PainelTermosLGPD: React.FC = () => {
   const [aceitesDe, setAceitesDe] = useState<Termo | null>(null);
   const [aceites, setAceites] = useState<Aceite[]>([]);
   const [carregandoAceites, setCarregandoAceites] = useState(false);
+  const [usuariosTermo, setUsuariosTermo] = useState<UsuarioTermo[]>([]);
+  const [empresasTermo, setEmpresasTermo] = useState<EmpresaTermo[]>([]);
+  const [filtroEmpresa, setFiltroEmpresa] = useState('todas');
+  const [filtroContaTipo, setFiltroContaTipo] = useState('todos');
+  const [filtroUsuarioTipo, setFiltroUsuarioTipo] = useState('todos');
+  const [filtroAceite, setFiltroAceite] = useState('todos');
 
   const notificar = (message: string, tipo: 'sucesso' | 'erro') => {
     setToast({ message, tipo });
@@ -199,10 +220,22 @@ export const PainelTermosLGPD: React.FC = () => {
   async function abrirAceites(t: Termo) {
     setAceitesDe(t);
     setAceites([]);
+    setUsuariosTermo([]);
+    setEmpresasTermo([]);
+    setFiltroEmpresa('todas');
+    setFiltroContaTipo('todos');
+    setFiltroUsuarioTipo('todos');
+    setFiltroAceite('todos');
     setCarregandoAceites(true);
     try {
-      const { data } = await api.get(`/admin/termos/${t.id}/aceites`);
-      setAceites(Array.isArray(data) ? data : []);
+      const [aceitesRes, usuariosRes, empresasRes] = await Promise.all([
+        api.get(`/admin/termos/${t.id}/aceites`),
+        api.get('/admin/usuarios'),
+        api.get('/painel-admin/empresas'),
+      ]);
+      setAceites(Array.isArray(aceitesRes.data) ? aceitesRes.data : []);
+      setUsuariosTermo(Array.isArray(usuariosRes.data) ? usuariosRes.data : []);
+      setEmpresasTermo(Array.isArray(empresasRes.data) ? empresasRes.data : []);
     } catch (err: any) {
       notificar(mensagemErro(err, 'Erro ao carregar aceites.'), 'erro');
       setAceitesDe(null);
@@ -210,6 +243,31 @@ export const PainelTermosLGPD: React.FC = () => {
       setCarregandoAceites(false);
     }
   }
+
+  const papeisDoTermo = aceitesDe?.obrigatorio_para || [];
+  const usuariosAplicaveis = usuariosTermo.filter((u) => papeisDoTermo.length === 0 || papeisDoTermo.includes(u.tipo || ''));
+  const aceitesPorUsuario = new Map(aceites.map((a) => [a.usuario_id, a]));
+  const empresaPorId = new Map(empresasTermo.map((e) => [e.id, e]));
+  const linhasAceites = usuariosAplicaveis.map((u) => {
+    const empresa = u.empresa_id ? empresaPorId.get(u.empresa_id) : undefined;
+    return {
+      usuario: u,
+      empresa,
+      aceite: aceitesPorUsuario.get(u.id),
+      contaTipo: empresa?.tipo || u.empresa_tipo || null,
+    };
+  });
+  const linhasAceitesNoContexto = linhasAceites.filter((l) => {
+    const porEmpresa = filtroEmpresa === 'todas' || l.usuario.empresa_id === filtroEmpresa;
+    const porContaTipo = filtroContaTipo === 'todos' || (filtroContaTipo === 'autonomos' ? l.contaTipo === 'autonomo' : l.contaTipo !== 'autonomo');
+    const porUsuarioTipo = filtroUsuarioTipo === 'todos' || l.usuario.tipo === filtroUsuarioTipo;
+    return porEmpresa && porContaTipo && porUsuarioTipo;
+  });
+  const totalAceitaram = linhasAceitesNoContexto.filter((l) => !!l.aceite).length;
+  const linhasAceitesFiltradas = linhasAceitesNoContexto.filter((l) => {
+    const porAceite = filtroAceite === 'todos' || (filtroAceite === 'aceitou' ? !!l.aceite : !l.aceite);
+    return porAceite;
+  });
 
   return (
     <div className="space-y-4 animate-fade-in">
@@ -245,31 +303,26 @@ export const PainelTermosLGPD: React.FC = () => {
 
       {/* Tabela */}
       <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left">
+          <table className="w-full table-fixed text-left">
             <thead>
               <tr className="text-xs font-bold text-gray-400 uppercase bg-gray-50/60">
-                <th className="px-4 py-3">Tipo</th>
-                <th className="px-4 py-3">Versão</th>
-                <th className="px-4 py-3">Título</th>
-                <th className="px-4 py-3">Resumo</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Obrigatório para</th>
-                <th className="px-4 py-3">Publicado em</th>
-                <th className="px-4 py-3">Hash</th>
-                <th className="px-4 py-3 text-right">Ações</th>
+                <th className="w-[22%] px-4 py-3">Tipo / versão</th>
+                <th className="w-[31%] px-4 py-3">Termo</th>
+                <th className="w-[15%] px-4 py-3">Status</th>
+                <th className="w-[20%] px-4 py-3">Aplicação</th>
+                <th className="w-[12%] px-4 py-3 text-right">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50 text-sm">
               {carregando ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-8 text-center text-gray-400">
+                  <td colSpan={5} className="px-4 py-8 text-center text-gray-400">
                     Carregando…
                   </td>
                 </tr>
               ) : termos.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-8 text-center text-gray-400">
+                  <td colSpan={5} className="px-4 py-8 text-center text-gray-400">
                     Nenhum termo cadastrado.
                   </td>
                 </tr>
@@ -279,23 +332,23 @@ export const PainelTermosLGPD: React.FC = () => {
                   const ehRascunho = status === 'Rascunho';
                   return (
                     <tr key={t.id} className="hover:bg-gray-50/60">
-                      <td className="px-4 py-3 font-medium text-gray-700">{tipoLabel(t.tipo)}</td>
-                      <td className="px-4 py-3 text-gray-500">v{t.versao}</td>
-                      <td className="px-4 py-3 text-gray-700">{truncar(t.titulo, 40)}</td>
-                      <td className="px-4 py-3 text-gray-500" title={t.resumo || ''}>
-                        {truncar(t.resumo, 40)}
+                      <td className="px-4 py-3 align-top">
+                        <p className="font-medium text-gray-700 break-words">{tipoLabel(t.tipo)}</p>
+                        <p className="text-xs text-gray-400 mt-1">Versão {t.versao}</p>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3 align-top min-w-0">
+                        <p className="font-medium text-gray-700 break-words">{truncar(t.titulo, 54)}</p>
+                        <p className="text-xs text-gray-400 mt-1 break-words" title={t.resumo || ''}>{truncar(t.resumo, 70)}</p>
+                      </td>
+                      <td className="px-4 py-3 align-top">
                         <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${corStatus[status]}`}>
                           {status}
                         </span>
+                        <p className="text-[11px] text-gray-400 mt-2">{formatarData(t.publicado_em)}</p>
                       </td>
-                      <td className="px-4 py-3 text-gray-500">
-                        {(t.obrigatorio_para || []).join(', ') || '—'}
-                      </td>
-                      <td className="px-4 py-3 text-gray-500">{formatarData(t.publicado_em)}</td>
-                      <td className="px-4 py-3 font-mono text-xs text-gray-400">
-                        {t.conteudo_hash ? t.conteudo_hash.slice(0, 14) + '…' : '—'}
+                      <td className="px-4 py-3 align-top text-gray-500 break-words">
+                        <p>{(t.obrigatorio_para || []).map((p) => p === 'admin' ? 'Administradores' : 'Motoristas').join(', ') || '—'}</p>
+                        <p className="font-mono text-[10px] text-gray-300 mt-1" title={t.conteudo_hash || ''}>{t.conteudo_hash ? t.conteudo_hash.slice(0, 10) + '…' : 'Sem hash'}</p>
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-1.5">
@@ -332,7 +385,6 @@ export const PainelTermosLGPD: React.FC = () => {
               )}
             </tbody>
           </table>
-        </div>
       </div>
 
       {/* Modal: Novo / Editar termo */}
@@ -474,7 +526,7 @@ export const PainelTermosLGPD: React.FC = () => {
       {/* Modal: Ver aceites */}
       {aceitesDe && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden max-h-[90vh] flex flex-col">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-5xl overflow-hidden max-h-[90vh] flex flex-col">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
               <h2 className="text-lg font-bold text-gray-800">
                 Aceites — {tipoLabel(aceitesDe.tipo)} v{aceitesDe.versao}
@@ -483,43 +535,50 @@ export const PainelTermosLGPD: React.FC = () => {
                 <X size={22} />
               </button>
             </div>
-            <div className="px-6 py-4 overflow-y-auto">
+            <div className="p-5 overflow-y-auto space-y-4">
               {carregandoAceites ? (
                 <p className="text-sm text-gray-400 py-6 text-center">Carregando…</p>
-              ) : aceites.length === 0 ? (
-                <p className="text-sm text-gray-400 py-6 text-center">Nenhum aceite registrado.</p>
               ) : (
-                <table className="w-full text-left text-sm">
-                  <thead>
-                    <tr className="text-xs font-bold text-gray-400 uppercase">
-                      <th className="px-2 py-2">Usuário</th>
-                      <th className="px-2 py-2">Email</th>
-                      <th className="px-2 py-2">Aceito em</th>
-                      <th className="px-2 py-2">Origem</th>
-                      <th className="px-2 py-2">IP</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-50">
-                    {aceites.map((a) => (
-                      <tr key={a.id}>
-                        <td className="px-2 py-2">
-                          <div className="font-medium text-gray-700">
-                            {a.usuario_nome || 'Usuário não identificado'}
-                          </div>
-                          <div className="font-mono text-[11px] text-gray-400">
-                            {a.usuario_id || '—'}
-                          </div>
-                        </td>
-                        <td className="px-2 py-2 text-gray-500">{a.usuario_email || '—'}</td>
-                        <td className="px-2 py-2 text-gray-500">
-                          {a.aceito_em ? new Date(a.aceito_em).toLocaleString('pt-BR') : '—'}
-                        </td>
-                        <td className="px-2 py-2 text-gray-500">{a.origem || '—'}</td>
-                        <td className="px-2 py-2 text-gray-400 font-mono text-xs">{a.ip || '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="rounded-xl bg-gray-50 border border-gray-100 p-3"><p className="text-2xl font-bold text-gray-800">{linhasAceitesNoContexto.length}</p><p className="text-xs text-gray-500">Total de usuários aplicáveis</p></div>
+                    <div className="rounded-xl bg-green-50 border border-green-100 p-3"><p className="text-2xl font-bold text-green-700">{totalAceitaram}</p><p className="text-xs text-green-700">Aceitaram</p></div>
+                    <div className="rounded-xl bg-amber-50 border border-amber-100 p-3"><p className="text-2xl font-bold text-amber-700">{Math.max(linhasAceitesNoContexto.length - totalAceitaram, 0)}</p><p className="text-xs text-amber-700">Faltam aceitar</p></div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 bg-gray-50 border border-gray-100 rounded-xl p-3">
+                    <select value={filtroEmpresa} onChange={(e) => setFiltroEmpresa(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
+                      <option value="todas">Todas as contas</option>
+                      {empresasTermo.map((e) => <option key={e.id} value={e.id}>{e.nome}</option>)}
+                    </select>
+                    <select value={filtroContaTipo} onChange={(e) => setFiltroContaTipo(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
+                      <option value="todos">Empresas e autônomos</option><option value="empresas">Empresas</option><option value="autonomos">Autônomos</option>
+                    </select>
+                    <select value={filtroUsuarioTipo} onChange={(e) => setFiltroUsuarioTipo(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
+                      <option value="todos">Todos os tipos de usuário</option><option value="admin">Administrador</option><option value="motorista">Motorista</option>
+                    </select>
+                    <select value={filtroAceite} onChange={(e) => setFiltroAceite(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
+                      <option value="todos">Aceitou ou pendente</option><option value="aceitou">Aceitou</option><option value="pendente">Não aceitou</option>
+                    </select>
+                  </div>
+
+                  <div className="border border-gray-100 rounded-xl overflow-hidden">
+                    <table className="w-full table-fixed text-left text-sm">
+                      <thead><tr className="text-xs font-bold text-gray-400 uppercase bg-gray-50"><th className="w-[30%] px-3 py-2.5">Usuário</th><th className="w-[28%] px-3 py-2.5">Conta</th><th className="w-[18%] px-3 py-2.5">Tipo</th><th className="w-[24%] px-3 py-2.5">Aceite</th></tr></thead>
+                      <tbody className="divide-y divide-gray-50">
+                        {linhasAceitesFiltradas.map(({ usuario, empresa, contaTipo, aceite }) => (
+                          <tr key={usuario.id}>
+                            <td className="px-3 py-2.5"><p className="font-medium text-gray-700 truncate">{usuario.nome || 'Usuário não identificado'}</p><p className="text-xs text-gray-400 truncate">{usuario.email || '—'}</p></td>
+                            <td className="px-3 py-2.5"><p className="text-gray-600 truncate">{empresa?.nome || 'Sem conta'}</p><p className="text-[10px] uppercase text-gray-400">{contaTipo === 'autonomo' ? 'Autônomo' : 'Empresa'}</p></td>
+                            <td className="px-3 py-2.5 text-gray-600">{usuario.tipo === 'motorista' ? 'Motorista' : 'Administrador'}</td>
+                            <td className="px-3 py-2.5">{aceite ? <><span className="inline-flex px-2 py-1 rounded-full bg-green-100 text-green-700 text-xs font-bold">Aceitou</span><p className="text-[11px] text-gray-400 mt-1">{aceite.aceito_em ? new Date(aceite.aceito_em).toLocaleString('pt-BR') : 'Data não informada'}</p></> : <span className="inline-flex px-2 py-1 rounded-full bg-amber-100 text-amber-700 text-xs font-bold">Não aceitou</span>}</td>
+                          </tr>
+                        ))}
+                        {linhasAceitesFiltradas.length === 0 && <tr><td colSpan={4} className="p-8 text-center text-gray-400">Nenhum usuário corresponde aos filtros.</td></tr>}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
               )}
             </div>
           </div>

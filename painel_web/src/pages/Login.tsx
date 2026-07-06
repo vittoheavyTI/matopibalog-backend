@@ -180,7 +180,7 @@ export const Login: React.FC = () => {
           <div style={{ width: '100%', maxWidth: '380px', minHeight: '400px' }} />
         ) : (
           <div className="login-card" style={{
-            backgroundColor: tmpl.cardBackground,
+            backgroundColor: `color-mix(in srgb, ${tmpl.cardBackground} ${config.cardOpacity}%, transparent)`,
             width: '100%',
             maxWidth: `${tmpl.cardWidth}px`,
             borderRadius: tmpl.cardBorderRadius,

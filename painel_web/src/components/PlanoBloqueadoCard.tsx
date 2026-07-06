@@ -21,16 +21,16 @@ export const PlanoBloqueadoCard: React.FC<PlanoBloqueadoCardProps> = ({ message,
       <div className="mx-auto w-14 h-14 rounded-full bg-red-50 flex items-center justify-center mb-4">
         <Lock size={26} className="text-red-500" />
       </div>
-      <h3 className="text-xl font-bold text-gray-800 mb-2">Plano bloqueado ou expirado</h3>
+      <h3 className="text-xl font-bold text-gray-800 mb-2">Sua empresa está suspensa ou bloqueada</h3>
       <p className="text-sm text-gray-600 mb-1">{message}</p>
       <p className="text-sm text-gray-500 mb-6">
-        Regularize seu plano para continuar acessando os recursos operacionais.
+        Acesse Faturas / Regularização para regularizar o plano e voltar a operar.
       </p>
       <button
         onClick={onRegularizar}
         className="inline-flex items-center gap-2 px-5 py-2.5 bg-green-700 hover:bg-green-800 text-white rounded-xl font-bold text-sm transition-colors"
       >
-        <Receipt size={16} /> Regularizar plano
+        <Receipt size={16} /> Ir para Faturas / Regularização
       </button>
       <p className="flex items-center justify-center gap-1.5 text-xs text-gray-400 mt-4">
         <LifeBuoy size={14} /> Se precisar de ajuda, entre em contato com o suporte.

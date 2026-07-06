@@ -86,10 +86,14 @@ function getContrastTextColor(hexColor: string): string {
 }
 
 export const Configuracoes: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'empresa' | 'aparencia'>('empresa');
+  const [activeTab, setActiveTab] = useState<'empresa' | 'sistema' | 'aparencia'>('empresa');
   const { user } = useAuth();
   const [codigoConvite, setCodigoConvite] = useState<string | null>(null);
   const [regenerandoCodigo, setRegenerandoCodigo] = useState(false);
+  // Config. Sistema (super-admin) — migrada da antiga página solta "Config. Sistema"
+  // para uma aba aqui, evitando página duplicada no menu.
+  const [sistema, setSistema] = useState({ nome_sistema: 'Matopiba Log', email_suporte: 'suporte@matopibalog.com.br', trial_dias: '7' });
+  const [sistemaSalvo, setSistemaSalvo] = useState(false);
   const [company, setCompany] = useState<CompanyData>({
     nome: '', cnpj: '', endereco: '', cep: '',
     complemento: '', pontoReferencia: '', cidade: '', estado: '', telefone: '', email: '',
@@ -112,6 +116,7 @@ export const Configuracoes: React.FC = () => {
   const [footerWidth, setFooterWidth] = useState(() => Number(localStorage.getItem(`${PREFIX}footer_width`)) || 80);
   const [inputBgColor, setInputBgColor] = useState(() => localStorage.getItem(`${PREFIX}input_bg`) || '#ffffff');
   const [inputBorderColor, setInputBorderColor] = useState(() => localStorage.getItem(`${PREFIX}input_border`) || '#e5e7eb');
+  const [cardOpacity, setCardOpacity] = useState(() => Number(localStorage.getItem(`${PREFIX}card_opacity`)) || 100);
 
   // Posição customizada do card
   const [cardOffsetX, setCardOffsetX] = useState(() => Number(localStorage.getItem(`${PREFIX}card_offset_x`)) || 0);
@@ -173,7 +178,14 @@ export const Configuracoes: React.FC = () => {
         if (d.footerWidth !== undefined) setFooterWidth(d.footerWidth);
         if (d.inputBgColor) setInputBgColor(d.inputBgColor);
         if (d.inputBorderColor) setInputBorderColor(d.inputBorderColor);
+        if (d.cardOpacity !== undefined) setCardOpacity(d.cardOpacity);
         if (d.loginTemplate) setSelectedTemplate(d.loginTemplate);
+        // Config. Sistema (aba Sistema): carrega valores globais existentes, se houver.
+        setSistema((s) => ({
+          nome_sistema: d.nome_sistema ?? s.nome_sistema,
+          email_suporte: d.email_suporte ?? s.email_suporte,
+          trial_dias: d.trial_dias !== undefined && d.trial_dias !== null ? String(d.trial_dias) : s.trial_dias,
+        }));
         // Sincroniza sidebar logo do backend → localStorage (persiste entre dispositivos)
         if (d.sidebarLogo)                   localStorage.setItem('matopibalog_logo', d.sidebarLogo);
         if (d.sidebarLogoScale !== undefined) localStorage.setItem('matopibalog_logo_scale', String(d.sidebarLogoScale));
@@ -215,6 +227,7 @@ export const Configuracoes: React.FC = () => {
       footerWidth,
       inputBgColor,
       inputBorderColor,
+      cardOpacity,
       loginTemplate: selectedTemplate,
       cardOffsetX,
       cardOffsetY,
@@ -249,6 +262,13 @@ export const Configuracoes: React.FC = () => {
   const showSavedFeedback = () => {
     setShowSaved(true);
     setTimeout(() => setShowSaved(false), 3000);
+  };
+
+  const handleSaveSistema = async () => {
+    // PUT /configuracoes exige super-admin no backend; a aba só aparece para super-admin.
+    try { await api.put('/configuracoes', sistema); } catch (err) { console.error('Erro ao salvar Config. Sistema:', err); }
+    setSistemaSalvo(true);
+    setTimeout(() => setSistemaSalvo(false), 3000);
   };
 
   const handleSaveCompany = async () => {
@@ -329,6 +349,7 @@ export const Configuracoes: React.FC = () => {
     localStorage.setItem(`${PREFIX}footer_width`, footerWidth.toString());
     localStorage.setItem(`${PREFIX}input_bg`, inputBgColor);
     localStorage.setItem(`${PREFIX}input_border`, inputBorderColor);
+    localStorage.setItem(`${PREFIX}card_opacity`, cardOpacity.toString());
     localStorage.setItem(`${PREFIX}card_offset_x`, cardOffsetX.toString());
     localStorage.setItem(`${PREFIX}card_offset_y`, cardOffsetY.toString());
     await syncConfigToServer();
@@ -360,8 +381,8 @@ export const Configuracoes: React.FC = () => {
       </div>
 
       <div className="flex space-x-1 bg-gray-100 p-1 rounded-xl w-fit">
-        {(['empresa', 'aparencia'] as const)
-          .filter((tab) => tab !== 'aparencia' || user?.is_super_admin)
+        {(['empresa', 'sistema', 'aparencia'] as const)
+          .filter((tab) => tab === 'empresa' || user?.is_super_admin)
           .map((tab) => (
           <button
             key={tab}
@@ -369,6 +390,7 @@ export const Configuracoes: React.FC = () => {
             className={`flex items-center px-6 py-2.5 rounded-lg font-bold text-sm transition-all ${activeTab === tab ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
           >
             {tab === 'empresa' && <><Building2 size={18} className="mr-2" />Dados da Empresa</>}
+            {tab === 'sistema' && <><Settings size={18} className="mr-2" />Sistema</>}
             {tab === 'aparencia' && <><Palette size={18} className="mr-2" />Aparência do Sistema</>}
           </button>
         ))}
@@ -376,7 +398,7 @@ export const Configuracoes: React.FC = () => {
 
       {/* ── ABA EMPRESA ── */}
       {activeTab === 'empresa' && (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 space-y-6">
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-6">
           <div className="flex items-start gap-2.5 bg-green-50 border border-green-100 text-green-800 rounded-xl p-3.5 text-sm">
             <FileText size={18} className="mt-0.5 flex-shrink-0" />
             <span>Esses dados serão usados nos relatórios e PDFs da sua empresa ou conta. Mantenha-os corretos e completos.</span>
@@ -464,18 +486,55 @@ export const Configuracoes: React.FC = () => {
           </div>
 
           <div className="flex justify-end pt-4 border-t border-gray-50">
-            <button onClick={handleSaveCompany} className="flex items-center px-8 py-3 bg-green-700 text-white rounded-xl font-bold shadow-lg shadow-green-100 hover:bg-green-800 transition-all active:scale-95">
-              {showSaved ? <Check size={20} className="mr-2" /> : <Save size={20} className="mr-2" />}
+            <button onClick={handleSaveCompany} className="inline-flex items-center px-4 py-2.5 bg-green-700 text-white rounded-xl font-medium text-sm shadow-sm hover:bg-green-800 transition-all active:scale-95">
+              {showSaved ? <Check size={18} className="mr-2" /> : <Save size={18} className="mr-2" />}
               {showSaved ? 'Salvo!' : 'Salvar Configurações'}
             </button>
           </div>
         </div>
       )}
 
-      
+      {/* ── ABA SISTEMA (super-admin) ── */}
+      {activeTab === 'sistema' && (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 max-w-2xl space-y-4">
+          <div className="flex items-start gap-2.5 bg-blue-50 border border-blue-100 text-blue-800 rounded-xl p-3.5 text-sm">
+            <Settings size={18} className="mt-0.5 flex-shrink-0" />
+            <span>Parâmetros globais da plataforma. Aplicam-se a todas as contas.</span>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Nome do Sistema</label>
+            <input type="text" className="w-full border-2 border-gray-50 rounded-xl p-2.5 outline-none focus:border-green-700 bg-gray-50/50" value={sistema.nome_sistema} onChange={e => setSistema({ ...sistema, nome_sistema: e.target.value })} />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">E-mail de Suporte</label>
+            <input type="email" className="w-full border-2 border-gray-50 rounded-xl p-2.5 outline-none focus:border-green-700 bg-gray-50/50" value={sistema.email_suporte} onChange={e => setSistema({ ...sistema, email_suporte: e.target.value })} />
+            <p className="text-xs text-gray-400 mt-1 ml-1">Exibido no caminho de regularização (contato de suporte para autônomos).</p>
+          </div>
+          {/* Recursos ainda sem efeito no servidor — marcados como "Em preparação" para não confundir. */}
+          {[
+            { label: 'Modo Manutenção', desc: 'Bloquear o acesso durante manutenções.' },
+            { label: 'Registros Abertos', desc: 'Permitir novos cadastros públicos.' },
+          ].map(t => (
+            <div key={t.label} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl opacity-80">
+              <div>
+                <span className="text-sm font-medium text-gray-700">{t.label}</span>
+                <p className="text-xs text-gray-400">{t.desc}</p>
+              </div>
+              <span className="text-[10px] font-bold uppercase tracking-wide bg-amber-100 text-amber-700 px-2 py-1 rounded-full flex-shrink-0 ml-3">Em preparação</span>
+            </div>
+          ))}
+          <div className="pt-2">
+            <button onClick={handleSaveSistema} className={`flex items-center px-5 py-2.5 rounded-xl font-bold text-sm transition-all ${sistemaSalvo ? 'bg-green-600 text-white' : 'bg-green-700 text-white hover:bg-green-800'}`}>
+              {sistemaSalvo ? <Check size={18} className="mr-2" /> : <Save size={18} className="mr-2" />}
+              {sistemaSalvo ? 'Salvo!' : 'Salvar Sistema'}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ── ABA APARÊNCIA ── */}
       {activeTab === 'aparencia' && (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 space-y-8">
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-6">
           <h3 className="text-lg font-bold text-gray-800 flex items-center"><Palette size={20} className="mr-2" /> Personalizar Tela de Login</h3>
 
           {/* Upload de imagens */}
@@ -545,7 +604,7 @@ export const Configuracoes: React.FC = () => {
                 padding: '16px',
               }}>
                 <div style={{
-                  backgroundColor: tmplPreview.cardBackground,
+                  backgroundColor: `color-mix(in srgb, ${tmplPreview.cardBackground} ${cardOpacity}%, transparent)`,
                   width: '100%',
                   maxWidth: `${Math.round(tmplPreview.cardWidth * 0.72)}px`,
                   borderRadius: tmplPreview.cardBorderRadius,
@@ -663,6 +722,16 @@ export const Configuracoes: React.FC = () => {
             </div>
           </div>
 
+          {/* Card */}
+          <div className="border-t border-gray-100 pt-6">
+            <label className="block text-xs font-bold text-gray-400 uppercase mb-3 ml-1">Aparência do Card</label>
+            <div className="max-w-xl">
+              <div className="flex justify-between text-sm mb-1"><span className="font-medium text-gray-700">Opacidade do card</span><span className="text-gray-500">{cardOpacity}%</span></div>
+              <p className="text-xs text-gray-500 mb-2">Ajusta somente o fundo do card; campos, textos e tamanho permanecem inalterados.</p>
+              <input type="range" min="20" max="100" value={cardOpacity} onChange={e => { const v = Number(e.target.value); setCardOpacity(v); localStorage.setItem(`${PREFIX}card_opacity`, v.toString()); }} className="w-full accent-green-700" />
+            </div>
+          </div>
+
           {/* Campos */}
           <div className="border-t border-gray-100 pt-6">
             <label className="block text-xs font-bold text-gray-400 uppercase mb-3 ml-1">Aparência dos Campos</label>
@@ -743,8 +812,8 @@ export const Configuracoes: React.FC = () => {
               <input type="text" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-green-700 bg-gray-50/50" placeholder="© 2026 Minha Transportadora. Todos os direitos reservados." value={footerText} onChange={e => { setFooterText(e.target.value); localStorage.setItem(`${PREFIX}login_footer`, e.target.value); }} />
             </div>
 
-            <button onClick={handleSaveFooter} className={`flex items-center px-6 py-3 rounded-xl font-bold transition-all ${showSaved ? 'bg-green-600 text-white' : 'bg-green-700 text-white hover:bg-green-800'}`}>
-              {showSaved ? <Check size={18} className="mr-1" /> : <Save size={18} className="mr-1" />}
+            <button onClick={handleSaveFooter} className={`inline-flex items-center px-4 py-2.5 rounded-xl font-medium text-sm shadow-sm transition-all ${showSaved ? 'bg-green-600 text-white' : 'bg-green-700 text-white hover:bg-green-800'}`}>
+              {showSaved ? <Check size={18} className="mr-2" /> : <Save size={18} className="mr-2" />}
               {showSaved ? 'Salvo!' : 'Salvar Aparência'}
             </button>
           </div>

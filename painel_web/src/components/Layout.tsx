@@ -1,13 +1,14 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Outlet } from 'react-router-dom';
+import { Outlet, useNavigate } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { SessionTimeoutWatcher } from './SessionTimeoutWatcher';
 import { NotificacoesDropdown } from './NotificacoesDropdown';
 import { useAuth } from '../contexts/AuthContext';
-import { LogOut, User as UserIcon, ChevronDown } from 'lucide-react';
+import { LogOut, User as UserIcon, ChevronDown, UserCog } from 'lucide-react';
 
 export const Layout: React.FC = () => {
   const { user, logout } = useAuth();
+  const navigate = useNavigate();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -66,6 +67,13 @@ export const Layout: React.FC = () => {
                     {user?.email}
                   </p>
                 </div>
+                <button
+                  onClick={() => { setIsDropdownOpen(false); navigate('/configuracoes'); }}
+                  className="flex items-center space-x-2 w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  <UserCog size={16} />
+                  <span>Editar Perfil</span>
+                </button>
                 <button
                   onClick={handleLogout}
                   className="flex items-center space-x-2 w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 transition-colors"
