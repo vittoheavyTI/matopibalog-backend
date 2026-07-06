@@ -10,6 +10,11 @@ import 'screens/app_shell.dart';
 import 'screens/trocar_senha_screen.dart';
 import 'screens/termos_pendentes_screen.dart';
 import 'services/offline_sync.dart';
+import 'services/push_service.dart';
+
+/// Navigator global — permite ao PushService abrir a tela de Notificações ao
+/// tocar num push, mesmo fora da árvore de widgets.
+final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
 
 @pragma('vm:entry-point')
 void callbackDispatcher() {
@@ -34,6 +39,10 @@ void main() async {
 
   final themeProvider = ThemeProvider();
   await themeProvider.init();
+
+  // Inicializa push (FCM). Tolerante: sem google-services.json apenas desabilita
+  // o push e o app segue com as notificações internas.
+  await PushService.init(rootNavigatorKey);
 
   runApp(
     MultiProvider(
@@ -78,6 +87,7 @@ class MatopibaLogApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Matopiba Log',
+      navigatorKey: rootNavigatorKey,
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,

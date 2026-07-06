@@ -43,3 +43,8 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Firebase: config do app fica fora do versionamento (fornecida no build/Codemagic).
+# O build tolera a ausencia (ver android/app/build.gradle.kts).
+google-services.json
+/android/app/google-services.json

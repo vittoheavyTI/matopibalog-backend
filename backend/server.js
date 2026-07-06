@@ -102,6 +102,7 @@ app.use('/painel-admin', require('./routes/painel-admin'));
 app.use('/planos', require('./routes/planos'));
 app.use('/pagamentos', require('./routes/pagamentos'));
 app.use('/notificacoes', notificacoesRoutes);
+app.use('/push', require('./routes/push'));
 app.use('/termos', termosRoutes);
 
 // Tratamento de erros de upload (multer). Mapeia tamanho/MIME para respostas

@@ -7,6 +7,8 @@ workflows:
     name: Android APK Debug
     max_build_duration: 60
     environment:
+      groups:
+        - firebase   # fornece GOOGLE_SERVICES_JSON_BASE64 (var segura no Codemagic)
       flutter: stable
       java: 21
     scripts:
@@ -16,6 +18,19 @@ workflows:
           if [ -f "$GRADLE_PROPS" ]; then
             grep -v '^org.gradle.java.home=' "$GRADLE_PROPS" > "$GRADLE_PROPS.tmp" || true
             mv "$GRADLE_PROPS.tmp" "$GRADLE_PROPS"
+          fi
+
+      - name: Gerar google-services.json a partir da variavel segura (se existir)
+        script: |
+          # Push Firebase: decodifica a var segura do Codemagic no caminho esperado
+          # pelo Gradle (o plugin google-services so e aplicado se o arquivo existir).
+          # Tolerante: sem a variavel, o build segue sem push (notificacoes internas
+          # continuam). NUNCA imprime o conteudo (sem cat/echo do JSON).
+          if [ -n "$GOOGLE_SERVICES_JSON_BASE64" ]; then
+            echo "$GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > app_android/android/app/google-services.json
+            echo "google-services.json gerado para o build."
+          else
+            echo "GOOGLE_SERVICES_JSON_BASE64 nao configurado; build seguira sem Firebase Push."
           fi
 
       - name: Flutter clean, pub get, analyze e build debug
@@ -36,6 +51,8 @@ workflows:
     name: Android APK Release (sem assinatura)
     max_build_duration: 60
     environment:
+      groups:
+        - firebase   # fornece GOOGLE_SERVICES_JSON_BASE64 (var segura no Codemagic)
       flutter: stable
       java: 21
     scripts:
@@ -45,6 +62,19 @@ workflows:
           if [ -f "$GRADLE_PROPS" ]; then
             grep -v '^org.gradle.java.home=' "$GRADLE_PROPS" > "$GRADLE_PROPS.tmp" || true
             mv "$GRADLE_PROPS.tmp" "$GRADLE_PROPS"
+          fi
+
+      - name: Gerar google-services.json a partir da variavel segura (se existir)
+        script: |
+          # Push Firebase: decodifica a var segura do Codemagic no caminho esperado
+          # pelo Gradle (o plugin google-services so e aplicado se o arquivo existir).
+          # Tolerante: sem a variavel, o build segue sem push (notificacoes internas
+          # continuam). NUNCA imprime o conteudo (sem cat/echo do JSON).
+          if [ -n "$GOOGLE_SERVICES_JSON_BASE64" ]; then
+            echo "$GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > app_android/android/app/google-services.json
+            echo "google-services.json gerado para o build."
+          else
+            echo "GOOGLE_SERVICES_JSON_BASE64 nao configurado; build seguira sem Firebase Push."
           fi
 
       - name: Flutter clean, pub get, analyze e build release

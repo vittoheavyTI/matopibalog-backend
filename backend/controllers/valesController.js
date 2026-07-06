@@ -102,6 +102,11 @@ exports.create = async (req, res) => {
       throw error;
     }
     notificacaoService.notificarLancamentoCriado(data, 'vale').catch(() => {});
+    // Lancamento criado pelo painel (admin): avisa tambem o motorista, que o
+    // fluxo padrao (somenteAdmins / nasce aprovado) nao alcancava.
+    if (req.user.role === 'admin') {
+      notificacaoService.notificarLancamentoParaMotorista(data, 'vale').catch(() => {});
+    }
     res.status(201).json(data);
   } catch (error) {
     // Corrida concorrente: outro request com o mesmo client_request_id inseriu

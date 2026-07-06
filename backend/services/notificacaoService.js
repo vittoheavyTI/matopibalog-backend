@@ -1,4 +1,5 @@
 const supabase = require('../config/supabase');
+const pushService = require('./pushService');
 
 function logFalha(contexto, error) {
   console.error('[notificacaoService] Falha controlada', {
@@ -60,6 +61,22 @@ async function criarNotificacao({
       .single();
 
     if (error) throw error;
+
+    // Push best-effort a partir da notificacao recem-criada (fonte da verdade).
+    // Fire-and-forget: nunca await de forma que atrase/quebre o fluxo principal;
+    // o proprio pushService engole qualquer falha e ignora se o Firebase nao
+    // estiver configurado. So dispara para insert novo (dedupe existente sai antes).
+    pushService.enviarParaUsuario(usuario_id, {
+      titulo,
+      mensagem,
+      data: {
+        notificacao_id: data.id,
+        tipo,
+        referencia_tipo: entidade_tipo,
+        referencia_id: entidade_id,
+      },
+    }).catch(() => {});
+
     return data;
   } catch (error) {
     // Uma corrida no mesmo evento pode atingir o indice unico. O evento principal
@@ -158,6 +175,24 @@ async function notificarLancamentoCriado(lancamento, tipo) {
   }, { somenteAdmins: true });
 }
 
+// Lancamento criado PELO PAINEL (admin) que impacta o motorista. O fluxo padrao
+// so avisa os admins (notificarLancamentoCriado, somenteAdmins) e, quando nasce
+// aprovado, nem isso — entao o motorista nunca era avisado. Aqui informamos o
+// motorista. Nao duplica com o fluxo de aprovacao/rejeicao (notificarLancamento-
+// Resolvido), que so ocorre depois, na acao de resolver o lancamento.
+async function notificarLancamentoParaMotorista(lancamento, tipo) {
+  if (!lancamento || !lancamento.motorista_id) return null;
+  return criarParaUsuario(lancamento.motorista_id, {
+    empresa_id: lancamento.empresa_id,
+    tipo: 'lancamento_criado',
+    titulo: 'Novo lancamento registrado',
+    mensagem: 'Um lancamento foi registrado no seu frete.',
+    entidade_id: lancamento.id,
+    entidade_tipo: tipo,
+    dedupe_key: `lancamento_motorista:${tipo}:${lancamento.id}`,
+  });
+}
+
 async function notificarLancamentoResolvido(lancamento, tipo, aprovado) {
   const acao = aprovado ? 'aprovado' : 'rejeitado';
   const label = { despesa: 'Despesa', abastecimento: 'Abastecimento', vale: 'Vale' }[tipo] || 'Lancamento';
@@ -179,5 +214,6 @@ module.exports = {
   notificarFreteCriado,
   notificarViagemFinalizada,
   notificarLancamentoCriado,
+  notificarLancamentoParaMotorista,
   notificarLancamentoResolvido,
 };
