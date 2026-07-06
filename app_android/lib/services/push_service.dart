@@ -118,6 +118,19 @@ class PushService {
     }
   }
 
+  /// Limpa as notificações da bandeja do sistema (e, na maioria dos launchers,
+  /// o badge numérico associado ao ícone). Chamado ao marcar todas como lidas —
+  /// não faz sentido o ícone continuar com número se não há nada não lido.
+  /// Best-effort: nunca lança. Obs.: não existe API universal para o badge do
+  /// launcher sem dependência extra; cancelAll cobre a bandeja e o caso comum.
+  static Future<void> limparNotificacoesBandeja() async {
+    try {
+      await _local.cancelAll();
+    } catch (e) {
+      AppLogger.error('PushService', 'Falha ao limpar notificacoes da bandeja', e);
+    }
+  }
+
   static void _onForegroundMessage(RemoteMessage message) {
     final n = message.notification;
     if (n != null) {

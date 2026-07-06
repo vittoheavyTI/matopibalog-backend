@@ -23,12 +23,13 @@ class AppShell extends StatefulWidget {
   State<AppShell> createState() => _AppShellState();
 }
 
-class _AppShellState extends State<AppShell> {
+class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   int _naoLidas = 0;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _carregarContador();
     // Ao receber um push em primeiro plano, atualiza o badge do sino na hora.
     PushService.onPushRecebido = _carregarContador;
@@ -36,11 +37,22 @@ class _AppShellState extends State<AppShell> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     // Evita segurar referência a este State após ser descartado.
     if (PushService.onPushRecebido == _carregarContador) {
       PushService.onPushRecebido = null;
     }
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Ao voltar do segundo plano, o push pode ter chegado enquanto o app estava
+    // oculto (o contador foi mexido no servidor). Recarrega o badge sem exigir
+    // que o usuário abra o sino.
+    if (state == AppLifecycleState.resumed) {
+      _carregarContador();
+    }
   }
 
   /// Busca o contador remoto de não lidas para o badge do sino.
