@@ -819,7 +819,11 @@ export const GerenciamentoViagens: React.FC = () => {
                     <td className="p-4">
                       <span className="text-sm font-bold text-gray-800 flex items-center">
                         <DollarSign size={14} className="mr-0.5 text-green-600" />
-                        {(frete.valor_frete ?? frete.valorFrete) != null ? formatCurrency(frete.valor_frete ?? frete.valorFrete) : <span className="text-xs text-orange-400 italic">a calcular</span>}
+                        {/* Tonelada/km ainda não finalizado guarda 0 provisório no banco (coluna NOT NULL);
+                            mostra "a calcular" em vez de R$ 0,00 até a finalização computar o valor real. */}
+                        {frete.modalidade_calculo === 'tonelada_km' && frete.status !== 'finalizado'
+                          ? <span className="text-xs text-orange-400 italic">a calcular</span>
+                          : ((frete.valor_frete ?? frete.valorFrete) != null ? formatCurrency(frete.valor_frete ?? frete.valorFrete) : <span className="text-xs text-orange-400 italic">a calcular</span>)}
                       </span>
                       {frete.modalidade_calculo === 'tonelada_km' && (
                         <span className="mt-0.5 inline-block text-[10px] font-bold uppercase tracking-wide text-blue-600 bg-blue-50 rounded px-1.5 py-0.5">
