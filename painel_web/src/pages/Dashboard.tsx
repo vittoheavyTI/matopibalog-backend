@@ -4,8 +4,10 @@ import { format } from 'date-fns';
 import { formatCurrency } from '../utils';
 import {
   DollarSign, AlertCircle, FileText, Check, X,
-  Save, Edit, Unlock, Lock, ChevronLeft, Plus, Fuel, TrendingUp, Truck
+  Save, Edit, Unlock, Lock, ChevronLeft, Plus, Fuel, TrendingUp, Truck,
+  Building2, Clock, AlertTriangle
 } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import api, { newClientRequestId } from '../api';
 import { EVENTO_NOTIFICACOES_NOVAS } from '../components/NotificacoesDropdown';
 import { useAuth } from '../contexts/AuthContext';
@@ -32,6 +34,58 @@ const StatCard: React.FC<{
   </div>
 );
 
+// Seletor de empresa pesquisável (combobox) — substitui o <select> nativo do filtro
+// "Todas as empresas" no Dashboard do super-admin. Permite digitar para filtrar a lista.
+// Sem dependência nova: input + lista filtrada + fecha ao selecionar / clicar fora.
+const EmpresaCombobox: React.FC<{
+  empresas: { id: string; nome: string }[];
+  value: string;
+  onChange: (v: string) => void;
+}> = ({ empresas, value, onChange }) => {
+  const [open, setOpen] = useState(false);
+  const [busca, setBusca] = useState('');
+  const ref = useRef<HTMLDivElement>(null);
+  const selecionada = empresas.find(e => e.id === value);
+  const label = value === 'todas' ? '' : (selecionada?.nome || '');
+  const filtradas = empresas.filter(e => e.nome.toLowerCase().includes(busca.toLowerCase()));
+
+  useEffect(() => {
+    const onDoc = (ev: MouseEvent) => {
+      if (ref.current && !ref.current.contains(ev.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, []);
+
+  const selecionar = (v: string) => { onChange(v); setBusca(''); setOpen(false); };
+
+  return (
+    <div className="relative" ref={ref}>
+      <input
+        type="text"
+        value={open ? busca : label}
+        placeholder="Todas as empresas"
+        onFocus={() => { setBusca(''); setOpen(true); }}
+        onChange={e => { setBusca(e.target.value); setOpen(true); }}
+        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 outline-none focus:ring-2 focus:ring-green-600/30"
+      />
+      {open && (
+        <div className="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-56 overflow-auto">
+          <button type="button" onMouseDown={() => selecionar('todas')} className={`block w-full text-left px-3 py-2 text-sm hover:bg-gray-50 ${value === 'todas' ? 'text-green-700 font-semibold' : 'text-gray-700'}`}>
+            Todas as empresas
+          </button>
+          {filtradas.map(e => (
+            <button key={e.id} type="button" onMouseDown={() => selecionar(e.id)} className={`block w-full text-left px-3 py-2 text-sm hover:bg-gray-50 ${value === e.id ? 'text-green-700 font-semibold' : 'text-gray-700'}`}>
+              {e.nome}
+            </button>
+          ))}
+          {filtradas.length === 0 && <p className="px-3 py-2 text-sm text-gray-400">Nenhuma empresa encontrada</p>}
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const Dashboard: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -45,6 +99,9 @@ export const Dashboard: React.FC = () => {
   const [abastecimentos, setAbastecimentos] = useState<any[]>([]);
   const [vales, setVales] = useState<any[]>([]);
   const [summary, setSummary] = useState<any>(null);
+  // Empresas da plataforma (só super-admin) — alimenta a seção Receita/Trial/Alertas
+  // fundida da antiga página "Visão Geral". Reaproveita a mesma query /painel-admin/empresas.
+  const [empresasPainel, setEmpresasPainel] = useState<any[]>([]);
   // Loadings por seção: a lista "Motoristas em Frete" (rápida) não pode ficar presa
   // esperando o /dashboard/summary (lento — várias queries sequenciais no backend).
   // Cada área tem seu próprio loading e atualiza assim que sua resposta chega.
@@ -119,6 +176,14 @@ export const Dashboard: React.FC = () => {
       .finally(() => {
         setLoadingSummary(false);
       });
+
+    // Super-admin: empresas da plataforma para a seção Receita/Trial/Alertas.
+    // Independente e tolerante — falha não bloqueia o resto do Dashboard.
+    if (isSuperAdmin) {
+      api.get('/painel-admin/empresas')
+        .then(r => setEmpresasPainel(r.data || []))
+        .catch(() => setEmpresasPainel([]));
+    }
 
     await Promise.allSettled([motoristasEmViagemPromise, summaryPromise]);
   };
@@ -468,6 +533,18 @@ export const Dashboard: React.FC = () => {
       })
     : motoristasEmViagem;
 
+  // Derivados da fusão da "Visão Geral" (só super-admin): receita mensal por empresa
+  // ativa com plano pago, empresas em trial e contagem de ativas.
+  const empresasTrial = empresasPainel.filter((e: any) => e.status === 'trial');
+  const empresasAtivas = empresasPainel.filter((e: any) => e.status === 'ativo');
+  const receitaChart = empresasPainel
+    .filter((e: any) => e.status === 'ativo' && parseFloat(e.planos?.preco_mensal || 0) > 0)
+    .map((e: any) => ({
+      nome: e.nome && e.nome.length > 12 ? e.nome.substring(0, 12) + '…' : (e.nome || '?'),
+      receita: parseFloat(e.planos?.preco_mensal || 0),
+    }))
+    .slice(0, 10);
+
   return (
     <div className="space-y-5 pb-10">
       {!selectedMot && (
@@ -528,6 +605,57 @@ export const Dashboard: React.FC = () => {
         </div>
       )}
 
+      {/* Seção b/c da fusão da "Visão Geral": Receita por Empresa + Trial + Alertas (só super-admin). */}
+      {!selectedMot && isSuperAdmin && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 animate-fade-in">
+          <div className="lg:col-span-2 bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+            <h3 className="font-bold text-gray-800 text-sm mb-0.5 flex items-center"><TrendingUp size={16} className="mr-1.5 text-green-600" /> Receita por Empresa</h3>
+            <p className="text-xs text-gray-400 mb-3">Valor mensal das assinaturas ativas · {empresasAtivas.length} ativa(s)</p>
+            {receitaChart.length === 0 ? (
+              <div className="h-44 flex items-center justify-center bg-gray-50 rounded-lg border border-dashed border-gray-200">
+                <p className="text-sm text-gray-400">Nenhuma empresa ativa com plano pago</p>
+              </div>
+            ) : (
+              <div className="h-44">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={receitaChart} margin={{ top: 4, right: 8, left: 0, bottom: 4 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
+                    <XAxis dataKey="nome" tick={{ fontSize: 11, fill: '#6b7280' }} />
+                    <YAxis tick={{ fontSize: 11, fill: '#6b7280' }} tickFormatter={(v: number) => `R$${v}`} width={56} />
+                    <Tooltip formatter={(v: any) => [`R$ ${Number(v).toFixed(2)}`, 'Receita mensal']} labelStyle={{ fontWeight: 700 }} />
+                    <Bar dataKey="receita" fill="#15803d" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </div>
+          <div className="space-y-4">
+            <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+              <h3 className="font-bold text-gray-800 text-sm mb-2 flex items-center"><Clock size={15} className="mr-1.5 text-amber-500" /> Empresas em Trial</h3>
+              {empresasTrial.length === 0 ? (
+                <p className="text-sm text-gray-400 text-center py-3">Nenhuma</p>
+              ) : (
+                <div className="space-y-1.5 max-h-40 overflow-auto">
+                  {empresasTrial.slice(0, 6).map((e: any, i: number) => (
+                    <div key={i} className="flex items-center justify-between px-3 py-1.5 bg-amber-50 rounded-lg">
+                      <span className="text-sm font-medium text-gray-700 truncate">{e.nome}</span>
+                      <span className="text-[10px] font-bold text-amber-600 bg-amber-100 px-2 py-0.5 rounded-full flex-shrink-0 ml-2">Trial</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
+              <h3 className="font-bold text-gray-800 text-sm mb-2 flex items-center"><AlertTriangle size={15} className="mr-1.5 text-red-500" /> Alertas</h3>
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 rounded-lg text-sm text-gray-700"><Building2 size={14} className="text-blue-500 flex-shrink-0" /> {empresasAtivas.length} empresa(s) ativa(s)</div>
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-yellow-50 rounded-lg text-sm text-gray-700"><Clock size={14} className="text-yellow-500 flex-shrink-0" /> {empresasTrial.length} em período de teste</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="space-y-4">
         {!selectedMot && (
           <div className="flex justify-between items-center px-2 animate-fade-in">
@@ -549,10 +677,7 @@ export const Dashboard: React.FC = () => {
 
         {!selectedMot && isSuperAdmin && (
           <div className="bg-white rounded-xl border border-gray-100 p-4 grid grid-cols-1 md:grid-cols-3 gap-3">
-            <select value={empresaFiltro} onChange={e => setEmpresaFiltro(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700">
-              <option value="todas">Todas as empresas</option>
-              {empresasEmFrete.map(e => <option key={e.id} value={e.id}>{e.nome}</option>)}
-            </select>
+            <EmpresaCombobox empresas={empresasEmFrete} value={empresaFiltro} onChange={setEmpresaFiltro} />
             <select value={vinculoFiltro} onChange={e => setVinculoFiltro(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700">
               <option value="todos">Autônomos e vinculados</option>
               <option value="autonomos">Somente autônomos</option>
@@ -768,30 +893,30 @@ export const Dashboard: React.FC = () => {
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-gray-50 text-gray-600 text-xs uppercase font-bold tracking-wider">
-                  <th className="p-5 border-b">Motorista (Em Curso/Pendente)</th>
-                  {isSuperAdmin && <th className="p-5 border-b">Empresa</th>}
-                  <th className="p-5 border-b">Placa</th>
-                  <th className="p-5 border-b">Status</th>
-                  <th className="p-5 border-b text-center">Ação</th>
+                  <th className="px-4 py-2.5 border-b">Motorista (Em Curso/Pendente)</th>
+                  {isSuperAdmin && <th className="px-4 py-2.5 border-b">Empresa</th>}
+                  <th className="px-4 py-2.5 border-b">Placa</th>
+                  <th className="px-4 py-2.5 border-b">Status</th>
+                  <th className="px-4 py-2.5 border-b text-center">Ação</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
                 {loadingEmViagem ? (
                   <tr>
-                    <td colSpan={isSuperAdmin ? 5 : 4} className="p-10 text-center text-gray-600 italic">
+                    <td colSpan={isSuperAdmin ? 5 : 4} className="py-8 text-center text-gray-600 italic">
                       Carregando motoristas em frete...
                     </td>
                   </tr>
                 ) : motoristasEmViagemFiltrados.length === 0 ? (
                   <tr>
-                    <td colSpan={isSuperAdmin ? 5 : 4} className="p-10 text-center text-gray-600 italic">
+                    <td colSpan={isSuperAdmin ? 5 : 4} className="py-8 text-center text-gray-600 italic">
                       Nenhum motorista corresponde aos filtros atuais.
                     </td>
                   </tr>
                 ) : (
                   motoristasEmViagemFiltrados.map(mot => (
                     <tr key={mot.uid} className="hover:bg-gray-50/50 transition-colors">
-                      <td className="p-5">
+                      <td className="px-4 py-2.5">
                         <div className="flex items-center">
                           <div className="bg-blue-50 text-blue-600 w-8 h-8 rounded-lg flex items-center justify-center mr-3 font-bold text-xs overflow-hidden">
                             {mot.fotoUrl
@@ -801,18 +926,18 @@ export const Dashboard: React.FC = () => {
                           <span className="font-semibold text-gray-700">{mot.nomeCompleto}</span>
                         </div>
                       </td>
-                      {isSuperAdmin && <td className="p-5 text-sm text-gray-600">{mot.empresaNome}</td>}
-                      <td className="p-5 text-gray-600 font-medium">{mot.placaVeiculo}</td>
-                      <td className="p-5">
+                      {isSuperAdmin && <td className="px-4 py-2.5 text-sm text-gray-600">{mot.empresaNome}</td>}
+                      <td className="px-4 py-2.5 text-gray-600 font-medium">{mot.placaVeiculo}</td>
+                      <td className="px-4 py-2.5">
                         <span className={`flex items-center text-xs font-bold px-2 py-1 rounded-full w-fit ${mot.statusCadastro === 'bloqueado' ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-600'}`}>
                           {mot.statusCadastro === 'bloqueado' ? <Lock size={14} className="mr-1" /> : <AlertCircle size={14} className="mr-1" />}
                           {mot.statusCadastro === 'bloqueado' ? 'BLOQUEADO' : 'EM VIAGEM'}
                         </span>
                       </td>
-                      <td className="p-5 text-center">
+                      <td className="px-4 py-2.5 text-center">
                         <button
                           onClick={() => navigate(isSuperAdmin ? '/painel-administrativo/motoristas' : '/relatorios/viagens?motorista=' + mot.uid)}
-                          className="px-5 py-2.5 bg-green-700 text-white rounded-xl font-bold text-sm hover:bg-green-800 shadow-md transition-all active:scale-95"
+                          className="px-4 py-2 bg-green-700 text-white rounded-lg font-bold text-sm hover:bg-green-800 shadow-sm transition-all active:scale-95"
                         >
                           {isSuperAdmin ? 'Ver no Painel Admin' : 'Gerenciar Frete'}
                         </button>

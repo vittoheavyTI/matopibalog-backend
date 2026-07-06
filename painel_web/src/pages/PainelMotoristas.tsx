@@ -75,9 +75,9 @@ export const PainelMotoristas: React.FC = () => {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-white rounded-2xl border border-gray-100 p-6 hover:shadow-md"><p className="text-3xl font-black text-gray-800">{motoristas.length}</p><p className="text-sm text-gray-500">Total</p></div>
-        <div className="bg-white rounded-2xl border border-gray-100 p-6 hover:shadow-md"><p className="text-3xl font-black text-green-600">{aprovados.length}</p><p className="text-sm text-gray-500">Aprovados</p></div>
-        <div className="bg-white rounded-2xl border border-gray-100 p-6 hover:shadow-md"><p className="text-3xl font-black text-amber-500">{pendentes.length}</p><p className="text-sm text-gray-500">Pendentes</p></div>
+        <div className="bg-white rounded-2xl border border-gray-100 p-4 hover:shadow-md"><p className="text-2xl font-black text-gray-800">{motoristas.length}</p><p className="text-sm text-gray-500">Total</p></div>
+        <div className="bg-white rounded-2xl border border-gray-100 p-4 hover:shadow-md"><p className="text-2xl font-black text-green-600">{aprovados.length}</p><p className="text-sm text-gray-500">Aprovados</p></div>
+        <div className="bg-white rounded-2xl border border-gray-100 p-4 hover:shadow-md"><p className="text-2xl font-black text-amber-500">{pendentes.length}</p><p className="text-sm text-gray-500">Pendentes</p></div>
       </div>
 
       <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 grid grid-cols-1 md:grid-cols-5 gap-3">
@@ -110,23 +110,23 @@ export const PainelMotoristas: React.FC = () => {
 
       <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
         <table className="w-full text-left">
-          <thead><tr className="bg-gray-50 text-gray-600 text-xs font-bold uppercase tracking-wider"><th className="p-4 border-b">Nome</th><th className="p-4 border-b">Email</th><th className="p-4 border-b">Empresa</th><th className="p-4 border-b">Status</th><th className="p-4 border-b text-center">Ações</th></tr></thead>
+          <thead><tr className="bg-gray-50 text-gray-600 text-xs font-bold uppercase tracking-wider"><th className="px-4 py-2.5 border-b">Nome</th><th className="px-4 py-2.5 border-b">Email</th><th className="px-4 py-2.5 border-b">Empresa</th><th className="px-4 py-2.5 border-b">Status</th><th className="px-4 py-2.5 border-b text-center">Ações</th></tr></thead>
           <tbody className="divide-y divide-gray-50">
             {filtered.map(m => (
               <tr key={m.id} className="hover:bg-gray-50/50">
-                <td className="p-4"><p className="font-bold text-gray-800">{m.usuarios?.nome || m.nome}</p><p className="text-xs text-gray-400">{m.cpf}</p></td>
-                <td className="p-4 text-sm text-gray-600">{m.usuarios?.email || m.email}</td>
-                <td className="p-4 text-sm text-gray-600">
+                <td className="px-4 py-2.5"><p className="font-bold text-gray-800">{m.usuarios?.nome || m.nome}</p><p className="text-xs text-gray-400">{m.cpf}</p></td>
+                <td className="px-4 py-2.5 text-sm text-gray-600">{m.usuarios?.email || m.email}</td>
+                <td className="px-4 py-2.5 text-sm text-gray-600">
                   <p>{m.empresaNome}</p>
                   <span className="text-[10px] font-bold uppercase text-gray-400">{m.empresaTipo === 'autonomo' ? 'Autônomo' : 'Vinculado'} · {m.temFreteAtivo ? 'Com frete ativo' : 'Sem frete ativo'}</span>
                 </td>
-                <td className="p-4">
+                <td className="px-4 py-2.5">
                   {m.status === 'aprovado' ? <span className="flex items-center text-green-600 text-sm font-bold"><CheckCircle size={14} className="mr-1" />Aprovado</span> :
                    m.status === 'pendente' ? <span className="flex items-center text-amber-600 text-sm font-bold"><FileWarning size={14} className="mr-1" />Pendente</span> :
                    m.status === 'bloqueado' ? <span className="flex items-center text-gray-600 text-sm font-bold"><XCircle size={14} className="mr-1" />Bloqueado</span> :
                    <span className="flex items-center text-red-600 text-sm font-bold"><XCircle size={14} className="mr-1" />Reprovado</span>}
                 </td>
-                <td className="p-4 text-center">
+                <td className="px-4 py-2.5 text-center">
                   <div className="flex items-center justify-center gap-1 flex-wrap">
                     {m.status === 'pendente' && <>
                       <button onClick={() => aprovar(m.id)} className="px-3 py-1.5 text-xs font-bold bg-green-500 text-white rounded-lg hover:bg-green-600 flex items-center"><CheckCircle size={14} className="mr-1" />Aprovar</button>
@@ -137,7 +137,7 @@ export const PainelMotoristas: React.FC = () => {
                 </td>
               </tr>
             ))}
-            {filtered.length === 0 && <tr><td colSpan={5} className="p-8 text-center text-gray-400">Nenhum motorista</td></tr>}
+            {filtered.length === 0 && <tr><td colSpan={5} className="p-8 text-center text-gray-400">Nenhum motorista encontrado para os filtros selecionados.</td></tr>}
           </tbody>
         </table>
       </div>

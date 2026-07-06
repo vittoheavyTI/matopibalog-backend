@@ -36,19 +36,19 @@ export const PainelConfigSistema: React.FC = () => {
         <div className="bg-gray-800 p-2 rounded-lg text-white"><Shield size={24} /></div>
         <div>
           <h1 className="text-2xl font-bold text-gray-800">Config. Sistema</h1>
-          <p className="text-sm text-gray-500">Configurações do sistema</p>
+          <p className="text-sm text-gray-500">Parâmetros globais da plataforma</p>
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl border border-gray-100 p-6 max-w-2xl space-y-5">
-        <div><label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Nome do Sistema</label><input type="text" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" value={config.nome_sistema} onChange={e => setConfig({ ...config, nome_sistema: e.target.value })} /></div>
-        <div><label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Email de Suporte</label><input type="email" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" value={config.email_suporte} onChange={e => setConfig({ ...config, email_suporte: e.target.value })} /></div>
-        <div><label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Dias de Trial</label><input type="number" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" value={config.trial_dias} onChange={e => setConfig({ ...config, trial_dias: e.target.value })} /></div>
+      <div className="bg-white rounded-2xl border border-gray-100 p-5 max-w-2xl space-y-4">
+        <div><label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Nome do Sistema</label><input type="text" className="w-full border-2 border-gray-50 rounded-xl p-2.5 outline-none focus:border-blue-500 bg-gray-50/50" value={config.nome_sistema} onChange={e => setConfig({ ...config, nome_sistema: e.target.value })} /></div>
+        <div><label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Email de Suporte</label><input type="email" className="w-full border-2 border-gray-50 rounded-xl p-2.5 outline-none focus:border-blue-500 bg-gray-50/50" value={config.email_suporte} onChange={e => setConfig({ ...config, email_suporte: e.target.value })} /></div>
+        <div><label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Dias de Trial</label><input type="number" className="w-full border-2 border-gray-50 rounded-xl p-2.5 outline-none focus:border-blue-500 bg-gray-50/50" value={config.trial_dias} onChange={e => setConfig({ ...config, trial_dias: e.target.value })} /></div>
         {[
           { label: 'Modo Manutenção', key: 'manutencao' },
           { label: 'Registros Abertos', key: 'registros_abertos' },
         ].map(t => (
-          <div key={t.key} className="flex items-center justify-between p-4 bg-gray-50 rounded-xl">
+          <div key={t.key} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
             <span className="text-sm font-medium text-gray-700">{t.label}</span>
             <label className="relative inline-flex items-center cursor-pointer">
               <input type="checkbox" className="sr-only peer" checked={(config as any)[t.key]} onChange={e => setConfig({ ...config, [t.key]: e.target.checked })} />

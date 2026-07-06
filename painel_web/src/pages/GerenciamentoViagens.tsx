@@ -551,6 +551,14 @@ export const GerenciamentoViagens: React.FC = () => {
       loadData();
       alert('Frete finalizado! Os dados foram movidos para o resumo histórico.');
     } catch (err: any) {
+      // Plano suspenso/bloqueado/expirado (403 do verificarPlano): não é erro de
+      // servidor. Mostra o card de regularização com caminho para Faturas / Regularização.
+      const planoMsg = extrairMensagemPlano(err);
+      if (planoMsg) {
+        setShowFinalizarModal(false);
+        setPlanoBloqueadoMsg(planoMsg);
+        return;
+      }
       const msg = err?.response?.status === 409
         ? (err.response.data?.message || 'Há lançamentos pendentes deste motorista.')
         : 'Erro ao finalizar frete no servidor.';
@@ -581,6 +589,12 @@ export const GerenciamentoViagens: React.FC = () => {
       else loadData();
       alert('Frete finalizado com sucesso!');
     } catch (err: any) {
+      // Plano suspenso/bloqueado/expirado (403 do verificarPlano): caminho de regularização.
+      const planoMsg = extrairMensagemPlano(err);
+      if (planoMsg) {
+        setPlanoBloqueadoMsg(planoMsg);
+        return;
+      }
       const msg = err?.response?.status === 409
         ? (err.response.data?.message || 'Há lançamentos pendentes deste frete.')
         : 'Erro ao finalizar frete no servidor.';

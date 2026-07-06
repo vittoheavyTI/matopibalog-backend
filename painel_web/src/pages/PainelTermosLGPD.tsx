@@ -249,15 +249,15 @@ export const PainelTermosLGPD: React.FC = () => {
           <table className="w-full text-left">
             <thead>
               <tr className="text-xs font-bold text-gray-400 uppercase bg-gray-50/60">
-                <th className="px-4 py-3">Tipo</th>
-                <th className="px-4 py-3">Versão</th>
-                <th className="px-4 py-3">Título</th>
-                <th className="px-4 py-3">Resumo</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Obrigatório para</th>
-                <th className="px-4 py-3">Publicado em</th>
-                <th className="px-4 py-3">Hash</th>
-                <th className="px-4 py-3 text-right">Ações</th>
+                <th className="px-4 py-2.5">Tipo</th>
+                <th className="px-4 py-2.5">Versão</th>
+                <th className="px-4 py-2.5">Título</th>
+                <th className="px-4 py-2.5">Resumo</th>
+                <th className="px-4 py-2.5">Status</th>
+                <th className="px-4 py-2.5">Obrigatório para</th>
+                <th className="px-4 py-2.5">Publicado em</th>
+                <th className="px-4 py-2.5">Hash</th>
+                <th className="px-4 py-2.5 text-right">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50 text-sm">

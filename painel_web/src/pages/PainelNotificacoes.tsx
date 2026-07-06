@@ -80,6 +80,11 @@ export const PainelNotificacoes: React.FC = () => {
         )}
       </div>
 
+      <div className="flex items-start gap-2 bg-blue-50 border border-blue-100 rounded-xl px-4 py-2.5 text-xs text-blue-700">
+        <AlertCircle size={15} className="flex-shrink-0 mt-0.5" />
+        <span>Envio manual de comunicados para clientes será disponibilizado em próxima versão.</span>
+      </div>
+
       {erro && (
         <div className="flex items-center gap-2 bg-red-50 text-red-700 border border-red-200 rounded-xl p-4">
           <AlertCircle size={18} />
@@ -91,14 +96,14 @@ export const PainelNotificacoes: React.FC = () => {
       {carregando ? (
         <div className="flex justify-center py-16 text-gray-500"><Loader2 className="animate-spin" size={32} /></div>
       ) : notificacoes.length === 0 ? (
-        <div className="bg-white rounded-2xl border border-gray-100 p-12 text-center">
-          <Bell size={40} className="mx-auto mb-3 text-gray-300" />
+        <div className="bg-white rounded-2xl border border-gray-100 p-8 text-center">
+          <Bell size={36} className="mx-auto mb-2 text-gray-300" />
           <p className="font-medium text-gray-500">Nenhuma notificação por enquanto.</p>
         </div>
       ) : (
         <div className="space-y-3">
           {notificacoes.map((item) => (
-            <div key={item.id} className={`flex items-start gap-4 bg-white rounded-2xl border p-5 transition-all ${item.lida ? 'border-gray-100 opacity-70' : 'border-green-200 shadow-sm'}`}>
+            <div key={item.id} className={`flex items-start gap-4 bg-white rounded-2xl border p-4 transition-all ${item.lida ? 'border-gray-100 opacity-70' : 'border-green-200 shadow-sm'}`}>
               <div className={`p-2.5 rounded-xl flex-shrink-0 ${item.lida ? 'bg-gray-100 text-gray-500' : 'bg-green-50 text-green-700'}`}>
                 <Bell size={20} />
               </div>

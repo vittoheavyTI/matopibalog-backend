@@ -78,14 +78,17 @@ export const Faturas: React.FC = () => {
   const totalPago = faturas.filter(f => f.status === 'pago').reduce((s, f) => s + Number(f.valor), 0);
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
-      <div className="flex items-center gap-3 mb-8">
-        <CreditCard className="text-blue-600" size={28} />
-        <h1 className="text-2xl font-bold text-gray-900">Faturas</h1>
+    <div className="space-y-4 animate-fade-in">
+      <div className="flex items-center space-x-3 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+        <div className="bg-gray-800 p-2 rounded-lg text-white"><CreditCard size={24} /></div>
+        <div>
+          <h1 className="text-2xl font-bold text-gray-800">Faturas</h1>
+          <p className="text-sm text-gray-500">Faturas de todas as contas — somente leitura, sem emitir cobrança</p>
+        </div>
       </div>
 
       {/* Cards resumo */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
           <div className="text-sm text-gray-500">Total Pendente</div>
           <div className="text-2xl font-bold text-yellow-600">R$ {totalPendente.toFixed(2)}</div>
@@ -101,7 +104,7 @@ export const Faturas: React.FC = () => {
       </div>
 
       {/* Filtros globais — somente leitura, sem criar cobranças. */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-3 mb-4 bg-white p-4 rounded-xl border border-gray-100">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-3 bg-white p-4 rounded-xl border border-gray-100">
         <div className="relative">
           <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
           <input type="text" placeholder="Empresa ou ID" value={search} onChange={e => setSearch(e.target.value)} className="w-full pl-10 pr-3 py-2.5 border border-gray-200 rounded-xl outline-none text-sm" />
@@ -125,19 +128,19 @@ export const Faturas: React.FC = () => {
         {loading ? (
           <div className="p-8 text-center text-gray-500">Carregando...</div>
         ) : filtered.length === 0 ? (
-          <div className="p-8 text-center text-gray-500">Nenhuma fatura encontrada.</div>
+          <div className="p-8 text-center text-gray-500">Nenhuma fatura encontrada para os filtros selecionados.</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-100">
-                  <th className="text-left p-4 font-medium text-gray-600">Empresa</th>
-                  <th className="text-left p-4 font-medium text-gray-600">Valor</th>
-                  <th className="text-left p-4 font-medium text-gray-600">Tipo</th>
-                  <th className="text-left p-4 font-medium text-gray-600">Status</th>
-                  <th className="text-left p-4 font-medium text-gray-600">Vencimento</th>
-                  <th className="text-left p-4 font-medium text-gray-600">Pagamento</th>
-                  <th className="text-left p-4 font-medium text-gray-600">Ações</th>
+                  <th className="text-left px-4 py-2.5 font-medium text-gray-600">Empresa</th>
+                  <th className="text-left px-4 py-2.5 font-medium text-gray-600">Valor</th>
+                  <th className="text-left px-4 py-2.5 font-medium text-gray-600">Tipo</th>
+                  <th className="text-left px-4 py-2.5 font-medium text-gray-600">Status</th>
+                  <th className="text-left px-4 py-2.5 font-medium text-gray-600">Vencimento</th>
+                  <th className="text-left px-4 py-2.5 font-medium text-gray-600">Pagamento</th>
+                  <th className="text-left px-4 py-2.5 font-medium text-gray-600">Ações</th>
                 </tr>
               </thead>
               <tbody>
@@ -145,16 +148,16 @@ export const Faturas: React.FC = () => {
                   const st = statusMap[f.status] || { label: f.status, color: 'bg-gray-100 text-gray-800' };
                   return (
                     <tr key={f.id} className="border-b border-gray-50 hover:bg-gray-50">
-                      <td className="p-4 font-medium text-gray-900">
+                      <td className="px-4 py-2.5 font-medium text-gray-900">
                         <p>{f.empresas?.nome || '—'}</p>
                         <p className="text-[10px] uppercase text-gray-400">{f.empresas?.tipo === 'autonomo' ? 'Autônomo' : 'Empresa'} · {f.empresas?.status || 'sem status'} · {f.empresas?.planos?.nome || 'sem plano'}</p>
                       </td>
-                      <td className="p-4 text-gray-700">R$ {Number(f.valor).toFixed(2)}</td>
-                      <td className="p-4 text-gray-500">{f.tipo_pagamento || '—'}</td>
-                      <td className="p-4"><span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${st.color}`}>{st.label}</span></td>
-                      <td className="p-4 text-gray-500">{f.due_date ? new Date(f.due_date).toLocaleDateString('pt-BR') : '—'}</td>
-                      <td className="p-4 text-gray-500">{f.pago_em ? new Date(f.pago_em).toLocaleDateString('pt-BR') : '—'}</td>
-                      <td className="p-4">
+                      <td className="px-4 py-2.5 text-gray-700">R$ {Number(f.valor).toFixed(2)}</td>
+                      <td className="px-4 py-2.5 text-gray-500">{f.tipo_pagamento || '—'}</td>
+                      <td className="px-4 py-2.5"><span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${st.color}`}>{st.label}</span></td>
+                      <td className="px-4 py-2.5 text-gray-500">{f.due_date ? new Date(f.due_date).toLocaleDateString('pt-BR') : '—'}</td>
+                      <td className="px-4 py-2.5 text-gray-500">{f.pago_em ? new Date(f.pago_em).toLocaleDateString('pt-BR') : '—'}</td>
+                      <td className="px-4 py-2.5">
                         <div className="flex gap-2">
                           {f.invoice_url && (
                             <a href={f.invoice_url} target="_blank" rel="noopener noreferrer" className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500 hover:text-blue-600">
