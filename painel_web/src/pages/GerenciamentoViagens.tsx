@@ -75,7 +75,10 @@ export const GerenciamentoViagens: React.FC = () => {
     motorista_id: '',
     origem: '',
     destino: '',
+    modalidade_calculo: 'valor_fixo',
     valor_frete: '',
+    toneladas: '',
+    valor_tonelada_km: '',
     km_inicial: '',
     km_final: '',
     quem_recebeu: 'proprietario',
@@ -141,6 +144,8 @@ export const GerenciamentoViagens: React.FC = () => {
         valor_frete: f.valor_frete, valorFrete: f.valor_frete,
         km_inicial: f.km_inicial, km_final: f.km_final,
         kmInicial: f.km_inicial, kmFinal: f.km_final,
+        modalidade_calculo: f.modalidade_calculo || 'valor_fixo',
+        toneladas: f.toneladas, valor_tonelada_km: f.valor_tonelada_km,
         data: f.data, criadoEm: f.data,
         status: f.status, placa: f.placa
       })));
@@ -239,7 +244,10 @@ export const GerenciamentoViagens: React.FC = () => {
       motorista_id: motId || '',
       origem: '',
       destino: '',
+      modalidade_calculo: 'valor_fixo',
       valor_frete: '',
+      toneladas: '',
+      valor_tonelada_km: '',
       km_inicial: '',
       km_final: '',
       quem_recebeu: 'proprietario',
@@ -267,7 +275,10 @@ export const GerenciamentoViagens: React.FC = () => {
       motorista_id: frete.motorista_id,
       origem: frete.origem,
       destino: frete.destino,
-      valor_frete: String(frete.valor_frete),
+      modalidade_calculo: frete.modalidade_calculo || 'valor_fixo',
+      valor_frete: frete.valor_frete != null ? String(frete.valor_frete) : '',
+      toneladas: frete.toneladas != null ? String(frete.toneladas) : '',
+      valor_tonelada_km: frete.valor_tonelada_km != null ? String(frete.valor_tonelada_km) : '',
       km_inicial: frete.km_inicial ? String(frete.km_inicial) : '',
       km_final: frete.km_final ? String(frete.km_final) : '',
       quem_recebeu: frete.quem_recebeu,
@@ -284,14 +295,26 @@ export const GerenciamentoViagens: React.FC = () => {
     if (!editingFrete && !formData.motorista_id) { alert('Selecione um motorista.'); return; }
     if (!formData.origem || !formData.origem.trim()) { alert('Informe a origem.'); return; }
     if (!formData.destino || !formData.destino.trim()) { alert('Informe o destino.'); return; }
-    const valorFrete = parseFloat(formData.valor_frete);
-    if (!formData.valor_frete || isNaN(valorFrete) || valorFrete <= 0) { alert('Informe um valor de frete válido.'); return; }
+    // Validação por modalidade:
+    //  - tonelada/km: exige toneladas > 0 e valor por tonelada/km > 0. O valor do
+    //    frete é CALCULADO no backend (na finalização, com o km_final) — não é digitado.
+    //  - valor fixo: exige o valor do frete > 0 (comportamento histórico).
+    const isTonKm = formData.modalidade_calculo === 'tonelada_km';
+    if (isTonKm) {
+      const ton = parseFloat(formData.toneladas);
+      const vtk = parseFloat(formData.valor_tonelada_km);
+      if (!formData.toneladas || isNaN(ton) || ton <= 0) { alert('Informe as toneladas (maior que zero).'); return; }
+      if (!formData.valor_tonelada_km || isNaN(vtk) || vtk <= 0) { alert('Informe o valor por tonelada/km (maior que zero).'); return; }
+    } else {
+      const valorFrete = parseFloat(formData.valor_frete);
+      if (!formData.valor_frete || isNaN(valorFrete) || valorFrete <= 0) { alert('Informe um valor de frete válido.'); return; }
+    }
     try {
       setIsSubmitting(true);
-      const payload = {
+      const payload: any = {
         origem: formData.origem,
         destino: formData.destino,
-        valor_frete: parseFloat(formData.valor_frete),
+        modalidade_calculo: formData.modalidade_calculo,
         // PR-G2: KM é opcional — manda null quando vazio, 0 ou negativo (o backend trata null
         // como "não enviado"); evita coagir a 0 e reprovar na validação de número positivo.
         km_inicial: Number(formData.km_inicial) > 0 ? parseInt(formData.km_inicial) : null,
@@ -302,6 +325,13 @@ export const GerenciamentoViagens: React.FC = () => {
         status: formData.status,
         data: formData.data
       };
+      if (isTonKm) {
+        // valor_frete é derivado no backend; enviamos só os insumos.
+        payload.toneladas = parseFloat(formData.toneladas);
+        payload.valor_tonelada_km = parseFloat(formData.valor_tonelada_km);
+      } else {
+        payload.valor_frete = parseFloat(formData.valor_frete);
+      }
 
       if (editingFrete) {
         await api.patch('/fretes/' + editingFrete.id, {...payload});
@@ -789,8 +819,13 @@ export const GerenciamentoViagens: React.FC = () => {
                     <td className="p-4">
                       <span className="text-sm font-bold text-gray-800 flex items-center">
                         <DollarSign size={14} className="mr-0.5 text-green-600" />
-                        {formatCurrency(frete.valor_frete || frete.valorFrete)}
+                        {(frete.valor_frete ?? frete.valorFrete) != null ? formatCurrency(frete.valor_frete ?? frete.valorFrete) : <span className="text-xs text-orange-400 italic">a calcular</span>}
                       </span>
+                      {frete.modalidade_calculo === 'tonelada_km' && (
+                        <span className="mt-0.5 inline-block text-[10px] font-bold uppercase tracking-wide text-blue-600 bg-blue-50 rounded px-1.5 py-0.5">
+                          Ton/km{frete.toneladas ? ` · ${frete.toneladas}t` : ''}
+                        </span>
+                      )}
                     </td>
                     <td className="p-4">
                       {(frete.km_final || frete.kmFinal) && (frete.km_inicial || frete.kmInicial) ? (
@@ -1217,9 +1252,47 @@ export const GerenciamentoViagens: React.FC = () => {
                 <div><label className="block text-xs font-bold text-gray-600 uppercase mb-1">Destino *</label><input className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" value={formData.destino} onChange={e => setFormData({...formData, destino: e.target.value})} placeholder="Cidade de destino" /></div>
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <div><label className="block text-xs font-bold text-gray-600 uppercase mb-1">Valor do Frete *</label><input type="number" step="0.01" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" value={formData.valor_frete} onChange={e => setFormData({...formData, valor_frete: e.target.value})} placeholder="0,00" /></div>
+                <div><label className="block text-xs font-bold text-gray-600 uppercase mb-1">Modalidade de Cálculo</label>
+                  <select className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white outline-none focus:border-blue-500" value={formData.modalidade_calculo} onChange={e => setFormData({...formData, modalidade_calculo: e.target.value})}>
+                    <option value="valor_fixo">Valor fixo</option>
+                    <option value="tonelada_km">Tonelada / km</option>
+                  </select>
+                </div>
                 <div><label className="block text-xs font-bold text-gray-600 uppercase mb-1">Data</label><input type="date" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" value={formData.data} onChange={e => setFormData({...formData, data: e.target.value})} /></div>
               </div>
+              {formData.modalidade_calculo === 'tonelada_km' ? (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div><label className="block text-xs font-bold text-gray-600 uppercase mb-1">Toneladas *</label><input type="number" step="0.001" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" value={formData.toneladas} onChange={e => setFormData({...formData, toneladas: e.target.value})} placeholder="0" /></div>
+                    <div><label className="block text-xs font-bold text-gray-600 uppercase mb-1">Valor por Tonelada/km *</label><input type="number" step="0.0001" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" value={formData.valor_tonelada_km} onChange={e => setFormData({...formData, valor_tonelada_km: e.target.value})} placeholder="0,00" /></div>
+                  </div>
+                  {(() => {
+                    // Prévia do valor: toneladas × (km_final − km_inicial) × valor_tonelada_km.
+                    // Só exibe o total quando há KM final > inicial; senão orienta que o valor
+                    // será calculado na finalização. Espelha a regra do backend (utils/calculoFrete).
+                    const ton = Number(formData.toneladas);
+                    const vtk = Number(formData.valor_tonelada_km);
+                    const kmIni = Number(formData.km_inicial);
+                    const kmFim = Number(formData.km_final);
+                    const temInsumos = ton > 0 && vtk > 0;
+                    const kmTotal = (Number.isFinite(kmIni) && Number.isFinite(kmFim) && kmFim > kmIni) ? kmFim - kmIni : null;
+                    return (
+                      <div className="rounded-lg bg-blue-50 border border-blue-100 px-3 py-2 text-xs text-blue-800">
+                        {temInsumos && kmTotal !== null ? (
+                          <span><b>Valor previsto:</b> {formatCurrency(Math.round(ton * kmTotal * vtk * 100) / 100)} <span className="text-blue-500">({ton} t × {kmTotal.toLocaleString()} km × {formatCurrency(vtk)})</span></span>
+                        ) : (
+                          <span>O valor será calculado na finalização, quando o KM final for informado (valor = toneladas × km rodado × valor por tonelada/km).</span>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </>
+              ) : (
+                <div className="grid grid-cols-2 gap-3">
+                  <div><label className="block text-xs font-bold text-gray-600 uppercase mb-1">Valor do Frete *</label><input type="number" step="0.01" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" value={formData.valor_frete} onChange={e => setFormData({...formData, valor_frete: e.target.value})} placeholder="0,00" /></div>
+                  <div />
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-3">
                 <div><label className="block text-xs font-bold text-gray-600 uppercase mb-1">KM Inicial</label><input type="number" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" value={formData.km_inicial} onChange={e => setFormData({...formData, km_inicial: e.target.value})} placeholder="0" /></div>
                 <div><label className="block text-xs font-bold text-gray-600 uppercase mb-1">KM Final</label><input type="number" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" value={formData.km_final} onChange={e => setFormData({...formData, km_final: e.target.value})} placeholder="0" /></div>

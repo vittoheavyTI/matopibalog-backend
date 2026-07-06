@@ -265,6 +265,9 @@ export const ResumoMotorista: React.FC = () => {
         quemRecebeu: f.quem_recebeu,
         km_inicial: parseFloat(f.km_inicial),
         km_final: parseFloat(f.km_final),
+        modalidadeCalculo: f.modalidade_calculo || 'valor_fixo',
+        toneladas: f.toneladas != null ? Number(f.toneladas) : null,
+        valorToneladaKm: f.valor_tonelada_km != null ? Number(f.valor_tonelada_km) : null,
         status: f.status,
         data: f.data || f.criadoEm || f.criado_em
       }));
@@ -1219,7 +1222,12 @@ export const ResumoMotorista: React.FC = () => {
               </p>
             </div>
             <div className="text-right">
-              <p className="text-3xl font-black">{formatCurrency(trip.valorFrete)}</p>
+              <p className="text-3xl font-black">{Number.isFinite(trip.valorFrete) ? formatCurrency(trip.valorFrete) : '—'}</p>
+              {trip.modalidadeCalculo === 'tonelada_km' && (
+                <p className="text-blue-100 text-xs mt-1">
+                  Tonelada/km{trip.toneladas ? ` · ${trip.toneladas} t` : ''}{trip.valorToneladaKm ? ` × ${formatCurrency(trip.valorToneladaKm)}/t·km` : ''}
+                </p>
+              )}
               <span className={`inline-block mt-1 px-3 py-1 rounded-lg text-xs font-bold uppercase ${
                 trip.status === 'finalizado' ? 'bg-green-500' :
                 trip.status === 'ativo' ? 'bg-blue-400' :
