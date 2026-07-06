@@ -200,7 +200,7 @@ router.get('/assinaturas', async (req, res) => {
 
 // MOTORISTAS GLOBAL
 router.get('/motoristas', async (req, res) => {
-  const { data, error } = await supabase.from('motoristas').select('*, usuarios(nome, email), empresas(nome)');
+  const { data, error } = await supabase.from('motoristas').select('*, usuarios(nome, email), empresas(nome, tipo)');
   if (error) return res.status(500).json({ message: 'Erro ao listar motoristas.' });
   res.json(data || []);
 });
@@ -209,6 +209,12 @@ router.patch('/motoristas/:id/aprovar', async (req, res) => {
   const { error } = await supabase.from('motoristas').update({ status_cadastro: 'aprovado' }).eq('id', req.params.id);
   if (error) return res.status(500).json({ message: 'Erro ao aprovar.' });
   res.json({ message: 'Motorista aprovado.' });
+});
+
+router.patch('/motoristas/:id/reprovar', async (req, res) => {
+  const { error } = await supabase.from('motoristas').update({ status_cadastro: 'reprovado' }).eq('id', req.params.id);
+  if (error) return res.status(500).json({ message: 'Erro ao reprovar.' });
+  res.json({ message: 'Motorista reprovado.' });
 });
 
 module.exports = router;

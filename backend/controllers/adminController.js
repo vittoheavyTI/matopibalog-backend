@@ -120,7 +120,7 @@ exports.getAllMotoristas = async (req, res) => {
   try {
     let query = supabase
       .from('motoristas')
-      .select('*, usuarios!inner(nome, email, status, empresa_id, telefone, cep, endereco, bairro, cidade, foto_url), empresas!left(tipo)');
+      .select('*, usuarios!inner(nome, email, status, empresa_id, telefone, cep, endereco, bairro, cidade, foto_url), empresas!left(nome, tipo)');
 
     if (!req.user.is_super_admin) {
       // Admin comum: filtra SEMPRE pela empresa dele, ignora qualquer ?empresa_id= passado

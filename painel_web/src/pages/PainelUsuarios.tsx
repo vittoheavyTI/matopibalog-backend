@@ -53,7 +53,7 @@ export const PainelUsuarios: React.FC = () => {
         api.get('/painel-admin/empresas'),
       ]);
       const users = usersRes.data;
-      const emps = (empsRes.data || []).map((e: any) => ({ id: e.id, nome: e.nome }));
+      const emps = (empsRes.data || []).map((e: any) => ({ id: e.id, nome: e.nome, tipo: e.tipo }));
       setUsuarios(users || []);
       setEmpresas(emps || []);
     }
@@ -95,6 +95,7 @@ export const PainelUsuarios: React.FC = () => {
   // Nome da empresa mapeado localmente: /admin/usuarios traz empresa_id (não o nome).
   // Reaproveita a lista de empresas já carregada. Sem empresa → "-".
   const empresaNome = (id?: string) => (id && empresas.find(e => e.id === id)?.nome) || '-';
+  const empresaTipo = (id?: string) => id && empresas.find(e => e.id === id)?.tipo;
 
   const filtered = usuarios.filter(u => (u.nome || '').toLowerCase().includes(searchTerm.toLowerCase()) || (u.email || '').includes(searchTerm));
 
@@ -110,8 +111,8 @@ export const PainelUsuarios: React.FC = () => {
       <div className="flex items-center space-x-3 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
         <div className="bg-gray-800 p-2 rounded-lg text-white"><Shield size={24} /></div>
         <div>
-          <h1 className="text-2xl font-bold text-gray-800">Usuários</h1>
-          <p className="text-sm text-gray-500">Gerenciar usuários do sistema</p>
+          <h1 className="text-2xl font-bold text-gray-800">Usuários Globais</h1>
+          <p className="text-sm text-gray-500">Administradores vinculados às empresas e contas autônomas</p>
         </div>
       </div>
 
@@ -136,7 +137,7 @@ export const PainelUsuarios: React.FC = () => {
                 <td className="p-4 font-bold text-gray-800">{u.nome}</td>
                 <td className="p-4 text-sm text-gray-600">{u.email}</td>
                 <td className="p-4 text-sm text-gray-600">{empresaNome(u.empresa_id)}</td>
-                <td className="p-4"><span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase ${u.tipo === 'admin' ? 'bg-purple-50 text-purple-700' : u.tipo === 'master' ? 'bg-red-50 text-red-700' : 'bg-blue-50 text-blue-700'}`}>{u.tipo}</span></td>
+                <td className="p-4"><span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase ${u.tipo === 'admin' ? 'bg-purple-50 text-purple-700' : u.tipo === 'master' ? 'bg-red-50 text-red-700' : 'bg-blue-50 text-blue-700'}`}>{u.tipo === 'admin' && empresaTipo(u.empresa_id) === 'autonomo' ? 'Admin de autônomo' : u.tipo}</span></td>
                 <td className="p-4 text-center">
                   <button onClick={() => { setEditing(u); setForm({ nome: u.nome, email: u.email, empresa_id: u.empresa_id || '', tipo: u.tipo }); setShowModal(true); }} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg mr-1"><Eye size={16} /></button>
                   <button onClick={() => setDeleteTarget(u)} className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg"><Trash2 size={16} /></button>
@@ -161,7 +162,7 @@ export const PainelUsuarios: React.FC = () => {
               <div><label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Empresa</label>
                 <select className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" value={form.empresa_id} onChange={e => setForm({ ...form, empresa_id: e.target.value })}>
                   <option value="">Sem empresa</option>
-                  {empresas.map(e => <option key={e.id} value={e.id}>{e.nome}</option>)}
+                  {empresas.map(e => <option key={e.id} value={e.id}>{e.nome}{e.tipo === 'autonomo' ? ' — Autônomo' : ''}</option>)}
                 </select>
               </div>
               <div><label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Tipo</label>

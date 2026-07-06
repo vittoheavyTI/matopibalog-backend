@@ -22,7 +22,7 @@ export const PainelEmpresas: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<any>(null);
-  const [formDados, setFormDados] = useState({ nome: '', cnpj: '', email: '', telefone: '', plano_id: '' });
+  const [formDados, setFormDados] = useState({ nome: '', cnpj: '', email: '', telefone: '', plano_id: '', tipo: 'transportadora' });
   const [deleteTarget, setDeleteTarget] = useState<any>(null);
   const [trialTarget, setTrialTarget] = useState<any>(null);
   const [customDate, setCustomDate] = useState('');
@@ -47,13 +47,13 @@ export const PainelEmpresas: React.FC = () => {
 
   async function handleSalvar() {
     if (!formDados.nome.trim()) { setToast({ message: 'Nome é obrigatório', tipo: 'erro' }); return; }
-    const payload = { nome: formDados.nome, cnpj: formDados.cnpj, email_contato: formDados.email, telefone_contato: formDados.telefone, plano_id: formDados.plano_id || null };
+    const payload = { nome: formDados.nome, cnpj: formDados.cnpj, email: formDados.email, telefone: formDados.telefone, plano_id: formDados.plano_id || null };
     if (editing) {
       try { await api.put('/painel-admin/empresas/' + editing.id, payload); } catch { setToast({ message: 'Erro ao atualizar', tipo: 'erro' }); return; }
       setToast({ message: 'Empresa atualizada!', tipo: 'sucesso' });
       setShowModal(false); setEditing(null); carregar();
     } else {
-      try { await api.post('/painel-admin/empresas', { ...payload, status: 'trial' }); } catch { setToast({ message: 'Erro ao criar', tipo: 'erro' }); return; }
+      try { await api.post('/painel-admin/empresas', { ...payload, tipo: formDados.tipo, status: 'trial' }); } catch { setToast({ message: 'Erro ao criar', tipo: 'erro' }); return; }
       setToast({ message: 'Empresa criada!', tipo: 'sucesso' });
       setShowModal(false); carregar();
     }
@@ -118,8 +118,8 @@ export const PainelEmpresas: React.FC = () => {
       <div className="flex items-center space-x-3 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
         <div className="bg-gray-800 p-2 rounded-lg text-white"><Shield size={24} /></div>
         <div>
-          <h1 className="text-2xl font-bold text-gray-800">Empresas</h1>
-          <p className="text-sm text-gray-500">Gestão de empresas cadastradas</p>
+          <h1 className="text-2xl font-bold text-gray-800">Empresas e Autônomos</h1>
+          <p className="text-sm text-gray-500">Gestão das contas da plataforma</p>
         </div>
       </div>
 
@@ -128,7 +128,7 @@ export const PainelEmpresas: React.FC = () => {
           <Search size={18} className="text-gray-400 mr-2 flex-shrink-0" />
           <input type="text" placeholder="Buscar..." className="flex-1 outline-none text-gray-700 text-sm" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
         </div>
-        <button onClick={() => { setEditing(null); setFormDados({ nome: '', cnpj: '', email: '', telefone: '', plano_id: '' }); setShowModal(true); }} className="flex items-center px-4 py-2.5 bg-green-700 text-white rounded-xl font-medium text-sm hover:bg-green-800 active:scale-95"><Plus size={18} className="mr-1.5" /> Nova Empresa</button>
+        <button onClick={() => { setEditing(null); setFormDados({ nome: '', cnpj: '', email: '', telefone: '', plano_id: '', tipo: 'transportadora' }); setShowModal(true); }} className="flex items-center px-4 py-2.5 bg-green-700 text-white rounded-xl font-medium text-sm hover:bg-green-800 active:scale-95"><Plus size={18} className="mr-1.5" /> Nova Conta</button>
       </div>
 
       <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
@@ -156,7 +156,7 @@ export const PainelEmpresas: React.FC = () => {
                 </td>
                 <td className="p-4">
                   <div className="flex items-center justify-center gap-1">
-                    <button onClick={() => { setEditing(e); setFormDados({ nome: e.nome || '', cnpj: e.cnpj || '', email: e.email_contato || '', telefone: e.telefone_contato || '', plano_id: e.plano_id || '' }); setShowModal(true); }} title="Editar empresa" aria-label="Editar empresa" className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg"><Eye size={16} /></button>
+                    <button onClick={() => { setEditing(e); setFormDados({ nome: e.nome || '', cnpj: e.cnpj || '', email: e.email_contato || '', telefone: e.telefone_contato || '', plano_id: e.plano_id || '', tipo: e.tipo || 'transportadora' }); setShowModal(true); }} title="Editar empresa" aria-label="Editar empresa" className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg"><Eye size={16} /></button>
                     <button onClick={() => suspender(e.id)} title={e.status === 'suspenso' ? 'Reativar empresa' : 'Suspender empresa'} aria-label={e.status === 'suspenso' ? 'Reativar empresa' : 'Suspender empresa'} className="p-1.5 text-orange-500 hover:bg-orange-50 rounded-lg">{e.status === 'suspenso' ? <Unlock size={16} /> : <Ban size={16} />}</button>
                     <button onClick={() => { setTrialTarget(e); setCustomDate(''); setConfirmAtivo(false); }} title="Gerenciar trial" aria-label="Gerenciar trial da empresa" className="p-1.5 text-amber-600 hover:bg-amber-50 rounded-lg"><CalendarClock size={16} /></button>
                     <button onClick={() => resetSenhaAdmin(e.id, e.nome)} className="p-1.5 text-gray-500 hover:bg-gray-100 rounded-lg" title="Resetar senha do admin" aria-label="Resetar senha do admin"><KeyRound size={16} /></button>
@@ -174,7 +174,7 @@ export const PainelEmpresas: React.FC = () => {
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-fade-in">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
             <div className="p-6 border-b flex justify-between items-center bg-gray-50">
-              <h3 className="text-xl font-bold text-gray-800">{editing ? 'Editar Empresa' : 'Nova Empresa'}</h3>
+              <h3 className="text-xl font-bold text-gray-800">{editing ? 'Editar Conta' : 'Nova Conta'}</h3>
               <button onClick={() => setShowModal(false)} className="p-2 hover:bg-gray-200 rounded-full"><X size={24} /></button>
             </div>
             <div className="p-6 space-y-4">
@@ -184,6 +184,14 @@ export const PainelEmpresas: React.FC = () => {
                   <input type="text" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" value={(formDados as any)[f.key] || ''} onChange={e => setFormDados({ ...formDados, [f.key]: e.target.value })} />
                 </div>
               ))}
+              <div>
+                <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Tipo de conta</label>
+                <select disabled={!!editing} className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50 disabled:text-gray-400" value={formDados.tipo} onChange={e => setFormDados({ ...formDados, tipo: e.target.value })}>
+                  <option value="transportadora">Empresa / Transportadora</option>
+                  <option value="autonomo">Autônomo</option>
+                </select>
+                {!editing && formDados.tipo === 'autonomo' && <p className="text-xs text-emerald-700 mt-1">Depois de criar a conta, adicione o administrador em Usuários Globais.</p>}
+              </div>
               <div>
                 <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Plano ID</label>
                 <input type="text" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" value={formDados.plano_id} onChange={e => setFormDados({ ...formDados, plano_id: e.target.value })} placeholder="UUID do plano" />

@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import api, { newClientRequestId } from '../api';
 import { EVENTO_NOTIFICACOES_NOVAS } from '../components/NotificacoesDropdown';
+import { useAuth } from '../contexts/AuthContext';
 
 // [PR2B] Card de métrica reutilizável. Recebe as classes de cor como strings
 // literais (nunca interpoladas) para não quebrar o purge do Tailwind.
@@ -33,7 +34,12 @@ const StatCard: React.FC<{
 
 export const Dashboard: React.FC = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const isSuperAdmin = user?.is_super_admin === true;
   const [motoristasEmViagem, setMotoristasEmViagem] = useState<any[]>([]);
+  const [empresaFiltro, setEmpresaFiltro] = useState('todas');
+  const [vinculoFiltro, setVinculoFiltro] = useState('todos');
+  const [statusFiltro, setStatusFiltro] = useState('todos');
   const [fretes, setFretes] = useState<any[]>([]);
   const [despesas, setDespesas] = useState<any[]>([]);
   const [abastecimentos, setAbastecimentos] = useState<any[]>([]);
@@ -80,6 +86,7 @@ export const Dashboard: React.FC = () => {
 
       const mapMotorista = (m: any) => {
         const fullM = motoristaLookup.get(m.id) || m;
+        const empresa = Array.isArray(fullM.empresas) ? fullM.empresas[0] : fullM.empresas;
         return {
           uid: fullM.id,
           nomeCompleto: fullM.usuarios?.nome || 'Motorista',
@@ -87,7 +94,9 @@ export const Dashboard: React.FC = () => {
           placaVeiculo: fullM.placa_veiculo,
           percentualComissao: fullM.percentual_comissao,
           statusCadastro: fullM.status_cadastro,
-          empresaTipo: fullM.empresa_tipo
+          empresaId: fullM.usuarios?.empresa_id || fullM.empresa_id,
+          empresaNome: empresa?.nome || 'Sem empresa',
+          empresaTipo: fullM.empresa_tipo || empresa?.tipo
         };
       };
 
@@ -445,12 +454,25 @@ export const Dashboard: React.FC = () => {
   const misto = temVinculados && temAutonomos;
   // soVinculado é o padrão: cobre vinculado-only e o caso sem motoristas (4 cards zerados, como hoje).
   const soVinculado = !soAutonomo && !misto;
+  const empresasEmFrete = Array.from(
+    new Map(motoristasEmViagem.map(m => [m.empresaId, { id: m.empresaId, nome: m.empresaNome }])).values()
+  ).filter(e => e.id).sort((a, b) => a.nome.localeCompare(b.nome));
+  const motoristasEmViagemFiltrados = isSuperAdmin
+    ? motoristasEmViagem.filter(m => {
+        const porEmpresa = empresaFiltro === 'todas' || m.empresaId === empresaFiltro;
+        const porVinculo = vinculoFiltro === 'todos'
+          || (vinculoFiltro === 'autonomos' ? m.empresaTipo === 'autonomo' : m.empresaTipo !== 'autonomo');
+        const porStatus = statusFiltro === 'todos'
+          || (statusFiltro === 'bloqueado' ? m.statusCadastro === 'bloqueado' : m.statusCadastro !== 'bloqueado');
+        return porEmpresa && porVinculo && porStatus;
+      })
+    : motoristasEmViagem;
 
   return (
     <div className="space-y-5 pb-10">
       {!selectedMot && (
         <div className="flex justify-between items-center gap-3 animate-fade-in">
-          <h2 className="text-2xl font-bold text-gray-800">Dashboard</h2>
+          <h2 className="text-2xl font-bold text-gray-800">{isSuperAdmin ? 'Visão Geral da Plataforma' : 'Dashboard'}</h2>
           <p className="text-xs text-gray-500 text-right">Visão do mês atual • Para outros períodos, use Relatórios ou Histórico</p>
         </div>
       )}
@@ -510,18 +532,37 @@ export const Dashboard: React.FC = () => {
         {!selectedMot && (
           <div className="flex justify-between items-center px-2 animate-fade-in">
             <button
-              onClick={() => window.open('/relatorios/viagens', '_blank', 'noopener,noreferrer')}
-              className="text-xl font-bold text-gray-700 flex items-center hover:text-blue-600 transition-colors cursor-pointer"
-              title="Ir para Gerenciamento de Fretes"
+              onClick={() => { if (!isSuperAdmin) window.open('/relatorios/viagens', '_blank', 'noopener,noreferrer'); }}
+              className={`text-xl font-bold text-gray-700 flex items-center ${isSuperAdmin ? 'cursor-default' : 'hover:text-blue-600 transition-colors cursor-pointer'}`}
+              title={isSuperAdmin ? 'Visão global de fretes ativos' : 'Ir para Gerenciamento de Fretes'}
             >
               <DollarSign size={20} className="mr-2 text-green-600" /> Motoristas em Frete
             </button>
-            <button
+            {!isSuperAdmin && <button
               onClick={() => navigate('/relatorios/viagens?novoFrete=1')}
               className="flex items-center px-4 py-2 bg-green-700 text-white rounded-lg hover:bg-green-800 transition-all shadow-md active:scale-95 font-bold text-sm"
             >
               <Plus size={18} className="mr-1" /> Adicionar Frete
-            </button>
+            </button>}
+          </div>
+        )}
+
+        {!selectedMot && isSuperAdmin && (
+          <div className="bg-white rounded-xl border border-gray-100 p-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+            <select value={empresaFiltro} onChange={e => setEmpresaFiltro(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700">
+              <option value="todas">Todas as empresas</option>
+              {empresasEmFrete.map(e => <option key={e.id} value={e.id}>{e.nome}</option>)}
+            </select>
+            <select value={vinculoFiltro} onChange={e => setVinculoFiltro(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700">
+              <option value="todos">Autônomos e vinculados</option>
+              <option value="autonomos">Somente autônomos</option>
+              <option value="vinculados">Somente vinculados</option>
+            </select>
+            <select value={statusFiltro} onChange={e => setStatusFiltro(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700">
+              <option value="todos">Todos os status</option>
+              <option value="em_viagem">Em viagem</option>
+              <option value="bloqueado">Bloqueados</option>
+            </select>
           </div>
         )}
 
@@ -728,6 +769,7 @@ export const Dashboard: React.FC = () => {
               <thead>
                 <tr className="bg-gray-50 text-gray-600 text-xs uppercase font-bold tracking-wider">
                   <th className="p-5 border-b">Motorista (Em Curso/Pendente)</th>
+                  {isSuperAdmin && <th className="p-5 border-b">Empresa</th>}
                   <th className="p-5 border-b">Placa</th>
                   <th className="p-5 border-b">Status</th>
                   <th className="p-5 border-b text-center">Ação</th>
@@ -736,18 +778,18 @@ export const Dashboard: React.FC = () => {
               <tbody className="divide-y divide-gray-50">
                 {loadingEmViagem ? (
                   <tr>
-                    <td colSpan={4} className="p-10 text-center text-gray-600 italic">
+                    <td colSpan={isSuperAdmin ? 5 : 4} className="p-10 text-center text-gray-600 italic">
                       Carregando motoristas em frete...
                     </td>
                   </tr>
-                ) : motoristasEmViagem.length === 0 ? (
+                ) : motoristasEmViagemFiltrados.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="p-10 text-center text-gray-600 italic">
-                      Nenhum motorista em frete ativo no momento.
+                    <td colSpan={isSuperAdmin ? 5 : 4} className="p-10 text-center text-gray-600 italic">
+                      Nenhum motorista corresponde aos filtros atuais.
                     </td>
                   </tr>
                 ) : (
-                  motoristasEmViagem.map(mot => (
+                  motoristasEmViagemFiltrados.map(mot => (
                     <tr key={mot.uid} className="hover:bg-gray-50/50 transition-colors">
                       <td className="p-5">
                         <div className="flex items-center">
@@ -759,6 +801,7 @@ export const Dashboard: React.FC = () => {
                           <span className="font-semibold text-gray-700">{mot.nomeCompleto}</span>
                         </div>
                       </td>
+                      {isSuperAdmin && <td className="p-5 text-sm text-gray-600">{mot.empresaNome}</td>}
                       <td className="p-5 text-gray-600 font-medium">{mot.placaVeiculo}</td>
                       <td className="p-5">
                         <span className={`flex items-center text-xs font-bold px-2 py-1 rounded-full w-fit ${mot.statusCadastro === 'bloqueado' ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-600'}`}>
@@ -768,10 +811,10 @@ export const Dashboard: React.FC = () => {
                       </td>
                       <td className="p-5 text-center">
                         <button
-                          onClick={() => navigate('/relatorios/viagens?motorista=' + mot.uid)}
+                          onClick={() => navigate(isSuperAdmin ? '/painel-administrativo/motoristas' : '/relatorios/viagens?motorista=' + mot.uid)}
                           className="px-5 py-2.5 bg-green-700 text-white rounded-xl font-bold text-sm hover:bg-green-800 shadow-md transition-all active:scale-95"
                         >
-                          Gerenciar Frete
+                          {isSuperAdmin ? 'Ver no Painel Admin' : 'Gerenciar Frete'}
                         </button>
                       </td>
                     </tr>
@@ -782,7 +825,13 @@ export const Dashboard: React.FC = () => {
         )}
       </div>
 
-      {!selectedMot && summary?.fretes_por_motorista && (
+      {!selectedMot && isSuperAdmin && (
+        <button onClick={() => navigate('/relatorios/resumo')} className="w-full bg-white border border-blue-100 rounded-xl p-4 text-left text-blue-700 font-bold hover:bg-blue-50 transition-colors">
+          Abrir Histórico de Fretes
+        </button>
+      )}
+
+      {!selectedMot && !isSuperAdmin && summary?.fretes_por_motorista && (
         <div className="space-y-5 mt-6 animate-fade-in">
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
             <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/30">
