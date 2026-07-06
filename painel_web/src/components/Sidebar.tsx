@@ -249,14 +249,14 @@ export const Sidebar: React.FC = () => {
             ))}
 
             {/* Minhas Faturas é visão do cliente: super-admin usa Painel Admin → Faturas Todas */}
-            {!user?.is_super_admin && (
+            {!user?.is_super_admin && user?.role === 'admin' && (
               <NavLink
                 to="/minhas-faturas"
                 className={linkClass}
-                title={collapsed ? 'Minhas Faturas' : undefined}
+                title={collapsed ? 'Faturas / Regularização' : undefined}
               >
                 <Receipt size={20} className="flex-shrink-0" />
-                {!collapsed && <span>Minhas Faturas</span>}
+                {!collapsed && <span>Faturas / Regularização</span>}
               </NavLink>
             )}
 

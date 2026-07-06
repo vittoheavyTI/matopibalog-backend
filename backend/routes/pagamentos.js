@@ -6,6 +6,7 @@ const supabase = require('../config/supabase');
 const { verifyToken, isAdmin, isSuperAdmin } = require('../middlewares/auth');
 const { verificarEmpresa } = require('../middlewares/tenant');
 const { resolveAsaasApiKey } = require('../utils/asaasConfig');
+const { classificarResponsavelRegularizacao } = require('../utils/billingProfile');
 
 // Comparação em tempo constante (hash de tamanho fixo evita vazar comprimento)
 function safeEqual(a, b) {
@@ -119,7 +120,7 @@ router.get('/cobrancas/all', verifyToken, isSuperAdmin, async (req, res) => {
   try {
     const { data } = await supabase
       .from('faturas')
-      .select('*, empresas(nome)')
+      .select('*, empresas(nome, tipo, status, plano_id, planos(nome))')
       .order('created_at', { ascending: false });
 
     res.json(data || []);
@@ -127,6 +128,57 @@ router.get('/cobrancas/all', verifyToken, isSuperAdmin, async (req, res) => {
     res.status(500).json({ message: 'Erro ao listar todas as cobranças.' });
   }
 });
+
+async function carregarPlanoStatus(empresaId, user) {
+  const [empresaResult, adminsResult, configResult] = await Promise.all([
+    supabase
+      .from('empresas')
+      .select('status, tipo, trial_ends_at, plano_id, planos(nome, preco_mensal, limite_motoristas)')
+      .eq('id', empresaId)
+      .single(),
+    supabase
+      .from('usuarios')
+      .select('id', { count: 'exact', head: true })
+      .eq('empresa_id', empresaId)
+      .eq('tipo', 'admin')
+      .eq('status', 'ativo'),
+    supabase
+      .from('configuracoes')
+      .select('dados')
+      .eq('id', 1)
+      .maybeSingle(),
+  ]);
+
+  if (empresaResult.error || !empresaResult.data) {
+    const error = empresaResult.error || new Error('Empresa não encontrada.');
+    throw error;
+  }
+  if (adminsResult.error) throw adminsResult.error;
+
+  const empresa = empresaResult.data;
+  const trialExpirado = empresa.status === 'trial' && Boolean(
+    empresa.trial_ends_at && new Date(empresa.trial_ends_at) < new Date()
+  );
+  const temAdminAtivo = (adminsResult.count || 0) > 0;
+  const responsavel = classificarResponsavelRegularizacao({
+    role: user.role,
+    empresaTipo: empresa.tipo,
+    temAdminAtivo,
+  });
+
+  return {
+    status: empresa.status,
+    empresa_tipo: empresa.tipo,
+    trial_ends_at: empresa.trial_ends_at,
+    trial_expirado: trialExpirado,
+    plano_id: empresa.plano_id,
+    plano: empresa.planos || null,
+    regularizacao: {
+      responsavel,
+      suporte_email: configResult.data?.dados?.email_suporte || null,
+    },
+  };
+}
 
 // Estado read-only do plano da empresa escopada pelo token.
 // Admin comum sempre usa a própria empresa; super-admin precisa selecionar
@@ -140,36 +192,24 @@ router.get('/plano-status', verifyToken, isAdmin, verificarEmpresa, async (req, 
   }
 
   try {
-    const { data: empresa, error } = await supabase
-      .from('empresas')
-      .select('status, trial_ends_at, plano_id, planos(nome, preco_mensal, limite_motoristas)')
-      .eq('id', req.empresa_id)
-      .single();
-
-    if (error) {
-      if (error.code === 'PGRST116') {
-        return res.status(404).json({ message: 'Empresa não encontrada.' });
-      }
-      throw error;
-    }
-    if (!empresa) {
-      return res.status(404).json({ message: 'Empresa não encontrada.' });
-    }
-
-    const trialExpirado = empresa.status === 'trial' && Boolean(
-      empresa.trial_ends_at && new Date(empresa.trial_ends_at) < new Date()
-    );
-
-    return res.json({
-      status: empresa.status,
-      trial_ends_at: empresa.trial_ends_at,
-      trial_expirado: trialExpirado,
-      plano_id: empresa.plano_id,
-      plano: empresa.planos || null,
-    });
+    return res.json(await carregarPlanoStatus(req.empresa_id, req.user));
   } catch (err) {
     console.error('Erro ao carregar status do plano:', err.message);
     return res.status(500).json({ message: 'Erro ao carregar status do plano.' });
+  }
+});
+
+// Status mínimo para o app. Não expõe faturas, IDs Asaas nem dados de pagamento:
+// informa somente o estado da própria empresa e quem deve conduzir a regularização.
+router.get('/me/plano-status', verifyToken, verificarEmpresa, async (req, res) => {
+  if (!req.empresa_id) {
+    return res.status(400).json({ message: 'Empresa não identificada.' });
+  }
+  try {
+    return res.json(await carregarPlanoStatus(req.empresa_id, req.user));
+  } catch (err) {
+    console.error('Erro ao carregar status de regularização:', err.message);
+    return res.status(err.code === 'PGRST116' ? 404 : 500).json({ message: 'Erro ao carregar status de regularização.' });
   }
 });
 

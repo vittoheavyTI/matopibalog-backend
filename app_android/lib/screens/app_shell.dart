@@ -124,6 +124,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
+    final finance = context.watch<FinanceProvider>();
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final inicial = auth.nome.isNotEmpty ? auth.nome[0].toUpperCase() : 'M';
 
@@ -178,7 +179,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             ListTile(
               leading: const Icon(Icons.local_shipping_outlined),
               title: const Text('Novo Frete'),
-              onTap: () {
+              enabled: !finance.planoBloqueado,
+              onTap: finance.planoBloqueado ? null : () {
                 AppLogger.action('menu_nav', params: {'destino': 'add_frete'});
                 _navegarPara(context, const AddFreteScreen());
               },
@@ -186,7 +188,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             ListTile(
               leading: const Icon(Icons.receipt_outlined),
               title: const Text('Nova Despesa'),
-              onTap: () {
+              enabled: !finance.planoBloqueado,
+              onTap: finance.planoBloqueado ? null : () {
                 AppLogger.action('menu_nav', params: {'destino': 'add_despesa'});
                 _novoLancamentoComFrete(context, (freteId) => AddDespesaScreen(freteId: freteId));
               },
@@ -194,7 +197,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             ListTile(
               leading: const Icon(Icons.local_gas_station_outlined),
               title: const Text('Novo Abastecimento'),
-              onTap: () {
+              enabled: !finance.planoBloqueado,
+              onTap: finance.planoBloqueado ? null : () {
                 AppLogger.action('menu_nav', params: {'destino': 'add_abastecimento'});
                 _novoLancamentoComFrete(context, (freteId) => AddAbastecimentoScreen(freteId: freteId));
               },
@@ -204,7 +208,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               ListTile(
                 leading: const Icon(Icons.payments_outlined),
                 title: const Text('Novo Vale'),
-                onTap: () {
+                enabled: !finance.planoBloqueado,
+                onTap: finance.planoBloqueado ? null : () {
                   AppLogger.action('menu_nav', params: {'destino': 'add_vale'});
                   _novoLancamentoComFrete(context, (freteId) => AddValeScreen(freteId: freteId));
                 },

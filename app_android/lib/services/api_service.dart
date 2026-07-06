@@ -336,6 +336,20 @@ class ApiService {
     }
   }
 
+  /// Estado read-only do plano para orientar o app. Não retorna faturas,
+  /// dados Asaas ou credenciais; somente status e responsável.
+  static Future<Map<String, dynamic>?> getPlanoStatus() async {
+    try {
+      final response = await http
+          .get(Uri.parse('$_baseUrl/pagamentos/me/plano-status'), headers: await _getHeaders())
+          .timeout(_timeoutGet);
+      if (response.statusCode == 200) return jsonDecode(response.body);
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   static Future<Map<String, dynamic>?> updateMe(Map<String, dynamic> data) async {
     try {
       final response = await http
