@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { format, startOfMonth, endOfMonth } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { formatCurrency } from '../utils';
-import { Calendar, Users, User, Download, Truck, DollarSign, ChevronLeft, ChevronRight, Fuel, FileText, TrendingUp, Printer, Building2 } from 'lucide-react';
+import { Calendar, Users, User, Download, Truck, DollarSign, ChevronLeft, ChevronRight, Fuel, FileText, TrendingUp, Printer, Building2, Camera } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import api from '../api';
@@ -84,6 +84,21 @@ export const ResumoMotorista: React.FC = () => {
   const [tripValesRej, setTripValesRej] = useState<any[]>([]);
   // true enquanto os 3 GETs por frete_id estão em voo — bloqueia o PDF de sair vazio
   const [tripLoading, setTripLoading] = useState(false);
+
+  const abrirFotoOdometro = async (freteId: string, tipo: 'inicial' | 'final') => {
+    const novaAba = window.open('about:blank', '_blank');
+    if (novaAba) novaAba.opener = null;
+    try {
+      const response = await api.get(`/fretes/${freteId}/odometro/${tipo}/url`);
+      const url = response.data?.signed_url;
+      if (!url) throw new Error('URL temporária não retornada.');
+      if (novaAba) novaAba.location.href = url;
+      else window.open(url, '_blank', 'noopener,noreferrer');
+    } catch (err: any) {
+      novaAba?.close();
+      alert(err?.response?.data?.message || 'Não foi possível abrir a foto do odômetro.');
+    }
+  };
 
   useEffect(() => {
     if (!isSuperAdmin) {
@@ -268,6 +283,8 @@ export const ResumoMotorista: React.FC = () => {
         modalidadeCalculo: f.modalidade_calculo || 'valor_fixo',
         toneladas: f.toneladas != null ? Number(f.toneladas) : null,
         valorToneladaKm: f.valor_tonelada_km != null ? Number(f.valor_tonelada_km) : null,
+        fotoOdometroInicialPath: f.foto_odometro_inicial_path || null,
+        fotoOdometroFinalPath: f.foto_odometro_final_path || null,
         status: f.status,
         data: f.data || f.criadoEm || f.criado_em
       }));
@@ -1255,6 +1272,37 @@ export const ResumoMotorista: React.FC = () => {
             <p className="text-[10px] font-bold text-gray-400 uppercase mb-1">Média Consumo</p>
             <p className="text-xl font-bold text-green-600">{media ? `${media} km/l` : '-'}</p>
           </div>
+        </div>
+
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+          <h3 className="font-bold text-gray-700 flex items-center mb-3">
+            <Camera size={18} className="mr-2 text-blue-600" />Fotos do odômetro
+          </h3>
+          {!trip.fotoOdometroInicialPath ? (
+            // Frete legado (criado antes do fluxo de odômetro): nunca teve foto. Mostra
+            // aviso discreto em vez de dois "Não enviada" que pareceriam pendência.
+            <p className="text-xs text-gray-400">Frete legado — anterior ao fluxo de fotos de odômetro; não há fotos a exibir.</p>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {([
+                ['inicial', 'Odômetro inicial', trip.fotoOdometroInicialPath],
+                ['final', 'Odômetro final', trip.fotoOdometroFinalPath],
+              ] as const).map(([tipo, label, path]) => (
+                <div key={tipo} className="rounded-lg border border-gray-100 bg-gray-50 p-3 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-bold text-gray-700 uppercase">{label}</p>
+                    {/* Fluxo novo: foto ausente é PENDÊNCIA (âmbar), não estado neutro. */}
+                    <p className={`text-xs mt-1 ${path ? 'text-green-700' : 'text-amber-600'}`}>{path ? 'Enviada' : 'Pendente'}</p>
+                  </div>
+                  {path && (
+                    <button onClick={() => abrirFotoOdometro(trip.id, tipo)} className="px-3 py-2 rounded-lg bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 transition-colors">
+                      Ver foto
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="bg-white rounded-xl shadow-sm border border-gray-100">

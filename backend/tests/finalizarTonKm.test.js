@@ -94,3 +94,69 @@ test('finalizar valor_fixo sem km → finaliza normalmente (comportamento antigo
   assert.equal(resposta.status, 200);
   assert.equal(capt.updatePayload.status, 'finalizado');
 });
+
+test('novo fluxo pendente sem foto inicial → 422 e não finaliza', async () => {
+  const { resposta, capt } = await executarFinalizar(freteTonKm({
+    status: 'pendente',
+    foto_odometro_inicial_path: null,
+    foto_odometro_final_path: null,
+  }), { km_final: 1500 });
+  assert.equal(resposta.status, 422);
+  assert.match(resposta.body.message, /foto do odômetro inicial/i);
+  assert.equal(capt.updatePayload, undefined);
+});
+
+test('novo fluxo com foto inicial SEM foto final → 422 e não finaliza', async () => {
+  const { resposta, capt } = await executarFinalizar(freteTonKm({
+    foto_odometro_inicial_path: 'e-1/fretes/frete-1/odometro-inicial.jpg',
+    foto_odometro_final_path: null,
+  }), { km_final: 1500 });
+  assert.equal(resposta.status, 422);
+  assert.match(resposta.body.message, /foto do odômetro final/i);
+  assert.equal(capt.updatePayload, undefined);
+});
+
+test('novo fluxo com fotos inicial e final → calcula e finaliza', async () => {
+  const { resposta, capt } = await executarFinalizar(freteTonKm({
+    foto_odometro_inicial_path: 'e-1/fretes/frete-1/odometro-inicial.jpg',
+    foto_odometro_final_path: 'e-1/fretes/frete-1/odometro-final.jpg',
+  }), { km_final: 1500 });
+  assert.equal(resposta.status, 200);
+  assert.equal(capt.updatePayload.status, 'finalizado');
+  assert.equal(capt.updatePayload.valor_frete, 50 * 500 * 150);
+});
+
+test('novo fluxo valor_fixo com fotos mas sem KM final → 422', async () => {
+  const { resposta, capt } = await executarFinalizar({
+    id: 'f-3', motorista_id: 'm-1', empresa_id: 'e-1', status: 'ativo',
+    km_inicial: 1000, km_final: null, modalidade_calculo: 'valor_fixo',
+    toneladas: null, valor_tonelada_km: null,
+    foto_odometro_inicial_path: 'e-1/fretes/f-3/odometro-inicial.jpg',
+    foto_odometro_final_path: 'e-1/fretes/f-3/odometro-final.jpg',
+  });
+  assert.equal(resposta.status, 422);
+  assert.match(resposta.body.message, /KM final/i);
+  assert.equal(capt.updatePayload, undefined);
+});
+
+// --- PR #245: regressões explícitas do fluxo tonelada/km ---
+// Garantem que a trava NÃO depende de foto/rótulo "legado": um frete tonelada/km
+// SEM foto inicial (portanto "legado" pela classificação do painel) continua
+// bloqueado sem km_final, mantém o status e não persiste valor provisório.
+
+test('PR#245: tonelada_km LEGADO (sem foto inicial) sem km_final → 422, status preservado, sem valor final', async () => {
+  const frete = freteTonKm({ status: 'ativo', foto_odometro_inicial_path: null, foto_odometro_final_path: null });
+  const { resposta, capt } = await executarFinalizar(frete, {});
+  assert.equal(resposta.status, 422);
+  assert.match(resposta.body.message, /KM final/i);
+  // Nenhum update ⇒ status permanece 'ativo' e valor_frete provisório não vira final.
+  assert.equal(capt.updatePayload, undefined, 'não deve chamar update / não muda status');
+});
+
+test('PR#245: tonelada_km bloqueado nunca grava valor_frete (mesmo com km_inicial presente)', async () => {
+  const frete = freteTonKm({ km_inicial: 1000, km_final: null, valor_frete: 0 });
+  const { resposta, capt } = await executarFinalizar(frete, {});
+  assert.equal(resposta.status, 422);
+  // Ainda que houvesse um update, valor_frete NÃO poderia ter sido definido.
+  assert.ok(!capt.updatePayload || capt.updatePayload.valor_frete === undefined, 'valor_frete provisório não pode virar final');
+});

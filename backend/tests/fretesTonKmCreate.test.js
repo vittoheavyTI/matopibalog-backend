@@ -56,6 +56,7 @@ test('create tonelada_km SEM km_final → valor_frete 0 provisório (nunca null)
   const { resposta, insertPayload } = await executarCreate({
     origem: 'A', destino: 'B', motorista_id: '11111111-1111-1111-1111-111111111111',
     modalidade_calculo: 'tonelada_km', toneladas: 50, valor_tonelada_km: 150, km_inicial: 1,
+    odometro_obrigatorio: true,
   });
   assert.equal(resposta.status, 201);
   assert.equal(insertPayload.valor_frete, 0, 'valor_frete provisório deve ser 0, não null');
@@ -63,6 +64,7 @@ test('create tonelada_km SEM km_final → valor_frete 0 provisório (nunca null)
   assert.equal(insertPayload.modalidade_calculo, 'tonelada_km');
   assert.equal(insertPayload.toneladas, 50);
   assert.equal(insertPayload.valor_tonelada_km, 150);
+  assert.equal(insertPayload.status, 'pendente', 'novo frete aguarda foto inicial antes de ativar');
 });
 
 test('create tonelada_km COM km_final → valor_frete calculado', async () => {
@@ -85,4 +87,5 @@ test('create valor_fixo → valor_frete digitado é gravado (comportamento antig
   assert.equal(insertPayload.modalidade_calculo, 'valor_fixo');
   assert.equal(insertPayload.toneladas, null);
   assert.equal(insertPayload.valor_tonelada_km, null);
+  assert.equal(insertPayload.status, 'ativo', 'cliente antigo sem marcador mantém compatibilidade');
 });
