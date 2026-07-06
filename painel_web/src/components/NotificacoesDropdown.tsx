@@ -2,6 +2,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Bell, Check, CheckCheck, Loader2, X } from 'lucide-react';
 import api from '../api';
 
+// Evento global do browser disparado quando chega notificação nova (o contador
+// sobe no polling). Páginas com listas relevantes (Dashboard, Gerenciamento de
+// Fretes) ouvem e refazem apenas o fetch da tela aberta — sem recarregar a página.
+export const EVENTO_NOTIFICACOES_NOVAS = 'matopiba:notificacoes:novas';
+
 type Notificacao = {
   id: string;
   tipo: string;
@@ -33,6 +38,8 @@ export const NotificacoesDropdown: React.FC = () => {
       // contador nao repete o alerta para a mesma notificacao.
       if (contadorAnterior.current !== null && novo > contadorAnterior.current) {
         setToast(true);
+        // Avisa as telas abertas para refazerem o fetch (refresh automático).
+        window.dispatchEvent(new CustomEvent(EVENTO_NOTIFICACOES_NOVAS));
       }
       contadorAnterior.current = novo;
       setNaoLidas(novo);

@@ -31,15 +31,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _carregarContador();
-    // Ao receber um push em primeiro plano, atualiza o badge do sino na hora.
-    PushService.onPushRecebido = _carregarContador;
+    // Ao receber um push em primeiro plano, atualiza o badge do sino E os dados
+    // da tela (Últimos Fretes/Lançamentos) sem o usuário precisar recarregar.
+    PushService.onPushRecebido = _onEventoNotificacao;
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     // Evita segurar referência a este State após ser descartado.
-    if (PushService.onPushRecebido == _carregarContador) {
+    if (PushService.onPushRecebido == _onEventoNotificacao) {
       PushService.onPushRecebido = null;
     }
     super.dispose();
@@ -48,11 +49,20 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // Ao voltar do segundo plano, o push pode ter chegado enquanto o app estava
-    // oculto (o contador foi mexido no servidor). Recarrega o badge sem exigir
-    // que o usuário abra o sino.
+    // oculto (contador e dados mexidos no servidor). Recarrega badge + dados sem
+    // exigir que o usuário abra o sino ou puxe a lista.
     if (state == AppLifecycleState.resumed) {
-      _carregarContador();
+      _onEventoNotificacao();
     }
+  }
+
+  /// Reação a um evento de notificação (push em foreground ou volta do 2º plano):
+  /// atualiza o badge do sino e recarrega os dados financeiros. `loadData` mantém
+  /// o conteúdo atual visível (o spinner central só aparece na 1ª carga), então
+  /// o refresh é silencioso. Não gera loop: loadData não dispara notificação.
+  void _onEventoNotificacao() {
+    _carregarContador();
+    if (mounted) context.read<FinanceProvider>().loadData();
   }
 
   /// Busca o contador remoto de não lidas para o badge do sino.

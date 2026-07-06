@@ -7,6 +7,7 @@ import {
   Save, Edit, Unlock, Lock, ChevronLeft, Plus, Fuel, TrendingUp, Truck
 } from 'lucide-react';
 import api, { newClientRequestId } from '../api';
+import { EVENTO_NOTIFICACOES_NOVAS } from '../components/NotificacoesDropdown';
 
 // [PR2B] Card de métrica reutilizável. Recebe as classes de cor como strings
 // literais (nunca interpoladas) para não quebrar o purge do Tailwind.
@@ -190,6 +191,18 @@ export const Dashboard: React.FC = () => {
       loadMotoristaData(selectedMot.uid);
     }
   }, [selectedMot]);
+
+  // Refresh automático ao chegar notificação nova (evento global do sino):
+  // refaz o fetch da visão atual, sem recarregar a página. Listener limpo no
+  // unmount / a cada mudança de mês/motorista para não vazar closures antigas.
+  useEffect(() => {
+    const handler = () => {
+      loadDashboardData();
+      if (selectedMot) loadMotoristaData(selectedMot.uid);
+    };
+    window.addEventListener(EVENTO_NOTIFICACOES_NOVAS, handler);
+    return () => window.removeEventListener(EVENTO_NOTIFICACOES_NOVAS, handler);
+  }, [selectedMonth, selectedMot]);
 
   const handleAprovarDespesa = async (id: string, tipoItem: string, aprovado: boolean, obs?: string) => {
     const status = aprovado ? 'aprovado' : 'rejeitado';
