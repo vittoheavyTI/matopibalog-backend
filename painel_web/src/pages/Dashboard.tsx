@@ -391,9 +391,12 @@ export const Dashboard: React.FC = () => {
         setPlanoBloqueadoMsg(planoMsg);
         return;
       }
-      const msg = err?.response?.status === 409
-        ? (err.response.data?.message || 'Há lançamentos pendentes deste motorista.')
-        : 'Erro ao finalizar frete no servidor.';
+      // 409 = pendências; 422 = regra do novo fluxo de odômetro (ex.: falta a foto
+      // final). Em ambos os casos, mostra a mensagem real do backend — inclusive para
+      // orientar a anexar a foto do odômetro no Gerenciamento de Fretes.
+      const msg = (err?.response?.status === 409 || err?.response?.status === 422)
+        ? (err.response.data?.message || 'Não foi possível finalizar o frete.')
+        : (err?.response?.data?.message || 'Erro ao finalizar frete no servidor.');
       alert(msg);
     }
   };

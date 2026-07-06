@@ -182,6 +182,10 @@ export const GerenciamentoViagens: React.FC = () => {
         modalidade_calculo: f.modalidade_calculo || 'valor_fixo',
         toneladas: f.toneladas, valor_tonelada_km: f.valor_tonelada_km,
         data: f.data, criadoEm: f.data,
+        // Paths de odômetro: sem eles o pré-check de finalização (foto final
+        // obrigatória no novo fluxo) fica sempre desligado. Preserva ambos.
+        foto_odometro_inicial_path: f.foto_odometro_inicial_path || null,
+        foto_odometro_final_path: f.foto_odometro_final_path || null,
         status: f.status, placa: f.placa
       })));
       setDespesas(despesasData.filter((d: any) => d.status !== 'finalizado').map((d: any) => ({
