@@ -165,17 +165,21 @@ exports.create = async (req, res) => {
     // Valor do frete por modalidade:
     //  - valor_fixo: usa o valor_frete digitado.
     //  - tonelada_km: DERIVADO = toneladas * (km_final - km_inicial) * valor_tonelada_km.
-    //    Na criação o km_final normalmente ainda não existe → valor fica null
-    //    (provisório) e é calculado na finalização. Se ambos os KMs já vierem no
-    //    create, calcula desde já. valor_frete enviado no body é ignorado aqui.
+    //    Na criação o km_final normalmente ainda não existe → o valor real ainda não
+    //    é calculável. Como a coluna fretes.valor_frete é NOT NULL (sem CHECK > 0,
+    //    confirmado no schema de produção), gravamos 0 PROVISÓRIO nesse caso — nunca
+    //    null (o null quebrava o INSERT com 23502). O valor definitivo é calculado na
+    //    finalização (ou no update, quando o km_final for informado). Se ambos os KMs
+    //    já vierem no create, calcula desde já. valor_frete do body é ignorado aqui.
     let valorFreteFinal = valor_frete !== undefined ? Number(valor_frete) : null;
     if (modalidade === 'tonelada_km') {
-      valorFreteFinal = calcularValorToneladaKm({
+      const calc = calcularValorToneladaKm({
         toneladas,
         valorToneladaKm: valor_tonelada_km,
         kmInicial: km_inicial,
         kmFinal: km_final,
       });
+      valorFreteFinal = calc !== null ? calc : 0;
     }
 
     // Comissão só para VINCULADO (empresa.tipo conhecido e ≠ 'autonomo'). Autônomo e
@@ -213,6 +217,14 @@ exports.create = async (req, res) => {
     res.status(201).json({ ...data, comissao_calculada: comissao });
   } catch (error) {
     console.error(error);
+    // Violação de restrição do banco (NOT NULL / CHECK) → 400 com mensagem em
+    // português, em vez do genérico "Erro ao criar frete." que escondia a causa.
+    // Não expõe detalhe interno do Postgres ao cliente.
+    if (error?.code === '23502' || error?.code === '23514') {
+      return res.status(400).json({
+        message: 'Não foi possível salvar o frete. Verifique os campos: no tonelada/km informe toneladas, valor por tonelada/km e KM inicial; no valor fixo informe o valor do frete.'
+      });
+    }
     res.status(500).json({ message: 'Erro ao criar frete.' });
   }
 };
