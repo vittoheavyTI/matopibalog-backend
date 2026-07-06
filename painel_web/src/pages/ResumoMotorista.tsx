@@ -2,10 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { format, startOfMonth, endOfMonth } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { formatCurrency } from '../utils';
-import { Calendar, Users, User, Download, Truck, DollarSign, ChevronLeft, ChevronRight, Fuel, FileText, TrendingUp, Printer } from 'lucide-react';
+import { Calendar, Users, User, Download, Truck, DollarSign, ChevronLeft, ChevronRight, Fuel, FileText, TrendingUp, Printer, Building2 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import api from '../api';
+import { useAuth } from '../contexts/AuthContext';
 
 const safeFmt = (d: any, fmt: string) => {
   if (!d) return '-';
@@ -49,7 +50,14 @@ class CatchError extends React.Component<{ children: React.ReactNode }, { error:
 }
 
 export const ResumoMotorista: React.FC = () => {
+  const { user } = useAuth();
+  const isSuperAdmin = user?.is_super_admin === true;
   const [motoristas, setMotoristas] = useState<any[]>([]);
+  const [empresas, setEmpresas] = useState<any[]>([]);
+  const [selectedEmpresaId, setSelectedEmpresaId] = useState<string>('todas');
+  const [empresaBusca, setEmpresaBusca] = useState<string>('');
+  const [empresaAberta, setEmpresaAberta] = useState<boolean>(false);
+  const [tipoConta, setTipoConta] = useState<string>('todos');
   const [selectedMot, setSelectedMot] = useState<string>('todos');
   const [motoristaBusca, setMotoristaBusca] = useState<string>('');
   const [motoristaAberto, setMotoristaAberto] = useState<boolean>(false);
@@ -78,29 +86,61 @@ export const ResumoMotorista: React.FC = () => {
   const [tripLoading, setTripLoading] = useState(false);
 
   useEffect(() => {
-    const init = async () => {
+    if (!isSuperAdmin) {
+      setEmpresas([]);
+      setSelectedEmpresaId('todas');
+      setTipoConta('todos');
+      return;
+    }
+
+    api.get('/painel-admin/empresas')
+      .then(response => {
+        setEmpresas((response.data || []).map((empresa: any) => ({
+          id: empresa.id,
+          nome: empresa.nome,
+          tipo: empresa.tipo
+        })).sort((a: any, b: any) => (a.nome || '').localeCompare(b.nome || '')));
+      })
+      .catch(err => console.error('Erro ao buscar contas:', err));
+  }, [isSuperAdmin]);
+
+  useEffect(() => {
+    const carregarMotoristas = async () => {
       try {
-        const response = await api.get('/admin/motoristas');
-        setMotoristas((response.data || []).map((m: any) => ({
-          uid: m.id,
-          nomeCompleto: m.usuarios.nome,
-          percentualComissao: m.percentual_comissao,
-          placa: m.placa_veiculo,
-          empresaTipo: m.empresa_tipo
-        })).sort((a: any, b: any) => (a.nomeCompleto || '').localeCompare(b.nomeCompleto || '')));
+        const params = isSuperAdmin && selectedEmpresaId !== 'todas'
+          ? { empresa_id: selectedEmpresaId }
+          : undefined;
+        const response = await api.get('/admin/motoristas', { params });
+        setMotoristas((response.data || []).map((m: any) => {
+          const empresa = Array.isArray(m.empresas) ? m.empresas[0] : m.empresas;
+          return {
+            uid: m.id,
+            nomeCompleto: m.usuarios?.nome || 'Motorista',
+            percentualComissao: m.percentual_comissao,
+            placa: m.placa_veiculo,
+            empresaId: m.usuarios?.empresa_id || m.empresa_id,
+            empresaNome: empresa?.nome || m.empresa_nome || 'Conta não identificada',
+            empresaTipo: empresa?.tipo || m.empresa_tipo
+          };
+        }).sort((a: any, b: any) => (a.nomeCompleto || '').localeCompare(b.nomeCompleto || '')));
       } catch (err) {
         console.error('Erro ao buscar motoristas:', err);
+        setMotoristas([]);
       }
     };
-    init();
-  }, []);
+    carregarMotoristas();
+  }, [isSuperAdmin, selectedEmpresaId]);
 
   useEffect(() => {
     setSelectedTripId(null);
     if (motoristas.length > 0 || selectedMot !== 'todos') {
       loadData();
+    } else {
+      setStats([]);
+      setTotals(null);
+      setFretesDetalhados([]);
     }
-  }, [selectedDate, selectedMot, motoristas]);
+  }, [selectedDate, selectedMot, motoristas, tipoConta, selectedEmpresaId]);
 
   // Histórico: aprovado e finalizado entram; pendente fica fora; rejeitado entra na etapa de auditoria (C)
   useEffect(() => {
@@ -117,10 +157,13 @@ export const ResumoMotorista: React.FC = () => {
     let vivo = true;
     (async () => {
       try {
+        const empresaParam = isSuperAdmin && selectedEmpresaId !== 'todas'
+          ? '&empresa_id=' + encodeURIComponent(selectedEmpresaId)
+          : '';
         const [rd, ra, rv] = await Promise.all([
-          api.get('/despesas?frete_id=' + selectedTripId),
-          api.get('/abastecimentos?frete_id=' + selectedTripId),
-          api.get('/vales?frete_id=' + selectedTripId),
+          api.get('/despesas?frete_id=' + selectedTripId + empresaParam),
+          api.get('/abastecimentos?frete_id=' + selectedTripId + empresaParam),
+          api.get('/vales?frete_id=' + selectedTripId + empresaParam),
         ]);
         if (!vivo) return;
         const resolvido = (s: string) => s === 'aprovado' || s === 'finalizado';
@@ -156,7 +199,7 @@ export const ResumoMotorista: React.FC = () => {
       }
     })();
     return () => { vivo = false; };
-  }, [selectedTripId]);
+  }, [selectedTripId, isSuperAdmin, selectedEmpresaId]);
 
   const loadData = async () => {
     const date = new Date(selectedDate + '-01T12:00:00');
@@ -179,6 +222,14 @@ export const ResumoMotorista: React.FC = () => {
         valesUrl += '&motorista_id=' + selectedMot;
       }
 
+      if (isSuperAdmin && selectedEmpresaId !== 'todas') {
+        const empresaParam = '&empresa_id=' + encodeURIComponent(selectedEmpresaId);
+        fretesUrl += empresaParam;
+        despesasUrl += empresaParam;
+        abastecimentosUrl += empresaParam;
+        valesUrl += empresaParam;
+      }
+
       const [fretesResult, despesasResult, abastecimentosResult, valesResult] = await Promise.all([
         api.get(fretesUrl),
         api.get(despesasUrl),
@@ -191,10 +242,22 @@ export const ResumoMotorista: React.FC = () => {
       const abastecimentosData = abastecimentosResult.data || [];
       const valesData = valesResult.data || [];
 
-      const fretes = (fretesData || []).filter((f: any) => f.status === 'finalizado').map((f: any) => ({
+      const motoristasNoEscopo = motoristas.filter((m: any) =>
+        (tipoConta === 'todos' || m.empresaTipo === tipoConta) &&
+        (selectedMot === 'todos' || m.uid === selectedMot)
+      );
+      const motoristasIdsNoEscopo = new Set(motoristasNoEscopo.map((m: any) => m.uid));
+      const motoristaPorId = new Map(motoristas.map((m: any) => [m.uid, m]));
+
+      const fretes = (fretesData || []).filter((f: any) =>
+        f.status === 'finalizado' && motoristasIdsNoEscopo.has(f.motorista_id)
+      ).map((f: any) => ({
         id: f.id,
         motoristaUid: f.motorista_id,
         motoristaNome: f.motoristas?.usuarios?.nome || 'N/A',
+        empresaId: motoristaPorId.get(f.motorista_id)?.empresaId,
+        empresaNome: motoristaPorId.get(f.motorista_id)?.empresaNome,
+        empresaTipo: motoristaPorId.get(f.motorista_id)?.empresaTipo,
         placa: f.placa,
         origem: f.origem,
         destino: f.destino,
@@ -216,7 +279,9 @@ export const ResumoMotorista: React.FC = () => {
 
       // Histórico: inclui aprovados E finalizados (ao finalizar a viagem, itens aprovados viram 'finalizado').
       // Pendentes/rejeitados ficam fora (rejeitados em auditoria = bloco próprio).
-      const despesas = (despesasData || []).filter((d: any) => d.status === 'aprovado' || d.status === 'finalizado').map((d: any) => ({
+      const despesas = (despesasData || []).filter((d: any) =>
+        (d.status === 'aprovado' || d.status === 'finalizado') && motoristasIdsNoEscopo.has(d.motorista_id)
+      ).map((d: any) => ({
         motoristaUid: d.motorista_id,
         valor: parseFloat(d.valor),
         descricao: d.descricao,
@@ -227,7 +292,9 @@ export const ResumoMotorista: React.FC = () => {
         fotoUrl: d.foto_url
       }));
 
-      const abastecimentos = (abastecimentosData || []).filter((a: any) => a.status === 'aprovado' || a.status === 'finalizado').map((a: any) => ({
+      const abastecimentos = (abastecimentosData || []).filter((a: any) =>
+        (a.status === 'aprovado' || a.status === 'finalizado') && motoristasIdsNoEscopo.has(a.motorista_id)
+      ).map((a: any) => ({
         motoristaUid: a.motorista_id,
         valorTotal: parseFloat(a.valor_total),
         litros: parseFloat(a.litros),
@@ -240,7 +307,9 @@ export const ResumoMotorista: React.FC = () => {
         fotoUrl: a.foto_url
       }));
 
-      const vales = (valesData || []).filter((v: any) => v.status === 'aprovado' || v.status === 'finalizado').map((v: any) => ({
+      const vales = (valesData || []).filter((v: any) =>
+        (v.status === 'aprovado' || v.status === 'finalizado') && motoristasIdsNoEscopo.has(v.motorista_id)
+      ).map((v: any) => ({
         motoristaUid: v.motorista_id,
         valor: parseFloat(v.valor),
         // Vale: descricao correto; posto é fallback p/ registros antigos
@@ -262,7 +331,7 @@ export const ResumoMotorista: React.FC = () => {
         setValesDet([]);
       }
 
-      const targetMots = motoristas.filter(m => selectedMot === 'todos' || m.uid === selectedMot);
+      const targetMots = motoristasNoEscopo;
 
       const rawStats = targetMots.map(m => {
         const mFretes = fretes.filter((f: any) => f.motoristaUid === m.uid);
@@ -286,6 +355,8 @@ export const ResumoMotorista: React.FC = () => {
           uid: m.uid,
           // PR7B.1: tipo de empresa propagado p/ separar vinculado x autônomo na TELA (cards + tabela).
           empresaTipo: m.empresaTipo,
+          empresaId: m.empresaId,
+          empresaNome: m.empresaNome,
           viagens: mFretes.length,
           totalFrete,
           comissao,
@@ -1376,14 +1447,25 @@ export const ResumoMotorista: React.FC = () => {
     nome: format(new Date(2000, i, 1), 'MMMM', { locale: ptBR }),
   }));
   // Filtro só visual da lista do combobox; nunca altera dados carregados nem permissões.
+  const contaLabel = (conta: any) =>
+    `${conta?.nome || 'Conta não identificada'}${conta?.tipo === 'autonomo' ? ' (Autônomo)' : ''}`;
+  const empresasFiltradas = empresas.filter(empresa =>
+    (tipoConta === 'todos' || empresa.tipo === tipoConta) &&
+    (!empresaBusca.trim() || (empresa.nome || '').toLowerCase().includes(empresaBusca.trim().toLowerCase()))
+  );
+  const empresaSelecionada = empresas.find(empresa => empresa.id === selectedEmpresaId);
+  const nomeEmpresaSelecionada = selectedEmpresaId === 'todas'
+    ? 'Todas as contas'
+    : contaLabel(empresaSelecionada);
   const motoristasFiltrados = motoristas.filter(m =>
-    !motoristaBusca.trim() ||
-    (m.nomeCompleto || '').toLowerCase().includes(motoristaBusca.trim().toLowerCase())
+    (tipoConta === 'todos' || m.empresaTipo === tipoConta) &&
+    (!motoristaBusca.trim() || (m.nomeCompleto || '').toLowerCase().includes(motoristaBusca.trim().toLowerCase()))
   );
   // Nome exibido no campo quando o dropdown está fechado (sincroniza com selectedMot).
   const nomeMotoristaSelecionado = selectedMot === 'todos'
     ? 'Todos os Motoristas'
     : (motoristas.find(m => m.uid === selectedMot)?.nomeCompleto || '');
+  const motoristaSelecionado = motoristas.find(m => m.uid === selectedMot);
 
   // PR7B.1: separa motoristas vinculados de autônomos na TELA (cards + tabela do modo "Todos").
   // Vinculado mantém Comissão/Saldo Líq.; autônomo usa Faturamento/Gastos/Resultado.
@@ -1473,6 +1555,7 @@ export const ResumoMotorista: React.FC = () => {
           <thead className="bg-gray-50 text-[10px] font-bold uppercase text-gray-400 border-b">
             <tr>
               <th className="p-4">Motorista</th>
+              {isSuperAdmin && <th className="p-4">Conta</th>}
               <th className="p-4 text-right">Fretes</th>
               {isAut ? (
                 <>
@@ -1501,6 +1584,11 @@ export const ResumoMotorista: React.FC = () => {
                     <span className="font-semibold text-gray-800">{s.nome}</span>
                   </div>
                 </td>
+                {isSuperAdmin && (
+                  <td className="p-4 text-sm text-gray-600">
+                    {contaLabel({ nome: s.empresaNome, tipo: s.empresaTipo })}
+                  </td>
+                )}
                 <td className="p-4 text-right font-bold text-gray-700">{s.viagens}</td>
                 {isAut ? (
                   <>
@@ -1528,6 +1616,7 @@ export const ResumoMotorista: React.FC = () => {
           <tfoot className="bg-gray-50 border-t-2 border-gray-200">
             <tr>
               <td className="p-4 font-black text-gray-800">SUBTOTAL</td>
+              {isSuperAdmin && <td className="p-4" aria-hidden="true" />}
               <td className="p-4 text-right font-black text-gray-800">{tot.viagens}</td>
               {isAut ? (
                 <>
@@ -1619,6 +1708,74 @@ export const ResumoMotorista: React.FC = () => {
             ))}
           </select>
         </div>
+        {isSuperAdmin && (
+          <>
+            <div className="flex items-center space-x-2">
+              <Building2 size={18} className="text-gray-400" />
+              <div className="relative w-64">
+                <input
+                  type="text"
+                  value={empresaAberta ? empresaBusca : nomeEmpresaSelecionada}
+                  onChange={e => setEmpresaBusca(e.target.value)}
+                  onFocus={() => { setEmpresaAberta(true); setEmpresaBusca(''); }}
+                  onBlur={() => setEmpresaAberta(false)}
+                  placeholder="Todas as contas"
+                  aria-label="Filtrar por conta"
+                  className="border rounded-lg p-2 outline-none focus:border-blue-500 w-full bg-white"
+                />
+                {empresaAberta && (
+                  <ul className="absolute z-30 mt-1 w-full max-h-60 overflow-auto bg-white border border-gray-200 rounded-lg shadow-lg">
+                    <li
+                      onMouseDown={() => {
+                        setSelectedEmpresaId('todas');
+                        setSelectedMot('todos');
+                        setEmpresaAberta(false);
+                        setEmpresaBusca('');
+                      }}
+                      className="px-3 py-2 cursor-pointer hover:bg-blue-50 text-sm font-medium"
+                    >
+                      Todas as contas
+                    </li>
+                    {empresasFiltradas.map(empresa => (
+                      <li
+                        key={empresa.id}
+                        onMouseDown={() => {
+                          setSelectedEmpresaId(empresa.id);
+                          setSelectedMot('todos');
+                          setEmpresaAberta(false);
+                          setEmpresaBusca('');
+                        }}
+                        className="px-3 py-2 cursor-pointer hover:bg-blue-50 text-sm"
+                      >
+                        {contaLabel(empresa)}
+                      </li>
+                    ))}
+                    {empresasFiltradas.length === 0 && (
+                      <li className="px-3 py-2 text-sm text-gray-400">Nenhuma conta encontrada</li>
+                    )}
+                  </ul>
+                )}
+              </div>
+            </div>
+            <select
+              value={tipoConta}
+              onChange={e => {
+                const novoTipo = e.target.value;
+                setTipoConta(novoTipo);
+                setSelectedMot('todos');
+                if (empresaSelecionada && novoTipo !== 'todos' && empresaSelecionada.tipo !== novoTipo) {
+                  setSelectedEmpresaId('todas');
+                }
+              }}
+              aria-label="Filtrar por tipo de conta"
+              className="border rounded-lg p-2 outline-none focus:border-blue-500 bg-white"
+            >
+              <option value="todos">Todos</option>
+              <option value="empresa">Empresas</option>
+              <option value="autonomo">Autônomos</option>
+            </select>
+          </>
+        )}
         <div className="flex items-center space-x-2">
           <Users size={18} className="text-gray-400" />
           <div className="relative w-56">
@@ -1645,7 +1802,8 @@ export const ResumoMotorista: React.FC = () => {
                     onMouseDown={() => { setSelectedMot(m.uid); setMotoristaAberto(false); setMotoristaBusca(''); }}
                     className="px-3 py-2 cursor-pointer hover:bg-blue-50 text-sm"
                   >
-                    {m.nomeCompleto}
+                    <span className="block">{m.nomeCompleto}</span>
+                    {isSuperAdmin && <span className="block text-[10px] text-gray-400">{contaLabel({ nome: m.empresaNome, tipo: m.empresaTipo })}</span>}
                   </li>
                 ))}
                 {motoristasFiltrados.length === 0 && (
@@ -1686,6 +1844,11 @@ export const ResumoMotorista: React.FC = () => {
                     <Truck size={18} className="mr-2 text-blue-600" />
                     Fretes de {motoristas.find(m => m.uid === selectedMot)?.nomeCompleto || 'Motorista'}
                   </h3>
+                  {isSuperAdmin && motoristaSelecionado && (
+                    <p className="mt-1 ml-6 text-xs text-gray-500">
+                      Conta: {contaLabel({ nome: motoristaSelecionado.empresaNome, tipo: motoristaSelecionado.empresaTipo })}
+                    </p>
+                  )}
                 </div>
                 <div className="divide-y divide-gray-100">
                   {fretesDetalhados.map(f => {
@@ -1711,6 +1874,11 @@ export const ResumoMotorista: React.FC = () => {
                               <p className="text-xs text-gray-400">
                                 {f.placa} {dist > 0 ? ` • ${(dist || 0).toLocaleString()} km` : ''}
                               </p>
+                              {isSuperAdmin && (
+                                <p className="text-[11px] text-blue-600 mt-0.5">
+                                  {contaLabel({ nome: f.empresaNome, tipo: f.empresaTipo })}
+                                </p>
+                              )}
                             </div>
                           </div>
                           <div className="flex items-center space-x-4 flex-shrink-0">
