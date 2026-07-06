@@ -116,6 +116,7 @@ export const Configuracoes: React.FC = () => {
   const [footerWidth, setFooterWidth] = useState(() => Number(localStorage.getItem(`${PREFIX}footer_width`)) || 80);
   const [inputBgColor, setInputBgColor] = useState(() => localStorage.getItem(`${PREFIX}input_bg`) || '#ffffff');
   const [inputBorderColor, setInputBorderColor] = useState(() => localStorage.getItem(`${PREFIX}input_border`) || '#e5e7eb');
+  const [cardOpacity, setCardOpacity] = useState(() => Number(localStorage.getItem(`${PREFIX}card_opacity`)) || 100);
 
   // Posição customizada do card
   const [cardOffsetX, setCardOffsetX] = useState(() => Number(localStorage.getItem(`${PREFIX}card_offset_x`)) || 0);
@@ -177,6 +178,7 @@ export const Configuracoes: React.FC = () => {
         if (d.footerWidth !== undefined) setFooterWidth(d.footerWidth);
         if (d.inputBgColor) setInputBgColor(d.inputBgColor);
         if (d.inputBorderColor) setInputBorderColor(d.inputBorderColor);
+        if (d.cardOpacity !== undefined) setCardOpacity(d.cardOpacity);
         if (d.loginTemplate) setSelectedTemplate(d.loginTemplate);
         // Config. Sistema (aba Sistema): carrega valores globais existentes, se houver.
         setSistema((s) => ({
@@ -225,6 +227,7 @@ export const Configuracoes: React.FC = () => {
       footerWidth,
       inputBgColor,
       inputBorderColor,
+      cardOpacity,
       loginTemplate: selectedTemplate,
       cardOffsetX,
       cardOffsetY,
@@ -346,6 +349,7 @@ export const Configuracoes: React.FC = () => {
     localStorage.setItem(`${PREFIX}footer_width`, footerWidth.toString());
     localStorage.setItem(`${PREFIX}input_bg`, inputBgColor);
     localStorage.setItem(`${PREFIX}input_border`, inputBorderColor);
+    localStorage.setItem(`${PREFIX}card_opacity`, cardOpacity.toString());
     localStorage.setItem(`${PREFIX}card_offset_x`, cardOffsetX.toString());
     localStorage.setItem(`${PREFIX}card_offset_y`, cardOffsetY.toString());
     await syncConfigToServer();
@@ -482,8 +486,8 @@ export const Configuracoes: React.FC = () => {
           </div>
 
           <div className="flex justify-end pt-4 border-t border-gray-50">
-            <button onClick={handleSaveCompany} className="flex items-center px-8 py-3 bg-green-700 text-white rounded-xl font-bold shadow-lg shadow-green-100 hover:bg-green-800 transition-all active:scale-95">
-              {showSaved ? <Check size={20} className="mr-2" /> : <Save size={20} className="mr-2" />}
+            <button onClick={handleSaveCompany} className="inline-flex items-center px-4 py-2.5 bg-green-700 text-white rounded-xl font-medium text-sm shadow-sm hover:bg-green-800 transition-all active:scale-95">
+              {showSaved ? <Check size={18} className="mr-2" /> : <Save size={18} className="mr-2" />}
               {showSaved ? 'Salvo!' : 'Salvar Configurações'}
             </button>
           </div>
@@ -505,11 +509,6 @@ export const Configuracoes: React.FC = () => {
             <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">E-mail de Suporte</label>
             <input type="email" className="w-full border-2 border-gray-50 rounded-xl p-2.5 outline-none focus:border-green-700 bg-gray-50/50" value={sistema.email_suporte} onChange={e => setSistema({ ...sistema, email_suporte: e.target.value })} />
             <p className="text-xs text-gray-400 mt-1 ml-1">Exibido no caminho de regularização (contato de suporte para autônomos).</p>
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Duração padrão do trial (dias)</label>
-            <input type="number" className="w-full border-2 border-gray-50 rounded-xl p-2.5 outline-none focus:border-green-700 bg-gray-50/50" value={sistema.trial_dias} onChange={e => setSistema({ ...sistema, trial_dias: e.target.value })} />
-            <p className="text-xs text-gray-400 mt-1 ml-1">Referência para novas contas. A data efetiva do trial é definida na criação/edição da empresa.</p>
           </div>
           {/* Recursos ainda sem efeito no servidor — marcados como "Em preparação" para não confundir. */}
           {[
@@ -605,7 +604,7 @@ export const Configuracoes: React.FC = () => {
                 padding: '16px',
               }}>
                 <div style={{
-                  backgroundColor: tmplPreview.cardBackground,
+                  backgroundColor: `color-mix(in srgb, ${tmplPreview.cardBackground} ${cardOpacity}%, transparent)`,
                   width: '100%',
                   maxWidth: `${Math.round(tmplPreview.cardWidth * 0.72)}px`,
                   borderRadius: tmplPreview.cardBorderRadius,
@@ -723,6 +722,16 @@ export const Configuracoes: React.FC = () => {
             </div>
           </div>
 
+          {/* Card */}
+          <div className="border-t border-gray-100 pt-6">
+            <label className="block text-xs font-bold text-gray-400 uppercase mb-3 ml-1">Aparência do Card</label>
+            <div className="max-w-xl">
+              <div className="flex justify-between text-sm mb-1"><span className="font-medium text-gray-700">Opacidade do card</span><span className="text-gray-500">{cardOpacity}%</span></div>
+              <p className="text-xs text-gray-500 mb-2">Ajusta somente o fundo do card; campos, textos e tamanho permanecem inalterados.</p>
+              <input type="range" min="20" max="100" value={cardOpacity} onChange={e => { const v = Number(e.target.value); setCardOpacity(v); localStorage.setItem(`${PREFIX}card_opacity`, v.toString()); }} className="w-full accent-green-700" />
+            </div>
+          </div>
+
           {/* Campos */}
           <div className="border-t border-gray-100 pt-6">
             <label className="block text-xs font-bold text-gray-400 uppercase mb-3 ml-1">Aparência dos Campos</label>
@@ -803,8 +812,8 @@ export const Configuracoes: React.FC = () => {
               <input type="text" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-green-700 bg-gray-50/50" placeholder="© 2026 Minha Transportadora. Todos os direitos reservados." value={footerText} onChange={e => { setFooterText(e.target.value); localStorage.setItem(`${PREFIX}login_footer`, e.target.value); }} />
             </div>
 
-            <button onClick={handleSaveFooter} className={`flex items-center px-6 py-3 rounded-xl font-bold transition-all ${showSaved ? 'bg-green-600 text-white' : 'bg-green-700 text-white hover:bg-green-800'}`}>
-              {showSaved ? <Check size={18} className="mr-1" /> : <Save size={18} className="mr-1" />}
+            <button onClick={handleSaveFooter} className={`inline-flex items-center px-4 py-2.5 rounded-xl font-medium text-sm shadow-sm transition-all ${showSaved ? 'bg-green-600 text-white' : 'bg-green-700 text-white hover:bg-green-800'}`}>
+              {showSaved ? <Check size={18} className="mr-2" /> : <Save size={18} className="mr-2" />}
               {showSaved ? 'Salvo!' : 'Salvar Aparência'}
             </button>
           </div>

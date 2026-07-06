@@ -10,7 +10,16 @@ import {
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import api, { newClientRequestId } from '../api';
 import { EVENTO_NOTIFICACOES_NOVAS } from '../components/NotificacoesDropdown';
+import { PlanoBloqueadoCard } from '../components/PlanoBloqueadoCard';
 import { useAuth } from '../contexts/AuthContext';
+
+const extrairMensagemPlano = (err: any): string | null => {
+  if (err?.response?.status !== 403) return null;
+  const message = err?.response?.data?.message || '';
+  return /plano|trial|suspens|bloquead|expirad|regulariz/i.test(message)
+    ? message || 'Sua empresa está suspensa ou bloqueada.'
+    : null;
+};
 
 // [PR2B] Card de métrica reutilizável. Recebe as classes de cor como strings
 // literais (nunca interpoladas) para não quebrar o purge do Tailwind.
@@ -113,6 +122,7 @@ export const Dashboard: React.FC = () => {
   // em estado (identidade estável) para não disparar o useEffect em loop.
   const [selectedMonth] = useState(new Date());
   const [selectedMot, setSelectedMot] = useState<any | null>(null);
+  const [planoBloqueadoMsg, setPlanoBloqueadoMsg] = useState<string | null>(null);
   const [editingItem, setEditingItem] = useState<{ id: string, type: 'despesa' | 'manutencao' | 'abastecimento' | 'vale' | 'frete', data: any } | null>(null);
 
   // Criação de frete foi centralizada no Gerenciamento de Fretes (fonte de verdade).
@@ -376,6 +386,11 @@ export const Dashboard: React.FC = () => {
       loadDashboardData();
       alert('Frete finalizado com sucesso! Os dados foram movidos para o resumo histórico.');
     } catch (err: any) {
+      const planoMsg = extrairMensagemPlano(err);
+      if (planoMsg) {
+        setPlanoBloqueadoMsg(planoMsg);
+        return;
+      }
       const msg = err?.response?.status === 409
         ? (err.response.data?.message || 'Há lançamentos pendentes deste motorista.')
         : 'Erro ao finalizar frete no servidor.';
@@ -548,6 +563,10 @@ export const Dashboard: React.FC = () => {
     receita: parseFloat(e.planos?.preco_mensal || 0),
   }));
 
+  if (planoBloqueadoMsg) {
+    return <div className="pt-10"><PlanoBloqueadoCard message={planoBloqueadoMsg} onRegularizar={() => navigate('/minhas-faturas')} /></div>;
+  }
+
   return (
     <div className="space-y-5 pb-10">
       {!selectedMot && (
@@ -618,7 +637,7 @@ export const Dashboard: React.FC = () => {
                 <p className="text-xs text-gray-400">Top 8 por valor mensal · {empresasPagantes.length} pagante(s) · {empresasAtivas.length} ativa(s)</p>
               </div>
               {empresasPagantes.length > 8 && (
-                <button onClick={() => navigate('/painel-administrativo/assinaturas')} className="text-xs font-semibold text-green-700 hover:underline flex-shrink-0">Ver todas →</button>
+                <button onClick={() => navigate('/painel-administrativo/financeiro?aba=visao-geral')} className="text-xs font-semibold text-green-700 hover:underline flex-shrink-0">Ver todas →</button>
               )}
             </div>
             {receitaChart.length === 0 ? (
@@ -640,7 +659,7 @@ export const Dashboard: React.FC = () => {
             )}
           </div>
           <div className="space-y-4">
-            <button onClick={() => navigate('/painel-administrativo/assinaturas')} className="block w-full text-left bg-white rounded-xl border border-gray-100 shadow-sm p-4 hover:border-amber-200 hover:shadow transition-all">
+            <button onClick={() => navigate('/painel-administrativo/financeiro?aba=assinaturas')} className="block w-full text-left bg-white rounded-xl border border-gray-100 shadow-sm p-4 hover:border-amber-200 hover:shadow transition-all">
               <h3 className="font-bold text-gray-800 text-sm mb-2 flex items-center justify-between">
                 <span className="flex items-center"><Clock size={15} className="mr-1.5 text-amber-500" /> Empresas em Trial</span>
                 <span className="text-[10px] font-bold text-amber-600 bg-amber-100 px-2 py-0.5 rounded-full">{empresasTrial.length}</span>
@@ -665,10 +684,10 @@ export const Dashboard: React.FC = () => {
                 <button onClick={() => navigate('/painel-administrativo/empresas')} className="flex items-center gap-2 w-full px-3 py-2 bg-blue-50 hover:bg-blue-100 rounded-lg text-sm text-gray-700 transition-colors">
                   <Building2 size={15} className="text-blue-500 flex-shrink-0" /> <span className="flex-1 text-left">{empresasAtivas.length} empresa(s) ativa(s)</span>
                 </button>
-                <button onClick={() => navigate('/painel-administrativo/assinaturas')} className="flex items-center gap-2 w-full px-3 py-2 bg-yellow-50 hover:bg-yellow-100 rounded-lg text-sm text-gray-700 transition-colors">
+                <button onClick={() => navigate('/painel-administrativo/financeiro?aba=assinaturas')} className="flex items-center gap-2 w-full px-3 py-2 bg-yellow-50 hover:bg-yellow-100 rounded-lg text-sm text-gray-700 transition-colors">
                   <Clock size={15} className="text-yellow-500 flex-shrink-0" /> <span className="flex-1 text-left">{empresasTrial.length} em período de teste</span>
                 </button>
-                <button onClick={() => navigate('/painel-administrativo/faturas')} className="flex items-center gap-2 w-full px-3 py-2 bg-red-50 hover:bg-red-100 rounded-lg text-sm text-gray-700 transition-colors">
+                <button onClick={() => navigate('/painel-administrativo/financeiro?aba=alertas')} className="flex items-center gap-2 w-full px-3 py-2 bg-red-50 hover:bg-red-100 rounded-lg text-sm text-gray-700 transition-colors">
                   <AlertTriangle size={15} className="text-red-500 flex-shrink-0" /> <span className="flex-1 text-left">{empresasInadimplentes.length} suspensa(s)/bloqueada(s)</span>
                 </button>
               </div>

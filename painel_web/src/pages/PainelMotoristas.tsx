@@ -110,7 +110,7 @@ export const PainelMotoristas: React.FC = () => {
 
       <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
         <table className="w-full text-left">
-          <thead><tr className="bg-gray-50 text-gray-600 text-xs font-bold uppercase tracking-wider"><th className="px-4 py-2.5 border-b">Nome</th><th className="px-4 py-2.5 border-b">Email</th><th className="px-4 py-2.5 border-b">Empresa</th><th className="px-4 py-2.5 border-b">Status</th><th className="px-4 py-2.5 border-b text-center">Ações</th></tr></thead>
+          <thead><tr className="bg-gray-50 text-gray-600 text-xs font-bold uppercase tracking-wider"><th className="px-4 py-2.5 border-b">Motorista</th><th className="px-4 py-2.5 border-b">E-mail</th><th className="px-4 py-2.5 border-b">Empresa/conta</th><th className="px-4 py-2.5 border-b">Status</th><th className="px-4 py-2.5 border-b text-center">Ações</th></tr></thead>
           <tbody className="divide-y divide-gray-50">
             {filtered.map(m => (
               <tr key={m.id} className="hover:bg-gray-50/50">
@@ -118,7 +118,7 @@ export const PainelMotoristas: React.FC = () => {
                 <td className="px-4 py-2.5 text-sm text-gray-600">{m.usuarios?.email || m.email}</td>
                 <td className="px-4 py-2.5 text-sm text-gray-600">
                   <p>{m.empresaNome}</p>
-                  <span className="text-[10px] font-bold uppercase text-gray-400">{m.empresaTipo === 'autonomo' ? 'Autônomo' : 'Vinculado'} · {m.temFreteAtivo ? 'Com frete ativo' : 'Sem frete ativo'}</span>
+                  <span className="text-[10px] font-bold uppercase text-gray-400">{m.empresaTipo === 'autonomo' ? 'Motorista autônomo' : 'Motorista vinculado'} · {m.temFreteAtivo ? 'Com frete ativo' : 'Sem frete ativo'}</span>
                 </td>
                 <td className="px-4 py-2.5">
                   {m.status === 'aprovado' ? <span className="flex items-center text-green-600 text-sm font-bold"><CheckCircle size={14} className="mr-1" />Aprovado</span> :
@@ -132,7 +132,7 @@ export const PainelMotoristas: React.FC = () => {
                       <button onClick={() => aprovar(m.id)} className="px-3 py-1.5 text-xs font-bold bg-green-500 text-white rounded-lg hover:bg-green-600 flex items-center"><CheckCircle size={14} className="mr-1" />Aprovar</button>
                       <button onClick={() => reprovar(m.id)} className="px-3 py-1.5 text-xs font-bold bg-red-500 text-white rounded-lg hover:bg-red-600 flex items-center"><XCircle size={14} className="mr-1" />Reprovar</button>
                     </>}
-                    <button onClick={() => resetSenha(m.id, m.usuarios?.nome || m.nome)} className="px-3 py-1.5 text-xs font-bold bg-gray-500 text-white rounded-lg hover:bg-gray-600 flex items-center"><KeyRound size={14} className="mr-1" />Resetar Senha</button>
+                    <button onClick={() => resetSenha(m.id, m.usuarios?.nome || m.nome)} title="Resetar senha" aria-label="Resetar senha do motorista" className="px-3 py-1.5 text-xs font-bold bg-gray-500 text-white rounded-lg hover:bg-gray-600 flex items-center"><KeyRound size={14} className="mr-1" />Resetar senha</button>
                   </div>
                 </td>
               </tr>

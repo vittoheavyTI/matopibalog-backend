@@ -31,7 +31,7 @@ const statusMap: Record<string, { label: string; color: string }> = {
   estornado: { label: 'Estornado', color: 'bg-purple-100 text-purple-800' },
 };
 
-export const Faturas: React.FC = () => {
+export const Faturas: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
   const [faturas, setFaturas] = useState<Fatura[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -79,13 +79,13 @@ export const Faturas: React.FC = () => {
 
   return (
     <div className="space-y-4 animate-fade-in">
-      <div className="flex items-center space-x-3 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+      {!embedded && <div className="flex items-center space-x-3 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
         <div className="bg-gray-800 p-2 rounded-lg text-white"><CreditCard size={24} /></div>
         <div>
           <h1 className="text-2xl font-bold text-gray-800">Faturas</h1>
           <p className="text-sm text-gray-500">Faturas de todas as contas — somente leitura, sem emitir cobrança</p>
         </div>
-      </div>
+      </div>}
 
       {/* Cards resumo */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

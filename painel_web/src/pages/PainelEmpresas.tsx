@@ -125,7 +125,7 @@ export const PainelEmpresas: React.FC = () => {
         <div className="bg-gray-800 p-2 rounded-lg text-white"><Shield size={24} /></div>
         <div>
           <h1 className="text-2xl font-bold text-gray-800">Empresas e Autônomos</h1>
-          <p className="text-sm text-gray-500">Gestão das contas da plataforma</p>
+          <p className="text-sm text-gray-500">Contas da plataforma. Pessoas com acesso são geridas separadamente em Usuários.</p>
         </div>
       </div>
 
@@ -148,7 +148,7 @@ export const PainelEmpresas: React.FC = () => {
         <table className="w-full text-left">
           <thead>
             <tr className="bg-gray-50 text-gray-600 text-xs font-bold uppercase tracking-wider">
-              <th className="px-4 py-2.5 border-b">Empresa</th><th className="px-4 py-2.5 border-b">CNPJ</th><th className="px-4 py-2.5 border-b">Plano</th><th className="px-4 py-2.5 border-b">Status</th><th className="px-4 py-2.5 border-b text-center">Ações</th>
+              <th className="px-4 py-2.5 border-b">Conta</th><th className="px-4 py-2.5 border-b">CNPJ</th><th className="px-4 py-2.5 border-b">Plano</th><th className="px-4 py-2.5 border-b">Status</th><th className="px-4 py-2.5 border-b text-center">Ações</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-50">
@@ -188,13 +188,13 @@ export const PainelEmpresas: React.FC = () => {
 
       {showModal && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
-            <div className="p-6 border-b flex justify-between items-center bg-gray-50">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden max-h-[90vh] flex flex-col">
+            <div className="px-6 py-4 border-b flex justify-between items-center bg-gray-50 flex-shrink-0">
               <h3 className="text-xl font-bold text-gray-800">{editing ? 'Editar Conta' : 'Nova Conta'}</h3>
               <button onClick={() => setShowModal(false)} className="p-2 hover:bg-gray-200 rounded-full"><X size={24} /></button>
             </div>
-            <div className="p-6 space-y-4">
-              {[{ label: 'Nome', key: 'nome' }, { label: 'CNPJ', key: 'cnpj' }, { label: 'Email', key: 'email' }, { label: 'Telefone', key: 'telefone' }].map(f => (
+            <div className="p-6 overflow-y-auto grid grid-cols-1 md:grid-cols-2 gap-4">
+              {[{ label: 'Nome da conta', key: 'nome' }, { label: 'CNPJ', key: 'cnpj' }, { label: 'E-mail de contato da conta', key: 'email' }, { label: 'Telefone de contato da conta', key: 'telefone' }].map(f => (
                 <div key={f.key}>
                   <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">{f.label}</label>
                   <input type="text" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" value={(formDados as any)[f.key] || ''} onChange={e => setFormDados({ ...formDados, [f.key]: e.target.value })} />
@@ -206,14 +206,14 @@ export const PainelEmpresas: React.FC = () => {
                   <option value="transportadora">Empresa / Transportadora</option>
                   <option value="autonomo">Autônomo</option>
                 </select>
-                {!editing && formDados.tipo === 'autonomo' && <p className="text-xs text-emerald-700 mt-1">Depois de criar a conta, adicione o administrador em Usuários Globais.</p>}
+                {!editing && formDados.tipo === 'autonomo' && <p className="text-xs text-emerald-700 mt-1">Depois de criar a conta, adicione a pessoa responsável em Usuários.</p>}
               </div>
               <div>
-                <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Plano ID</label>
+                <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Plano</label>
                 <input type="text" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" value={formDados.plano_id} onChange={e => setFormDados({ ...formDados, plano_id: e.target.value })} placeholder="UUID do plano" />
               </div>
             </div>
-            <div className="p-4 bg-gray-50 border-t flex justify-end gap-3">
+            <div className="p-4 bg-gray-50 border-t flex justify-end gap-3 flex-shrink-0">
               <button onClick={() => setShowModal(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded-lg text-sm font-medium">Cancelar</button>
               <button onClick={handleSalvar} className="flex items-center px-5 py-2 bg-green-700 text-white rounded-lg font-medium text-sm hover:bg-green-800"><Check size={16} className="mr-1.5" /> Salvar</button>
             </div>

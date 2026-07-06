@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Users, FileText, Truck, ChevronLeft, ChevronRight, Upload, X, Check, Trash2, Settings, UserCircle, Receipt, History, Building2, CreditCard, DollarSign, Bell, Plug, ClipboardList } from 'lucide-react';
+import { LayoutDashboard, Users, FileText, Truck, ChevronLeft, ChevronRight, Upload, X, Check, Trash2, Settings, UserCircle, Receipt, History, Building2, DollarSign, Bell, Plug, ClipboardList } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../api';
 
@@ -114,10 +114,10 @@ export const Sidebar: React.FC = () => {
 
   const commonMainNav = [
     { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
-    { to: '/motoristas', icon: Users, label: 'Motoristas' },
     { to: '/relatorios/viagens', icon: Truck, label: 'Gerenciamento de Fretes' },
     { to: '/relatorios/resumo', icon: History, label: 'Histórico de Fretes' },
     { to: '/relatorios', icon: FileText, label: 'Relatórios' },
+    { to: '/motoristas', icon: Users, label: 'Motoristas' },
     { to: '/admins', icon: UserCircle, label: 'Usuários' },
   ];
 
@@ -131,22 +131,20 @@ export const Sidebar: React.FC = () => {
         { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
         { to: '/painel-administrativo/empresas', icon: Building2, label: 'Empresas e Autônomos' },
         { to: '/painel-administrativo/planos', icon: ClipboardList, label: 'Planos' },
-        { to: '/painel-administrativo/assinaturas', icon: CreditCard, label: 'Assinaturas' },
-        { to: '/painel-administrativo/faturas', icon: Receipt, label: 'Faturas' },
-        { to: '/painel-administrativo/usuarios', icon: UserCircle, label: 'Usuários Globais' },
-        { to: '/painel-administrativo/motoristas', icon: Users, label: 'Motoristas / Autônomos' },
         { to: '/painel-administrativo/financeiro', icon: DollarSign, label: 'Financeiro' },
-        { to: '/integracoes', icon: Plug, label: 'Integrações' },
+        { to: '/relatorios/resumo', icon: History, label: 'Histórico de Fretes' },
+        { to: '/painel-administrativo/usuarios', icon: UserCircle, label: 'Usuários' },
+        { to: '/painel-administrativo/motoristas', icon: Users, label: 'Motoristas / Autônomos' },
         { to: '/painel-administrativo/termos-lgpd', icon: FileText, label: 'Termos LGPD' },
         { to: '/painel-administrativo/notificacoes', icon: Bell, label: 'Notificações' },
-        { to: '/relatorios/resumo', icon: History, label: 'Histórico de Fretes' },
+        { to: '/integracoes', icon: Plug, label: 'Integrações' },
       ]
     : commonMainNav;
 
   // Item de menu uniforme: mesma fonte/peso/tamanho para todos, espaçamento vertical
   // enxuto (py-2) e ícones alinhados. Evita que os itens fiquem soltos.
   const linkClass = ({ isActive }: { isActive: boolean }) =>
-    `flex items-center gap-3 rounded-lg transition-colors text-sm font-medium ${collapsed ? 'justify-center px-0 py-2' : 'px-3 py-2'} ${isActive ? 'bg-green-700 text-white' : 'text-gray-300 hover:bg-gray-800'}`;
+    `flex items-center gap-3 rounded-lg transition-colors text-sm font-medium ${collapsed ? 'justify-center px-0 py-2.5' : 'px-3 py-2.5'} ${isActive ? 'bg-green-700 text-white' : 'text-gray-300 hover:bg-gray-800'}`;
 
   return (
     <>
@@ -200,7 +198,7 @@ export const Sidebar: React.FC = () => {
             scrollbarColor: user?.is_super_admin ? 'rgba(255,255,255,0.25) transparent' : undefined,
           }}
         >
-          <nav className="space-y-0.5">
+          <nav className="space-y-1">
             {mainNav.map(item => (
               <NavLink key={item.to} to={item.to} end={item.to === '/' || item.to === '/relatorios'} className={linkClass} title={collapsed ? item.label : undefined}>
                 <item.icon size={20} className="flex-shrink-0" />

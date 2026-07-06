@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Shield, Search, CheckCircle, XCircle, Clock, CreditCard } from 'lucide-react';
 import api from '../api';
 
-export const PainelAssinaturas: React.FC = () => {
+export const PainelAssinaturas: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
   const [assinaturas, setAssinaturas] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [tipoFiltro, setTipoFiltro] = useState('todos');
@@ -55,13 +55,13 @@ export const PainelAssinaturas: React.FC = () => {
 
   return (
     <div className="space-y-4 animate-fade-in">
-      <div className="flex items-center space-x-3 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+      {!embedded && <div className="flex items-center space-x-3 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
         <div className="bg-gray-800 p-2 rounded-lg text-white"><Shield size={24} /></div>
         <div>
           <h1 className="text-2xl font-bold text-gray-800">Assinaturas</h1>
           <p className="text-sm text-gray-500">Acompanhe planos ativos, trial, vencimentos e status por conta (somente leitura)</p>
         </div>
-      </div>
+      </div>}
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-white rounded-2xl border border-gray-100 p-4"><p className="text-2xl font-black text-gray-800">{assinaturas.length}</p><p className="text-sm text-gray-500">Total</p></div>

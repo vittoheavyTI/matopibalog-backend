@@ -95,7 +95,7 @@ export const MinhasFaturas: React.FC = () => {
 
   // Super-admin gerencia faturas dos clientes em Painel Admin → Faturas Todas.
   if (user?.is_super_admin) {
-    return <Navigate to="/painel-administrativo/faturas" replace />;
+    return <Navigate to="/painel-administrativo/financeiro?aba=faturas" replace />;
   }
 
   const proximaFatura = faturas.find(f => f.status === 'pendente' || f.status === 'vencido');
