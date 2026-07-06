@@ -534,16 +534,19 @@ export const Dashboard: React.FC = () => {
     : motoristasEmViagem;
 
   // Derivados da fusão da "Visão Geral" (só super-admin): receita mensal por empresa
-  // ativa com plano pago, empresas em trial e contagem de ativas.
+  // ativa com plano pago, empresas em trial, ativas e inadimplentes/bloqueadas.
   const empresasTrial = empresasPainel.filter((e: any) => e.status === 'trial');
   const empresasAtivas = empresasPainel.filter((e: any) => e.status === 'ativo');
-  const receitaChart = empresasPainel
+  const empresasInadimplentes = empresasPainel.filter((e: any) => ['suspenso', 'bloqueado', 'expirado'].includes(e.status));
+  // Escalável: ordena por receita desc e mostra só o Top 8 no gráfico (labels legíveis).
+  // "Ver todas" leva a Assinaturas quando houver mais que 8.
+  const empresasPagantes = empresasPainel
     .filter((e: any) => e.status === 'ativo' && parseFloat(e.planos?.preco_mensal || 0) > 0)
-    .map((e: any) => ({
-      nome: e.nome && e.nome.length > 12 ? e.nome.substring(0, 12) + '…' : (e.nome || '?'),
-      receita: parseFloat(e.planos?.preco_mensal || 0),
-    }))
-    .slice(0, 10);
+    .sort((a: any, b: any) => parseFloat(b.planos?.preco_mensal || 0) - parseFloat(a.planos?.preco_mensal || 0));
+  const receitaChart = empresasPagantes.slice(0, 8).map((e: any) => ({
+    nome: e.nome && e.nome.length > 10 ? e.nome.substring(0, 10) + '…' : (e.nome || '?'),
+    receita: parseFloat(e.planos?.preco_mensal || 0),
+  }));
 
   return (
     <div className="space-y-5 pb-10">
@@ -609,8 +612,15 @@ export const Dashboard: React.FC = () => {
       {!selectedMot && isSuperAdmin && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 animate-fade-in">
           <div className="lg:col-span-2 bg-white rounded-xl border border-gray-100 shadow-sm p-4">
-            <h3 className="font-bold text-gray-800 text-sm mb-0.5 flex items-center"><TrendingUp size={16} className="mr-1.5 text-green-600" /> Receita por Empresa</h3>
-            <p className="text-xs text-gray-400 mb-3">Valor mensal das assinaturas ativas · {empresasAtivas.length} ativa(s)</p>
+            <div className="flex items-start justify-between mb-3">
+              <div>
+                <h3 className="font-bold text-gray-800 text-sm flex items-center"><TrendingUp size={16} className="mr-1.5 text-green-600" /> Receita por Empresa</h3>
+                <p className="text-xs text-gray-400">Top 8 por valor mensal · {empresasPagantes.length} pagante(s) · {empresasAtivas.length} ativa(s)</p>
+              </div>
+              {empresasPagantes.length > 8 && (
+                <button onClick={() => navigate('/painel-administrativo/assinaturas')} className="text-xs font-semibold text-green-700 hover:underline flex-shrink-0">Ver todas →</button>
+              )}
+            </div>
             {receitaChart.length === 0 ? (
               <div className="h-44 flex items-center justify-center bg-gray-50 rounded-lg border border-dashed border-gray-200">
                 <p className="text-sm text-gray-400">Nenhuma empresa ativa com plano pago</p>
@@ -620,7 +630,7 @@ export const Dashboard: React.FC = () => {
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={receitaChart} margin={{ top: 4, right: 8, left: 0, bottom: 4 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
-                    <XAxis dataKey="nome" tick={{ fontSize: 11, fill: '#6b7280' }} />
+                    <XAxis dataKey="nome" tick={{ fontSize: 11, fill: '#6b7280' }} interval={0} angle={-20} textAnchor="end" height={44} />
                     <YAxis tick={{ fontSize: 11, fill: '#6b7280' }} tickFormatter={(v: number) => `R$${v}`} width={56} />
                     <Tooltip formatter={(v: any) => [`R$ ${Number(v).toFixed(2)}`, 'Receita mensal']} labelStyle={{ fontWeight: 700 }} />
                     <Bar dataKey="receita" fill="#15803d" radius={[4, 4, 0, 0]} />
@@ -630,26 +640,37 @@ export const Dashboard: React.FC = () => {
             )}
           </div>
           <div className="space-y-4">
-            <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
-              <h3 className="font-bold text-gray-800 text-sm mb-2 flex items-center"><Clock size={15} className="mr-1.5 text-amber-500" /> Empresas em Trial</h3>
+            <button onClick={() => navigate('/painel-administrativo/assinaturas')} className="block w-full text-left bg-white rounded-xl border border-gray-100 shadow-sm p-4 hover:border-amber-200 hover:shadow transition-all">
+              <h3 className="font-bold text-gray-800 text-sm mb-2 flex items-center justify-between">
+                <span className="flex items-center"><Clock size={15} className="mr-1.5 text-amber-500" /> Empresas em Trial</span>
+                <span className="text-[10px] font-bold text-amber-600 bg-amber-100 px-2 py-0.5 rounded-full">{empresasTrial.length}</span>
+              </h3>
               {empresasTrial.length === 0 ? (
-                <p className="text-sm text-gray-400 text-center py-3">Nenhuma</p>
+                <p className="text-sm text-gray-400 py-2">Nenhuma empresa em trial.</p>
               ) : (
-                <div className="space-y-1.5 max-h-40 overflow-auto">
-                  {empresasTrial.slice(0, 6).map((e: any, i: number) => (
-                    <div key={i} className="flex items-center justify-between px-3 py-1.5 bg-amber-50 rounded-lg">
+                <div className="space-y-1.5 max-h-32 overflow-auto">
+                  {empresasTrial.slice(0, 5).map((e: any, i: number) => (
+                    <div key={i} className="flex items-center justify-between px-3 py-2 bg-amber-50 rounded-lg">
                       <span className="text-sm font-medium text-gray-700 truncate">{e.nome}</span>
-                      <span className="text-[10px] font-bold text-amber-600 bg-amber-100 px-2 py-0.5 rounded-full flex-shrink-0 ml-2">Trial</span>
+                      <span className="text-[10px] font-bold text-amber-600 flex-shrink-0 ml-2">Trial</span>
                     </div>
                   ))}
+                  {empresasTrial.length > 5 && <p className="text-xs text-amber-700 font-semibold px-1 pt-1">+{empresasTrial.length - 5} — ver em Assinaturas</p>}
                 </div>
               )}
-            </div>
+            </button>
             <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
               <h3 className="font-bold text-gray-800 text-sm mb-2 flex items-center"><AlertTriangle size={15} className="mr-1.5 text-red-500" /> Alertas</h3>
               <div className="space-y-1.5">
-                <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 rounded-lg text-sm text-gray-700"><Building2 size={14} className="text-blue-500 flex-shrink-0" /> {empresasAtivas.length} empresa(s) ativa(s)</div>
-                <div className="flex items-center gap-2 px-3 py-1.5 bg-yellow-50 rounded-lg text-sm text-gray-700"><Clock size={14} className="text-yellow-500 flex-shrink-0" /> {empresasTrial.length} em período de teste</div>
+                <button onClick={() => navigate('/painel-administrativo/empresas')} className="flex items-center gap-2 w-full px-3 py-2 bg-blue-50 hover:bg-blue-100 rounded-lg text-sm text-gray-700 transition-colors">
+                  <Building2 size={15} className="text-blue-500 flex-shrink-0" /> <span className="flex-1 text-left">{empresasAtivas.length} empresa(s) ativa(s)</span>
+                </button>
+                <button onClick={() => navigate('/painel-administrativo/assinaturas')} className="flex items-center gap-2 w-full px-3 py-2 bg-yellow-50 hover:bg-yellow-100 rounded-lg text-sm text-gray-700 transition-colors">
+                  <Clock size={15} className="text-yellow-500 flex-shrink-0" /> <span className="flex-1 text-left">{empresasTrial.length} em período de teste</span>
+                </button>
+                <button onClick={() => navigate('/painel-administrativo/faturas')} className="flex items-center gap-2 w-full px-3 py-2 bg-red-50 hover:bg-red-100 rounded-lg text-sm text-gray-700 transition-colors">
+                  <AlertTriangle size={15} className="text-red-500 flex-shrink-0" /> <span className="flex-1 text-left">{empresasInadimplentes.length} suspensa(s)/bloqueada(s)</span>
+                </button>
               </div>
             </div>
           </div>

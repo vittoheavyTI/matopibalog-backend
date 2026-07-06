@@ -22,7 +22,6 @@ import { PainelUsuarios } from './pages/PainelUsuarios';
 import { PainelMotoristas } from './pages/PainelMotoristas';
 import { PainelRelatorios } from './pages/PainelRelatorios';
 import { PainelFinanceiro } from './pages/PainelFinanceiro';
-import { PainelConfigSistema } from './pages/PainelConfigSistema';
 import { PainelNotificacoes } from './pages/PainelNotificacoes';
 import { PainelTermosLGPD } from './pages/PainelTermosLGPD';
 import { PlanosPublicos } from './pages/PlanosPublicos';
@@ -88,7 +87,9 @@ const AppRoutes = () => {
           <Route path="motoristas" element={<SuperAdminRoute><PainelMotoristas /></SuperAdminRoute>} />
           <Route path="relatorios" element={<SuperAdminRoute><PainelRelatorios /></SuperAdminRoute>} />
           <Route path="financeiro" element={<SuperAdminRoute><PainelFinanceiro /></SuperAdminRoute>} />
-          <Route path="configuracoes" element={<SuperAdminRoute><PainelConfigSistema /></SuperAdminRoute>} />
+          {/* Config. Sistema virou a aba "Sistema" dentro de Configurações. Rota antiga
+              redireciona para não quebrar links salvos. */}
+          <Route path="configuracoes" element={<Navigate to="/configuracoes" replace />} />
           <Route path="notificacoes" element={<SuperAdminRoute><PainelNotificacoes /></SuperAdminRoute>} />
           <Route path="termos-lgpd" element={<SuperAdminRoute><PainelTermosLGPD /></SuperAdminRoute>} />
           <Route path="faturas" element={<SuperAdminRoute><Faturas /></SuperAdminRoute>} />

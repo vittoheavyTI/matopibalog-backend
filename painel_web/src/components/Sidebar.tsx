@@ -139,13 +139,14 @@ export const Sidebar: React.FC = () => {
         { to: '/integracoes', icon: Plug, label: 'Integrações' },
         { to: '/painel-administrativo/termos-lgpd', icon: FileText, label: 'Termos LGPD' },
         { to: '/painel-administrativo/notificacoes', icon: Bell, label: 'Notificações' },
-        { to: '/painel-administrativo/configuracoes', icon: Settings, label: 'Config. Sistema' },
         { to: '/relatorios/resumo', icon: History, label: 'Histórico de Fretes' },
       ]
     : commonMainNav;
 
+  // Item de menu uniforme: mesma fonte/peso/tamanho para todos, espaçamento vertical
+  // enxuto (py-2) e ícones alinhados. Evita que os itens fiquem soltos.
   const linkClass = ({ isActive }: { isActive: boolean }) =>
-    `flex items-center space-x-3 rounded-lg transition-colors ${collapsed ? 'justify-center px-0 py-3' : 'px-4 py-3'} ${isActive ? 'bg-green-700 text-white' : 'text-gray-300 hover:bg-gray-800'}`;
+    `flex items-center gap-3 rounded-lg transition-colors text-sm font-medium ${collapsed ? 'justify-center px-0 py-2' : 'px-3 py-2'} ${isActive ? 'bg-green-700 text-white' : 'text-gray-300 hover:bg-gray-800'}`;
 
   return (
     <>
@@ -199,7 +200,7 @@ export const Sidebar: React.FC = () => {
             scrollbarColor: user?.is_super_admin ? 'rgba(255,255,255,0.25) transparent' : undefined,
           }}
         >
-          <nav className="space-y-1">
+          <nav className="space-y-0.5">
             {mainNav.map(item => (
               <NavLink key={item.to} to={item.to} end={item.to === '/' || item.to === '/relatorios'} className={linkClass} title={collapsed ? item.label : undefined}>
                 <item.icon size={20} className="flex-shrink-0" />
