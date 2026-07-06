@@ -213,7 +213,11 @@ exports.create = async (req, res) => {
       throw error;
     }
 
-    notificacaoService.notificarFreteCriado(data, { actorId: req.user?.uid }).catch(() => {});
+    // Notificação de frete criado (best-effort): avisa o motorista dono e os admins
+    // da empresa (exceto o autor). Não bloqueia a criação; em falha, apenas loga para
+    // dar observabilidade (antes o erro era engolido em silêncio).
+    notificacaoService.notificarFreteCriado(data, { actorId: req.user?.uid })
+      .catch((e) => console.warn('[fretesController:create] notificarFreteCriado falhou:', e?.message || e));
     res.status(201).json({ ...data, comissao_calculada: comissao });
   } catch (error) {
     console.error(error);
@@ -462,18 +466,34 @@ exports.finalizar = async (req, res) => {
       updatePayload.km_inicial = kmIni;
     }
 
-    // Frete por tonelada/km: com o km_final agora conhecido, o valor definitivo é
-    // calculado = toneladas * (km_final - km_inicial) * valor_tonelada_km. Usa os
-    // KMs efetivos (os enviados nesta finalização têm prioridade sobre os gravados).
-    // Se ainda faltar algum insumo, mantém o valor atual (não fabrica número).
+    // Frete por tonelada/km: NÃO pode ser finalizado sem KM final — senão ficaria
+    // "finalizado" com valor 0 provisório e distância ausente (bug corrigido aqui).
+    // O km_final efetivo é o enviado nesta finalização (updatePayload.km_final) ou o
+    // já gravado no frete. Regras (retorna 422 e NÃO altera status quando falham):
+    //  - km_final obrigatório;
+    //  - km_inicial obrigatório (sem ele não há distância);
+    //  - km_final > km_inicial (calcularValorToneladaKm devolve null caso contrário).
+    // Só quando tudo é válido calculamos o valor definitivo e prosseguimos com a
+    // finalização = toneladas * (km_final - km_inicial) * valor_tonelada_km.
     if (frete.modalidade_calculo === 'tonelada_km') {
+      const kmFinalEfetivo = updatePayload.km_final ?? frete.km_final;
+      const kmInicialEfetivo = updatePayload.km_inicial ?? frete.km_inicial;
+      if (kmFinalEfetivo === null || kmFinalEfetivo === undefined || kmFinalEfetivo === '') {
+        return res.status(422).json({ message: 'Informe o KM final para finalizar um frete por tonelada/km.' });
+      }
+      if (kmInicialEfetivo === null || kmInicialEfetivo === undefined || kmInicialEfetivo === '') {
+        return res.status(422).json({ message: 'Informe o KM inicial para finalizar um frete por tonelada/km.' });
+      }
       const calc = calcularValorToneladaKm({
         toneladas: frete.toneladas,
         valorToneladaKm: frete.valor_tonelada_km,
-        kmInicial: updatePayload.km_inicial ?? frete.km_inicial,
-        kmFinal: updatePayload.km_final ?? frete.km_final,
+        kmInicial: kmInicialEfetivo,
+        kmFinal: kmFinalEfetivo,
       });
-      if (calc !== null) updatePayload.valor_frete = calc;
+      if (calc === null) {
+        return res.status(422).json({ message: 'O KM final deve ser maior que o KM inicial.' });
+      }
+      updatePayload.valor_frete = calc;
     }
 
     const { data, error } = await supabase
