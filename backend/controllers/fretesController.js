@@ -484,6 +484,18 @@ exports.update = async (req, res) => {
     if (allowedUpdate.status === 'ativo' && checkData.status === 'pendente' && !checkData.foto_odometro_inicial_path) {
       return res.status(422).json({ message: 'Envie a foto do odômetro inicial para ativar o frete.' });
     }
+    // Novo fluxo de odômetro: espelha exports.finalizar TAMBÉM neste PATCH, para que
+    // uma finalização via update (status → 'finalizado') não contorne a trava de foto
+    // (defense-in-depth: a regra vale no backend, não só no painel). Fonte de verdade =
+    // foto_odometro_inicial_path. Fretes legados (sem foto inicial) seguem finalizáveis.
+    if (allowedUpdate.status === 'finalizado') {
+      if (checkData.status === 'pendente' && !checkData.foto_odometro_inicial_path) {
+        return res.status(422).json({ message: 'Envie a foto do odômetro inicial para ativar o frete.' });
+      }
+      if (checkData.foto_odometro_inicial_path && !checkData.foto_odometro_final_path) {
+        return res.status(422).json({ message: 'Envie a foto do odômetro final para concluir o frete.' });
+      }
+    }
 
     const { data, error } = await supabase
       .from('fretes')
@@ -561,7 +573,7 @@ exports.finalizar = async (req, res) => {
     // Compatibilidade: a obrigação vale para o novo fluxo, identificado pela
     // foto inicial. Fretes antigos sem path continuam finalizáveis.
     if (frete.foto_odometro_inicial_path && !frete.foto_odometro_final_path) {
-      return res.status(422).json({ message: 'Envie a foto do odômetro final para finalizar o frete.' });
+      return res.status(422).json({ message: 'Envie a foto do odômetro final para concluir o frete.' });
     }
 
     // Série 1.5 (KM na finalização): o app NOVO envia km_inicial/km_final no corpo;
