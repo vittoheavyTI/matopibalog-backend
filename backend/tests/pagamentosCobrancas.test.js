@@ -35,7 +35,12 @@ function criarSupabaseMock(cenario) {
       }
       if (tabela === 'configuracoes') return { data: cenario.config || { dados: {} }, error: null };
       if (tabela === 'faturas') {
-        if ('client_request_id' in filtros) return { data: cenario.faturaPorClientRequest ?? null, error: null };
+        if ('client_request_id' in filtros) {
+          // 1ª leitura = pré-check (nada ainda); 2ª = re-fetch pós-corrida 23505.
+          registro.clientReqSelects = (registro.clientReqSelects || 0) + 1;
+          if (registro.clientReqSelects === 1) return { data: cenario.faturaPorClientRequest ?? null, error: null };
+          return { data: cenario.faturaAposCorrida ?? cenario.faturaPorClientRequest ?? null, error: null };
+        }
         if ('id' in filtros) {
           return cenario.faturaById
             ? { data: cenario.faturaById, error: null }
@@ -239,4 +244,69 @@ test('conciliação: fatura inexistente retorna 404', async () => {
   await handler({ user: superAdmin, params: { id: 'nao-existe' }, body: {} }, res, () => {});
 
   assert.equal(res.statusCode, 404);
+});
+
+// ── GATE 1: trava hard de sandbox ────────────────────────────────────────────
+
+test('criação em production é bloqueada (403) e NÃO chama o Asaas', async () => {
+  const cenario = {
+    config: { dados: { integracao_asaas: { apiKey: 'chave-prod', environment: 'production' } } },
+    empresa: { asaas_customer_id: 'cus_1', nome: 'Empresa X' },
+  };
+  const supabase = criarSupabaseMock(cenario);
+  const axios = criarAxiosMock(cenario);
+  const router = carregarRouter(supabase, axios);
+  const handler = getHandler(router, 'POST', '/cobrancas');
+
+  const res = fakeRes();
+  await handler({ user: superAdmin, body: { empresa_id: 'e1', valor: 100, tipo: 'BOLETO', client_request_id: 'req-prod' } }, res, () => {});
+
+  assert.equal(res.statusCode, 403);
+  assert.match(res.body.message, /sandbox/i);
+  assert.equal(axios.chamadas.post, 0);
+  assert.equal(supabase.__registro.inserts.length, 0);
+});
+
+test('conciliação em production é bloqueada (403) e NÃO chama o Asaas', async () => {
+  const cenario = {
+    config: { dados: { integracao_asaas: { apiKey: 'chave-prod', environment: 'production' } } },
+    faturaById: { id: 'f1', empresa_id: 'e1', asaas_id: 'pay_1', status: 'pendente', pago_em: null },
+  };
+  const supabase = criarSupabaseMock(cenario);
+  const axios = criarAxiosMock(cenario);
+  const router = carregarRouter(supabase, axios);
+  const handler = getHandler(router, 'POST', '/cobrancas/:id/conciliar');
+
+  const res = fakeRes();
+  await handler({ user: superAdmin, params: { id: 'f1' }, body: {} }, res, () => {});
+
+  assert.equal(res.statusCode, 403);
+  assert.match(res.body.message, /sandbox/i);
+  assert.equal(axios.chamadas.get, 0);
+  assert.equal(supabase.__registro.updates.length, 0);
+});
+
+// ── GATE 3: idempotência por corrida (unique 23505) ──────────────────────────
+
+test('corrida: insert com 23505 devolve a fatura existente (idempotente)', async () => {
+  const faturaConcorrente = { id: 'f-concorrente', asaas_id: 'pay_1', status: 'pendente', client_request_id: 'req-corrida' };
+  const cenario = {
+    faturaPorClientRequest: null,          // pré-check não encontra
+    faturaAposCorrida: faturaConcorrente,  // re-fetch pós-23505 encontra
+    empresa: { asaas_customer_id: 'cus_1', nome: 'Empresa X' },
+    config: { dados: { integracao_asaas: { apiKey: 'chave-teste' } } },
+    asaasPayment: { id: 'pay_1', status: 'PENDING', invoiceUrl: 'https://sandbox.asaas.com/i/pay_1' },
+    insertError: { code: '23505' },
+  };
+  const supabase = criarSupabaseMock(cenario);
+  const axios = criarAxiosMock(cenario);
+  const router = carregarRouter(supabase, axios);
+  const handler = getHandler(router, 'POST', '/cobrancas');
+
+  const res = fakeRes();
+  await handler({ user: superAdmin, body: { empresa_id: 'e1', valor: 100, tipo: 'BOLETO', client_request_id: 'req-corrida' } }, res, () => {});
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.idempotente, true);
+  assert.equal(res.body.id, 'f-concorrente');
 });

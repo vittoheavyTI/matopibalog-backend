@@ -32,8 +32,33 @@ async function getAsaasConfig() {
   const baseURL = environment === 'production'
     ? 'https://api.asaas.com/v3'
     : 'https://sandbox.asaas.com/api/v3';
-  
-  return { apiKey, baseURL };
+
+  return { apiKey, baseURL, environment };
+}
+
+// Mensagem única da trava de sandbox.
+const MSG_SANDBOX_OBRIGATORIO = 'Cobranças reais estão desabilitadas neste ambiente. Use Asaas sandbox.';
+
+// Lê SOMENTE o ambiente configurado do Asaas (sem resolver a apiKey), para a
+// trava poder bloquear ANTES de qualquer chamada externa ou leitura de segredo.
+async function ambienteAsaas() {
+  const { data } = await supabase
+    .from('configuracoes')
+    .select('dados')
+    .eq('id', 1)
+    .single();
+  return data?.dados?.['integracao_asaas']?.environment || 'sandbox';
+}
+
+// Trava HARD de sandbox (defense-in-depth — não confia só na UI). Se o ambiente
+// não for 'sandbox', responde 403 e NÃO chama o Asaas nem toca em dados.
+// Retorna true quando bloqueou (o handler deve dar `return` em seguida).
+async function bloquearSeNaoSandbox(res) {
+  if ((await ambienteAsaas()) !== 'sandbox') {
+    res.status(403).json({ message: MSG_SANDBOX_OBRIGATORIO });
+    return true;
+  }
+  return false;
 }
 
 function asaasHeaders(apiKey) {
@@ -61,6 +86,7 @@ async function obterPixQrCode(baseURL, apiKey, paymentId) {
 
 router.post('/clientes', verifyToken, isSuperAdmin, async (req, res) => {
   try {
+    if (await bloquearSeNaoSandbox(res)) return;
     const { empresa_id, nome, cpfCnpj, email, telefone } = req.body;
     const { apiKey, baseURL } = await getAsaasConfig();
 
@@ -84,6 +110,9 @@ router.post('/clientes', verifyToken, isSuperAdmin, async (req, res) => {
 
 router.post('/cobrancas', verifyToken, isSuperAdmin, async (req, res) => {
   try {
+    // GATE de sandbox ANTES de tudo: em produção nada é lido, criado ou cobrado.
+    if (await bloquearSeNaoSandbox(res)) return;
+
     const { empresa_id, valor, tipo, descricao, due_date } = req.body;
 
     // Idempotência: chave enviada pelo cliente ou gerada aqui. Duas requisições
@@ -309,6 +338,9 @@ router.get('/cobrancas/:empresa_id', verifyToken, isAdmin, verificarEmpresa, asy
 // fatura sem depender do webhook. Não cria cobrança nova.
 router.post('/cobrancas/:id/conciliar', verifyToken, isSuperAdmin, async (req, res) => {
   try {
+    // GATE de sandbox: em produção não consulta o Asaas nem toca em fatura/empresa.
+    if (await bloquearSeNaoSandbox(res)) return;
+
     const { data: fatura, error: fetchErr } = await supabase
       .from('faturas')
       .select('id, empresa_id, asaas_id, status, pago_em')
