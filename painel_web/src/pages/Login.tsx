@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useLoginConfig } from '../hooks/useLoginConfig';
 import api from '../api';
+import { consumirMotivoSessao } from '../utils/sessionReason';
 import { Truck, Eye, EyeOff } from 'lucide-react';
 
 const LOGIN_TEMPLATES = [
@@ -80,8 +81,8 @@ export const Login: React.FC = () => {
   const [error, setError] = useState('');
   const [loadingLocal, setLoadingLocal] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  // Mensagem exibida quando a sessão anterior expirou por inatividade
-  // (flag gravada pelo SessionTimeoutWatcher antes de deslogar).
+  // Mensagem exibida quando a sessão anterior foi encerrada (inatividade, expiração
+  // ou token inválido). Motivo lido de sessionStorage via consumirMotivoSessao().
   const [sessionNotice, setSessionNotice] = useState('');
 
   // Modal esqueceu a senha
@@ -106,14 +107,18 @@ export const Login: React.FC = () => {
     }
   }, [user, navigate]);
 
-  // Lê (e limpa) a flag de sessão expirada por inatividade para avisar o usuário.
+  // Lê (e limpa) o motivo do encerramento da sessão anterior para avisar o usuário.
+  // Consumo único: removido ao ler, então não reaparece após refresh.
+  // 'manual' (ou ausência) não exibe alerta.
   useEffect(() => {
-    try {
-      if (sessionStorage.getItem('matopibalog_session_expired_reason') === 'idle') {
-        setSessionNotice('Sua sessão expirou por inatividade. Faça login novamente.');
-        sessionStorage.removeItem('matopibalog_session_expired_reason');
-      }
-    } catch (e) { /* ignore */ }
+    const motivo = consumirMotivoSessao();
+    if (motivo === 'idle') {
+      setSessionNotice('Sua sessão foi encerrada por inatividade.');
+    } else if (motivo === 'expired') {
+      setSessionNotice('Sua sessão expirou. Entre novamente.');
+    } else if (motivo === 'invalid') {
+      setSessionNotice('Não foi possível validar sua sessão. Entre novamente.');
+    }
   }, []);
 
   const handleLogin = async (e: React.FormEvent) => {

@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { registrarMotivoSessao } from './utils/sessionReason';
 
 const api = axios.create({
   // Tente adicionar o /api no final do baseURL se suas rotas do backend usam /api
@@ -20,6 +21,43 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+// Decodifica o payload de um JWT no formato base64url, sem dependência externa e
+// SEM logar o token. Retorna o objeto do payload ou null se não decodificar.
+function decodificarPayloadJwt(token: string): any | null {
+  try {
+    const payload = token.split('.')[1];
+    if (!payload) return null;
+    let b64 = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const resto = b64.length % 4;
+    if (resto) b64 += '='.repeat(4 - resto);
+    return JSON.parse(atob(b64));
+  } catch (e) {
+    return null;
+  }
+}
+
+// Determina se o encerramento foi por token EXPIRADO (exp já passou) ou por token
+// INVÁLIDO/ausente. O backend não distingue os dois no 403, então inferimos aqui a
+// partir do `exp` do JWT em localStorage — lendo APENAS o campo exp, nunca o token.
+function motivoPorToken(): 'expired' | 'invalid' {
+  try {
+    const token = localStorage.getItem('auth_token');
+    if (!token) return 'invalid'; // 401 sem token
+    const payload = decodificarPayloadJwt(token);
+    if (payload && typeof payload.exp === 'number' && payload.exp * 1000 < Date.now()) {
+      return 'expired';
+    }
+    return 'invalid';
+  } catch (e) {
+    return 'invalid';
+  }
+}
+
+// Flag de módulo para não disparar 'auth:unauthorized' em duplicidade quando
+// várias requisições falham ao mesmo tempo. Uma resposta 2xx (ex.: novo login)
+// rearma naturalmente o disparo.
+let encerrando = false;
+
 // Interceptor de resposta: avisa o sistema quando a SESSÃO expira, para acionar o
 // logout automático (AuthContext escuta 'auth:unauthorized').
 // - 401: comportamento original (sessão sem token / não autenticada).
@@ -27,7 +65,11 @@ api.interceptors.request.use((config) => {
 //   devolve ESSE 403 específico quando o JWT expira/é inválido. Sem isto a sessão
 //   expirava silenciosamente (a tela travava sem deslogar). Os demais 403 (permissão/
 //   negócio) usam a chave `message`, então NÃO são tratados como logout.
+// Antes de disparar o evento, registra o motivo (expired/invalid) em sessionStorage
+// para o Login exibir a mensagem correta. Registro é "soft": não sobrescreve um
+// motivo já definido por um fluxo explícito (idle/manual).
 api.interceptors.response.use((response) => {
+  encerrando = false;
   return response;
 }, (error) => {
   const response = error.response;
@@ -38,7 +80,11 @@ api.interceptors.response.use((response) => {
     const sessaoExpirada =
       response.status === 401 ||
       (response.status === 403 && data?.error === 'Token inválido ou expirado.');
-    if (sessaoExpirada && !isAuthRoute) {
+    const naTelaLogin =
+      typeof window !== 'undefined' && window.location?.pathname === '/login';
+    if (sessaoExpirada && !isAuthRoute && !naTelaLogin && !encerrando) {
+      encerrando = true;
+      registrarMotivoSessao(motivoPorToken());
       window.dispatchEvent(new Event('auth:unauthorized'));
     }
   }

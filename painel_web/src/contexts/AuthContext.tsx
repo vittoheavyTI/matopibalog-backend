@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import api from '../api';
+import { definirMotivoSessao, type MotivoSessao } from '../utils/sessionReason';
 
 export interface User {
   uid: string;
@@ -21,7 +22,7 @@ interface AuthContextType {
   user: User | null;
   loading: boolean;
   login: (user: User) => void;
-  logout: () => void;
+  logout: (motivo?: MotivoSessao) => void;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -58,6 +59,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const loadingRef = useRef(true);
+  // Guarda contra reentrância: processa o encerramento por 'auth:unauthorized'
+  // uma única vez. Rearmado a cada login para novos ciclos de sessão.
+  const encerrandoRef = useRef(false);
 
   // Verifica o cookie na montagem para restaurar a sessão
   useEffect(() => {
@@ -85,16 +89,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
   }, []);
 
-  // Reage a expiração de cookie detectada pelo interceptor do axios
+  // Reage a expiração de sessão detectada pelo interceptor do axios.
+  // O interceptor já registrou o motivo (expired/invalid) antes de disparar; aqui
+  // apenas limpamos token e estado (uma única vez) e deixamos o ProtectedRoute
+  // levar ao /login. NÃO gravamos motivo aqui para não sobrescrever o já definido.
   useEffect(() => {
     const handleUnauthorized = () => {
-      if (!loadingRef.current) setUser(null);
+      if (loadingRef.current) return;
+      if (encerrandoRef.current) return;
+      encerrandoRef.current = true;
+      try { localStorage.removeItem('auth_token'); } catch (e) { /* ignore */ }
+      setUser(null);
     };
     window.addEventListener('auth:unauthorized', handleUnauthorized);
     return () => window.removeEventListener('auth:unauthorized', handleUnauthorized);
   }, []);
 
   const login = (user: User) => {
+    // Novo ciclo de sessão: rearma o guarda de encerramento para que uma futura
+    // expiração volte a ser processada.
+    encerrandoRef.current = false;
     // Aplica imediatamente os dados vindos do /auth/login para não travar a navegação.
     setUser(user);
     // O /auth/login NÃO retorna termos_pendentes (apenas /auth/me calcula). Sem este
@@ -106,7 +120,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       .catch(() => { /* mantém o user do login; sem bloqueio de navegação */ });
   };
 
-  const logout = async () => {
+  // motivo: por que a sessão terminou. Padrão 'manual' (clique em Sair) → o Login
+  // NÃO mostra alerta de expiração. O watcher de inatividade chama logout('idle').
+  // Gravado ANTES de qualquer chamada de rede, para não ser trocado pelo
+  // registro "soft" do interceptor caso o /auth/logout falhe.
+  const logout = async (motivo: MotivoSessao = 'manual') => {
+    definirMotivoSessao(motivo);
     try {
       await api.post('/auth/logout');
     } catch {}
