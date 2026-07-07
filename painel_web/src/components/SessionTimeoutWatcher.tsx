@@ -34,13 +34,13 @@ export const SessionTimeoutWatcher: React.FC = () => {
     clearCountdown();
   }, [clearCountdown]);
 
-  // Expira a sessão por inatividade: sinaliza o motivo p/ o Login e desloga
-  // pelo fluxo existente (logout limpa token e AuthContext redireciona ao /login).
+  // Expira a sessão por inatividade: desloga pelo fluxo existente informando o
+  // motivo 'idle'. O próprio logout grava o motivo (antes da chamada de rede),
+  // limpa o token e o AuthContext redireciona ao /login.
   const handleExpire = useCallback(() => {
     warningActiveRef.current = false;
     clearTimers();
-    try { sessionStorage.setItem('matopibalog_session_expired_reason', 'idle'); } catch (e) { /* ignore */ }
-    logout();
+    logout('idle');
   }, [clearTimers, logout]);
 
   // Mostra o aviso e inicia a contagem regressiva visual dos 2 min finais.
