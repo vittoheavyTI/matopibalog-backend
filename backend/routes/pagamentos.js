@@ -6,6 +6,7 @@ const supabase = require('../config/supabase');
 const { verifyToken, isAdmin, isSuperAdmin } = require('../middlewares/auth');
 const { verificarEmpresa } = require('../middlewares/tenant');
 const { resolveAsaasApiKey } = require('../utils/asaasConfig');
+const { normalizarStatusAsaas } = require('../utils/asaasStatus');
 const { classificarResponsavelRegularizacao } = require('../utils/billingProfile');
 
 // Comparação em tempo constante (hash de tamanho fixo evita vazar comprimento)
@@ -42,6 +43,22 @@ function asaasHeaders(apiKey) {
   };
 }
 
+// PIX QR (best-effort). O Asaas NÃO devolve o QR na criação do payment: o
+// copia-e-cola vem em GET /payments/:id/pixQrCode. Guardamos o `payload`
+// (texto compacto), não a imagem base64. Falha aqui não invalida a cobrança:
+// a fatura fica com o invoice_url e o QR pode ser obtido depois na conciliação.
+async function obterPixQrCode(baseURL, apiKey, paymentId) {
+  try {
+    const { data } = await axios.get(
+      `${baseURL}/payments/${paymentId}/pixQrCode`,
+      { headers: asaasHeaders(apiKey) }
+    );
+    return data?.payload || null;
+  } catch (_) {
+    return null;
+  }
+}
+
 router.post('/clientes', verifyToken, isSuperAdmin, async (req, res) => {
   try {
     const { empresa_id, nome, cpfCnpj, email, telefone } = req.body;
@@ -67,7 +84,26 @@ router.post('/clientes', verifyToken, isSuperAdmin, async (req, res) => {
 
 router.post('/cobrancas', verifyToken, isSuperAdmin, async (req, res) => {
   try {
-    const { empresa_id, valor, tipo, descricao, parcelas } = req.body;
+    const { empresa_id, valor, tipo, descricao, due_date } = req.body;
+
+    // Idempotência: chave enviada pelo cliente ou gerada aqui. Duas requisições
+    // com o mesmo client_request_id NÃO criam duas cobranças (ver migration 021).
+    const clientRequestId =
+      (req.body.client_request_id && String(req.body.client_request_id).trim()) ||
+      crypto.randomUUID();
+
+    // Pré-checagem: se já existe fatura para esta chave, devolve-a sem chamar o
+    // Asaas. O índice único parcial é a garantia real (trata corrida abaixo).
+    const { data: existente, error: existErr } = await supabase
+      .from('faturas')
+      .select('*')
+      .eq('client_request_id', clientRequestId)
+      .maybeSingle();
+    if (existErr && existErr.code !== 'PGRST116') throw existErr;
+    if (existente) {
+      return res.status(200).json({ ...existente, idempotente: true });
+    }
+
     const { apiKey, baseURL } = await getAsaasConfig();
 
     const { data: empresa } = await supabase
@@ -80,12 +116,19 @@ router.post('/cobrancas', verifyToken, isSuperAdmin, async (req, res) => {
       return res.status(400).json({ message: 'Empresa sem cliente Asaas. Crie o cliente primeiro.' });
     }
 
+    // Vencimento: aceita due_date (YYYY-MM-DD) do cliente; senão, hoje + 7 dias.
+    const dueDate = /^\d{4}-\d{2}-\d{2}$/.test(String(due_date || ''))
+      ? due_date
+      : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
     const payload = {
       customer: empresa.asaas_customer_id,
       value: Number(valor),
       description: descricao || `Assinatura ${empresa.nome}`,
-      dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      dueDate,
       postalService: false,
+      // Rastreio no Asaas: espelha nossa chave de idempotência.
+      externalReference: clientRequestId,
     };
 
     if (tipo === 'PIX') {
@@ -98,18 +141,47 @@ router.post('/cobrancas', verifyToken, isSuperAdmin, async (req, res) => {
 
     const response = await axios.post(`${baseURL}/payments`, payload, { headers: asaasHeaders(apiKey) });
 
-    await supabase.from('faturas').insert({
+    // Normaliza o status do Asaas (ex.: 'PENDING') para o vocabulário da tabela.
+    const statusInterno = normalizarStatusAsaas(response.data.status);
+
+    // PIX: busca o copia-e-cola em chamada dedicada (best-effort).
+    const pixQrCode = tipo === 'PIX'
+      ? await obterPixQrCode(baseURL, apiKey, response.data.id)
+      : null;
+
+    const novaFatura = {
       empresa_id,
       asaas_id: response.data.id,
       valor: Number(valor),
       tipo_pagamento: tipo,
-      status: response.data.status,
+      status: statusInterno,
       invoice_url: response.data.invoiceUrl,
-      pix_qr_code: response.data.pixQrCode,
-      due_date: payload.dueDate,
-    });
+      pix_qr_code: pixQrCode,
+      due_date: dueDate,
+      client_request_id: clientRequestId,
+    };
 
-    res.json(response.data);
+    const { data: fatura, error: insertErr } = await supabase
+      .from('faturas')
+      .insert(novaFatura)
+      .select()
+      .single();
+
+    if (insertErr) {
+      // Corrida: outra requisição com a mesma chave já inseriu (23505 = unique).
+      // Devolve a fatura existente para manter idempotência.
+      if (insertErr.code === '23505') {
+        const { data: jaExiste } = await supabase
+          .from('faturas')
+          .select('*')
+          .eq('client_request_id', clientRequestId)
+          .maybeSingle();
+        if (jaExiste) return res.status(200).json({ ...jaExiste, idempotente: true });
+      }
+      throw insertErr;
+    }
+
+    res.status(201).json(fatura);
   } catch (err) {
     res.status(500).json({ message: 'Erro ao criar cobrança.', error: err.response?.data || err.message });
   }
@@ -230,6 +302,64 @@ router.get('/cobrancas/:empresa_id', verifyToken, isAdmin, verificarEmpresa, asy
     res.json(data || []);
   } catch (err) {
     res.status(500).json({ message: 'Erro ao listar cobranças.' });
+  }
+});
+
+// Conciliação manual (super-admin): consulta a cobrança no Asaas e sincroniza a
+// fatura sem depender do webhook. Não cria cobrança nova.
+router.post('/cobrancas/:id/conciliar', verifyToken, isSuperAdmin, async (req, res) => {
+  try {
+    const { data: fatura, error: fetchErr } = await supabase
+      .from('faturas')
+      .select('id, empresa_id, asaas_id, status, pago_em')
+      .eq('id', req.params.id)
+      .single();
+
+    if (fetchErr || !fatura) {
+      return res.status(404).json({ message: 'Fatura não encontrada.' });
+    }
+    if (!fatura.asaas_id) {
+      return res.status(400).json({ message: 'Fatura sem cobrança Asaas vinculada.' });
+    }
+
+    const { apiKey, baseURL } = await getAsaasConfig();
+    const { data: payment } = await axios.get(
+      `${baseURL}/payments/${fatura.asaas_id}`,
+      { headers: asaasHeaders(apiKey) }
+    );
+
+    const novoStatus = normalizarStatusAsaas(payment?.status);
+
+    // Preserva pago_em: só grava na primeira vez que a fatura vira 'pago'.
+    const updatePayload = { status: novoStatus };
+    if (novoStatus === 'pago' && !fatura.pago_em) {
+      updatePayload.pago_em = new Date().toISOString();
+    }
+
+    const { data: atualizada, error: updErr } = await supabase
+      .from('faturas')
+      .update(updatePayload)
+      .eq('id', fatura.id)
+      .select()
+      .single();
+    if (updErr) throw updErr;
+
+    // Efeitos na empresa (espelham o webhook): pago → ativo; vencido → suspenso.
+    // Cancelado/estornado NÃO rebaixam o acesso automaticamente — cortar acesso
+    // por cancelamento/estorno é decisão manual do super-admin (evita cortar por
+    // estorno parcial ou engano).
+    if (fatura.empresa_id) {
+      if (novoStatus === 'pago') {
+        await supabase.from('empresas').update({ status: 'ativo' }).eq('id', fatura.empresa_id);
+      } else if (novoStatus === 'vencido') {
+        await supabase.from('empresas').update({ status: 'suspenso' }).eq('id', fatura.empresa_id);
+      }
+    }
+
+    return res.json(atualizada);
+  } catch (err) {
+    console.error('Erro ao conciliar cobrança:', err.message);
+    return res.status(500).json({ message: 'Erro ao conciliar cobrança.', error: err.response?.data || err.message });
   }
 });
 
