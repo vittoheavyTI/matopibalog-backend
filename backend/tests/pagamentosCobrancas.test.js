@@ -63,11 +63,17 @@ function criarSupabaseMock(cenario) {
 
 // ── Mock do axios ────────────────────────────────────────────────────────────
 function criarAxiosMock(cenario) {
-  const chamadas = { post: 0, get: 0 };
+  const chamadas = { post: 0, get: 0, postBodies: [] };
   return {
     chamadas,
-    async post() {
+    async post(url, body) {
       chamadas.post += 1;
+      chamadas.postBodies.push({ url, body });
+      if (/\/customers$/.test(url)) {
+        if (cenario.clienteAsaasError) throw cenario.clienteAsaasError;
+        return { data: cenario.asaasCustomer || { id: 'cus_new' } };
+      }
+      if (cenario.asaasPaymentError) throw cenario.asaasPaymentError;
       return { data: cenario.asaasPayment || { id: 'pay_1', status: 'PENDING', invoiceUrl: 'https://sandbox.asaas.com/i/pay_1' } };
     },
     async get(url) {
@@ -309,4 +315,91 @@ test('corrida: insert com 23505 devolve a fatura existente (idempotente)', async
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.idempotente, true);
   assert.equal(res.body.id, 'f-concorrente');
+});
+
+// ── POST /clientes: validação e tradução do erro do Asaas ────────────────────
+
+const configSandbox = { dados: { integracao_asaas: { apiKey: 'chave-teste', environment: 'sandbox' } } };
+
+function chamarClientes(cenario, body) {
+  const supabase = criarSupabaseMock({ config: configSandbox, ...cenario });
+  const axios = criarAxiosMock({ config: configSandbox, ...cenario });
+  const router = carregarRouter(supabase, axios);
+  const handler = getHandler(router, 'POST', '/clientes');
+  const res = fakeRes();
+  return handler({ user: superAdmin, body }, res, () => {}).then(() => ({ res, axios, supabase }));
+}
+
+test('clientes: conta sem CPF/CNPJ retorna 400 e NÃO chama o Asaas', async () => {
+  const { res, axios } = await chamarClientes({}, { empresa_id: 'e1', nome: 'Empresa X', email: 'x@x.com' });
+  assert.equal(res.statusCode, 400);
+  assert.match(res.body.message, /CPF ou CNPJ/i);
+  assert.equal(axios.chamadas.post, 0);
+});
+
+test('clientes: CNPJ mascarado é normalizado (só dígitos) antes de enviar', async () => {
+  const { res, axios } = await chamarClientes(
+    { asaasCustomer: { id: 'cus_ok' } },
+    { empresa_id: 'e1', nome: 'Empresa X', cpfCnpj: '12.345.678/0001-95', email: 'x@x.com' }
+  );
+  assert.equal(res.statusCode, 200);
+  const enviado = axios.chamadas.postBodies.find((p) => /\/customers$/.test(p.url));
+  assert.equal(enviado.body.cpfCnpj, '12345678000195');
+});
+
+test('clientes: documento com dígitos insuficientes retorna 400 e não chama Asaas', async () => {
+  const { res, axios } = await chamarClientes({}, { empresa_id: 'e1', nome: 'Empresa X', cpfCnpj: '123', email: 'x@x.com' });
+  assert.equal(res.statusCode, 400);
+  assert.match(res.body.message, /CPF ou CNPJ/i);
+  assert.equal(axios.chamadas.post, 0);
+});
+
+test('clientes: e-mail inválido retorna 400 claro', async () => {
+  const { res, axios } = await chamarClientes({}, { empresa_id: 'e1', nome: 'Empresa X', cpfCnpj: '12345678000195', email: 'sem-arroba' });
+  assert.equal(res.statusCode, 400);
+  assert.match(res.body.message, /e-?mail/i);
+  assert.equal(axios.chamadas.post, 0);
+});
+
+test('clientes: telefone inválido opcional é omitido, não quebra', async () => {
+  const { res, axios } = await chamarClientes(
+    { asaasCustomer: { id: 'cus_ok' } },
+    { empresa_id: 'e1', nome: 'Empresa X', cpfCnpj: '12345678000195', email: 'x@x.com', telefone: '123' }
+  );
+  assert.equal(res.statusCode, 200);
+  const enviado = axios.chamadas.postBodies.find((p) => /\/customers$/.test(p.url));
+  assert.equal(enviado.body.phone, undefined);
+});
+
+test('clientes: erro do Asaas em CPF/CNPJ vira 422 traduzido, sem vazar payload', async () => {
+  const { res } = await chamarClientes(
+    { clienteAsaasError: { response: { status: 400, data: { errors: [{ description: 'O CPF/CNPJ informado é inválido.' }] } } } },
+    { empresa_id: 'e1', nome: 'Empresa X', cpfCnpj: '12345678000195', email: 'x@x.com' }
+  );
+  assert.equal(res.statusCode, 422);
+  assert.match(res.body.message, /CPF\/CNPJ.*Asaas/i);
+  assert.equal(res.body.error, undefined); // não vaza payload/segredo
+});
+
+test('clientes: cliente válido cria no Asaas e salva asaas_customer_id', async () => {
+  const { res, axios, supabase } = await chamarClientes(
+    { asaasCustomer: { id: 'cus_123' } },
+    { empresa_id: 'e1', nome: 'Empresa X', cpfCnpj: '12345678000195', email: 'x@x.com', telefone: '(77) 99999-8888' }
+  );
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.customer_id, 'cus_123');
+  const enviado = axios.chamadas.postBodies.find((p) => /\/customers$/.test(p.url));
+  assert.equal(enviado.body.phone, '77999998888'); // telefone válido normalizado
+  const upd = supabase.__registro.updates.find((u) => u.tabela === 'empresas');
+  assert.equal(upd.payload.asaas_customer_id, 'cus_123');
+});
+
+test('clientes: em production é bloqueado (403) sem chamar Asaas', async () => {
+  const { res, axios } = await chamarClientes(
+    { config: { dados: { integracao_asaas: { environment: 'production' } } } },
+    { empresa_id: 'e1', nome: 'Empresa X', cpfCnpj: '12345678000195', email: 'x@x.com' }
+  );
+  assert.equal(res.statusCode, 403);
+  assert.match(res.body.message, /sandbox/i);
+  assert.equal(axios.chamadas.post, 0);
 });

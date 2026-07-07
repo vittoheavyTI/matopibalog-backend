@@ -52,6 +52,25 @@ function novoClientRequestId(): string {
   return `req-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
+const soDigitos = (v?: string | null) => (v || '').replace(/\D+/g, '');
+const emailOk = (v?: string | null) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((v || '').trim());
+
+// Avalia se a conta tem cadastro suficiente para virar cliente Asaas (CPF/CNPJ + e-mail).
+function avaliarConta(e: EmpresaOpcao): { ok: boolean; motivo: string } {
+  const doc = soDigitos(e.cnpj);
+  if (doc.length !== 11 && doc.length !== 14) return { ok: false, motivo: 'falta CPF/CNPJ válido' };
+  if (!emailOk(e.email_contato)) return { ok: false, motivo: 'falta e-mail válido' };
+  return { ok: true, motivo: '' };
+}
+
+// Estado do cadastro Asaas para exibir como badge (sem expor IDs internos do Asaas).
+function estadoAsaas(e: EmpresaOpcao): { label: string; color: string } {
+  if (e.asaas_customer_id) return { label: 'Cliente Asaas', color: 'bg-green-100 text-green-700' };
+  return avaliarConta(e).ok
+    ? { label: 'Sem cliente', color: 'bg-amber-100 text-amber-700' }
+    : { label: 'Cadastro incompleto', color: 'bg-red-100 text-red-700' };
+}
+
 export const Faturas: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
   const [faturas, setFaturas] = useState<Fatura[]>([]);
   const [loading, setLoading] = useState(true);
@@ -71,6 +90,9 @@ export const Faturas: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
   const [precisaCliente, setPrecisaCliente] = useState(false);
   const [resultado, setResultado] = useState<Fatura | null>(null);
   const [conciliandoId, setConciliandoId] = useState('');
+  // Combobox pesquisável de Conta.
+  const [contaBusca, setContaBusca] = useState('');
+  const [contaTipo, setContaTipo] = useState<'todas' | 'vinculados' | 'autonomos'>('todas');
 
   useEffect(() => {
     carregarFaturas();
@@ -103,10 +125,19 @@ export const Faturas: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
     setErroModal('');
     setPrecisaCliente(false);
     setResultado(null);
+    setContaBusca('');
+    setContaTipo('todas');
     setShowModal(true);
   };
 
   const empresaSelecionada = empresas.find((e) => e.id === form.empresa_id);
+  const contaIncompleta = empresaSelecionada ? !avaliarConta(empresaSelecionada).ok : false;
+  const contasFiltradas = empresas.filter((e) => {
+    const porTipo = contaTipo === 'todas'
+      || (contaTipo === 'autonomos' ? e.tipo === 'autonomo' : e.tipo !== 'autonomo');
+    const porBusca = e.nome.toLowerCase().includes(contaBusca.trim().toLowerCase());
+    return porTipo && porBusca;
+  });
 
   const criarCobranca = async () => {
     setErroModal('');
@@ -320,13 +351,43 @@ export const Faturas: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
               {!resultado && <>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Conta</label>
-                  <select value={form.empresa_id} onChange={(e) => setForm({ ...form, empresa_id: e.target.value })} className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm">
-                    <option value="">Selecione a conta…</option>
-                    {empresas.map((e) => (
-                      <option key={e.id} value={e.id}>{e.nome} · {e.tipo === 'autonomo' ? 'Autônomo' : 'Empresa'}{e.planos?.nome ? ` · ${e.planos.nome}` : ''}</option>
+                  {/* Filtro por tipo */}
+                  <div className="flex gap-1 mb-2">
+                    {([['todas', 'Todas'], ['vinculados', 'Empresas'], ['autonomos', 'Autônomos']] as const).map(([v, l]) => (
+                      <button key={v} type="button" onClick={() => setContaTipo(v)}
+                        className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${contaTipo === v ? 'bg-green-700 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>{l}</button>
                     ))}
-                  </select>
+                  </div>
+                  {/* Busca por nome */}
+                  <div className="relative mb-1">
+                    <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <input type="text" value={contaBusca} onChange={(e) => setContaBusca(e.target.value)} placeholder="Buscar conta pelo nome…" className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-xl text-sm outline-none" />
+                  </div>
+                  {/* Lista pesquisável (sem expor IDs internos do Asaas) */}
+                  <div className="max-h-44 overflow-y-auto border border-gray-100 rounded-xl divide-y divide-gray-50">
+                    {contasFiltradas.length === 0 && <p className="px-3 py-3 text-sm text-gray-400">Nenhuma conta encontrada.</p>}
+                    {contasFiltradas.map((e) => {
+                      const est = estadoAsaas(e);
+                      const sel = form.empresa_id === e.id;
+                      return (
+                        <button key={e.id} type="button" onClick={() => setForm({ ...form, empresa_id: e.id })}
+                          className={`w-full text-left px-3 py-2 flex items-center justify-between gap-2 hover:bg-gray-50 ${sel ? 'bg-green-50' : ''}`}>
+                          <span className="min-w-0">
+                            <span className="block text-sm font-medium text-gray-800 truncate">{e.nome}</span>
+                            <span className="block text-[11px] text-gray-400">{e.tipo === 'autonomo' ? 'Autônomo' : 'Empresa'}{e.planos?.nome ? ` · ${e.planos.nome}` : ''}</span>
+                          </span>
+                          <span className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-semibold ${est.color}`}>{est.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
+
+                {empresaSelecionada && contaIncompleta && (
+                  <div className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                    Cadastro incompleto de <strong>{empresaSelecionada.nome}</strong>: {avaliarConta(empresaSelecionada).motivo}. Corrija em <strong>Empresas e Autônomos</strong> antes de criar o cliente Asaas.
+                  </div>
+                )}
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
@@ -355,11 +416,11 @@ export const Faturas: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
                 )}
 
                 {precisaCliente ? (
-                  <button onClick={criarClienteEReenviar} disabled={enviando} className="w-full inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2.5 rounded-xl disabled:opacity-50">
+                  <button onClick={criarClienteEReenviar} disabled={enviando || contaIncompleta} className="w-full inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2.5 rounded-xl disabled:opacity-50">
                     {enviando ? 'Processando…' : 'Criar cliente Asaas sandbox e continuar'}
                   </button>
                 ) : (
-                  <button onClick={criarCobranca} disabled={enviando} className="w-full inline-flex items-center justify-center gap-2 bg-green-700 hover:bg-green-800 text-white font-semibold px-4 py-2.5 rounded-xl disabled:opacity-50">
+                  <button onClick={criarCobranca} disabled={enviando || contaIncompleta} className="w-full inline-flex items-center justify-center gap-2 bg-green-700 hover:bg-green-800 text-white font-semibold px-4 py-2.5 rounded-xl disabled:opacity-50">
                     {enviando ? 'Criando…' : 'Criar cobrança sandbox'}
                   </button>
                 )}

@@ -68,6 +68,23 @@ function asaasHeaders(apiKey) {
   };
 }
 
+// Remove tudo que não é dígito (tira máscara de CPF/CNPJ/telefone).
+function apenasDigitos(v) {
+  return String(v == null ? '' : v).replace(/\D+/g, '');
+}
+
+// Validação simples de e-mail (suficiente para barrar valores obviamente inválidos).
+function emailValido(v) {
+  return typeof v === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
+}
+
+// Mascara e-mail para log (nunca logar o valor completo). Ex.: "j***@gmail.com".
+function mascararEmail(v) {
+  if (typeof v !== 'string' || !v.includes('@')) return v ? 'presente' : 'ausente';
+  const [usuario, dominio] = v.split('@');
+  return `${usuario.slice(0, 1)}***@${dominio}`;
+}
+
 // PIX QR (best-effort). O Asaas NÃO devolve o QR na criação do payment: o
 // copia-e-cola vem em GET /payments/:id/pixQrCode. Guardamos o `payload`
 // (texto compacto), não a imagem base64. Falha aqui não invalida a cobrança:
@@ -88,15 +105,38 @@ router.post('/clientes', verifyToken, isSuperAdmin, async (req, res) => {
   try {
     if (await bloquearSeNaoSandbox(res)) return;
     const { empresa_id, nome, cpfCnpj, email, telefone } = req.body;
+
+    // Validação/normalização ANTES de chamar o Asaas: evita o erro genérico e
+    // aponta exatamente qual campo do cadastro está faltando/ inválido.
+    const nomeLimpo = typeof nome === 'string' ? nome.trim() : '';
+    if (!nomeLimpo) {
+      return res.status(400).json({ message: 'Informe o nome da conta antes de criar o cliente Asaas.' });
+    }
+    // CPF/CNPJ: sem máscara, exatamente 11 (CPF) ou 14 (CNPJ) dígitos. Serve para
+    // empresa e autônomo (o documento vive na coluna `cnpj` em ambos os tipos).
+    const doc = apenasDigitos(cpfCnpj);
+    if (doc.length !== 11 && doc.length !== 14) {
+      return res.status(400).json({ message: 'Informe um CPF ou CNPJ válido no cadastro da conta.' });
+    }
+    const emailLimpo = typeof email === 'string' ? email.trim() : '';
+    if (!emailValido(emailLimpo)) {
+      return res.status(400).json({ message: 'Informe um e-mail válido no cadastro da conta.' });
+    }
+    // Telefone é opcional: só envia se tiver 10 ou 11 dígitos; caso contrário, omite.
+    const tel = apenasDigitos(telefone);
+    const telefoneEnvio = tel.length === 10 || tel.length === 11 ? tel : undefined;
+
     const { apiKey, baseURL } = await getAsaasConfig();
 
-    const response = await axios.post(`${baseURL}/customers`, {
-      name: nome,
-      cpfCnpj,
-      email,
-      phone: telefone,
+    const payloadAsaas = {
+      name: nomeLimpo,
+      cpfCnpj: doc,
+      email: emailLimpo,
       notificationDisabled: false,
-    }, { headers: asaasHeaders(apiKey) });
+    };
+    if (telefoneEnvio) payloadAsaas.phone = telefoneEnvio;
+
+    const response = await axios.post(`${baseURL}/customers`, payloadAsaas, { headers: asaasHeaders(apiKey) });
 
     await supabase.from('empresas').update({
       asaas_customer_id: response.data.id,
@@ -104,7 +144,31 @@ router.post('/clientes', verifyToken, isSuperAdmin, async (req, res) => {
 
     res.json({ customer_id: response.data.id });
   } catch (err) {
-    res.status(500).json({ message: 'Erro ao criar cliente Asaas.', error: err.response?.data || err.message });
+    // Extrai com segurança a descrição do Asaas (nunca loga/retorna payload, API key ou headers).
+    const asaasStatus = err.response?.status;
+    const asaasErros = err.response?.data?.errors;
+    const asaasDesc = Array.isArray(asaasErros) && asaasErros[0]?.description ? asaasErros[0].description : '';
+
+    // Log seguro: status + presença/tamanho dos campos, com documento e e-mail mascarados.
+    console.error('[pagamentos/clientes] Falha ao criar cliente Asaas', {
+      status: asaasStatus || 'sem-status',
+      nomePresente: Boolean(req.body?.nome),
+      cpfCnpjDigitos: apenasDigitos(req.body?.cpfCnpj).length,
+      email: mascararEmail(req.body?.email),
+      telefoneDigitos: apenasDigitos(req.body?.telefone).length,
+      asaas: asaasDesc || err.message,
+    });
+
+    // Mapeia erros conhecidos do Asaas para PT. 4xx do Asaas → 422 (cadastro inválido);
+    // 5xx/rede → 500. NUNCA devolve API key, headers ou payload com dados pessoais.
+    const httpOut = asaasStatus && asaasStatus >= 400 && asaasStatus < 500 ? 422 : 500;
+    let mensagem = 'Não foi possível criar o cliente Asaas: cadastro incompleto ou inválido.';
+    if (/cpf|cnpj/i.test(asaasDesc)) {
+      mensagem = 'O CPF/CNPJ informado não foi aceito pelo Asaas. Revise o cadastro da conta.';
+    } else if (/e-?mail/i.test(asaasDesc)) {
+      mensagem = 'O e-mail informado não foi aceito pelo Asaas.';
+    }
+    return res.status(httpOut).json({ message: mensagem });
   }
 });
 
