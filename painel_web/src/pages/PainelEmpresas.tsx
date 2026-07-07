@@ -19,6 +19,9 @@ function trialVencido(iso?: string) {
 
 export const PainelEmpresas: React.FC = () => {
   const [empresas, setEmpresas] = useState<any[]>([]);
+  const [planos, setPlanos] = useState<any[]>([]);
+  const [planosLoading, setPlanosLoading] = useState(false);
+  const [planosErro, setPlanosErro] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [tipoFiltro, setTipoFiltro] = useState('todos');
   const [showModal, setShowModal] = useState(false);
@@ -30,7 +33,7 @@ export const PainelEmpresas: React.FC = () => {
   const [confirmAtivo, setConfirmAtivo] = useState(false);
   const [toast, setToast] = useState<{ message: string; tipo: 'sucesso' | 'erro' } | null>(null);
 
-  useEffect(() => { carregar(); }, []);
+  useEffect(() => { carregar(); carregarPlanos(); }, []);
 
   // Auto-dismiss do toast: some sozinho após 3,5s. Cada novo toast reinicia o
   // timer (o cleanup limpa o anterior) e o unmount também limpa — evita a
@@ -46,15 +49,33 @@ export const PainelEmpresas: React.FC = () => {
     setEmpresas(response.data || []);
   }
 
+  // Carrega o catálogo de planos para o <select> do formulário (mesmo endpoint de PainelPlanos).
+  async function carregarPlanos() {
+    setPlanosLoading(true);
+    setPlanosErro(false);
+    try {
+      const response = await api.get('/painel-admin/planos');
+      setPlanos(response.data || []);
+    } catch {
+      setPlanosErro(true);
+    } finally {
+      setPlanosLoading(false);
+    }
+  }
+
   async function handleSalvar() {
     if (!formDados.nome.trim()) { setToast({ message: 'Nome é obrigatório', tipo: 'erro' }); return; }
+    const emailTrim = formDados.email.trim();
+    if (emailTrim && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailTrim)) { setToast({ message: 'E-mail inválido', tipo: 'erro' }); return; }
     const payload = { nome: formDados.nome, cnpj: formDados.cnpj, email: formDados.email, telefone: formDados.telefone, plano_id: formDados.plano_id || null };
     if (editing) {
-      try { await api.put('/painel-admin/empresas/' + editing.id, payload); } catch { setToast({ message: 'Erro ao atualizar', tipo: 'erro' }); return; }
+      try { await api.put('/painel-admin/empresas/' + editing.id, payload); }
+      catch (err: any) { setToast({ message: err?.response?.data?.message || 'Não foi possível salvar a conta.', tipo: 'erro' }); return; }
       setToast({ message: 'Empresa atualizada!', tipo: 'sucesso' });
       setShowModal(false); setEditing(null); carregar();
     } else {
-      try { await api.post('/painel-admin/empresas', { ...payload, tipo: formDados.tipo, status: 'trial' }); } catch { setToast({ message: 'Erro ao criar', tipo: 'erro' }); return; }
+      try { await api.post('/painel-admin/empresas', { ...payload, tipo: formDados.tipo, status: 'trial' }); }
+      catch (err: any) { setToast({ message: err?.response?.data?.message || 'Não foi possível salvar a conta.', tipo: 'erro' }); return; }
       setToast({ message: 'Empresa criada!', tipo: 'sucesso' });
       setShowModal(false); carregar();
     }
@@ -110,6 +131,20 @@ export const PainelEmpresas: React.FC = () => {
     const porTipo = tipoFiltro === 'todos' || (tipoFiltro === 'autonomos' ? e.tipo === 'autonomo' : e.tipo !== 'autonomo');
     return porBusca && porTipo;
   });
+
+  // Opções do <select> de plano: apenas planos ativos. Ao editar, se o plano
+  // atual estiver inativo (ou sumido do catálogo), injeta a opção corrente
+  // marcada como "(inativo)" para aparecer selecionada e não zerar ao salvar.
+  const planosAtivos = planos.filter((p: any) => p.ativo !== false);
+  let opcoesPlano: any[] = planosAtivos;
+  const planoAtualId = formDados.plano_id;
+  if (planoAtualId && !planosAtivos.some((p: any) => p.id === planoAtualId)) {
+    const doCatalogo = planos.find((p: any) => p.id === planoAtualId);
+    const atual = doCatalogo
+      ? { ...doCatalogo, ativo: false }
+      : { id: planoAtualId, nome: editing?.planos?.nome || 'Plano atual', preco_mensal: editing?.planos?.preco_mensal || 0, ativo: false };
+    opcoesPlano = [atual, ...planosAtivos];
+  }
 
   return (
     <div className="space-y-4 animate-fade-in">
@@ -207,10 +242,28 @@ export const PainelEmpresas: React.FC = () => {
                   <option value="autonomo">Autônomo</option>
                 </select>
                 {!editing && formDados.tipo === 'autonomo' && <p className="text-xs text-emerald-700 mt-1">Depois de criar a conta, adicione a pessoa responsável em Usuários.</p>}
+                {editing && <p className="text-xs text-gray-400 mt-1">O tipo da conta não pode ser alterado após a criação neste momento.</p>}
               </div>
               <div>
                 <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Plano</label>
-                <input type="text" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" value={formDados.plano_id} onChange={e => setFormDados({ ...formDados, plano_id: e.target.value })} placeholder="UUID do plano" />
+                {planosLoading ? (
+                  <div className="w-full border-2 border-gray-50 rounded-xl p-3 bg-gray-50/50 text-sm text-gray-400">Carregando planos…</div>
+                ) : planosErro ? (
+                  <div className="w-full border-2 border-red-100 rounded-xl p-3 bg-red-50/50 text-sm text-red-600">
+                    Não foi possível carregar os planos.{' '}
+                    <button type="button" onClick={carregarPlanos} className="underline font-semibold">Tentar novamente</button>
+                  </div>
+                ) : (
+                  <>
+                    <select className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" value={formDados.plano_id} onChange={e => setFormDados({ ...formDados, plano_id: e.target.value })}>
+                      <option value="">Sem plano</option>
+                      {opcoesPlano.map((p: any) => (
+                        <option key={p.id} value={p.id}>{p.nome} — R$ {Number(p.preco_mensal || 0).toFixed(2)}{p.ativo === false ? ' (inativo)' : ''}</option>
+                      ))}
+                    </select>
+                    {planos.length === 0 && <p className="text-xs text-amber-600 mt-1">Nenhum plano cadastrado. A conta ficará sem plano.</p>}
+                  </>
+                )}
               </div>
             </div>
             <div className="p-4 bg-gray-50 border-t flex justify-end gap-3 flex-shrink-0">

@@ -3,8 +3,29 @@ const router = express.Router();
 const supabase = require('../config/supabase');
 const { verifyToken, isAdmin, isSuperAdmin } = require('../middlewares/auth');
 const { criarEmpresaCompleta } = require('../services/empresaService');
+const { plano_idValido, normalizarPlanoId } = require('../utils/plano');
 
 router.use(verifyToken, isAdmin, isSuperAdmin);
+
+// Valida/resolve o plano_id recebido do cliente ANTES de tocar o banco.
+// Retorna { plano_id: string|null } em caso de sucesso, ou { status, message }
+// para o handler responder direto. Nunca deixa texto não-UUID chegar ao Postgres
+// (evita 22P02 → 500) e barra UUID válido porém inexistente com 400.
+async function resolverPlanoId(valor) {
+  const plano_id = normalizarPlanoId(valor);
+  if (plano_id === null) return { plano_id: null };
+  if (!plano_idValido(plano_id)) {
+    return { status: 400, message: 'Plano informado é inválido.' };
+  }
+  const { data, error } = await supabase
+    .from('planos')
+    .select('id')
+    .eq('id', plano_id)
+    .maybeSingle();
+  if (error) return { status: 500, message: 'Erro ao validar plano.' };
+  if (!data) return { status: 400, message: 'Plano informado não foi encontrado.' };
+  return { plano_id };
+}
 
 // DASHBOARD
 router.get('/dashboard', async (req, res) => {
@@ -30,17 +51,27 @@ router.get('/empresas', async (req, res) => {
 
 router.post('/empresas', async (req, res) => {
   try {
+    // Só validamos plano_id quando o cliente informou algum. Se veio vazio, o
+    // serviço aplica sua própria resolução (alias/default) e pode nascer sem plano.
+    let planoIdValidado;
+    if (req.body.plano_id !== undefined && req.body.plano_id !== null && String(req.body.plano_id).trim() !== '') {
+      const r = await resolverPlanoId(req.body.plano_id);
+      if (r.status) return res.status(r.status).json({ message: r.message });
+      planoIdValidado = r.plano_id;
+    }
     const { empresa, error } = await criarEmpresaCompleta({
       nome: req.body.nome,
       cnpj: req.body.cnpj,
       email_contato: req.body.email,
       telefone: req.body.telefone,
-      plano_id: req.body.plano_id,
+      plano_id: planoIdValidado,
       planoAlias: req.body.plano,
       tipo: req.body.tipo || 'transportadora',
     });
     if (error || !empresa) {
-      return res.status(500).json({ message: error || 'Erro ao criar empresa.' });
+      // Erros de plano vindos do serviço saem como 400 (não 500).
+      const status = /plano/i.test(error || '') ? 400 : 500;
+      return res.status(status).json({ message: error || 'Erro ao criar empresa.' });
     }
     res.status(201).json(empresa);
   } catch (err) {
@@ -55,7 +86,13 @@ router.put('/empresas/:id', async (req, res) => {
   if (req.body.cnpj !== undefined) upd.cnpj = req.body.cnpj;
   if (req.body.email !== undefined) upd.email_contato = req.body.email;
   if (req.body.telefone !== undefined) upd.telefone_contato = req.body.telefone;
-  if (req.body.plano_id !== undefined) upd.plano_id = req.body.plano_id;
+  if (req.body.plano_id !== undefined) {
+    // Valida antes de gravar: '' → null (sem plano); não-UUID → 400;
+    // UUID inexistente → 400. Nunca deixa 22P02 virar 500.
+    const r = await resolverPlanoId(req.body.plano_id);
+    if (r.status) return res.status(r.status).json({ message: r.message });
+    upd.plano_id = r.plano_id;
+  }
   if (req.body.status !== undefined) upd.status = req.body.status;
   const { data, error } = await supabase.from('empresas').update(upd).eq('id', req.params.id).select().single();
   if (error) return res.status(500).json({ message: 'Erro ao atualizar empresa.' });
