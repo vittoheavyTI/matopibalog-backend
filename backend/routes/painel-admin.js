@@ -4,6 +4,7 @@ const supabase = require('../config/supabase');
 const { verifyToken, isAdmin, isSuperAdmin } = require('../middlewares/auth');
 const { criarEmpresaCompleta } = require('../services/empresaService');
 const { plano_idValido, normalizarPlanoId } = require('../utils/plano');
+const { conflitoUnico } = require('../utils/pgError');
 
 router.use(verifyToken, isAdmin, isSuperAdmin);
 
@@ -59,7 +60,7 @@ router.post('/empresas', async (req, res) => {
       if (r.status) return res.status(r.status).json({ message: r.message });
       planoIdValidado = r.plano_id;
     }
-    const { empresa, error } = await criarEmpresaCompleta({
+    const { empresa, error, status } = await criarEmpresaCompleta({
       nome: req.body.nome,
       cnpj: req.body.cnpj,
       email_contato: req.body.email,
@@ -69,9 +70,10 @@ router.post('/empresas', async (req, res) => {
       tipo: req.body.tipo || 'transportadora',
     });
     if (error || !empresa) {
-      // Erros de plano vindos do serviço saem como 400 (não 500).
-      const status = /plano/i.test(error || '') ? 400 : 500;
-      return res.status(status).json({ message: error || 'Erro ao criar empresa.' });
+      // Status vindo do serviço tem precedência (409 = documento duplicado).
+      // Sem status: erros de plano saem como 400; o resto como 500.
+      const httpStatus = status || (/plano/i.test(error || '') ? 400 : 500);
+      return res.status(httpStatus).json({ message: error || 'Erro ao criar empresa.' });
     }
     res.status(201).json(empresa);
   } catch (err) {
@@ -95,7 +97,13 @@ router.put('/empresas/:id', async (req, res) => {
   }
   if (req.body.status !== undefined) upd.status = req.body.status;
   const { data, error } = await supabase.from('empresas').update(upd).eq('id', req.params.id).select().single();
-  if (error) return res.status(500).json({ message: 'Erro ao atualizar empresa.' });
+  if (error) {
+    // Trocar o documento para um já usado por outra conta → 409 amigável.
+    // (Manter o próprio documento não gera 23505: o valor não muda.)
+    const conflito = conflitoUnico(error);
+    if (conflito) return res.status(conflito.status).json({ message: conflito.message });
+    return res.status(500).json({ message: 'Erro ao atualizar empresa.' });
+  }
   res.json(data);
 });
 

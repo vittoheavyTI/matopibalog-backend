@@ -1,4 +1,5 @@
 const supabase = require('../config/supabase');
+const { conflitoUnico } = require('../utils/pgError');
 
 // Gera código de convite no formato MATO-XXXXXX
 function gerarCodigoConvite() {
@@ -118,7 +119,11 @@ async function criarEmpresaCompleta(opts) {
 
   if (insertError) {
     console.error('[empresaService] Erro ao inserir empresa:', insertError);
-    return { empresa: null, error: insertError.message || 'Erro ao criar empresa.' };
+    // Conflito de unicidade (ex.: CNPJ/CPF já cadastrado) → mensagem amigável e
+    // status 409, sem vazar constraint/SQL. Demais erros → genérico 500.
+    const conflito = conflitoUnico(insertError);
+    if (conflito) return { empresa: null, error: conflito.message, status: conflito.status };
+    return { empresa: null, error: 'Erro ao criar empresa.', status: 500 };
   }
 
   console.log(
