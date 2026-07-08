@@ -69,6 +69,9 @@ export const Usuarios: React.FC = () => {
   const [selectedEmpresaId, setSelectedEmpresaId] = useState('');
   const [empresaSearch, setEmpresaSearch] = useState('');
   const [showEmpresaDropdown, setShowEmpresaDropdown] = useState(false);
+  // Filtro por tipo dentro do combobox de conta (só afeta a lista do picker do modal,
+  // não confundir com o filtro da listagem "Todas as contas").
+  const [empresaTipoFiltro, setEmpresaTipoFiltro] = useState<'todas' | 'empresas' | 'autonomos'>('todas');
   const empresaDropdownRef = useRef<HTMLDivElement>(null);
 
   const [newUser, setNewUser] = useState({
@@ -123,7 +126,7 @@ export const Usuarios: React.FC = () => {
     loadUsuarios();
     if (currentUser?.is_super_admin) {
       api.get('/painel-admin/empresas').then(res => {
-        setEmpresas((res.data || []).map((e: any) => ({ id: e.id, nome: e.nome, tipo: e.tipo })));
+        setEmpresas((res.data || []).map((e: any) => ({ id: e.id, nome: e.nome, tipo: e.tipo, plano: e.planos?.nome || null, status: e.status || null })));
       }).catch(() => {});
     }
   }, []);
@@ -162,7 +165,7 @@ export const Usuarios: React.FC = () => {
       } else {
         // Super-admin deve selecionar empresa alvo explicitamente
         if (currentUser?.is_super_admin && !selectedEmpresaId) {
-          alert('Selecione a empresa para criar o usuário.');
+          alert('Selecione a conta à qual o usuário será vinculado.');
           return;
         }
         const payload: any = {
@@ -190,6 +193,7 @@ export const Usuarios: React.FC = () => {
       setEditingUser(null);
       setSelectedEmpresaId('');
       setEmpresaSearch('');
+      setEmpresaTipoFiltro('todas');
       setNewUser({
         nome: '',
         email: '',
@@ -206,7 +210,10 @@ export const Usuarios: React.FC = () => {
     } catch (error: any) {
       console.error('Erro detalhado ao salvar usuário:', error);
       console.error('Payload do usuário no momento do erro:', editingUser ? { type: 'EDIT', data: editingUser } : { type: 'NEW', data: newUser });
-      alert('Erro ao salvar usuário: ' + (error.response?.data?.message || error.message || 'Erro desconhecido'));
+      // Só exibe a mensagem amigável do backend (err.response.data.message); nunca
+      // error.message cru (pode conter detalhe técnico). Fallback genérico por ação.
+      const msgFallback = editingUser ? 'Não foi possível salvar o usuário.' : 'Não foi possível criar o usuário.';
+      alert(error.response?.data?.message || msgFallback);
     } finally {
       setIsSubmitting(false);
     }
@@ -308,6 +315,20 @@ export const Usuarios: React.FC = () => {
   const getEmpresaLabel = (user: any) => {
     if (user.is_super_admin) return 'Plataforma';
     return empresas.find(e => e.id === user.empresaId)?.nome || 'Conta não identificada';
+  };
+
+  // Rótulo humano do tipo da conta (nunca expõe valor cru/UUID).
+  const tipoContaLabel = (tipo?: string) => (tipo === 'autonomo' ? 'Autônomo' : 'Empresa');
+
+  // Linha de exibição de uma conta no picker: "Nome · Empresa/Autônomo · Plano".
+  // Plano só entra se houver. Sem IDs internos.
+  const formatContaLinha = (e: any) => [e?.nome, tipoContaLabel(e?.tipo), e?.plano].filter(Boolean).join(' · ');
+
+  // Conta atual de um usuário (edição, somente leitura). Super-admin → Plataforma.
+  const contaAtualLabel = (user: any) => {
+    if (user?.is_super_admin) return 'Plataforma';
+    const e = empresas.find(x => x.id === user?.empresaId);
+    return e ? formatContaLinha(e) : 'Conta não identificada';
   };
 
   const getTipoBadgeClasses = (user: any) => {
@@ -592,6 +613,20 @@ export const Usuarios: React.FC = () => {
                       disabled={!!editingUser}
                     />
                   </div>
+                  {editingUser && currentUser?.is_super_admin && (
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">Conta vinculada</label>
+                      <input
+                        type="text"
+                        readOnly
+                        className="w-full border p-3 rounded-xl bg-gray-100 text-gray-600"
+                        value={contaAtualLabel(editingUser)}
+                      />
+                      <p className="text-[10px] text-gray-400 mt-1 ml-1">
+                        A troca de conta do usuário será disponibilizada em uma etapa específica, para preservar o isolamento entre contas.
+                      </p>
+                    </div>
+                  )}
                   {!editingUser && currentUser?.is_super_admin && (
                     <div ref={empresaDropdownRef} className="relative">
                       <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">Empresa</label>
@@ -603,21 +638,39 @@ export const Usuarios: React.FC = () => {
                         placeholder="Digite para buscar..."
                       />
                       {showEmpresaDropdown && (
-                        <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto">
-                          {empresas
-                            .filter(e => !empresaSearch || e.nome.toLowerCase().includes(empresaSearch.toLowerCase()))
-                            .map(e => (
+                        <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg max-h-56 overflow-y-auto">
+                          <div className="flex gap-1 p-2 border-b bg-gray-50 sticky top-0">
+                            {([['todas', 'Todas'], ['empresas', 'Empresas'], ['autonomos', 'Autônomos']] as const).map(([k, l]) => (
+                              <button
+                                key={k}
+                                type="button"
+                                onClick={() => setEmpresaTipoFiltro(k)}
+                                className={`px-2.5 py-1 rounded-full text-[11px] font-bold border transition-colors ${empresaTipoFiltro === k ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+                              >
+                                {l}
+                              </button>
+                            ))}
+                          </div>
+                          {(() => {
+                            const lista = empresas
+                              .filter(e => empresaTipoFiltro === 'todas' || (empresaTipoFiltro === 'autonomos' ? e.tipo === 'autonomo' : e.tipo !== 'autonomo'))
+                              .filter(e => !empresaSearch || e.nome.toLowerCase().includes(empresaSearch.toLowerCase()));
+                            if (lista.length === 0) {
+                              return <div className="px-4 py-3 text-sm text-gray-400">Nenhuma conta encontrada</div>;
+                            }
+                            return lista.map(e => (
                               <div
                                 key={e.id}
-                                className="px-4 py-3 hover:bg-blue-50 cursor-pointer text-sm text-gray-700"
+                                className="px-4 py-2.5 hover:bg-blue-50 cursor-pointer"
                                 onClick={() => { setSelectedEmpresaId(e.id); setEmpresaSearch(''); setShowEmpresaDropdown(false); }}
                               >
-                                {e.nome}
+                                <div className="text-sm text-gray-700">{formatContaLinha(e)}</div>
+                                {e.status && e.status !== 'ativo' && (
+                                  <div className="text-[10px] font-bold uppercase tracking-wide text-amber-600">{e.status}</div>
+                                )}
                               </div>
-                            ))}
-                          {empresas.filter(e => !empresaSearch || e.nome.toLowerCase().includes(empresaSearch.toLowerCase())).length === 0 && (
-                            <div className="px-4 py-3 text-sm text-gray-400">Nenhuma empresa encontrada</div>
-                          )}
+                            ));
+                          })()}
                         </div>
                       )}
                     </div>
