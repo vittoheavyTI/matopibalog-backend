@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Search, Plus, X, Check, AlertTriangle, Eye, Ban, Unlock, Trash2, KeyRound, CalendarClock } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Shield, Search, Plus, X, Check, AlertTriangle, Eye, Ban, Unlock, Trash2, KeyRound, CalendarClock, UserPlus } from 'lucide-react';
 import api from '../api';
 
 // Formata ISO → DD/MM/AAAA (pt-BR). Retorna '-' se inválido.
@@ -18,8 +19,17 @@ function trialVencido(iso?: string) {
 }
 
 export const PainelEmpresas: React.FC = () => {
+  const navigate = useNavigate();
   const [empresas, setEmpresas] = useState<any[]>([]);
   const [planos, setPlanos] = useState<any[]>([]);
+  // Contagem de administradores por conta, derivada de UMA chamada a /admin/usuarios
+  // (agrupada em memória). null = ainda não carregada / falhou → NÃO classificar como
+  // "Sem administrador" (mostra skeleton ou aviso neutro).
+  const [adminCounts, setAdminCounts] = useState<Record<string, number> | null>(null);
+  const [adminCountsLoading, setAdminCountsLoading] = useState(true);
+  const [adminCountsErro, setAdminCountsErro] = useState(false);
+  // Modal de sucesso pós-criação (conta recém-criada, ainda sem administrador).
+  const [successConta, setSuccessConta] = useState<{ id: string; nome: string } | null>(null);
   const [planosLoading, setPlanosLoading] = useState(false);
   const [planosErro, setPlanosErro] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -33,7 +43,7 @@ export const PainelEmpresas: React.FC = () => {
   const [confirmAtivo, setConfirmAtivo] = useState(false);
   const [toast, setToast] = useState<{ message: string; tipo: 'sucesso' | 'erro' } | null>(null);
 
-  useEffect(() => { carregar(); carregarPlanos(); }, []);
+  useEffect(() => { carregar(); carregarPlanos(); carregarAdmins(); }, []);
 
   // Auto-dismiss do toast: some sozinho após 3,5s. Cada novo toast reinicia o
   // timer (o cleanup limpa o anterior) e o unmount também limpa — evita a
@@ -47,6 +57,29 @@ export const PainelEmpresas: React.FC = () => {
   async function carregar() {
     const response = await api.get('/painel-admin/empresas');
     setEmpresas(response.data || []);
+  }
+
+  // Uma única consulta de usuários (super-admin recebe todos, com empresa_id + tipo).
+  // Conta apenas tipo === 'admin' por empresa_id, em memória → sem N+1, sem backend.
+  // Falha → adminCounts=null + erro=true (a UI mostra aviso neutro, nunca "Sem administrador").
+  async function carregarAdmins() {
+    setAdminCountsLoading(true);
+    setAdminCountsErro(false);
+    try {
+      const response = await api.get('/admin/usuarios');
+      const counts: Record<string, number> = {};
+      (response.data || []).forEach((u: any) => {
+        if (u.tipo === 'admin' && u.empresa_id) {
+          counts[u.empresa_id] = (counts[u.empresa_id] || 0) + 1;
+        }
+      });
+      setAdminCounts(counts);
+    } catch {
+      setAdminCounts(null);
+      setAdminCountsErro(true);
+    } finally {
+      setAdminCountsLoading(false);
+    }
   }
 
   // Carrega o catálogo de planos para o <select> do formulário (mesmo endpoint de PainelPlanos).
@@ -74,10 +107,22 @@ export const PainelEmpresas: React.FC = () => {
       setToast({ message: 'Empresa atualizada!', tipo: 'sucesso' });
       setShowModal(false); setEditing(null); carregar();
     } else {
-      try { await api.post('/painel-admin/empresas', { ...payload, tipo: formDados.tipo, status: 'trial' }); }
+      let novaEmpresa: any = null;
+      try {
+        const resp = await api.post('/painel-admin/empresas', { ...payload, tipo: formDados.tipo, status: 'trial' });
+        novaEmpresa = resp.data;
+      }
       catch (err: any) { setToast({ message: err?.response?.data?.message || 'Não foi possível salvar a conta.', tipo: 'erro' }); return; }
-      setToast({ message: 'Empresa criada!', tipo: 'sucesso' });
-      setShowModal(false); carregar();
+      setShowModal(false);
+      carregar();
+      carregarAdmins();
+      // Conta nasce sem administrador → oferece criar o primeiro admin agora ou depois.
+      // Fallback (sem id no retorno): mantém o toast de criação simples.
+      if (novaEmpresa?.id) {
+        setSuccessConta({ id: novaEmpresa.id, nome: novaEmpresa.nome || formDados.nome });
+      } else {
+        setToast({ message: 'Empresa criada!', tipo: 'sucesso' });
+      }
     }
   }
 
@@ -109,7 +154,7 @@ export const PainelEmpresas: React.FC = () => {
     if (!deleteTarget) return;
     try { await api.delete('/painel-admin/empresas/' + deleteTarget.id); } catch { setToast({ message: 'Erro ao excluir', tipo: 'erro' }); return; }
     setToast({ message: 'Empresa excluída!', tipo: 'sucesso' });
-    setDeleteTarget(null); carregar();
+    setDeleteTarget(null); carregar(); carregarAdmins();
   }
 
   // Prorroga/libera trial via endpoint dedicado. body = { dias: 7|15 } ou { trial_ends_at: 'YYYY-MM-DD' }.
@@ -192,6 +237,21 @@ export const PainelEmpresas: React.FC = () => {
                 <td className="px-4 py-2.5">
                   <p className="font-bold text-gray-800">{e.nome}</p>
                   <p className="text-[10px] uppercase tracking-wide text-gray-400">{e.tipo === 'autonomo' ? 'Autônomo' : 'Empresa'}</p>
+                  <div className="mt-1">
+                    {adminCountsErro ? (
+                      // Consulta falhou → aviso neutro; NUNCA marcar como "Sem administrador".
+                      <span className="text-[10px] font-semibold text-gray-300">Administradores indisponível</span>
+                    ) : (adminCountsLoading || adminCounts === null) ? (
+                      // Skeleton enquanto a contagem não termina.
+                      <span className="inline-block h-3 w-24 rounded bg-gray-100 animate-pulse align-middle" />
+                    ) : ((adminCounts[e.id] || 0) === 0) ? (
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-red-500">Sem administrador</span>
+                    ) : (
+                      <span className="text-[10px] font-semibold text-gray-500">
+                        {adminCounts[e.id]} {adminCounts[e.id] === 1 ? 'administrador' : 'administradores'}
+                      </span>
+                    )}
+                  </div>
                 </td>
                 <td className="px-4 py-2.5 text-sm text-gray-600">{e.cnpj || '—'}</td>
                 <td className="px-4 py-2.5"><span className="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest bg-blue-50 text-blue-700">{e.planos?.nome || e.plano_id || '-'}</span></td>
@@ -285,6 +345,32 @@ export const PainelEmpresas: React.FC = () => {
             <div className="p-4 bg-gray-50 border-t flex justify-end gap-3">
               <button onClick={() => setDeleteTarget(null)} className="px-5 py-2.5 font-bold text-gray-500 hover:bg-gray-200 rounded-xl">Cancelar</button>
               <button onClick={excluir} className="flex items-center px-6 py-2.5 bg-red-600 text-white font-bold rounded-xl shadow hover:bg-red-700"><Trash2 size={18} className="mr-2" /> Excluir</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {successConta && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+            <div className="p-6 flex flex-col items-center text-center space-y-3">
+              <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center"><Check size={32} className="text-green-600" /></div>
+              <h3 className="text-xl font-bold text-gray-800">Conta criada com sucesso.</h3>
+              <p className="text-gray-500">Esta conta ainda não possui administrador. Deseja criar o primeiro administrador agora?</p>
+              <p className="text-sm font-semibold text-gray-700">{successConta.nome}</p>
+            </div>
+            <div className="p-4 bg-gray-50 border-t flex justify-end gap-3">
+              <button onClick={() => setSuccessConta(null)} className="px-5 py-2.5 font-bold text-gray-500 hover:bg-gray-200 rounded-xl">Criar depois</button>
+              <button
+                onClick={() => {
+                  const conta = successConta;
+                  setSuccessConta(null);
+                  navigate(`/painel-administrativo/usuarios?empresa_id=${encodeURIComponent(conta.id)}&openCreate=true&source=empresa-created`);
+                }}
+                className="flex items-center px-6 py-2.5 bg-green-700 text-white font-bold rounded-xl shadow hover:bg-green-800"
+              >
+                <UserPlus size={18} className="mr-2" /> Criar administrador agora
+              </button>
             </div>
           </div>
         </div>

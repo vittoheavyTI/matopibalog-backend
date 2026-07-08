@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { UserPlus, Search, Shield, Phone, MapPin, Camera, X, Check, Trash2, AlertTriangle, Loader2, Key, Copy, KeyRound, Eye, EyeOff, Edit3 } from 'lucide-react';
 import api from '../api';
 import { mensagemErro } from '../utils/mensagemErro';
@@ -67,9 +68,18 @@ export const Usuarios: React.FC = () => {
 
   // Super-admin pode selecionar empresa alvo (dropdown pesquisável)
   const [empresas, setEmpresas] = useState<any[]>([]);
+  const [empresasLoaded, setEmpresasLoaded] = useState(false);
   const [selectedEmpresaId, setSelectedEmpresaId] = useState('');
   const [empresaSearch, setEmpresaSearch] = useState('');
   const [showEmpresaDropdown, setShowEmpresaDropdown] = useState(false);
+  // Fluxo "criar administrador da conta" (deep-link vindo de Empresas): a conta
+  // chega pré-selecionada e TRAVADA (read-only) para não ser trocada por acidente.
+  const [contaTravada, setContaTravada] = useState(false);
+  const [bannerConta, setBannerConta] = useState<string | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  // Garante que o deep-link é processado uma única vez por montagem (evita
+  // reabrir o modal em re-render / refresh / voltar no histórico).
+  const deepLinkRef = useRef(false);
   // Filtro por tipo dentro do combobox de conta (só afeta a lista do picker do modal,
   // não confundir com o filtro da listagem "Todas as contas").
   const [empresaTipoFiltro, setEmpresaTipoFiltro] = useState<'todas' | 'empresas' | 'autonomos'>('todas');
@@ -128,9 +138,48 @@ export const Usuarios: React.FC = () => {
     if (currentUser?.is_super_admin) {
       api.get('/painel-admin/empresas').then(res => {
         setEmpresas((res.data || []).map((e: any) => ({ id: e.id, nome: e.nome, tipo: e.tipo, plano: e.planos?.nome || null, status: e.status || null })));
-      }).catch(() => {});
+      }).catch(() => {}).finally(() => setEmpresasLoaded(true));
+    } else {
+      setEmpresasLoaded(true);
     }
   }, []);
+
+  // Deep-link "Criar administrador agora" (vindo de Empresas).
+  // ?empresa_id=<id>&openCreate=true&source=empresa-created
+  // - Só super-admin (o fluxo cria admin de uma conta arbitrária).
+  // - Espera a lista de contas carregar para VALIDAR que a conta existe.
+  // - Conta inexistente/param inválido → aviso seguro, NÃO abre o formulário vazio.
+  // - Sempre limpa os params com replace (nunca reabre em refresh / voltar).
+  useEffect(() => {
+    if (deepLinkRef.current) return;
+    if (searchParams.get('openCreate') !== 'true') return;
+    if (!currentUser?.is_super_admin) return;
+    if (!empresasLoaded) return; // aguarda a lista para validar a conta
+    deepLinkRef.current = true;
+
+    const empresaId = searchParams.get('empresa_id') || '';
+    const source = searchParams.get('source') || '';
+    const empresa = empresas.find(e => e.id === empresaId);
+
+    // Limpa os params antes de qualquer coisa (replace → sem reabertura no refresh/voltar).
+    setSearchParams({}, { replace: true });
+
+    if (!empresaId || !empresa) {
+      alert('Não foi possível abrir o cadastro: conta não encontrada.');
+      return;
+    }
+
+    setEditingUser(null);
+    setSomenteLeitura(false);
+    setSelectedEmpresaId(empresa.id);
+    setEmpresaSearch('');
+    setNewUser(prev => ({ ...prev, nivel: 'admin' }));
+    if (source === 'empresa-created') {
+      setContaTravada(true);
+      setBannerConta(empresa.nome);
+    }
+    setShowModal(true);
+  }, [empresasLoaded, searchParams, empresas, currentUser]);
 
   // Fecha dropdown de empresa ao clicar fora
   useEffect(() => {
@@ -142,6 +191,14 @@ export const Usuarios: React.FC = () => {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  // Fecha o modal de usuário e zera o estado do fluxo "criar administrador da conta"
+  // (evita que uma abertura manual posterior herde a conta travada/banner).
+  const fecharModal = () => {
+    setShowModal(false);
+    setContaTravada(false);
+    setBannerConta(null);
+  };
 
   const handleSave = async () => {
     try {
@@ -195,6 +252,8 @@ export const Usuarios: React.FC = () => {
       setSelectedEmpresaId('');
       setEmpresaSearch('');
       setEmpresaTipoFiltro('todas');
+      setContaTravada(false);
+      setBannerConta(null);
       setNewUser({
         nome: '',
         email: '',
@@ -378,8 +437,8 @@ export const Usuarios: React.FC = () => {
           <h2 className="text-2xl font-bold text-gray-800">Usuários</h2>
           <p className="text-sm text-gray-500">Pessoas que acessam o sistema, vinculadas às contas da plataforma</p>
         </div>
-        <button 
-          onClick={() => { setEditingUser(null); setSomenteLeitura(false); setShowModal(true); }}
+        <button
+          onClick={() => { setEditingUser(null); setSomenteLeitura(false); setContaTravada(false); setBannerConta(null); setSelectedEmpresaId(''); setEmpresaSearch(''); setShowModal(true); }}
           className="inline-flex items-center px-4 py-2.5 bg-green-700 text-white rounded-xl font-medium text-sm shadow-sm hover:bg-green-800 transition-all active:scale-95"
         >
           <UserPlus size={18} className="mr-2" /> Novo Usuário
@@ -548,11 +607,17 @@ export const Usuarios: React.FC = () => {
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl overflow-hidden max-h-[88vh] flex flex-col">
             <div className="px-5 py-4 border-b flex justify-between items-center bg-gray-50 flex-shrink-0">
               <h3 className="text-xl font-bold text-gray-800">{somenteLeitura ? 'Dados do Usuário' : editingUser ? 'Editar Usuário' : 'Novo Usuário'}</h3>
-              <button onClick={() => setShowModal(false)} className="p-2 hover:bg-gray-200 rounded-full transition-colors"><X size={24} /></button>
+              <button onClick={fecharModal} className="p-2 hover:bg-gray-200 rounded-full transition-colors"><X size={24} /></button>
             </div>
             
             <fieldset disabled={somenteLeitura} className="contents">
             <div className="p-4 overflow-y-auto space-y-4">
+              {!editingUser && bannerConta && (
+                <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl p-3 text-sm text-blue-800">
+                  <Shield size={16} className="flex-shrink-0" />
+                  <span>Criando administrador para: <strong>{bannerConta}</strong></span>
+                </div>
+              )}
               <div className="flex flex-col items-center space-y-1 pb-1">
                 <input 
                   type="file" 
@@ -626,7 +691,21 @@ export const Usuarios: React.FC = () => {
                       </p>
                     </div>
                   )}
-                  {!editingUser && currentUser?.is_super_admin && (
+                  {!editingUser && currentUser?.is_super_admin && contaTravada && (
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">Conta</label>
+                      <input
+                        type="text"
+                        readOnly
+                        className="w-full border p-3 rounded-xl bg-gray-100 text-gray-600"
+                        value={empresas.find(e => e.id === selectedEmpresaId)?.nome || bannerConta || ''}
+                      />
+                      <p className="text-[10px] text-gray-400 mt-1 ml-1">
+                        Conta definida pela criação. Para vincular a outra conta, use "Novo Usuário".
+                      </p>
+                    </div>
+                  )}
+                  {!editingUser && currentUser?.is_super_admin && !contaTravada && (
                     <div ref={empresaDropdownRef} className="relative">
                       <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">Empresa</label>
                       <input
@@ -839,7 +918,7 @@ export const Usuarios: React.FC = () => {
             </fieldset>
 
             <div className="p-4 bg-gray-50 border-t flex justify-end space-x-3 flex-shrink-0">
-              <button onClick={() => setShowModal(false)} className="px-4 py-2.5 font-medium text-sm text-gray-600 hover:bg-gray-200 rounded-xl transition-all">{somenteLeitura ? 'Fechar' : 'Cancelar'}</button>
+              <button onClick={fecharModal} className="px-4 py-2.5 font-medium text-sm text-gray-600 hover:bg-gray-200 rounded-xl transition-all">{somenteLeitura ? 'Fechar' : 'Cancelar'}</button>
               {!somenteLeitura && <button
                 onClick={handleSave}
                 disabled={isSubmitting}
