@@ -117,7 +117,7 @@ export const Usuarios: React.FC = () => {
         status: u.status
       })));
     } catch (err: any) {
-      console.error('Erro detalhado ao carregar usuários:', err);
+      if (import.meta.env.DEV) console.error('[Usuarios] carregar falhou', { status: err?.response?.status });
     } finally {
       setLoading(false);
     }
@@ -209,8 +209,7 @@ export const Usuarios: React.FC = () => {
         permissoes: { dashboard: true, motoristas: true, relatorios: true, usuarios: false, configuracoes: false }
       });
     } catch (error: any) {
-      console.error('Erro detalhado ao salvar usuário:', error);
-      console.error('Payload do usuário no momento do erro:', editingUser ? { type: 'EDIT', data: editingUser } : { type: 'NEW', data: newUser });
+      if (import.meta.env.DEV) console.error('[Usuarios] salvar falhou', { status: error?.response?.status });
       // Só exibe a mensagem amigável do backend (err.response.data.message); nunca
       // error.message cru (pode conter detalhe técnico). Fallback genérico por ação.
       const msgFallback = editingUser ? 'Não foi possível salvar o usuário.' : 'Não foi possível criar o usuário.';
@@ -228,8 +227,7 @@ export const Usuarios: React.FC = () => {
       setDeleteTarget(null);
       await loadUsuarios();
     } catch (error: any) {
-      console.error('Erro detalhado ao excluir usuário:', error);
-      console.error('Alvo da exclusão:', deleteTarget);
+      if (import.meta.env.DEV) console.error('[Usuarios] excluir falhou', { status: error?.response?.status });
       alert('Erro ao excluir: ' + mensagemErro(error, 'tente novamente.'));
     } finally {
       setIsDeleting(false);
@@ -251,7 +249,7 @@ export const Usuarios: React.FC = () => {
       setMostrarSenhaReset(false);
       await loadUsuarios();
     } catch (err: any) {
-      console.error('Erro ao resetar senha:', err);
+      if (import.meta.env.DEV) console.error('[Usuarios] resetar senha falhou', { status: err?.response?.status });
       alert('Erro ao resetar senha: ' + mensagemErro(err, 'tente novamente.'));
     } finally {
       setIsResetting(false);
@@ -299,7 +297,7 @@ export const Usuarios: React.FC = () => {
         }
       }
     } catch (err) {
-      console.error('Erro ao buscar CEP:', err);
+      if (import.meta.env.DEV) console.error('[Usuarios] buscar CEP falhou');
     } finally {
       setIsFetchingCep(false);
     }

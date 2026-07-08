@@ -150,7 +150,7 @@ export const GerenciamentoViagens: React.FC = () => {
         empresaTipo: m.empresa_tipo
       })));
     } catch (err) {
-      console.error('Erro ao carregar fretes:', err);
+      if (import.meta.env.DEV) console.error('[Fretes] carregar falhou');
       const msgPlano = extrairMensagemPlano(err);
       if (msgPlano) setPlanoBloqueadoMsg(msgPlano);
       else setErroCarregamento(true);
@@ -209,7 +209,7 @@ export const GerenciamentoViagens: React.FC = () => {
         valor: v.valor, quemPagou: v.quem_pagou, status: v.status, data: v.data, frete_id: v.frete_id, tipo: 'vale'
       })));
     } catch (err) {
-      console.error('Erro ao carregar dados do motorista', err);
+      if (import.meta.env.DEV) console.error('[Fretes] carregar dados do motorista falhou');
       const msgPlano = extrairMensagemPlano(err);
       if (msgPlano) setPlanoBloqueadoMsg(msgPlano);
       else setErroCarregamento(true);
@@ -550,7 +550,7 @@ export const GerenciamentoViagens: React.FC = () => {
       a.remove();
       URL.revokeObjectURL(objectUrl);
     } catch (e) {
-      console.warn('Falha no download do comprovante, abrindo em nova aba:', e);
+      if (import.meta.env.DEV) console.warn('[Fretes] download do comprovante falhou; abrindo em nova aba');
       window.open(url, '_blank', 'noopener,noreferrer');
     }
   };
