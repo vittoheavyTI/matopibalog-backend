@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useLoginConfig } from '../hooks/useLoginConfig';
 import api from '../api';
 import { consumirMotivoSessao } from '../utils/sessionReason';
+import { mensagemErro } from '../utils/mensagemErro';
 import { Truck, Eye, EyeOff } from 'lucide-react';
 
 const LOGIN_TEMPLATES = [
@@ -133,7 +134,7 @@ export const Login: React.FC = () => {
       login({ ...rawUser, fotoUrl: rawUser.foto_url });
       navigate('/');
     } catch (err: any) {
-      setError(err.response?.data?.error || err.message || 'Credenciais inválidas.');
+      setError(mensagemErro(err, 'Não foi possível entrar. Verifique e-mail e senha.'));
     } finally {
       setLoadingLocal(false);
     }

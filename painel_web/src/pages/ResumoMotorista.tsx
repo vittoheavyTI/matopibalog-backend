@@ -38,10 +38,13 @@ class CatchError extends React.Component<{ children: React.ReactNode }, { error:
     if (this.state.error) {
       return (
         <div className="p-8">
-          <h2 className="text-red-600 font-bold text-xl mb-4">Erro no ResumoMotorista</h2>
-          <pre className="bg-red-50 p-4 rounded-lg text-red-800 text-sm overflow-auto max-h-96 whitespace-pre-wrap break-all">
-            {this.state.error.message}{'\n'}{this.state.error.stack}
-          </pre>
+          <h2 className="text-red-600 font-bold text-xl mb-4">Erro ao carregar o resumo</h2>
+          <p className="text-sm text-gray-600 mb-3">Não foi possível exibir esta tela. Tente recarregar a página.</p>
+          {import.meta.env.DEV && (
+            <pre className="bg-red-50 p-4 rounded-lg text-red-800 text-sm overflow-auto max-h-96 whitespace-pre-wrap break-all">
+              {this.state.error.message}{'\n'}{this.state.error.stack}
+            </pre>
+          )}
         </div>
       );
     }

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { UserPlus, Search, Shield, Phone, MapPin, Camera, X, Check, Trash2, AlertTriangle, Loader2, Key, Copy, KeyRound, Eye, EyeOff, Edit3 } from 'lucide-react';
 import api from '../api';
+import { mensagemErro } from '../utils/mensagemErro';
 import { maskPhone, maskCEP } from '../utils/masks';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
@@ -229,7 +230,7 @@ export const Usuarios: React.FC = () => {
     } catch (error: any) {
       console.error('Erro detalhado ao excluir usuário:', error);
       console.error('Alvo da exclusão:', deleteTarget);
-      alert('Erro ao excluir: ' + (error.response?.data?.message || error.message || 'Erro desconhecido'));
+      alert('Erro ao excluir: ' + mensagemErro(error, 'tente novamente.'));
     } finally {
       setIsDeleting(false);
     }
@@ -251,7 +252,7 @@ export const Usuarios: React.FC = () => {
       await loadUsuarios();
     } catch (err: any) {
       console.error('Erro ao resetar senha:', err);
-      alert('Erro ao resetar senha: ' + (err.response?.data?.message || err.message || 'Erro desconhecido'));
+      alert('Erro ao resetar senha: ' + mensagemErro(err, 'tente novamente.'));
     } finally {
       setIsResetting(false);
     }

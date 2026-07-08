@@ -4,6 +4,7 @@ import { Plus, X, Search, Filter, Truck, MapPin, Calendar, DollarSign, Gauge, Tr
 import { format } from 'date-fns';
 import { formatCurrency } from '../utils';
 import api, { newClientRequestId } from '../api';
+import { mensagemErro } from '../utils/mensagemErro';
 import { PlanoBloqueadoCard } from '../components/PlanoBloqueadoCard';
 import { EVENTO_NOTIFICACOES_NOVAS } from '../components/NotificacoesDropdown';
 
@@ -444,7 +445,7 @@ export const GerenciamentoViagens: React.FC = () => {
       const detalhe = Array.isArray(data?.errors) && data.errors.length
         ? ' (' + data.errors.map((e: any) => `${e.campo}: ${e.mensagem}`).join('; ') + ')'
         : '';
-      alert('Erro ao salvar frete: ' + (data?.message || err.message) + detalhe);
+      alert('Erro ao salvar frete: ' + mensagemErro(err, 'verifique os campos e tente novamente.') + detalhe);
     } finally {
       setIsSubmitting(false);
     }
@@ -464,7 +465,7 @@ export const GerenciamentoViagens: React.FC = () => {
       selecionarFotoInicial(null);
       alert('Foto do odômetro inicial enviada. O frete foi ativado.');
     } catch (err: any) {
-      alert('Ainda não foi possível enviar a foto: ' + (err?.response?.data?.message || err.message || 'erro desconhecido') + '.');
+      alert('Ainda não foi possível enviar a foto: ' + mensagemErro(err, 'tente novamente.') + '.');
     } finally {
       setReenviandoFotoInicial(false);
     }
@@ -482,7 +483,7 @@ export const GerenciamentoViagens: React.FC = () => {
         await loadData();
       }
     } catch (err: any) {
-      alert('Erro ao excluir frete: ' + (err.response?.data?.message || err.message));
+      alert('Erro ao excluir frete: ' + mensagemErro(err, 'tente novamente.'));
     } finally {
       setIsDeleting(false);
     }
@@ -503,7 +504,7 @@ export const GerenciamentoViagens: React.FC = () => {
       }
       if (filterMot !== 'todos') await loadMotoristaData(filterMot);
     } catch (err: any) {
-      const msg = err?.response?.data?.message || err?.message || 'Tente novamente.';
+      const msg = mensagemErro(err, 'Tente novamente.');
       alert('Erro ao atualizar status: ' + msg);
     }
   };
