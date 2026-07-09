@@ -9,6 +9,7 @@ const { resolveAsaasApiKey } = require('../utils/asaasConfig');
 const { normalizarStatusAsaas } = require('../utils/asaasStatus');
 const { classificarResponsavelRegularizacao } = require('../utils/billingProfile');
 const { garantirAssinatura, conciliarAssinatura } = require('../services/asaasSubscriptionService');
+const { sincronizarCobrancas } = require('../services/asaasInvoiceSyncService');
 
 // Comparação em tempo constante (hash de tamanho fixo evita vazar comprimento)
 function safeEqual(a, b) {
@@ -500,6 +501,111 @@ router.post('/assinaturas/:empresa_id/conciliar', verifyToken, isSuperAdmin, asy
     const httpStatus = err.httpStatus || 500;
     console.error('[pagamentos/assinaturas/conciliar] Falha', { empresa_id: req.params.empresa_id, status: httpStatus });
     return res.status(httpStatus).json({ message: err.message || 'Erro ao conciliar assinatura.' });
+  }
+});
+
+// ─── SINCRONIZAÇÃO DE COBRANÇAS DA ASSINATURA (BLOCO 4) ──────────────────────
+// Importa as cobranças já geradas pela assinatura Asaas para a tabela local.
+// Super-admin (qualquer empresa) + administrador da própria conta.
+// Gate sandbox hard (fail-closed em produção).
+
+// Super-admin: sincroniza cobranças de uma conta específica.
+router.post('/assinaturas/:empresa_id/sincronizar-cobrancas', verifyToken, isSuperAdmin, async (req, res) => {
+  try {
+    if (await bloquearSeNaoSandbox(res)) return;
+    const { apiKey, baseURL } = await getAsaasConfig();
+    const resultado = await sincronizarCobrancas({
+      empresaId: req.params.empresa_id,
+      config: { apiKey, baseURL },
+      supabase,
+      http: axios,
+    });
+    res.json(resultado);
+  } catch (err) {
+    const httpStatus = err.httpStatus || 500;
+    console.error('[pagamentos/sincronizar] Falha', { empresa_id: req.params.empresa_id, status: httpStatus });
+    res.status(httpStatus).json({ message: err.message || 'Erro ao sincronizar cobranças.' });
+  }
+});
+
+// Administrador da própria conta: sincroniza suas cobranças.
+router.post('/minhas-faturas/sincronizar', verifyToken, isAdmin, verificarEmpresa, async (req, res) => {
+  try {
+    if (await bloquearSeNaoSandbox(res)) return;
+    if (!req.empresa_id) {
+      return res.status(400).json({ message: 'Empresa não identificada.' });
+    }
+    const { apiKey, baseURL } = await getAsaasConfig();
+    const resultado = await sincronizarCobrancas({
+      empresaId: req.empresa_id,
+      config: { apiKey, baseURL },
+      supabase,
+      http: axios,
+    });
+    res.json(resultado);
+  } catch (err) {
+    const httpStatus = err.httpStatus || 500;
+    console.error('[pagamentos/minhas-faturas/sincronizar] Falha', { status: httpStatus });
+    res.status(httpStatus).json({ message: err.message || 'Erro ao sincronizar cobranças.' });
+  }
+});
+
+// ─── PIX SOB DEMANDA (BLOCO 4) ────────────────────────────────────────────────
+// Recupera o QR Code Pix de uma fatura consultando o Asaas.
+// Não persiste a imagem ou o payload Pix no banco (pix_qr_code já armazenado
+// na criação da cobrança manual, mas assinaturas não geram Pix no ato).
+router.get('/faturas/:id/pix', verifyToken, async (req, res) => {
+  try {
+    const { data: fatura, error: fetchErr } = await supabase
+      .from('faturas')
+      .select('id, empresa_id, asaas_id, tipo_pagamento, pix_qr_code')
+      .eq('id', req.params.id)
+      .single();
+
+    if (fetchErr || !fatura) {
+      return res.status(404).json({ message: 'Fatura não encontrada.' });
+    }
+
+    // Tenant isolation: super-admin vê qualquer empresa; admin comum só a própria.
+    if (!req.user?.is_super_admin) {
+      const { data: usuario } = await supabase
+        .from('usuarios')
+        .select('empresa_id')
+        .eq('id', req.user.uid)
+        .maybeSingle();
+      if (!usuario || usuario.empresa_id !== fatura.empresa_id) {
+        return res.status(403).json({ message: 'Acesso negado.' });
+      }
+    }
+
+    if (!fatura.asaas_id) {
+      return res.status(400).json({ message: 'Fatura sem cobrança Asaas vinculada.' });
+    }
+
+    // Se já temos o pix_qr_code, devolve direto (sem consultar Asaas de novo)
+    if (fatura.pix_qr_code) {
+      return res.json({ pix_qr_code: fatura.pix_qr_code });
+    }
+
+    // Cobrança não é PIX nem BOLETO (boleto pode ter Pix vinculado)
+    if (fatura.tipo_pagamento !== 'PIX' && fatura.tipo_pagamento !== 'BOLETO') {
+      return res.status(400).json({ message: 'Esta cobrança não suporta Pix.' });
+    }
+
+    // Busca Pix no Asaas (BOLETO com Pix também tem QR code disponível)
+    if (await bloquearSeNaoSandbox(res)) return;
+    const { apiKey, baseURL } = await getAsaasConfig();
+    const qr = await obterPixQrCode(baseURL, apiKey, fatura.asaas_id);
+    if (!qr) {
+      return res.status(404).json({ message: 'Pix não disponível para esta cobrança.' });
+    }
+
+    // Atualiza localmente (cache para evitar chamadas repetidas)
+    await supabase.from('faturas').update({ pix_qr_code: qr }).eq('id', fatura.id);
+
+    res.json({ pix_qr_code: qr, expiracao: 300 });
+  } catch (err) {
+    res.status(500).json({ message: 'Erro ao consultar Pix.' });
   }
 });
 
