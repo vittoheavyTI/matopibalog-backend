@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Shield, Search, Plus, X, Check, AlertTriangle, Eye, Ban, Unlock, Trash2, KeyRound, CalendarClock, UserPlus } from 'lucide-react';
+import { Shield, Search, Plus, X, Check, AlertTriangle, Eye, Ban, Unlock, Trash2, KeyRound, CalendarClock, UserPlus, CreditCard } from 'lucide-react';
 import api from '../api';
 
 // Formata ISO → DD/MM/AAAA (pt-BR). Retorna '-' se inválido.
@@ -18,6 +18,33 @@ function trialVencido(iso?: string) {
   return !isNaN(d.getTime()) && d < new Date();
 }
 
+// Estado de assinatura da conta (discreto). Define o rótulo e se a ação
+// "Configurar assinatura sandbox" deve aparecer. A ação NÃO aparece quando:
+// sem plano, plano isento (preço 0) ou assinatura já ativa. billing_status vem
+// do backend (empresas.*) e pode ser undefined antes da migration → tratado
+// como "sem assinatura" (a ação só funciona após a migration aplicada).
+function estadoAssinatura(e: any): { label: string; tone: 'ok' | 'warn' | 'muted' | 'neutral'; showAction: boolean } {
+  const preco = Number(e?.planos?.preco_mensal ?? 0);
+  if (!e?.plano_id || !e?.planos) return { label: 'Sem plano', tone: 'neutral', showAction: false };
+  if (!(preco > 0)) return { label: 'Isento', tone: 'neutral', showAction: false };
+  if (e.billing_status === 'ativo') return { label: 'Assinatura ativa', tone: 'ok', showAction: false };
+  const mapa: Record<string, string> = {
+    pendente_cliente: 'Cadastro pendente',
+    pendente_assinatura: 'Assinatura pendente',
+    erro: 'Erro na assinatura',
+    inativo: 'Assinatura inativa',
+    nao_configurado: 'Sem assinatura',
+  };
+  return { label: mapa[e.billing_status] || 'Sem assinatura', tone: e.billing_status === 'erro' ? 'warn' : 'muted', showAction: true };
+}
+
+const TONE_CLASSES: Record<string, string> = {
+  ok: 'text-green-600',
+  warn: 'text-red-500',
+  muted: 'text-gray-400',
+  neutral: 'text-gray-300',
+};
+
 export const PainelEmpresas: React.FC = () => {
   const navigate = useNavigate();
   const [empresas, setEmpresas] = useState<any[]>([]);
@@ -30,6 +57,11 @@ export const PainelEmpresas: React.FC = () => {
   const [adminCountsErro, setAdminCountsErro] = useState(false);
   // Modal de sucesso pós-criação (conta recém-criada, ainda sem administrador).
   const [successConta, setSuccessConta] = useState<{ id: string; nome: string } | null>(null);
+  // Confirmação da ação "Configurar assinatura sandbox" (piloto).
+  // Botão é provisório para validação — o onboarding automático será fechado
+  // posteriormente. Não é o fluxo comercial final.
+  const [assinaturaTarget, setAssinaturaTarget] = useState<any | null>(null);
+  const [assinaturaEnviando, setAssinaturaEnviando] = useState(false);
   const [planosLoading, setPlanosLoading] = useState(false);
   const [planosErro, setPlanosErro] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -228,7 +260,7 @@ export const PainelEmpresas: React.FC = () => {
         <table className="w-full text-left">
           <thead>
             <tr className="bg-gray-50 text-gray-600 text-xs font-bold uppercase tracking-wider">
-              <th className="px-4 py-2.5 border-b">Conta</th><th className="px-4 py-2.5 border-b">CNPJ</th><th className="px-4 py-2.5 border-b">Plano</th><th className="px-4 py-2.5 border-b">Status</th><th className="px-4 py-2.5 border-b text-center">Ações</th>
+              <th className="px-4 py-2.5 border-b">Conta</th><th className="px-4 py-2.5 border-b">CNPJ</th><th className="px-4 py-2.5 border-b">Plano</th><th className="px-4 py-2.5 border-b">Assinatura</th><th className="px-4 py-2.5 border-b">Status</th><th className="px-4 py-2.5 border-b text-center">Ações</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-50">
@@ -256,6 +288,16 @@ export const PainelEmpresas: React.FC = () => {
                 <td className="px-4 py-2.5 text-sm text-gray-600">{e.cnpj || '—'}</td>
                 <td className="px-4 py-2.5"><span className="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest bg-blue-50 text-blue-700">{e.planos?.nome || e.plano_id || '-'}</span></td>
                 <td className="px-4 py-2.5">
+                  {(() => {
+                    const { label, tone } = estadoAssinatura(e);
+                    return (
+                      <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest ${TONE_CLASSES[tone] || TONE_CLASSES.neutral}`}>
+                        {label}
+                      </span>
+                    );
+                  })()}
+                </td>
+                <td className="px-4 py-2.5">
                   <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest ${e.status === 'ativo' ? 'bg-green-50 text-green-700' : e.status === 'trial' ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-700'}`}>{e.status}</span>
                   <div className="mt-1 text-[10px] font-semibold">
                     {e.trial_ends_at
@@ -272,11 +314,26 @@ export const PainelEmpresas: React.FC = () => {
                     <button onClick={() => { setTrialTarget(e); setCustomDate(''); setConfirmAtivo(false); }} title="Gerenciar trial" aria-label="Gerenciar trial da empresa" className="p-1.5 text-amber-600 hover:bg-amber-50 rounded-lg"><CalendarClock size={16} /></button>
                     <button onClick={() => resetSenhaAdmin(e.id, e.nome)} className="p-1.5 text-gray-500 hover:bg-gray-100 rounded-lg" title="Resetar senha do admin" aria-label="Resetar senha do admin"><KeyRound size={16} /></button>
                     <button onClick={() => setDeleteTarget(e)} title="Excluir empresa" aria-label="Excluir empresa" className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg"><Trash2 size={16} /></button>
+                    {(() => {
+                      const { showAction } = estadoAssinatura(e);
+                      if (!showAction) return null;
+                      return (
+                        <button
+                          onClick={() => setAssinaturaTarget(e)}
+                          disabled={assinaturaEnviando}
+                          title="Configurar assinatura sandbox (piloto)"
+                          aria-label="Configurar assinatura sandbox"
+                          className="p-1.5 text-green-700 hover:bg-green-50 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          <CreditCard size={16} />
+                        </button>
+                      );
+                    })()}
                   </div>
                 </td>
               </tr>
             ))}
-            {filtered.length === 0 && <tr><td colSpan={5} className="p-8 text-center text-gray-400">Nenhuma empresa</td></tr>}
+            {filtered.length === 0 && <tr><td colSpan={6} className="p-8 text-center text-gray-400">Nenhuma empresa</td></tr>}
           </tbody>
         </table>
       </div>
@@ -354,7 +411,7 @@ export const PainelEmpresas: React.FC = () => {
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-fade-in">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
             <div className="p-6 flex flex-col items-center text-center space-y-3">
-              <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center"><Check size={32} className="text-green-600" /></div>
+              <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center"><CreditCard size={32} className="text-green-600" /></div>
               <h3 className="text-xl font-bold text-gray-800">Conta criada com sucesso.</h3>
               <p className="text-gray-500">Esta conta ainda não possui administrador. Deseja criar o primeiro administrador agora?</p>
               <p className="text-sm font-semibold text-gray-700">{successConta.nome}</p>
@@ -375,6 +432,46 @@ export const PainelEmpresas: React.FC = () => {
           </div>
         </div>
       )}
+
+      {assinaturaTarget && (() => {
+        const { label } = estadoAssinatura(assinaturaTarget);
+        return (
+          <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-fade-in">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+              <div className="p-6 flex flex-col items-center text-center space-y-3">
+                <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center"><CreditCard size={32} className="text-amber-600" /></div>
+                <h3 className="text-xl font-bold text-gray-800">Configurar assinatura sandbox</h3>
+                <p className="text-gray-500 text-sm">Esta ação vai criar (ou conciliar) o cliente e a assinatura recorrente no Asaas para <strong>{assinaturaTarget.nome}</strong>.</p>
+                <p className="text-xs text-gray-400">Estado atual: <span className="font-semibold">{label}</span></p>
+                <p className="text-[11px] text-amber-700 bg-amber-50 px-3 py-1.5 rounded-lg">Configuração de piloto no ambiente Asaas sandbox. O onboarding automático será fechado posteriormente — este não é o fluxo comercial final.</p>
+              </div>
+              <div className="p-4 bg-gray-50 border-t flex justify-end gap-3">
+                <button onClick={() => setAssinaturaTarget(null)} disabled={assinaturaEnviando} className="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded-lg text-sm font-medium disabled:opacity-40">Cancelar</button>
+                <button
+                  onClick={async () => {
+                    setAssinaturaEnviando(true);
+                    try {
+                      const resp = await api.post('/pagamentos/assinaturas/' + assinaturaTarget.id + '/garantir');
+                      setToast({ message: resp.data?.mensagem || 'Assinatura sandbox configurada.', tipo: 'sucesso' });
+                      carregar();
+                    } catch (err: any) {
+                      const msg = err?.response?.data?.message || 'Erro ao configurar assinatura.';
+                      setToast({ message: msg, tipo: 'erro' });
+                    } finally {
+                      setAssinaturaEnviando(false);
+                      setAssinaturaTarget(null);
+                    }
+                  }}
+                  disabled={assinaturaEnviando}
+                  className="flex items-center px-5 py-2 bg-amber-600 text-white rounded-lg font-medium text-sm hover:bg-amber-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {assinaturaEnviando ? <>Carregando…</> : <>Configurar assinatura</>}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {trialTarget && (() => {
         const hojeStr = new Date().toISOString().slice(0, 10);

@@ -8,6 +8,7 @@ const { verificarEmpresa } = require('../middlewares/tenant');
 const { resolveAsaasApiKey } = require('../utils/asaasConfig');
 const { normalizarStatusAsaas } = require('../utils/asaasStatus');
 const { classificarResponsavelRegularizacao } = require('../utils/billingProfile');
+const { garantirAssinatura, conciliarAssinatura } = require('../services/asaasSubscriptionService');
 
 // Comparação em tempo constante (hash de tamanho fixo evita vazar comprimento)
 function safeEqual(a, b) {
@@ -456,6 +457,49 @@ router.post('/cobrancas/:id/conciliar', verifyToken, isSuperAdmin, async (req, r
   } catch (err) {
     console.error('Erro ao conciliar cobrança:', err.message);
     return res.status(500).json({ message: 'Erro ao conciliar cobrança.', error: err.response?.data || err.message });
+  }
+});
+
+// ─── ASSINATURAS (piloto sandbox) ────────────────────────────────────────────
+// Garante cliente + assinatura da conta e devolve o estado atual. Super-admin.
+// Gate hard de sandbox ANTES de qualquer segredo/chamada. A criação da assinatura
+// já gera a 1ª cobrança no Asaas — NÃO chamar o endpoint de cobrança avulsa aqui.
+router.post('/assinaturas/:empresa_id/garantir', verifyToken, isSuperAdmin, async (req, res) => {
+  try {
+    if (await bloquearSeNaoSandbox(res)) return;
+    const { apiKey, baseURL } = await getAsaasConfig();
+    const resultado = await garantirAssinatura({
+      empresaId: req.params.empresa_id,
+      config: { apiKey, baseURL },
+      supabase,
+      http: axios,
+    });
+    return res.json(resultado);
+  } catch (err) {
+    const httpStatus = err.httpStatus || 500;
+    // Log seguro: só operação + status + empresa_id (UUID, não é PII). Sem apiKey/payload.
+    console.error('[pagamentos/assinaturas/garantir] Falha', { empresa_id: req.params.empresa_id, status: httpStatus });
+    return res.status(httpStatus).json({ message: err.message || 'Erro ao configurar assinatura.' });
+  }
+});
+
+// Conciliação read-only: sincroniza estado local e conta cobranças vinculadas.
+// NÃO importa cobranças para `faturas` (isso é o BLOCO 4). Super-admin + gate sandbox.
+router.post('/assinaturas/:empresa_id/conciliar', verifyToken, isSuperAdmin, async (req, res) => {
+  try {
+    if (await bloquearSeNaoSandbox(res)) return;
+    const { apiKey, baseURL } = await getAsaasConfig();
+    const resultado = await conciliarAssinatura({
+      empresaId: req.params.empresa_id,
+      config: { apiKey, baseURL },
+      supabase,
+      http: axios,
+    });
+    return res.json(resultado);
+  } catch (err) {
+    const httpStatus = err.httpStatus || 500;
+    console.error('[pagamentos/assinaturas/conciliar] Falha', { empresa_id: req.params.empresa_id, status: httpStatus });
+    return res.status(httpStatus).json({ message: err.message || 'Erro ao conciliar assinatura.' });
   }
 });
 
