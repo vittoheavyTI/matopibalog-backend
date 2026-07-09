@@ -411,7 +411,7 @@ export const PainelEmpresas: React.FC = () => {
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-fade-in">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
             <div className="p-6 flex flex-col items-center text-center space-y-3">
-              <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center"><CreditCard size={32} className="text-green-600" /></div>
+              <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center"><Check size={32} className="text-green-600" /></div>
               <h3 className="text-xl font-bold text-gray-800">Conta criada com sucesso.</h3>
               <p className="text-gray-500">Esta conta ainda não possui administrador. Deseja criar o primeiro administrador agora?</p>
               <p className="text-sm font-semibold text-gray-700">{successConta.nome}</p>
