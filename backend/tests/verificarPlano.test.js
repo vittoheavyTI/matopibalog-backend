@@ -42,7 +42,7 @@ const criarSupabaseMock = (empresa, faturaMock = null) => {
         in() {
           return this;
         },
-        lte() {
+        lt() {
           return this;
         },
         order() {
@@ -168,7 +168,7 @@ test('trial vencido COM fatura com link suspende e bloqueia', async () => {
   const resultado = await executar({
     method: 'POST',
     empresa: { status: 'trial', trial_ends_at: '2000-01-01T00:00:00.000Z' },
-    faturaMock: { id: 'f1', invoice_url: 'https://example.com/pay', bank_slip_url: null }
+    faturaMock: { id: 'f1', invoice_url: 'https://example.com/pay', bank_slip_url: null, due_date: '1999-12-31', status: 'pendente' }
   });
 
   assert.equal(resultado.nextChamado, 0);
@@ -182,7 +182,7 @@ test('trial vencido COM fatura com bank_slip_url suspende', async () => {
   const resultado = await executar({
     method: 'POST',
     empresa: { status: 'trial', trial_ends_at: '2000-01-01T00:00:00.000Z' },
-    faturaMock: { id: 'f1', invoice_url: null, bank_slip_url: 'https://example.com/boleto' }
+    faturaMock: { id: 'f1', invoice_url: null, bank_slip_url: 'https://example.com/boleto', due_date: '1999-12-31', status: 'vencido' }
   });
 
   assert.equal(resultado.nextChamado, 0);

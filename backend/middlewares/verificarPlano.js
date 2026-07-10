@@ -10,15 +10,14 @@ async function podeSuspenderAutomaticamente(empresaId) {
       .select('id, invoice_url, bank_slip_url, due_date, status')
       .eq('empresa_id', empresaId)
       .in('status', ['pendente', 'vencido'])
-      .lte('due_date', hoje)
+      .lt('due_date', hoje)
       .order('due_date', { ascending: true })
       .limit(1)
       .maybeSingle();
 
-    // Só suspende se existir fatura pendente/vencida COM link de pagamento E vencimento já passado
+    // Só suspende se existir fatura pendente/vencida COM link de pagamento E vencimento estritamente anterior a hoje
     if (!data) return false;
     if (!data.invoice_url && !data.bank_slip_url) return false;
-    if (data.due_date > hoje) return false; // vencimento futuro
     return Boolean(data.invoice_url || data.bank_slip_url);
   } catch {
     return false; // erro na consulta → não suspende (fail-safe)
