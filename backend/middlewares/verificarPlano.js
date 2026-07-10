@@ -1,24 +1,35 @@
 const supabase = require('../config/supabase');
+const { avaliarElegibilidadeSuspensao } = require('../services/paymentDomainService');
 
 // Proteção: uma conta não pode ser suspensa automaticamente se não houver
 // fatura pendente/vencida com link de pagamento e vencimento já passado.
 async function podeSuspenderAutomaticamente(empresaId) {
   try {
     const hoje = new Date().toISOString().split('T')[0];
-    const { data } = await supabase
+    const [{ data: empresa, error: empresaError }, { data: fatura, error: faturaError }] = await Promise.all([
+      supabase
+        .from('empresas')
+        .select('id, status, trial_ends_at')
+        .eq('id', empresaId)
+        .single(),
+      supabase
       .from('faturas')
-      .select('id, invoice_url, bank_slip_url, due_date, status')
+        .select('id, empresa_id, invoice_url, bank_slip_url, due_date, status')
       .eq('empresa_id', empresaId)
       .in('status', ['pendente', 'vencido'])
       .lt('due_date', hoje)
       .order('due_date', { ascending: true })
       .limit(1)
-      .maybeSingle();
+        .maybeSingle(),
+    ]);
 
-    // Só suspende se existir fatura pendente/vencida COM link de pagamento E vencimento estritamente anterior a hoje
-    if (!data) return false;
-    if (!data.invoice_url && !data.bank_slip_url) return false;
-    return Boolean(data.invoice_url || data.bank_slip_url);
+    const decisao = avaliarElegibilidadeSuspensao({
+      empresa: empresa ? { id: empresaId, ...empresa } : empresa,
+      fatura,
+      hoje,
+      erroConsulta: empresaError || faturaError,
+    });
+    return decisao.elegivel;
   } catch {
     return false; // erro na consulta → não suspende (fail-safe)
   }

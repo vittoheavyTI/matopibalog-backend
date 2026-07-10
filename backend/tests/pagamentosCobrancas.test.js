@@ -46,6 +46,11 @@ function criarSupabaseMock(cenario) {
             ? { data: cenario.faturaById, error: null }
             : { data: null, error: { code: 'PGRST116' } };
         }
+        if ('asaas_id' in filtros) {
+          return cenario.faturaByAsaasId
+            ? { data: cenario.faturaByAsaasId, error: null }
+            : { data: null, error: { code: 'PGRST116' } };
+        }
       }
       if (tabela === 'empresas') {
         return cenario.empresa
@@ -191,6 +196,7 @@ test('idempotência: client_request_id repetido devolve a fatura e NÃO chama o 
 test('conciliação: RECEIVED marca fatura paga e empresa ativa', async () => {
   const cenario = {
     faturaById: { id: 'f1', empresa_id: 'e1', asaas_id: 'pay_1', status: 'pendente', pago_em: null },
+    empresa: { id: 'e1', status: 'trial', trial_ends_at: '2000-01-01T00:00:00.000Z' },
     config: { dados: { integracao_asaas: { apiKey: 'chave-teste' } } },
     asaasPaymentGet: { id: 'pay_1', status: 'RECEIVED' },
   };
@@ -212,7 +218,17 @@ test('conciliação: RECEIVED marca fatura paga e empresa ativa', async () => {
 
 test('conciliação: OVERDUE marca fatura vencida e empresa suspensa', async () => {
   const cenario = {
-    faturaById: { id: 'f1', empresa_id: 'e1', asaas_id: 'pay_1', status: 'pendente', pago_em: null },
+    faturaById: {
+      id: 'f1',
+      empresa_id: 'e1',
+      asaas_id: 'pay_1',
+      status: 'pendente',
+      pago_em: null,
+      due_date: '2000-01-01',
+      invoice_url: 'https://example.com/pay',
+      bank_slip_url: null,
+    },
+    empresa: { id: 'e1', status: 'ativo', trial_ends_at: null },
     config: { dados: { integracao_asaas: { apiKey: 'chave-teste' } } },
     asaasPaymentGet: { id: 'pay_1', status: 'OVERDUE' },
   };
@@ -227,6 +243,26 @@ test('conciliação: OVERDUE marca fatura vencida e empresa suspensa', async () 
   assert.equal(res.body.status, 'vencido');
   const updEmpresa = supabase.__registro.updates.find((u) => u.tabela === 'empresas');
   assert.equal(updEmpresa.payload.status, 'suspenso');
+});
+
+test('conciliação: pagamento nao reativa conta suspensa', async () => {
+  const cenario = {
+    faturaById: { id: 'f1', empresa_id: 'e1', asaas_id: 'pay_1', status: 'pendente', pago_em: null },
+    empresa: { id: 'e1', status: 'suspenso', trial_ends_at: null },
+    config: { dados: { integracao_asaas: { apiKey: 'chave-teste' } } },
+    asaasPaymentGet: { id: 'pay_1', status: 'RECEIVED' },
+  };
+  const supabase = criarSupabaseMock(cenario);
+  const axios = criarAxiosMock(cenario);
+  const router = carregarRouter(supabase, axios);
+  const handler = getHandler(router, 'POST', '/cobrancas/:id/conciliar');
+
+  const res = fakeRes();
+  await handler({ user: superAdmin, params: { id: 'f1' }, body: {} }, res, () => {});
+
+  assert.equal(res.body.status, 'pago');
+  const updatesEmpresa = supabase.__registro.updates.filter((u) => u.tabela === 'empresas');
+  assert.equal(updatesEmpresa.length, 0);
 });
 
 test('conciliação: fatura sem asaas_id retorna 400', async () => {
@@ -253,6 +289,114 @@ test('conciliação: fatura inexistente retorna 404', async () => {
   await handler({ user: superAdmin, params: { id: 'nao-existe' }, body: {} }, res, () => {});
 
   assert.equal(res.statusCode, 404);
+});
+
+test('webhook: PAYMENT_RECEIVED ativa somente conta em trial', async () => {
+  process.env.ASAAS_WEBHOOK_TOKEN = 'token-teste';
+  const cenario = {
+    faturaByAsaasId: { id: 'f1', empresa_id: 'e1', status: 'pendente', pago_em: null },
+    empresa: { id: 'e1', status: 'trial', trial_ends_at: '2000-01-01T00:00:00.000Z' },
+  };
+  const supabase = criarSupabaseMock(cenario);
+  const axios = criarAxiosMock(cenario);
+  const router = carregarRouter(supabase, axios);
+  const handler = getHandler(router, 'POST', '/webhook/asaas');
+
+  const res = fakeRes();
+  await handler({
+    headers: { 'asaas-access-token': 'token-teste' },
+    body: { event: 'PAYMENT_RECEIVED', payment: { id: 'pay_1' } },
+  }, res, () => {});
+
+  assert.equal(res.statusCode, 200);
+  const updFatura = supabase.__registro.updates.find((u) => u.tabela === 'faturas');
+  assert.equal(updFatura.payload.status, 'pago');
+  const updEmpresa = supabase.__registro.updates.find((u) => u.tabela === 'empresas');
+  assert.equal(updEmpresa.payload.status, 'ativo');
+});
+
+test('webhook: pagamento preserva suspenso, bloqueado e expirado', async () => {
+  process.env.ASAAS_WEBHOOK_TOKEN = 'token-teste';
+  for (const status of ['suspenso', 'bloqueado', 'expirado']) {
+    const cenario = {
+      faturaByAsaasId: { id: `f-${status}`, empresa_id: 'e1', status: 'pendente', pago_em: null },
+      empresa: { id: 'e1', status, trial_ends_at: null },
+    };
+    const supabase = criarSupabaseMock(cenario);
+    const axios = criarAxiosMock(cenario);
+    const router = carregarRouter(supabase, axios);
+    const handler = getHandler(router, 'POST', '/webhook/asaas');
+
+    const res = fakeRes();
+    await handler({
+      headers: { 'asaas-access-token': 'token-teste' },
+      body: { event: 'PAYMENT_CONFIRMED', payment: { id: 'pay_1' } },
+    }, res, () => {});
+
+    assert.equal(res.statusCode, 200);
+    const updatesEmpresa = supabase.__registro.updates.filter((u) => u.tabela === 'empresas');
+    assert.equal(updatesEmpresa.length, 0);
+  }
+});
+
+test('webhook: PAYMENT_OVERDUE so suspende com fatura vencida e link', async () => {
+  process.env.ASAAS_WEBHOOK_TOKEN = 'token-teste';
+  const cenario = {
+    faturaByAsaasId: {
+      id: 'f1',
+      empresa_id: 'e1',
+      status: 'pendente',
+      pago_em: null,
+      due_date: '2000-01-01',
+      invoice_url: 'https://example.com/pay',
+      bank_slip_url: null,
+    },
+    empresa: { id: 'e1', status: 'ativo', trial_ends_at: null },
+  };
+  const supabase = criarSupabaseMock(cenario);
+  const axios = criarAxiosMock(cenario);
+  const router = carregarRouter(supabase, axios);
+  const handler = getHandler(router, 'POST', '/webhook/asaas');
+
+  const res = fakeRes();
+  await handler({
+    headers: { 'asaas-access-token': 'token-teste' },
+    body: { event: 'PAYMENT_OVERDUE', payment: { id: 'pay_1' } },
+  }, res, () => {});
+
+  assert.equal(res.statusCode, 200);
+  const updEmpresa = supabase.__registro.updates.find((u) => u.tabela === 'empresas');
+  assert.equal(updEmpresa.payload.status, 'suspenso');
+});
+
+test('webhook: PAYMENT_OVERDUE sem link nao suspende', async () => {
+  process.env.ASAAS_WEBHOOK_TOKEN = 'token-teste';
+  const cenario = {
+    faturaByAsaasId: {
+      id: 'f1',
+      empresa_id: 'e1',
+      status: 'pendente',
+      pago_em: null,
+      due_date: '2000-01-01',
+      invoice_url: null,
+      bank_slip_url: null,
+    },
+    empresa: { id: 'e1', status: 'ativo', trial_ends_at: null },
+  };
+  const supabase = criarSupabaseMock(cenario);
+  const axios = criarAxiosMock(cenario);
+  const router = carregarRouter(supabase, axios);
+  const handler = getHandler(router, 'POST', '/webhook/asaas');
+
+  const res = fakeRes();
+  await handler({
+    headers: { 'asaas-access-token': 'token-teste' },
+    body: { event: 'PAYMENT_OVERDUE', payment: { id: 'pay_1' } },
+  }, res, () => {});
+
+  assert.equal(res.statusCode, 200);
+  const updatesEmpresa = supabase.__registro.updates.filter((u) => u.tabela === 'empresas');
+  assert.equal(updatesEmpresa.length, 0);
 });
 
 // ── GATE 1: trava hard de sandbox ────────────────────────────────────────────

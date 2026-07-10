@@ -1,13 +1,27 @@
 const supabase = require('../config/supabase');
+const { decidirSuspensaoPorInadimplencia } = require('../services/paymentDomainService');
+
+async function buscarFaturaElegivel(empresaId, hoje) {
+  return supabase
+    .from('faturas')
+    .select('id, empresa_id, invoice_url, bank_slip_url, due_date, status')
+    .eq('empresa_id', empresaId)
+    .in('status', ['pendente', 'vencido'])
+    .lt('due_date', hoje)
+    .order('due_date', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+}
 
 async function expirarTrials() {
   try {
     const now = new Date().toISOString();
+    const hoje = now.slice(0, 10);
 
     // Expirar trials vencidos
     const { data: expirados, error: queryError } = await supabase
       .from('empresas')
-      .select('id, nome')
+      .select('id, nome, status, trial_ends_at')
       .eq('status', 'trial')
       .lt('trial_ends_at', now);
 
@@ -17,17 +31,40 @@ async function expirarTrials() {
     }
 
     if (expirados && expirados.length > 0) {
-      const ids = expirados.map(e => e.id);
-      const { error: updateError } = await supabase
-        .from('empresas')
-        .update({ status: 'suspenso' })
-        .in('id', ids);
+      let suspensas = 0;
+      let preservadas = 0;
 
-      if (updateError) {
-        console.error('[expirarTrials] Erro ao atualizar:', updateError.message);
-      } else {
-        console.log(`[expirarTrials] ${ids.length} empresas expiradas:`, expirados.map(e => e.nome).join(', '));
+      for (const empresa of expirados) {
+        const { data: fatura, error: faturaError } = await buscarFaturaElegivel(empresa.id, hoje);
+        const decisao = decidirSuspensaoPorInadimplencia({
+          empresa,
+          fatura,
+          hoje,
+          erroConsulta: faturaError,
+        });
+
+        if (!decisao.deveSuspender) {
+          preservadas += 1;
+          console.log('[expirarTrials] Trial preservado sem suspensão financeira comprovada', {
+            empresa_id: empresa.id,
+            razao: decisao.razao,
+          });
+          continue;
+        }
+
+        const { error: updateError } = await supabase
+          .from('empresas')
+          .update({ status: decisao.novoStatus })
+          .eq('id', empresa.id);
+
+        if (updateError) {
+          console.error('[expirarTrials] Erro ao atualizar:', updateError.message);
+        } else {
+          suspensas += 1;
+        }
       }
+
+      console.log(`[expirarTrials] Trials avaliados: ${expirados.length}; suspensos: ${suspensas}; preservados: ${preservadas}.`);
     } else {
       console.log('[expirarTrials] Nenhuma trial a expirar.');
     }
@@ -46,8 +83,14 @@ async function expirarTrials() {
   }
 }
 
-// Executar imediatamente e a cada hora
-expirarTrials();
-setInterval(expirarTrials, 60 * 60 * 1000);
+function iniciarExpiracaoTrials() {
+  expirarTrials();
+  return setInterval(expirarTrials, 60 * 60 * 1000);
+}
 
-module.exports = { expirarTrials };
+// Executar imediatamente e a cada hora em runtime normal; testes importam sem iniciar timer.
+if (process.env.NODE_ENV !== 'test') {
+  iniciarExpiracaoTrials();
+}
+
+module.exports = { expirarTrials, iniciarExpiracaoTrials };

@@ -6,10 +6,16 @@ const supabase = require('../config/supabase');
 const { verifyToken, isAdmin, isSuperAdmin } = require('../middlewares/auth');
 const { verificarEmpresa } = require('../middlewares/tenant');
 const { resolveAsaasApiKey } = require('../utils/asaasConfig');
-const { normalizarStatusAsaas } = require('../utils/asaasStatus');
 const { classificarResponsavelRegularizacao } = require('../utils/billingProfile');
 const { garantirAssinatura, conciliarAssinatura } = require('../services/asaasSubscriptionService');
 const { sincronizarCobrancas } = require('../services/asaasInvoiceSyncService');
+const {
+  normalizarStatusAsaas,
+  normalizarEventoAsaas,
+  decidirAtualizacaoFatura,
+  decidirTransicaoContaPorPagamento,
+  decidirSuspensaoPorInadimplencia,
+} = require('../services/paymentDomainService');
 
 // Comparação em tempo constante (hash de tamanho fixo evita vazar comprimento)
 function safeEqual(a, b) {
@@ -237,7 +243,7 @@ router.post('/cobrancas', verifyToken, isSuperAdmin, async (req, res) => {
     const response = await axios.post(`${baseURL}/payments`, payload, { headers: asaasHeaders(apiKey) });
 
     // Normaliza o status do Asaas (ex.: 'PENDING') para o vocabulário da tabela.
-    const statusInterno = normalizarStatusAsaas(response.data.status);
+    const statusInterno = normalizarStatusAsaas(response.data.status).status;
 
     // PIX: busca o copia-e-cola em chamada dedicada (best-effort).
     const pixQrCode = tipo === 'PIX'
@@ -409,7 +415,7 @@ router.post('/cobrancas/:id/conciliar', verifyToken, isSuperAdmin, async (req, r
 
     const { data: fatura, error: fetchErr } = await supabase
       .from('faturas')
-      .select('id, empresa_id, asaas_id, status, pago_em')
+      .select('id, empresa_id, asaas_id, status, pago_em, due_date, invoice_url, bank_slip_url')
       .eq('id', req.params.id)
       .single();
 
@@ -426,31 +432,47 @@ router.post('/cobrancas/:id/conciliar', verifyToken, isSuperAdmin, async (req, r
       { headers: asaasHeaders(apiKey) }
     );
 
-    const novoStatus = normalizarStatusAsaas(payment?.status);
-
-    // Preserva pago_em: só grava na primeira vez que a fatura vira 'pago'.
-    const updatePayload = { status: novoStatus };
-    if (novoStatus === 'pago' && !fatura.pago_em) {
-      updatePayload.pago_em = new Date().toISOString();
+    const normalizado = normalizarStatusAsaas(payment?.status, fatura.status);
+    if (!normalizado.conhecido) {
+      return res.json(fatura);
     }
+
+    const decisaoFatura = decidirAtualizacaoFatura({
+      statusAtual: fatura.status,
+      statusNovo: normalizado.status,
+      pagoEmAtual: fatura.pago_em,
+    });
+    if (decisaoFatura.ignorar) return res.json(fatura);
 
     const { data: atualizada, error: updErr } = await supabase
       .from('faturas')
-      .update(updatePayload)
+      .update(decisaoFatura.update)
       .eq('id', fatura.id)
       .select()
       .single();
     if (updErr) throw updErr;
 
-    // Efeitos na empresa (espelham o webhook): pago → ativo; vencido → suspenso.
-    // Cancelado/estornado NÃO rebaixam o acesso automaticamente — cortar acesso
-    // por cancelamento/estorno é decisão manual do super-admin (evita cortar por
-    // estorno parcial ou engano).
     if (fatura.empresa_id) {
-      if (novoStatus === 'pago') {
-        await supabase.from('empresas').update({ status: 'ativo' }).eq('id', fatura.empresa_id);
-      } else if (novoStatus === 'vencido') {
-        await supabase.from('empresas').update({ status: 'suspenso' }).eq('id', fatura.empresa_id);
+      const { data: empresa, error: empresaErr } = await supabase
+        .from('empresas')
+        .select('id, status, trial_ends_at')
+        .eq('id', fatura.empresa_id)
+        .single();
+      if (empresaErr) throw empresaErr;
+
+      if (decisaoFatura.statusFinal === 'pago') {
+        const decisaoConta = decidirTransicaoContaPorPagamento(empresa?.status, 'pago');
+        if (decisaoConta.deveAtualizar) {
+          await supabase.from('empresas').update({ status: decisaoConta.novoStatus }).eq('id', fatura.empresa_id);
+        }
+      } else if (decisaoFatura.statusFinal === 'vencido') {
+        const decisaoSuspensao = decidirSuspensaoPorInadimplencia({
+          empresa,
+          fatura: { ...fatura, status: decisaoFatura.statusFinal },
+        });
+        if (decisaoSuspensao.deveSuspender) {
+          await supabase.from('empresas').update({ status: decisaoSuspensao.novoStatus }).eq('id', fatura.empresa_id);
+        }
       }
     }
 
@@ -625,6 +647,7 @@ router.get('/faturas/:id/pix', verifyToken, async (req, res) => {
 
 router.post('/webhook/asaas', async (req, res) => {
   try {
+    // Bloco B envolverá este endpoint com persistência idempotente da migration 024.
     // Portão de autenticação: o Asaas envia um token fixo no header
     // 'asaas-access-token' em toda requisição. Comparar com o segredo nosso.
     // Fail-closed: sem env var configurada OU header ausente/diferente → 401.
@@ -643,27 +666,10 @@ router.post('/webhook/asaas', async (req, res) => {
     }
     const asaasId = payment.id;
 
-    // Mapeia o evento para o status interno. Evento desconhecido → null
-    // (ignorado adiante, sem tocar na fatura — antes virava 'pendente').
-    let novoStatus = null;
-    if (eventType === 'PAYMENT_CONFIRMED' || eventType === 'PAYMENT_RECEIVED') {
-      novoStatus = 'pago';
-    } else if (eventType === 'PAYMENT_OVERDUE') {
-      novoStatus = 'vencido';
-    } else if (eventType === 'PAYMENT_CANCELED') {
-      novoStatus = 'cancelado';
-    } else if (eventType === 'PAYMENT_REFUNDED') {
-      novoStatus = 'estornado';
-    }
-
-    if (novoStatus === null) {
-      return res.status(200).json({ received: true, ignored: true });
-    }
-
     // Busca a fatura atual ANTES de alterar, para idempotência e ordem de eventos.
     const { data: fatura, error: fetchError } = await supabase
       .from('faturas')
-      .select('id, empresa_id, status, pago_em')
+      .select('id, empresa_id, status, pago_em, due_date, invoice_url, bank_slip_url')
       .eq('asaas_id', asaasId)
       .single();
 
@@ -679,40 +685,55 @@ router.post('/webhook/asaas', async (req, res) => {
       return res.status(200).json({ received: true, ignored: true });
     }
 
-    // Ordem de eventos: fatura já paga NÃO pode ser rebaixada para vencido/cancelado
-    // por evento fora de ordem (ex.: OVERDUE chegando após CONFIRMED). Estorno é
-    // transição legítima e segue (comportamento preservado).
-    if (fatura.status === 'pago' && (novoStatus === 'vencido' || novoStatus === 'cancelado')) {
+    const normalizado = normalizarEventoAsaas(eventType, fatura.status);
+    if (!normalizado.conhecido) {
       return res.status(200).json({ received: true, ignored: true });
     }
 
-    // Monta o update preservando pago_em (W1): só preenche na primeira confirmação;
-    // nunca sobrescreve em replay e nunca zera em eventos não-pago.
-    const updatePayload = { status: novoStatus };
-    if (novoStatus === 'pago' && !fatura.pago_em) {
-      updatePayload.pago_em = new Date().toISOString();
+    const decisaoFatura = decidirAtualizacaoFatura({
+      statusAtual: fatura.status,
+      statusNovo: normalizado.status,
+      pagoEmAtual: fatura.pago_em,
+    });
+    if (decisaoFatura.ignorar) {
+      return res.status(200).json({ received: true, ignored: true });
     }
 
     const { error: updateError } = await supabase
       .from('faturas')
-      .update(updatePayload)
+      .update(decisaoFatura.update)
       .eq('id', fatura.id);
 
     if (updateError) throw updateError;
 
-    // Efeitos na empresa (mantidos): pago → ativo; vencido → suspenso.
-    if (novoStatus === 'pago' && fatura.empresa_id) {
-      await supabase
+    if (fatura.empresa_id) {
+      const { data: empresa, error: empresaErr } = await supabase
         .from('empresas')
-        .update({ status: 'ativo' })
-        .eq('id', fatura.empresa_id);
-    }
+        .select('id, status, trial_ends_at')
+        .eq('id', fatura.empresa_id)
+        .single();
+      if (empresaErr) throw empresaErr;
 
-    if (novoStatus === 'vencido' && fatura.empresa_id) {
-      await supabase
-        .from('empresas')
-        .update({ status: 'suspenso' })
-        .eq('id', fatura.empresa_id);
+      if (decisaoFatura.statusFinal === 'pago') {
+        const decisaoConta = decidirTransicaoContaPorPagamento(empresa?.status, 'pago');
+        if (decisaoConta.deveAtualizar) {
+          await supabase
+            .from('empresas')
+            .update({ status: decisaoConta.novoStatus })
+            .eq('id', fatura.empresa_id);
+        }
+      } else if (decisaoFatura.statusFinal === 'vencido') {
+        const decisaoSuspensao = decidirSuspensaoPorInadimplencia({
+          empresa,
+          fatura: { ...fatura, status: decisaoFatura.statusFinal },
+        });
+        if (decisaoSuspensao.deveSuspender) {
+          await supabase
+            .from('empresas')
+            .update({ status: decisaoSuspensao.novoStatus })
+            .eq('id', fatura.empresa_id);
+        }
+      }
     }
 
     return res.status(200).json({ received: true });

@@ -13,22 +13,13 @@
 // Injeção de dependências (supabase, http, config) para testabilidade.
 // NÃO loga nem retorna: apiKey, Authorization, CPF/CNPJ, e-mail, telefone.
 
-const STATUS_MAP = {
-  PENDING: 'pendente',
-  AWAITING_RISK_ANALYSIS: 'pendente',
-  RECEIVED: 'pago',
-  CONFIRMED: 'pago',
-  RECEIVED_IN_CASH: 'pago',
-  OVERDUE: 'vencido',
-  DELETED: 'cancelado',
-  REFUNDED: 'estornado',
-  REFUND_REQUESTED: 'estornado',
-  REFUND_IN_PROGRESS: 'estornado',
-};
+const {
+  normalizarStatusAsaas,
+  decidirTransicaoContaPorPagamento,
+} = require('./paymentDomainService');
 
 function normalizarStatus(raw) {
-  if (typeof raw !== 'string') return 'pendente';
-  return STATUS_MAP[raw.trim().toUpperCase()] || 'pendente';
+  return normalizarStatusAsaas(raw).status;
 }
 
 function headers(apiKey) {
@@ -59,7 +50,7 @@ async function upsertFatura(supabase, empresaId, subscriptionId, payment) {
   if (!asaasId) return { acao: 'ignorado' };
 
   const rawStatus = String(payment.status || '').toUpperCase();
-  const statusLocal = normalizarStatus(rawStatus);
+  const statusLocal = normalizarStatusAsaas(rawStatus).status;
 
   const faturaData = {
     empresa_id: empresaId,
@@ -91,9 +82,10 @@ async function upsertFatura(supabase, empresaId, subscriptionId, payment) {
 
   if (existente) {
     // Atualiza status, URLs e data de pagamento se mudaram
+    const decisaoStatus = normalizarStatusAsaas(rawStatus, existente.status);
     const update = { last_synced_at: faturaData.last_synced_at };
 
-    if (existente.status !== statusLocal) update.status = statusLocal;
+    if (existente.status !== decisaoStatus.status) update.status = decisaoStatus.status;
     if (existente.invoice_url !== faturaData.invoice_url) update.invoice_url = faturaData.invoice_url;
     if (existente.bank_slip_url !== faturaData.bank_slip_url) update.bank_slip_url = faturaData.bank_slip_url;
     if (faturaData.pago_em && !existente.pago_em) update.pago_em = faturaData.pago_em;
@@ -154,11 +146,9 @@ async function sincronizarCobrancas({ empresaId, config, supabase, http, subscri
     payments.map((p) => upsertFatura(supabase, empresaId, subId, p))
   );
 
-  // Após sincronizar faturas, verifica se há pagamento recebido que deve ativar a conta
-  // (apenas se empresa estiver em trial — não reativa contas suspensas/bloqueadas/expiradas manualmente)
+  // Após sincronizar faturas, aplica a regra comum de ativação por pagamento.
   let ativouConta = false;
-  const statusPago = ['RECEIVED', 'CONFIRMED', 'RECEIVED_IN_CASH'];
-  const temPagamentoRecebido = payments.some(p => statusPago.includes(String(p.status || '').toUpperCase()));
+  const temPagamentoRecebido = payments.some(p => normalizarStatusAsaas(p.status).status === 'pago');
 
   if (temPagamentoRecebido) {
     const { data: empresa } = await supabase
@@ -167,8 +157,9 @@ async function sincronizarCobrancas({ empresaId, config, supabase, http, subscri
       .eq('id', empresaId)
       .single();
 
-    if (empresa && empresa.status === 'trial') {
-      await supabase.from('empresas').update({ status: 'ativo' }).eq('id', empresaId);
+    const decisaoConta = decidirTransicaoContaPorPagamento(empresa?.status, 'pago');
+    if (decisaoConta.deveAtualizar) {
+      await supabase.from('empresas').update({ status: decisaoConta.novoStatus }).eq('id', empresaId);
       ativouConta = true;
     }
   }
