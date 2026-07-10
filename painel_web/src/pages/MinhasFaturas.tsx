@@ -202,8 +202,21 @@ export const MinhasFaturas: React.FC = () => {
 
   // Separa próxima fatura e histórico
   const pendentes = faturas.filter(f => f.status === 'pendente' || f.status === 'vencido');
+  // Ordena pendentes por due_date ascendente (a mais próxima primeiro)
+  pendentes.sort((a, b) => {
+    if (!a.due_date) return 1;
+    if (!b.due_date) return -1;
+    return new Date(a.due_date).getTime() - new Date(b.due_date).getTime();
+  });
   const proximaFatura = pendentes.length > 0 ? pendentes[0] : null;
-  const historico = faturas.filter(f => f !== proximaFatura);
+  // Histórico: as demais faturas, ordenadas da mais recente para a mais antiga por due_date
+  const historico = faturas
+    .filter(f => f !== proximaFatura)
+    .sort((a, b) => {
+      if (!a.due_date) return 1;
+      if (!b.due_date) return -1;
+      return new Date(b.due_date).getTime() - new Date(a.due_date).getTime();
+    });
 
   const requerRegularizacao = ['suspenso', 'expirado', 'bloqueado'].includes(planoStatus?.status || '') || planoStatus?.trial_expirado;
   const suporteEmail = planoStatus?.regularizacao?.suporte_email;

@@ -113,6 +113,9 @@ async function upsertFatura(supabase, empresaId, subscriptionId, payment) {
 
 /**
  * Sincroniza as cobranças da assinatura Asaas com a tabela local faturas.
+ * Se encontrar pagamento recebido (RECEIVED/CONFIRMED/RECEIVED_IN_CASH) e a empresa
+ * estiver em trial, ativa a conta (status -> ativo) de forma idempotente.
+ * Não reativa contas que estejam suspensas/bloqueadas/expiradas manualmente.
  *
  * @param {object} deps
  * @param {string} deps.empresaId   - UUID da empresa
@@ -129,7 +132,7 @@ async function sincronizarCobrancas({ empresaId, config, supabase, http, subscri
   if (!subId) {
     const { data: empresa } = await supabase
       .from('empresas')
-      .select('asaas_subscription_id')
+      .select('asaas_subscription_id, status')
       .eq('id', empresaId)
       .single();
 
@@ -151,6 +154,25 @@ async function sincronizarCobrancas({ empresaId, config, supabase, http, subscri
     payments.map((p) => upsertFatura(supabase, empresaId, subId, p))
   );
 
+  // Após sincronizar faturas, verifica se há pagamento recebido que deve ativar a conta
+  // (apenas se empresa estiver em trial — não reativa contas suspensas/bloqueadas/expiradas manualmente)
+  let ativouConta = false;
+  const statusPago = ['RECEIVED', 'CONFIRMED', 'RECEIVED_IN_CASH'];
+  const temPagamentoRecebido = payments.some(p => statusPago.includes(String(p.status || '').toUpperCase()));
+
+  if (temPagamentoRecebido) {
+    const { data: empresa } = await supabase
+      .from('empresas')
+      .select('status, trial_ends_at')
+      .eq('id', empresaId)
+      .single();
+
+    if (empresa && empresa.status === 'trial') {
+      await supabase.from('empresas').update({ status: 'ativo' }).eq('id', empresaId);
+      ativouConta = true;
+    }
+  }
+
   const encontradas = payments.length;
   const criadas = resultados.filter((r) => r.acao === 'criada').length;
   const atualizadas = resultados.filter((r) => r.acao === 'atualizada').length;
@@ -162,6 +184,7 @@ async function sincronizarCobrancas({ empresaId, config, supabase, http, subscri
     criadas,
     atualizadas,
     inalteradas,
+    ativou_conta: ativouConta,
   };
 }
 

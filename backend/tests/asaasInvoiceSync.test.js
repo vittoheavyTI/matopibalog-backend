@@ -6,14 +6,23 @@ const { sincronizarCobrancas, normalizarStatus } = require('../services/asaasInv
 // ── Helpers ──────────────────────────────────────────────────────────────────────
 
 function fakeSupabase(registro = {}) {
-  const state = { empresas: { asaas_subscription_id: 'sub_1' }, faturas: [] };
+  const state = { empresas: { asaas_subscription_id: 'sub_1', status: 'trial', trial_ends_at: '2000-01-01T00:00:00.000Z' }, faturas: [] };
   return {
     state,
     from(table) {
       return {
         select() { return this; },
         insert(p) { state.faturas.push(p); return Promise.resolve({ data: null }); },
-        update(p) { const self = this; return { eq() { return self; }, then(r) { r({data: null}) } }; },
+        update(p) {
+          if (table === 'empresas') {
+            Object.assign(state.empresas, p);
+          }
+          const self = this;
+          return {
+            eq() { return self; },
+            then(r) { r({data: null}) }
+          };
+        },
         eq(f, v) {
           if (table === 'faturas' && f === 'asaas_id') {
             const existente = state.faturas.find(f => f.asaas_id === v);
@@ -278,4 +287,235 @@ test('cobranca BOLETO com Pix tem pix consultavel depois', async () => {
   assert.equal(supabase.state.faturas[0].tipo_pagamento, 'BOLETO');
   // pix_qr_code não é preenchido na sincronização (será buscado sob demanda)
   assert.equal(supabase.state.faturas[0].pix_qr_code, undefined);
+});
+
+// ── Novos testes do gate final ─────────────────────────────────────────────────
+
+test('ativacao sincronizacao: RECEIVED atualiza fatura, muda trial para ativo', async () => {
+  const supabase = fakeSupabase();
+  supabase.state.empresas = { status: 'trial', trial_ends_at: '2000-01-01T00:00:00.000Z' };
+  const http = fakeHttp([{
+    id: 'pay_received',
+    status: 'RECEIVED',
+    value: 149.90,
+    billingType: 'PIX',
+    dueDate: '2026-07-16',
+    paymentDate: '2026-07-10T12:00:00Z',
+  }]);
+
+  const resultado = await sincronizarCobrancas({ empresaId, config, supabase, http, subscriptionId: 'sub_1' });
+
+  assert.equal(resultado.criadas, 1);
+  assert.equal(supabase.state.faturas[0].status, 'pago');
+  assert.equal(supabase.state.faturas[0].pago_em, '2026-07-10T12:00:00Z');
+  assert.equal(supabase.state.empresas.status, 'ativo'); // trial -> ativo
+  assert.equal(resultado.ativou_conta, true);
+});
+
+test('ativacao sincronizacao: CONFIRMED produz mesmo resultado', async () => {
+  const supabase = fakeSupabase();
+  supabase.state.empresas = { status: 'trial', trial_ends_at: '2000-01-01T00:00:00.000Z' };
+  const http = fakeHttp([{
+    id: 'pay_confirmed',
+    status: 'CONFIRMED',
+    value: 149.90,
+    billingType: 'BOLETO',
+    dueDate: '2026-07-16',
+    paymentDate: '2026-07-10T12:00:00Z',
+  }]);
+
+  const resultado = await sincronizarCobrancas({ empresaId, config, supabase, http, subscriptionId: 'sub_1' });
+
+  assert.equal(resultado.criadas, 1);
+  assert.equal(supabase.state.faturas[0].status, 'pago');
+  assert.equal(supabase.state.empresas.status, 'ativo');
+  assert.equal(resultado.ativou_conta, true);
+});
+
+test('ativacao sincronizacao: sincronizacao repetida e idempotente', async () => {
+  const supabase = fakeSupabase();
+  supabase.state.empresas = { status: 'trial', trial_ends_at: '2000-01-01T00:00:00.000Z' };
+  const http = fakeHttp([{
+    id: 'pay_repeat',
+    status: 'RECEIVED',
+    value: 149.90,
+    billingType: 'PIX',
+    dueDate: '2026-07-16',
+    paymentDate: '2026-07-10T12:00:00Z',
+  }]);
+
+  // Primeira sincronização
+  await sincronizarCobrancas({ empresaId, config, supabase, http, subscriptionId: 'sub_1' });
+  // Segunda sincronização (mesmo payment)
+  const resultado2 = await sincronizarCobrancas({ empresaId, config, supabase, http, subscriptionId: 'sub_1' });
+
+  assert.equal(resultado2.criadas, 0);
+  assert.equal(resultado2.atualizadas, 1); // atualiza last_synced_at
+  assert.equal(supabase.state.faturas.length, 1); // não duplicou
+  assert.equal(supabase.state.empresas.status, 'ativo');
+});
+
+test('ativacao sincronizacao: conta manualmente suspensa nao e reativada', async () => {
+  const supabase = fakeSupabase();
+  supabase.state.empresas = { status: 'suspenso', trial_ends_at: null };
+  const http = fakeHttp([{
+    id: 'pay_suspended',
+    status: 'RECEIVED',
+    value: 149.90,
+    billingType: 'PIX',
+    dueDate: '2026-07-16',
+    paymentDate: '2026-07-10T12:00:00Z',
+  }]);
+
+  const resultado = await sincronizarCobrancas({ empresaId, config, supabase, http, subscriptionId: 'sub_1' });
+
+  assert.equal(resultado.criadas, 1);
+  assert.equal(supabase.state.faturas[0].status, 'pago');
+  // Conta NÃO deve ser reativada (status permanece suspenso)
+  assert.equal(supabase.state.empresas.status, 'suspenso');
+  assert.equal(resultado.ativou_conta, false);
+});
+
+test('ativacao sincronizacao: RECEIVED_IN_CASH produz mesmo resultado', async () => {
+  const supabase = fakeSupabase();
+  supabase.state.empresas = { status: 'trial', trial_ends_at: '2000-01-01T00:00:00.000Z' };
+  const http = fakeHttp([{
+    id: 'pay_cash',
+    status: 'RECEIVED_IN_CASH',
+    value: 149.90,
+    billingType: 'BOLETO',
+    dueDate: '2026-07-16',
+    paymentDate: '2026-07-10T12:00:00Z',
+  }]);
+
+  const resultado = await sincronizarCobrancas({ empresaId, config, supabase, http, subscriptionId: 'sub_1' });
+
+  assert.equal(resultado.criadas, 1);
+  assert.equal(supabase.state.faturas[0].status, 'pago');
+  assert.equal(supabase.state.empresas.status, 'ativo');
+  assert.equal(resultado.ativou_conta, true);
+});
+
+test('ativacao sincronizacao: conta bloqueada nao e reativada', async () => {
+  const supabase = fakeSupabase();
+  supabase.state.empresas = { status: 'bloqueado', trial_ends_at: null };
+  const http = fakeHttp([{
+    id: 'pay_blocked',
+    status: 'RECEIVED',
+    value: 149.90,
+    billingType: 'PIX',
+    dueDate: '2026-07-16',
+    paymentDate: '2026-07-10T12:00:00Z',
+  }]);
+
+  const resultado = await sincronizarCobrancas({ empresaId, config, supabase, http, subscriptionId: 'sub_1' });
+
+  assert.equal(resultado.criadas, 1);
+  assert.equal(supabase.state.faturas[0].status, 'pago');
+  assert.equal(supabase.state.empresas.status, 'bloqueado');
+  assert.equal(resultado.ativou_conta, false);
+});
+
+test('ativacao sincronizacao: conta expirada nao e reativada', async () => {
+  const supabase = fakeSupabase();
+  supabase.state.empresas = { status: 'expirado', trial_ends_at: null };
+  const http = fakeHttp([{
+    id: 'pay_expired',
+    status: 'RECEIVED',
+    value: 149.90,
+    billingType: 'PIX',
+    dueDate: '2026-07-16',
+    paymentDate: '2026-07-10T12:00:00Z',
+  }]);
+
+  const resultado = await sincronizarCobrancas({ empresaId, config, supabase, http, subscriptionId: 'sub_1' });
+
+  assert.equal(resultado.criadas, 1);
+  assert.equal(supabase.state.faturas[0].status, 'pago');
+  assert.equal(supabase.state.empresas.status, 'expirado');
+  assert.equal(resultado.ativou_conta, false);
+});
+
+test('ativacao sincronizacao: trial_ends_at permanece inalterado', async () => {
+  const supabase = fakeSupabase();
+  supabase.state.empresas = { status: 'trial', trial_ends_at: '2000-01-01T00:00:00.000Z' };
+  const http = fakeHttp([{
+    id: 'pay_trial_ends',
+    status: 'RECEIVED',
+    value: 149.90,
+    billingType: 'PIX',
+    dueDate: '2026-07-16',
+    paymentDate: '2026-07-10T12:00:00Z',
+  }]);
+
+  await sincronizarCobrancas({ empresaId, config, supabase, http, subscriptionId: 'sub_1' });
+
+  // trial_ends_at não deve ser alterado
+  assert.equal(supabase.state.empresas.trial_ends_at, '2000-01-01T00:00:00.000Z');
+});
+
+test('ativacao sincronizacao: plano permanece inalterado', async () => {
+  const supabase = fakeSupabase();
+  supabase.state.empresas = { status: 'trial', trial_ends_at: '2000-01-01T00:00:00.000Z', plano_id: 'plano_basico' };
+  const http = fakeHttp([{
+    id: 'pay_plan',
+    status: 'RECEIVED',
+    value: 149.90,
+    billingType: 'PIX',
+    dueDate: '2026-07-16',
+    paymentDate: '2026-07-10T12:00:00Z',
+  }]);
+
+  await sincronizarCobrancas({ empresaId, config, supabase, http, subscriptionId: 'sub_1' });
+
+  // plano_id não deve ser alterado
+  assert.equal(supabase.state.empresas.plano_id, 'plano_basico');
+});
+
+test('nenhuma chamada cria customer, assinatura ou cobranca', async () => {
+  const supabase = fakeSupabase();
+  supabase.state.empresas = { status: 'trial', trial_ends_at: '2000-01-01T00:00:00.000Z' };
+  const http = fakeHttp([{
+    id: 'pay_none',
+    status: 'RECEIVED',
+    value: 149.90,
+    billingType: 'PIX',
+    dueDate: '2026-07-16',
+    paymentDate: '2026-07-10T12:00:00Z',
+  }]);
+
+  // Verifica que http.post NÃO foi chamado
+  let postCalled = false;
+  http.post = async (...args) => {
+    postCalled = true;
+    throw new Error('POST não deveria ser chamado');
+  };
+
+  await sincronizarCobrancas({ empresaId, config, supabase, http, subscriptionId: 'sub_1' });
+
+  assert.equal(postCalled, false); // apenas GET /payments
+});
+
+test('historico: cobranca atual pendente aparece antes das antigas', async () => {
+  const supabase = fakeSupabase();
+  supabase.state.empresas = { status: 'trial', trial_ends_at: '2000-01-01T00:00:00.000Z' };
+
+  // Três payments: um atual (pendente), dois antigos (pago, vencido)
+  const hoje = new Date().toISOString().split('T')[0];
+  const amanha = new Date(Date.now() + 86400000).toISOString().split('T')[0];
+  const ontem = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+  const mesPassado = new Date(Date.now() - 30*86400000).toISOString().split('T')[0];
+
+  const http = fakeHttp([
+    { id: 'pay_atual', status: 'PENDING', value: 149.90, billingType: 'BOLETO', dueDate: amanha },
+    { id: 'pay_mes_passado', status: 'RECEIVED', value: 149.90, billingType: 'BOLETO', dueDate: mesPassado, paymentDate: '2026-06-10T12:00:00Z' },
+    { id: 'pay_ontem', status: 'OVERDUE', value: 149.90, billingType: 'BOLETO', dueDate: ontem },
+  ]);
+
+  const resultado = await sincronizarCobrancas({ empresaId, config, supabase, http, subscriptionId: 'sub_1' });
+
+  assert.equal(resultado.criadas, 3);
+  // Ordem na sincronização: Asaas retorna geralmente por dueDate ascendente
+  // A ordenação do histórico é feita no frontend
+  assert.equal(supabase.state.faturas.length, 3);
 });

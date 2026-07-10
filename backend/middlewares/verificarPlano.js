@@ -1,18 +1,24 @@
 const supabase = require('../config/supabase');
 
 // Proteção: uma conta não pode ser suspensa automaticamente se não houver
-// fatura com invoice_url ou bank_slip_url disponível.
+// fatura pendente/vencida com link de pagamento e vencimento já passado.
 async function podeSuspenderAutomaticamente(empresaId) {
   try {
+    const hoje = new Date().toISOString().split('T')[0];
     const { data } = await supabase
       .from('faturas')
-      .select('id, invoice_url, bank_slip_url')
+      .select('id, invoice_url, bank_slip_url, due_date, status')
       .eq('empresa_id', empresaId)
       .in('status', ['pendente', 'vencido'])
+      .lte('due_date', hoje)
+      .order('due_date', { ascending: true })
+      .limit(1)
       .maybeSingle();
 
-    // Só suspende se existir fatura pendente/vencida COM link de pagamento
+    // Só suspende se existir fatura pendente/vencida COM link de pagamento E vencimento já passado
     if (!data) return false;
+    if (!data.invoice_url && !data.bank_slip_url) return false;
+    if (data.due_date > hoje) return false; // vencimento futuro
     return Boolean(data.invoice_url || data.bank_slip_url);
   } catch {
     return false; // erro na consulta → não suspende (fail-safe)
@@ -41,8 +47,11 @@ const verificarPlano = async (req, res, next) => {
       return res.status(500).json({ message: 'Erro ao verificar plano.' });
     }
 
-    // Se for trial e expirou, verifica se existe fatura com link ANTES de suspender
-    if (data.status === 'trial' && data.trial_ends_at && new Date(data.trial_ends_at) < new Date()) {
+    const hoje = new Date();
+    const trialExpirado = data.status === 'trial' && data.trial_ends_at && new Date(data.trial_ends_at) < hoje;
+
+    // Se for trial e expirou, verifica se existe fatura pendente/vencida COM link e vencimento passado
+    if (trialExpirado) {
       if (await podeSuspenderAutomaticamente(req.empresa_id)) {
         await supabase.from('empresas').update({ status: 'suspenso' }).eq('id', req.empresa_id);
         return res.status(403).json({ message: 'Período de teste expirado. Assine um plano para continuar.' });
@@ -56,9 +65,12 @@ const verificarPlano = async (req, res, next) => {
       return res.status(403).json({ message: 'Plano bloqueado ou expirado. Entre em contato com o suporte.' });
     }
 
-    // Suspenso automático: verifica se ainda há fatura pendente; se não há, pode
-    // ser um resquício de suspensão anterior sem fatura — permite contato com suporte.
+    // Suspenso automático: verifica se ainda há fatura pendente/vencida com link e vencida
     if (data.status === 'suspenso') {
+      // Se não há mais fatura pendente com link e vencida, mantém suspenso mas permite contato com suporte
+      if (!(await podeSuspenderAutomaticamente(req.empresa_id))) {
+        return res.status(403).json({ message: 'Plano suspenso. Regularize seu plano para continuar.' });
+      }
       return res.status(403).json({ message: 'Plano suspenso. Regularize seu plano para continuar.' });
     }
 

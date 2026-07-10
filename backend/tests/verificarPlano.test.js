@@ -42,17 +42,26 @@ const criarSupabaseMock = (empresa, faturaMock = null) => {
         in() {
           return this;
         },
+        lte() {
+          return this;
+        },
+        order() {
+          return this;
+        },
+        limit() {
+          return this;
+        },
         maybeSingle() {
           if (tabela === 'faturas') {
             return Promise.resolve({ data: faturaMock, error: null });
           }
           return Promise.resolve({ data: empresa, error: null });
         },
-        async single() {
+        single() {
           if (tabela === 'faturas') {
-            return { data: faturaMock, error: faturaMock ? null : { code: 'PGRST116' } };
+            return Promise.resolve({ data: faturaMock, error: faturaMock ? null : { code: 'PGRST116' } });
           }
-          return { data: empresa, error: empresa ? null : { code: 'PGRST116' } };
+          return Promise.resolve({ data: empresa, error: null });
         }
       };
     }
