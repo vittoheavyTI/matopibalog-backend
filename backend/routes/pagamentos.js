@@ -551,14 +551,14 @@ router.post('/minhas-faturas/sincronizar', verifyToken, isAdmin, verificarEmpres
 });
 
 // ─── PIX SOB DEMANDA (BLOCO 4) ────────────────────────────────────────────────
-// Recupera o QR Code Pix de uma fatura consultando o Asaas.
-// Não persiste a imagem ou o payload Pix no banco (pix_qr_code já armazenado
-// na criação da cobrança manual, mas assinaturas não geram Pix no ato).
+// Recupera o QR Code Pix de uma fatura consultando o Asaas SOB DEMANDA.
+// NÃO persiste imagem, payload, Base64 ou expiração no banco.
+// Retorna contrato explícito: { encoded_image, payload, expiration_date }.
 router.get('/faturas/:id/pix', verifyToken, async (req, res) => {
   try {
     const { data: fatura, error: fetchErr } = await supabase
       .from('faturas')
-      .select('id, empresa_id, asaas_id, tipo_pagamento, pix_qr_code')
+      .select('id, empresa_id, asaas_id, tipo_pagamento')
       .eq('id', req.params.id)
       .single();
 
@@ -582,28 +582,42 @@ router.get('/faturas/:id/pix', verifyToken, async (req, res) => {
       return res.status(400).json({ message: 'Fatura sem cobrança Asaas vinculada.' });
     }
 
-    // Se já temos o pix_qr_code, devolve direto (sem consultar Asaas de novo)
-    if (fatura.pix_qr_code) {
-      return res.json({ pix_qr_code: fatura.pix_qr_code });
-    }
-
-    // Cobrança não é PIX nem BOLETO (boleto pode ter Pix vinculado)
+    // Apenas PIX e BOLETO (boleto pode ter Pix vinculado) têm QR Code disponível
     if (fatura.tipo_pagamento !== 'PIX' && fatura.tipo_pagamento !== 'BOLETO') {
       return res.status(400).json({ message: 'Esta cobrança não suporta Pix.' });
     }
 
-    // Busca Pix no Asaas (BOLETO com Pix também tem QR code disponível)
+    // Gate sandbox
     if (await bloquearSeNaoSandbox(res)) return;
+
     const { apiKey, baseURL } = await getAsaasConfig();
-    const qr = await obterPixQrCode(baseURL, apiKey, fatura.asaas_id);
-    if (!qr) {
-      return res.status(404).json({ message: 'Pix não disponível para esta cobrança.' });
+
+    // Consulta o Asaas para obter o QR Code completo (payload + imagem base64 + expiração)
+    try {
+      const { data: pixData } = await axios.get(
+        `${baseURL}/payments/${fatura.asaas_id}/pixQrCode`,
+        { headers: asaasHeaders(apiKey) }
+      );
+
+      // Asaas sandbox retorna: { payload, encodedImage, expirationDate }
+      // encodedImage = base64 PNG do QR Code (sem prefixo data:image)
+      // payload = copia e cola (EMV)
+      // expirationDate = ISO string
+
+      const encodedImage = pixData?.encodedImage || null;
+      const payload = pixData?.payload || null;
+      const expirationDate = pixData?.expirationDate || null;
+
+      // Retorna contrato sanitizado e explícito — NÃO persiste nada
+      return res.json({
+        encoded_image: encodedImage,
+        payload,
+        expiration_date: expirationDate,
+      });
+    } catch (asaasErr) {
+      console.error('[pix sob demanda] Erro ao consultar Asaas:', asaasErr.message);
+      return res.status(502).json({ message: 'Erro ao consultar Pix no Asaas.' });
     }
-
-    // Atualiza localmente (cache para evitar chamadas repetidas)
-    await supabase.from('faturas').update({ pix_qr_code: qr }).eq('id', fatura.id);
-
-    res.json({ pix_qr_code: qr, expiracao: 300 });
   } catch (err) {
     res.status(500).json({ message: 'Erro ao consultar Pix.' });
   }

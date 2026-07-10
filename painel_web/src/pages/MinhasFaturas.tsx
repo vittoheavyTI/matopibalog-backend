@@ -13,10 +13,16 @@ interface Fatura {
   status: 'pendente' | 'pago' | 'vencido' | 'cancelado' | 'estornado';
   invoice_url: string;
   bank_slip_url?: string;
-  pix_qr_code: string;
+  pix_qr_code: string; // legado: payload copia-e-cola (mantido para compatibilidade)
   due_date: string;
   pago_em: string;
   created_at: string;
+}
+
+interface PixResponse {
+  encoded_image: string | null;
+  payload: string | null;
+  expiration_date: string | null;
 }
 
 interface PlanoStatus {
@@ -79,7 +85,7 @@ export const MinhasFaturas: React.FC = () => {
   const [sincronizando, setSincronizando] = useState(false);
   const [erroSync, setErroSync] = useState<string | null>(null);
   // Modal Pix
-  const [pixModal, setPixModal] = useState<{ faturaId: string; qrCode: string; copiaCola: string } | null>(null);
+  const [pixModal, setPixModal] = useState<{ faturaId: string; encodedImage: string | null; copiaCola: string | null; expirationDate: string | null } | null>(null);
   const [pixCarregando, setPixCarregando] = useState(false);
   const [pixCopiado, setPixCopiado] = useState(false);
   const pixTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -163,15 +169,15 @@ export const MinhasFaturas: React.FC = () => {
   };
 
   const abrirPix = async (fatura: Fatura) => {
-    // Se já tem QR code local, abre direto
-    if (fatura.pix_qr_code) {
-      setPixModal({ faturaId: fatura.id, qrCode: fatura.pix_qr_code, copiaCola: fatura.pix_qr_code });
-      return;
-    }
     setPixCarregando(true);
     try {
-      const { data } = await api.get(`/pagamentos/faturas/${fatura.id}/pix`);
-      setPixModal({ faturaId: fatura.id, qrCode: data.pix_qr_code, copiaCola: data.pix_qr_code });
+      const { data } = await api.get<PixResponse>(`/pagamentos/faturas/${fatura.id}/pix`);
+      setPixModal({
+        faturaId: fatura.id,
+        encodedImage: data.encoded_image || null,
+        copiaCola: data.payload || null,
+        expirationDate: data.expiration_date || null,
+      });
     } catch {
       // Se falhou, tenta abrir invoice_url como fallback
       if (fatura.invoice_url && validarUrl(fatura.invoice_url)) {
@@ -200,23 +206,48 @@ export const MinhasFaturas: React.FC = () => {
   const trialEndsAt = planoStatus?.trial_ends_at;
   const trialData = trialEndsAt ? formatarData(trialEndsAt.split('T')[0]) : null;
 
-  // Separa próxima fatura e histórico
-  const pendentes = faturas.filter(f => f.status === 'pendente' || f.status === 'vencido');
-  // Ordena pendentes por due_date ascendente (a mais próxima primeiro)
-  pendentes.sort((a, b) => {
-    if (!a.due_date) return 1;
-    if (!b.due_date) return -1;
-    return new Date(a.due_date).getTime() - new Date(b.due_date).getTime();
-  });
-  const proximaFatura = pendentes.length > 0 ? pendentes[0] : null;
-  // Histórico: as demais faturas, ordenadas da mais recente para a mais antiga por due_date
-  const historico = faturas
-    .filter(f => f !== proximaFatura)
-    .sort((a, b) => {
+  // --- Classificação de faturas ---
+  const getFaturaAtual = (lista: Fatura[]) => {
+    const pendentes = lista.filter(f => f.status === 'pendente' || f.status === 'vencido');
+    if (pendentes.length === 0) return null;
+    pendentes.sort((a, b) => {
       if (!a.due_date) return 1;
       if (!b.due_date) return -1;
-      return new Date(b.due_date).getTime() - new Date(a.due_date).getTime();
+      return new Date(a.due_date).getTime() - new Date(b.due_date).getTime();
     });
+    return pendentes[0];
+  };
+
+  const getProximasCobrancas = (lista: Fatura[], atual: Fatura | null) => {
+    const pendentes = lista.filter(f => f.status === 'pendente' || f.status === 'vencido');
+    pendentes.sort((a, b) => {
+      if (!a.due_date) return 1;
+      if (!b.due_date) return -1;
+      return new Date(a.due_date).getTime() - new Date(b.due_date).getTime();
+    });
+    if (atual) {
+      return pendentes.filter(f => f.id !== atual.id);
+    }
+    return pendentes;
+  };
+
+  const getHistorico = (lista: Fatura[], atual: Fatura | null) => {
+    const historico = lista.filter(f => {
+      if (f === atual) return false;
+      if (['pago', 'cancelado', 'estornado'].includes(f.status)) return true;
+      return false;
+    });
+    historico.sort((a, b) => {
+      const dateA = a.due_date ? new Date(a.due_date).getTime() : (a.created_at ? new Date(a.created_at).getTime() : 0);
+      const dateB = b.due_date ? new Date(b.due_date).getTime() : (b.created_at ? new Date(b.created_at).getTime() : 0);
+      return dateB - dateA;
+    });
+    return historico;
+  };
+
+  const atual = getFaturaAtual(faturas);
+  const proximas = getProximasCobrancas(faturas, atual);
+  const historico = getHistorico(faturas, atual);
 
   const requerRegularizacao = ['suspenso', 'expirado', 'bloqueado'].includes(planoStatus?.status || '') || planoStatus?.trial_expirado;
   const suporteEmail = planoStatus?.regularizacao?.suporte_email;
@@ -245,7 +276,7 @@ export const MinhasFaturas: React.FC = () => {
     }
     if (status === 'suspenso') return {
       titulo: 'Conta suspensa',
-      texto: proximaFatura?.invoice_url
+      texto: atual?.invoice_url
         ? 'Sua conta está suspensa. Pague a fatura pendente para recuperar o acesso.'
         : 'Sua conta está suspensa. Entre em contato com o suporte para regularizar.',
       classes: 'bg-red-50 border-red-200 text-red-800',
@@ -279,10 +310,10 @@ export const MinhasFaturas: React.FC = () => {
         <button
           onClick={() => sincronizar(true)}
           disabled={sincronizando}
-          className="inline-flex items-center gap-1.5 text-xs text-gray-500 hover:text-green-700 disabled:opacity-50 transition-colors"
+          className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-xl hover:bg-gray-50 hover:border-gray-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors min-h-[40px]"
         >
-          <RefreshCw size={14} className={sincronizando ? 'animate-spin' : ''} />
-          {sincronizando ? 'Sincronizando…' : 'Atualizar status'}
+          <RefreshCw size={16} className={sincronizando ? 'animate-spin' : ''} />
+          {sincronizando ? 'Atualizando…' : 'Atualizar status'}
         </button>
       </div>
 
@@ -314,7 +345,7 @@ export const MinhasFaturas: React.FC = () => {
                   {planoStatus.plano.nome} · R$ {Number(planoStatus.plano.preco_mensal).toFixed(2)}/mês
                 </p>
               )}
-              {requerRegularizacao && suporteHref && !proximaFatura && (
+              {requerRegularizacao && suporteHref && !atual && (
                 <a href={suporteHref} className="inline-flex items-center gap-2 mt-4 px-4 py-2 bg-green-700 hover:bg-green-800 text-white rounded-lg text-sm font-bold">
                   <ExternalLink size={15} /> Solicitar regularização
                 </a>
@@ -325,16 +356,16 @@ export const MinhasFaturas: React.FC = () => {
       )}
 
       {/* Próxima mensalidade */}
-      {!loading && proximaFatura && (
+      {!loading && atual && (
         <div className={`rounded-xl p-6 border-2 shadow-sm ${
-          proximaFatura.status === 'vencido'
+          atual.status === 'vencido'
             ? 'border-red-300 bg-red-50'
             : trialAtivo
               ? 'border-blue-300 bg-blue-50'
               : 'border-yellow-300 bg-yellow-50'
         }`}>
           <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">
-            {trialAtivo ? 'Próxima mensalidade' : proximaFatura.status === 'vencido' ? '⚠️ Fatura Vencida' : 'Próxima Fatura'}
+            {trialAtivo ? 'Próxima mensalidade' : atual.status === 'vencido' ? '⚠️ Fatura Vencida' : 'Próxima Fatura'}
           </p>
 
           {trialAtivo && trialData && (
@@ -346,14 +377,14 @@ export const MinhasFaturas: React.FC = () => {
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
               <div className="text-3xl font-bold text-gray-800">
-                R$ {Number(proximaFatura.valor).toFixed(2)}
+                R$ {Number(atual.valor).toFixed(2)}
               </div>
               <div className="text-sm text-gray-500 mt-1">
-                Plano {planoStatus?.plano?.nome || '—'} · Vencimento: {formatarData(proximaFatura.due_date)}
+                Plano {planoStatus?.plano?.nome || '—'} · Vencimento: {formatarData(atual.due_date)}
               </div>
             </div>
-            <span className={`self-start sm:self-auto px-3 py-1 rounded-lg text-xs font-bold uppercase tracking-widest ${statusMap[proximaFatura.status]?.color}`}>
-              {proximaFatura.status === 'pendente' ? (trialAtivo ? 'A vencer' : 'Pendente') : statusMap[proximaFatura.status]?.label}
+            <span className={`self-start sm:self-auto px-3 py-1 rounded-lg text-xs font-bold uppercase tracking-widest ${statusMap[atual.status]?.color}`}>
+              {atual.status === 'pendente' ? (trialAtivo ? 'A vencer' : 'Pendente') : statusMap[atual.status]?.label}
             </span>
           </div>
 
@@ -364,9 +395,9 @@ export const MinhasFaturas: React.FC = () => {
           )}
 
           <div className="mt-4 flex flex-wrap items-center gap-2">
-            {proximaFatura.invoice_url && validarUrl(proximaFatura.invoice_url) && (
+            {atual.invoice_url && validarUrl(atual.invoice_url) && (
               <a
-                href={proximaFatura.invoice_url}
+                href={atual.invoice_url}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-2 px-5 py-2.5 bg-green-700 hover:bg-green-800 text-white rounded-xl font-bold text-sm transition-colors"
@@ -374,18 +405,18 @@ export const MinhasFaturas: React.FC = () => {
                 <ExternalLink size={16} /> Pagar agora
               </a>
             )}
-            {(proximaFatura.tipo_pagamento === 'PIX' || proximaFatura.tipo_pagamento === 'BOLETO') && (
+            {(atual.tipo_pagamento === 'PIX' || atual.tipo_pagamento === 'BOLETO') && (
               <button
-                onClick={() => abrirPix(proximaFatura)}
+                onClick={() => abrirPix(atual)}
                 disabled={pixCarregando}
                 className="inline-flex items-center gap-2 px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-semibold text-sm transition-colors disabled:opacity-50"
               >
                 <QrCode size={16} /> {pixCarregando ? 'Carregando…' : 'Pix'}
               </button>
             )}
-            {proximaFatura.invoice_url && validarUrl(proximaFatura.invoice_url) && (
+            {atual.invoice_url && validarUrl(atual.invoice_url) && (
               <a
-                href={proximaFatura.invoice_url}
+                href={atual.invoice_url}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-2 px-4 py-2.5 border border-gray-300 hover:bg-gray-50 text-gray-700 rounded-xl font-semibold text-sm transition-colors"
@@ -397,16 +428,64 @@ export const MinhasFaturas: React.FC = () => {
 
           <p className="text-[11px] text-gray-400 mt-3">
             Os pagamentos são processados em ambiente seguro pelo Asaas.
-            {getTipoLabel(proximaFatura.tipo_pagamento) !== 'Escolha a forma de pagamento' && (
-              <> Forma: {getTipoLabel(proximaFatura.tipo_pagamento)}.</>
+            {getTipoLabel(atual.tipo_pagamento) !== 'Escolha a forma de pagamento' && (
+              <> Forma: {getTipoLabel(atual.tipo_pagamento)}.</>
             )}
           </p>
         </div>
       )}
 
-      {!loading && !proximaFatura && faturas.length > 0 && (
+      {!loading && !atual && faturas.length > 0 && (
         <div className="rounded-xl p-5 border text-sm font-medium bg-green-50 border-green-200 text-green-700">
           ✅ Nenhuma fatura pendente. Tudo em dia!
+        </div>
+      )}
+
+      {/* Próximas cobranças */}
+      {!loading && proximas.length > 0 && (
+        <div className="mt-6">
+          <h3 className="text-base font-semibold text-gray-700 mb-3">Próximas cobranças</h3>
+          <div className="space-y-3">
+            {proximas.map(f => (
+              <div key={f.id} className="rounded-xl p-4 border bg-white shadow-sm hover:shadow-md transition-shadow">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-gray-700">
+                      {planoStatus?.plano ? `Mensalidade ${planoStatus.plano.nome}` : 'Assinatura'}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Vencimento: {formatarData(f.due_date)} · {getTipoLabel(f.tipo_pagamento)}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className={`px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest ${statusMap[f.status]?.color}`}>
+                      {f.status === 'pendente' ? 'A vencer' : statusMap[f.status]?.label}
+                    </span>
+                    <span className="font-bold text-gray-800">R$ {Number(f.valor).toFixed(2)}</span>
+                    {f.invoice_url && validarUrl(f.invoice_url) && (
+                      <a
+                        href={f.invoice_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-700 hover:bg-green-800 text-white rounded-lg text-xs font-bold transition-colors"
+                      >
+                        <ExternalLink size={12} /> Abrir fatura
+                      </a>
+                    )}
+                    {(f.tipo_pagamento === 'PIX' || f.tipo_pagamento === 'BOLETO') && f.status !== 'pago' && (
+                      <button
+                        onClick={() => abrirPix(f)}
+                        disabled={pixCarregando}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-semibold text-xs transition-colors disabled:opacity-50"
+                      >
+                        <QrCode size={12} /> Pix
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -520,31 +599,47 @@ export const MinhasFaturas: React.FC = () => {
               </button>
             </div>
             <div className="p-5 space-y-4">
-              {/* QR Code de mentirinha (será real quando o backend servir a imagem) */}
+              {/* QR Code real quando disponível, senão fallback */}
               <div className="flex justify-center">
-                <div className="w-48 h-48 bg-gray-100 border-2 border-dashed border-gray-300 rounded-xl flex items-center justify-center text-gray-400 text-xs text-center p-2">
-                  QR Code Pix
-                  <br />
-                  {pixModal.copiaCola.slice(0, 20)}...
-                </div>
+                {pixModal.encodedImage ? (
+                  <img
+                    src={`data:image/png;base64,${pixModal.encodedImage}`}
+                    alt="QR Code Pix"
+                    className="w-[200px] h-[200px] rounded-xl bg-white p-2 border border-gray-200"
+                  />
+                ) : (
+                  <div className="w-[200px] h-[200px] bg-white border-2 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center text-gray-400 text-xs text-center p-4">
+                    <QrCode size={48} className="mb-2" />
+                    <p className="font-medium">QR Code indisponível</p>
+                    <p className="mt-1">
+                      Utilize o código Pix Copia e Cola abaixo.
+                    </p>
+                  </div>
+                )}
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">Código Pix Copia e Cola</label>
                 <div className="flex items-center gap-2">
                   <input
                     readOnly
-                    value={pixModal.copiaCola}
+                    value={pixModal.copiaCola || ''}
                     className="flex-1 border border-gray-200 rounded-lg px-2 py-1.5 text-xs text-gray-600 bg-gray-50"
                   />
                   <button
                     onClick={copiarPix}
-                    className="p-1.5 text-gray-500 hover:text-green-700"
+                    disabled={!pixModal.copiaCola}
+                    className="p-1.5 text-gray-500 hover:text-green-700 disabled:opacity-50"
                     title="Copiar"
                   >
                     <Copy size={15} />
                   </button>
                 </div>
                 {pixCopiado && <p className="text-xs text-green-600 mt-1">Copiado!</p>}
+                {pixModal.expirationDate && (
+                  <p className="text-[11px] text-gray-400 text-center mt-2">
+                    Expira em: {new Date(pixModal.expirationDate).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}
+                  </p>
+                )}
               </div>
               <p className="text-[11px] text-gray-400 text-center">
                 O código Pix expira em alguns minutos.

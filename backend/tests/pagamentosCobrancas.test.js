@@ -78,7 +78,10 @@ function criarAxiosMock(cenario) {
     },
     async get(url) {
       chamadas.get += 1;
-      if (/\/pixQrCode$/.test(url)) return { data: cenario.pixQr || { payload: 'PIXCOPIACOLA' } };
+      if (/\/pixQrCode$/.test(url)) {
+        if (cenario.asaasPaymentError) throw cenario.asaasPaymentError;
+        return { data: cenario.pixQr || { payload: 'PIXCOPIACOLA' } };
+      }
       return { data: cenario.asaasPaymentGet || { id: 'pay_1', status: 'RECEIVED' } };
     },
   };
@@ -402,4 +405,231 @@ test('clientes: em production é bloqueado (403) sem chamar Asaas', async () => 
   assert.equal(res.statusCode, 403);
   assert.match(res.body.message, /sandbox/i);
   assert.equal(axios.chamadas.post, 0);
+});
+
+// ── GET /pagamentos/faturas/:id/pix — Pix sob demanda ────────────────────────────
+
+test('pix sob demanda: sempre consulta o Asaas mesmo se pix_qr_code legado existe', async () => {
+  const cenario = {
+    faturaById: { id: 'f1', empresa_id: 'e1', asaas_id: 'pay_1', tipo_pagamento: 'BOLETO', pix_qr_code: 'PIX-LEGADO' },
+    config: { dados: { integracao_asaas: { apiKey: 'chave-teste', environment: 'sandbox' } } },
+    pixQr: { encodedImage: 'BASE64_IMAGE', payload: 'PIX-PAYLOAD-ATUAL', expirationDate: '2026-07-16T23:59:59Z' },
+  };
+  const supabase = criarSupabaseMock(cenario);
+  const axios = criarAxiosMock(cenario);
+  const router = carregarRouter(supabase, axios);
+  const handler = getHandler(router, 'GET', '/faturas/:id/pix');
+
+  const res = fakeRes();
+  await handler({ user: superAdmin, params: { id: 'f1' } }, res, () => {});
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.encoded_image, 'BASE64_IMAGE');
+  assert.equal(res.body.payload, 'PIX-PAYLOAD-ATUAL');
+  assert.equal(res.body.expiration_date, '2026-07-16T23:59:59Z');
+  // Confirma que chamou o Asaas (axios.get chamado)
+  assert.equal(axios.chamadas.get, 1);
+  // Confirma que NÃO retornou o legado
+  assert.notEqual(res.body.payload, 'PIX-LEGADO');
+  // Confirma que NÃO fez UPDATE em faturas
+  const updates = supabase.__registro.updates.filter(u => u.tabela === 'faturas');
+  assert.equal(updates.length, 0);
+});
+
+test('pix sob demanda: sem encodedImage retorna null mas payload atual', async () => {
+  const cenario = {
+    faturaById: { id: 'f1', empresa_id: 'e1', asaas_id: 'pay_1', tipo_pagamento: 'PIX', pix_qr_code: 'PIX-LEGADO' },
+    config: { dados: { integracao_asaas: { apiKey: 'chave-teste', environment: 'sandbox' } } },
+    pixQr: { payload: 'PIX-PAYLOAD-ATUAL', expirationDate: '2026-07-16T23:59:59Z' }, // sem encodedImage
+  };
+  const supabase = criarSupabaseMock(cenario);
+  const axios = criarAxiosMock(cenario);
+  const router = carregarRouter(supabase, axios);
+  const handler = getHandler(router, 'GET', '/faturas/:id/pix');
+
+  const res = fakeRes();
+  await handler({ user: superAdmin, params: { id: 'f1' } }, res, () => {});
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.encoded_image, null);
+  assert.equal(res.body.payload, 'PIX-PAYLOAD-ATUAL');
+  assert.equal(res.body.expiration_date, '2026-07-16T23:59:59Z');
+  assert.equal(axios.chamadas.get, 1);
+});
+
+test('pix sob demanda: erro do Asaas retorna 502 sanitizado', async () => {
+  const cenario = {
+    faturaById: { id: 'f1', empresa_id: 'e1', asaas_id: 'pay_1', tipo_pagamento: 'BOLETO' },
+    config: { dados: { integracao_asaas: { apiKey: 'chave-teste', environment: 'sandbox' } } },
+    asaasPaymentError: { response: { status: 404, data: { errors: [{ description: 'Payment not found' }] } } },
+  };
+  const supabase = criarSupabaseMock(cenario);
+  const axios = criarAxiosMock(cenario);
+  const router = carregarRouter(supabase, axios);
+  const handler = getHandler(router, 'GET', '/faturas/:id/pix');
+
+  const res = fakeRes();
+  await handler({ user: superAdmin, params: { id: 'f1' } }, res, () => {});
+
+  assert.equal(res.statusCode, 502);
+  assert.equal(res.body.message, 'Erro ao consultar Pix no Asaas.');
+});
+
+test('pix sob demanda: tenant cross-account bloqueado (403)', async () => {
+  const cenario = {
+    faturaById: { id: 'f1', empresa_id: 'e2', asaas_id: 'pay_1', tipo_pagamento: 'BOLETO' },
+    config: { dados: { integracao_asaas: { apiKey: 'chave-teste', environment: 'sandbox' } } },
+  };
+  const supabase = criarSupabaseMock(cenario);
+  const axios = criarAxiosMock(cenario);
+  const router = carregarRouter(supabase, axios);
+  const handler = getHandler(router, 'GET', '/faturas/:id/pix');
+
+  // Admin comum (não super-admin) tentando acessar fatura de outra empresa
+  const adminComum = { is_super_admin: false, role: 'admin', uid: 'u1' };
+  // Mock do usuário retornar empresa_id diferente
+  const supabaseWithUsuario = criarSupabaseMock({
+    ...cenario,
+    usuario: { empresa_id: 'e1' }, // diferente de e2
+  });
+  const router2 = carregarRouter(supabaseWithUsuario, axios);
+  const handler2 = getHandler(router2, 'GET', '/faturas/:id/pix');
+
+  const res = fakeRes();
+  await handler2({ user: adminComum, params: { id: 'f1' } }, res, () => {});
+
+  assert.equal(res.statusCode, 403);
+  assert.equal(res.body.message, 'Acesso negado.');
+});
+
+test('pix sob demanda: tipo não suportado retorna 400', async () => {
+  const cenario = {
+    faturaById: { id: 'f1', empresa_id: 'e1', asaas_id: 'pay_1', tipo_pagamento: 'CARTAO' },
+    config: { dados: { integracao_asaas: { apiKey: 'chave-teste', environment: 'sandbox' } } },
+  };
+  const supabase = criarSupabaseMock(cenario);
+  const axios = criarAxiosMock(cenario);
+  const router = carregarRouter(supabase, axios);
+  const handler = getHandler(router, 'GET', '/faturas/:id/pix');
+
+  const res = fakeRes();
+  await handler({ user: superAdmin, params: { id: 'f1' } }, res, () => {});
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, 'Esta cobrança não suporta Pix.');
+});
+
+test('pix sob demanda: sem asaas_id retorna 400', async () => {
+  const cenario = {
+    faturaById: { id: 'f1', empresa_id: 'e1', asaas_id: null, tipo_pagamento: 'BOLETO' },
+    config: { dados: { integracao_asaas: { apiKey: 'chave-teste', environment: 'sandbox' } } },
+  };
+  const supabase = criarSupabaseMock(cenario);
+  const axios = criarAxiosMock(cenario);
+  const router = carregarRouter(supabase, axios);
+  const handler = getHandler(router, 'GET', '/faturas/:id/pix');
+
+  const res = fakeRes();
+  await handler({ user: superAdmin, params: { id: 'f1' } }, res, () => {});
+
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.message, 'Fatura sem cobrança Asaas vinculada.');
+});
+
+test('pix sob demanda: fatura inexistente retorna 404', async () => {
+  const cenario = { faturaById: null };
+  const supabase = criarSupabaseMock(cenario);
+  const axios = criarAxiosMock(cenario);
+  const router = carregarRouter(supabase, axios);
+  const handler = getHandler(router, 'GET', '/faturas/:id/pix');
+
+  const res = fakeRes();
+  await handler({ user: superAdmin, params: { id: 'nao-existe' } }, res, () => {});
+
+  assert.equal(res.statusCode, 404);
+  assert.equal(res.body.message, 'Fatura não encontrada.');
+});
+
+test('pix sob demanda: ignora pix_qr_code legado e sempre consulta Asaas', async () => {
+  const cenario = {
+    faturaById: {
+      id: 'f1',
+      empresa_id: 'e1',
+      asaas_id: 'pay_1',
+      tipo_pagamento: 'BOLETO',
+      pix_qr_code: 'PIX_LEGADO_NAO_DEVE_SER_USADO'
+    },
+    config: { dados: { integracao_asaas: { apiKey: 'chave-teste', environment: 'sandbox' } } },
+    pixQr: {
+      encodedImage: 'BASE64_IMAGEM_REAL',
+      payload: 'PIX_COPIA_COLA_ATUAL',
+      expirationDate: '2026-07-16T15:00:00Z'
+    },
+  };
+  const supabase = criarSupabaseMock(cenario);
+  const axios = criarAxiosMock(cenario);
+  const router = carregarRouter(supabase, axios);
+  const handler = getHandler(router, 'GET', '/faturas/:id/pix');
+
+  const res = fakeRes();
+  await handler({ user: superAdmin, params: { id: 'f1' } }, res, () => {});
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(axios.chamadas.get, 1);
+  assert.equal(res.body.encoded_image, 'BASE64_IMAGEM_REAL');
+  assert.equal(res.body.payload, 'PIX_COPIA_COLA_ATUAL');
+  assert.equal(res.body.expiration_date, '2026-07-16T15:00:00Z');
+  assert.notEqual(res.body.payload, 'PIX_LEGADO_NAO_DEVE_SER_USADO');
+  assert.notEqual(res.body.encoded_image, 'PIX_LEGADO_NAO_DEVE_SER_USADO');
+  assert.equal(supabase.__registro.updates.filter(u => u.tabela === 'faturas').length, 0);
+  assert.equal(supabase.__registro.inserts.filter(i => i.tabela === 'faturas').length, 0);
+});
+
+test('pix sob demanda: sem encodedImage retorna null mas payload atual disponível', async () => {
+  const cenario = {
+    faturaById: {
+      id: 'f1',
+      empresa_id: 'e1',
+      asaas_id: 'pay_1',
+      tipo_pagamento: 'BOLETO',
+      pix_qr_code: 'PIX_LEGADO'
+    },
+    config: { dados: { integracao_asaas: { apiKey: 'chave-teste', environment: 'sandbox' } } },
+    pixQr: {
+      payload: 'PIX_APENAS_PAYLOAD',
+      expirationDate: '2026-07-16T15:00:00Z'
+    },
+  };
+  const supabase = criarSupabaseMock(cenario);
+  const axios = criarAxiosMock(cenario);
+  const router = carregarRouter(supabase, axios);
+  const handler = getHandler(router, 'GET', '/faturas/:id/pix');
+
+  const res = fakeRes();
+  await handler({ user: superAdmin, params: { id: 'f1' } }, res, () => {});
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.encoded_image, null);
+  assert.equal(res.body.payload, 'PIX_APENAS_PAYLOAD');
+  assert.equal(res.body.expiration_date, '2026-07-16T15:00:00Z');
+  assert.equal(supabase.__registro.updates.filter(u => u.tabela === 'faturas').length, 0);
+  assert.equal(supabase.__registro.inserts.filter(i => i.tabela === 'faturas').length, 0);
+});
+
+test('pix sob demanda: em production bloqueado (403) sem chamar Asaas', async () => {
+  const cenario = {
+    faturaById: { id: 'f1', empresa_id: 'e1', asaas_id: 'pay_1', tipo_pagamento: 'BOLETO' },
+    config: { dados: { integracao_asaas: { apiKey: 'chave-teste', environment: 'production' } } },
+  };
+  const supabase = criarSupabaseMock(cenario);
+  const axios = criarAxiosMock(cenario);
+  const router = carregarRouter(supabase, axios);
+  const handler = getHandler(router, 'GET', '/faturas/:id/pix');
+
+  const res = fakeRes();
+  await handler({ user: superAdmin, params: { id: 'f1' } }, res, () => {});
+
+  assert.equal(res.statusCode, 403);
+  assert.match(res.body.message, /sandbox/i);
+  assert.equal(axios.chamadas.get, 0);
 });
