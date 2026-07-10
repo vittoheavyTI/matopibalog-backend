@@ -4,6 +4,7 @@ import { Plus, X, Search, Filter, Truck, MapPin, Calendar, DollarSign, Gauge, Tr
 import { format } from 'date-fns';
 import { formatCurrency } from '../utils';
 import api, { newClientRequestId } from '../api';
+import { mensagemErro } from '../utils/mensagemErro';
 import { PlanoBloqueadoCard } from '../components/PlanoBloqueadoCard';
 import { EVENTO_NOTIFICACOES_NOVAS } from '../components/NotificacoesDropdown';
 
@@ -149,7 +150,7 @@ export const GerenciamentoViagens: React.FC = () => {
         empresaTipo: m.empresa_tipo
       })));
     } catch (err) {
-      console.error('Erro ao carregar fretes:', err);
+      if (import.meta.env.DEV) console.error('[Fretes] carregar falhou');
       const msgPlano = extrairMensagemPlano(err);
       if (msgPlano) setPlanoBloqueadoMsg(msgPlano);
       else setErroCarregamento(true);
@@ -208,7 +209,7 @@ export const GerenciamentoViagens: React.FC = () => {
         valor: v.valor, quemPagou: v.quem_pagou, status: v.status, data: v.data, frete_id: v.frete_id, tipo: 'vale'
       })));
     } catch (err) {
-      console.error('Erro ao carregar dados do motorista', err);
+      if (import.meta.env.DEV) console.error('[Fretes] carregar dados do motorista falhou');
       const msgPlano = extrairMensagemPlano(err);
       if (msgPlano) setPlanoBloqueadoMsg(msgPlano);
       else setErroCarregamento(true);
@@ -444,7 +445,7 @@ export const GerenciamentoViagens: React.FC = () => {
       const detalhe = Array.isArray(data?.errors) && data.errors.length
         ? ' (' + data.errors.map((e: any) => `${e.campo}: ${e.mensagem}`).join('; ') + ')'
         : '';
-      alert('Erro ao salvar frete: ' + (data?.message || err.message) + detalhe);
+      alert('Erro ao salvar frete: ' + mensagemErro(err, 'verifique os campos e tente novamente.') + detalhe);
     } finally {
       setIsSubmitting(false);
     }
@@ -464,7 +465,7 @@ export const GerenciamentoViagens: React.FC = () => {
       selecionarFotoInicial(null);
       alert('Foto do odômetro inicial enviada. O frete foi ativado.');
     } catch (err: any) {
-      alert('Ainda não foi possível enviar a foto: ' + (err?.response?.data?.message || err.message || 'erro desconhecido') + '.');
+      alert('Ainda não foi possível enviar a foto: ' + mensagemErro(err, 'tente novamente.') + '.');
     } finally {
       setReenviandoFotoInicial(false);
     }
@@ -482,7 +483,7 @@ export const GerenciamentoViagens: React.FC = () => {
         await loadData();
       }
     } catch (err: any) {
-      alert('Erro ao excluir frete: ' + (err.response?.data?.message || err.message));
+      alert('Erro ao excluir frete: ' + mensagemErro(err, 'tente novamente.'));
     } finally {
       setIsDeleting(false);
     }
@@ -503,7 +504,7 @@ export const GerenciamentoViagens: React.FC = () => {
       }
       if (filterMot !== 'todos') await loadMotoristaData(filterMot);
     } catch (err: any) {
-      const msg = err?.response?.data?.message || err?.message || 'Tente novamente.';
+      const msg = mensagemErro(err, 'Tente novamente.');
       alert('Erro ao atualizar status: ' + msg);
     }
   };
@@ -549,7 +550,7 @@ export const GerenciamentoViagens: React.FC = () => {
       a.remove();
       URL.revokeObjectURL(objectUrl);
     } catch (e) {
-      console.warn('Falha no download do comprovante, abrindo em nova aba:', e);
+      if (import.meta.env.DEV) console.warn('[Fretes] download do comprovante falhou; abrindo em nova aba');
       window.open(url, '_blank', 'noopener,noreferrer');
     }
   };

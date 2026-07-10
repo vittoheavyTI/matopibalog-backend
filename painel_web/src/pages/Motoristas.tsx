@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Plus, X, MessageCircle, Trash2, AlertTriangle, Camera, MapPin, Loader2, Eye, EyeOff } from 'lucide-react';
 import api from '../api';
+import { mensagemErro } from '../utils/mensagemErro';
 import { maskPhone, maskCPF, maskCEP } from '../utils/masks';
 import axios from 'axios';
 
@@ -50,7 +51,7 @@ export const Motoristas: React.FC = () => {
         empresaTipo: m.empresa_tipo
       })));
     } catch (error: any) {
-      console.error('Erro detalhado ao carregar motoristas:', error);
+      if (import.meta.env.DEV) console.error('[Motoristas] carregar falhou', { status: error?.response?.status });
     } finally {
       setLoading(false);
     }
@@ -82,9 +83,8 @@ export const Motoristas: React.FC = () => {
       setNewMot({ nomeCompleto: '', cpf: '', email: '', senha: '', placaVeiculo: '', telefone: '', cep: '', endereco: '', bairro: '', cidade: '', fotoUrl: '', percentualComissao: 12 });
       alert('Motorista cadastrado e já ativo. Ele troca a senha no primeiro acesso.');
     } catch (error: any) {
-      console.error('Erro detalhado ao cadastrar motorista:', error);
-      console.error('Payload do motorista enviado:', newMot);
-      alert('Erro ao cadastrar motorista: ' + (error.response?.data?.message || error.message || 'Erro desconhecido'));
+      if (import.meta.env.DEV) console.error('[Motoristas] cadastrar falhou', { status: error?.response?.status });
+      alert('Erro ao cadastrar motorista: ' + mensagemErro(error, 'tente novamente.'));
     } finally {
       setIsSubmitting(false);
     }
@@ -127,9 +127,8 @@ export const Motoristas: React.FC = () => {
       setShowEditModal(false);
       setEditingMot(null);
     } catch (error: any) {
-      console.error('Erro detalhado ao atualizar motorista:', error);
-      console.error('Payload de edição do motorista:', editingMot);
-      alert('Erro ao atualizar motorista: ' + (error.response?.data?.message || error.message || 'Erro desconhecido'));
+      if (import.meta.env.DEV) console.error('[Motoristas] atualizar falhou', { status: error?.response?.status });
+      alert('Erro ao atualizar motorista: ' + mensagemErro(error, 'tente novamente.'));
     } finally {
       setIsSubmitting(false);
     }
@@ -148,9 +147,8 @@ export const Motoristas: React.FC = () => {
       setDeleteTarget(null);
       await loadMotoristas();
     } catch (error: any) {
-      console.error('Erro detalhado ao excluir motorista:', error);
-      console.error('Alvo de exclusão do motorista:', deleteTarget);
-      alert(error.response?.data?.message || error.message || 'Erro ao excluir motorista.');
+      if (import.meta.env.DEV) console.error('[Motoristas] excluir falhou', { status: error?.response?.status });
+      alert(mensagemErro(error, 'Erro ao excluir motorista.'));
     } finally {
       setIsDeleting(false);
     }
@@ -197,7 +195,7 @@ export const Motoristas: React.FC = () => {
         }
       }
     } catch (err) {
-      console.error('Erro ao buscar CEP:', err);
+      if (import.meta.env.DEV) console.error('[Motoristas] buscar CEP falhou');
     } finally {
       setIsFetchingCep(false);
     }

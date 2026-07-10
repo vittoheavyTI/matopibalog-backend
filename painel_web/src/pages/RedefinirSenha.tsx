@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabase';
+import { mensagemErro } from '../utils/mensagemErro';
 import { Truck, Eye, EyeOff } from 'lucide-react';
 
 export const RedefinirSenha: React.FC = () => {
@@ -63,7 +64,7 @@ export const RedefinirSenha: React.FC = () => {
       setMessage('Senha redefinida com sucesso! Redirecionando para o login...');
       setTimeout(() => navigate('/login'), 3000);
     } catch (err: any) {
-      setError(err.message || 'Erro ao redefinir senha. Tente novamente.');
+      setError(mensagemErro(err, 'Não foi possível redefinir a senha. O link pode ter expirado — solicite um novo e-mail de recuperação.'));
     } finally {
       setLoading(false);
     }

@@ -33,9 +33,14 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
               <span className="text-2xl">!</span>
             </div>
             <h2 className="text-xl font-bold text-red-700">Erro inesperado</h2>
-            <p className="text-sm text-gray-500 font-mono bg-gray-50 p-3 rounded-lg text-left break-all">
-              {this.state.error.message}
+            <p className="text-sm text-gray-500">
+              Ocorreu um erro ao carregar esta tela. Tente recarregar a página.
             </p>
+            {import.meta.env.DEV && (
+              <p className="text-xs text-gray-400 font-mono bg-gray-50 p-3 rounded-lg text-left break-all">
+                {this.state.error.message}
+              </p>
+            )}
             <button
               onClick={() => { this.setState({ error: null }); window.location.reload(); }}
               className="px-6 py-2 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700"
