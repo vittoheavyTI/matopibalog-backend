@@ -102,7 +102,7 @@ exports.create = async (req, res) => {
   }
 
   try {
-    const { data: userData } = await supabase.from('usuarios').select('status, empresa_id, empresas(tipo)').eq('id', motorista_id_final).single();
+    const { data: userData } = await supabase.from('usuarios').select('status, empresa_id, empresas!usuarios_empresa_id_fkey(tipo)').eq('id', motorista_id_final).single();
     if (!userData || userData.status === 'bloqueado') return res.status(403).json({ message: 'Motorista bloqueado. Entre em contato com o administrador.' });
 
     const isAutonomo = userData.empresas?.tipo === 'autonomo';

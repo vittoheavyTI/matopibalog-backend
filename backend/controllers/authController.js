@@ -246,15 +246,25 @@ exports.login = async (req, res) => {
 
     const uid = authData.user.id;
 
-    // 2. Buscar perfil detalhado com tipo da empresa
+    // 2. Buscar perfil detalhado com tipo da empresa.
+    // FK explícita (usuarios.empresa_id → empresas.id): a migration 024 criou
+    // empresas.suspended_by → usuarios.id, tornando o embed genérico empresas()
+    // ambíguo (PGRST201). Sem o hint, o login inteiro quebra.
     const { data: userData, error: userError } = await supabase
       .from('usuarios')
-      .select('*, empresas(nome, tipo)')
+      .select('*, empresas!usuarios_empresa_id_fkey(nome, tipo)')
       .eq('id', uid)
       .single();
 
-    if (userError || !userData) {
-      console.error(`[login] Perfil ausente na tabela usuarios para uid ${uid}:`, userError);
+    // Erro real de banco/PostgREST (≠ PGRST116 "zero linhas do .single()"):
+    // NÃO mascarar como perfil ausente — é falha interna ao carregar o perfil.
+    if (userError && userError.code !== 'PGRST116') {
+      console.error(`[login] Erro ao carregar perfil para uid ${uid}:`, userError.code || userError.message);
+      return res.status(500).json({ message: 'Erro ao carregar perfil. Tente novamente em instantes.' });
+    }
+
+    if (!userData) {
+      console.error(`[login] Perfil ausente na tabela usuarios para uid ${uid}`);
       return res.status(409).json({
         message: 'Perfil incompleto. Entre em contato com o suporte.'
       });
@@ -326,7 +336,7 @@ exports.updateMe = async (req, res) => {
       .from('usuarios')
       .update(update)
       .eq('id', req.user.uid)
-      .select('*, motoristas(*), empresas(nome, tipo)')
+      .select('*, motoristas(*), empresas!usuarios_empresa_id_fkey(nome, tipo)')
       .single();
     if (error) throw error;
     res.status(200).json(data);
@@ -379,7 +389,7 @@ exports.getMe = async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('usuarios')
-      .select('*, motoristas(*), empresas(nome, tipo)')
+      .select('*, motoristas(*), empresas!usuarios_empresa_id_fkey(nome, tipo)')
       .eq('id', req.user.uid)
       .single();
 

@@ -116,7 +116,7 @@ exports.create = async (req, res) => {
     // Validar status do motorista e obter tipo da empresa
     const { data: userData, error: userError } = await supabase
       .from('usuarios')
-      .select('status, empresa_id, empresas(tipo)')
+      .select('status, empresa_id, empresas!usuarios_empresa_id_fkey(tipo)')
       .eq('id', motorista_id)
       .single();
 

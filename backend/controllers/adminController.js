@@ -354,7 +354,9 @@ exports.getUsuarios = async (req, res) => {
 
     let query = supabase
       .from('usuarios')
-      .select('*, empresas!left(tipo)')
+      // FK explícita: !left não desambigua a relação (PGRST201 após migration 024);
+      // embed to-one já é left join por padrão, semântica preservada.
+      .select('*, empresas!usuarios_empresa_id_fkey(tipo)')
       .order('nome', { ascending: true });
 
     if (empresaAlvo) {
