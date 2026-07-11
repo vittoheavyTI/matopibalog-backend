@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import api from '../api';
 import { CreditCard, Download, Search, Plus, RefreshCw, X, ExternalLink, Copy } from 'lucide-react';
+import { civilDateToDayNumber, extractCivilDate, formatCivilDate, todayInBahia } from '../utils';
 
 interface Fatura {
   id: string;
@@ -208,8 +209,8 @@ export const Faturas: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
   };
 
   const planos = Array.from(new Set(faturas.map(f => f.empresas?.planos?.nome).filter(Boolean) as string[])).sort();
-  const hoje = new Date();
-  hoje.setHours(0, 0, 0, 0);
+  const hojeCivil = todayInBahia();
+  const hojeDia = civilDateToDayNumber(hojeCivil) ?? 0;
   const filtered = faturas.filter(f => {
     const busca = search.toLowerCase();
     const porBusca = f.empresas?.nome?.toLowerCase().includes(busca) || f.asaas_id?.toLowerCase().includes(busca);
@@ -217,17 +218,22 @@ export const Faturas: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
       || (tipoFiltro === 'autonomos' ? f.empresas?.tipo === 'autonomo' : f.empresas?.tipo !== 'autonomo');
     const porStatus = statusFiltro === 'todos' || f.status === statusFiltro;
     const porPlano = planoFiltro === 'todos' || f.empresas?.planos?.nome === planoFiltro;
-    const vencimento = f.due_date ? new Date(`${f.due_date}T00:00:00`) : null;
-    const diasAteVencer = vencimento ? Math.ceil((vencimento.getTime() - hoje.getTime()) / 86400000) : null;
+    const vencimentoDia = civilDateToDayNumber(f.due_date);
+    const diasAteVencer = vencimentoDia === null ? null : vencimentoDia - hojeDia;
     const porVencimento = vencimentoFiltro === 'todos'
       || (vencimentoFiltro === 'vencidas' && diasAteVencer !== null && diasAteVencer < 0)
       || (vencimentoFiltro === 'proximos7' && diasAteVencer !== null && diasAteVencer >= 0 && diasAteVencer <= 7)
-      || (vencimentoFiltro === 'sem_data' && !vencimento);
+      || (vencimentoFiltro === 'sem_data' && vencimentoDia === null);
     return Boolean(porBusca && porTipo && porStatus && porPlano && porVencimento);
   });
 
-  const totalPendente = faturas.filter(f => f.status === 'pendente').reduce((s, f) => s + Number(f.valor), 0);
-  const totalPago = faturas.filter(f => f.status === 'pago').reduce((s, f) => s + Number(f.valor), 0);
+  const totalAReceber = faturas
+    .filter(f => f.status === 'pendente' || f.status === 'vencido')
+    .reduce((s, f) => s + Number(f.valor), 0);
+  const mesAtual = hojeCivil.slice(0, 7);
+  const totalPagoNoMes = faturas
+    .filter(f => f.status === 'pago' && extractCivilDate(f.pago_em)?.startsWith(mesAtual))
+    .reduce((s, f) => s + Number(f.valor), 0);
 
   return (
     <div className="space-y-4 animate-fade-in">
@@ -250,12 +256,12 @@ export const Faturas: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
       {/* Cards resumo */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
-          <div className="text-sm text-gray-500">Total Pendente</div>
-          <div className="text-2xl font-bold text-yellow-600">R$ {totalPendente.toFixed(2)}</div>
+          <div className="text-sm text-gray-500">A receber</div>
+          <div className="text-2xl font-bold text-yellow-600">R$ {totalAReceber.toFixed(2)}</div>
         </div>
         <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
-          <div className="text-sm text-gray-500">Total Recebido</div>
-          <div className="text-2xl font-bold text-green-600">R$ {totalPago.toFixed(2)}</div>
+          <div className="text-sm text-gray-500">Recebido no mês</div>
+          <div className="text-2xl font-bold text-green-600">R$ {totalPagoNoMes.toFixed(2)}</div>
         </div>
         <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
           <div className="text-sm text-gray-500">Total Faturas</div>
@@ -315,8 +321,8 @@ export const Faturas: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
                       <td className="px-4 py-2.5 text-gray-700">R$ {Number(f.valor).toFixed(2)}</td>
                       <td className="px-4 py-2.5 text-gray-500">{f.tipo_pagamento || '—'}</td>
                       <td className="px-4 py-2.5"><span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${st.color}`}>{st.label}</span></td>
-                      <td className="px-4 py-2.5 text-gray-500">{f.due_date ? new Date(f.due_date).toLocaleDateString('pt-BR') : '—'}</td>
-                      <td className="px-4 py-2.5 text-gray-500">{f.pago_em ? new Date(f.pago_em).toLocaleDateString('pt-BR') : '—'}</td>
+                      <td className="px-4 py-2.5 text-gray-500">{formatCivilDate(f.due_date)}</td>
+                      <td className="px-4 py-2.5 text-gray-500">{formatCivilDate(f.pago_em)}</td>
                       <td className="px-4 py-2.5">
                         <div className="flex items-center gap-1">
                           {f.invoice_url && (
@@ -434,7 +440,7 @@ export const Faturas: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
                     </span>
                     <span className="text-sm text-gray-600">{empresaSelecionada?.nome}</span>
                   </div>
-                  <div className="text-sm text-gray-700">Valor: <strong>R$ {Number(resultado.valor).toFixed(2)}</strong> · Vencimento: {resultado.due_date ? new Date(`${resultado.due_date}T00:00:00`).toLocaleDateString('pt-BR') : '—'}</div>
+                  <div className="text-sm text-gray-700">Valor: <strong>R$ {Number(resultado.valor).toFixed(2)}</strong> · Vencimento: {formatCivilDate(resultado.due_date)}</div>
                   {resultado.invoice_url && (
                     <a href={resultado.invoice_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-sm text-blue-700 hover:underline">
                       <ExternalLink size={15} /> Abrir link de pagamento
