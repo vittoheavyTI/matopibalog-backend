@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Shield, Search, CheckCircle, XCircle, Clock, CreditCard } from 'lucide-react';
 import api from '../api';
+import { calculateContractedMrr, formatCurrency, formatTechnicalDate, getActiveRecurringContracts, hasActiveRecurringContract } from '../utils';
 
 export const PainelAssinaturas: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
   const [assinaturas, setAssinaturas] = useState<any[]>([]);
@@ -21,7 +22,10 @@ export const PainelAssinaturas: React.FC<{ embedded?: boolean }> = ({ embedded =
         tipo: e.tipo || 'transportadora',
         plano: e.planos?.nome || 'Sem plano',
         valor: e.planos?.preco_mensal || 0,
-        status: e.status || 'inativo',
+        planos: e.planos,
+        status: e.status ?? null,
+        billing_status: e.billing_status,
+        asaas_subscription_id: e.asaas_subscription_id,
         inicio: e.trial_started_at || e.created_at,
         vencimento: e.trial_ends_at || null,
       }));
@@ -47,8 +51,8 @@ export const PainelAssinaturas: React.FC<{ embedded?: boolean }> = ({ embedded =
     return porBusca && porTipo && porStatus && porPlano && porVencimento;
   });
 
-  const statusAtivas = filtered.filter(a => a.status === 'ativo').length;
-  const receitaMensal = filtered.reduce((acc, a) => acc + (a.status === 'ativo' ? parseFloat(a.valor) : 0), 0);
+  const contratosAtivos = getActiveRecurringContracts(filtered);
+  const mrrContratado = calculateContractedMrr(filtered);
   const statusLabel: Record<string, string> = {
     ativo: 'Ativo', trial: 'Trial', suspenso: 'Suspenso', bloqueado: 'Bloqueado', expirado: 'Expirado',
   };
@@ -65,8 +69,8 @@ export const PainelAssinaturas: React.FC<{ embedded?: boolean }> = ({ embedded =
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-white rounded-2xl border border-gray-100 p-4"><p className="text-2xl font-black text-gray-800">{assinaturas.length}</p><p className="text-sm text-gray-500">Total</p></div>
-        <div className="bg-white rounded-2xl border border-gray-100 p-4"><p className="text-2xl font-black text-green-600">{statusAtivas}</p><p className="text-sm text-gray-500">Ativas</p></div>
-        <div className="bg-white rounded-2xl border border-gray-100 p-4"><p className="text-2xl font-black text-blue-600">R$ {receitaMensal.toFixed(2)}</p><p className="text-sm text-gray-500">Receita Mensal</p></div>
+        <div className="bg-white rounded-2xl border border-gray-100 p-4"><p className="text-2xl font-black text-green-600">{contratosAtivos.length}</p><p className="text-sm text-gray-500">Assinaturas ativas</p></div>
+        <div className="bg-white rounded-2xl border border-gray-100 p-4"><p className="text-2xl font-black text-blue-600">{formatCurrency(mrrContratado)}</p><p className="text-sm text-gray-500">MRR contratado</p><p className="text-xs text-gray-400">Mensalidades recorrentes de assinaturas ativas</p></div>
       </div>
 
       <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 grid grid-cols-1 md:grid-cols-5 gap-3">
@@ -81,7 +85,7 @@ export const PainelAssinaturas: React.FC<{ embedded?: boolean }> = ({ embedded =
         <table className="w-full text-left">
           <thead>
             <tr className="bg-gray-50 text-gray-600 text-xs font-bold uppercase tracking-wider">
-              <th className="px-4 py-2.5 border-b">Empresa</th><th className="p-4 border-b">Plano</th><th className="p-4 border-b">Valor</th><th className="p-4 border-b">Início</th><th className="p-4 border-b">Vencimento</th><th className="p-4 border-b">Status</th>
+              <th className="px-4 py-2.5 border-b">Empresa</th><th className="p-4 border-b">Plano</th><th className="p-4 border-b">Valor</th><th className="p-4 border-b">Início</th><th className="p-4 border-b">Vencimento</th><th className="p-4 border-b">Contrato</th><th className="p-4 border-b">Status</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-50">
@@ -90,12 +94,13 @@ export const PainelAssinaturas: React.FC<{ embedded?: boolean }> = ({ embedded =
                 <td className="px-4 py-2.5"><div><p className="font-bold text-gray-800">{a.empresa}</p><p className="text-xs text-gray-400">{a.tipo === 'autonomo' ? 'Autônomo' : 'Empresa'} · {a.cnpj || 'sem documento'}</p></div></td>
                 <td className="px-4 py-2.5"><span className="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase bg-purple-50 text-purple-700"><CreditCard size={12} className="inline mr-1" />{a.plano}</span></td>
                 <td className="px-4 py-2.5 font-bold text-gray-800">R$ {parseFloat(String(a.valor)).toFixed(2)}</td>
-                <td className="px-4 py-2.5 text-sm text-gray-500">{a.inicio ? new Date(a.inicio).toLocaleDateString('pt-BR') : '-'}</td>
-                <td className="px-4 py-2.5 text-sm text-gray-500">{a.vencimento ? new Date(a.vencimento).toLocaleDateString('pt-BR') : '-'}</td>
-                <td className="px-4 py-2.5">{a.status === 'ativo' ? <span className="flex items-center text-green-600 text-sm font-bold"><CheckCircle size={14} className="mr-1" />Ativo</span> : a.status === 'trial' ? <span className="flex items-center text-amber-600 text-sm font-bold"><Clock size={14} className="mr-1" />Trial</span> : <span className="flex items-center text-red-600 text-sm font-bold"><XCircle size={14} className="mr-1" />{statusLabel[a.status] || 'Inativo'}</span>}</td>
+                <td className="px-4 py-2.5 text-sm text-gray-500">{formatTechnicalDate(a.inicio)}</td>
+                <td className="px-4 py-2.5 text-sm text-gray-500">{formatTechnicalDate(a.vencimento)}</td>
+                <td className="px-4 py-2.5">{hasActiveRecurringContract(a) ? <span className="flex items-center text-green-600 text-sm font-bold"><CheckCircle size={14} className="mr-1" />Assinatura ativa</span> : <span className="flex items-center text-gray-500 text-sm font-bold"><XCircle size={14} className="mr-1" />Sem assinatura ativa</span>}</td>
+                <td className="px-4 py-2.5">{a.status === 'ativo' ? <span className="flex items-center text-green-600 text-sm font-bold"><CheckCircle size={14} className="mr-1" />Ativo</span> : a.status === 'trial' ? <span className="flex items-center text-amber-600 text-sm font-bold"><Clock size={14} className="mr-1" />Trial</span> : <span className="flex items-center text-red-600 text-sm font-bold"><XCircle size={14} className="mr-1" />{statusLabel[a.status] || a.status || 'Sem status'}</span>}</td>
               </tr>
             ))}
-            {filtered.length === 0 && <tr><td colSpan={6} className="p-8 text-center text-gray-400">Nenhuma assinatura encontrada para os filtros selecionados.</td></tr>}
+            {filtered.length === 0 && <tr><td colSpan={7} className="p-8 text-center text-gray-400">Nenhuma assinatura encontrada para os filtros selecionados.</td></tr>}
           </tbody>
         </table>
       </div>

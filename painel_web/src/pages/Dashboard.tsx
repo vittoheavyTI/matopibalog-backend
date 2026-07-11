@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
-import { formatCurrency } from '../utils';
+import { formatCurrency, getActiveRecurringContracts, getContractMonthlyPrice } from '../utils';
 import {
   DollarSign, AlertCircle, FileText, Check, X,
   Save, Edit, Unlock, Lock, ChevronLeft, Plus, Fuel, TrendingUp, Truck,
@@ -551,19 +551,18 @@ export const Dashboard: React.FC = () => {
       })
     : motoristasEmViagem;
 
-  // Derivados da fusão da "Visão Geral" (só super-admin): receita mensal por empresa
-  // ativa com plano pago, empresas em trial, ativas e inadimplentes/bloqueadas.
+  // Derivados da fusão da "Visão Geral" (só super-admin): MRR contratado,
+  // empresas em trial, ativas e inadimplentes/bloqueadas.
   const empresasTrial = empresasPainel.filter((e: any) => e.status === 'trial');
   const empresasAtivas = empresasPainel.filter((e: any) => e.status === 'ativo');
   const empresasInadimplentes = empresasPainel.filter((e: any) => ['suspenso', 'bloqueado', 'expirado'].includes(e.status));
-  // Escalável: ordena por receita desc e mostra só o Top 8 no gráfico (labels legíveis).
+  // Escalável: ordena por MRR desc e mostra só o Top 8 no gráfico (labels legíveis).
   // "Ver todas" leva a Assinaturas quando houver mais que 8.
-  const empresasPagantes = empresasPainel
-    .filter((e: any) => e.status === 'ativo' && parseFloat(e.planos?.preco_mensal || 0) > 0)
-    .sort((a: any, b: any) => parseFloat(b.planos?.preco_mensal || 0) - parseFloat(a.planos?.preco_mensal || 0));
-  const receitaChart = empresasPagantes.slice(0, 8).map((e: any) => ({
+  const empresasComMrr = getActiveRecurringContracts(empresasPainel)
+    .sort((a: any, b: any) => getContractMonthlyPrice(b) - getContractMonthlyPrice(a));
+  const receitaChart = empresasComMrr.slice(0, 8).map((e: any) => ({
     nome: e.nome && e.nome.length > 10 ? e.nome.substring(0, 10) + '…' : (e.nome || '?'),
-    receita: parseFloat(e.planos?.preco_mensal || 0),
+    receita: getContractMonthlyPrice(e),
   }));
 
   if (planoBloqueadoMsg) {
@@ -630,22 +629,22 @@ export const Dashboard: React.FC = () => {
         </div>
       )}
 
-      {/* Seção b/c da fusão da "Visão Geral": Receita por Empresa + Trial + Alertas (só super-admin). */}
+      {/* Seção b/c da fusão da "Visão Geral": MRR por Empresa + Trial + Alertas (só super-admin). */}
       {!selectedMot && isSuperAdmin && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 animate-fade-in">
           <div className="lg:col-span-2 bg-white rounded-xl border border-gray-100 shadow-sm p-4">
             <div className="flex items-start justify-between mb-3">
               <div>
-                <h3 className="font-bold text-gray-800 text-sm flex items-center"><TrendingUp size={16} className="mr-1.5 text-green-600" /> Receita por Empresa</h3>
-                <p className="text-xs text-gray-400">Top 8 por valor mensal · {empresasPagantes.length} pagante(s) · {empresasAtivas.length} ativa(s)</p>
+                <h3 className="font-bold text-gray-800 text-sm flex items-center"><TrendingUp size={16} className="mr-1.5 text-green-600" /> MRR por Empresa</h3>
+                <p className="text-xs text-gray-400">Top 8 por mensalidade recorrente · {empresasComMrr.length} contrato(s) · {empresasAtivas.length} ativa(s)</p>
               </div>
-              {empresasPagantes.length > 8 && (
+              {empresasComMrr.length > 8 && (
                 <button onClick={() => navigate('/painel-administrativo/financeiro?aba=visao-geral')} className="text-xs font-semibold text-green-700 hover:underline flex-shrink-0">Ver todas →</button>
               )}
             </div>
             {receitaChart.length === 0 ? (
               <div className="h-44 flex items-center justify-center bg-gray-50 rounded-lg border border-dashed border-gray-200">
-                <p className="text-sm text-gray-400">Nenhuma empresa ativa com plano pago</p>
+                <p className="text-sm text-gray-400">Nenhuma assinatura ativa com mensalidade</p>
               </div>
             ) : (
               <div className="h-44">
@@ -654,7 +653,7 @@ export const Dashboard: React.FC = () => {
                     <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
                     <XAxis dataKey="nome" tick={{ fontSize: 11, fill: '#6b7280' }} interval={0} angle={-20} textAnchor="end" height={44} />
                     <YAxis tick={{ fontSize: 11, fill: '#6b7280' }} tickFormatter={(v: number) => `R$${v}`} width={56} />
-                    <Tooltip formatter={(v: any) => [`R$ ${Number(v).toFixed(2)}`, 'Receita mensal']} labelStyle={{ fontWeight: 700 }} />
+                    <Tooltip formatter={(v: any) => [formatCurrency(Number(v)), 'MRR contratado']} labelStyle={{ fontWeight: 700 }} />
                     <Bar dataKey="receita" fill="#15803d" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>

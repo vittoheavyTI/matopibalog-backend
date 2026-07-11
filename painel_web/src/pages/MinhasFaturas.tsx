@@ -3,6 +3,7 @@ import { Navigate } from 'react-router-dom';
 import { Receipt, AlertCircle, ExternalLink, RefreshCw, Copy, QrCode, X, Download } from 'lucide-react';
 import api from '../api';
 import { useAuth } from '../contexts/AuthContext';
+import { civilDateToDayNumber, compareCivilDates, formatCivilDate, formatTechnicalDate } from '../utils';
 
 interface Fatura {
   id: string;
@@ -49,15 +50,6 @@ const statusMap: Record<string, { label: string; color: string }> = {
   cancelado:{ label: 'Cancelado',color: 'bg-gray-100 text-gray-800'    },
   estornado:{ label: 'Estornado',color: 'bg-purple-100 text-purple-800'},
 };
-
-function formatarData(iso?: string) {
-  if (!iso) return '—';
-  try {
-    return new Date(iso + 'T00:00:00').toLocaleDateString('pt-BR');
-  } catch {
-    return '—';
-  }
-}
 
 function validarUrl(url: string): boolean {
   try {
@@ -122,7 +114,7 @@ export const MinhasFaturas: React.FC = () => {
         dados.sort((a, b) => {
           if (!a.due_date) return 1;
           if (!b.due_date) return -1;
-          return new Date(a.due_date).getTime() - new Date(b.due_date).getTime();
+          return compareCivilDates(a.due_date, b.due_date);
         });
         setFaturas(dados);
       } else {
@@ -156,7 +148,7 @@ export const MinhasFaturas: React.FC = () => {
         dados.sort((a, b) => {
           if (!a.due_date) return 1;
           if (!b.due_date) return -1;
-          return new Date(a.due_date).getTime() - new Date(b.due_date).getTime();
+          return compareCivilDates(a.due_date, b.due_date);
         });
         setFaturas(dados);
       }
@@ -204,7 +196,7 @@ export const MinhasFaturas: React.FC = () => {
 
   const trialAtivo = planoStatus?.status === 'trial' && !planoStatus?.trial_expirado;
   const trialEndsAt = planoStatus?.trial_ends_at;
-  const trialData = trialEndsAt ? formatarData(trialEndsAt.split('T')[0]) : null;
+  const trialData = trialEndsAt ? formatTechnicalDate(trialEndsAt) : null;
 
   // --- Classificação de faturas ---
   const getFaturaAtual = (lista: Fatura[]) => {
@@ -213,7 +205,7 @@ export const MinhasFaturas: React.FC = () => {
     pendentes.sort((a, b) => {
       if (!a.due_date) return 1;
       if (!b.due_date) return -1;
-      return new Date(a.due_date).getTime() - new Date(b.due_date).getTime();
+      return compareCivilDates(a.due_date, b.due_date);
     });
     return pendentes[0];
   };
@@ -223,7 +215,7 @@ export const MinhasFaturas: React.FC = () => {
     pendentes.sort((a, b) => {
       if (!a.due_date) return 1;
       if (!b.due_date) return -1;
-      return new Date(a.due_date).getTime() - new Date(b.due_date).getTime();
+      return compareCivilDates(a.due_date, b.due_date);
     });
     if (atual) {
       return pendentes.filter(f => f.id !== atual.id);
@@ -238,8 +230,8 @@ export const MinhasFaturas: React.FC = () => {
       return false;
     });
     historico.sort((a, b) => {
-      const dateA = a.due_date ? new Date(a.due_date).getTime() : (a.created_at ? new Date(a.created_at).getTime() : 0);
-      const dateB = b.due_date ? new Date(b.due_date).getTime() : (b.created_at ? new Date(b.created_at).getTime() : 0);
+      const dateA = civilDateToDayNumber(a.due_date) ?? (a.created_at ? new Date(a.created_at).getTime() / 86400000 : 0);
+      const dateB = civilDateToDayNumber(b.due_date) ?? (b.created_at ? new Date(b.created_at).getTime() / 86400000 : 0);
       return dateB - dateA;
     });
     return historico;
@@ -380,7 +372,7 @@ export const MinhasFaturas: React.FC = () => {
                 R$ {Number(atual.valor).toFixed(2)}
               </div>
               <div className="text-sm text-gray-500 mt-1">
-                Plano {planoStatus?.plano?.nome || '—'} · Vencimento: {formatarData(atual.due_date)}
+                Plano {planoStatus?.plano?.nome || '—'} · Vencimento: {formatCivilDate(atual.due_date)}
               </div>
             </div>
             <span className={`self-start sm:self-auto px-3 py-1 rounded-lg text-xs font-bold uppercase tracking-widest ${statusMap[atual.status]?.color}`}>
@@ -454,7 +446,7 @@ export const MinhasFaturas: React.FC = () => {
                       {planoStatus?.plano ? `Mensalidade ${planoStatus.plano.nome}` : 'Assinatura'}
                     </p>
                     <p className="text-xs text-gray-500 mt-0.5">
-                      Vencimento: {formatarData(f.due_date)} · {getTipoLabel(f.tipo_pagamento)}
+                      Vencimento: {formatCivilDate(f.due_date)} · {getTipoLabel(f.tipo_pagamento)}
                     </p>
                   </div>
                   <div className="flex items-center gap-3">
@@ -540,7 +532,7 @@ export const MinhasFaturas: React.FC = () => {
                             R$ {Number(f.valor).toFixed(2)}
                           </td>
                           <td className="p-4 text-sm text-gray-700">
-                            {formatarData(f.due_date)}
+                            {formatCivilDate(f.due_date)}
                           </td>
                           <td className="p-4">
                             <span className={`px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest ${st.color}`}>
@@ -549,9 +541,7 @@ export const MinhasFaturas: React.FC = () => {
                           </td>
                           <td className="p-4 text-sm text-gray-500">{getTipoLabel(f.tipo_pagamento)}</td>
                           <td className="p-4 text-sm text-gray-500">
-                            {f.pago_em
-                              ? new Date(f.pago_em).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })
-                              : '—'}
+                            {formatCivilDate(f.pago_em)}
                           </td>
                           <td className="p-4 text-sm">
                             <div className="flex items-center gap-1">
