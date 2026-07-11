@@ -9,7 +9,7 @@ import { Truck, Eye, EyeOff } from 'lucide-react';
 // Diferente de RedefinirSenha.tsx (que é o fluxo de recuperação por e-mail via Supabase),
 // esta usa o backend autenticado (POST /auth/trocar-senha), que zera senha_temporaria.
 export const TrocarSenhaObrigatoria: React.FC = () => {
-  const { user, loading, login } = useAuth();
+  const { user, loading, login, logout } = useAuth();
   const config = useLoginConfig();
   const navigate = useNavigate();
 
@@ -46,6 +46,13 @@ export const TrocarSenhaObrigatoria: React.FC = () => {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  // Evita ficar preso na troca obrigatória: encerra a sessão pelo logout oficial
+  // (limpa token/estado) e volta ao login. Não mexe no localStorage diretamente.
+  const handleSair = async () => {
+    await logout();
+    navigate('/login', { replace: true });
   };
 
   return (
@@ -119,6 +126,15 @@ export const TrocarSenhaObrigatoria: React.FC = () => {
             style={{ width: '100%', height: '48px', background: submitting ? '#9ca3af' : '#3b82f6', color: '#fff', border: 'none', borderRadius: '10px', fontWeight: '600', fontSize: '14px', cursor: submitting ? 'not-allowed' : 'pointer' }}
           >
             {submitting ? 'Salvando...' : 'Salvar e acessar'}
+          </button>
+
+          <button
+            type="button"
+            onClick={handleSair}
+            disabled={submitting}
+            style={{ width: '100%', height: '44px', background: 'none', color: '#6b7280', border: 'none', borderRadius: '10px', fontWeight: '600', fontSize: '14px', cursor: submitting ? 'not-allowed' : 'pointer' }}
+          >
+            Sair
           </button>
         </form>
       </div>

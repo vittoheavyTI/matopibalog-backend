@@ -136,7 +136,7 @@ export const CadastroPublico: React.FC = () => {
       if (form.plano_id) payload.plano_id = form.plano_id;
       else if (form.plano) payload.plano = form.plano;
       await api.post('/auth/register-empresa', payload);
-      setSuccess('Cadastro realizado com sucesso! Verifique seu email para ativar a conta.');
+      setSuccess('Cadastro realizado com sucesso! Sua conta já está ativa com o período de avaliação — é só fazer login para começar.');
       setStep(3);
     } catch (err: any) {
       setError(err.response?.data?.message || 'Erro ao cadastrar. Tente novamente.');
