@@ -184,10 +184,18 @@ async function reivindicarOuRetornar(supabase, eventId, payloadHash) {
   return { evento: atualizado, status: STATUS.PROCESSING, code: 'claimed' };
 }
 
+function aplicarLease(query, lease) {
+  if (!lease) return query;
+  let q = query;
+  if (lease.attempts != null) q = q.eq('attempts', lease.attempts);
+  if (lease.processing_started_at) q = q.eq('processing_started_at', lease.processing_started_at);
+  return q;
+}
+
 /**
  * Marca evento como processed.
  */
-async function marcarProcessado(supabase, eventId, { faturaId, empresaId, lastError } = {}) {
+async function marcarProcessado(supabase, eventId, { faturaId, empresaId, lastError, lease } = {}) {
   const update = {
     status: STATUS.PROCESSED,
     processed_at: new Date().toISOString(),
@@ -196,11 +204,13 @@ async function marcarProcessado(supabase, eventId, { faturaId, empresaId, lastEr
   if (faturaId) update.fatura_id = faturaId;
   if (empresaId) update.empresa_id = empresaId;
 
-  const { data, error } = await supabase
+  const query = supabase
     .from('asaas_webhook_events')
     .update(update)
     .eq('event_id', eventId)
-    .eq('status', STATUS.PROCESSING)
+    .eq('status', STATUS.PROCESSING);
+
+  const { data, error } = await aplicarLease(query, lease)
     .select()
     .single();
 
@@ -211,18 +221,20 @@ async function marcarProcessado(supabase, eventId, { faturaId, empresaId, lastEr
 /**
  * Marca evento como ignored.
  */
-async function marcarIgnorado(supabase, eventId, razao) {
+async function marcarIgnorado(supabase, eventId, razao, { lease } = {}) {
   const update = {
     status: STATUS.IGNORED,
     processed_at: new Date().toISOString(),
     last_error: razao ? sanitizar(razao) : null,
   };
 
-  const { data, error } = await supabase
+  const query = supabase
     .from('asaas_webhook_events')
     .update(update)
     .eq('event_id', eventId)
-    .eq('status', STATUS.PROCESSING)
+    .eq('status', STATUS.PROCESSING);
+
+  const { data, error } = await aplicarLease(query, lease)
     .select()
     .single();
 
@@ -233,18 +245,23 @@ async function marcarIgnorado(supabase, eventId, razao) {
 /**
  * Marca evento como failed (permite retry).
  */
-async function marcarFalhou(supabase, eventId, razao) {
+async function marcarFalhou(supabase, eventId, razao, { lease } = {}) {
+  const attempts = lease?.attempts || 1;
+  const backoffMs = Math.min(60 * 60 * 1000, Math.max(60 * 1000, attempts * 60 * 1000));
   const update = {
     status: STATUS.FAILED,
     processed_at: null,
+    next_retry_at: new Date(Date.now() + backoffMs).toISOString(),
     last_error: razao ? sanitizar(razao) : null,
   };
 
-  const { data, error } = await supabase
+  const query = supabase
     .from('asaas_webhook_events')
     .update(update)
     .eq('event_id', eventId)
-    .eq('status', STATUS.PROCESSING)
+    .eq('status', STATUS.PROCESSING);
+
+  const { data, error } = await aplicarLease(query, lease)
     .select()
     .single();
 
@@ -269,6 +286,13 @@ function sanitizar(msg) {
   s = s.replace(/https?:\/\/[^\s]+/g, '[url]');
   // Remove e-mails
   s = s.replace(/[^\s@]+@[^\s@]+\.[^\s@]+/g, '[email]');
+  // Remove IDs externos comuns do Asaas.
+  s = s.replace(/\b(?:pay|cus|sub|evt)_[A-Za-z0-9_-]+\b/g, '[asaas_id]');
+  // Remove sequencias longas de digitos que podem representar CPF/CNPJ/telefone.
+  s = s.replace(/\b\d{10,14}\b/g, '[numero]');
+  // Remove headers ou trechos semelhantes a bearer/API key.
+  s = s.replace(/\b(?:authorization\s+)?bearer\s+[^\s]+/gi, '[secret]');
+  s = s.replace(/\b(?:api[-_ ]?key|access[-_ ]?token)\s*[:=]\s*[^\s]+/gi, '[secret]');
   return s;
 }
 

@@ -11,11 +11,12 @@ const { garantirAssinatura, conciliarAssinatura } = require('../services/asaasSu
 const { sincronizarCobrancas } = require('../services/asaasInvoiceSyncService');
 const {
   normalizarStatusAsaas,
-  normalizarEventoAsaas,
   decidirAtualizacaoFatura,
   decidirTransicaoContaPorPagamento,
   decidirSuspensaoPorInadimplencia,
 } = require('../services/paymentDomainService');
+const { processarWebhook } = require('../services/asaasWebhookService');
+const { sanitizar } = require('../services/asaasWebhookEventRepository');
 
 // Comparação em tempo constante (hash de tamanho fixo evita vazar comprimento)
 function safeEqual(a, b) {
@@ -647,9 +648,7 @@ router.get('/faturas/:id/pix', verifyToken, async (req, res) => {
 
 router.post('/webhook/asaas', async (req, res) => {
   try {
-    // Bloco B envolverá este endpoint com persistência idempotente da migration 024.
-    // Portão de autenticação: o Asaas envia um token fixo no header
-    // 'asaas-access-token' em toda requisição. Comparar com o segredo nosso.
+    // 1. Autenticação: token fixo no header 'asaas-access-token'.
     // Fail-closed: sem env var configurada OU header ausente/diferente → 401.
     const expected = process.env.ASAAS_WEBHOOK_TOKEN;
     const received = req.headers['asaas-access-token'];
@@ -657,89 +656,17 @@ router.post('/webhook/asaas', async (req, res) => {
       return res.status(401).json({ message: 'Unauthorized' });
     }
 
-    // Validação mínima de payload (sem logar o corpo). Malformado → 400.
-    const body = req.body;
-    const eventType = body?.event;
-    const payment = body?.payment;
-    if (typeof eventType !== 'string' || !payment || typeof payment.id !== 'string') {
-      return res.status(400).json({ message: 'Payload inválido.' });
-    }
-    const asaasId = payment.id;
-
-    // Busca a fatura atual ANTES de alterar, para idempotência e ordem de eventos.
-    const { data: fatura, error: fetchError } = await supabase
-      .from('faturas')
-      .select('id, empresa_id, status, pago_em, due_date, invoice_url, bank_slip_url')
-      .eq('asaas_id', asaasId)
-      .single();
-
-    if (fetchError) {
-      // PGRST116 = nenhuma linha: cobrança não é nossa → ignora com 200.
-      // Qualquer outro erro é falha real de banco → propaga p/ o catch (retry Asaas).
-      if (fetchError.code === 'PGRST116') {
-        return res.status(200).json({ received: true, ignored: true });
-      }
-      throw fetchError;
-    }
-    if (!fatura) {
-      return res.status(200).json({ received: true, ignored: true });
-    }
-
-    const normalizado = normalizarEventoAsaas(eventType, fatura.status);
-    if (!normalizado.conhecido) {
-      return res.status(200).json({ received: true, ignored: true });
-    }
-
-    const decisaoFatura = decidirAtualizacaoFatura({
-      statusAtual: fatura.status,
-      statusNovo: normalizado.status,
-      pagoEmAtual: fatura.pago_em,
+    // 2. Delegar processamento ao serviço (validação, persistência idempotente,
+    //    resolução interna da fatura/empresa, transições financeiras seguras).
+    const resultado = await processarWebhook({
+      supabase,
+      body: req.body,
     });
-    if (decisaoFatura.ignorar) {
-      return res.status(200).json({ received: true, ignored: true });
-    }
 
-    const { error: updateError } = await supabase
-      .from('faturas')
-      .update(decisaoFatura.update)
-      .eq('id', fatura.id);
-
-    if (updateError) throw updateError;
-
-    if (fatura.empresa_id) {
-      const { data: empresa, error: empresaErr } = await supabase
-        .from('empresas')
-        .select('id, status, trial_ends_at')
-        .eq('id', fatura.empresa_id)
-        .single();
-      if (empresaErr) throw empresaErr;
-
-      if (decisaoFatura.statusFinal === 'pago') {
-        const decisaoConta = decidirTransicaoContaPorPagamento(empresa?.status, 'pago');
-        if (decisaoConta.deveAtualizar) {
-          await supabase
-            .from('empresas')
-            .update({ status: decisaoConta.novoStatus })
-            .eq('id', fatura.empresa_id);
-        }
-      } else if (decisaoFatura.statusFinal === 'vencido') {
-        const decisaoSuspensao = decidirSuspensaoPorInadimplencia({
-          empresa,
-          fatura: { ...fatura, status: decisaoFatura.statusFinal },
-        });
-        if (decisaoSuspensao.deveSuspender) {
-          await supabase
-            .from('empresas')
-            .update({ status: decisaoSuspensao.novoStatus })
-            .eq('id', fatura.empresa_id);
-        }
-      }
-    }
-
-    return res.status(200).json({ received: true });
+    return res.status(resultado.httpStatus).json(resultado.resultado);
   } catch (err) {
-    // Retorno honesto (W4): erro interno real → 500 para o Asaas reenviar.
-    console.error('Webhook Asaas error:', err.message);
+    // Erro não tratado no serviço: 500 para retry do Asaas.
+    console.error('Webhook Asaas error:', sanitizar(err.message));
     return res.status(500).json({ message: 'Erro ao processar webhook.' });
   }
 });
