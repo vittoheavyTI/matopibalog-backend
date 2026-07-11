@@ -3,7 +3,7 @@ import { Navigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 
 export const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { user, loading } = useAuth();
+  const { user, loading, logout } = useAuth();
 
   if (loading) return null;
 
@@ -12,11 +12,24 @@ export const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ childr
   }
 
   if (user.role !== 'admin') {
+    // Não-admin (ex.: motorista) fica bloqueado no painel web, mas precisa de uma
+    // saída explícita: sem isto a sessão permanece ativa e o usuário fica preso
+    // (o Login redireciona quem está autenticado de volta para "/"). O botão usa
+    // o logout oficial (logout('manual') → setUser(null)), que sempre encerra a
+    // sessão e leva a /login pelo fluxo já existente, mesmo se o POST falhar.
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center">
+        <div className="text-center max-w-sm px-4">
           <h2 className="text-2xl font-bold text-red-600 mb-2">Acesso Negado</h2>
-          <p className="text-gray-600">Apenas administradores podem acessar o painel web.</p>
+          <p className="text-gray-600 mb-1">Apenas administradores podem acessar o painel web.</p>
+          <p className="text-gray-500 text-sm mb-6">Motoristas devem utilizar o aplicativo Matopiba Log.</p>
+          <button
+            type="button"
+            onClick={() => logout('manual')}
+            className="inline-flex items-center justify-center rounded-lg bg-green-700 px-5 py-2.5 font-semibold text-white transition hover:bg-green-800 focus:outline-none focus:ring-2 focus:ring-green-600 focus:ring-offset-2 cursor-pointer"
+          >
+            Sair e voltar ao login
+          </button>
         </div>
       </div>
     );
