@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Shield, Search, Plus, X, Check, AlertTriangle, Eye, Ban, Unlock, Trash2, KeyRound, CalendarClock, UserPlus, CreditCard } from 'lucide-react';
 import api from '../api';
-import { maskCNPJ, maskPhone } from '../utils/masks';
+import { maskCNPJ, maskCPF, maskPhone } from '../utils/masks';
 
 // Formata ISO → DD/MM/AAAA (pt-BR). Retorna '-' se inválido.
 function formatData(iso?: string) {
@@ -216,6 +216,11 @@ export const PainelEmpresas: React.FC = () => {
   const planosAtivos = planos.filter((p: any) => p.ativo !== false);
   let opcoesPlano: any[] = planosAtivos;
   const planoAtualId = formDados.plano_id;
+  // Documento da conta é condicional ao tipo: autônomo usa CPF, empresa usa CNPJ.
+  // O campo técnico continua sendo `empresas.cnpj` (nenhuma mudança de backend/schema).
+  const isAutonomo = formDados.tipo === 'autonomo';
+  const documentLabel = isAutonomo ? 'CPF' : 'CNPJ';
+  const documentMask = isAutonomo ? maskCPF : maskCNPJ;
   if (planoAtualId && !planosAtivos.some((p: any) => p.id === planoAtualId)) {
     const doCatalogo = planos.find((p: any) => p.id === planoAtualId);
     const atual = doCatalogo
@@ -261,7 +266,7 @@ export const PainelEmpresas: React.FC = () => {
         <table className="w-full text-left">
           <thead>
             <tr className="bg-gray-50 text-gray-600 text-xs font-bold uppercase tracking-wider">
-              <th className="px-4 py-2.5 border-b">Conta</th><th className="px-4 py-2.5 border-b">CNPJ</th><th className="px-4 py-2.5 border-b">Plano</th><th className="px-4 py-2.5 border-b">Assinatura</th><th className="px-4 py-2.5 border-b">Status</th><th className="px-4 py-2.5 border-b text-center">Ações</th>
+              <th className="px-4 py-2.5 border-b">Conta</th><th className="px-4 py-2.5 border-b">Documento</th><th className="px-4 py-2.5 border-b">Plano</th><th className="px-4 py-2.5 border-b">Assinatura</th><th className="px-4 py-2.5 border-b">Status</th><th className="px-4 py-2.5 border-b text-center">Ações</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-50">
@@ -347,24 +352,38 @@ export const PainelEmpresas: React.FC = () => {
               <button onClick={() => setShowModal(false)} className="p-2 hover:bg-gray-200 rounded-full"><X size={24} /></button>
             </div>
             <div className="p-6 overflow-y-auto grid grid-cols-1 md:grid-cols-2 gap-4">
-              {[{ label: 'Nome da conta', key: 'nome' }, { label: 'CNPJ', key: 'cnpj' }, { label: 'E-mail de contato da conta', key: 'email' }, { label: 'Telefone de contato da conta', key: 'telefone' }].map(f => (
-                <div key={f.key}>
-                  <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">{f.label}</label>
-                  <input type="text" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" value={(formDados as any)[f.key] || ''} onChange={e => {
-                    const raw = e.target.value;
-                    const v = f.key === 'cnpj' ? maskCNPJ(raw) : f.key === 'telefone' ? maskPhone(raw) : raw;
-                    setFormDados({ ...formDados, [f.key]: v });
-                  }} />
-                </div>
-              ))}
+              <div>
+                <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Nome da conta</label>
+                <input type="text" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" value={formDados.nome || ''} onChange={e => setFormDados({ ...formDados, nome: e.target.value })} />
+              </div>
+              {/* Tipo vem ANTES do documento: define se o campo seguinte é CPF ou CNPJ. */}
               <div>
                 <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Tipo de conta</label>
-                <select disabled={!!editing} className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50 disabled:text-gray-400" value={formDados.tipo} onChange={e => setFormDados({ ...formDados, tipo: e.target.value })}>
+                <select disabled={!!editing} className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50 disabled:text-gray-400" value={formDados.tipo} onChange={e => {
+                  // Ao trocar o tipo, reaplica a máscara correspondente sobre os dígitos
+                  // já digitados (as máscaras extraem os dígitos internamente). Não apaga o valor.
+                  const novoTipo = e.target.value;
+                  const novaMask = novoTipo === 'autonomo' ? maskCPF : maskCNPJ;
+                  setFormDados({ ...formDados, tipo: novoTipo, cnpj: novaMask(formDados.cnpj) });
+                }}>
                   <option value="transportadora">Empresa / Transportadora</option>
                   <option value="autonomo">Autônomo</option>
                 </select>
                 {!editing && formDados.tipo === 'autonomo' && <p className="text-xs text-emerald-700 mt-1">Depois de criar a conta, adicione a pessoa responsável em Usuários.</p>}
                 {editing && <p className="text-xs text-gray-400 mt-1">O tipo da conta não pode ser alterado após a criação neste momento.</p>}
+              </div>
+              {/* Documento da conta: rótulo e máscara condicionais ao tipo (campo técnico segue empresas.cnpj). */}
+              <div>
+                <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">{documentLabel}</label>
+                <input type="text" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" value={formDados.cnpj || ''} onChange={e => setFormDados({ ...formDados, cnpj: documentMask(e.target.value) })} />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">E-mail de contato da conta</label>
+                <input type="text" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" value={formDados.email || ''} onChange={e => setFormDados({ ...formDados, email: e.target.value })} />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Telefone de contato da conta</label>
+                <input type="text" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" value={formDados.telefone || ''} onChange={e => setFormDados({ ...formDados, telefone: maskPhone(e.target.value) })} />
               </div>
               <div>
                 <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Plano</label>
