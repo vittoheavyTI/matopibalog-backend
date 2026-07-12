@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Shield, Search, Plus, X, Check, AlertTriangle, Eye, Ban, Unlock, Trash2, KeyRound, CalendarClock, UserPlus, CreditCard } from 'lucide-react';
 import api from '../api';
+import { maskCNPJ, maskPhone } from '../utils/masks';
 
 // Formata ISO → DD/MM/AAAA (pt-BR). Retorna '-' se inválido.
 function formatData(iso?: string) {
@@ -349,7 +350,11 @@ export const PainelEmpresas: React.FC = () => {
               {[{ label: 'Nome da conta', key: 'nome' }, { label: 'CNPJ', key: 'cnpj' }, { label: 'E-mail de contato da conta', key: 'email' }, { label: 'Telefone de contato da conta', key: 'telefone' }].map(f => (
                 <div key={f.key}>
                   <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">{f.label}</label>
-                  <input type="text" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" value={(formDados as any)[f.key] || ''} onChange={e => setFormDados({ ...formDados, [f.key]: e.target.value })} />
+                  <input type="text" className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" value={(formDados as any)[f.key] || ''} onChange={e => {
+                    const raw = e.target.value;
+                    const v = f.key === 'cnpj' ? maskCNPJ(raw) : f.key === 'telefone' ? maskPhone(raw) : raw;
+                    setFormDados({ ...formDados, [f.key]: v });
+                  }} />
                 </div>
               ))}
               <div>
