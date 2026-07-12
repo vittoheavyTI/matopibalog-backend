@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
-import { Truck, User, Building2, Mail, Lock, Phone, X } from 'lucide-react';
+import { Truck, User, Building2, Mail, Lock, Phone, X, Eye, EyeOff } from 'lucide-react';
 import api from '../api';
+import { maskCNPJ, maskPhone } from '../utils/masks';
 
 interface FormData {
   nome: string;
@@ -188,7 +189,7 @@ export const CadastroPublico: React.FC = () => {
               <div className="space-y-4">
                 <InputField icon={<User size={18} />} placeholder="Nome completo" value={form.nome} onChange={v => updateField('nome', v)} required />
                 <InputField icon={<Mail size={18} />} placeholder="Email" type="email" value={form.email} onChange={v => updateField('email', v)} required />
-                <InputField icon={<Phone size={18} />} placeholder="Telefone" value={form.telefone} onChange={v => updateField('telefone', v)} required />
+                <InputField icon={<Phone size={18} />} placeholder="Telefone" value={form.telefone} onChange={v => updateField('telefone', maskPhone(v))} required />
                 <InputField icon={<Lock size={18} />} placeholder="Senha" type="password" value={form.senha} onChange={v => updateField('senha', v)} required />
                 <InputField icon={<Lock size={18} />} placeholder="Confirmar senha" type="password" value={form.confirmarSenha} onChange={v => updateField('confirmarSenha', v)} required />
               </div>
@@ -203,7 +204,7 @@ export const CadastroPublico: React.FC = () => {
               <h2 className="text-lg font-semibold text-gray-900 mb-6">Dados da Empresa</h2>
               <div className="space-y-4">
                 <InputField icon={<Building2 size={18} />} placeholder="Nome da empresa" value={form.empresa} onChange={v => updateField('empresa', v)} required />
-                <InputField icon={<Building2 size={18} />} placeholder="CNPJ" value={form.cnpj} onChange={v => updateField('cnpj', v)} required />
+                <InputField icon={<Building2 size={18} />} placeholder="CNPJ" value={form.cnpj} onChange={v => updateField('cnpj', maskCNPJ(v))} required />
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Plano</label>
@@ -248,17 +249,32 @@ export const CadastroPublico: React.FC = () => {
 function InputField({ icon, placeholder, type = 'text', value, onChange, required }: {
   icon: React.ReactNode; placeholder: string; type?: string; value: string; onChange: (v: string) => void; required?: boolean;
 }) {
+  // Só campos de senha ganham o botão de mostrar/ocultar. Alterna o type
+  // password/text sem expor a senha por padrão e sem mexer no autocomplete.
+  const [reveal, setReveal] = useState(false);
+  const isPassword = type === 'password';
+  const inputType = isPassword && reveal ? 'text' : type;
   return (
     <div className="relative">
       <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">{icon}</div>
       <input
-        type={type}
+        type={inputType}
         placeholder={placeholder}
         value={value}
         onChange={e => onChange(e.target.value)}
         required={required}
-        className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-sm"
+        className={`w-full pl-10 ${isPassword ? 'pr-10' : 'pr-4'} py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-sm`}
       />
+      {isPassword && (
+        <button
+          type="button"
+          onClick={() => setReveal(r => !r)}
+          aria-label={reveal ? 'Ocultar senha' : 'Mostrar senha'}
+          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+        >
+          {reveal ? <EyeOff size={18} /> : <Eye size={18} />}
+        </button>
+      )}
     </div>
   );
 }
