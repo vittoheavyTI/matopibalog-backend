@@ -177,7 +177,10 @@ export const Faturas: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
         return [comEmpresa, ...semAtual];
       });
     } catch (err: any) {
-      const msg = err?.response?.data?.message || 'Erro ao criar cobrança.';
+      // Preserva a mensagem do backend quando existir; sem inventar causa.
+      // Distingue apenas "sem resposta" (rede) de erro do servidor sem mensagem.
+      const msg = err?.response?.data?.message
+        || (err?.response ? 'Erro ao criar cobrança. Tente novamente.' : 'Sem resposta do servidor. Verifique a conexão e tente novamente.');
       setErroModal(msg);
       if (/sem cliente asaas/i.test(msg)) setPrecisaCliente(true);
     } finally {
@@ -205,7 +208,8 @@ export const Faturas: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
       setPrecisaCliente(false);
       await criarCobranca(); // mesmo client_request_id ⇒ idempotente
     } catch (err: any) {
-      setErroModal(err?.response?.data?.message || 'Erro ao criar cliente Asaas.');
+      setErroModal(err?.response?.data?.message
+        || (err?.response ? 'Erro ao criar cliente Asaas.' : 'Sem resposta do servidor. Verifique a conexão e tente novamente.'));
     } finally {
       setEnviando(false);
     }
@@ -362,15 +366,15 @@ export const Faturas: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
       {/* Modal criar cobrança sandbox */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => !enviando && setShowModal(false)}>
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 flex-shrink-0">
               <h3 className="font-bold text-gray-800">Criar cobrança sandbox</h3>
               <button onClick={() => !enviando && setShowModal(false)} className="p-1 text-gray-400 hover:text-gray-600"><X size={20} /></button>
             </div>
 
-            <div className="p-5 space-y-4">
+            <div className="p-5 space-y-4 overflow-y-auto">
               <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 px-3 py-2 rounded-lg">
-                Ambiente Asaas <strong>sandbox</strong> (piloto de homologação): cobrança de teste, <strong>sem valor real</strong>. Este não é o fluxo comercial final.
+                <strong>Sandbox</strong> (piloto): cobrança de teste, <strong>sem valor real</strong> — não é o fluxo comercial final.
               </p>
               {!resultado && <>
                 <div>
@@ -409,19 +413,18 @@ export const Faturas: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
 
                 {empresaSelecionada && contaIncompleta && (
                   <div className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
-                    <p>Complete o cadastro da conta antes de criar o cliente Asaas sandbox:</p>
+                    <p>Complete em <strong>Empresas e Autônomos</strong> antes de criar o cliente Asaas:</p>
                     <ul className="list-disc list-inside mt-1 space-y-0.5">
                       {avaliarConta(empresaSelecionada).faltantes.map((f) => (
                         <li key={f}>{f}</li>
                       ))}
                     </ul>
-                    <p className="mt-1">Edite em <strong>Empresas e Autônomos</strong>.</p>
                   </div>
                 )}
 
                 {empresaSelecionada && !contaIncompleta && semCliente && !precisaCliente && (
                   <div className="text-sm text-blue-800 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2">
-                    Esta conta ainda não tem cliente Asaas — ele será criado agora, antes da cobrança.
+                    Sem cliente Asaas — será criado agora, antes da cobrança.
                   </div>
                 )}
 
