@@ -354,6 +354,9 @@ export const Faturas: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
             </div>
 
             <div className="p-5 space-y-4">
+              <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 px-3 py-2 rounded-lg">
+                Ambiente Asaas <strong>sandbox</strong> (piloto de homologação): cobrança de teste, <strong>sem valor real</strong>. Este não é o fluxo comercial final.
+              </p>
               {!resultado && <>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Conta</label>
