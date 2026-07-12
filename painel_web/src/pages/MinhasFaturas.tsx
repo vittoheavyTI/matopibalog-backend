@@ -419,7 +419,7 @@ export const MinhasFaturas: React.FC = () => {
           </div>
 
           <p className="text-[11px] text-gray-400 mt-3">
-            Os pagamentos são processados em ambiente seguro pelo Asaas.
+            Durante o piloto, os pagamentos são processados em ambiente sandbox de homologação, sem valor real.
             {getTipoLabel(atual.tipo_pagamento) !== 'Escolha a forma de pagamento' && (
               <> Forma: {getTipoLabel(atual.tipo_pagamento)}.</>
             )}
