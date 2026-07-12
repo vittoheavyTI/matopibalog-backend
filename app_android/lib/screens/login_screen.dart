@@ -36,7 +36,7 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
     await context.read<AuthProvider>().login(
-      _emailCtrl.text.trim(),
+      _emailCtrl.text.trim().toLowerCase(),
       _passCtrl.text,
       manterConectado: _manterConectado,
     );
@@ -73,7 +73,7 @@ class _LoginScreenState extends State<LoginScreen> {
     if (confirmed != true || emailCtrl.text.trim().isEmpty) return;
 
     try {
-      final ok = await ApiService.esqueceuSenha(emailCtrl.text.trim());
+      final ok = await ApiService.esqueceuSenha(emailCtrl.text.trim().toLowerCase());
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(

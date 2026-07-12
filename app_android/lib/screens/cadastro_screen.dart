@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // TextInputFormatter
 import '../models/plano_publico.dart';
 import '../services/api_service.dart';
+import '../utils/mascaras.dart';
 
 class CadastroScreen extends StatefulWidget {
   const CadastroScreen({super.key});
@@ -107,13 +108,17 @@ class _CadastroScreenState extends State<CadastroScreen> {
     if (RegExp(r'^(\d)\1{10}$').hasMatch(cpf)) return 'CPF invalido';
 
     int sum = 0;
-    for (int i = 0; i < 9; i++) sum += int.parse(cpf[i]) * (10 - i);
+    for (int i = 0; i < 9; i++) {
+      sum += int.parse(cpf[i]) * (10 - i);
+    }
     int rest = (sum * 10) % 11;
     if (rest == 10) rest = 0;
     if (rest != int.parse(cpf[9])) return 'CPF invalido';
 
     sum = 0;
-    for (int i = 0; i < 10; i++) sum += int.parse(cpf[i]) * (11 - i);
+    for (int i = 0; i < 10; i++) {
+      sum += int.parse(cpf[i]) * (11 - i);
+    }
     rest = (sum * 10) % 11;
     if (rest == 10) rest = 0;
     if (rest != int.parse(cpf[10])) return 'CPF invalido';
@@ -189,10 +194,10 @@ class _CadastroScreenState extends State<CadastroScreen> {
       final documento = _cpfCtrl.text.trim().replaceAll(RegExp(r'\D'), '');
       final resultado = await ApiService.register({
         'nome': _nomeCtrl.text.trim(),
-        'placa_veiculo': _placaCtrl.text.trim().toUpperCase(),
+        'placa_veiculo': normalizarPlaca(_placaCtrl.text),
         if (comConvite || documento.length == 11) 'cpf': documento,
         if (!comConvite) 'documento_billing': documento,
-        'email': _emailCtrl.text.trim(),
+        'email': _emailCtrl.text.trim().toLowerCase(),
         'senha': _passCtrl.text,
         if (comConvite) 'codigo_convite': codigo,
       }, planoId: comConvite ? null : _planoSelecionado?.id);
@@ -385,6 +390,7 @@ class _CadastroScreenState extends State<CadastroScreen> {
                 validator: _validatePlaca,
                 textInputAction: TextInputAction.next,
                 textCapitalization: TextCapitalization.characters,
+                inputFormatters: const [Mascaras.placa],
               ),
               const SizedBox(height: 16),
               TextFormField(
@@ -395,6 +401,7 @@ class _CadastroScreenState extends State<CadastroScreen> {
                   helperText: _temCodigoConvite ? null : 'Autonomo pode usar CPF ou CNPJ/MEI para cobranca.',
                 ),
                 keyboardType: TextInputType.number,
+                inputFormatters: [_temCodigoConvite ? Mascaras.cpf : Mascaras.documento],
                 validator: _validateDocumento,
                 textInputAction: TextInputAction.next,
               ),
