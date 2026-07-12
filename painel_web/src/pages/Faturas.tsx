@@ -56,12 +56,16 @@ function novoClientRequestId(): string {
 const soDigitos = (v?: string | null) => (v || '').replace(/\D+/g, '');
 const emailOk = (v?: string | null) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((v || '').trim());
 
-// Avalia se a conta tem cadastro suficiente para virar cliente Asaas (CPF/CNPJ + e-mail).
-function avaliarConta(e: EmpresaOpcao): { ok: boolean; motivo: string } {
+// Avalia se a conta tem cadastro suficiente para virar cliente Asaas.
+// Retorna TODOS os campos obrigatórios faltantes (nome + CPF/CNPJ + e-mail) para
+// exibir como checklist. Telefone é opcional no backend, então não entra aqui.
+function avaliarConta(e: EmpresaOpcao): { ok: boolean; faltantes: string[] } {
+  const faltantes: string[] = [];
+  if (!(e.nome || '').trim()) faltantes.push('Nome da conta');
   const doc = soDigitos(e.cnpj);
-  if (doc.length !== 11 && doc.length !== 14) return { ok: false, motivo: 'falta CPF/CNPJ válido' };
-  if (!emailOk(e.email_contato)) return { ok: false, motivo: 'falta e-mail válido' };
-  return { ok: true, motivo: '' };
+  if (doc.length !== 11 && doc.length !== 14) faltantes.push('CPF ou CNPJ válido');
+  if (!emailOk(e.email_contato)) faltantes.push('E-mail de contato válido');
+  return { ok: faltantes.length === 0, faltantes };
 }
 
 // Estado do cadastro Asaas para exibir como badge (sem expor IDs internos do Asaas).
@@ -133,6 +137,12 @@ export const Faturas: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
 
   const empresaSelecionada = empresas.find((e) => e.id === form.empresa_id);
   const contaIncompleta = empresaSelecionada ? !avaliarConta(empresaSelecionada).ok : false;
+  // Preempção: o front já sabe se a conta tem cliente Asaas (asaas_customer_id).
+  // Se estiver completa e sem cliente, mostramos direto o botão de criar cliente,
+  // sem exigir um POST em /cobrancas que falharia primeiro. O catch de criarCobranca
+  // mantém precisaCliente como fallback de segurança.
+  const semCliente = !!empresaSelecionada && !empresaSelecionada.asaas_customer_id;
+  const mostrarCriarCliente = precisaCliente || (semCliente && !contaIncompleta);
   const contasFiltradas = empresas.filter((e) => {
     const porTipo = contaTipo === 'todas'
       || (contaTipo === 'autonomos' ? e.tipo === 'autonomo' : e.tipo !== 'autonomo');
@@ -177,6 +187,11 @@ export const Faturas: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
 
   const criarClienteEReenviar = async () => {
     if (!empresaSelecionada) return;
+    // Com a preempção, este botão pode aparecer antes de um POST em /cobrancas.
+    // Garante um valor válido no front ANTES de criar o cliente (não muda payload
+    // nem endpoint; só evita criar cliente e falhar em seguida por valor).
+    const valorNum = Number(form.valor);
+    if (!Number.isFinite(valorNum) || valorNum <= 0) { setErroModal('Informe um valor válido.'); return; }
     setEnviando(true);
     setErroModal('');
     try {
@@ -394,7 +409,19 @@ export const Faturas: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
 
                 {empresaSelecionada && contaIncompleta && (
                   <div className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
-                    Cadastro incompleto de <strong>{empresaSelecionada.nome}</strong>: {avaliarConta(empresaSelecionada).motivo}. Corrija em <strong>Empresas e Autônomos</strong> antes de criar o cliente Asaas.
+                    <p>Complete o cadastro da conta antes de criar o cliente Asaas sandbox:</p>
+                    <ul className="list-disc list-inside mt-1 space-y-0.5">
+                      {avaliarConta(empresaSelecionada).faltantes.map((f) => (
+                        <li key={f}>{f}</li>
+                      ))}
+                    </ul>
+                    <p className="mt-1">Edite em <strong>Empresas e Autônomos</strong>.</p>
+                  </div>
+                )}
+
+                {empresaSelecionada && !contaIncompleta && semCliente && !precisaCliente && (
+                  <div className="text-sm text-blue-800 bg-blue-50 border border-blue-200 rounded-xl px-3 py-2">
+                    Esta conta ainda não tem cliente Asaas — ele será criado agora, antes da cobrança.
                   </div>
                 )}
 
@@ -424,7 +451,7 @@ export const Faturas: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
                   <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2">{erroModal}</div>
                 )}
 
-                {precisaCliente ? (
+                {mostrarCriarCliente ? (
                   <button onClick={criarClienteEReenviar} disabled={enviando || contaIncompleta} className="w-full inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2.5 rounded-xl disabled:opacity-50">
                     {enviando ? 'Processando…' : 'Criar cliente Asaas sandbox e continuar'}
                   </button>
