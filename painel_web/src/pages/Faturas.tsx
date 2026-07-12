@@ -56,6 +56,76 @@ function novoClientRequestId(): string {
 const soDigitos = (v?: string | null) => (v || '').replace(/\D+/g, '');
 const emailOk = (v?: string | null) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((v || '').trim());
 
+function textoSeguroParaModal(valor: unknown): string | null {
+  if (typeof valor !== 'string') return null;
+  const original = valor.trim();
+  if (!original) return null;
+
+  // Nao exibe strings que parecem payload bruto serializado.
+  if ((original.startsWith('{') || original.startsWith('[')) && /["']?[a-z0-9_ -]+["']?\s*:/i.test(original)) {
+    return null;
+  }
+
+  let texto = original
+    .replace(/https?:\/\/\S+/gi, '[link removido]')
+    .replace(/[^\s@]+@[^\s@]+\.[^\s@]+/g, '[e-mail removido]')
+    .replace(/\b\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}\b/g, '[documento removido]')
+    .replace(/\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b/g, '[documento removido]')
+    .replace(/\b\d{11,14}\b/g, '[documento removido]')
+    .replace(/\b(?:pay|cus|sub|evt)_[a-z0-9_-]+\b/gi, '[id removido]')
+    .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi, '[id removido]')
+    .replace(/\b(access[_-]?token|authorization|bearer|api[_-]?key|secret|token|senha|password)\b\s*[:=]\s*\S+/gi, '$1=[segredo removido]')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!texto || /^[\W_]+$/.test(texto)) return null;
+  if (/\b(access[_-]?token|authorization|bearer|api[_-]?key|secret|senha|password)\b/i.test(texto)) {
+    return null;
+  }
+  if (texto.length > 180) texto = `${texto.slice(0, 177).trimEnd()}...`;
+  return texto;
+}
+
+function detalheSeguroDoBackend(error: unknown): string | null {
+  if (typeof error === 'string') return textoSeguroParaModal(error);
+  if (!error || typeof error !== 'object') return null;
+
+  const corpo = error as {
+    description?: unknown;
+    message?: unknown;
+    errors?: unknown;
+  };
+
+  if (Array.isArray(corpo.errors)) {
+    for (const item of corpo.errors) {
+      if (!item || typeof item !== 'object') continue;
+      const erro = item as { description?: unknown; message?: unknown };
+      const detalhe = textoSeguroParaModal(erro.description) || textoSeguroParaModal(erro.message);
+      if (detalhe) return detalhe;
+    }
+  }
+
+  return textoSeguroParaModal(corpo.description) || textoSeguroParaModal(corpo.message);
+}
+
+function mensagemErroCriarCobrancaSandbox(err: unknown): string {
+  const anyErr = err as { response?: { data?: unknown } } | undefined;
+  const data = anyErr?.response?.data as { message?: unknown; error?: unknown } | undefined;
+
+  if (!anyErr?.response) {
+    return 'Sem resposta do servidor. Verifique a conexão e tente novamente.';
+  }
+
+  const mensagemBackend = textoSeguroParaModal(data?.message) || 'Erro ao criar cobrança. Tente novamente.';
+  const detalhe = detalheSeguroDoBackend(data?.error);
+
+  if (detalhe && detalhe.toLowerCase() !== mensagemBackend.toLowerCase()) {
+    return `${mensagemBackend} Detalhe: ${detalhe}`;
+  }
+
+  return mensagemBackend;
+}
+
 // Avalia se a conta tem cadastro suficiente para virar cliente Asaas.
 // Retorna TODOS os campos obrigatórios faltantes (nome + CPF/CNPJ + e-mail) para
 // exibir como checklist. Telefone é opcional no backend, então não entra aqui.
@@ -177,10 +247,9 @@ export const Faturas: React.FC<{ embedded?: boolean }> = ({ embedded = false }) 
         return [comEmpresa, ...semAtual];
       });
     } catch (err: any) {
-      // Preserva a mensagem do backend quando existir; sem inventar causa.
-      // Distingue apenas "sem resposta" (rede) de erro do servidor sem mensagem.
-      const msg = err?.response?.data?.message
-        || (err?.response ? 'Erro ao criar cobrança. Tente novamente.' : 'Sem resposta do servidor. Verifique a conexão e tente novamente.');
+      // Preserva a mensagem do backend e anexa apenas detalhes textuais conhecidos
+      // do Asaas, sanitizados para nao vazar payload, ids, e-mail, documento ou token.
+      const msg = mensagemErroCriarCobrancaSandbox(err);
       setErroModal(msg);
       if (/sem cliente asaas/i.test(msg)) setPrecisaCliente(true);
     } finally {
