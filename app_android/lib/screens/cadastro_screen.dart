@@ -102,25 +102,53 @@ class _CadastroScreenState extends State<CadastroScreen> {
     return null;
   }
 
-  String? _validateCpf(String? v) {
-    if (v == null || v.trim().isEmpty) return 'CPF é obrigatório';
-    final cpf = v.trim().replaceAll(RegExp(r'\D'), '');
-    if (cpf.length != 11) return 'CPF deve ter 11 números';
-    if (RegExp(r'^(\d)\1{10}$').hasMatch(cpf)) return 'CPF inválido';
+  String? _validarCpfDigitos(String cpf) {
+    if (cpf.length != 11) return 'CPF deve ter 11 numeros';
+    if (RegExp(r'^(\d)\1{10}$').hasMatch(cpf)) return 'CPF invalido';
 
     int sum = 0;
     for (int i = 0; i < 9; i++) sum += int.parse(cpf[i]) * (10 - i);
     int rest = (sum * 10) % 11;
     if (rest == 10) rest = 0;
-    if (rest != int.parse(cpf[9])) return 'CPF inválido';
+    if (rest != int.parse(cpf[9])) return 'CPF invalido';
 
     sum = 0;
     for (int i = 0; i < 10; i++) sum += int.parse(cpf[i]) * (11 - i);
     rest = (sum * 10) % 11;
     if (rest == 10) rest = 0;
-    if (rest != int.parse(cpf[10])) return 'CPF inválido';
+    if (rest != int.parse(cpf[10])) return 'CPF invalido';
 
     return null;
+  }
+
+  String? _validarCnpjDigitos(String cnpj) {
+    if (cnpj.length != 14) return 'CNPJ deve ter 14 numeros';
+    if (RegExp(r'^(\d)\1{13}$').hasMatch(cnpj)) return 'CNPJ invalido';
+
+    int calcularDigito(String base, List<int> pesos) {
+      var soma = 0;
+      for (var i = 0; i < pesos.length; i++) {
+        soma += int.parse(base[i]) * pesos[i];
+      }
+      final resto = soma % 11;
+      return resto < 2 ? 0 : 11 - resto;
+    }
+
+    const pesos1 = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+    const pesos2 = [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+    if (calcularDigito(cnpj, pesos1) != int.parse(cnpj[12])) return 'CNPJ invalido';
+    if (calcularDigito(cnpj, pesos2) != int.parse(cnpj[13])) return 'CNPJ invalido';
+    return null;
+  }
+
+  String? _validateDocumento(String? v) {
+    if (v == null || v.trim().isEmpty) {
+      return _temCodigoConvite ? 'CPF e obrigatorio' : 'Documento e obrigatorio';
+    }
+    final documento = v.trim().replaceAll(RegExp(r'\D'), '');
+    if (_temCodigoConvite || documento.length == 11) return _validarCpfDigitos(documento);
+    if (documento.length == 14) return _validarCnpjDigitos(documento);
+    return 'Documento deve ter 11 ou 14 numeros';
   }
 
   String? _validateEmail(String? v) {
@@ -158,10 +186,12 @@ class _CadastroScreenState extends State<CadastroScreen> {
       // mantido como digitado — o backend aceita com ou sem. Reduz erro do motorista.
       final codigo = _codigoConviteCtrl.text.toUpperCase().replaceAll(RegExp(r'\s'), '');
       final comConvite = codigo.isNotEmpty;
+      final documento = _cpfCtrl.text.trim().replaceAll(RegExp(r'\D'), '');
       final resultado = await ApiService.register({
         'nome': _nomeCtrl.text.trim(),
         'placa_veiculo': _placaCtrl.text.trim().toUpperCase(),
-        'cpf': _cpfCtrl.text.trim().replaceAll(RegExp(r'\D'), ''),
+        if (comConvite || documento.length == 11) 'cpf': documento,
+        if (!comConvite) 'documento_billing': documento,
         'email': _emailCtrl.text.trim(),
         'senha': _passCtrl.text,
         if (comConvite) 'codigo_convite': codigo,
@@ -359,12 +389,13 @@ class _CadastroScreenState extends State<CadastroScreen> {
               const SizedBox(height: 16),
               TextFormField(
                 controller: _cpfCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'CPF (Apenas números)',
-                  prefixIcon: Icon(Icons.badge),
+                decoration: InputDecoration(
+                  labelText: _temCodigoConvite ? 'CPF (Apenas numeros)' : 'Documento CPF/CNPJ (Apenas numeros)',
+                  prefixIcon: const Icon(Icons.badge),
+                  helperText: _temCodigoConvite ? null : 'Autonomo pode usar CPF ou CNPJ/MEI para cobranca.',
                 ),
                 keyboardType: TextInputType.number,
-                validator: _validateCpf,
+                validator: _validateDocumento,
                 textInputAction: TextInputAction.next,
               ),
               const SizedBox(height: 16),
