@@ -28,10 +28,14 @@ class _CadastroScreenState extends State<CadastroScreen> {
   final _passCtrl = TextEditingController();
   final _confirmPassCtrl = TextEditingController();
   final _codigoConviteCtrl = TextEditingController();
+  // CPF do motorista/responsável — só usado no autônomo quando o documento é CNPJ.
+  final _cpfResponsavelCtrl = TextEditingController();
   bool _loading = false;
   String _error = '';
   bool _showPass = false;
   bool _showConfirmPass = false;
+  // Documento (autônomo) tem 14 dígitos → é CNPJ/MEI e exige CPF do responsável.
+  bool _docEhCnpj = false;
   // Plano escolhido na etapa seguinte (SelecaoPlanoScreen), só no fluxo autônomo.
   PlanoPublico? _planoSelecionado;
 
@@ -46,6 +50,7 @@ class _CadastroScreenState extends State<CadastroScreen> {
     _passCtrl.dispose();
     _confirmPassCtrl.dispose();
     _codigoConviteCtrl.dispose();
+    _cpfResponsavelCtrl.dispose();
     super.dispose();
   }
 
@@ -124,6 +129,11 @@ class _CadastroScreenState extends State<CadastroScreen> {
     return 'Documento deve ter 11 ou 14 números';
   }
 
+  String? _validateCpfResponsavel(String? v) {
+    if (v == null || v.trim().isEmpty) return 'CPF do responsável é obrigatório';
+    return _validarCpfDigitos(v.trim().replaceAll(RegExp(r'\D'), ''));
+  }
+
   String? _validateEmail(String? v) {
     if (v == null || v.trim().isEmpty) return 'E-mail é obrigatório';
     final email = v.trim();
@@ -160,10 +170,14 @@ class _CadastroScreenState extends State<CadastroScreen> {
       final comConvite = _vinculado;
       final codigo = _codigoConviteCtrl.text.toUpperCase().replaceAll(RegExp(r'\s'), '');
       final documento = _cpfCtrl.text.trim().replaceAll(RegExp(r'\D'), '');
+      final cpfResponsavel = _cpfResponsavelCtrl.text.replaceAll(RegExp(r'\D'), '');
+      // CPF enviado: vinculado e autônomo-CPF usam o próprio documento; o
+      // autônomo-CNPJ usa o CPF do responsável (o CNPJ nunca vira cpf).
+      final cpfEnviar = (comConvite || documento.length == 11) ? documento : cpfResponsavel;
       final resultado = await ApiService.register({
         'nome': _nomeCtrl.text.trim(),
         'placa_veiculo': normalizarPlaca(_placaCtrl.text),
-        if (comConvite || documento.length == 11) 'cpf': documento,
+        if (cpfEnviar.isNotEmpty) 'cpf': cpfEnviar,
         if (!comConvite) 'documento_billing': documento,
         'email': _emailCtrl.text.trim().toLowerCase(),
         'senha': _passCtrl.text,
@@ -334,8 +348,32 @@ class _CadastroScreenState extends State<CadastroScreen> {
                 inputFormatters: [_vinculado ? Mascaras.cpf : Mascaras.documento],
                 validator: _validateDocumento,
                 textInputAction: TextInputAction.next,
+                onChanged: (v) {
+                  // Autônomo com CNPJ (14 dígitos) precisa informar o CPF do
+                  // responsável. Vinculado usa CPF (nunca 14) → nunca aparece.
+                  final ehCnpj = !_vinculado &&
+                      v.replaceAll(RegExp(r'\D'), '').length == 14;
+                  if (ehCnpj != _docEhCnpj) setState(() => _docEhCnpj = ehCnpj);
+                },
               ),
               const SizedBox(height: 16),
+              // CNPJ/MEI: o documento é a conta de cobrança; ainda precisamos do
+              // CPF da pessoa que dirige (nunca enviamos o CNPJ como CPF).
+              if (_docEhCnpj) ...[
+                TextFormField(
+                  controller: _cpfResponsavelCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'CPF do motorista responsável (apenas números)',
+                    prefixIcon: Icon(Icons.person_outline),
+                    helperText: 'O CNPJ é usado para cobrança; informe o CPF de quem dirige.',
+                  ),
+                  keyboardType: TextInputType.number,
+                  inputFormatters: const [Mascaras.cpf],
+                  validator: _validateCpfResponsavel,
+                  textInputAction: TextInputAction.next,
+                ),
+                const SizedBox(height: 16),
+              ],
               TextFormField(
                 controller: _emailCtrl,
                 decoration: const InputDecoration(

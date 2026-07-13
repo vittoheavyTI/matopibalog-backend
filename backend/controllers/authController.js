@@ -82,7 +82,14 @@ exports.register = async (req, res) => {
         return res.status(400).json({ message: 'Informe um CPF ou CNPJ valido para o documento de cobranca.' });
       }
 
-      cpfMotorista = cpfMotoristaInformado || (documentoBilling.length === 11 ? documentoBilling : null);
+      // CNPJ/MEI: o documento de cobranca NAO serve como CPF do motorista.
+      // Exigimos o CPF do responsavel (11 digitos) ANTES de criar a empresa,
+      // para nao cair na constraint NOT NULL de motoristas.cpf nem deixar
+      // empresa orfa. Para CPF, o proprio documento ja e o CPF do motorista.
+      if (documentoBilling.length === 14 && cpfMotoristaInformado.length !== 11) {
+        return res.status(400).json({ message: 'Para CNPJ/MEI, informe o CPF do motorista responsavel.' });
+      }
+      cpfMotorista = documentoBilling.length === 11 ? documentoBilling : cpfMotoristaInformado;
 
       let planoQuery = supabase
         .from('planos')

@@ -105,19 +105,35 @@ test('register autonomo: CPF alimenta empresas.cnpj e motoristas.cpf', async () 
   assert.equal(motorista.cpf, '12345678909');
 });
 
-test('register autonomo: CNPJ alimenta empresas.cnpj e nao copia para motoristas.cpf', async () => {
+test('register autonomo: CNPJ com CPF do responsavel alimenta billing e motorista', async () => {
   const { res, chamadas } = await registrar({
     nome: 'Autonomo MEI',
     email: 'mei@example.com',
     senha: '123456',
     placa_veiculo: 'ABC1D23',
     documento_billing: '11.444.777/0001-61',
+    cpf: '123.456.789-09',
   });
 
   assert.equal(res.statusCode, 201);
   assert.equal(chamadas.criarEmpresaCompleta[0].cnpj, '11444777000161');
   const motorista = chamadas.inserts.find((i) => i.tabela === 'motoristas').payload;
-  assert.equal(motorista.cpf, null);
+  // CNPJ vai para o billing; o CPF do motorista e o do responsavel (nunca o CNPJ).
+  assert.equal(motorista.cpf, '12345678909');
+});
+
+test('register autonomo: CNPJ sem CPF do responsavel retorna 400 antes de criar empresa', async () => {
+  const { res, chamadas } = await registrar({
+    nome: 'Autonomo MEI Sem CPF',
+    email: 'mei-sem-cpf@example.com',
+    senha: '123456',
+    placa_veiculo: 'ABC1D23',
+    documento_billing: '11.444.777/0001-61',
+  });
+
+  assert.equal(res.statusCode, 400);
+  assert.match(res.body.message, /CPF do motorista responsavel/i);
+  assert.equal(chamadas.criarEmpresaCompleta.length, 0);
 });
 
 test('register autonomo: app legado com apenas cpf continua alimentando billing', async () => {
