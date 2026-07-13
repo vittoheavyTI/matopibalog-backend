@@ -40,6 +40,17 @@ class ApiService {
     return null;
   }
 
+  /// Content-Type para DOCUMENTOS de frete (PDF, XML ou imagem). O backend
+  /// aceita application/pdf, application/xml, e imagens JPEG/PNG/WebP. Retorna
+  /// null para extensão fora da allowlist (aborta antes do POST). O pacote http
+  /// NÃO infere o MIME, então definimos aqui pela extensão.
+  static MediaType? _contentTypeDocumento(String path) {
+    final lower = path.toLowerCase();
+    if (lower.endsWith('.pdf')) return MediaType('application', 'pdf');
+    if (lower.endsWith('.xml')) return MediaType('application', 'xml');
+    return _contentTypeImagem(path);
+  }
+
   /// Chave do token no secure storage — deve casar com AuthProvider._tokenKey.
   static const _tokenKey = 'token';
   static const FlutterSecureStorage _secureStorage = FlutterSecureStorage();
@@ -692,6 +703,60 @@ class ApiService {
       return {'ok': false, 'message': body['message'] ?? 'Erro ao enviar foto do odômetro.'};
     } catch (e) {
       AppLogger.error('ApiService', 'upload foto odometro exception', e);
+      return {'ok': false, 'message': _mensagemErroRede(e)};
+    }
+  }
+
+  // DOCUMENTOS DE FRETE (CTe/MDF-e/NF-e e outros)
+
+  /// Lista os documentos de um frete (metadados, sem URLs). Retorna [] em falha
+  /// (a tela trata lista vazia). Cada item: {id, tipo, nome_arquivo, mime,
+  /// tamanho_bytes, created_at}.
+  static Future<List<dynamic>> getDocumentosFrete(String freteId) async {
+    try {
+      final response = await http
+          .get(Uri.parse('$_baseUrl/fretes/$freteId/documentos'), headers: await _getHeaders())
+          .timeout(_timeoutGet);
+      AppLogger.api('ApiService', 'GET /fretes/$freteId/documentos', response.statusCode);
+      if (response.statusCode == 200) return jsonDecode(response.body) as List<dynamic>;
+      return [];
+    } catch (e) {
+      AppLogger.error('ApiService', 'GET documentos frete exception', e);
+      return [];
+    }
+  }
+
+  /// Anexa um documento (PDF/XML/imagem) a um frete. `tipo` ∈ cte|mdfe|nfe|outro.
+  /// Retorna {ok, message?}. Valida a extensão antes do POST (mesma allowlist do
+  /// backend). Bucket privado — o download é feito pelo painel via signed URL.
+  static Future<Map<String, dynamic>> uploadDocumentoFrete(
+      String freteId, String tipo, String filePath) async {
+    try {
+      final contentType = _contentTypeDocumento(filePath);
+      if (contentType == null) {
+        return {'ok': false, 'message': 'Formato não permitido. Use PDF, XML ou imagem (JPEG, PNG, WebP).'};
+      }
+      final request = http.MultipartRequest('POST', Uri.parse('$_baseUrl/fretes/$freteId/documentos'));
+      request.headers.addAll(await _getHeaders());
+      request.headers.remove('Content-Type');
+      request.fields['tipo'] = tipo;
+      request.files.add(await http.MultipartFile.fromPath('documento', filePath, contentType: contentType));
+      final response = await request.send().timeout(_timeoutUpload);
+      final bodyText = await response.stream.bytesToString();
+      AppLogger.api('ApiService', 'POST /fretes/$freteId/documentos', response.statusCode);
+      if (response.statusCode == 201) {
+        Map<String, dynamic> body = {};
+        try { body = jsonDecode(bodyText) as Map<String, dynamic>; } catch (_) {}
+        return {'ok': true, ...body};
+      }
+      String msg = 'Erro ao enviar o documento.';
+      try {
+        final json = jsonDecode(bodyText);
+        msg = json['message'] ?? json['error'] ?? msg;
+      } catch (_) {}
+      return {'ok': false, 'message': msg};
+    } catch (e) {
+      AppLogger.error('ApiService', 'POST documento frete exception', e);
       return {'ok': false, 'message': _mensagemErroRede(e)};
     }
   }
