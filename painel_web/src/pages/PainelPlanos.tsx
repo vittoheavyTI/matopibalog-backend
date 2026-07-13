@@ -9,6 +9,7 @@ type FormPlano = {
   limite_motoristas: string;
   dias_trial: string;
   ativo: boolean;
+  categoria: string;
   recursos: string;
 };
 
@@ -19,8 +20,16 @@ const FORM_VAZIO: FormPlano = {
   limite_motoristas: '5',
   dias_trial: '7',
   ativo: true,
+  categoria: 'ambos',
   recursos: '',
 };
+
+// Público-alvo do plano. Dirige o que aparece no app do autônomo.
+const CATEGORIAS_PLANO: { chave: string; titulo: string }[] = [
+  { chave: 'empresa', titulo: 'Empresa' },
+  { chave: 'autonomo', titulo: 'Autônomo' },
+  { chave: 'ambos', titulo: 'Ambos' },
+];
 
 const LABELS_RECURSOS: Record<string, string> = {
   api: 'Api',
@@ -158,6 +167,7 @@ export const PainelPlanos: React.FC = () => {
       limite_motoristas: String(plano.limite_motoristas ?? 5),
       dias_trial: String(plano.dias_trial ?? 7),
       ativo: plano.ativo !== false,
+      categoria: plano.categoria || 'ambos',
       recursos: recursosParaTexto(plano.recursos),
     });
     setShowModal(true);
@@ -180,6 +190,7 @@ export const PainelPlanos: React.FC = () => {
       limite_motoristas: limite,
       dias_trial: diasTrial,
       ativo: form.ativo,
+      categoria: form.categoria,
       recursos: textoParaRecursos(form.recursos),
     };
 
@@ -198,6 +209,51 @@ export const PainelPlanos: React.FC = () => {
       setToast({ message: editing ? 'Erro ao atualizar' : 'Erro ao criar', tipo: 'erro' });
     }
   }
+
+  // Soft delete: nunca remove o plano do banco (empresas/faturas podem
+  // referenciá-lo). Apenas alterna ativo=false/true via PUT.
+  async function alternarAtivo(plano: any) {
+    const reativar = plano.ativo === false;
+    try {
+      await api.put('/painel-admin/planos/' + plano.id, { ativo: reativar });
+      setToast({ message: reativar ? 'Plano reativado!' : 'Plano inativado!', tipo: 'sucesso' });
+      carregar();
+    } catch {
+      setToast({ message: 'Erro ao alterar status do plano', tipo: 'erro' });
+    }
+  }
+
+  function renderCard(plano: any) {
+    const recursos = normalizarRecursosParaLista(plano.recursos);
+    const inativo = plano.ativo === false;
+    return (
+      <div key={plano.id} className="bg-white rounded-2xl border border-gray-100 p-6 hover:shadow-md transition-all">
+        <div className="flex justify-between items-start gap-3 mb-3">
+          <h3 className="text-lg font-bold text-gray-800">{plano.nome}</h3>
+          <span className="text-xl font-black text-blue-600 whitespace-nowrap">R$ {Number(plano.preco_mensal || 0).toFixed(2)}</span>
+        </div>
+        <p className="text-sm text-gray-500 mb-4">{plano.descricao || 'Sem descrição'}</p>
+        <div className="flex flex-wrap gap-2 mb-4 text-xs font-semibold">
+          <span className="px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 capitalize">{plano.categoria || 'ambos'}</span>
+          <span className="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700">Até {Number(plano.limite_motoristas ?? 0)} motoristas</span>
+          <span className="px-2.5 py-1 rounded-lg bg-amber-50 text-amber-700">Trial: {Number(plano.dias_trial ?? 0)} dias</span>
+          <span className={`px-2.5 py-1 rounded-lg ${!inativo ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>{!inativo ? 'Ativo' : 'Inativo'}</span>
+        </div>
+        <div className="flex flex-wrap gap-1.5 min-h-7">
+          {recursos.length > 0 ? recursos.map((recurso) => (
+            <span key={recurso} className="px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-medium">{recurso}</span>
+          )) : <span className="text-xs text-gray-400">Nenhum recurso informado</span>}
+        </div>
+        <div className="flex gap-2 mt-4 pt-3 border-t">
+          <button onClick={() => abrirEdicao(plano)} title={`Editar plano ${plano.nome}`} aria-label={`Editar plano ${plano.nome}`} className="flex-1 py-2 text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-xl"><Eye size={14} className="inline mr-1" />Editar</button>
+          <button onClick={() => alternarAtivo(plano)} title={inativo ? `Reativar plano ${plano.nome}` : `Inativar plano ${plano.nome}`} aria-label={inativo ? `Reativar plano ${plano.nome}` : `Inativar plano ${plano.nome}`} className={`flex-1 py-2 text-xs font-bold rounded-xl ${inativo ? 'text-green-700 bg-green-50 hover:bg-green-100' : 'text-red-600 bg-red-50 hover:bg-red-100'}`}>{inativo ? 'Reativar' : 'Inativar'}</button>
+        </div>
+      </div>
+    );
+  }
+
+  const ativos = planos.filter((p) => p.ativo !== false);
+  const inativos = planos.filter((p) => p.ativo === false);
 
   return (
     <div className="space-y-4 animate-fade-in">
@@ -220,34 +276,29 @@ export const PainelPlanos: React.FC = () => {
         <button onClick={abrirNovoPlano} title="Criar novo plano" aria-label="Criar novo plano" className="flex items-center shrink-0 px-4 py-2.5 bg-green-700 text-white rounded-xl font-medium text-sm hover:bg-green-800 active:scale-95"><Plus size={18} className="mr-1.5" /> Novo Plano</button>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {planos.map((plano) => {
-          const recursos = normalizarRecursosParaLista(plano.recursos);
-          return (
-            <div key={plano.id} className="bg-white rounded-2xl border border-gray-100 p-6 hover:shadow-md transition-all">
-              <div className="flex justify-between items-start gap-3 mb-3">
-                <h3 className="text-lg font-bold text-gray-800">{plano.nome}</h3>
-                <span className="text-xl font-black text-blue-600 whitespace-nowrap">R$ {Number(plano.preco_mensal || 0).toFixed(2)}</span>
-              </div>
-              <p className="text-sm text-gray-500 mb-4">{plano.descricao || 'Sem descrição'}</p>
-              <div className="flex flex-wrap gap-2 mb-4 text-xs font-semibold">
-                <span className="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700">Até {Number(plano.limite_motoristas ?? 0)} motoristas</span>
-                <span className="px-2.5 py-1 rounded-lg bg-amber-50 text-amber-700">Trial: {Number(plano.dias_trial ?? 0)} dias</span>
-                <span className={`px-2.5 py-1 rounded-lg ${plano.ativo !== false ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>{plano.ativo !== false ? 'Ativo' : 'Inativo'}</span>
-              </div>
-              <div className="flex flex-wrap gap-1.5 min-h-7">
-                {recursos.length > 0 ? recursos.map((recurso) => (
-                  <span key={recurso} className="px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-medium">{recurso}</span>
-                )) : <span className="text-xs text-gray-400">Nenhum recurso informado</span>}
-              </div>
-              <div className="flex gap-2 mt-4 pt-3 border-t">
-                <button onClick={() => abrirEdicao(plano)} title={`Editar plano ${plano.nome}`} aria-label={`Editar plano ${plano.nome}`} className="flex-1 py-2 text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-xl"><Eye size={14} className="inline mr-1" />Editar</button>
-              </div>
+      {planos.length === 0 && <div className="p-8 text-center text-gray-400 bg-white rounded-2xl border border-gray-100">Nenhum plano cadastrado</div>}
+
+      {CATEGORIAS_PLANO.map(({ chave, titulo }) => {
+        const doGrupo = ativos.filter((p) => (p.categoria || 'ambos') === chave);
+        if (doGrupo.length === 0) return null;
+        return (
+          <div key={chave} className="space-y-3">
+            <h2 className="text-sm font-bold uppercase tracking-wide text-gray-500">{titulo}</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {doGrupo.map(renderCard)}
             </div>
-          );
-        })}
-        {planos.length === 0 && <div className="col-span-full p-8 text-center text-gray-400">Nenhum plano cadastrado</div>}
-      </div>
+          </div>
+        );
+      })}
+
+      {inativos.length > 0 && (
+        <div className="space-y-3">
+          <h2 className="text-sm font-bold uppercase tracking-wide text-gray-400">Inativos</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {inativos.map(renderCard)}
+          </div>
+        </div>
+      )}
 
       {showModal && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-fade-in">
@@ -283,6 +334,15 @@ export const PainelPlanos: React.FC = () => {
                 <label htmlFor="plano-recursos" className="block text-xs font-bold text-gray-500 uppercase mb-1.5 ml-1">Recursos</label>
                 <textarea id="plano-recursos" rows={4} className="w-full border-2 border-gray-100 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50 resize-y" value={form.recursos} onChange={(e) => setForm({ ...form, recursos: e.target.value })} placeholder={'Um recurso por linha\nou separados por vírgula'} />
                 <p className="text-xs text-gray-400 mt-1.5 ml-1">Use vírgulas ou uma linha para cada recurso. Não é necessário escrever JSON.</p>
+              </div>
+              <div>
+                <label htmlFor="plano-categoria" className="block text-xs font-bold text-gray-500 uppercase mb-1.5 ml-1">Categoria (público-alvo)</label>
+                <select id="plano-categoria" className="w-full border-2 border-gray-100 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" value={form.categoria} onChange={(e) => setForm({ ...form, categoria: e.target.value })}>
+                  <option value="empresa">Empresa</option>
+                  <option value="autonomo">Autônomo</option>
+                  <option value="ambos">Ambos</option>
+                </select>
+                <p className="text-xs text-gray-400 mt-1.5 ml-1">No app do autônomo só aparecem planos "Autônomo" ou "Ambos".</p>
               </div>
               <label className="flex items-center justify-between gap-4 rounded-xl border border-gray-100 bg-gray-50/50 p-3 cursor-pointer">
                 <span>
