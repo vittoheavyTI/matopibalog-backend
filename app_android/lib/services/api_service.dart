@@ -260,7 +260,19 @@ class ApiService {
           )
           .timeout(_timeoutPostJson);
 
-      if (response.statusCode == 201) return {'ok': true};
+      if (response.statusCode == 201) {
+        // 'administrador' vem só no fluxo "autônomo com administrador":
+        // { criado: bool, email?, senha_temporaria?, motivo? }. A tela de
+        // boas-vindas usa esse objeto para exibir a senha uma vez ou o motivo.
+        Map<String, dynamic>? administrador;
+        try {
+          final decoded = jsonDecode(response.body);
+          if (decoded is Map && decoded['administrador'] is Map) {
+            administrador = Map<String, dynamic>.from(decoded['administrador'] as Map);
+          }
+        } catch (_) {/* body não-JSON ou sem admin */}
+        return {'ok': true, if (administrador != null) 'administrador': administrador};
+      }
 
       String? mensagem;
       try {

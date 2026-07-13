@@ -4,10 +4,14 @@ import '../models/plano_publico.dart';
 import '../services/api_service.dart';
 import '../utils/mascaras.dart';
 import 'selecao_plano_screen.dart';
+import 'boas_vindas_screen.dart';
 
 /// Tipo de cadastro escolhido na tela anterior (EscolhaCadastroScreen).
 /// Dirige a visibilidade dos campos e as regras de validação/payload.
-enum TipoCadastro { vinculado, autonomo }
+///  - vinculado         → motorista com código de empresa;
+///  - autonomo          → conta própria;
+///  - autonomoComAdmin  → conta própria + administrador (painel web).
+enum TipoCadastro { vinculado, autonomo, autonomoComAdmin }
 
 class CadastroScreen extends StatefulWidget {
   const CadastroScreen({super.key, required this.tipo});
@@ -30,6 +34,9 @@ class _CadastroScreenState extends State<CadastroScreen> {
   final _codigoConviteCtrl = TextEditingController();
   // CPF do motorista/responsável — só usado no autônomo quando o documento é CNPJ.
   final _cpfResponsavelCtrl = TextEditingController();
+  // Dados do administrador — só no fluxo "autônomo com administrador".
+  final _adminNomeCtrl = TextEditingController();
+  final _adminEmailCtrl = TextEditingController();
   bool _loading = false;
   String _error = '';
   bool _showPass = false;
@@ -40,6 +47,7 @@ class _CadastroScreenState extends State<CadastroScreen> {
   PlanoPublico? _planoSelecionado;
 
   bool get _vinculado => widget.tipo == TipoCadastro.vinculado;
+  bool get _comAdministrador => widget.tipo == TipoCadastro.autonomoComAdmin;
 
   @override
   void dispose() {
@@ -51,6 +59,8 @@ class _CadastroScreenState extends State<CadastroScreen> {
     _confirmPassCtrl.dispose();
     _codigoConviteCtrl.dispose();
     _cpfResponsavelCtrl.dispose();
+    _adminNomeCtrl.dispose();
+    _adminEmailCtrl.dispose();
     super.dispose();
   }
 
@@ -134,6 +144,25 @@ class _CadastroScreenState extends State<CadastroScreen> {
     return _validarCpfDigitos(v.trim().replaceAll(RegExp(r'\D'), ''));
   }
 
+  String? _validateAdminNome(String? v) {
+    if (v == null || v.trim().isEmpty) return 'Nome do administrador é obrigatório';
+    if (v.trim().length < 2) return 'Nome deve ter pelo menos 2 caracteres';
+    return null;
+  }
+
+  String? _validateAdminEmail(String? v) {
+    if (v == null || v.trim().isEmpty) return 'E-mail do administrador é obrigatório';
+    final email = v.trim();
+    if (!RegExp(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$').hasMatch(email)) {
+      return 'E-mail do administrador inválido';
+    }
+    // O admin acessa o painel; deve ser uma pessoa diferente do autônomo.
+    if (email.toLowerCase() == _emailCtrl.text.trim().toLowerCase()) {
+      return 'Use um e-mail diferente do seu';
+    }
+    return null;
+  }
+
   String? _validateEmail(String? v) {
     if (v == null || v.trim().isEmpty) return 'E-mail é obrigatório';
     final email = v.trim();
@@ -182,30 +211,28 @@ class _CadastroScreenState extends State<CadastroScreen> {
         'email': _emailCtrl.text.trim().toLowerCase(),
         'senha': _passCtrl.text,
         if (comConvite) 'codigo_convite': codigo,
+        // Fluxo "autônomo com administrador": envia os dados do admin. O backend
+        // cria o admin vinculado (não-fatal) e devolve o status/senha temporária.
+        if (_comAdministrador)
+          'administrador': {
+            'nome': _adminNomeCtrl.text.trim(),
+            'email': _adminEmailCtrl.text.trim().toLowerCase(),
+          },
       }, planoId: comConvite ? null : _planoSelecionado?.id);
 
       if (resultado['ok'] == true && mounted) {
-        // Mensagem específica por fluxo (nenhum passa por análise manual):
-        //  - com convite: motorista autoaprovado, vinculado à empresa;
-        //  - sem convite: autônomo em trial com acesso imediato.
-        final mensagemSucesso = comConvite
-            ? 'Cadastro realizado com sucesso. Você já pode acessar sua conta vinculada à empresa.'
-            : 'Cadastro realizado com sucesso. Seu período de teste foi iniciado e você já pode usar o app.';
-        showDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (_) => AlertDialog(
-            title: const Text('Cadastro concluído'),
-            content: Text(mensagemSucesso, style: const TextStyle(fontSize: 15)),
-            actions: [
-              TextButton(
-                onPressed: () {
-                  Navigator.pop(context);
-                  Navigator.pop(context);
-                },
-                child: const Text('OK'),
-              ),
-            ],
+        // Boas-vindas por fluxo. O admin (autônomo com administrador) vem como
+        // Map em resultado['administrador'] (criado + senha temporária, ou motivo).
+        final fluxo = comConvite
+            ? 'vinculado'
+            : (_comAdministrador ? 'autonomo_admin' : 'autonomo');
+        final adminResultado = resultado['administrador'] is Map
+            ? Map<String, dynamic>.from(resultado['administrador'] as Map)
+            : null;
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => BoasVindasScreen(fluxo: fluxo, adminResultado: adminResultado),
           ),
         );
       } else {
@@ -251,7 +278,9 @@ class _CadastroScreenState extends State<CadastroScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(_vinculado ? 'Cadastro — Motorista vinculado' : 'Cadastro — Autônomo'),
+        title: Text(_vinculado
+            ? 'Cadastro — Motorista vinculado'
+            : (_comAdministrador ? 'Cadastro — Autônomo com administrador' : 'Cadastro — Autônomo')),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24.0),
@@ -412,9 +441,51 @@ class _CadastroScreenState extends State<CadastroScreen> {
                 ),
                 obscureText: !_showConfirmPass,
                 validator: _validateConfirmSenha,
-                textInputAction: TextInputAction.done,
-                onFieldSubmitted: (_) => _submeter(),
+                textInputAction: _comAdministrador ? TextInputAction.next : TextInputAction.done,
+                onFieldSubmitted: _comAdministrador ? null : (_) => _submeter(),
               ),
+              // Seção do administrador — só no fluxo "autônomo com administrador".
+              // O admin acessa o PAINEL (web) e recebe uma senha temporária.
+              if (_comAdministrador) ...[
+                const SizedBox(height: 24),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.indigo.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.indigo.shade100),
+                  ),
+                  child: const Text(
+                    'Administrador da conta: acessa o painel web. Vamos criar o acesso dele com uma '
+                    'senha temporária, exibida ao final para você repassar.',
+                    style: TextStyle(fontSize: 13),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _adminNomeCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Nome do administrador',
+                    prefixIcon: Icon(Icons.person_outline),
+                  ),
+                  validator: _validateAdminNome,
+                  textInputAction: TextInputAction.next,
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _adminEmailCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'E-mail do administrador',
+                    prefixIcon: Icon(Icons.alternate_email),
+                    helperText: 'Diferente do seu e-mail. É o login dele no painel.',
+                  ),
+                  keyboardType: TextInputType.emailAddress,
+                  validator: _validateAdminEmail,
+                  textInputAction: TextInputAction.done,
+                  onFieldSubmitted: (_) => _submeter(),
+                ),
+              ],
               const SizedBox(height: 24),
               SizedBox(
                 width: double.infinity,
