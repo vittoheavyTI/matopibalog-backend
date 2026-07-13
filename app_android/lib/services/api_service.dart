@@ -161,11 +161,15 @@ class ApiService {
     }
   }
 
-  static Future<List<PlanoPublico>> getPlanosPublicos() async {
+  static Future<List<PlanoPublico>> getPlanosPublicos({String? categoria}) async {
+    final filtro = (categoria != null && categoria.trim().isNotEmpty) ? categoria.trim() : '';
+    // Cache segmentado por categoria: o catálogo do autônomo difere do geral.
+    final cacheKey = filtro.isEmpty ? _planosCacheKey : '${_planosCacheKey}_$filtro';
+    final cacheAtKey = filtro.isEmpty ? _planosCacheAtKey : '${_planosCacheAtKey}_$filtro';
     final prefs = await SharedPreferences.getInstance();
     final agora = DateTime.now();
-    final cacheRaw = prefs.getString(_planosCacheKey);
-    final cacheAtRaw = prefs.getInt(_planosCacheAtKey);
+    final cacheRaw = prefs.getString(cacheKey);
+    final cacheAtRaw = prefs.getInt(cacheAtKey);
     List<PlanoPublico>? cache;
     Duration? cacheAge;
 
@@ -193,7 +197,7 @@ class ApiService {
     try {
       final response = await http
           .get(
-            Uri.parse('$_baseUrl/planos/publicos'),
+            Uri.parse('$_baseUrl/planos/publicos${filtro.isEmpty ? '' : '?categoria=$filtro'}'),
             headers: {'Content-Type': 'application/json'},
           )
           .timeout(_timeoutGet);
@@ -215,10 +219,10 @@ class ApiService {
           .toList();
 
       await prefs.setString(
-        _planosCacheKey,
+        cacheKey,
         jsonEncode(planos.map((plano) => plano.toJson()).toList()),
       );
-      await prefs.setInt(_planosCacheAtKey, agora.millisecondsSinceEpoch);
+      await prefs.setInt(cacheAtKey, agora.millisecondsSinceEpoch);
       return planos;
     } catch (_) {
       if (cache != null && cacheAge != null && !cacheAge.isNegative && cacheAge <= _planosCacheMaxAge) {

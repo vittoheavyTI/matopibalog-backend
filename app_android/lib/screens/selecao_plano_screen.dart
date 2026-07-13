@@ -24,6 +24,8 @@ class SelecaoPlanoScreen extends StatefulWidget {
 class _SelecaoPlanoScreenState extends State<SelecaoPlanoScreen> {
   bool _carregando = true;
   String _erro = '';
+  // Carregou com sucesso mas não há plano de autônomo → bloqueia a conclusão.
+  bool _semPlanos = false;
   List<PlanoPublico> _planos = const [];
   PlanoPublico? _planoSelecionado;
 
@@ -35,31 +37,25 @@ class _SelecaoPlanoScreenState extends State<SelecaoPlanoScreen> {
 
   Future<void> _carregarPlanos() async {
     try {
-      final planos = await ApiService.getPlanosPublicos();
-      PlanoPublico? padrao;
-      for (final plano in planos) {
-        if (plano.nome.trim().toLowerCase() == 'plano básico') {
-          padrao = plano;
-          break;
-        }
-      }
-      padrao ??= planos.isNotEmpty ? planos.first : null;
-
+      // Só planos destinados a autônomo (categoria autonomo/ambos). O default é
+      // o primeiro da lista (mais barato) — não dependemos mais do nome do plano.
+      final planos = await ApiService.getPlanosPublicos(categoria: 'autonomo');
       if (!mounted) return;
       setState(() {
         _planos = planos;
-        _planoSelecionado = padrao;
+        _planoSelecionado = planos.isNotEmpty ? planos.first : null;
+        _semPlanos = planos.isEmpty;
         _carregando = false;
-        _erro = planos.isEmpty
-            ? 'Nenhum plano disponível agora. O Plano Básico será usado no cadastro.'
-            : '';
+        _erro = '';
       });
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _carregando = false;
-        _erro = 'Não foi possível carregar os planos. Você pode continuar; '
-            'o Plano Básico será usado.';
+        // Falha de rede: não bloqueia — sem plano_id, o backend escolhe um plano
+        // elegível de autônomo (ou retorna erro amigável). Nunca plano de empresa.
+        _erro = 'Não foi possível carregar os planos. Você pode tentar concluir; '
+            'usaremos um plano de autônomo disponível.';
       });
     }
   }
@@ -148,7 +144,23 @@ class _SelecaoPlanoScreenState extends State<SelecaoPlanoScreen> {
                 child: Padding(padding: EdgeInsets.all(12), child: CircularProgressIndicator()),
               )
             else ...[
-              if (_erro.isNotEmpty) ...[
+              if (_semPlanos) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.red.shade200),
+                  ),
+                  child: const Text(
+                    'Nenhum plano para autônomo disponível no momento. '
+                    'Tente novamente mais tarde ou fale com o suporte.',
+                    style: TextStyle(fontSize: 13),
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ] else if (_erro.isNotEmpty) ...[
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(12),
@@ -167,7 +179,8 @@ class _SelecaoPlanoScreenState extends State<SelecaoPlanoScreen> {
             SizedBox(
               height: 48,
               child: ElevatedButton(
-                onPressed: _carregando ? null : _confirmar,
+                // Lista vazia (sem plano de autônomo) bloqueia a conclusão.
+                onPressed: (_carregando || _semPlanos) ? null : _confirmar,
                 child: const Text('CRIAR CONTA', style: TextStyle(fontSize: 16)),
               ),
             ),
