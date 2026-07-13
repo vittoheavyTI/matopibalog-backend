@@ -4,6 +4,7 @@ import '../services/api_service.dart';
 import '../services/app_logger.dart';
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
+import 'package:file_picker/file_picker.dart';
 
 class DetalheViagemScreen extends StatefulWidget {
   final Map<String, dynamic> frete;
@@ -18,6 +19,8 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
   List<dynamic> _despesas = [];
   List<dynamic> _abastecimentos = [];
   List<dynamic> _vales = [];
+  List<dynamic> _documentos = [];
+  bool _enviandoDoc = false;
   bool _loading = true;
   bool _finalizando = false;
   String _error = '';
@@ -45,14 +48,16 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
       final despesas = ApiService.getListComFiltro('despesas', {'frete_id': freteId});
       final abast = ApiService.getListComFiltro('abastecimentos', {'frete_id': freteId});
       final vales = ApiService.getListComFiltro('vales', {'frete_id': freteId});
+      final documentos = ApiService.getDocumentosFrete(freteId);
       final perfil = ApiService.getMe();
-      final results = await Future.wait([despesas, abast, vales]);
+      final results = await Future.wait([despesas, abast, vales, documentos]);
       final perfilData = await perfil;
       if (mounted) {
         setState(() {
           _despesas = results[0];
           _abastecimentos = results[1];
           _vales = results[2];
+          _documentos = results[3];
           _perfilCache = perfilData;
           _loading = false;
         });
@@ -288,6 +293,156 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
     return total;
   }
 
+  // Menu de tipo do documento antes de escolher o arquivo (cte/mdfe/nfe/outro).
+  Future<String?> _escolherTipoDocumento() {
+    const opcoes = [
+      ('cte', 'CT-e'),
+      ('mdfe', 'MDF-e'),
+      ('nfe', 'NF-e'),
+      ('outro', 'Outro'),
+    ];
+    return showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text('Tipo do documento', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            ),
+            for (final o in opcoes)
+              ListTile(
+                leading: const Icon(Icons.description_outlined),
+                title: Text(o.$2),
+                onTap: () => Navigator.pop(ctx, o.$1),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Anexa um documento (PDF/XML/imagem) ao frete: escolhe tipo, seleciona o
+  // arquivo e envia. Bucket privado no backend; visualização é pelo painel.
+  Future<void> _anexarDocumento() async {
+    final tipo = await _escolherTipoDocumento();
+    if (tipo == null || !mounted) return;
+
+    FilePickerResult? escolhido;
+    try {
+      escolhido = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['pdf', 'xml', 'jpg', 'jpeg', 'png', 'webp'],
+      );
+    } catch (e) {
+      AppLogger.error('DetalheFrete', 'file_picker', e);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Não foi possível abrir o seletor de arquivos.')),
+        );
+      }
+      return;
+    }
+    final caminho = escolhido?.files.single.path;
+    if (caminho == null) return; // usuário cancelou
+
+    setState(() => _enviandoDoc = true);
+    final freteId = _frete['id']?.toString() ?? '';
+    final res = await ApiService.uploadDocumentoFrete(freteId, tipo, caminho);
+    if (!mounted) return;
+    setState(() => _enviandoDoc = false);
+    if (res['ok'] == true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Documento anexado.')),
+      );
+      _fetchDetalhes();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(res['message']?.toString() ?? 'Erro ao anexar documento.')),
+      );
+    }
+  }
+
+  Widget _secaoDocumentos() {
+    IconData iconePorMime(String? mime) {
+      if (mime == null) return Icons.insert_drive_file_outlined;
+      if (mime.contains('pdf')) return Icons.picture_as_pdf_outlined;
+      if (mime.contains('xml')) return Icons.code_outlined;
+      if (mime.startsWith('image/')) return Icons.image_outlined;
+      return Icons.insert_drive_file_outlined;
+    }
+
+    String rotuloTipo(String? tipo) {
+      switch (tipo) {
+        case 'cte':
+          return 'CT-e';
+        case 'mdfe':
+          return 'MDF-e';
+        case 'nfe':
+          return 'NF-e';
+        default:
+          return 'Outro';
+      }
+    }
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.folder_open_outlined, color: Color(0xFF1B5E20)),
+                const SizedBox(width: 8),
+                const Text('Documentos', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                const Spacer(),
+                Text('${_documentos.length}', style: TextStyle(color: Colors.grey.shade600)),
+              ],
+            ),
+            const Divider(),
+            if (_documentos.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Text('Nenhum documento anexado.',
+                    style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+              )
+            else
+              ..._documentos.map((d) {
+                final m = d as Map<String, dynamic>;
+                return ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  leading: Icon(iconePorMime(m['mime']?.toString())),
+                  title: Text(m['nome_arquivo']?.toString() ?? rotuloTipo(m['tipo']?.toString())),
+                  subtitle: Text(rotuloTipo(m['tipo']?.toString())),
+                  trailing: const Icon(Icons.check_circle, color: Colors.green, size: 18),
+                );
+              }),
+            const SizedBox(height: 6),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                icon: _enviandoDoc
+                    ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.attach_file),
+                label: Text(_enviandoDoc ? 'Enviando…' : 'Anexar documento'),
+                onPressed: _enviandoDoc ? null : _anexarDocumento,
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text('PDF, XML ou imagem. Visualização/download pelo painel.',
+                  style: TextStyle(color: Colors.grey.shade500, fontSize: 11)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final f = _frete;
@@ -329,6 +484,8 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
                           _secaoLancamentos('Vales', _vales, 'valor'),
                           const SizedBox(height: 12),
                         ],
+                        _secaoDocumentos(),
+                        const SizedBox(height: 12),
                         _cardResumo(f),
                         const SizedBox(height: 16),
                         if (_podeFinalizar())

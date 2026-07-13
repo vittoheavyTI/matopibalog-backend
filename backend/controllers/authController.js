@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const { criarEmpresaCompleta } = require('../services/empresaService');
 const notificacaoService = require('../services/notificacaoService');
 const { getTermosPendentes } = require('./termosController');
+const { gerarSenhaTemporaria } = require('../utils/senhaTemporaria');
 
 // Client ISOLADO só para autenticação (signInWithPassword no login). Mantido
 // separado do client admin (config/supabase.js) de propósito: assim a sessão do
@@ -28,8 +29,71 @@ function apenasDigitos(valor) {
   return String(valor || '').replace(/\D+/g, '');
 }
 
+// Cria, de forma NÃO-FATAL, um administrador vinculado à empresa autônoma recém
+// criada. Retorna um objeto de status para o app orientar o usuário:
+//   { criado: true,  email, senha_temporaria }  → exibir a senha UMA vez
+//   { criado: false, motivo }                   → conta criada, admin não; usar painel
+// Nunca lança: qualquer falha vira { criado:false } para não derrubar o cadastro
+// do autônomo (que já está concluído neste ponto). empresa_id vem SEMPRE do
+// backend (empresa do autônomo), nunca do body.
+async function criarAdministradorAutonomo({ empresa_id, administrador, emailAutonomo }) {
+  const nomeAdmin = String(administrador?.nome || '').trim();
+  const emailAdmin = String(administrador?.email || '').trim().toLowerCase();
+  if (!nomeAdmin || !emailAdmin) {
+    return { criado: false, motivo: 'Dados do administrador incompletos.' };
+  }
+  // O admin precisa ser uma pessoa diferente do autônomo (mesmo e-mail colidiria
+  // no Auth e confundiria os acessos app x painel).
+  if (emailAdmin === String(emailAutonomo || '').trim().toLowerCase()) {
+    return { criado: false, motivo: 'O e-mail do administrador deve ser diferente do seu.' };
+  }
+
+  let adminUid = null;
+  try {
+    const senhaTemporaria = gerarSenhaTemporaria();
+    const { data: adminAuth, error: adminAuthError } = await supabase.auth.admin.createUser({
+      email: emailAdmin,
+      password: senhaTemporaria,
+      email_confirm: true,
+    });
+    if (adminAuthError || !adminAuth?.user) {
+      const msg = (adminAuthError?.message || '').toLowerCase();
+      if (adminAuthError?.status === 422 || msg.includes('already') || msg.includes('registered')) {
+        return { criado: false, motivo: 'Este e-mail de administrador já está cadastrado. Adicione o administrador pelo painel.' };
+      }
+      return { criado: false, motivo: 'Não foi possível criar o administrador. Adicione pelo painel.' };
+    }
+    adminUid = adminAuth.user.id;
+
+    const { error: adminUserError } = await supabase.from('usuarios').insert({
+      id: adminUid,
+      nome: nomeAdmin,
+      email: emailAdmin,
+      tipo: 'admin',
+      status: 'ativo',
+      empresa_id, // derivado do backend (empresa do autônomo), nunca do body
+      // Nasce com senha provisória → login força troca no 1º acesso.
+      senha_temporaria: true,
+      permissoes: { dashboard: true, motoristas: true, relatorios: true, usuarios: false, configuracoes: false },
+    });
+    if (adminUserError) {
+      // Rollback do Auth para não deixar admin órfão (sem linha em usuarios).
+      await supabase.auth.admin.deleteUser(adminUid).catch(() => {});
+      return { criado: false, motivo: 'Não foi possível vincular o administrador. Adicione pelo painel.' };
+    }
+
+    return { criado: true, email: emailAdmin, senha_temporaria: senhaTemporaria };
+  } catch (e) {
+    console.error('[register] criarAdministradorAutonomo falhou (não-fatal):', e.message);
+    if (adminUid) {
+      await supabase.auth.admin.deleteUser(adminUid).catch(() => {});
+    }
+    return { criado: false, motivo: 'Não foi possível criar o administrador. Adicione pelo painel.' };
+  }
+}
+
 exports.register = async (req, res) => {
-  const { nome, email, senha, codigo_convite, plano_id, cpf, placa_veiculo } = req.body;
+  const { nome, email, senha, codigo_convite, plano_id, cpf, placa_veiculo, administrador } = req.body;
 
   if (!nome || !email || !senha) {
     return res.status(400).json({ message: 'Campos obrigatórios: nome, email, senha.' });
@@ -231,7 +295,19 @@ exports.register = async (req, res) => {
       }, { somenteAdmins: true, excluir_usuario_id: authData.user.id }).catch(() => {});
     }
 
-    res.status(201).json({ message: 'Usuário criado com sucesso!' });
+    // Fluxo "Autônomo com administrador": o autônomo já está criado acima. Se veio
+    // um administrador no payload E não é fluxo vinculado, tenta criar o admin
+    // (não-fatal). A senha temporária volta UMA vez para a tela de boas-vindas.
+    const resposta = { message: 'Usuário criado com sucesso!' };
+    if (!comConvite && administrador && administrador.email) {
+      resposta.administrador = await criarAdministradorAutonomo({
+        empresa_id,
+        administrador,
+        emailAutonomo: email,
+      });
+    }
+
+    res.status(201).json(resposta);
   } catch (error) {
     console.error('Erro no registro:', error.message);
     res.status(500).json({ message: 'Erro ao cadastrar. Verifique os dados e tente novamente.' });

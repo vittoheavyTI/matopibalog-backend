@@ -25,6 +25,13 @@ const registerSchema = z.object({
   documento: z.string().max(20).optional(),
   cnpj: z.string().max(20).optional(),
   placa_veiculo: z.string().max(20).optional(),
+  // Fluxo "Autônomo com administrador": dados opcionais do admin a ser criado
+  // vinculado à mesma empresa autônoma. Só nome+email; a senha é temporária,
+  // gerada no backend. Ignorado no fluxo vinculado (com código de convite).
+  administrador: z.object({
+    nome: z.string().min(2, 'Nome do administrador deve ter pelo menos 2 caracteres.').max(100),
+    email: z.string().email('E-mail do administrador inválido.'),
+  }).optional(),
 });
 
 const esqueceuSenhaSchema = z.object({

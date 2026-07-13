@@ -24,6 +24,13 @@ const extrairMensagemPlano = (err: any): string | null => {
   return typeof data?.message === 'string' ? data.message : null;
 };
 
+type TipoDocumentoFrete = 'cte' | 'mdfe' | 'nfe' | 'outro';
+type DocumentoFretePendente = {
+  id: string;
+  tipo: TipoDocumentoFrete;
+  file: File;
+};
+
 export const GerenciamentoViagens: React.FC = () => {
   const [fretes, setFretes] = useState<any[]>([]);
   const [motoristas, setMotoristas] = useState<any[]>([]);
@@ -76,6 +83,14 @@ export const GerenciamentoViagens: React.FC = () => {
   // Accordion da visualização por frete (detalhe do motorista).
   const [fretesExpandidos, setFretesExpandidos] = useState<Set<string>>(new Set());
   const [semFreteExpandido, setSemFreteExpandido] = useState(false);
+  // Documentos fiscais do frete (bucket privado): carregados sob demanda ao
+  // expandir o frete. Painel apenas lista/baixa (não anexa) — bucket privado,
+  // download via signed URL de TTL curto.
+  const [docsPorFrete, setDocsPorFrete] = useState<Record<string, any[]>>({});
+  const [docsCarregando, setDocsCarregando] = useState<Set<string>>(new Set());
+  const [tipoDocumentoNovoFrete, setTipoDocumentoNovoFrete] = useState<TipoDocumentoFrete>('cte');
+  const [documentosNovoFrete, setDocumentosNovoFrete] = useState<DocumentoFretePendente[]>([]);
+  const documentoNovoFreteInputRef = useRef<HTMLInputElement | null>(null);
   // Combobox digitável de motorista no modal de frete (paridade de UX com o Dashboard).
   const [buscaMotorista, setBuscaMotorista] = useState('');
   const [motoristaAberto, setMotoristaAberto] = useState(false);
@@ -105,6 +120,13 @@ export const GerenciamentoViagens: React.FC = () => {
     const form = new FormData();
     form.append('foto', file);
     return api.post(`/fretes/${freteId}/odometro/${tipo}`, form);
+  };
+
+  const enviarDocumentoFrete = async (freteId: string, doc: DocumentoFretePendente) => {
+    const form = new FormData();
+    form.append('tipo', doc.tipo);
+    form.append('documento', doc.file);
+    return api.post(`/fretes/${freteId}/documentos`, form);
   };
 
   const [formData, setFormData] = useState({
@@ -263,13 +285,89 @@ export const GerenciamentoViagens: React.FC = () => {
     setSemFreteExpandido(false);
   }, [filterMot, fretes]);
 
+  const carregarDocumentosFrete = async (freteId: string) => {
+    setDocsCarregando(prev => new Set(prev).add(freteId));
+    try {
+      const res = await api.get('/fretes/' + freteId + '/documentos');
+      setDocsPorFrete(prev => ({ ...prev, [freteId]: res.data || [] }));
+    } catch {
+      setDocsPorFrete(prev => ({ ...prev, [freteId]: [] }));
+    } finally {
+      setDocsCarregando(prev => { const n = new Set(prev); n.delete(freteId); return n; });
+    }
+  };
+
+  // Abre o documento numa nova aba via signed URL (gerada só na hora, TTL curto).
+  const abrirDocumento = async (freteId: string, docId: string) => {
+    try {
+      const res = await api.get('/fretes/' + freteId + '/documentos/' + docId + '/url');
+      const url = res.data?.url;
+      if (url) window.open(url, '_blank', 'noopener,noreferrer');
+    } catch {
+      /* link indisponível/expirado: usuário pode tentar novamente */
+    }
+  };
+
   const toggleFreteExpandido = (freteId: string) => {
+    const jaAberto = fretesExpandidos.has(freteId);
     setFretesExpandidos(prev => {
       const next = new Set(prev);
       if (next.has(freteId)) next.delete(freteId);
       else next.add(freteId);
       return next;
     });
+    // Lazy-load dos documentos na primeira expansão.
+    if (!jaAberto && !(freteId in docsPorFrete)) carregarDocumentosFrete(freteId);
+  };
+
+  const rotuloTipoDoc = (t: string): string =>
+    ({ cte: 'CT-e', mdfe: 'MDF-e', nfe: 'NF-e' } as Record<string, string>)[t] || 'Outro';
+
+  const adicionarDocumentoNovoFrete = (file: File | null) => {
+    if (!file) return;
+    if (file.size > 15 * 1024 * 1024) {
+      alert('O documento deve ter no máximo 15 MB.');
+      return;
+    }
+    const id = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${file.name}`;
+    setDocumentosNovoFrete(prev => [...prev, { id, tipo: tipoDocumentoNovoFrete, file }]);
+    if (documentoNovoFreteInputRef.current) documentoNovoFreteInputRef.current.value = '';
+  };
+
+  const removerDocumentoNovoFrete = (id: string) => {
+    setDocumentosNovoFrete(prev => prev.filter(doc => doc.id !== id));
+  };
+
+  const renderDocumentosFrete = (freteId: string) => {
+    const docs = docsPorFrete[freteId];
+    const carregando = docsCarregando.has(freteId);
+    return (
+      <div className="border-t border-gray-100 pt-2 mt-1">
+        <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-1">Documentos</p>
+        {carregando ? (
+          <p className="text-xs text-gray-400">Carregando documentos…</p>
+        ) : !docs || docs.length === 0 ? (
+          <p className="text-xs text-gray-400">Nenhum documento anexado.</p>
+        ) : (
+          <ul className="space-y-1">
+            {docs.map((d: any) => (
+              <li key={d.id} className="flex items-center justify-between gap-2 text-xs bg-gray-50 rounded px-2 py-1">
+                <span className="truncate text-gray-700">
+                  <span className="font-semibold">{rotuloTipoDoc(d.tipo)}</span>
+                  {d.nome_arquivo ? ' · ' + d.nome_arquivo : ''}
+                </span>
+                <button
+                  onClick={() => abrirDocumento(freteId, d.id)}
+                  className="text-blue-600 hover:underline font-semibold whitespace-nowrap"
+                >
+                  Baixar
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    );
   };
 
   // Ordenação por data desc (mais recente → mais antigo). Data ausente/inválida → fim.
@@ -281,6 +379,8 @@ export const GerenciamentoViagens: React.FC = () => {
   const openNewModal = (motId?: string) => {
     setEditingFrete(null);
     selecionarFotoInicial(null);
+    setDocumentosNovoFrete([]);
+    setTipoDocumentoNovoFrete('cte');
     setFormData({
       motorista_id: motId || '',
       origem: '',
@@ -313,6 +413,8 @@ export const GerenciamentoViagens: React.FC = () => {
   const openEditModal = (frete: any) => {
     setEditingFrete(frete);
     selecionarFotoInicial(null);
+    setDocumentosNovoFrete([]);
+    setTipoDocumentoNovoFrete('cte');
     setFormData({
       motorista_id: frete.motorista_id,
       origem: frete.origem,
@@ -431,13 +533,31 @@ export const GerenciamentoViagens: React.FC = () => {
           return;
         }
       }
+      let documentosComFalha = 0;
+      if (!editingFrete && documentosNovoFrete.length > 0) {
+        for (const doc of documentosNovoFrete) {
+          try {
+            await enviarDocumentoFrete(freteId, doc);
+          } catch {
+            documentosComFalha += 1;
+          }
+        }
+      }
       if (filterMot !== 'todos') {
         await loadMotoristaData(filterMot);
       } else {
         await loadData();
       }
+      if (!editingFrete && documentosNovoFrete.length > documentosComFalha) {
+        await carregarDocumentosFrete(freteId);
+      }
       setShowModal(false);
       selecionarFotoInicial(null);
+      setDocumentosNovoFrete([]);
+      setTipoDocumentoNovoFrete('cte');
+      if (documentosComFalha > 0) {
+        alert(`Frete salvo, mas ${documentosComFalha} documento(s) não foram anexados. Anexe depois no detalhe do frete.`);
+      }
     } catch (err: any) {
       // PR-G2: mostra o(s) campo(s) inválido(s) que o backend devolve em errors[], em vez de
       // só "Dados inválidos." — facilita diagnosticar qual campo reprovou.
@@ -1228,6 +1348,7 @@ export const GerenciamentoViagens: React.FC = () => {
                         {itensFrete.length === 0
                           ? <p className="text-gray-400 text-sm text-center py-3">Nenhum lançamento vinculado a este frete.</p>
                           : itensFrete.map(renderLancamentoItem)}
+                        {renderDocumentosFrete(f.id)}
                       </div>
                     )}
                   </div>
@@ -1383,6 +1504,68 @@ export const GerenciamentoViagens: React.FC = () => {
                 <div><label className="block text-xs font-bold text-gray-600 uppercase mb-1">Origem *</label><input className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" value={formData.origem} onChange={e => setFormData({...formData, origem: e.target.value})} placeholder="Cidade de origem" /></div>
                 <div><label className="block text-xs font-bold text-gray-600 uppercase mb-1">Destino *</label><input className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" value={formData.destino} onChange={e => setFormData({...formData, destino: e.target.value})} placeholder="Cidade de destino" /></div>
               </div>
+              {!editingFrete && (
+                <div className="rounded-xl border border-gray-200 bg-gray-50/70 p-3 space-y-3">
+                  <div>
+                    <label className="text-xs font-bold text-gray-700 uppercase flex items-center">
+                      <FileText size={15} className="mr-1.5 text-green-700" />Documentos fiscais
+                    </label>
+                    <p className="text-xs text-gray-500 mt-1">Opcional. Você também pode anexar depois no detalhe do frete.</p>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-[140px_minmax(0,1fr)] gap-2">
+                    <select
+                      value={tipoDocumentoNovoFrete}
+                      onChange={e => setTipoDocumentoNovoFrete(e.target.value as TipoDocumentoFrete)}
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white outline-none focus:border-blue-500"
+                    >
+                      <option value="cte">CT-e</option>
+                      <option value="mdfe">MDF-e</option>
+                      <option value="nfe">NF-e</option>
+                      <option value="outro">Outro</option>
+                    </select>
+                    <div>
+                      <input
+                        ref={documentoNovoFreteInputRef}
+                        type="file"
+                        accept="application/pdf,application/xml,text/xml,image/jpeg,image/png,image/webp"
+                        onChange={e => adicionarDocumentoNovoFrete(e.target.files?.[0] || null)}
+                        className="hidden"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => documentoNovoFreteInputRef.current?.click()}
+                        className="w-full inline-flex items-center justify-center rounded-lg border border-green-200 bg-white px-3 py-2 text-sm font-bold text-green-700 hover:bg-green-50"
+                      >
+                        <Upload size={16} className="mr-2" />Adicionar documento
+                      </button>
+                    </div>
+                  </div>
+                  {documentosNovoFrete.length === 0 ? (
+                    <p className="text-xs text-gray-400">Nenhum documento selecionado.</p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {documentosNovoFrete.map(doc => (
+                        <li key={doc.id} className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs">
+                          <div className="min-w-0">
+                            <p className="font-semibold text-gray-700 truncate">{doc.file.name}</p>
+                            <p className="text-gray-500">{rotuloTipoDoc(doc.tipo)} · {(doc.file.size / 1024 / 1024).toFixed(2)} MB</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => removerDocumentoNovoFrete(doc.id)}
+                            className="shrink-0 p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded"
+                            aria-label="Remover documento"
+                            title="Remover documento"
+                          >
+                            <X size={16} />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <p className="text-[11px] text-gray-500">PDF, XML, JPG, PNG ou WebP, até 15 MB por arquivo.</p>
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-3">
                 <div><label className="block text-xs font-bold text-gray-600 uppercase mb-1">Modalidade de Cálculo</label>
                   <select className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white outline-none focus:border-blue-500" value={formData.modalidade_calculo} onChange={e => setFormData({...formData, modalidade_calculo: e.target.value})}>

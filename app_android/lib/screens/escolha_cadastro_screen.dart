@@ -4,10 +4,11 @@ import 'cadastro_screen.dart';
 /// Tela intermediária entre o Login e o formulário de cadastro.
 /// O usuário escolhe o tipo de conta antes de preencher os dados.
 ///
-/// Piloto: apenas dois fluxos suportados de ponta a ponta pelo backend —
-/// motorista vinculado (código da empresa) e autônomo (documento de cobrança).
-/// "Autônomo com administrador" fica para uma frente própria, quando o
-/// convite de administrador existir com segurança no backend.
+/// Três fluxos suportados de ponta a ponta pelo backend:
+///  - motorista vinculado (código da empresa);
+///  - autônomo (documento de cobrança);
+///  - autônomo com administrador (cria também um admin vinculado à mesma conta,
+///    com senha temporária, para acessar o painel web).
 class EscolhaCadastroScreen extends StatelessWidget {
   const EscolhaCadastroScreen({super.key});
 
@@ -55,6 +56,14 @@ class EscolhaCadastroScreen extends StatelessWidget {
               descricao:
                   'Você trabalha por conta própria. Escolhe um plano e usa o app de forma independente.',
               onTap: () => _abrirCadastro(context, TipoCadastro.autonomo),
+            ),
+            const SizedBox(height: 16),
+            _CartaoOpcao(
+              icone: Icons.admin_panel_settings_outlined,
+              titulo: 'Autônomo com administrador',
+              descricao:
+                  'Como o autônomo, mas você também cadastra um administrador para acessar o painel web da conta.',
+              onTap: () => _abrirCadastro(context, TipoCadastro.autonomoComAdmin),
             ),
           ],
         ),
