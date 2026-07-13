@@ -4,8 +4,15 @@ import '../models/plano_publico.dart';
 import '../services/api_service.dart';
 import '../utils/mascaras.dart';
 
+/// Tipo de cadastro escolhido na tela anterior (EscolhaCadastroScreen).
+/// Dirige a visibilidade dos campos e as regras de validação/payload.
+enum TipoCadastro { vinculado, autonomo }
+
 class CadastroScreen extends StatefulWidget {
-  const CadastroScreen({super.key});
+  const CadastroScreen({super.key, required this.tipo});
+
+  /// Fluxo selecionado: motorista vinculado (com código da empresa) ou autônomo.
+  final TipoCadastro tipo;
 
   @override
   State<CadastroScreen> createState() => _CadastroScreenState();
@@ -29,17 +36,17 @@ class _CadastroScreenState extends State<CadastroScreen> {
   List<PlanoPublico> _planos = const [];
   PlanoPublico? _planoSelecionado;
 
-  bool get _temCodigoConvite => _codigoConviteCtrl.text.trim().isNotEmpty;
+  bool get _vinculado => widget.tipo == TipoCadastro.vinculado;
 
   @override
   void initState() {
     super.initState();
-    _codigoConviteCtrl.addListener(_aoAlterarCodigoConvite);
-    _carregarPlanos();
-  }
-
-  void _aoAlterarCodigoConvite() {
-    if (mounted) setState(() {});
+    // Planos só existem no fluxo autônomo; o vinculado usa o plano da empresa.
+    if (_vinculado) {
+      _carregandoPlanos = false;
+    } else {
+      _carregarPlanos();
+    }
   }
 
   Future<void> _carregarPlanos() async {
@@ -75,7 +82,6 @@ class _CadastroScreenState extends State<CadastroScreen> {
 
   @override
   void dispose() {
-    _codigoConviteCtrl.removeListener(_aoAlterarCodigoConvite);
     _nomeCtrl.dispose();
     _placaCtrl.dispose();
     _cpfCtrl.dispose();
@@ -100,6 +106,11 @@ class _CadastroScreenState extends State<CadastroScreen> {
     if (!padraoAntigo.hasMatch(placa) && !padraoMercosul.hasMatch(placa)) {
       return 'Formato: AAA-0A00 ou AAA0A00 (Mercosul)';
     }
+    return null;
+  }
+
+  String? _validateCodigoEmpresa(String? v) {
+    if (v == null || v.trim().isEmpty) return 'Código da empresa é obrigatório';
     return null;
   }
 
@@ -148,10 +159,10 @@ class _CadastroScreenState extends State<CadastroScreen> {
 
   String? _validateDocumento(String? v) {
     if (v == null || v.trim().isEmpty) {
-      return _temCodigoConvite ? 'CPF é obrigatório' : 'Documento é obrigatório';
+      return _vinculado ? 'CPF é obrigatório' : 'Documento é obrigatório';
     }
     final documento = v.trim().replaceAll(RegExp(r'\D'), '');
-    if (_temCodigoConvite || documento.length == 11) return _validarCpfDigitos(documento);
+    if (_vinculado || documento.length == 11) return _validarCpfDigitos(documento);
     if (documento.length == 14) return _validarCnpjDigitos(documento);
     return 'Documento deve ter 11 ou 14 números';
   }
@@ -189,8 +200,8 @@ class _CadastroScreenState extends State<CadastroScreen> {
     try {
       // Normaliza o código antes de enviar (uppercase, sem espaços). O traço é
       // mantido como digitado — o backend aceita com ou sem. Reduz erro do motorista.
+      final comConvite = _vinculado;
       final codigo = _codigoConviteCtrl.text.toUpperCase().replaceAll(RegExp(r'\s'), '');
-      final comConvite = codigo.isNotEmpty;
       final documento = _cpfCtrl.text.trim().replaceAll(RegExp(r'\D'), '');
       final resultado = await ApiService.register({
         'nome': _nomeCtrl.text.trim(),
@@ -245,22 +256,6 @@ class _CadastroScreenState extends State<CadastroScreen> {
   }
 
   Widget _buildSelecaoPlanos() {
-    if (_temCodigoConvite) {
-      return Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: Colors.blue.shade50,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.blue.shade100),
-        ),
-        child: const Text(
-          'Motorista vinculado usa o plano da empresa do convite.',
-          style: TextStyle(fontSize: 13),
-        ),
-      );
-    }
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -347,7 +342,9 @@ class _CadastroScreenState extends State<CadastroScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('CADASTRO DE MOTORISTA')),
+      appBar: AppBar(
+        title: Text(_vinculado ? 'Cadastro — Motorista vinculado' : 'Cadastro — Autônomo'),
+      ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24.0),
         child: Form(
@@ -368,6 +365,45 @@ class _CadastroScreenState extends State<CadastroScreen> {
                     style: const TextStyle(color: Colors.red),
                     textAlign: TextAlign.center,
                   ),
+                ),
+                const SizedBox(height: 16),
+              ],
+              // Fluxo vinculado: o código da empresa vem em destaque, antes dos
+              // dados pessoais, porque é o que autoriza o vínculo.
+              if (_vinculado) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.blue.shade100),
+                  ),
+                  child: const Text(
+                    'Você vai se vincular a uma empresa. Informe o código recebido para concluir o cadastro.',
+                    style: TextStyle(fontSize: 13),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _codigoConviteCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Código da empresa',
+                    hintText: 'Ex.: MATO-AB1234 ou MATOAB1234',
+                    helperText: 'Informe o código recebido da empresa. Digite com ou sem traço.',
+                    prefixIcon: Icon(Icons.business_outlined),
+                  ),
+                  textCapitalization: TextCapitalization.characters,
+                  // Uppercase enquanto digita (o traço não é obrigatório; o backend
+                  // normaliza de qualquer forma). Não bloqueia nem exige formato.
+                  inputFormatters: [
+                    TextInputFormatter.withFunction(
+                      (oldValue, newValue) =>
+                          newValue.copyWith(text: newValue.text.toUpperCase()),
+                    ),
+                  ],
+                  validator: _validateCodigoEmpresa,
+                  textInputAction: TextInputAction.next,
                 ),
                 const SizedBox(height: 16),
               ],
@@ -394,48 +430,23 @@ class _CadastroScreenState extends State<CadastroScreen> {
               ),
               const SizedBox(height: 16),
               TextFormField(
-                controller: _codigoConviteCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Código da empresa (opcional)',
-                  hintText: 'Ex.: MATO-AB1234 ou MATOAB1234',
-                  helperText: 'Digite com ou sem traço. Deixe vazio se autônomo.',
-                  prefixIcon: Icon(Icons.business_outlined),
-                ),
-                textCapitalization: TextCapitalization.characters,
-                // Uppercase enquanto digita (o traço não é obrigatório; o backend
-                // normaliza de qualquer forma). Não bloqueia nem exige formato.
-                inputFormatters: [
-                  TextInputFormatter.withFunction(
-                    (oldValue, newValue) =>
-                        newValue.copyWith(text: newValue.text.toUpperCase()),
-                  ),
-                ],
-                textInputAction: TextInputAction.next,
-              ),
-              const SizedBox(height: 4),
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 4),
-                child: Text(
-                  'Motorista autônomo? Deixe este campo em branco.',
-                  style: TextStyle(fontSize: 12, color: Colors.grey),
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
                 controller: _cpfCtrl,
                 decoration: InputDecoration(
-                  labelText: _temCodigoConvite ? 'CPF (apenas números)' : 'Documento CPF/CNPJ (apenas números)',
+                  labelText: _vinculado ? 'CPF (apenas números)' : 'Documento CPF/CNPJ (apenas números)',
                   prefixIcon: const Icon(Icons.badge),
-                  helperText: _temCodigoConvite ? null : 'Autônomo pode usar CPF ou CNPJ/MEI para cobrança.',
+                  helperText: _vinculado ? null : 'Autônomo pode usar CPF ou CNPJ/MEI para cobrança.',
                 ),
                 keyboardType: TextInputType.number,
-                inputFormatters: [_temCodigoConvite ? Mascaras.cpf : Mascaras.documento],
+                inputFormatters: [_vinculado ? Mascaras.cpf : Mascaras.documento],
                 validator: _validateDocumento,
                 textInputAction: TextInputAction.next,
               ),
               const SizedBox(height: 16),
-              _buildSelecaoPlanos(),
-              const SizedBox(height: 16),
+              // Seleção de plano é exclusiva do autônomo (inline).
+              if (!_vinculado) ...[
+                _buildSelecaoPlanos(),
+                const SizedBox(height: 16),
+              ],
               TextFormField(
                 controller: _emailCtrl,
                 decoration: const InputDecoration(

@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../services/api_service.dart';
 import '../services/app_logger.dart';
-import 'cadastro_screen.dart';
+import 'escolha_cadastro_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -225,7 +225,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         onPressed: () => Navigator.push(
                           context,
                           MaterialPageRoute(
-                              builder: (_) => const CadastroScreen()),
+                              builder: (_) => const EscolhaCadastroScreen()),
                         ),
                         child: const Text('Não tem conta? Cadastre-se'),
                       ),
