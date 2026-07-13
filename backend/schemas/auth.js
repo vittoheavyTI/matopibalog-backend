@@ -21,6 +21,9 @@ const registerSchema = z.object({
   codigo_convite: z.string().max(20).optional(),
   plano_id: planoIdSchema.optional(),
   cpf: z.string().max(20).optional(),
+  documento_billing: z.string().max(20).optional(),
+  documento: z.string().max(20).optional(),
+  cnpj: z.string().max(20).optional(),
   placa_veiculo: z.string().max(20).optional(),
 });
 

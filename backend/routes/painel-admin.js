@@ -197,7 +197,14 @@ router.get('/planos', async (req, res) => {
   res.json(data || []);
 });
 
+// Categorias validas de plano (a quem ele se destina).
+const CATEGORIAS_PLANO = ['empresa', 'autonomo', 'ambos'];
+
 router.post('/planos', async (req, res) => {
+  const categoria = req.body.categoria !== undefined ? String(req.body.categoria) : 'ambos';
+  if (!CATEGORIAS_PLANO.includes(categoria)) {
+    return res.status(400).json({ message: 'Categoria inválida. Use empresa, autonomo ou ambos.' });
+  }
   const { data, error } = await supabase.from('planos').insert({
     nome: req.body.nome,
     preco_mensal: Number(req.body.preco_mensal) || 0,
@@ -205,7 +212,8 @@ router.post('/planos', async (req, res) => {
     recursos: req.body.recursos || [],
     limite_motoristas: req.body.limite_motoristas !== undefined ? Number(req.body.limite_motoristas) : 5,
     dias_trial: req.body.dias_trial !== undefined ? Number(req.body.dias_trial) : 7,
-    ativo: req.body.ativo !== undefined ? req.body.ativo === true : true
+    ativo: req.body.ativo !== undefined ? req.body.ativo === true : true,
+    categoria
   }).select().single();
   if (error) return res.status(500).json({ message: 'Erro ao criar plano.' });
   res.status(201).json(data);
@@ -221,6 +229,13 @@ router.put('/planos/:id', async (req, res) => {
   if (req.body.dias_trial !== undefined) upd.dias_trial = Number(req.body.dias_trial);
   if (req.body.ativo !== undefined) upd.ativo = req.body.ativo === true;
   else if (req.body.status !== undefined) upd.ativo = req.body.status === 'ativo';
+  if (req.body.categoria !== undefined) {
+    const categoria = String(req.body.categoria);
+    if (!CATEGORIAS_PLANO.includes(categoria)) {
+      return res.status(400).json({ message: 'Categoria inválida. Use empresa, autonomo ou ambos.' });
+    }
+    upd.categoria = categoria;
+  }
   const { data, error } = await supabase.from('planos').update(upd).eq('id', req.params.id).select().single();
   if (error) return res.status(500).json({ message: 'Erro ao atualizar plano.' });
   res.json(data);

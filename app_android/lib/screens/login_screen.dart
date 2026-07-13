@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../services/api_service.dart';
 import '../services/app_logger.dart';
-import 'cadastro_screen.dart';
+import 'escolha_cadastro_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -36,7 +36,7 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
     await context.read<AuthProvider>().login(
-      _emailCtrl.text.trim(),
+      _emailCtrl.text.trim().toLowerCase(),
       _passCtrl.text,
       manterConectado: _manterConectado,
     );
@@ -73,7 +73,7 @@ class _LoginScreenState extends State<LoginScreen> {
     if (confirmed != true || emailCtrl.text.trim().isEmpty) return;
 
     try {
-      final ok = await ApiService.esqueceuSenha(emailCtrl.text.trim());
+      final ok = await ApiService.esqueceuSenha(emailCtrl.text.trim().toLowerCase());
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -225,7 +225,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         onPressed: () => Navigator.push(
                           context,
                           MaterialPageRoute(
-                              builder: (_) => const CadastroScreen()),
+                              builder: (_) => const EscolhaCadastroScreen()),
                         ),
                         child: const Text('Não tem conta? Cadastre-se'),
                       ),

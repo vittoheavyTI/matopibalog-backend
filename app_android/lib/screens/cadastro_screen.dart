@@ -2,9 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // TextInputFormatter
 import '../models/plano_publico.dart';
 import '../services/api_service.dart';
+import '../utils/mascaras.dart';
+import 'selecao_plano_screen.dart';
+
+/// Tipo de cadastro escolhido na tela anterior (EscolhaCadastroScreen).
+/// Dirige a visibilidade dos campos e as regras de validação/payload.
+enum TipoCadastro { vinculado, autonomo }
 
 class CadastroScreen extends StatefulWidget {
-  const CadastroScreen({super.key});
+  const CadastroScreen({super.key, required this.tipo});
+
+  /// Fluxo selecionado: motorista vinculado (com código da empresa) ou autônomo.
+  final TipoCadastro tipo;
 
   @override
   State<CadastroScreen> createState() => _CadastroScreenState();
@@ -19,62 +28,21 @@ class _CadastroScreenState extends State<CadastroScreen> {
   final _passCtrl = TextEditingController();
   final _confirmPassCtrl = TextEditingController();
   final _codigoConviteCtrl = TextEditingController();
+  // CPF do motorista/responsável — só usado no autônomo quando o documento é CNPJ.
+  final _cpfResponsavelCtrl = TextEditingController();
   bool _loading = false;
-  bool _carregandoPlanos = true;
   String _error = '';
-  String _erroPlanos = '';
   bool _showPass = false;
   bool _showConfirmPass = false;
-  List<PlanoPublico> _planos = const [];
+  // Documento (autônomo) tem 14 dígitos → é CNPJ/MEI e exige CPF do responsável.
+  bool _docEhCnpj = false;
+  // Plano escolhido na etapa seguinte (SelecaoPlanoScreen), só no fluxo autônomo.
   PlanoPublico? _planoSelecionado;
 
-  bool get _temCodigoConvite => _codigoConviteCtrl.text.trim().isNotEmpty;
-
-  @override
-  void initState() {
-    super.initState();
-    _codigoConviteCtrl.addListener(_aoAlterarCodigoConvite);
-    _carregarPlanos();
-  }
-
-  void _aoAlterarCodigoConvite() {
-    if (mounted) setState(() {});
-  }
-
-  Future<void> _carregarPlanos() async {
-    try {
-      final planos = await ApiService.getPlanosPublicos();
-      PlanoPublico? padrao;
-      for (final plano in planos) {
-        if (plano.nome.trim().toLowerCase() == 'plano básico') {
-          padrao = plano;
-          break;
-        }
-      }
-      padrao ??= planos.isNotEmpty ? planos.first : null;
-
-      if (!mounted) return;
-      setState(() {
-        _planos = planos;
-        _planoSelecionado = padrao;
-        _carregandoPlanos = false;
-        _erroPlanos = planos.isEmpty
-            ? 'Nenhum plano disponível agora. O Plano Básico será usado no cadastro.'
-            : '';
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _carregandoPlanos = false;
-        _erroPlanos = 'Não foi possível carregar os planos. Você pode continuar; '
-            'o Plano Básico será usado.';
-      });
-    }
-  }
+  bool get _vinculado => widget.tipo == TipoCadastro.vinculado;
 
   @override
   void dispose() {
-    _codigoConviteCtrl.removeListener(_aoAlterarCodigoConvite);
     _nomeCtrl.dispose();
     _placaCtrl.dispose();
     _cpfCtrl.dispose();
@@ -82,6 +50,7 @@ class _CadastroScreenState extends State<CadastroScreen> {
     _passCtrl.dispose();
     _confirmPassCtrl.dispose();
     _codigoConviteCtrl.dispose();
+    _cpfResponsavelCtrl.dispose();
     super.dispose();
   }
 
@@ -102,25 +71,67 @@ class _CadastroScreenState extends State<CadastroScreen> {
     return null;
   }
 
-  String? _validateCpf(String? v) {
-    if (v == null || v.trim().isEmpty) return 'CPF é obrigatório';
-    final cpf = v.trim().replaceAll(RegExp(r'\D'), '');
+  String? _validateCodigoEmpresa(String? v) {
+    if (v == null || v.trim().isEmpty) return 'Código da empresa é obrigatório';
+    return null;
+  }
+
+  String? _validarCpfDigitos(String cpf) {
     if (cpf.length != 11) return 'CPF deve ter 11 números';
     if (RegExp(r'^(\d)\1{10}$').hasMatch(cpf)) return 'CPF inválido';
 
     int sum = 0;
-    for (int i = 0; i < 9; i++) sum += int.parse(cpf[i]) * (10 - i);
+    for (int i = 0; i < 9; i++) {
+      sum += int.parse(cpf[i]) * (10 - i);
+    }
     int rest = (sum * 10) % 11;
     if (rest == 10) rest = 0;
     if (rest != int.parse(cpf[9])) return 'CPF inválido';
 
     sum = 0;
-    for (int i = 0; i < 10; i++) sum += int.parse(cpf[i]) * (11 - i);
+    for (int i = 0; i < 10; i++) {
+      sum += int.parse(cpf[i]) * (11 - i);
+    }
     rest = (sum * 10) % 11;
     if (rest == 10) rest = 0;
     if (rest != int.parse(cpf[10])) return 'CPF inválido';
 
     return null;
+  }
+
+  String? _validarCnpjDigitos(String cnpj) {
+    if (cnpj.length != 14) return 'CNPJ deve ter 14 números';
+    if (RegExp(r'^(\d)\1{13}$').hasMatch(cnpj)) return 'CNPJ inválido';
+
+    int calcularDigito(String base, List<int> pesos) {
+      var soma = 0;
+      for (var i = 0; i < pesos.length; i++) {
+        soma += int.parse(base[i]) * pesos[i];
+      }
+      final resto = soma % 11;
+      return resto < 2 ? 0 : 11 - resto;
+    }
+
+    const pesos1 = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+    const pesos2 = [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+    if (calcularDigito(cnpj, pesos1) != int.parse(cnpj[12])) return 'CNPJ inválido';
+    if (calcularDigito(cnpj, pesos2) != int.parse(cnpj[13])) return 'CNPJ inválido';
+    return null;
+  }
+
+  String? _validateDocumento(String? v) {
+    if (v == null || v.trim().isEmpty) {
+      return _vinculado ? 'CPF é obrigatório' : 'Documento é obrigatório';
+    }
+    final documento = v.trim().replaceAll(RegExp(r'\D'), '');
+    if (_vinculado || documento.length == 11) return _validarCpfDigitos(documento);
+    if (documento.length == 14) return _validarCnpjDigitos(documento);
+    return 'Documento deve ter 11 ou 14 números';
+  }
+
+  String? _validateCpfResponsavel(String? v) {
+    if (v == null || v.trim().isEmpty) return 'CPF do responsável é obrigatório';
+    return _validarCpfDigitos(v.trim().replaceAll(RegExp(r'\D'), ''));
   }
 
   String? _validateEmail(String? v) {
@@ -156,13 +167,19 @@ class _CadastroScreenState extends State<CadastroScreen> {
     try {
       // Normaliza o código antes de enviar (uppercase, sem espaços). O traço é
       // mantido como digitado — o backend aceita com ou sem. Reduz erro do motorista.
+      final comConvite = _vinculado;
       final codigo = _codigoConviteCtrl.text.toUpperCase().replaceAll(RegExp(r'\s'), '');
-      final comConvite = codigo.isNotEmpty;
+      final documento = _cpfCtrl.text.trim().replaceAll(RegExp(r'\D'), '');
+      final cpfResponsavel = _cpfResponsavelCtrl.text.replaceAll(RegExp(r'\D'), '');
+      // CPF enviado: vinculado e autônomo-CPF usam o próprio documento; o
+      // autônomo-CNPJ usa o CPF do responsável (o CNPJ nunca vira cpf).
+      final cpfEnviar = (comConvite || documento.length == 11) ? documento : cpfResponsavel;
       final resultado = await ApiService.register({
         'nome': _nomeCtrl.text.trim(),
-        'placa_veiculo': _placaCtrl.text.trim().toUpperCase(),
-        'cpf': _cpfCtrl.text.trim().replaceAll(RegExp(r'\D'), ''),
-        'email': _emailCtrl.text.trim(),
+        'placa_veiculo': normalizarPlaca(_placaCtrl.text),
+        if (cpfEnviar.isNotEmpty) 'cpf': cpfEnviar,
+        if (!comConvite) 'documento_billing': documento,
+        'email': _emailCtrl.text.trim().toLowerCase(),
         'senha': _passCtrl.text,
         if (comConvite) 'codigo_convite': codigo,
       }, planoId: comConvite ? null : _planoSelecionado?.id);
@@ -205,114 +222,37 @@ class _CadastroScreenState extends State<CadastroScreen> {
     }
   }
 
-  String _formatarPreco(double valor) {
-    return 'R\$ ${valor.toStringAsFixed(2).replaceAll('.', ',')}/mês';
+  /// Fluxo autônomo: valida os dados e navega para a etapa de seleção de plano.
+  /// Ao voltar com um plano confirmado, dispara o cadastro. O payload é o mesmo
+  /// de _cadastrar — apenas o momento da escolha do plano mudou de tela.
+  Future<void> _irParaPlanos() async {
+    if (!_formKey.currentState!.validate()) return;
+    final resultado = await Navigator.push<ResultadoSelecaoPlano>(
+      context,
+      MaterialPageRoute(builder: (_) => const SelecaoPlanoScreen()),
+    );
+    // resultado == null → usuário voltou sem confirmar; não cadastra.
+    if (resultado == null || !mounted) return;
+    _planoSelecionado = resultado.plano;
+    await _cadastrar();
   }
 
-  Widget _buildSelecaoPlanos() {
-    if (_temCodigoConvite) {
-      return Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: Colors.blue.shade50,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.blue.shade100),
-        ),
-        child: const Text(
-          'Motorista vinculado usa o plano da empresa do convite.',
-          style: TextStyle(fontSize: 13),
-        ),
-      );
+  /// Despacha a ação do botão principal conforme o tipo de cadastro:
+  /// vinculado cadastra direto; autônomo segue para a escolha de plano.
+  void _submeter() {
+    if (_vinculado) {
+      _cadastrar();
+    } else {
+      _irParaPlanos();
     }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text('Escolha seu plano', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 8),
-        if (_carregandoPlanos)
-          const Center(
-            child: Padding(padding: EdgeInsets.all(12), child: CircularProgressIndicator()),
-          )
-        else if (_erroPlanos.isNotEmpty)
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.orange.shade50,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.orange.shade200),
-            ),
-            child: Text(_erroPlanos, style: const TextStyle(fontSize: 13)),
-          )
-        else
-          ..._planos.map(_buildPlanoCard),
-      ],
-    );
-  }
-
-  Widget _buildPlanoCard(PlanoPublico plano) {
-    final selecionado = _planoSelecionado?.id == plano.id;
-    final detalhes = <String>[
-      if (plano.diasTrial != null) '${plano.diasTrial} dias de teste grátis',
-      if (plano.limiteMotoristas != null) 'Até ${plano.limiteMotoristas} motorista(s)',
-      ...plano.recursos.take(3),
-    ];
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(10),
-        onTap: () => setState(() => _planoSelecionado = plano),
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: selecionado ? Theme.of(context).colorScheme.primary : Colors.grey.shade300,
-              width: selecionado ? 2 : 1,
-            ),
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(
-                selecionado ? Icons.radio_button_checked : Icons.radio_button_off,
-                color: selecionado ? Theme.of(context).colorScheme.primary : Colors.grey,
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(plano.nome, style: const TextStyle(fontWeight: FontWeight.bold)),
-                    Text(
-                      _formatarPreco(plano.precoMensal),
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.primary,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    if (plano.descricao.isNotEmpty)
-                      Text(plano.descricao, style: const TextStyle(fontSize: 12)),
-                    for (final detalhe in detalhes)
-                      Text('• $detalhe', style: const TextStyle(fontSize: 12)),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('CADASTRO DE MOTORISTA')),
+      appBar: AppBar(
+        title: Text(_vinculado ? 'Cadastro — Motorista vinculado' : 'Cadastro — Autônomo'),
+      ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24.0),
         child: Form(
@@ -336,6 +276,45 @@ class _CadastroScreenState extends State<CadastroScreen> {
                 ),
                 const SizedBox(height: 16),
               ],
+              // Fluxo vinculado: o código da empresa vem em destaque, antes dos
+              // dados pessoais, porque é o que autoriza o vínculo.
+              if (_vinculado) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.blue.shade100),
+                  ),
+                  child: const Text(
+                    'Você vai se vincular a uma empresa. Informe o código recebido para concluir o cadastro.',
+                    style: TextStyle(fontSize: 13),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _codigoConviteCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Código da empresa',
+                    hintText: 'Ex.: MATO-AB1234 ou MATOAB1234',
+                    helperText: 'Informe o código recebido da empresa. Digite com ou sem traço.',
+                    prefixIcon: Icon(Icons.business_outlined),
+                  ),
+                  textCapitalization: TextCapitalization.characters,
+                  // Uppercase enquanto digita (o traço não é obrigatório; o backend
+                  // normaliza de qualquer forma). Não bloqueia nem exige formato.
+                  inputFormatters: [
+                    TextInputFormatter.withFunction(
+                      (oldValue, newValue) =>
+                          newValue.copyWith(text: newValue.text.toUpperCase()),
+                    ),
+                  ],
+                  validator: _validateCodigoEmpresa,
+                  textInputAction: TextInputAction.next,
+                ),
+                const SizedBox(height: 16),
+              ],
               TextFormField(
                 controller: _nomeCtrl,
                 decoration: const InputDecoration(
@@ -349,55 +328,52 @@ class _CadastroScreenState extends State<CadastroScreen> {
               TextFormField(
                 controller: _placaCtrl,
                 decoration: const InputDecoration(
-                  labelText: 'Placa do Veículo (AAA-0A00)',
+                  labelText: 'Placa do Veículo (AAA-0A00 ou AAA0A00)',
                   prefixIcon: Icon(Icons.directions_car),
                 ),
                 validator: _validatePlaca,
                 textInputAction: TextInputAction.next,
                 textCapitalization: TextCapitalization.characters,
+                inputFormatters: const [Mascaras.placa],
               ),
               const SizedBox(height: 16),
               TextFormField(
                 controller: _cpfCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'CPF (Apenas números)',
-                  prefixIcon: Icon(Icons.badge),
+                decoration: InputDecoration(
+                  labelText: _vinculado ? 'CPF (apenas números)' : 'Documento CPF/CNPJ (apenas números)',
+                  prefixIcon: const Icon(Icons.badge),
+                  helperText: _vinculado ? null : 'Autônomo pode usar CPF ou CNPJ/MEI para cobrança.',
                 ),
                 keyboardType: TextInputType.number,
-                validator: _validateCpf,
+                inputFormatters: [_vinculado ? Mascaras.cpf : Mascaras.documento],
+                validator: _validateDocumento,
                 textInputAction: TextInputAction.next,
+                onChanged: (v) {
+                  // Autônomo com CNPJ (14 dígitos) precisa informar o CPF do
+                  // responsável. Vinculado usa CPF (nunca 14) → nunca aparece.
+                  final ehCnpj = !_vinculado &&
+                      v.replaceAll(RegExp(r'\D'), '').length == 14;
+                  if (ehCnpj != _docEhCnpj) setState(() => _docEhCnpj = ehCnpj);
+                },
               ),
               const SizedBox(height: 16),
-              TextFormField(
-                controller: _codigoConviteCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Código da empresa (opcional)',
-                  hintText: 'Ex.: MATO-AB1234 ou MATOAB1234',
-                  helperText: 'Digite com ou sem traço. Deixe vazio se autônomo.',
-                  prefixIcon: Icon(Icons.business_outlined),
-                ),
-                textCapitalization: TextCapitalization.characters,
-                // Uppercase enquanto digita (o traço não é obrigatório; o backend
-                // normaliza de qualquer forma). Não bloqueia nem exige formato.
-                inputFormatters: [
-                  TextInputFormatter.withFunction(
-                    (oldValue, newValue) =>
-                        newValue.copyWith(text: newValue.text.toUpperCase()),
+              // CNPJ/MEI: o documento é a conta de cobrança; ainda precisamos do
+              // CPF da pessoa que dirige (nunca enviamos o CNPJ como CPF).
+              if (_docEhCnpj) ...[
+                TextFormField(
+                  controller: _cpfResponsavelCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'CPF do motorista responsável (apenas números)',
+                    prefixIcon: Icon(Icons.person_outline),
+                    helperText: 'O CNPJ é usado para cobrança; informe o CPF de quem dirige.',
                   ),
-                ],
-                textInputAction: TextInputAction.next,
-              ),
-              const SizedBox(height: 4),
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 4),
-                child: Text(
-                  'Motorista autônomo? Deixe este campo em branco.',
-                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                  keyboardType: TextInputType.number,
+                  inputFormatters: const [Mascaras.cpf],
+                  validator: _validateCpfResponsavel,
+                  textInputAction: TextInputAction.next,
                 ),
-              ),
-              const SizedBox(height: 16),
-              _buildSelecaoPlanos(),
-              const SizedBox(height: 16),
+                const SizedBox(height: 16),
+              ],
               TextFormField(
                 controller: _emailCtrl,
                 decoration: const InputDecoration(
@@ -437,21 +413,22 @@ class _CadastroScreenState extends State<CadastroScreen> {
                 obscureText: !_showConfirmPass,
                 validator: _validateConfirmSenha,
                 textInputAction: TextInputAction.done,
-                onFieldSubmitted: (_) => _cadastrar(),
+                onFieldSubmitted: (_) => _submeter(),
               ),
               const SizedBox(height: 24),
               SizedBox(
                 width: double.infinity,
                 height: 48,
                 child: ElevatedButton(
-                  onPressed: _loading ? null : _cadastrar,
+                  onPressed: _loading ? null : _submeter,
                   child: _loading
                       ? const SizedBox(
                           height: 20,
                           width: 20,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : const Text('CADASTRAR', style: TextStyle(fontSize: 16)),
+                      : Text(_vinculado ? 'CADASTRAR' : 'CONTINUAR',
+                          style: const TextStyle(fontSize: 16)),
                 ),
               ),
             ],

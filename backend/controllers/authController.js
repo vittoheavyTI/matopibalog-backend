@@ -16,22 +16,16 @@ const supabaseAuth = createClient(
   { auth: { persistSession: false, autoRefreshToken: false } }
 );
 
-// Gera código de convite no formato MATO-XXXXXX
-function gerarCodigoConvite() {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  let codigo = 'MATO-';
-  for (let i = 0; i < 6; i++) {
-    codigo += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return codigo;
-}
-
 // Normaliza um código de convite para comparação tolerante: maiúsculas, sem
 // espaços e sem traços/separadores. O backend é a defesa principal — aceita o
 // código com ou sem traço, em qualquer caixa, com espaços acidentais.
 // Ex.: 'mato-a1b2c3', ' MATO A1B2C3 ', 'MATOA1B2C3' → 'MATOA1B2C3'.
 function normalizarCodigoConvite(valor) {
   return String(valor || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+function apenasDigitos(valor) {
+  return String(valor || '').replace(/\D+/g, '');
 }
 
 exports.register = async (req, res) => {
@@ -43,8 +37,11 @@ exports.register = async (req, res) => {
 
   try {
     let empresa_id = null;
+    const comConvite = Boolean(codigo_convite && codigo_convite.trim() !== '');
+    const cpfMotoristaInformado = apenasDigitos(cpf);
+    let cpfMotorista = cpfMotoristaInformado || null;
 
-    if (codigo_convite && codigo_convite.trim() !== '') {
+    if (comConvite) {
       // --- Fluxo com código de convite: vincular à empresa ---
       // Busca tolerante a traço/caixa/espaços. Os códigos salvos têm formato
       // 'MATO-XXXXXX' (sempre com traço); o usuário pode digitar com ou sem.
@@ -77,63 +74,73 @@ exports.register = async (req, res) => {
       empresa_id = empresa.id;
     } else {
       // --- Fluxo autônomo: criar empresa própria ---
-      let planoQuery = supabase
-        .from('planos')
-        .select('id, dias_trial, ativo');
+      const documentoBilling = apenasDigitos(
+        req.body.documento_billing || req.body.documento || req.body.cnpj || cpf
+      );
 
-      planoQuery = plano_id
-        ? planoQuery.eq('id', plano_id)
-        : planoQuery.eq('nome', 'Plano Básico');
-
-      const { data: planoData, error: planoError } = await planoQuery.maybeSingle();
-
-      if (planoError) {
-        console.error('[register] Falha ao validar plano do autônomo:', planoError.message);
-        return res.status(500).json({ message: 'Erro ao validar plano. Tente novamente.' });
+      if (documentoBilling.length !== 11 && documentoBilling.length !== 14) {
+        return res.status(400).json({ message: 'Informe um CPF ou CNPJ valido para o documento de cobranca.' });
       }
 
-      // Quando o app envia um plano, ele precisa continuar disponível no
-      // momento do cadastro. Preço, limite e trial nunca vêm do cliente.
-      if (plano_id && (!planoData || planoData.ativo !== true)) {
-        return res.status(400).json({ message: 'Plano selecionado inválido ou indisponível.' });
+      // CNPJ/MEI: o documento de cobranca NAO serve como CPF do motorista.
+      // Exigimos o CPF do responsavel (11 digitos) ANTES de criar a empresa,
+      // para nao cair na constraint NOT NULL de motoristas.cpf nem deixar
+      // empresa orfa. Para CPF, o proprio documento ja e o CPF do motorista.
+      if (documentoBilling.length === 14 && cpfMotoristaInformado.length !== 11) {
+        return res.status(400).json({ message: 'Para CNPJ/MEI, informe o CPF do motorista responsavel.' });
       }
+      cpfMotorista = documentoBilling.length === 11 ? documentoBilling : cpfMotoristaInformado;
 
-      const trialEnd = new Date(
-        Date.now() + ((planoData?.dias_trial || 7) * 24 * 60 * 60 * 1000)
-      ).toISOString();
-
-      // Garantir código único (tentativas em caso de colisão)
-      let codigoUnico = null;
-      for (let tentativa = 0; tentativa < 5; tentativa++) {
-        const candidato = gerarCodigoConvite();
-        const { data: existente } = await supabase
-          .from('empresas')
-          .select('id')
-          .eq('codigo_convite', candidato)
+      // Selecao do plano do autonomo:
+      //  - com plano_id: valida o plano escolhido (precisa existir e estar ativo).
+      //  - sem plano_id: fallback para o 1o plano ATIVO elegivel a autonomo
+      //    (categoria 'autonomo' ou 'ambos'). NUNCA cai em plano de empresa;
+      //    se nao houver plano elegivel, bloqueia o cadastro com 400 amigavel.
+      let planoData = null;
+      if (plano_id) {
+        const { data, error: planoError } = await supabase
+          .from('planos')
+          .select('id, dias_trial, ativo')
+          .eq('id', plano_id)
           .maybeSingle();
-        if (!existente) { codigoUnico = candidato; break; }
+        if (planoError) {
+          console.error('[register] Falha ao validar plano do autônomo:', planoError.message);
+          return res.status(500).json({ message: 'Erro ao validar plano. Tente novamente.' });
+        }
+        // Preço, limite e trial nunca vêm do cliente — só validamos o id.
+        if (!data || data.ativo !== true) {
+          return res.status(400).json({ message: 'Plano selecionado inválido ou indisponível.' });
+        }
+        planoData = data;
+      } else {
+        const { data, error: planoError } = await supabase
+          .from('planos')
+          .select('id, dias_trial, ativo, categoria')
+          .eq('ativo', true)
+          .in('categoria', ['autonomo', 'ambos'])
+          .order('preco_mensal', { ascending: true })
+          .limit(1)
+          .maybeSingle();
+        if (planoError) {
+          console.error('[register] Falha ao buscar plano autônomo:', planoError.message);
+          return res.status(500).json({ message: 'Erro ao validar plano. Tente novamente.' });
+        }
+        if (!data) {
+          return res.status(400).json({ message: 'Nenhum plano para autônomo disponível no momento. Contate o suporte.' });
+        }
+        planoData = data;
       }
 
-      const { data: novaEmpresa, error: empresaError } = await supabase
-        .from('empresas')
-        .insert({
-          nome: nome + ' (Autônomo)',
-          cnpj: null,
-          email_contato: email,
-          telefone_contato: null,
-          plano_id: planoData?.id || null,
-          status: 'trial',
-          trial_started_at: new Date().toISOString(),
-          trial_ends_at: trialEnd,
-          codigo_convite: codigoUnico,
-          tipo: 'autonomo',
-        })
-        .select()
-        .single();
-
+      // Criacao da conta autonoma com documento de billing para Asaas.
+      const { empresa: novaEmpresa, error: empresaError, status: empresaStatus } = await criarEmpresaCompleta({
+        nome: `${nome} (Autonomo)`,
+        cnpj: documentoBilling,
+        email_contato: email,
+        plano_id: planoData?.id || null,
+        tipo: 'autonomo',
+      });
       if (empresaError || !novaEmpresa) {
-        console.error('[register] Falha ao criar empresa autônoma:', empresaError?.message);
-        return res.status(500).json({ message: 'Erro ao criar perfil autônomo. Tente novamente.' });
+        return res.status(empresaStatus || 500).json({ message: empresaError || 'Erro ao criar perfil autônomo. Tente novamente.' });
       }
 
       empresa_id = novaEmpresa.id;
@@ -182,7 +189,7 @@ exports.register = async (req, res) => {
     const { error: motoristaError } = await supabase.from('motoristas').insert({
       id: authData.user.id,
       empresa_id,
-      cpf: cpf && cpf.trim() !== '' ? cpf.trim() : null,
+      cpf: cpfMotorista,
       placa_veiculo: placa_veiculo || '',
       status_cadastro: statusCadastro
     });
@@ -200,7 +207,6 @@ exports.register = async (req, res) => {
       return res.status(500).json({ message: 'Não foi possível concluir o cadastro. Tente novamente.' });
     }
 
-    const comConvite = Boolean(codigo_convite && codigo_convite.trim() !== '');
     notificacaoService.criarParaUsuario(authData.user.id, {
       empresa_id,
       tipo: comConvite ? 'conta_vinculada' : 'conta_criada',

@@ -31,10 +31,22 @@ function normalizarRecursos(recursos) {
 // Retorna apenas campos seguros (whitelist explícita, sem SELECT *) e nunca
 // dados de empresa, faturas ou segredos.
 router.get('/publicos', async (req, res) => {
-  const { data, error } = await supabase
+  // Filtro opcional por publico-alvo. 'autonomo' → planos autonomo/ambos;
+  // 'empresa' → empresa/ambos. Sem o parametro, retorna todos (compatibilidade).
+  const categoria = String(req.query.categoria || '').trim().toLowerCase();
+
+  let query = supabase
     .from('planos')
-    .select('id, nome, descricao, preco_mensal, limite_motoristas, dias_trial, recursos, ativo')
-    .eq('ativo', true)
+    .select('id, nome, descricao, preco_mensal, limite_motoristas, dias_trial, recursos, ativo, categoria')
+    .eq('ativo', true);
+
+  if (categoria === 'autonomo') {
+    query = query.in('categoria', ['autonomo', 'ambos']);
+  } else if (categoria === 'empresa') {
+    query = query.in('categoria', ['empresa', 'ambos']);
+  }
+
+  const { data, error } = await query
     .order('preco_mensal', { ascending: true })
     .order('nome', { ascending: true });
 
@@ -52,6 +64,7 @@ router.get('/publicos', async (req, res) => {
     dias_trial: p.dias_trial,
     recursos: normalizarRecursos(p.recursos),
     ativo: p.ativo === true,
+    categoria: p.categoria || 'ambos',
   }));
 
   res.json({ planos });

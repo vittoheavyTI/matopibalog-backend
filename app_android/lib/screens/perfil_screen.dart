@@ -1,11 +1,13 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../services/api_service.dart';
 import '../services/app_logger.dart';
+import '../utils/mascaras.dart';
 
 class PerfilScreen extends StatefulWidget {
   const PerfilScreen({super.key});
@@ -65,7 +67,7 @@ class _PerfilScreenState extends State<PerfilScreen> {
   }
 
   void _preencherCampos(Map<String, dynamic> p) {
-    _telefoneCtrl.text = p['celular'] ?? p['telefone'] ?? '';
+    _telefoneCtrl.text = formatarTelefone(p['celular'] ?? p['telefone'] ?? '');
     _cepCtrl.text = p['cep'] ?? '';
     _enderecoCtrl.text = p['endereco'] ?? '';
     _bairroCtrl.text = p['bairro'] ?? '';
@@ -77,7 +79,7 @@ class _PerfilScreenState extends State<PerfilScreen> {
     AppLogger.action('perfil_save_attempt');
     try {
       final updated = await ApiService.updateMe({
-        'celular': _telefoneCtrl.text.trim(),
+        'celular': apenasDigitos(_telefoneCtrl.text),
         'cep': _cepCtrl.text.trim(),
         'endereco': _enderecoCtrl.text.trim(),
         'bairro': _bairroCtrl.text.trim(),
@@ -307,7 +309,8 @@ class _PerfilScreenState extends State<PerfilScreen> {
             // Dados editáveis
             _secao('Contato'),
             _editando
-                ? _campo('Telefone', _telefoneCtrl, TextInputType.phone)
+                ? _campo('Telefone', _telefoneCtrl, TextInputType.phone,
+                    formatters: [Mascaras.telefone])
                 : _linha('Telefone', p['celular'] ?? p['telefone'] ?? '--'),
 
             if (!_editando) ...[
@@ -399,11 +402,14 @@ class _PerfilScreenState extends State<PerfilScreen> {
     );
   }
 
-  Widget _campo(String label, TextEditingController ctrl, TextInputType tipo) => TextField(
-    controller: ctrl,
-    keyboardType: tipo,
-    decoration: InputDecoration(labelText: label),
-  );
+  Widget _campo(String label, TextEditingController ctrl, TextInputType tipo,
+          {List<TextInputFormatter>? formatters}) =>
+      TextField(
+        controller: ctrl,
+        keyboardType: tipo,
+        inputFormatters: formatters,
+        decoration: InputDecoration(labelText: label),
+      );
 }
 
 /// Tela cheia de alteração de senha, navegada via Navigator.push
