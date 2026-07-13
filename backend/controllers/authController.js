@@ -91,25 +91,44 @@ exports.register = async (req, res) => {
       }
       cpfMotorista = documentoBilling.length === 11 ? documentoBilling : cpfMotoristaInformado;
 
-      let planoQuery = supabase
-        .from('planos')
-        .select('id, dias_trial, ativo');
-
-      planoQuery = plano_id
-        ? planoQuery.eq('id', plano_id)
-        : planoQuery.eq('nome', 'Plano Básico');
-
-      const { data: planoData, error: planoError } = await planoQuery.maybeSingle();
-
-      if (planoError) {
-        console.error('[register] Falha ao validar plano do autônomo:', planoError.message);
-        return res.status(500).json({ message: 'Erro ao validar plano. Tente novamente.' });
-      }
-
-      // Quando o app envia um plano, ele precisa continuar disponível no
-      // momento do cadastro. Preço, limite e trial nunca vêm do cliente.
-      if (plano_id && (!planoData || planoData.ativo !== true)) {
-        return res.status(400).json({ message: 'Plano selecionado inválido ou indisponível.' });
+      // Selecao do plano do autonomo:
+      //  - com plano_id: valida o plano escolhido (precisa existir e estar ativo).
+      //  - sem plano_id: fallback para o 1o plano ATIVO elegivel a autonomo
+      //    (categoria 'autonomo' ou 'ambos'). NUNCA cai em plano de empresa;
+      //    se nao houver plano elegivel, bloqueia o cadastro com 400 amigavel.
+      let planoData = null;
+      if (plano_id) {
+        const { data, error: planoError } = await supabase
+          .from('planos')
+          .select('id, dias_trial, ativo')
+          .eq('id', plano_id)
+          .maybeSingle();
+        if (planoError) {
+          console.error('[register] Falha ao validar plano do autônomo:', planoError.message);
+          return res.status(500).json({ message: 'Erro ao validar plano. Tente novamente.' });
+        }
+        // Preço, limite e trial nunca vêm do cliente — só validamos o id.
+        if (!data || data.ativo !== true) {
+          return res.status(400).json({ message: 'Plano selecionado inválido ou indisponível.' });
+        }
+        planoData = data;
+      } else {
+        const { data, error: planoError } = await supabase
+          .from('planos')
+          .select('id, dias_trial, ativo, categoria')
+          .eq('ativo', true)
+          .in('categoria', ['autonomo', 'ambos'])
+          .order('preco_mensal', { ascending: true })
+          .limit(1)
+          .maybeSingle();
+        if (planoError) {
+          console.error('[register] Falha ao buscar plano autônomo:', planoError.message);
+          return res.status(500).json({ message: 'Erro ao validar plano. Tente novamente.' });
+        }
+        if (!data) {
+          return res.status(400).json({ message: 'Nenhum plano para autônomo disponível no momento. Contate o suporte.' });
+        }
+        planoData = data;
       }
 
       // Criacao da conta autonoma com documento de billing para Asaas.

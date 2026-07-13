@@ -26,9 +26,15 @@ function carregarController(cenario = {}) {
         select() { return this; },
         eq() { return this; },
         not() { return this; },
+        in() { return this; },
+        order() { return this; },
+        limit() { return this; },
         async maybeSingle() {
           if (tabela === 'planos') {
-            return { data: cenario.plano || { id: 'plano-1', dias_trial: 7, ativo: true }, error: null };
+            const plano = Object.prototype.hasOwnProperty.call(cenario, 'plano')
+              ? cenario.plano
+              : { id: 'plano-1', dias_trial: 7, ativo: true };
+            return { data: plano, error: null };
           }
           return { data: null, error: null };
         },
@@ -162,6 +168,20 @@ test('register autonomo: documento invalido para antes de criar empresa', async 
 
   assert.equal(res.statusCode, 400);
   assert.match(res.body.message, /CPF ou CNPJ valido/i);
+  assert.equal(chamadas.criarEmpresaCompleta.length, 0);
+});
+
+test('register autonomo: sem plano elegivel a autonomo retorna 400 antes de criar empresa', async () => {
+  const { res, chamadas } = await registrar({
+    nome: 'Autonomo Sem Plano',
+    email: 'semplano@example.com',
+    senha: '123456',
+    placa_veiculo: 'ABC1D23',
+    documento_billing: '12345678909',
+  }, { plano: null });
+
+  assert.equal(res.statusCode, 400);
+  assert.match(res.body.message, /Nenhum plano para aut/i);
   assert.equal(chamadas.criarEmpresaCompleta.length, 0);
 });
 
