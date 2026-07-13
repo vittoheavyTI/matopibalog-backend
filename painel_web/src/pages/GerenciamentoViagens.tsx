@@ -76,6 +76,11 @@ export const GerenciamentoViagens: React.FC = () => {
   // Accordion da visualização por frete (detalhe do motorista).
   const [fretesExpandidos, setFretesExpandidos] = useState<Set<string>>(new Set());
   const [semFreteExpandido, setSemFreteExpandido] = useState(false);
+  // Documentos fiscais do frete (bucket privado): carregados sob demanda ao
+  // expandir o frete. Painel apenas lista/baixa (não anexa) — bucket privado,
+  // download via signed URL de TTL curto.
+  const [docsPorFrete, setDocsPorFrete] = useState<Record<string, any[]>>({});
+  const [docsCarregando, setDocsCarregando] = useState<Set<string>>(new Set());
   // Combobox digitável de motorista no modal de frete (paridade de UX com o Dashboard).
   const [buscaMotorista, setBuscaMotorista] = useState('');
   const [motoristaAberto, setMotoristaAberto] = useState(false);
@@ -263,13 +268,74 @@ export const GerenciamentoViagens: React.FC = () => {
     setSemFreteExpandido(false);
   }, [filterMot, fretes]);
 
+  const carregarDocumentosFrete = async (freteId: string) => {
+    setDocsCarregando(prev => new Set(prev).add(freteId));
+    try {
+      const res = await api.get('/fretes/' + freteId + '/documentos');
+      setDocsPorFrete(prev => ({ ...prev, [freteId]: res.data || [] }));
+    } catch {
+      setDocsPorFrete(prev => ({ ...prev, [freteId]: [] }));
+    } finally {
+      setDocsCarregando(prev => { const n = new Set(prev); n.delete(freteId); return n; });
+    }
+  };
+
+  // Abre o documento numa nova aba via signed URL (gerada só na hora, TTL curto).
+  const abrirDocumento = async (freteId: string, docId: string) => {
+    try {
+      const res = await api.get('/fretes/' + freteId + '/documentos/' + docId + '/url');
+      const url = res.data?.url;
+      if (url) window.open(url, '_blank', 'noopener,noreferrer');
+    } catch {
+      /* link indisponível/expirado: usuário pode tentar novamente */
+    }
+  };
+
   const toggleFreteExpandido = (freteId: string) => {
+    const jaAberto = fretesExpandidos.has(freteId);
     setFretesExpandidos(prev => {
       const next = new Set(prev);
       if (next.has(freteId)) next.delete(freteId);
       else next.add(freteId);
       return next;
     });
+    // Lazy-load dos documentos na primeira expansão.
+    if (!jaAberto && !(freteId in docsPorFrete)) carregarDocumentosFrete(freteId);
+  };
+
+  const rotuloTipoDoc = (t: string): string =>
+    ({ cte: 'CT-e', mdfe: 'MDF-e', nfe: 'NF-e' } as Record<string, string>)[t] || 'Outro';
+
+  const renderDocumentosFrete = (freteId: string) => {
+    const docs = docsPorFrete[freteId];
+    const carregando = docsCarregando.has(freteId);
+    return (
+      <div className="border-t border-gray-100 pt-2 mt-1">
+        <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-1">Documentos</p>
+        {carregando ? (
+          <p className="text-xs text-gray-400">Carregando documentos…</p>
+        ) : !docs || docs.length === 0 ? (
+          <p className="text-xs text-gray-400">Nenhum documento anexado.</p>
+        ) : (
+          <ul className="space-y-1">
+            {docs.map((d: any) => (
+              <li key={d.id} className="flex items-center justify-between gap-2 text-xs bg-gray-50 rounded px-2 py-1">
+                <span className="truncate text-gray-700">
+                  <span className="font-semibold">{rotuloTipoDoc(d.tipo)}</span>
+                  {d.nome_arquivo ? ' · ' + d.nome_arquivo : ''}
+                </span>
+                <button
+                  onClick={() => abrirDocumento(freteId, d.id)}
+                  className="text-blue-600 hover:underline font-semibold whitespace-nowrap"
+                >
+                  Baixar
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    );
   };
 
   // Ordenação por data desc (mais recente → mais antigo). Data ausente/inválida → fim.
@@ -1228,6 +1294,7 @@ export const GerenciamentoViagens: React.FC = () => {
                         {itensFrete.length === 0
                           ? <p className="text-gray-400 text-sm text-center py-3">Nenhum lançamento vinculado a este frete.</p>
                           : itensFrete.map(renderLancamentoItem)}
+                        {renderDocumentosFrete(f.id)}
                       </div>
                     )}
                   </div>
