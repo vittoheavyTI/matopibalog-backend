@@ -213,12 +213,17 @@ export const PainelEmpresas: React.FC = () => {
   // Opções do <select> de plano: apenas planos ativos. Ao editar, se o plano
   // atual estiver inativo (ou sumido do catálogo), injeta a opção corrente
   // marcada como "(inativo)" para aparecer selecionada e não zerar ao salvar.
-  const planosAtivos = planos.filter((p: any) => p.ativo !== false);
+  const isAutonomo = formDados.tipo === 'autonomo';
+  // Plano precisa casar com o público-alvo da conta: autônomo vê planos
+  // autonomo/ambos; empresa/transportadora vê empresa/ambos. Filtro por
+  // categoria (nunca por nome); categoria ausente conta como 'ambos'.
+  const categoriasPermitidas = isAutonomo ? ['autonomo', 'ambos'] : ['empresa', 'ambos'];
+  const planosAtivos = planos.filter((p: any) =>
+    p.ativo !== false && categoriasPermitidas.includes(String(p.categoria || 'ambos')));
   let opcoesPlano: any[] = planosAtivos;
   const planoAtualId = formDados.plano_id;
   // Documento da conta é condicional ao tipo: autônomo usa CPF, empresa usa CNPJ.
   // O campo técnico continua sendo `empresas.cnpj` (nenhuma mudança de backend/schema).
-  const isAutonomo = formDados.tipo === 'autonomo';
   const documentLabel = isAutonomo ? 'CPF' : 'CNPJ';
   const documentMask = isAutonomo ? maskCPF : maskCNPJ;
   if (planoAtualId && !planosAtivos.some((p: any) => p.id === planoAtualId)) {
@@ -362,9 +367,10 @@ export const PainelEmpresas: React.FC = () => {
                 <select disabled={!!editing} className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50 disabled:text-gray-400" value={formDados.tipo} onChange={e => {
                   // Ao trocar o tipo, reaplica a máscara correspondente sobre os dígitos
                   // já digitados (as máscaras extraem os dígitos internamente). Não apaga o valor.
+                  // Zera o plano: as categorias elegíveis mudam com o tipo (empresa x autônomo).
                   const novoTipo = e.target.value;
                   const novaMask = novoTipo === 'autonomo' ? maskCPF : maskCNPJ;
-                  setFormDados({ ...formDados, tipo: novoTipo, cnpj: novaMask(formDados.cnpj) });
+                  setFormDados({ ...formDados, tipo: novoTipo, cnpj: novaMask(formDados.cnpj), plano_id: '' });
                 }}>
                   <option value="transportadora">Empresa / Transportadora</option>
                   <option value="autonomo">Autônomo</option>

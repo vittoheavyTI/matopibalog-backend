@@ -66,7 +66,9 @@ export const CadastroPublico: React.FC = () => {
   useEffect(() => {
     const qpId = searchParams.get('plano_id');
     const qpAlias = searchParams.get('plano');
-    api.get('/planos/publicos')
+    // Cadastro público é de empresa/transportadora: só planos de empresa ou
+    // "ambos" (autônomo se cadastra pelo app). Filtro por categoria, nunca por nome.
+    api.get('/planos/publicos?categoria=empresa')
       .then((res) => {
         const bruto = res.data?.planos || [];
         const lista: PlanoOpcao[] = bruto.map((p: any) => ({

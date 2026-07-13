@@ -50,7 +50,9 @@ export const PlanosPublicos: React.FC = () => {
 
   useEffect(() => {
     let vivo = true;
-    api.get('/planos/publicos')
+    // Catálogo público leva ao cadastro de empresa (/cadastro): só planos de
+    // empresa ou "ambos". Autônomo usa o app. Filtro por categoria, nunca por nome.
+    api.get('/planos/publicos?categoria=empresa')
       .then((res) => {
         if (!vivo) return;
         const lista: PlanoPublico[] = (res.data?.planos || []).map((p: any) => ({
