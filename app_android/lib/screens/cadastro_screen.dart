@@ -3,6 +3,7 @@ import 'package:flutter/services.dart'; // TextInputFormatter
 import '../models/plano_publico.dart';
 import '../services/api_service.dart';
 import '../utils/mascaras.dart';
+import 'selecao_plano_screen.dart';
 
 /// Tipo de cadastro escolhido na tela anterior (EscolhaCadastroScreen).
 /// Dirige a visibilidade dos campos e as regras de validação/payload.
@@ -28,57 +29,13 @@ class _CadastroScreenState extends State<CadastroScreen> {
   final _confirmPassCtrl = TextEditingController();
   final _codigoConviteCtrl = TextEditingController();
   bool _loading = false;
-  bool _carregandoPlanos = true;
   String _error = '';
-  String _erroPlanos = '';
   bool _showPass = false;
   bool _showConfirmPass = false;
-  List<PlanoPublico> _planos = const [];
+  // Plano escolhido na etapa seguinte (SelecaoPlanoScreen), só no fluxo autônomo.
   PlanoPublico? _planoSelecionado;
 
   bool get _vinculado => widget.tipo == TipoCadastro.vinculado;
-
-  @override
-  void initState() {
-    super.initState();
-    // Planos só existem no fluxo autônomo; o vinculado usa o plano da empresa.
-    if (_vinculado) {
-      _carregandoPlanos = false;
-    } else {
-      _carregarPlanos();
-    }
-  }
-
-  Future<void> _carregarPlanos() async {
-    try {
-      final planos = await ApiService.getPlanosPublicos();
-      PlanoPublico? padrao;
-      for (final plano in planos) {
-        if (plano.nome.trim().toLowerCase() == 'plano básico') {
-          padrao = plano;
-          break;
-        }
-      }
-      padrao ??= planos.isNotEmpty ? planos.first : null;
-
-      if (!mounted) return;
-      setState(() {
-        _planos = planos;
-        _planoSelecionado = padrao;
-        _carregandoPlanos = false;
-        _erroPlanos = planos.isEmpty
-            ? 'Nenhum plano disponível agora. O Plano Básico será usado no cadastro.'
-            : '';
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _carregandoPlanos = false;
-        _erroPlanos = 'Não foi possível carregar os planos. Você pode continuar; '
-            'o Plano Básico será usado.';
-      });
-    }
-  }
 
   @override
   void dispose() {
@@ -251,92 +208,29 @@ class _CadastroScreenState extends State<CadastroScreen> {
     }
   }
 
-  String _formatarPreco(double valor) {
-    return 'R\$ ${valor.toStringAsFixed(2).replaceAll('.', ',')}/mês';
+  /// Fluxo autônomo: valida os dados e navega para a etapa de seleção de plano.
+  /// Ao voltar com um plano confirmado, dispara o cadastro. O payload é o mesmo
+  /// de _cadastrar — apenas o momento da escolha do plano mudou de tela.
+  Future<void> _irParaPlanos() async {
+    if (!_formKey.currentState!.validate()) return;
+    final resultado = await Navigator.push<ResultadoSelecaoPlano>(
+      context,
+      MaterialPageRoute(builder: (_) => const SelecaoPlanoScreen()),
+    );
+    // resultado == null → usuário voltou sem confirmar; não cadastra.
+    if (resultado == null || !mounted) return;
+    _planoSelecionado = resultado.plano;
+    await _cadastrar();
   }
 
-  Widget _buildSelecaoPlanos() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text('Escolha seu plano', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 8),
-        if (_carregandoPlanos)
-          const Center(
-            child: Padding(padding: EdgeInsets.all(12), child: CircularProgressIndicator()),
-          )
-        else if (_erroPlanos.isNotEmpty)
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.orange.shade50,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.orange.shade200),
-            ),
-            child: Text(_erroPlanos, style: const TextStyle(fontSize: 13)),
-          )
-        else
-          ..._planos.map(_buildPlanoCard),
-      ],
-    );
-  }
-
-  Widget _buildPlanoCard(PlanoPublico plano) {
-    final selecionado = _planoSelecionado?.id == plano.id;
-    final detalhes = <String>[
-      if (plano.diasTrial != null) '${plano.diasTrial} dias de teste grátis',
-      if (plano.limiteMotoristas != null) 'Até ${plano.limiteMotoristas} motorista(s)',
-      ...plano.recursos.take(3),
-    ];
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(10),
-        onTap: () => setState(() => _planoSelecionado = plano),
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: selecionado ? Theme.of(context).colorScheme.primary : Colors.grey.shade300,
-              width: selecionado ? 2 : 1,
-            ),
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(
-                selecionado ? Icons.radio_button_checked : Icons.radio_button_off,
-                color: selecionado ? Theme.of(context).colorScheme.primary : Colors.grey,
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(plano.nome, style: const TextStyle(fontWeight: FontWeight.bold)),
-                    Text(
-                      _formatarPreco(plano.precoMensal),
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.primary,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    if (plano.descricao.isNotEmpty)
-                      Text(plano.descricao, style: const TextStyle(fontSize: 12)),
-                    for (final detalhe in detalhes)
-                      Text('• $detalhe', style: const TextStyle(fontSize: 12)),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+  /// Despacha a ação do botão principal conforme o tipo de cadastro:
+  /// vinculado cadastra direto; autônomo segue para a escolha de plano.
+  void _submeter() {
+    if (_vinculado) {
+      _cadastrar();
+    } else {
+      _irParaPlanos();
+    }
   }
 
   @override
@@ -442,11 +336,6 @@ class _CadastroScreenState extends State<CadastroScreen> {
                 textInputAction: TextInputAction.next,
               ),
               const SizedBox(height: 16),
-              // Seleção de plano é exclusiva do autônomo (inline).
-              if (!_vinculado) ...[
-                _buildSelecaoPlanos(),
-                const SizedBox(height: 16),
-              ],
               TextFormField(
                 controller: _emailCtrl,
                 decoration: const InputDecoration(
@@ -486,21 +375,22 @@ class _CadastroScreenState extends State<CadastroScreen> {
                 obscureText: !_showConfirmPass,
                 validator: _validateConfirmSenha,
                 textInputAction: TextInputAction.done,
-                onFieldSubmitted: (_) => _cadastrar(),
+                onFieldSubmitted: (_) => _submeter(),
               ),
               const SizedBox(height: 24),
               SizedBox(
                 width: double.infinity,
                 height: 48,
                 child: ElevatedButton(
-                  onPressed: _loading ? null : _cadastrar,
+                  onPressed: _loading ? null : _submeter,
                   child: _loading
                       ? const SizedBox(
                           height: 20,
                           width: 20,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : const Text('CADASTRAR', style: TextStyle(fontSize: 16)),
+                      : Text(_vinculado ? 'CADASTRAR' : 'CONTINUAR',
+                          style: const TextStyle(fontSize: 16)),
                 ),
               ),
             ],
