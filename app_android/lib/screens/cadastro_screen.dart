@@ -104,8 +104,8 @@ class _CadastroScreenState extends State<CadastroScreen> {
   }
 
   String? _validarCpfDigitos(String cpf) {
-    if (cpf.length != 11) return 'CPF deve ter 11 numeros';
-    if (RegExp(r'^(\d)\1{10}$').hasMatch(cpf)) return 'CPF invalido';
+    if (cpf.length != 11) return 'CPF deve ter 11 números';
+    if (RegExp(r'^(\d)\1{10}$').hasMatch(cpf)) return 'CPF inválido';
 
     int sum = 0;
     for (int i = 0; i < 9; i++) {
@@ -113,7 +113,7 @@ class _CadastroScreenState extends State<CadastroScreen> {
     }
     int rest = (sum * 10) % 11;
     if (rest == 10) rest = 0;
-    if (rest != int.parse(cpf[9])) return 'CPF invalido';
+    if (rest != int.parse(cpf[9])) return 'CPF inválido';
 
     sum = 0;
     for (int i = 0; i < 10; i++) {
@@ -121,14 +121,14 @@ class _CadastroScreenState extends State<CadastroScreen> {
     }
     rest = (sum * 10) % 11;
     if (rest == 10) rest = 0;
-    if (rest != int.parse(cpf[10])) return 'CPF invalido';
+    if (rest != int.parse(cpf[10])) return 'CPF inválido';
 
     return null;
   }
 
   String? _validarCnpjDigitos(String cnpj) {
-    if (cnpj.length != 14) return 'CNPJ deve ter 14 numeros';
-    if (RegExp(r'^(\d)\1{13}$').hasMatch(cnpj)) return 'CNPJ invalido';
+    if (cnpj.length != 14) return 'CNPJ deve ter 14 números';
+    if (RegExp(r'^(\d)\1{13}$').hasMatch(cnpj)) return 'CNPJ inválido';
 
     int calcularDigito(String base, List<int> pesos) {
       var soma = 0;
@@ -141,19 +141,19 @@ class _CadastroScreenState extends State<CadastroScreen> {
 
     const pesos1 = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
     const pesos2 = [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
-    if (calcularDigito(cnpj, pesos1) != int.parse(cnpj[12])) return 'CNPJ invalido';
-    if (calcularDigito(cnpj, pesos2) != int.parse(cnpj[13])) return 'CNPJ invalido';
+    if (calcularDigito(cnpj, pesos1) != int.parse(cnpj[12])) return 'CNPJ inválido';
+    if (calcularDigito(cnpj, pesos2) != int.parse(cnpj[13])) return 'CNPJ inválido';
     return null;
   }
 
   String? _validateDocumento(String? v) {
     if (v == null || v.trim().isEmpty) {
-      return _temCodigoConvite ? 'CPF e obrigatorio' : 'Documento e obrigatorio';
+      return _temCodigoConvite ? 'CPF é obrigatório' : 'Documento é obrigatório';
     }
     final documento = v.trim().replaceAll(RegExp(r'\D'), '');
     if (_temCodigoConvite || documento.length == 11) return _validarCpfDigitos(documento);
     if (documento.length == 14) return _validarCnpjDigitos(documento);
-    return 'Documento deve ter 11 ou 14 numeros';
+    return 'Documento deve ter 11 ou 14 números';
   }
 
   String? _validateEmail(String? v) {
@@ -384,26 +384,13 @@ class _CadastroScreenState extends State<CadastroScreen> {
               TextFormField(
                 controller: _placaCtrl,
                 decoration: const InputDecoration(
-                  labelText: 'Placa do Veículo (AAA-0A00)',
+                  labelText: 'Placa do Veículo (AAA-0A00 ou AAA0A00)',
                   prefixIcon: Icon(Icons.directions_car),
                 ),
                 validator: _validatePlaca,
                 textInputAction: TextInputAction.next,
                 textCapitalization: TextCapitalization.characters,
                 inputFormatters: const [Mascaras.placa],
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _cpfCtrl,
-                decoration: InputDecoration(
-                  labelText: _temCodigoConvite ? 'CPF (Apenas numeros)' : 'Documento CPF/CNPJ (Apenas numeros)',
-                  prefixIcon: const Icon(Icons.badge),
-                  helperText: _temCodigoConvite ? null : 'Autonomo pode usar CPF ou CNPJ/MEI para cobranca.',
-                ),
-                keyboardType: TextInputType.number,
-                inputFormatters: [_temCodigoConvite ? Mascaras.cpf : Mascaras.documento],
-                validator: _validateDocumento,
-                textInputAction: TextInputAction.next,
               ),
               const SizedBox(height: 16),
               TextFormField(
@@ -432,6 +419,19 @@ class _CadastroScreenState extends State<CadastroScreen> {
                   'Motorista autônomo? Deixe este campo em branco.',
                   style: TextStyle(fontSize: 12, color: Colors.grey),
                 ),
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _cpfCtrl,
+                decoration: InputDecoration(
+                  labelText: _temCodigoConvite ? 'CPF (apenas números)' : 'Documento CPF/CNPJ (apenas números)',
+                  prefixIcon: const Icon(Icons.badge),
+                  helperText: _temCodigoConvite ? null : 'Autônomo pode usar CPF ou CNPJ/MEI para cobrança.',
+                ),
+                keyboardType: TextInputType.number,
+                inputFormatters: [_temCodigoConvite ? Mascaras.cpf : Mascaras.documento],
+                validator: _validateDocumento,
+                textInputAction: TextInputAction.next,
               ),
               const SizedBox(height: 16),
               _buildSelecaoPlanos(),
