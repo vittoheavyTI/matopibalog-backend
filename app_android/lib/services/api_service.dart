@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config.dart';
 import '../models/plano_publico.dart';
@@ -758,6 +760,49 @@ class ApiService {
     } catch (e) {
       AppLogger.error('ApiService', 'POST documento frete exception', e);
       return {'ok': false, 'message': _mensagemErroRede(e)};
+    }
+  }
+
+  /// Busca a signed URL (TTL curto) de um documento do frete no bucket privado.
+  /// Reaproveita GET /fretes/:id/documentos/:docId/url. Retorna a URL ou null.
+  static Future<String?> getDocumentoUrl(String freteId, String docId) async {
+    try {
+      final response = await http
+          .get(Uri.parse('$_baseUrl/fretes/$freteId/documentos/$docId/url'),
+              headers: await _getHeaders())
+          .timeout(_timeoutGet);
+      AppLogger.api('ApiService', 'GET /fretes/$freteId/documentos/$docId/url', response.statusCode);
+      if (response.statusCode == 200) {
+        final body = jsonDecode(response.body) as Map<String, dynamic>;
+        return body['url']?.toString();
+      }
+      return null;
+    } catch (e) {
+      AppLogger.error('ApiService', 'GET documento url exception', e);
+      return null;
+    }
+  }
+
+  /// Baixa o conteúdo de uma signed URL para um arquivo temporário e retorna o
+  /// caminho local (usado para abrir/compartilhar o documento). A signed URL já
+  /// carrega a autenticação no próprio link, então o GET vai SEM headers de auth.
+  /// Retorna null em falha.
+  static Future<String?> baixarDocumentoParaTemp(String url, String nomeArquivo) async {
+    try {
+      final response = await http.get(Uri.parse(url)).timeout(_timeoutUpload);
+      if (response.statusCode != 200) {
+        AppLogger.warning('ApiService', 'download documento status ${response.statusCode}');
+        return null;
+      }
+      final dir = await getTemporaryDirectory();
+      // Sanitiza o nome para não escapar da pasta temp nem quebrar o path.
+      final nomeSeguro = nomeArquivo.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
+      final file = File('${dir.path}/$nomeSeguro');
+      await file.writeAsBytes(response.bodyBytes);
+      return file.path;
+    } catch (e) {
+      AppLogger.error('ApiService', 'download documento temp exception', e);
+      return null;
     }
   }
 

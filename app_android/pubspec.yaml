@@ -20,6 +20,11 @@ dependencies:
   # Seleção de documentos fiscais do frete (PDF/XML/imagem) no detalhe do frete.
   # image_picker só pega imagens/galeria; file_picker cobre PDF e XML.
   file_picker: ^8.1.2
+  # Abrir/compartilhar documentos do frete: baixa o arquivo (signed URL do
+  # bucket privado) para um temp com path_provider e abre a folha de
+  # compartilhamento nativa (WhatsApp, visualizadores etc.). path_provider já
+  # está declarado abaixo.
+  share_plus: ^10.1.4
   uuid: ^4.3.3
   intl: ^0.18.1
   connectivity_plus: ^5.0.2
