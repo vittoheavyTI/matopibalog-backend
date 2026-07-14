@@ -1270,9 +1270,13 @@ export const GerenciamentoViagens: React.FC = () => {
               {mFretes.length === 0 && mDesp.length === 0 && mAbs.length === 0 && mVales.length === 0 &&
                 <p className="text-gray-600 text-center py-8">Nenhum lançamento.</p>}
 
-              {/* Fretes ordenados: ativos/pendentes no topo, depois finalizados, do mais recente para o mais antigo */}
+              {/* Área OPERACIONAL: só fretes ativos/pendentes. Finalizados e cancelados
+                  não aparecem aqui — o histórico fica no Resumo do Motorista e no filtro
+                  "Finalizado" da lista geral. É também defesa contra a corrida
+                  loadData()×loadMotoristaData() no mount com ?motorista=<id>, que pode
+                  deixar finalizados (da carga global não filtrada) no estado. Display-only. */}
               {[...mFretes]
-                .filter((f: any) => f.status !== 'cancelado')
+                .filter((f: any) => f.status !== 'cancelado' && f.status !== 'finalizado')
                 .sort((a: any, b: any) => {
                   const prioA = a.status === 'ativo' || a.status === 'pendente' ? 0 : 1;
                   const prioB = b.status === 'ativo' || b.status === 'pendente' ? 0 : 1;
