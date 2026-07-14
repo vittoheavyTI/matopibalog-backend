@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Bell, Check, CheckCheck, Loader2, X } from 'lucide-react';
 import api from '../api';
+import { useAuth } from '../contexts/AuthContext';
 
 // Evento global do browser disparado quando chega notificação nova (o contador
 // sobe no polling). Páginas com listas relevantes (Dashboard, Gerenciamento de
@@ -18,6 +20,8 @@ type Notificacao = {
 };
 
 export const NotificacoesDropdown: React.FC = () => {
+  const { user } = useAuth();
+  const [searchParams] = useSearchParams();
   const [aberto, setAberto] = useState(false);
   const [notificacoes, setNotificacoes] = useState<Notificacao[]>([]);
   const [naoLidas, setNaoLidas] = useState(0);
@@ -28,10 +32,15 @@ export const NotificacoesDropdown: React.FC = () => {
   // Ultimo contador conhecido. null enquanto nao houve o primeiro carregamento,
   // para nao disparar toast ao abrir o painel com notificacoes antigas.
   const contadorAnterior = useRef<number | null>(null);
+  const empresaIdUrl = searchParams.get('empresa_id') || '';
+  const feedEmpresaSelecionada = user?.is_super_admin === true && !!empresaIdUrl;
 
   const carregarContador = async () => {
     try {
-      const { data } = await api.get('/notificacoes/nao-lidas/count');
+      const config = feedEmpresaSelecionada
+        ? { params: { empresa_id: empresaIdUrl } }
+        : undefined;
+      const { data } = await api.get('/notificacoes/nao-lidas/count', config);
       const novo = Number(data?.count) || 0;
       // So alerta quando SUBIU em relacao ao ultimo valor conhecido (chegou algo
       // novo). Como o toast so dispara no aumento, o polling repetido com o mesmo
@@ -52,7 +61,10 @@ export const NotificacoesDropdown: React.FC = () => {
     setCarregando(true);
     setErro('');
     try {
-      const { data } = await api.get('/notificacoes', { params: { limite: 20 } });
+      const params = feedEmpresaSelecionada
+        ? { limite: 20, empresa_id: empresaIdUrl }
+        : { limite: 20 };
+      const { data } = await api.get('/notificacoes', { params });
       setNotificacoes(Array.isArray(data) ? data : []);
     } catch {
       setErro('Não foi possível carregar as notificações.');
@@ -62,12 +74,13 @@ export const NotificacoesDropdown: React.FC = () => {
   };
 
   useEffect(() => {
+    contadorAnterior.current = null;
     carregarContador();
     // 15s: aproxima o painel do tempo real sem sobrecarregar (endpoint leve de
     // contagem). Antes era 60s, o que dava a sensacao de atraso (~35s).
     const timer = window.setInterval(carregarContador, 15_000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [feedEmpresaSelecionada, empresaIdUrl]);
 
   // Auto-dismiss do toast (3,5s). Cada novo alerta reinicia o timer.
   useEffect(() => {
@@ -78,7 +91,7 @@ export const NotificacoesDropdown: React.FC = () => {
 
   useEffect(() => {
     if (aberto) carregarLista();
-  }, [aberto]);
+  }, [aberto, feedEmpresaSelecionada, empresaIdUrl]);
 
   useEffect(() => {
     const fecharAoClicarFora = (event: MouseEvent) => {
@@ -89,6 +102,7 @@ export const NotificacoesDropdown: React.FC = () => {
   }, []);
 
   const marcarLida = async (id: string) => {
+    if (feedEmpresaSelecionada) return;
     try {
       await api.patch(`/notificacoes/${id}/lida`);
       setNotificacoes((atuais) => atuais.map((item) =>
@@ -104,6 +118,7 @@ export const NotificacoesDropdown: React.FC = () => {
   };
 
   const marcarTodas = async () => {
+    if (feedEmpresaSelecionada) return;
     try {
       await api.patch('/notificacoes/lidas');
       setNotificacoes((atuais) => atuais.map((item) => ({ ...item, lida: true })));
@@ -164,9 +179,13 @@ export const NotificacoesDropdown: React.FC = () => {
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
             <div>
               <p className="font-bold text-gray-900">Notificações</p>
-              <p className="text-xs text-gray-500">{naoLidas} não lida{naoLidas === 1 ? '' : 's'}</p>
+              <p className="text-xs text-gray-500">
+                {feedEmpresaSelecionada
+                  ? `Feed da empresa selecionada · ${naoLidas} não lida${naoLidas === 1 ? '' : 's'}`
+                  : `${naoLidas} não lida${naoLidas === 1 ? '' : 's'}`}
+              </p>
             </div>
-            {naoLidas > 0 && (
+            {naoLidas > 0 && !feedEmpresaSelecionada && (
               <button type="button" onClick={marcarTodas} className="flex items-center gap-1 text-xs font-semibold text-green-700 hover:underline">
                 <CheckCheck size={15} /> Marcar todas
               </button>
@@ -188,7 +207,7 @@ export const NotificacoesDropdown: React.FC = () => {
                   <p className="text-sm text-gray-600 mt-0.5">{item.mensagem}</p>
                   <p className="text-xs text-gray-400 mt-1">{dataAmigavel(item.created_at)}</p>
                 </div>
-                {!item.lida && (
+                {!item.lida && !feedEmpresaSelecionada && (
                   <button type="button" title="Marcar como lida" onClick={() => marcarLida(item.id)} className="self-start p-1.5 text-green-700 hover:bg-green-100 rounded-lg">
                     <Check size={16} />
                   </button>
