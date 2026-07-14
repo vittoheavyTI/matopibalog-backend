@@ -328,18 +328,72 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
     );
   }
 
-  // Anexa um documento (PDF/XML/imagem) ao frete: escolhe tipo, seleciona o
-  // arquivo e envia. Bucket privado no backend; visualização é pelo painel.
-  Future<void> _anexarDocumento() async {
-    final tipo = await _escolherTipoDocumento();
-    if (tipo == null || !mounted) return;
+  // Origem do arquivo do documento: câmera (foto na hora), galeria ou arquivo
+  // do dispositivo/drive (PDF/XML/imagem). Retorna 'camera'|'galeria'|'arquivo'
+  // ou null se o usuário fechar a folha.
+  Future<String?> _escolherOrigemDocumento() {
+    return showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text('Anexar documento', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined),
+              title: const Text('Tirar foto agora'),
+              onTap: () => Navigator.pop(ctx, 'camera'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Escolher da galeria'),
+              onTap: () => Navigator.pop(ctx, 'galeria'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.attach_file),
+              title: const Text('Anexar arquivo (PDF, XML ou imagem)'),
+              onTap: () => Navigator.pop(ctx, 'arquivo'),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
 
-    FilePickerResult? escolhido;
+  // Captura (câmera) ou seleciona (galeria) uma imagem e retorna o caminho, ou
+  // null se cancelar/der erro. Mesmos limites das demais telas de foto do app.
+  Future<String?> _selecionarImagemDocumento(ImageSource source) async {
     try {
-      escolhido = await FilePicker.platform.pickFiles(
+      final picked = await ImagePicker().pickImage(
+        source: source, imageQuality: 75, maxWidth: 1800, maxHeight: 1800,
+      );
+      return picked?.path;
+    } catch (e) {
+      AppLogger.error('DetalheFrete', 'image_picker documento', e);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(source == ImageSource.camera
+              ? 'Erro ao acessar a câmera.'
+              : 'Erro ao acessar a galeria.')),
+        );
+      }
+      return null;
+    }
+  }
+
+  // Seleciona um arquivo do dispositivo/drive (PDF, XML ou imagem) via
+  // file_picker — mesma allowlist do backend. Retorna o caminho ou null.
+  Future<String?> _selecionarArquivoDocumento() async {
+    try {
+      final escolhido = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: const ['pdf', 'xml', 'jpg', 'jpeg', 'png', 'webp'],
       );
+      return escolhido?.files.single.path;
     } catch (e) {
       AppLogger.error('DetalheFrete', 'file_picker', e);
       if (mounted) {
@@ -347,11 +401,13 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
           const SnackBar(content: Text('Não foi possível abrir o seletor de arquivos.')),
         );
       }
-      return;
+      return null;
     }
-    final caminho = escolhido?.files.single.path;
-    if (caminho == null) return; // usuário cancelou
+  }
 
+  // Envia o documento selecionado para o frete e atualiza a lista. Reaproveitado
+  // pelas três origens (câmera/galeria/arquivo).
+  Future<void> _enviarDocumento(String tipo, String caminho) async {
     setState(() => _enviandoDoc = true);
     final freteId = _frete['id']?.toString() ?? '';
     final res = await ApiService.uploadDocumentoFrete(freteId, tipo, caminho);
@@ -367,6 +423,31 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
         SnackBar(content: Text(res['message']?.toString() ?? 'Erro ao anexar documento.')),
       );
     }
+  }
+
+  // Anexa um documento ao frete: escolhe o tipo (CT-e/MDF-e/NF-e/Outro), depois a
+  // origem (câmera, galeria ou arquivo) e envia. Bucket privado no backend.
+  Future<void> _anexarDocumento() async {
+    final tipo = await _escolherTipoDocumento();
+    if (tipo == null || !mounted) return;
+
+    final origem = await _escolherOrigemDocumento();
+    if (origem == null || !mounted) return;
+
+    String? caminho;
+    switch (origem) {
+      case 'camera':
+        caminho = await _selecionarImagemDocumento(ImageSource.camera);
+        break;
+      case 'galeria':
+        caminho = await _selecionarImagemDocumento(ImageSource.gallery);
+        break;
+      default:
+        caminho = await _selecionarArquivoDocumento();
+    }
+    if (caminho == null || !mounted) return; // cancelou ou erro
+
+    await _enviarDocumento(tipo, caminho);
   }
 
   // Ao tocar num documento: busca a signed URL (bucket privado), baixa para um

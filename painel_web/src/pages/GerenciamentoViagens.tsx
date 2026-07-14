@@ -439,14 +439,20 @@ export const GerenciamentoViagens: React.FC = () => {
     if (!editingFrete && !formData.motorista_id) { alert('Selecione um motorista.'); return; }
     if (!formData.origem || !formData.origem.trim()) { alert('Informe a origem.'); return; }
     if (!formData.destino || !formData.destino.trim()) { alert('Informe o destino.'); return; }
-    const novoFluxoSemFotoInicial = !editingFrete
-      || (editingFrete.status === 'pendente' && !editingFrete.foto_odometro_inicial_path);
-    if (novoFluxoSemFotoInicial && Number(formData.km_inicial) <= 0) {
-      alert('Informe o KM inicial para iniciar o frete.');
+    // Foto e KM inicial são OPCIONAIS na criação pelo painel: o admin abre a viagem
+    // e o frete nasce ATIVO (não enviamos odometro_obrigatorio). Só exigimos foto+KM
+    // quando o admin está ATIVANDO um frete que JÁ está pendente (ex.: criado antes
+    // desta regra, ou upload da foto que falhou) — aí a foto inicial é o que o backend
+    // usa para ativar. O fluxo do app (motorista) não passa por aqui.
+    const ativandoPendenteExistente = !!editingFrete
+      && editingFrete.status === 'pendente'
+      && !editingFrete.foto_odometro_inicial_path;
+    if (ativandoPendenteExistente && Number(formData.km_inicial) <= 0) {
+      alert('Informe o KM inicial para ativar este frete pendente.');
       return;
     }
-    if (novoFluxoSemFotoInicial && !fotoInicial) {
-      alert('Envie a foto do odômetro inicial para iniciar o frete.');
+    if (ativandoPendenteExistente && !fotoInicial) {
+      alert('Envie a foto do odômetro inicial para ativar este frete pendente.');
       return;
     }
     if (fotoInicial && fotoInicial.size > 10 * 1024 * 1024) {
@@ -505,11 +511,13 @@ export const GerenciamentoViagens: React.FC = () => {
         // Na CRIAÇÃO enviamos quem_recebeu (autônomo travado em 'motorista'; vinculado escolhe,
         // default 'proprietario'). O backend ainda força 'motorista' p/ autônomo (defense-in-depth).
         // status continua omitido: o backend o ignora na criação (insert não inclui o campo).
+        // NÃO enviamos odometro_obrigatorio: o frete criado pelo painel nasce ATIVO (foto/KM
+        // inicial opcionais). Se o admin anexar a foto, ela é enviada abaixo e fica registrada,
+        // sem prender o frete em 'pendente'.
         const { status: _statusOmitido, ...payloadCriacao } = payload;
         const criado = await api.post('/fretes', {
           ...payloadCriacao,
           motorista_id: formData.motorista_id,
-          odometro_obrigatorio: true,
         });
         freteId = criado.data.id;
         freteResultante = criado.data;
@@ -1609,12 +1617,12 @@ export const GerenciamentoViagens: React.FC = () => {
                 </div>
               )}
               <div className="grid grid-cols-2 gap-3">
-                <div><label className="block text-xs font-bold text-gray-600 uppercase mb-1">KM Inicial *</label><input type="number" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" value={formData.km_inicial} onChange={e => setFormData({...formData, km_inicial: e.target.value})} placeholder="0" /></div>
+                <div><label className="block text-xs font-bold text-gray-600 uppercase mb-1">KM Inicial {editingFrete && editingFrete.status === 'pendente' && !editingFrete.foto_odometro_inicial_path ? '*' : '(opcional)'}</label><input type="number" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" value={formData.km_inicial} onChange={e => setFormData({...formData, km_inicial: e.target.value})} placeholder="0" /></div>
                 <div><label className="block text-xs font-bold text-gray-600 uppercase mb-1">KM Final</label><input type="number" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" value={formData.km_final} onChange={e => setFormData({...formData, km_final: e.target.value})} placeholder="0" /></div>
               </div>
               <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-3 space-y-2">
                 <label className="text-xs font-bold text-blue-800 uppercase flex items-center">
-                  <Camera size={15} className="mr-1.5" />Foto do odômetro inicial {!editingFrete || !editingFrete.foto_odometro_inicial_path ? '*' : '(substituir)'}
+                  <Camera size={15} className="mr-1.5" />Foto do odômetro inicial {editingFrete?.foto_odometro_inicial_path ? '(substituir)' : (editingFrete && editingFrete.status === 'pendente' ? '*' : '(opcional)')}
                 </label>
                 <input
                   type="file"
@@ -1627,7 +1635,9 @@ export const GerenciamentoViagens: React.FC = () => {
                 ) : editingFrete?.foto_odometro_inicial_path ? (
                   <p className="text-xs font-medium text-green-700">Foto inicial já enviada.</p>
                 ) : (
-                  <p className="text-xs text-blue-700">Obrigatória para ativar o frete. JPEG, PNG ou WebP, até 10 MB.</p>
+                  <p className="text-xs text-blue-700">{editingFrete && editingFrete.status === 'pendente'
+                    ? 'Obrigatória para ativar este frete pendente. JPEG, PNG ou WebP, até 10 MB.'
+                    : 'Opcional. O frete nasce ativo; o motorista registra o odômetro no app quando necessário. JPEG, PNG ou WebP, até 10 MB.'}</p>
                 )}
               </div>
               <div className="grid grid-cols-2 gap-3">
