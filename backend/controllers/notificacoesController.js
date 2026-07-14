@@ -2,6 +2,40 @@ const supabase = require('../config/supabase');
 
 const COLUNAS = 'id, usuario_id, empresa_id, tipo, titulo, mensagem, referencia_tipo, referencia_id, lida, metadata, created_at, read_at';
 
+async function resolverEscopoNotificacoes(req) {
+  if (req.user?.is_super_admin === true && req.impersonating && req.empresa_id) {
+    const { data: admins, error } = await supabase
+      .from('usuarios')
+      .select('id')
+      .eq('empresa_id', req.empresa_id)
+      .eq('tipo', 'admin')
+      .eq('status', 'ativo');
+
+    if (error) throw error;
+
+    return {
+      tipo: 'empresa_admins',
+      empresaId: req.empresa_id,
+      usuarioIds: (admins || []).map((admin) => admin.id).filter(Boolean),
+    };
+  }
+
+  return {
+    tipo: 'usuario',
+    usuarioId: req.user.uid,
+  };
+}
+
+function aplicarEscopoNotificacoes(query, escopo) {
+  if (escopo.tipo === 'empresa_admins') {
+    return query
+      .eq('empresa_id', escopo.empresaId)
+      .in('usuario_id', escopo.usuarioIds);
+  }
+
+  return query.eq('usuario_id', escopo.usuarioId);
+}
+
 function parseFiltroLida(valor) {
   if (valor === undefined) return null;
   if (valor === 'true' || valor === true) return true;
@@ -21,10 +55,14 @@ exports.getAll = async (req, res) => {
     : 50;
 
   try {
-    let query = supabase
+    const escopo = await resolverEscopoNotificacoes(req);
+    if (escopo.tipo === 'empresa_admins' && escopo.usuarioIds.length === 0) {
+      return res.status(200).json([]);
+    }
+
+    let query = aplicarEscopoNotificacoes(supabase
       .from('notificacoes')
-      .select(COLUNAS)
-      .eq('usuario_id', req.user.uid)
+      .select(COLUNAS), escopo)
       .order('created_at', { ascending: false })
       .limit(limite);
 
@@ -41,10 +79,14 @@ exports.getAll = async (req, res) => {
 
 exports.contarNaoLidas = async (req, res) => {
   try {
-    const { count, error } = await supabase
+    const escopo = await resolverEscopoNotificacoes(req);
+    if (escopo.tipo === 'empresa_admins' && escopo.usuarioIds.length === 0) {
+      return res.status(200).json({ count: 0 });
+    }
+
+    const { count, error } = await aplicarEscopoNotificacoes(supabase
       .from('notificacoes')
-      .select('id', { count: 'exact', head: true })
-      .eq('usuario_id', req.user.uid)
+      .select('id', { count: 'exact', head: true }), escopo)
       .eq('lida', false);
     if (error) throw error;
     return res.status(200).json({ count: count || 0 });
