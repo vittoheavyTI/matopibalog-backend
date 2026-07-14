@@ -446,44 +446,68 @@ class _CadastroScreenState extends State<CadastroScreen> {
               ),
               // Seção do administrador — só no fluxo "autônomo com administrador".
               // O admin acessa o PAINEL (web) e recebe uma senha temporária.
+              // Seção do administrador, destacada num card separado dos dados do
+              // autônomo: cabeçalho com ícone + título, texto curto e os campos
+              // dentro. Só muda o visual — controllers/validators inalterados.
               if (_comAdministrador) ...[
                 const SizedBox(height: 24),
                 Container(
                   width: double.infinity,
-                  padding: const EdgeInsets.all(12),
+                  padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: Colors.indigo.shade50,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.indigo.shade100),
+                    color: const Color(0xFF1B5E20).withValues(alpha: 0.06),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFF1B5E20).withValues(alpha: 0.25)),
                   ),
-                  child: const Text(
-                    'Administrador da conta: acessa o painel web. Vamos criar o acesso dele com uma '
-                    'senha temporária, exibida ao final para você repassar.',
-                    style: TextStyle(fontSize: 13),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(Icons.admin_panel_settings_outlined, color: Color(0xFF1B5E20)),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Administrador do painel',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF1B5E20),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Essa pessoa acessará o painel web para acompanhar a conta.',
+                        style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        controller: _adminNomeCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Nome do administrador',
+                          prefixIcon: Icon(Icons.person_outline),
+                        ),
+                        validator: _validateAdminNome,
+                        textInputAction: TextInputAction.next,
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        controller: _adminEmailCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'E-mail do administrador',
+                          prefixIcon: Icon(Icons.alternate_email),
+                          helperText: 'Diferente do seu e-mail. É o login dele no painel.',
+                        ),
+                        keyboardType: TextInputType.emailAddress,
+                        validator: _validateAdminEmail,
+                        textInputAction: TextInputAction.done,
+                        onFieldSubmitted: (_) => _submeter(),
+                      ),
+                    ],
                   ),
-                ),
-                const SizedBox(height: 16),
-                TextFormField(
-                  controller: _adminNomeCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Nome do administrador',
-                    prefixIcon: Icon(Icons.person_outline),
-                  ),
-                  validator: _validateAdminNome,
-                  textInputAction: TextInputAction.next,
-                ),
-                const SizedBox(height: 16),
-                TextFormField(
-                  controller: _adminEmailCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'E-mail do administrador',
-                    prefixIcon: Icon(Icons.alternate_email),
-                    helperText: 'Diferente do seu e-mail. É o login dele no painel.',
-                  ),
-                  keyboardType: TextInputType.emailAddress,
-                  validator: _validateAdminEmail,
-                  textInputAction: TextInputAction.done,
-                  onFieldSubmitted: (_) => _submeter(),
                 ),
               ],
               const SizedBox(height: 24),

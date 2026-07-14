@@ -5,6 +5,7 @@ import '../services/app_logger.dart';
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:share_plus/share_plus.dart';
 
 class DetalheViagemScreen extends StatefulWidget {
   final Map<String, dynamic> frete;
@@ -21,6 +22,9 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
   List<dynamic> _vales = [];
   List<dynamic> _documentos = [];
   bool _enviandoDoc = false;
+  // Id do documento cujo download (para abrir/compartilhar) está em andamento,
+  // para mostrar o spinner só naquela linha e evitar toques repetidos.
+  String? _abrindoDocId;
   bool _loading = true;
   bool _finalizando = false;
   String _error = '';
@@ -365,6 +369,54 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
     }
   }
 
+  // Ao tocar num documento: busca a signed URL (bucket privado), baixa para um
+  // arquivo temporário e abre a folha de compartilhamento nativa (WhatsApp,
+  // visualizador de PDF/imagem etc.). Não altera o anexo já existente.
+  Future<void> _abrirCompartilharDocumento(Map<String, dynamic> doc) async {
+    if (_abrindoDocId != null) return; // já há um download em andamento
+    final docId = doc['id']?.toString() ?? '';
+    if (docId.isEmpty) return;
+    final freteId = _frete['id']?.toString() ?? '';
+
+    setState(() => _abrindoDocId = docId);
+    try {
+      final url = await ApiService.getDocumentoUrl(freteId, docId);
+      if (!mounted) return;
+      if (url == null || url.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Não foi possível gerar o link do documento.')),
+        );
+        return;
+      }
+
+      final nome = doc['nome_arquivo']?.toString();
+      final nomeArquivo = (nome != null && nome.trim().isNotEmpty) ? nome.trim() : 'documento_$docId';
+      final caminho = await ApiService.baixarDocumentoParaTemp(url, nomeArquivo);
+      if (!mounted) return;
+      if (caminho == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Não foi possível baixar o documento.')),
+        );
+        return;
+      }
+
+      final mime = doc['mime']?.toString();
+      await Share.shareXFiles(
+        [XFile(caminho, mimeType: mime, name: nomeArquivo)],
+        subject: nomeArquivo,
+      );
+    } catch (e) {
+      AppLogger.error('DetalheFrete', 'abrir/compartilhar documento', e);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Não foi possível abrir o documento.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _abrindoDocId = null);
+    }
+  }
+
   Widget _secaoDocumentos() {
     IconData iconePorMime(String? mime) {
       if (mime == null) return Icons.insert_drive_file_outlined;
@@ -412,13 +464,20 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
             else
               ..._documentos.map((d) {
                 final m = d as Map<String, dynamic>;
+                final docId = m['id']?.toString() ?? '';
+                final abrindo = _abrindoDocId == docId;
                 return ListTile(
                   contentPadding: EdgeInsets.zero,
                   dense: true,
                   leading: Icon(iconePorMime(m['mime']?.toString())),
                   title: Text(m['nome_arquivo']?.toString() ?? rotuloTipo(m['tipo']?.toString())),
                   subtitle: Text(rotuloTipo(m['tipo']?.toString())),
-                  trailing: const Icon(Icons.check_circle, color: Colors.green, size: 18),
+                  trailing: abrindo
+                      ? const SizedBox(
+                          height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.ios_share, color: Color(0xFF1B5E20), size: 20),
+                  // Um download por vez: desabilita o toque enquanto outro abre.
+                  onTap: _abrindoDocId != null ? null : () => _abrirCompartilharDocumento(m),
                 );
               }),
             const SizedBox(height: 6),
@@ -434,7 +493,7 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
             ),
             Padding(
               padding: const EdgeInsets.only(top: 6),
-              child: Text('PDF, XML ou imagem. Visualização/download pelo painel.',
+              child: Text('PDF, XML ou imagem. Toque no documento para abrir ou compartilhar.',
                   style: TextStyle(color: Colors.grey.shade500, fontSize: 11)),
             ),
           ],
