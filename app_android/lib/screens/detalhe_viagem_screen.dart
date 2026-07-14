@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../services/api_service.dart';
 import '../services/app_logger.dart';
+import '../services/document_scanner_service.dart';
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
@@ -328,8 +329,8 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
     );
   }
 
-  // Origem do arquivo do documento: câmera (foto na hora), galeria ou arquivo
-  // do dispositivo/drive (PDF/XML/imagem). Retorna 'camera'|'galeria'|'arquivo'
+  // Origem do arquivo do documento: scanner, câmera (foto na hora), galeria ou arquivo
+  // do dispositivo/drive (PDF/XML/imagem).
   // ou null se o usuário fechar a folha.
   Future<String?> _escolherOrigemDocumento() {
     return showModalBottomSheet<String>(
@@ -341,6 +342,11 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
             const Padding(
               padding: EdgeInsets.all(16),
               child: Text('Anexar documento', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            ),
+            ListTile(
+              leading: const Icon(Icons.document_scanner_outlined),
+              title: const Text('Escanear documento'),
+              onTap: () => Navigator.pop(ctx, 'scan'),
             ),
             ListTile(
               leading: const Icon(Icons.photo_camera_outlined),
@@ -405,28 +411,67 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
     }
   }
 
-  // Envia o documento selecionado para o frete e atualiza a lista. Reaproveitado
-  // pelas três origens (câmera/galeria/arquivo).
-  Future<void> _enviarDocumento(String tipo, String caminho) async {
+  // Escaneia como PDF quando o plugin suportar. Cancelamento volta sem mensagem.
+  Future<List<String>?> _escanearDocumento() async {
+    if (mounted) setState(() => _enviandoDoc = true);
+    final resultado = await DocumentScannerService.escanearDocumento(
+      maxPaginas: 10,
+      comoPdf: true,
+    );
+    if (!mounted) return null;
+    setState(() => _enviandoDoc = false);
+
+    if (resultado.cancelado) return null;
+    if (!resultado.ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(resultado.mensagem ??
+              'Não foi possível escanear o documento. Use câmera, galeria ou arquivo.'),
+        ),
+      );
+      return null;
+    }
+    return resultado.caminhos;
+  }
+
+  Future<void> _enviarDocumentos(String tipo, List<String> caminhos) async {
+    if (caminhos.isEmpty) return;
     setState(() => _enviandoDoc = true);
     final freteId = _frete['id']?.toString() ?? '';
-    final res = await ApiService.uploadDocumentoFrete(freteId, tipo, caminho);
+
+    var enviados = 0;
+    String? ultimaMensagemErro;
+    for (final caminho in caminhos) {
+      final res = await ApiService.uploadDocumentoFrete(freteId, tipo, caminho);
+      if (!mounted) return;
+      if (res['ok'] == true) {
+        enviados++;
+      } else {
+        ultimaMensagemErro = res['message']?.toString() ?? 'Erro ao anexar documento.';
+      }
+    }
+
     if (!mounted) return;
     setState(() => _enviandoDoc = false);
-    if (res['ok'] == true) {
+    if (enviados == caminhos.length) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Documento anexado.')),
+        SnackBar(content: Text(enviados == 1 ? 'Documento anexado.' : '$enviados documentos anexados.')),
+      );
+      _fetchDetalhes();
+    } else if (enviados > 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$enviados de ${caminhos.length} documentos anexados. Reenvie os demais.')),
       );
       _fetchDetalhes();
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(res['message']?.toString() ?? 'Erro ao anexar documento.')),
+        SnackBar(content: Text(ultimaMensagemErro ?? 'Erro ao anexar documento.')),
       );
     }
   }
 
   // Anexa um documento ao frete: escolhe o tipo (CT-e/MDF-e/NF-e/Outro), depois a
-  // origem (câmera, galeria ou arquivo) e envia. Bucket privado no backend.
+  // origem (scanner, câmera, galeria ou arquivo) e envia. Bucket privado no backend.
   Future<void> _anexarDocumento() async {
     final tipo = await _escolherTipoDocumento();
     if (tipo == null || !mounted) return;
@@ -434,20 +479,26 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
     final origem = await _escolherOrigemDocumento();
     if (origem == null || !mounted) return;
 
-    String? caminho;
+    List<String>? caminhos;
     switch (origem) {
+      case 'scan':
+        caminhos = await _escanearDocumento();
+        break;
       case 'camera':
-        caminho = await _selecionarImagemDocumento(ImageSource.camera);
+        final caminho = await _selecionarImagemDocumento(ImageSource.camera);
+        if (caminho != null) caminhos = [caminho];
         break;
       case 'galeria':
-        caminho = await _selecionarImagemDocumento(ImageSource.gallery);
+        final caminho = await _selecionarImagemDocumento(ImageSource.gallery);
+        if (caminho != null) caminhos = [caminho];
         break;
       default:
-        caminho = await _selecionarArquivoDocumento();
+        final caminho = await _selecionarArquivoDocumento();
+        if (caminho != null) caminhos = [caminho];
     }
-    if (caminho == null || !mounted) return; // cancelou ou erro
+    if (caminhos == null || caminhos.isEmpty || !mounted) return; // cancelou ou erro
 
-    await _enviarDocumento(tipo, caminho);
+    await _enviarDocumentos(tipo, caminhos);
   }
 
   // Ao tocar num documento: busca a signed URL (bucket privado), baixa para um
@@ -568,7 +619,7 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
                 icon: _enviandoDoc
                     ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2))
                     : const Icon(Icons.attach_file),
-                label: Text(_enviandoDoc ? 'Enviando…' : 'Anexar documento'),
+                label: Text(_enviandoDoc ? 'Processando…' : 'Anexar documento'),
                 onPressed: _enviandoDoc ? null : _anexarDocumento,
               ),
             ),
