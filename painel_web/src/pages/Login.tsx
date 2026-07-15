@@ -85,6 +85,11 @@ export const Login: React.FC = () => {
   // Mensagem exibida quando a sessão anterior foi encerrada (inatividade, expiração
   // ou token inválido). Motivo lido de sessionStorage via consumirMotivoSessao().
   const [sessionNotice, setSessionNotice] = useState('');
+  // Login barrado por e-mail não confirmado (backend responde 403 { naoConfirmado }).
+  // Nesse caso oferecemos o reenvio do link de confirmação — não é senha errada.
+  const [naoConfirmado, setNaoConfirmado] = useState(false);
+  const [reenviando, setReenviando] = useState(false);
+  const [reenvioMsg, setReenvioMsg] = useState('');
 
   // Modal esqueceu a senha
   const [showForgotModal, setShowForgotModal] = useState(false);
@@ -126,6 +131,8 @@ export const Login: React.FC = () => {
     e.preventDefault();
     setLoadingLocal(true);
     setError('');
+    setNaoConfirmado(false);
+    setReenvioMsg('');
     try {
       const response = await api.post('/auth/login', { email, senha: password });
       const { user: rawUser, token } = response.data;
@@ -134,9 +141,32 @@ export const Login: React.FC = () => {
       login({ ...rawUser, fotoUrl: rawUser.foto_url });
       navigate('/');
     } catch (err: any) {
-      setError(mensagemErro(err, 'Não foi possível entrar. Verifique e-mail e senha.'));
+      // 403 { naoConfirmado } = e-mail ainda não confirmado (não é senha errada):
+      // orientamos a confirmar e oferecemos o reenvio, sem tratar como credencial.
+      if (err.response?.status === 403 && err.response?.data?.naoConfirmado) {
+        setNaoConfirmado(true);
+        setError(err.response.data.message || 'Confirme seu e-mail antes de entrar.');
+      } else {
+        setError(mensagemErro(err, 'Não foi possível entrar. Verifique e-mail e senha.'));
+      }
     } finally {
       setLoadingLocal(false);
+    }
+  };
+
+  // Reenvia o e-mail de confirmação para o e-mail digitado no login. Resposta
+  // genérica do backend (não revela se o e-mail existe); aqui só damos o feedback.
+  const handleReenviarConfirmacao = async () => {
+    if (!email.trim()) return;
+    setReenviando(true);
+    setReenvioMsg('');
+    try {
+      await api.post('/auth/reenviar-confirmacao', { email });
+      setReenvioMsg('Se houver um cadastro pendente, reenviamos o link de confirmação.');
+    } catch {
+      setReenvioMsg('Não foi possível reenviar agora. Tente novamente em instantes.');
+    } finally {
+      setReenviando(false);
     }
   };
 
@@ -228,6 +258,24 @@ export const Login: React.FC = () => {
             {error && (
               <div style={{ background: '#fef2f2', color: '#dc2626', padding: '12px', borderRadius: '8px', fontSize: '14px', textAlign: 'center', marginBottom: '16px' }}>
                 {error}
+              </div>
+            )}
+
+            {/* E-mail não confirmado: oferece o reenvio do link de confirmação */}
+            {naoConfirmado && (
+              <div style={{ background: '#eff6ff', color: '#1e40af', border: '1px solid #bfdbfe', padding: '12px', borderRadius: '8px', fontSize: '14px', marginBottom: '16px' }}>
+                <p style={{ margin: '0 0 8px' }}>
+                  Confirme seu e-mail antes de entrar. Não recebeu o link?
+                </p>
+                {reenvioMsg && <p style={{ margin: '0 0 8px', color: '#1d4ed8' }}>{reenvioMsg}</p>}
+                <button
+                  type="button"
+                  onClick={handleReenviarConfirmacao}
+                  disabled={reenviando}
+                  style={{ width: '100%', height: '40px', background: reenviando ? '#9ca3af' : '#2563eb', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 600, fontSize: '14px', cursor: reenviando ? 'not-allowed' : 'pointer' }}
+                >
+                  {reenviando ? 'Reenviando...' : 'Reenviar confirmação'}
+                </button>
               </div>
             )}
 

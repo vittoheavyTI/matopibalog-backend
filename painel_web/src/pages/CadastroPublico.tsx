@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
-import { Truck, User, Building2, Mail, Lock, Phone, X, Eye, EyeOff } from 'lucide-react';
+import { Truck, User, Building2, Mail, Lock, Phone, Eye, EyeOff } from 'lucide-react';
 import api from '../api';
 import { maskCNPJ, maskPhone } from '../utils/masks';
 
@@ -48,18 +48,16 @@ export const CadastroPublico: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [reenviando, setReenviando] = useState(false);
+  const [reenvioMsg, setReenvioMsg] = useState('');
   const [catalogo, setCatalogo] = useState<PlanoOpcao[]>([]);
   const [form, setForm] = useState<FormData>({
     nome: '', email: '', senha: '', confirmarSenha: '',
     empresa: '', cnpj: '', telefone: '', plano_id: '', plano: 'basico',
   });
-  // Após cadastro concluído (step 3 com success), some sozinho em 4s.
-  // Usuário pode clicar no X para fechar antes.
-  useEffect(() => {
-    if (!success || step !== 3) return;
-    const timer = setTimeout(() => navigate('/login'), 4000);
-    return () => clearTimeout(timer);
-  }, [success, step, navigate]);
+  // Sem auto-redirecionamento: o cadastro NÃO libera acesso imediato. O usuário
+  // precisa confirmar o e-mail antes de entrar, então ele decide quando ir ao
+  // login (ou reenviar a confirmação).
 
   // Carrega o catálogo público e aplica a seleção inicial vinda da URL
   // (?plano_id=<uuid> preferido; ?plano=<alias> legado como fallback).
@@ -139,12 +137,28 @@ export const CadastroPublico: React.FC = () => {
       if (form.plano_id) payload.plano_id = form.plano_id;
       else if (form.plano) payload.plano = form.plano;
       await api.post('/auth/register-empresa', payload);
-      setSuccess('Cadastro realizado com sucesso! Sua conta já está ativa com o período de avaliação — é só fazer login para começar.');
+      setSuccess('Sua conta foi criada.');
       setStep(3);
     } catch (err: any) {
       setError(err.response?.data?.message || 'Erro ao cadastrar. Tente novamente.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Reenvia o e-mail de confirmação para o e-mail do cadastro. Resposta genérica
+  // do backend (não revela se o e-mail existe); aqui só damos o feedback.
+  const handleReenviar = async () => {
+    if (!form.email) return;
+    setReenviando(true);
+    setReenvioMsg('');
+    try {
+      await api.post('/auth/reenviar-confirmacao', { email: form.email });
+      setReenvioMsg('Se houver um cadastro pendente, reenviamos o link de confirmação.');
+    } catch {
+      setReenvioMsg('Não foi possível reenviar agora. Tente novamente em instantes.');
+    } finally {
+      setReenviando(false);
     }
   };
 
@@ -172,16 +186,30 @@ export const CadastroPublico: React.FC = () => {
           )}
 
           {success && (
-            <div className="relative bg-green-50 text-green-700 p-4 pr-10 rounded-lg text-sm mb-4">
-              <button
-                onClick={() => navigate('/login')}
-                aria-label="Ir para o login agora"
-                className="absolute top-2 right-2 p-1 rounded hover:bg-green-100 text-green-700"
-              >
-                <X size={16} />
-              </button>
+            <div className="bg-blue-50 text-blue-800 p-4 rounded-lg text-sm mb-4">
               <p className="font-semibold mb-1">✅ {success}</p>
-              <p className="text-green-600">Você será redirecionado para o login.</p>
+              <p className="mb-2">
+                Enviamos um link de confirmação para <strong>{form.email}</strong>.
+                Confirme seu e-mail antes de entrar — verifique também a caixa de spam.
+              </p>
+              {reenvioMsg && <p className="text-blue-700 mb-2">{reenvioMsg}</p>}
+              <div className="flex gap-3 mt-3">
+                <button
+                  type="button"
+                  onClick={() => navigate('/login')}
+                  className="flex-1 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
+                >
+                  Ir para o login
+                </button>
+                <button
+                  type="button"
+                  onClick={handleReenviar}
+                  disabled={reenviando}
+                  className="flex-1 py-2 border border-blue-300 text-blue-700 rounded-lg font-medium hover:bg-blue-100 disabled:opacity-50 transition-colors"
+                >
+                  {reenviando ? 'Reenviando...' : 'Reenviar e-mail'}
+                </button>
+              </div>
             </div>
           )}
 

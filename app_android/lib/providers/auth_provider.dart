@@ -35,6 +35,9 @@ class AuthProvider extends ChangeNotifier {
   bool _senhaTemporaria = false;
   bool _termosPendentes = false;
   int _termosPendentesCount = 0;
+  // Login barrado por e-mail não confirmado (backend responde 403 { naoConfirmado }).
+  // A tela usa isto para oferecer o reenvio do link — não é senha errada.
+  bool _naoConfirmado = false;
 
   AuthStatus get status => _status;
   String get token => _token;
@@ -48,6 +51,7 @@ class AuthProvider extends ChangeNotifier {
   bool get senhaTemporaria => _senhaTemporaria;
   bool get termosPendentes => _termosPendentes;
   int get termosPendentesCount => _termosPendentesCount;
+  bool get naoConfirmado => _naoConfirmado;
   bool get isLoggedIn => _status == AuthStatus.authenticated;
   bool get isMotorista => _role == 'motorista';
 
@@ -125,6 +129,7 @@ class AuthProvider extends ChangeNotifier {
     AppLogger.action('login_attempt', params: {'email': email});
     _status = AuthStatus.loading;
     _error = '';
+    _naoConfirmado = false;
     notifyListeners();
 
     final res = await ApiService.login(email, senha);
@@ -139,6 +144,11 @@ class AuthProvider extends ChangeNotifier {
         try {
           final body = jsonDecode(res?['_body'] as String? ?? '{}');
           _error = body['message'] ?? body['error'] ?? 'E-mail ou senha incorretos.';
+          // 403 { naoConfirmado } = e-mail ainda não confirmado (não é senha
+          // errada): a tela oferece o reenvio do link de confirmação.
+          if (httpStatus == 403 && body['naoConfirmado'] == true) {
+            _naoConfirmado = true;
+          }
         } catch (_) {
           _error = 'Erro inesperado ao processar resposta do servidor.';
         }

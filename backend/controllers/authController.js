@@ -17,6 +17,41 @@ const supabaseAuth = createClient(
   { auth: { persistSession: false, autoRefreshToken: false } }
 );
 
+// Client ANÔNIMO (anon/public key) — usado só para disparar e-mails transacionais
+// do Auth que NÃO exigem service_role, como o reenvio do e-mail de confirmação de
+// cadastro (resend type:'signup'). Fica null quando SUPABASE_ANON_KEY não está
+// configurada; nesse caso o envio é silenciosamente pulado (não-fatal).
+const supabaseAnon = process.env.SUPABASE_ANON_KEY
+  ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    })
+  : null;
+
+// URL de destino do link de confirmação após o clique. Precisa bater com a
+// Redirect URL cadastrada no Supabase e com FRONTEND_URL no Railway.
+function urlConfirmacao() {
+  return `${process.env.FRONTEND_URL || 'https://matopibalog.com.br'}/confirmado`;
+}
+
+// Envia (ou reenvia) o e-mail de confirmação de cadastro. NÃO-FATAL: qualquer
+// falha é apenas logada — o cadastro segue e o usuário pode pedir o reenvio
+// depois. Usa o client anônimo (resend signup não precisa de service_role).
+async function enviarConfirmacaoEmail(email) {
+  if (!supabaseAnon || !email) return;
+  try {
+    const { error } = await supabaseAnon.auth.resend({
+      type: 'signup',
+      email,
+      options: { emailRedirectTo: urlConfirmacao() },
+    });
+    if (error) {
+      console.error('[auth] Falha ao enviar confirmação de e-mail (não-fatal):', error.message);
+    }
+  } catch (e) {
+    console.error('[auth] Exceção ao enviar confirmação de e-mail (não-fatal):', e.message || e);
+  }
+}
+
 // Normaliza um código de convite para comparação tolerante: maiúsculas, sem
 // espaços e sem traços/separadores. O backend é a defesa principal — aceita o
 // código com ou sem traço, em qualquer caixa, com espaços acidentais.
@@ -210,11 +245,14 @@ exports.register = async (req, res) => {
       empresa_id = novaEmpresa.id;
     }
 
-    // Criar usuário no Supabase Auth
+    // Criar usuário no Supabase Auth.
+    // Auto-confirma SÓ quem entra por convite válido (a empresa é a autorização).
+    // Cadastro self-service (autônomo) nasce NÃO confirmado: precisa confirmar o
+    // e-mail antes do 1º login — o link é enviado logo após criar o perfil.
     const { data: authData, error: authError } = await supabase.auth.admin.createUser({
       email,
       password: senha,
-      email_confirm: true
+      email_confirm: comConvite
     });
 
     if (authError) {
@@ -299,6 +337,14 @@ exports.register = async (req, res) => {
     // um administrador no payload E não é fluxo vinculado, tenta criar o admin
     // (não-fatal). A senha temporária volta UMA vez para a tela de boas-vindas.
     const resposta = { message: 'Usuário criado com sucesso!' };
+
+    // Cadastro self-service (sem convite) → dispara o e-mail de confirmação e
+    // sinaliza ao cliente que o acesso depende de confirmar o e-mail.
+    if (!comConvite) {
+      await enviarConfirmacaoEmail(email);
+      resposta.email_confirmacao_pendente = true;
+    }
+
     if (!comConvite && administrador && administrador.email) {
       resposta.administrador = await criarAdministradorAutonomo({
         empresa_id,
@@ -324,7 +370,21 @@ exports.login = async (req, res) => {
       password: senha
     });
 
-    if (authError) return res.status(401).json({ message: 'Credenciais inválidas.' });
+    if (authError) {
+      // Supabase sinaliza e-mail não confirmado por code 'email_not_confirmed'
+      // (ou mensagem "Email not confirmed"). Isso NÃO é senha errada: devolvemos
+      // 403 { naoConfirmado } para o cliente orientar a confirmação e oferecer o
+      // reenvio — sem confundir com credenciais inválidas (401).
+      const codigo = authError.code || '';
+      const msg = (authError.message || '').toLowerCase();
+      if (codigo === 'email_not_confirmed' || msg.includes('not confirmed')) {
+        return res.status(403).json({
+          naoConfirmado: true,
+          message: 'Confirme seu e-mail antes de entrar. Verifique sua caixa de entrada ou reenvie a confirmação.',
+        });
+      }
+      return res.status(401).json({ message: 'Credenciais inválidas.' });
+    }
 
     const uid = authData.user.id;
 
@@ -558,6 +618,17 @@ exports.esqueceuSenha = async (req, res) => {
   }
 };
 
+// Reenvio do e-mail de confirmação de cadastro (self-service). Resposta SEMPRE
+// genérica: não revela se o e-mail existe nem se há cadastro pendente (evita
+// enumeração de contas). O envio em si é não-fatal.
+exports.reenviarConfirmacao = async (req, res) => {
+  const { email } = req.body;
+  await enviarConfirmacaoEmail(email);
+  return res.status(200).json({
+    message: 'Se houver um cadastro pendente para este e-mail, enviamos um novo link de confirmação.',
+  });
+};
+
 exports.registerEmpresa = async (req, res) => {
   const { nome, email, senha, empresa, cnpj, telefone, plano, plano_id } = req.body;
 
@@ -599,11 +670,13 @@ exports.registerEmpresa = async (req, res) => {
       return res.status(500).json({ message: empresaError || 'Erro ao criar empresa.' });
     }
 
-    // 2. Criar usuário admin no Supabase Auth
+    // 2. Criar usuário admin no Supabase Auth.
+    // Cadastro self-service da empresa → nasce NÃO confirmado; a confirmação do
+    // e-mail é exigida antes do 1º login. O link vai logo após criar o usuário.
     const { data: authData, error: authError } = await supabase.auth.admin.createUser({
       email,
       password: senha,
-      email_confirm: true
+      email_confirm: false
     });
 
     if (authError) {
@@ -631,9 +704,13 @@ exports.registerEmpresa = async (req, res) => {
       return res.status(500).json({ message: 'Erro ao salvar dados do usuário.' });
     }
 
+    // Dispara o e-mail de confirmação (não-fatal) e sinaliza pendência ao cliente.
+    await enviarConfirmacaoEmail(email);
+
     res.status(201).json({
       message: 'Cadastro realizado com sucesso!',
-      empresa_id: empresaData.id
+      empresa_id: empresaData.id,
+      email_confirmacao_pendente: true,
     });
   } catch (err) {
     console.error('Erro no register-empresa:', err);

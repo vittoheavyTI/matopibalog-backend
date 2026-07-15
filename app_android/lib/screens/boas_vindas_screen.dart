@@ -25,6 +25,15 @@ class BoasVindasScreen extends StatelessWidget {
 
   bool get _adminCriado => adminResultado != null && adminResultado!['criado'] == true;
 
+  // Cartão reutilizado nos fluxos self-service (autônomo): orienta confirmar o
+  // e-mail antes do 1º login. Motorista por convite é auto-confirmado e não o vê.
+  static const Widget _cartaoConfirmacaoEmail = _CartaoInfo(
+    icone: Icons.mark_email_unread_outlined,
+    titulo: 'Confirme seu e-mail',
+    texto: 'Enviamos um link de confirmação para o seu e-mail. Confirme antes de entrar — verifique também a caixa de spam.',
+    cor: Colors.blue,
+  );
+
   void _irParaLogin(BuildContext context) {
     // Volta à primeira rota da pilha (tela de Login).
     Navigator.of(context).popUntil((route) => route.isFirst);
@@ -82,10 +91,10 @@ class BoasVindasScreen extends StatelessWidget {
       case 'vinculado':
         return 'Sua conta foi criada e vinculada à empresa. Faça login para começar a usar o app.';
       case 'autonomo_admin':
-        return 'Sua conta de autônomo foi criada e o período de teste começou.';
+        return 'Sua conta de autônomo foi criada. Confirme seu e-mail antes de entrar.';
       case 'autonomo':
       default:
-        return 'Sua conta de autônomo foi criada e o período de teste começou. Faça login para começar a usar o app.';
+        return 'Sua conta de autônomo foi criada. Confirme seu e-mail antes de fazer login.';
     }
   }
 
@@ -100,14 +109,20 @@ class BoasVindasScreen extends StatelessWidget {
           ),
         ];
       case 'autonomo_admin':
-        return _blocoAdmin(context);
+        return [
+          _cartaoConfirmacaoEmail,
+          const SizedBox(height: 12),
+          ..._blocoAdmin(context),
+        ];
       case 'autonomo':
       default:
         return [
+          _cartaoConfirmacaoEmail,
+          const SizedBox(height: 12),
           const _CartaoInfo(
             icone: Icons.workspace_premium_outlined,
             titulo: 'Plano e período de teste',
-            texto: 'Você já pode usar o app no período de teste. Acompanhe o plano e a regularização dentro do app.',
+            texto: 'Depois de confirmar o e-mail, use o app no período de teste. Acompanhe o plano e a regularização dentro do app.',
           ),
         ];
     }

@@ -19,6 +19,7 @@ class _LoginScreenState extends State<LoginScreen> {
   // Pré-marcado: preserva o comportamento atual de manter a sessão salva.
   bool _manterConectado = true;
   String _lastShownError = '';
+  bool _reenviando = false;
 
   @override
   void dispose() {
@@ -91,6 +92,28 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  Future<void> _reenviarConfirmacao() async {
+    final email = _emailCtrl.text.trim().toLowerCase();
+    if (email.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Informe seu e-mail para reenviar a confirmação.')),
+      );
+      return;
+    }
+    setState(() => _reenviando = true);
+    final ok = await ApiService.reenviarConfirmacao(email);
+    if (!mounted) return;
+    setState(() => _reenviando = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(ok
+            ? 'Se houver um cadastro pendente, reenviamos o link de confirmação.'
+            : 'Não foi possível reenviar agora. Tente novamente.'),
+        backgroundColor: ok ? Colors.green.shade700 : Colors.red.shade700,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -101,8 +124,10 @@ class _LoginScreenState extends State<LoginScreen> {
           final loading = auth.status == AuthStatus.loading;
           final error = auth.error;
 
-          // Mostra erro do auth como SnackBar uma única vez por erro
-          if (error.isNotEmpty && auth.status == AuthStatus.error && error != _lastShownError) {
+          // Mostra erro do auth como SnackBar uma única vez por erro. Exceção:
+          // e-mail não confirmado tem tratamento inline (banner + reenvio), então
+          // não vira SnackBar para não duplicar a orientação.
+          if (error.isNotEmpty && auth.status == AuthStatus.error && error != _lastShownError && !auth.naoConfirmado) {
             _lastShownError = error;
             WidgetsBinding.instance.addPostFrameCallback((_) {
               if (!mounted) return;
@@ -142,6 +167,52 @@ class _LoginScreenState extends State<LoginScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
+                              // E-mail não confirmado: orienta e oferece o reenvio
+                              // do link (não é senha errada).
+                              if (auth.naoConfirmado) ...[
+                                Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: Colors.blue.shade50,
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(color: Colors.blue.shade100),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Icon(Icons.mark_email_unread_outlined,
+                                              color: Colors.blue.shade700, size: 20),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            child: Text(
+                                              'Confirme seu e-mail antes de entrar. Não recebeu o link?',
+                                              style: TextStyle(fontSize: 13, color: Colors.blue.shade900),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 8),
+                                      SizedBox(
+                                        width: double.infinity,
+                                        child: OutlinedButton(
+                                          onPressed: _reenviando ? null : _reenviarConfirmacao,
+                                          child: _reenviando
+                                              ? const SizedBox(
+                                                  height: 16,
+                                                  width: 16,
+                                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                                )
+                                              : const Text('Reenviar confirmação'),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+                              ],
                               TextField(
                                 controller: _emailCtrl,
                                 decoration: const InputDecoration(

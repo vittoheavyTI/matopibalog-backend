@@ -13,6 +13,7 @@ router.get('/me', verifyToken, authController.getMe);
 router.patch('/me', verifyToken, authController.updateMe);
 router.post('/me/foto', verifyToken, upload.single('foto'), authController.uploadFotoPerfil);
 router.post('/esqueceu-senha', validate(esqueceuSenhaSchema), authController.esqueceuSenha);
+router.post('/reenviar-confirmacao', validate(esqueceuSenhaSchema), authController.reenviarConfirmacao);
 router.post('/trocar-senha', verifyToken, validate(resetSenhaSchema), authController.trocarSenha);
 router.post('/register-empresa', validate(registerEmpresaSchema), authController.registerEmpresa);
 
