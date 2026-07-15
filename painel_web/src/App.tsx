@@ -24,6 +24,7 @@ import { PainelNotificacoes } from './pages/PainelNotificacoes';
 import { PainelTermosLGPD } from './pages/PainelTermosLGPD';
 import { PlanosPublicos } from './pages/PlanosPublicos';
 import { CadastroPublico } from './pages/CadastroPublico';
+import { EmailConfirmado } from './pages/EmailConfirmado';
 import { MinhasFaturas } from './pages/MinhasFaturas';
 import { RedefinirSenha } from './pages/RedefinirSenha';
 import { TrocarSenhaObrigatoria } from './pages/TrocarSenhaObrigatoria';
@@ -62,6 +63,7 @@ const AppRoutes = () => {
       <Route path="/termos-pendentes" element={<TermosPendentes />} />
       <Route path="/planos" element={<PlanosPublicos />} />
       <Route path="/cadastro" element={<CadastroPublico />} />
+      <Route path="/confirmado" element={<EmailConfirmado />} />
       
       <Route path="/" element={
         <ProtectedRoute>
