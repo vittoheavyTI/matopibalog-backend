@@ -3,6 +3,7 @@ const { createClient } = require('@supabase/supabase-js');
 const jwt = require('jsonwebtoken');
 const { criarEmpresaCompleta } = require('../services/empresaService');
 const notificacaoService = require('../services/notificacaoService');
+const planoLimiteService = require('../services/planoLimiteService');
 const { getTermosPendentes } = require('./termosController');
 const { gerarSenhaTemporaria } = require('../utils/senhaTemporaria');
 
@@ -171,6 +172,19 @@ exports.register = async (req, res) => {
       }
 
       empresa_id = empresa.id;
+
+      // Frente #7: trava de limite de motoristas por plano, SÓ no auto-cadastro
+      // por convite (empresa já existente). Avaliada antes de criar no Auth para
+      // não deixar órfão. O ramo autônomo (else) cria a 1a vaga da própria empresa
+      // e NUNCA passa por aqui. Fail-open: erro de infra da trava não bloqueia.
+      try {
+        const avaliacao = await planoLimiteService.avaliarLimiteMotoristas(supabase, empresa_id);
+        if (!avaliacao.ok) {
+          return res.status(409).json(planoLimiteService.montarErroLimiteMotoristas(avaliacao));
+        }
+      } catch (limiteErr) {
+        console.error('[register] Falha ao avaliar limite de motoristas (fail-open):', limiteErr.message);
+      }
     } else {
       // --- Fluxo autônomo: criar empresa própria ---
       const documentoBilling = apenasDigitos(
@@ -305,6 +319,16 @@ exports.register = async (req, res) => {
       // 23505 = unique_violation (Postgres) → CPF já cadastrado
       if (motoristaError.code === '23505' || (motoristaError.message || '').toLowerCase().includes('duplicate')) {
         return res.status(409).json({ message: 'Este CPF já está cadastrado. Verifique os dados ou contate o suporte.' });
+      }
+      // Frente #7: trigger legado de limite (corrida com o pré-check) → 409 amigável,
+      // nunca 500 genérico.
+      if (planoLimiteService.ehErroTriggerLimiteMotoristas(motoristaError)) {
+        try {
+          const avaliacao = await planoLimiteService.avaliarLimiteMotoristas(supabase, empresa_id);
+          return res.status(409).json(planoLimiteService.montarErroLimiteMotoristas(avaliacao));
+        } catch (_) {
+          return res.status(409).json({ limiteMotoristasAtingido: true, message: 'Limite de motoristas do plano atingido. Contate a empresa para fazer upgrade do plano.' });
+        }
       }
       return res.status(500).json({ message: 'Não foi possível concluir o cadastro. Tente novamente.' });
     }
