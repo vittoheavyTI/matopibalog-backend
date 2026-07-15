@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, X, MessageCircle, Trash2, AlertTriangle, Camera, MapPin, Loader2, Eye, EyeOff } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Plus, X, MessageCircle, Trash2, AlertTriangle, Camera, MapPin, Loader2, Eye, EyeOff, ArrowUpCircle } from 'lucide-react';
 import api from '../api';
 import { mensagemErro } from '../utils/mensagemErro';
 import { maskPhone, maskCPF, maskCEP } from '../utils/masks';
@@ -29,6 +30,11 @@ export const Motoristas: React.FC = () => {
   const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // Frente #7: uso do plano (limite de motoristas) + modal de upgrade.
+  const navigate = useNavigate();
+  const [planoUso, setPlanoUso] = useState<{ limite: number | null; totalAtual: number | null; planoAtual: string | null; ilimitado: boolean } | null>(null);
+  const [upgradeInfo, setUpgradeInfo] = useState<{ limite?: number | null; totalAtual?: number | null; planoAtual?: string | null; message?: string } | null>(null);
+
   const loadMotoristas = async () => {
     try {
       setLoading(true);
@@ -57,9 +63,25 @@ export const Motoristas: React.FC = () => {
     }
   };
 
+  // Uso do plano para o indicador X/Y. Nunca bloqueia a tela: em erro, some o
+  // indicador (fail-open no cliente também).
+  const loadPlanoUso = async () => {
+    try {
+      const r = await api.get('/admin/plano-uso');
+      setPlanoUso(r.data);
+    } catch (error: any) {
+      if (import.meta.env.DEV) console.error('[Motoristas] carregar plano-uso falhou', { status: error?.response?.status });
+      setPlanoUso(null);
+    }
+  };
+
   useEffect(() => {
     loadMotoristas();
+    loadPlanoUso();
   }, []);
+
+  // Limite atingido (só quando há limite finito conhecido). Ilimitado nunca bloqueia.
+  const limiteAtingido = !!planoUso && !planoUso.ilimitado && planoUso.limite != null && (planoUso.totalAtual ?? 0) >= planoUso.limite;
 
   const handleAddMotorista = async () => {
     try {
@@ -79,12 +101,21 @@ export const Motoristas: React.FC = () => {
         percentual_comissao: newMot.percentualComissao
       });
       await loadMotoristas();
+      await loadPlanoUso();
       setShowNewModal(false);
       setNewMot({ nomeCompleto: '', cpf: '', email: '', senha: '', placaVeiculo: '', telefone: '', cep: '', endereco: '', bairro: '', cidade: '', fotoUrl: '', percentualComissao: 12 });
       alert('Motorista cadastrado e já ativo. Ele troca a senha no primeiro acesso.');
     } catch (error: any) {
       if (import.meta.env.DEV) console.error('[Motoristas] cadastrar falhou', { status: error?.response?.status });
-      alert('Erro ao cadastrar motorista: ' + mensagemErro(error, 'tente novamente.'));
+      // Frente #7: limite de motoristas → modal amigável de upgrade, nunca alert genérico.
+      const data = error?.response?.data;
+      if (error?.response?.status === 409 && data?.limiteMotoristasAtingido) {
+        setShowNewModal(false);
+        setUpgradeInfo(data);
+        await loadPlanoUso();
+      } else {
+        alert('Erro ao cadastrar motorista: ' + mensagemErro(error, 'tente novamente.'));
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -124,6 +155,7 @@ export const Motoristas: React.FC = () => {
       }
 
       await loadMotoristas();
+      await loadPlanoUso();
       setShowEditModal(false);
       setEditingMot(null);
     } catch (error: any) {
@@ -146,6 +178,7 @@ export const Motoristas: React.FC = () => {
       await api.delete('/admin/motoristas/' + deleteTarget.uid);
       setDeleteTarget(null);
       await loadMotoristas();
+      await loadPlanoUso();
     } catch (error: any) {
       if (import.meta.env.DEV) console.error('[Motoristas] excluir falhou', { status: error?.response?.status });
       alert(mensagemErro(error, 'Erro ao excluir motorista.'));
@@ -208,12 +241,38 @@ export const Motoristas: React.FC = () => {
           <h2 className="text-2xl font-bold text-gray-800">Motoristas</h2>
           <p className="text-gray-600 text-sm">Cadastre e gerencie motoristas da operação.</p>
         </div>
-        <button
-          onClick={() => setShowNewModal(true)}
-          className="flex items-center px-4 py-2 bg-green-700 text-white rounded-lg hover:bg-green-800 transition-all shadow-md active:scale-95"
-        >
-          <Plus size={20} className="mr-2" /> Adicionar Motorista
-        </button>
+        <div className="flex items-center gap-4">
+          {planoUso && (
+            <div className="text-right leading-tight">
+              <span className="text-[11px] uppercase tracking-wide text-gray-400">Motoristas</span>
+              <p className={`text-sm font-bold ${limiteAtingido ? 'text-amber-600' : 'text-gray-700'}`}>
+                {planoUso.ilimitado || planoUso.limite == null
+                  ? 'Ilimitado'
+                  : `${planoUso.totalAtual ?? 0} / ${planoUso.limite}`}
+              </p>
+            </div>
+          )}
+          {limiteAtingido ? (
+            <button
+              onClick={() => setUpgradeInfo({
+                limite: planoUso!.limite,
+                totalAtual: planoUso!.totalAtual,
+                planoAtual: planoUso!.planoAtual,
+                message: `Seu plano ${planoUso!.planoAtual ?? 'atual'} permite ${planoUso!.limite} motorista(s) e você já utiliza ${planoUso!.totalAtual ?? planoUso!.limite}. Faça upgrade do plano para adicionar mais motoristas.`,
+              })}
+              className="flex items-center px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-all shadow-md active:scale-95"
+            >
+              <ArrowUpCircle size={20} className="mr-2" /> Fazer upgrade
+            </button>
+          ) : (
+            <button
+              onClick={() => setShowNewModal(true)}
+              className="flex items-center px-4 py-2 bg-green-700 text-white rounded-lg hover:bg-green-800 transition-all shadow-md active:scale-95"
+            >
+              <Plus size={20} className="mr-2" /> Adicionar Motorista
+            </button>
+          )}
+        </div>
       </div>
       
       {/* SEÇÃO: LISTA DE MOTORISTAS */}
@@ -300,6 +359,43 @@ export const Motoristas: React.FC = () => {
           </div>
         </div>
       </section>
+
+      {/* Frente #7: modal de limite de motoristas atingido → upgrade (sem cobrança). */}
+      {upgradeInfo && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+            <div className="flex justify-between items-center p-5 border-b border-amber-100 bg-amber-50">
+              <h3 className="font-bold text-lg text-gray-800 flex items-center gap-2">
+                <ArrowUpCircle size={20} className="text-amber-600" /> Limite de motoristas atingido
+              </h3>
+              <button onClick={() => setUpgradeInfo(null)} className="text-gray-400 hover:text-gray-600 p-1.5 hover:bg-white/60 rounded-lg transition-colors"><X size={20} /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-gray-700 text-sm">{upgradeInfo.message || 'Você atingiu o limite de motoristas do seu plano atual.'}</p>
+              <div className="bg-gray-50 rounded-xl p-4 text-sm space-y-1.5">
+                <div className="flex justify-between"><span className="text-gray-500">Plano atual</span><span className="font-semibold text-gray-800">{upgradeInfo.planoAtual ?? '—'}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">Motoristas em uso</span><span className="font-semibold text-gray-800">{upgradeInfo.totalAtual ?? '—'}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">Limite do plano</span><span className="font-semibold text-gray-800">{upgradeInfo.limite ?? '—'}</span></div>
+              </div>
+              <div className="flex flex-col gap-2 pt-1">
+                <button
+                  onClick={() => { setUpgradeInfo(null); navigate('/planos'); }}
+                  className="w-full py-2.5 bg-amber-500 text-white rounded-lg font-semibold hover:bg-amber-600 transition-colors"
+                >
+                  Ver planos / Solicitar upgrade
+                </button>
+                <button
+                  onClick={() => { setUpgradeInfo(null); navigate('/minhas-faturas'); }}
+                  className="w-full py-2 text-gray-600 rounded-lg hover:bg-gray-100 transition-colors text-sm"
+                >
+                  Ver faturas / regularização
+                </button>
+              </div>
+              <p className="text-[11px] text-gray-400 text-center">O upgrade é solicitado pela nossa equipe — nenhuma cobrança é feita automaticamente.</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modais de Add/Edit */}
       {showNewModal && (
