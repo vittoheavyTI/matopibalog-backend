@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { AlertTriangle, Check, Eye, Plus, Shield, X } from 'lucide-react';
+import { AlertTriangle, Archive, ArchiveRestore, Check, Eye, Plus, Shield, Trash2, X } from 'lucide-react';
 import api from '../api';
 
 type FormPlano = {
@@ -134,6 +134,11 @@ export const PainelPlanos: React.FC = () => {
   const [editing, setEditing] = useState<any>(null);
   const [form, setForm] = useState<FormPlano>(FORM_VAZIO);
   const [toast, setToast] = useState<{ message: string; tipo: 'sucesso' | 'erro' } | null>(null);
+  // Seção "Arquivados" recolhida por padrão (não polui a visão principal).
+  const [arquivadosAbertos, setArquivadosAbertos] = useState(false);
+  // Plano sob confirmação forte de exclusão (modal exige digitar o nome).
+  const [confirmarExcluir, setConfirmarExcluir] = useState<any>(null);
+  const [excluirTexto, setExcluirTexto] = useState('');
 
   useEffect(() => { carregar(); }, []);
 
@@ -210,8 +215,8 @@ export const PainelPlanos: React.FC = () => {
     }
   }
 
-  // Soft delete: nunca remove o plano do banco (empresas/faturas podem
-  // referenciá-lo). Apenas alterna ativo=false/true via PUT.
+  // Ativar/Inativar: dimensão APP/cadastro (ativo=true/false). Separada de
+  // arquivar. Nunca remove do banco (empresas/faturas podem referenciar).
   async function alternarAtivo(plano: any) {
     const reativar = plano.ativo === false;
     try {
@@ -223,9 +228,37 @@ export const PainelPlanos: React.FC = () => {
     }
   }
 
+  // Arquivar/Desarquivar: dimensão VISIBILIDADE NO PAINEL, separada de ativo.
+  // Arquivar seta ativo=false no backend; desarquivar NÃO reativa (ativo segue false).
+  async function alternarArquivo(plano: any, arquivarFlag: boolean) {
+    try {
+      await api.put('/painel-admin/planos/' + plano.id, { arquivar: arquivarFlag });
+      setToast({ message: arquivarFlag ? 'Plano arquivado!' : 'Plano desarquivado!', tipo: 'sucesso' });
+      carregar();
+    } catch {
+      setToast({ message: 'Erro ao arquivar o plano', tipo: 'erro' });
+    }
+  }
+
+  // Exclusão física — só chega aqui via modal de confirmação forte, e o botão só
+  // aparece quando excluivel===true. 409 do backend vira toast de erro (nunca quebra).
+  async function excluir(plano: any) {
+    try {
+      await api.delete('/painel-admin/planos/' + plano.id);
+      setToast({ message: 'Plano excluído!', tipo: 'sucesso' });
+      setConfirmarExcluir(null);
+      setExcluirTexto('');
+      carregar();
+    } catch (err: any) {
+      setToast({ message: err.response?.data?.message || 'Não foi possível excluir o plano.', tipo: 'erro' });
+    }
+  }
+
   function renderCard(plano: any) {
     const recursos = normalizarRecursosParaLista(plano.recursos);
     const inativo = plano.ativo === false;
+    const arquivado = Boolean(plano.arquivado_em);
+    const excluivel = plano.excluivel === true;
     return (
       <div key={plano.id} className="bg-white rounded-2xl border border-gray-100 p-6 hover:shadow-md transition-all">
         <div className="flex justify-between items-start gap-3 mb-3">
@@ -238,22 +271,36 @@ export const PainelPlanos: React.FC = () => {
           <span className="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700">Até {Number(plano.limite_motoristas ?? 0)} motoristas</span>
           <span className="px-2.5 py-1 rounded-lg bg-amber-50 text-amber-700">Trial: {Number(plano.dias_trial ?? 0)} dias</span>
           <span className={`px-2.5 py-1 rounded-lg ${!inativo ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>{!inativo ? 'Ativo' : 'Inativo'}</span>
+          {arquivado && <span className="px-2.5 py-1 rounded-lg bg-gray-200 text-gray-600">Arquivado</span>}
         </div>
         <div className="flex flex-wrap gap-1.5 min-h-7">
           {recursos.length > 0 ? recursos.map((recurso) => (
             <span key={recurso} className="px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-medium">{recurso}</span>
           )) : <span className="text-xs text-gray-400">Nenhum recurso informado</span>}
         </div>
-        <div className="flex gap-2 mt-4 pt-3 border-t">
-          <button onClick={() => abrirEdicao(plano)} title={`Editar plano ${plano.nome}`} aria-label={`Editar plano ${plano.nome}`} className="flex-1 py-2 text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-xl"><Eye size={14} className="inline mr-1" />Editar</button>
-          <button onClick={() => alternarAtivo(plano)} title={inativo ? `Reativar plano ${plano.nome}` : `Inativar plano ${plano.nome}`} aria-label={inativo ? `Reativar plano ${plano.nome}` : `Inativar plano ${plano.nome}`} className={`flex-1 py-2 text-xs font-bold rounded-xl ${inativo ? 'text-green-700 bg-green-50 hover:bg-green-100' : 'text-red-600 bg-red-50 hover:bg-red-100'}`}>{inativo ? 'Reativar' : 'Inativar'}</button>
+        <div className="flex flex-wrap gap-2 mt-4 pt-3 border-t">
+          <button onClick={() => abrirEdicao(plano)} title={`Editar plano ${plano.nome}`} aria-label={`Editar plano ${plano.nome}`} className="flex-1 min-w-24 py-2 text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-xl"><Eye size={14} className="inline mr-1" />Editar</button>
+          {!arquivado ? (
+            <>
+              <button onClick={() => alternarAtivo(plano)} title={inativo ? `Reativar plano ${plano.nome}` : `Inativar plano ${plano.nome}`} aria-label={inativo ? `Reativar plano ${plano.nome}` : `Inativar plano ${plano.nome}`} className={`flex-1 min-w-24 py-2 text-xs font-bold rounded-xl ${inativo ? 'text-green-700 bg-green-50 hover:bg-green-100' : 'text-amber-700 bg-amber-50 hover:bg-amber-100'}`}>{inativo ? 'Reativar' : 'Inativar'}</button>
+              <button onClick={() => alternarArquivo(plano, true)} title={`Arquivar plano ${plano.nome}`} aria-label={`Arquivar plano ${plano.nome}`} className="flex-1 min-w-24 py-2 text-xs font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-xl"><Archive size={14} className="inline mr-1" />Arquivar</button>
+            </>
+          ) : (
+            <button onClick={() => alternarArquivo(plano, false)} title={`Desarquivar plano ${plano.nome}`} aria-label={`Desarquivar plano ${plano.nome}`} className="flex-1 min-w-24 py-2 text-xs font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-xl"><ArchiveRestore size={14} className="inline mr-1" />Desarquivar</button>
+          )}
+          {excluivel && (
+            <button onClick={() => { setConfirmarExcluir(plano); setExcluirTexto(''); }} title={`Excluir plano ${plano.nome}`} aria-label={`Excluir plano ${plano.nome}`} className="flex-1 min-w-24 py-2 text-xs font-bold text-red-600 bg-red-50 hover:bg-red-100 rounded-xl"><Trash2 size={14} className="inline mr-1" />Excluir</button>
+          )}
         </div>
       </div>
     );
   }
 
-  const ativos = planos.filter((p) => p.ativo !== false);
-  const inativos = planos.filter((p) => p.ativo === false);
+  // Visão principal = não arquivados. Arquivados vão para seção recolhida.
+  const naoArquivados = planos.filter((p) => !p.arquivado_em);
+  const arquivados = planos.filter((p) => p.arquivado_em);
+  const ativos = naoArquivados.filter((p) => p.ativo !== false);
+  const inativos = naoArquivados.filter((p) => p.ativo === false);
 
   return (
     <div className="space-y-4 animate-fade-in">
@@ -297,6 +344,25 @@ export const PainelPlanos: React.FC = () => {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {inativos.map(renderCard)}
           </div>
+        </div>
+      )}
+
+      {arquivados.length > 0 && (
+        <div className="space-y-3">
+          <button
+            onClick={() => setArquivadosAbertos((v) => !v)}
+            aria-expanded={arquivadosAbertos}
+            className="flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-gray-400 hover:text-gray-600"
+          >
+            <Archive size={14} />
+            Arquivados ({arquivados.length})
+            <span className="text-[10px]">{arquivadosAbertos ? '▲' : '▼'}</span>
+          </button>
+          {arquivadosAbertos && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {arquivados.map(renderCard)}
+            </div>
+          )}
         </div>
       )}
 
@@ -355,6 +421,43 @@ export const PainelPlanos: React.FC = () => {
             <div className="p-4 bg-gray-50 border-t flex justify-end gap-3 sticky bottom-0">
               <button onClick={() => setShowModal(false)} title="Cancelar edição" aria-label="Cancelar edição" className="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded-lg text-sm font-medium">Cancelar</button>
               <button onClick={handleSalvar} title="Salvar plano" aria-label="Salvar plano" className="flex items-center px-5 py-2 bg-green-700 text-white rounded-lg font-medium text-sm hover:bg-green-800"><Check size={16} className="mr-1.5" /> Salvar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmarExcluir && (
+        <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
+            <div className="p-6 border-b flex items-center gap-2">
+              <AlertTriangle className="text-red-600" size={22} />
+              <h3 className="text-lg font-bold text-gray-800">Excluir plano</h3>
+            </div>
+            <div className="p-6 space-y-3">
+              <p className="text-sm text-gray-600">
+                Esta ação é <strong>irreversível</strong>. O plano <strong>{confirmarExcluir.nome}</strong> será
+                removido permanentemente. Só é possível porque ele nunca foi usado.
+              </p>
+              <p className="text-sm text-gray-500">Para confirmar, digite o nome do plano:</p>
+              <input
+                autoFocus
+                type="text"
+                value={excluirTexto}
+                onChange={(e) => setExcluirTexto(e.target.value)}
+                placeholder={confirmarExcluir.nome}
+                className="w-full border-2 border-gray-100 rounded-xl p-3 outline-none focus:border-red-500 bg-gray-50/50"
+                aria-label="Digite o nome do plano para confirmar a exclusão"
+              />
+            </div>
+            <div className="p-4 bg-gray-50 border-t flex justify-end gap-3">
+              <button onClick={() => { setConfirmarExcluir(null); setExcluirTexto(''); }} className="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded-lg text-sm font-medium">Cancelar</button>
+              <button
+                onClick={() => excluir(confirmarExcluir)}
+                disabled={excluirTexto.trim() !== confirmarExcluir.nome}
+                className="flex items-center px-5 py-2 bg-red-600 text-white rounded-lg font-medium text-sm hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Trash2 size={16} className="mr-1.5" /> Excluir definitivamente
+              </button>
             </div>
           </div>
         </div>
