@@ -19,6 +19,9 @@ router.patch('/motoristas/:id/block', verificarEmpresa, verificarPlano, adminCon
 router.get('/motoristas/em-viagem', verificarEmpresa, adminController.getEmViagem);
 router.delete('/motoristas/:id', verificarEmpresa, verificarPlano, adminController.deleteMotorista);
 
+// Uso do plano (limite de motoristas) para o painel — read-only, escopado pela empresa.
+router.get('/plano-uso', verificarEmpresa, adminController.getPlanoUso);
+
 router.get('/usuarios', verificarEmpresa, adminController.getUsuarios);
 router.post('/usuarios', verificarEmpresa, verificarPlano, adminController.createUsuario);
 router.put('/usuarios/:id', verificarEmpresa, verificarPlano, adminController.updateUsuario);

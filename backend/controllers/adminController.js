@@ -1,5 +1,6 @@
 const supabase = require('../config/supabase');
 const crypto = require('crypto');
+const planoLimiteService = require('../services/planoLimiteService');
 
 // Gera senha temporária aleatória e forte (sem caracteres ambíguos: 0/O/1/l/I)
 // usando o crypto nativo do Node. Substitui o antigo default fixo '123456' em
@@ -165,6 +166,19 @@ exports.createMotorista = async (req, res) => {
     return res.status(400).json({ message: 'A senha deve ter no mínimo 6 caracteres.' });
   }
 
+  // Frente #7: trava de limite de motoristas por plano. Avaliada ANTES de criar
+  // no Supabase Auth para não deixar usuário órfão. Fail-open: um erro de infra da
+  // própria trava não bloqueia o cadastro (o trigger legado no banco segue como
+  // backstop) — a prioridade é não regredir a operação.
+  try {
+    const avaliacao = await planoLimiteService.avaliarLimiteMotoristas(supabase, req.empresa_id);
+    if (!avaliacao.ok) {
+      return res.status(409).json(planoLimiteService.montarErroLimiteMotoristas(avaliacao));
+    }
+  } catch (limiteErr) {
+    console.error('[adminController:createMotorista] Falha ao avaliar limite (fail-open):', limiteErr.message);
+  }
+
   let uid = null;
   try {
     // 1. Criar no Supabase Auth
@@ -233,6 +247,16 @@ exports.createMotorista = async (req, res) => {
       console.error('[adminController:createMotorista] Erro ao inserir em motoristas, revertendo usuarios + Auth:', motError);
       try { await supabase.from('usuarios').delete().eq('id', uid); } catch (e) { console.error('[adminController:createMotorista] rollback usuarios falhou:', e); }
       try { await supabase.auth.admin.deleteUser(uid); } catch (e) { console.error('[adminController:createMotorista] rollback auth falhou:', e); }
+      // Frente #7: se o trigger legado de limite disparar (corrida com o pré-check),
+      // mapeia para o 409 amigável — nunca deixa virar 500 genérico.
+      if (planoLimiteService.ehErroTriggerLimiteMotoristas(motError)) {
+        try {
+          const avaliacao = await planoLimiteService.avaliarLimiteMotoristas(supabase, req.empresa_id);
+          return res.status(409).json(planoLimiteService.montarErroLimiteMotoristas(avaliacao));
+        } catch (_) {
+          return res.status(409).json({ limiteMotoristasAtingido: true, message: 'Limite de motoristas do plano atingido. Faça upgrade para adicionar mais motoristas.' });
+        }
+      }
       return res.status(500).json({ message: `Erro ao salvar dados do motorista: ${motError.message}` });
     }
 
@@ -245,6 +269,28 @@ exports.createMotorista = async (req, res) => {
       try { await supabase.auth.admin.deleteUser(uid); } catch (e) { console.error('[adminController:createMotorista] rollback auth falhou:', e); }
     }
     res.status(500).json({ message: 'Erro inesperado ao cadastrar motorista: ' + (error.message || error) });
+  }
+};
+
+// ─── Uso do plano (limite de motoristas) para o painel ────────────────────────
+// Read-only: devolve limite, uso atual e nome do plano da empresa do usuário
+// logado, usando o MESMO serviço da trava (fonte única de contagem). Não toca
+// pagamentos/faturas/Asaas. Escopo garantido por verificarEmpresa (req.empresa_id).
+exports.getPlanoUso = async (req, res) => {
+  if (!req.empresa_id) {
+    return res.status(400).json({ message: 'Empresa não identificada.' });
+  }
+  try {
+    const avaliacao = await planoLimiteService.avaliarLimiteMotoristas(supabase, req.empresa_id);
+    return res.status(200).json({
+      limite: avaliacao.limite,
+      totalAtual: avaliacao.totalAtual,
+      planoAtual: avaliacao.planoAtual,
+      ilimitado: avaliacao.ilimitado === true,
+    });
+  } catch (error) {
+    console.error('[adminController:getPlanoUso] Erro ao carregar uso do plano:', error.message);
+    return res.status(500).json({ message: 'Erro ao carregar uso do plano.' });
   }
 };
 
