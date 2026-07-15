@@ -126,6 +126,18 @@ async function criarEmpresaCompleta(opts) {
     return { empresa: null, error: 'Erro ao criar empresa.', status: 500 };
   }
 
+  // Marca durável de "plano já utilizado" (base do critério de exclusão de plano
+  // — frente #6). Ponto único de atribuição de empresas.plano_id. Não-fatal:
+  // falha aqui não desfaz o cadastro (a rede de segurança do DELETE recontagem
+  // por empresas cobre eventual dessincronia).
+  if (plano?.id) {
+    try {
+      await supabase.from('planos').update({ ja_utilizado: true }).eq('id', plano.id);
+    } catch (e) {
+      console.error('[empresaService] Falha ao marcar plano.ja_utilizado (não-fatal):', e.message || e);
+    }
+  }
+
   console.log(
     `[empresaService] Empresa criada: ${empresa.id} (${empresa.nome}) — código ${empresa.codigo_convite}`
   );
