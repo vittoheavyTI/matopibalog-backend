@@ -323,6 +323,24 @@ class ApiService {
     }
   }
 
+  /// Reenvia o e-mail de confirmação de cadastro. O backend responde sempre de
+  /// forma genérica (não revela se o e-mail existe / há cadastro pendente).
+  /// Retorna true em 200.
+  static Future<bool> reenviarConfirmacao(String email) async {
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$_baseUrl/auth/reenviar-confirmacao'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'email': email}),
+          )
+          .timeout(_timeoutPostJson);
+      return response.statusCode == 200;
+    } catch (e) {
+      return false;
+    }
+  }
+
   static Future<Map<String, dynamic>> trocarSenha(String novaSenha) async {
     try {
       final response = await http
