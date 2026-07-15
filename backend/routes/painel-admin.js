@@ -5,6 +5,7 @@ const { verifyToken, isAdmin, isSuperAdmin } = require('../middlewares/auth');
 const { criarEmpresaCompleta } = require('../services/empresaService');
 const { plano_idValido, normalizarPlanoId } = require('../utils/plano');
 const { conflitoUnico } = require('../utils/pgError');
+const { montarPatchArquivamento, excluirPlano } = require('../services/planoAdminService');
 
 router.use(verifyToken, isAdmin, isSuperAdmin);
 
@@ -194,7 +195,10 @@ router.patch('/empresas/:id/trial', async (req, res) => {
 router.get('/planos', async (req, res) => {
   const { data, error } = await supabase.from('planos').select('*').order('preco_mensal', { ascending: true });
   if (error) return res.status(500).json({ message: 'Erro ao listar planos.' });
-  res.json(data || []);
+  // `excluivel` deriva de ja_utilizado (critério B): só é excluível quem nunca foi
+  // usado. A UI usa isso para só mostrar o botão Excluir quando for seguro.
+  const planos = (data || []).map((p) => ({ ...p, excluivel: p.ja_utilizado !== true }));
+  res.json(planos);
 });
 
 // Categorias validas de plano (a quem ele se destina).
@@ -236,9 +240,19 @@ router.put('/planos/:id', async (req, res) => {
     }
     upd.categoria = categoria;
   }
+  // Arquivar/desarquivar (autoria vem do token, nunca do body). Arquivar seta
+  // ativo=false; desarquivar NÃO reativa (reativar no app é ação separada).
+  Object.assign(upd, montarPatchArquivamento(req.body, req.user.uid));
   const { data, error } = await supabase.from('planos').update(upd).eq('id', req.params.id).select().single();
   if (error) return res.status(500).json({ message: 'Erro ao atualizar plano.' });
   res.json(data);
+});
+
+// Exclusão FÍSICA segura (super-admin, herdado do router.use acima). Só remove
+// planos que nunca foram usados; qualquer vínculo → 409 amigável (nunca 500).
+router.delete('/planos/:id', async (req, res) => {
+  const resultado = await excluirPlano({ supabase, planoId: req.params.id });
+  res.status(resultado.status).json(resultado.body);
 });
 
 // ASSINATURAS (virtuais - derivadas de empresas + planos)
