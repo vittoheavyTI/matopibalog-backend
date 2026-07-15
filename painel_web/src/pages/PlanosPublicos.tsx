@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Check, Truck } from 'lucide-react';
 import api from '../api';
+import { useLoginConfig } from '../hooks/useLoginConfig';
 
 interface PlanoPublico {
   id: string;
@@ -44,6 +45,9 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 export const PlanosPublicos: React.FC = () => {
   const navigate = useNavigate();
+  // Reaproveita a logomarca global configurável (mesma fonte do Login, via
+  // /configuracoes/public). Sem exigir login: o endpoint é público.
+  const { loginLogo, loginLogoScale, loginLogoY, configLoading } = useLoginConfig();
   const [planos, setPlanos] = useState<PlanoPublico[]>([]);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState('');
@@ -86,10 +90,29 @@ export const PlanosPublicos: React.FC = () => {
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50">
       <div className="max-w-7xl mx-auto px-4 py-16">
         <div className="text-center mb-12">
-          <div className="flex items-center justify-center gap-2 mb-4">
-            <Truck className="text-blue-600" size={32} />
-            <h1 className="text-3xl font-bold text-gray-900">Matopiba Log</h1>
-          </div>
+          {configLoading ? (
+            // Placeholder de altura fixa enquanto a config carrega: evita o flash
+            // fallback→logo e mantém a posição dos cards estável.
+            <div className="h-20 mb-4" />
+          ) : loginLogo ? (
+            <div className="flex items-center justify-center mb-4">
+              <img
+                src={loginLogo}
+                alt="Matopiba Log"
+                style={{
+                  transform: `scale(${loginLogoScale / 100}) translateY(${loginLogoY}px)`,
+                  transformOrigin: 'center',
+                }}
+                className="max-h-20 max-w-full object-contain"
+              />
+            </div>
+          ) : (
+            // Fallback idêntico ao anterior quando não há logomarca configurada.
+            <div className="flex items-center justify-center gap-2 mb-4">
+              <Truck className="text-blue-600" size={32} />
+              <h1 className="text-3xl font-bold text-gray-900">Matopiba Log</h1>
+            </div>
+          )}
           <p className="text-xl text-gray-600">Planos para todos os tamanhos de frota</p>
         </div>
 
