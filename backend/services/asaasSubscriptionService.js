@@ -302,6 +302,7 @@ async function conciliarAssinatura({ empresaId, config, supabase, http }) {
 module.exports = {
   garantirAssinatura,
   conciliarAssinatura,
+  garantirCustomer,
   calcularPrimeiroVencimento,
   BILLING_STATES: BILLING,
 };
