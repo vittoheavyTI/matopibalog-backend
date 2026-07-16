@@ -232,14 +232,148 @@ function resolverPrecificacao(plano) {
   };
 }
 
+// ─── PR 3: ligação com as rotas de planos ────────────────────────────────────
+// Tudo abaixo continua PURO. A rota faz as leituras (plano atual, contagem de
+// empresas) e passa os dados prontos — assim a decisão sobre dinheiro é testável
+// sem banco, e este módulo segue sem I/O.
+
+// Campos cuja presença no body significa "o preço pode ter mudado".
+const CAMPOS_PRECO = ['modelo_cobranca', 'preco_mensal', 'preco_por_motorista', 'limite_motoristas'];
+
+// Default histórico do POST /painel-admin/planos quando limite_motoristas não vem.
+const LIMITE_MOTORISTAS_PADRAO = 5;
+
+// O body mexe em precificação? Se NÃO, o PUT não recalcula nada — é o que mantém
+// arquivar/desarquivar (frente #6) e ativar/inativar intactos: eles mandam só
+// { arquivar } ou { ativo }.
+function bodyTocaPreco(body) {
+  if (!body) return false;
+  return CAMPOS_PRECO.some((campo) => body[campo] !== undefined);
+}
+
+// Dois valores representam o mesmo dinheiro? Compara em centavos, nunca em float.
+// Valor irrecuperável (lixo, mais de 2 casas) → false: sem certeza, trata como
+// "mudou" e exige confirmação. Conservador de propósito.
+function mesmoPreco(a, b) {
+  const ca = paraCentavos(a);
+  const cb = paraCentavos(b);
+  if (!ca.ok || !cb.ok) return false;
+  return ca.centavos === cb.centavos;
+}
+
+// Quantidade chega como string em JSON de formulário; o serviço puro recusa
+// string de propósito (ver validarQuantidade). A normalização é responsabilidade
+// de quem monta a entrada — e é aqui.
+function normalizarQuantidade(valor) {
+  if (typeof valor === 'number') return valor;
+  if (typeof valor === 'string' && valor.trim() !== '') {
+    const n = Number(valor);
+    if (Number.isFinite(n)) return n;
+  }
+  return valor; // null/undefined/lixo seguem crus — quem recusa é validarQuantidade
+}
+
+// Mescla plano atual + body para ter o QUADRO COMPLETO antes de calcular.
+// Sem isso, `PUT { limite_motoristas: 20 }` num plano por_motorista traria a
+// quantidade no body e o unitário só no banco: a quantidade mudaria e o preço
+// NÃO — o bug original entrando pela porta dos fundos.
+function mesclarParaPrecificacao(planoAtual, body) {
+  const atual = planoAtual || {};
+  const b = body || {};
+  const pick = (campo) => (b[campo] !== undefined ? b[campo] : atual[campo]);
+  return {
+    modelo_cobranca: pick('modelo_cobranca'),
+    preco_mensal: pick('preco_mensal'),
+    preco_por_motorista: pick('preco_por_motorista'),
+    limite_motoristas: normalizarQuantidade(pick('limite_motoristas')),
+  };
+}
+
+// Payload do 409 de reprecificação. A mensagem precisa dizer o que NÃO acontece:
+// assinatura Asaas já criada não é atualizada (sync é frente futura, fora daqui).
+function montarErroReprecificacao({ preco_atual, preco_novo, empresas_afetadas }) {
+  return {
+    reprecificacaoRequerConfirmacao: true,
+    preco_atual,
+    preco_novo,
+    empresas_afetadas: empresas_afetadas || 0,
+    message:
+      'Este plano já está em uso. Alterar o preço NÃO atualiza automaticamente assinaturas Asaas já criadas — elas continuarão cobrando o valor antigo até uma frente futura de sincronização. Confirme para aplicar a mudança ao catálogo.',
+  };
+}
+
+// POST /painel-admin/planos — resolve a precificação de um plano NOVO.
+// Preserva o default histórico de limite_motoristas = 5 quando ausente, e
+// devolve limite_motoristas no patch para a rota persistir de uma vez só.
+function resolverCriacaoPreco(body) {
+  const b = body || {};
+  const limite_motoristas =
+    b.limite_motoristas !== undefined ? normalizarQuantidade(b.limite_motoristas) : LIMITE_MOTORISTAS_PADRAO;
+
+  const r = resolverPrecificacao({
+    modelo_cobranca: b.modelo_cobranca,
+    preco_mensal: b.preco_mensal,
+    preco_por_motorista: b.preco_por_motorista,
+    limite_motoristas,
+  });
+  if (!r.ok) return r;
+  return { ok: true, patch: { ...r.patch, limite_motoristas } };
+}
+
+// PUT /painel-admin/planos/:id — decide o que fazer com a precificação.
+// PURA: recebe o plano atual já carregado. A contagem de empresas afetadas é
+// buscada pela rota SÓ quando a ação for 'confirmar' (não custa query à toa).
+//
+// Ações:
+//   'ignorar'   → body não toca preço; a rota segue com o patch normal (nome,
+//                 descrição, ativo, arquivar...) sem recalcular nada;
+//   'aplicar'   → { patch } com o preço derivado, pronto para persistir;
+//   'confirmar' → plano ja_utilizado E o preço efetivo mudou, sem
+//                 confirmar_reprecificacao no body → a rota devolve 409;
+//   'erro'      → { status, body } prontos para res.status(...).json(...).
+function decidirEdicaoPreco({ planoAtual, body }) {
+  if (!bodyTocaPreco(body)) return { acao: 'ignorar' };
+
+  if (!planoAtual || !planoAtual.id) {
+    return { acao: 'erro', status: 404, body: { message: 'Plano não encontrado.' } };
+  }
+
+  const pre = resolverPrecificacao(mesclarParaPrecificacao(planoAtual, body));
+  if (!pre.ok) return { acao: 'erro', status: pre.status, body: pre.body };
+
+  const precoNovo = pre.patch.preco_mensal;
+  const mudouPreco = !mesmoPreco(planoAtual.preco_mensal, precoNovo);
+
+  // Renomear, mudar categoria ou salvar sem alterar valor não exige confirmação:
+  // o gate é sobre DINHEIRO mudando, não sobre o plano ser tocado.
+  if (planoAtual.ja_utilizado === true && mudouPreco && (body || {}).confirmar_reprecificacao !== true) {
+    return {
+      acao: 'confirmar',
+      preco_atual: Number(planoAtual.preco_mensal),
+      preco_novo: precoNovo,
+    };
+  }
+
+  return { acao: 'aplicar', patch: pre.patch };
+}
+
 module.exports = {
   MODELOS_COBRANCA,
   MODELO_PADRAO,
   SENTINELA_ILIMITADO,
   LIMITE_MOTORISTAS_MAX,
+  LIMITE_MOTORISTAS_PADRAO,
   VALOR_FINAL_MAX,
+  CAMPOS_PRECO,
   calcularPrecoFinal,
   resolverPrecificacao,
+  // PR 3 — ligação com as rotas (tudo puro)
+  bodyTocaPreco,
+  mesmoPreco,
+  mesclarParaPrecificacao,
+  montarErroReprecificacao,
+  resolverCriacaoPreco,
+  decidirEdicaoPreco,
   // exportados para teste isolado
   paraCentavos,
   normalizarModelo,
