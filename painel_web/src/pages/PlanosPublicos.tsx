@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Check, Truck } from 'lucide-react';
+import { Check, Truck, X } from 'lucide-react';
 import api from '../api';
 import { useLoginConfig } from '../hooks/useLoginConfig';
+import { useAuth } from '../contexts/AuthContext';
 
 interface PlanoPublico {
   id: string;
@@ -48,9 +49,15 @@ export const PlanosPublicos: React.FC = () => {
   // Reaproveita a logomarca global configurável (mesma fonte do Login, via
   // /configuracoes/public). Sem exigir login: o endpoint é público.
   const { loginLogo, loginLogoScale, loginLogoY, configLoading } = useLoginConfig();
+  // Detecta sessão para decidir o destino do CTA. `user` é null para visitante
+  // (rota pública dentro do AuthProvider). NÃO buscamos o plano atual aqui.
+  const { user } = useAuth();
   const [planos, setPlanos] = useState<PlanoPublico[]>([]);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState('');
+  // Plano escolhido por um usuário logado — abre o modal de upgrade. Visitante
+  // nunca passa por aqui (vai direto ao /cadastro).
+  const [planoUpgrade, setPlanoUpgrade] = useState<PlanoPublico | null>(null);
 
   useEffect(() => {
     let vivo = true;
@@ -84,6 +91,27 @@ export const PlanosPublicos: React.FC = () => {
       ? 'plano_id=' + encodeURIComponent(plano.id)
       : 'plano=' + encodeURIComponent(plano.id);
     navigate('/cadastro?' + q);
+  }
+
+  // CTA do card: visitante segue para o cadastro público (fluxo atual, intacto);
+  // usuário logado abre o modal de upgrade — nunca cai no /cadastro (a empresa
+  // e o admin já existem).
+  function aoEscolherPlano(plano: PlanoPublico) {
+    if (user) {
+      setPlanoUpgrade(plano);
+    } else {
+      irParaCadastro(plano);
+    }
+  }
+
+  // Destino do CTA do modal. Enquanto não há checkout self-service, orientamos
+  // à regularização/faturas. Super-admin gerencia planos pelo painel.
+  const upgradeDestino = user?.is_super_admin ? '/painel-administrativo/planos' : '/minhas-faturas';
+  const upgradeCtaLabel = user?.is_super_admin ? 'Gerenciar planos' : 'Ver faturas / regularização';
+
+  function confirmarUpgrade() {
+    setPlanoUpgrade(null);
+    navigate(upgradeDestino);
   }
 
   return (
@@ -154,9 +182,9 @@ export const PlanosPublicos: React.FC = () => {
                   </ul>
                   <button
                     className={`w-full py-3 rounded-xl text-white font-semibold transition-colors ${destaque ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-800 hover:bg-gray-900'}`}
-                    onClick={() => irParaCadastro(plano)}
+                    onClick={() => aoEscolherPlano(plano)}
                   >
-                    Começar Agora
+                    {user ? 'Solicitar upgrade' : 'Começar Agora'}
                   </button>
                 </div>
               );
@@ -171,6 +199,52 @@ export const PlanosPublicos: React.FC = () => {
           </p>
         </div>
       </div>
+
+      {/* Modal de upgrade — só para usuário logado. Não contrata nem cobra: enquanto
+          não há checkout self-service, orienta à regularização/faturas (ou ao painel
+          de planos, se super-admin). Não busca o plano atual nem chama billing. */}
+      {planoUpgrade && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setPlanoUpgrade(null)}
+        >
+          <div
+            className="relative w-full max-w-md bg-white rounded-2xl shadow-xl p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              aria-label="Fechar"
+              className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
+              onClick={() => setPlanoUpgrade(null)}
+            >
+              <X size={20} />
+            </button>
+            <h3 className="text-xl font-bold text-gray-900 mb-2">Solicitar upgrade</h3>
+            <p className="text-gray-600 mb-4">
+              Você escolheu o <span className="font-semibold text-gray-900">{planoUpgrade.nome}</span>.
+              A troca de plano é concluída após a confirmação do pagamento. Acesse suas
+              faturas para acompanhar a cobrança e a regularização.
+            </p>
+            <div className="flex flex-col gap-2">
+              <button
+                type="button"
+                className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold transition-colors"
+                onClick={confirmarUpgrade}
+              >
+                {upgradeCtaLabel}
+              </button>
+              <button
+                type="button"
+                className="w-full py-3 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold transition-colors"
+                onClick={() => setPlanoUpgrade(null)}
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
