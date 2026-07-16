@@ -9,6 +9,7 @@ const { resolveAsaasApiKey } = require('../utils/asaasConfig');
 const { classificarResponsavelRegularizacao } = require('../utils/billingProfile');
 const { garantirAssinatura, conciliarAssinatura } = require('../services/asaasSubscriptionService');
 const { sincronizarCobrancas } = require('../services/asaasInvoiceSyncService');
+const { solicitarUpgrade } = require('../services/upgradeRequestService');
 const {
   normalizarStatusAsaas,
   decidirAtualizacaoFatura,
@@ -570,6 +571,38 @@ router.post('/minhas-faturas/sincronizar', verifyToken, isAdmin, verificarEmpres
     const httpStatus = err.httpStatus || 500;
     console.error('[pagamentos/minhas-faturas/sincronizar] Falha', { status: httpStatus });
     res.status(httpStatus).json({ message: err.message || 'Erro ao sincronizar cobranças.' });
+  }
+});
+
+// ─── SOLICITAÇÃO DE UPGRADE DE PLANO (Frente #8-C / PR 2) ─────────────────────
+// Admin comum da empresa solicita a troca para um plano superior. Cria a
+// solicitação pendente + a cobrança avulsa (sandbox) + a fatura local, SEM
+// aplicar o plano (isso é o webhook, PR 3). Gate sandbox hard antes de tudo.
+// Toda a coreografia idempotente vive em upgradeRequestService (testável).
+router.post('/upgrade/solicitar', verifyToken, isAdmin, verificarEmpresa, async (req, res) => {
+  try {
+    if (await bloquearSeNaoSandbox(res)) return;
+    if (!req.empresa_id) {
+      return res.status(400).json({ message: 'Empresa não identificada.' });
+    }
+    const { apiKey, baseURL } = await getAsaasConfig();
+    const { httpStatus, resultado } = await solicitarUpgrade({
+      empresaId: req.empresa_id,
+      planoNovoId: req.body?.plano_novo_id,
+      criadoPor: req.user?.uid || null,
+      clientRequestId: req.body?.client_request_id,
+      config: { apiKey, baseURL },
+      supabase,
+      http: axios,
+    });
+    return res.status(httpStatus).json(resultado);
+  } catch (err) {
+    const httpStatus = err.httpStatus || 500;
+    const body = err.body || { message: err.message || 'Erro ao solicitar upgrade.' };
+    if (httpStatus >= 500) {
+      console.error('[pagamentos/upgrade/solicitar] Falha', { status: httpStatus });
+    }
+    return res.status(httpStatus).json(body);
   }
 });
 
