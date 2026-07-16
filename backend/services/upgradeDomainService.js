@@ -126,6 +126,43 @@ function deveReutilizarSolicitacaoPendente({ solicitacaoPendente, planoNovoId })
   return { reutilizar: false, bloquear: true, motivo: 'outro_upgrade_pendente' };
 }
 
+// PR 3 — decisão PURA de aplicação do plano quando a fatura de upgrade é paga.
+// Não faz I/O; só classifica a ação a partir do estado observado. Chamada pelo
+// webhook (via upgradeApplyService) SOMENTE quando a fatura já virou 'pago'.
+//
+// Retorna { acao, motivo, planoNovoId? }, onde acao é:
+//   * 'aplicar' — aplicar plano_novo_id na empresa e marcar solicitação paga;
+//   * 'ignorar' — nada a fazer (sem solicitação, ou solicitação não-pendente:
+//                 já paga = idempotente, ou cancelada/expirada/falhou);
+//   * 'falhar'  — inconsistência de negócio TERMINAL com solicitação ainda
+//                 pendente (empresa divergente, plano inexistente/inativo/
+//                 arquivado, plano divergente): NÃO aplica plano; marca 'falhou'.
+//
+// Parâmetros:
+//   solicitacao → { status, empresa_id, plano_novo_id } | null
+//   fatura      → { empresa_id, status }  (o webhook garante status='pago')
+//   planoNovo   → { id, ativo, arquivado_em } | null
+function decidirAplicacaoUpgrade({ solicitacao, fatura, planoNovo }) {
+  if (!solicitacao) return { acao: 'ignorar', motivo: 'sem_solicitacao' };
+  if (solicitacao.status !== 'pendente') {
+    return { acao: 'ignorar', motivo: `solicitacao_${solicitacao.status || 'sem_status'}` };
+  }
+  // Defesa: só o webhook chama, e só no 'pago'. Se não estiver pago, não age.
+  if (!fatura || fatura.status !== 'pago') {
+    return { acao: 'ignorar', motivo: 'fatura_nao_paga' };
+  }
+  // Inconsistências terminais → falhar (não aplica; marca falhou se ainda pendente).
+  if (!solicitacao.empresa_id || !fatura.empresa_id || solicitacao.empresa_id !== fatura.empresa_id) {
+    return { acao: 'falhar', motivo: 'empresa_divergente' };
+  }
+  if (!planoNovo || !planoNovo.id) return { acao: 'falhar', motivo: 'plano_inexistente' };
+  if (planoNovo.ativo === false) return { acao: 'falhar', motivo: 'plano_inativo' };
+  if (planoNovo.arquivado_em != null) return { acao: 'falhar', motivo: 'plano_arquivado' };
+  if (solicitacao.plano_novo_id !== planoNovo.id) return { acao: 'falhar', motivo: 'plano_divergente' };
+
+  return { acao: 'aplicar', motivo: 'ok', planoNovoId: solicitacao.plano_novo_id };
+}
+
 // Monta a LINHA a inserir em solicitacoes_upgrade_plano. NÃO cria nada — só o
 // objeto. fatura_id/asaas_payment_id ficam para o endpoint (PR 2) preencher
 // após criar a cobrança. criado_em/atualizado_em usam DEFAULT do banco.
@@ -152,4 +189,5 @@ module.exports = {
   montarErroPlanoInvalido,
   deveReutilizarSolicitacaoPendente,
   montarPayloadSolicitacao,
+  decidirAplicacaoUpgrade,
 };
