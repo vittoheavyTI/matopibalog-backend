@@ -37,7 +37,7 @@ router.get('/publicos', async (req, res) => {
 
   let query = supabase
     .from('planos')
-    .select('id, nome, descricao, preco_mensal, limite_motoristas, dias_trial, recursos, ativo, categoria')
+    .select('id, nome, descricao, preco_mensal, modelo_cobranca, preco_por_motorista, limite_motoristas, dias_trial, recursos, ativo, categoria')
     .eq('ativo', true);
 
   if (categoria === 'autonomo') {
@@ -59,7 +59,12 @@ router.get('/publicos', async (req, res) => {
     id: p.id,
     nome: p.nome,
     descricao: p.descricao || '',
+    // preco_mensal é o VALOR FINAL cobrado em qualquer modelo. Os dois campos
+    // abaixo só contam COMO ele foi formado — a vitrine anuncia o final e usa a
+    // composição como subtítulo. Nunca o contrário.
     preco_mensal: Number(p.preco_mensal) || 0,
+    modelo_cobranca: p.modelo_cobranca === 'por_motorista' ? 'por_motorista' : 'fixo',
+    preco_por_motorista: p.preco_por_motorista != null ? Number(p.preco_por_motorista) : null,
     limite_motoristas: p.limite_motoristas,
     dias_trial: p.dias_trial,
     recursos: normalizarRecursos(p.recursos),

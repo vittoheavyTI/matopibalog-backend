@@ -10,7 +10,10 @@ interface PlanoPublico {
   id: string;
   nome: string;
   descricao: string;
+  // Valor FINAL cobrado, em qualquer modelo — é sempre ele o headline do card.
   preco_mensal: number;
+  modelo_cobranca: 'fixo' | 'por_motorista';
+  preco_por_motorista: number | null;
   limite_motoristas: number | null;
   dias_trial: number | null;
   recursos: string[];
@@ -20,9 +23,9 @@ interface PlanoPublico {
 // planos não ficar em branco. O backend (/planos/publicos) é a fonte principal.
 // Os ids aqui são aliases legados (não-UUID) e navegam via ?plano=<alias>.
 const PLANOS_FALLBACK: PlanoPublico[] = [
-  { id: 'basico', nome: 'Plano Básico', descricao: 'Para pequenas frotas', preco_mensal: 49.9, limite_motoristas: 3, dias_trial: 7, recursos: ['Gestão de fretes', 'Relatórios básicos', 'Suporte via email'] },
-  { id: 'profissional', nome: 'Plano Profissional', descricao: 'Para frotas em crescimento', preco_mensal: 99.9, limite_motoristas: 10, dias_trial: 7, recursos: ['Gestão de fretes + despesas', 'Relatórios avançados', 'Suporte prioritário', 'App motorista'] },
-  { id: 'empresarial', nome: 'Plano Enterprise', descricao: 'Para operações completas', preco_mensal: 199.9, limite_motoristas: null, dias_trial: 7, recursos: ['Motoristas ilimitados', 'Todas as funcionalidades', 'Suporte 24h'] },
+  { id: 'basico', nome: 'Plano Básico', descricao: 'Para pequenas frotas', preco_mensal: 49.9, modelo_cobranca: 'fixo', preco_por_motorista: null, limite_motoristas: 3, dias_trial: 7, recursos: ['Gestão de fretes', 'Relatórios básicos', 'Suporte via email'] },
+  { id: 'profissional', nome: 'Plano Profissional', descricao: 'Para frotas em crescimento', preco_mensal: 99.9, modelo_cobranca: 'fixo', preco_por_motorista: null, limite_motoristas: 10, dias_trial: 7, recursos: ['Gestão de fretes + despesas', 'Relatórios avançados', 'Suporte prioritário', 'App motorista'] },
+  { id: 'empresarial', nome: 'Plano Enterprise', descricao: 'Para operações completas', preco_mensal: 199.9, modelo_cobranca: 'fixo', preco_por_motorista: null, limite_motoristas: null, dias_trial: 7, recursos: ['Motoristas ilimitados', 'Todas as funcionalidades', 'Suporte 24h'] },
 ];
 
 // Defesa extra: o backend já normaliza `recursos` para array de strings.
@@ -41,6 +44,17 @@ function normalizarRecursos(recursos: any): string[] {
 function limiteLabel(limite: number | null): string {
   if (limite == null) return 'Motoristas ilimitados';
   return `Até ${limite} motorista${limite === 1 ? '' : 's'}`;
+}
+
+// Composição do preço — subtítulo, nunca headline. Só existe em plano por
+// motorista; plano fixo devolve null e o card fica idêntico ao de hoje.
+// O valor em destaque continua sendo o FINAL: anunciar o unitário grande e
+// cobrar o total seria anunciar um preço e cobrar outro.
+function composicaoLabel(plano: PlanoPublico): string | null {
+  if (plano.modelo_cobranca !== 'por_motorista') return null;
+  if (plano.preco_por_motorista == null || plano.limite_motoristas == null) return null;
+  const motoristas = `${plano.limite_motoristas} motorista${plano.limite_motoristas === 1 ? '' : 's'}`;
+  return `${motoristas} × R$ ${plano.preco_por_motorista.toFixed(2)}`;
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -75,6 +89,10 @@ export const PlanosPublicos: React.FC = () => {
         const lista: PlanoPublico[] = (res.data?.planos || []).map((p: any) => ({
           ...p,
           preco_mensal: Number(p.preco_mensal) || 0,
+          // Defesa: plano antigo pode não trazer o campo. Qualquer coisa que não
+          // seja 'por_motorista' é fixo, e sem unitário não há composição.
+          modelo_cobranca: p.modelo_cobranca === 'por_motorista' ? 'por_motorista' : 'fixo',
+          preco_por_motorista: p.preco_por_motorista != null ? Number(p.preco_por_motorista) : null,
           recursos: normalizarRecursos(p.recursos),
         }));
         setPlanos(lista.length ? lista : PLANOS_FALLBACK);
@@ -221,6 +239,12 @@ export const PlanosPublicos: React.FC = () => {
                     <span className="text-4xl font-bold text-gray-900">R$ {plano.preco_mensal.toFixed(2)}</span>
                     <span className="text-gray-500">/mês</span>
                   </div>
+                  {/* Composição como SUBTÍTULO. O headline acima segue sendo o
+                      valor final cobrado — em plano fixo isto some e o card fica
+                      exatamente como era. */}
+                  {composicaoLabel(plano) && (
+                    <p className="text-sm text-gray-500 mb-1">{composicaoLabel(plano)}</p>
+                  )}
                   {plano.dias_trial ? (
                     <p className="text-sm text-green-600 font-medium mb-6">{plano.dias_trial} dias de teste grátis</p>
                   ) : <div className="mb-6" />}
