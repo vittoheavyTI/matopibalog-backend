@@ -5,6 +5,7 @@
 
 const { normalizarParaHash, inserirOuReivindicar, marcarProcessado, marcarIgnorado, marcarFalhou, sanitizar } = require('./asaasWebhookEventRepository');
 const { decidirTransicaoFaturaEvento } = require('./paymentDomainService');
+const { aplicarUpgradePago } = require('./upgradeApplyService');
 
 // Eventos obrigatórios conhecidos e seguros (não geram transição financeira, mas
 // são reconhecidos para não poluir logs com "desconhecido").
@@ -356,6 +357,32 @@ async function executarProcessamento({ supabase, body, eventType, evento, normal
         // Falha ao atualizar empresa — evento fica failed para retry
         await marcarFalhaERetentar(supabase, evento, 'erro_atualizar_empresa');
       }
+    }
+  }
+
+  // 13.5. Aplicar UPGRADE de plano (Frente #8-C / PR 3) — bloco ADITIVO e
+  // condicional, sem alterar o caminho acima. Só quando a fatura virou 'pago'.
+  // Fatura comum (sem solicitação de upgrade vinculada) NÃO é afetada. Erro
+  // técnico (DB) → marcarFalhaERetentar (retry idempotente); inconsistência de
+  // negócio NÃO quebra o webhook (o serviço decide sem lançar). NÃO cria fatura,
+  // NÃO chama Asaas, NÃO altera limite_motoristas (derivado do plano_id).
+  if (decisao.fatura && decisao.fatura.statusFinal === 'pago') {
+    let upgrade;
+    try {
+      upgrade = await aplicarUpgradePago({
+        supabase,
+        faturaId: fatura.id,
+        empresaId: fatura.empresa_id,
+        asaasPaymentId,
+      });
+    } catch (_) {
+      // Falha técnica na aplicação do plano → evento fica failed para retry.
+      await marcarFalhaERetentar(supabase, evento, 'erro_aplicar_upgrade');
+    }
+    if (upgrade && upgrade.resultado === 'aplicado') {
+      console.log('[webhook][upgrade] plano aplicado', { empresa_id: fatura.empresa_id, plano_novo_id: upgrade.planoNovoId });
+    } else if (upgrade && upgrade.resultado !== 'sem_solicitacao') {
+      console.warn('[webhook][upgrade] plano nao aplicado', { resultado: upgrade.resultado, motivo: upgrade.motivo });
     }
   }
 
