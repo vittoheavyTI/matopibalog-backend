@@ -6,6 +6,12 @@ const { criarEmpresaCompleta } = require('../services/empresaService');
 const { plano_idValido, normalizarPlanoId } = require('../utils/plano');
 const { conflitoUnico } = require('../utils/pgError');
 const { montarPatchArquivamento, excluirPlano } = require('../services/planoAdminService');
+const {
+  bodyTocaPreco,
+  decidirEdicaoPreco,
+  montarErroReprecificacao,
+  resolverCriacaoPreco,
+} = require('../services/planoPrecoService');
 
 router.use(verifyToken, isAdmin, isSuperAdmin);
 
@@ -209,15 +215,21 @@ router.post('/planos', async (req, res) => {
   if (!CATEGORIAS_PLANO.includes(categoria)) {
     return res.status(400).json({ message: 'Categoria inválida. Use empresa, autonomo ou ambos.' });
   }
+  // Precificação é do backend, não do cliente. Sem modelo_cobranca no body →
+  // resolve 'fixo' (o payload atual do painel). Em por_motorista o preco_mensal
+  // enviado é IGNORADO e recalculado como unitário × quantidade. O patch já traz
+  // modelo_cobranca, preco_mensal, preco_por_motorista e limite_motoristas.
+  const preco = resolverCriacaoPreco(req.body);
+  if (!preco.ok) return res.status(preco.status).json(preco.body);
+
   const { data, error } = await supabase.from('planos').insert({
     nome: req.body.nome,
-    preco_mensal: Number(req.body.preco_mensal) || 0,
     descricao: req.body.descricao || '',
     recursos: req.body.recursos || [],
-    limite_motoristas: req.body.limite_motoristas !== undefined ? Number(req.body.limite_motoristas) : 5,
     dias_trial: req.body.dias_trial !== undefined ? Number(req.body.dias_trial) : 7,
     ativo: req.body.ativo !== undefined ? req.body.ativo === true : true,
-    categoria
+    categoria,
+    ...preco.patch
   }).select().single();
   if (error) return res.status(500).json({ message: 'Erro ao criar plano.' });
   res.status(201).json(data);
@@ -226,7 +238,6 @@ router.post('/planos', async (req, res) => {
 router.put('/planos/:id', async (req, res) => {
   const upd = {};
   if (req.body.nome !== undefined) upd.nome = req.body.nome;
-  if (req.body.preco_mensal !== undefined) upd.preco_mensal = Number(req.body.preco_mensal);
   if (req.body.descricao !== undefined) upd.descricao = req.body.descricao;
   if (req.body.recursos !== undefined) upd.recursos = req.body.recursos;
   if (req.body.limite_motoristas !== undefined) upd.limite_motoristas = Number(req.body.limite_motoristas);
@@ -240,6 +251,46 @@ router.put('/planos/:id', async (req, res) => {
     }
     upd.categoria = categoria;
   }
+
+  // ─── Precificação ──────────────────────────────────────────────────────────
+  // O PUT é PARCIAL, mas a fórmula precisa do quadro completo: `PUT
+  // { limite_motoristas: 20 }` num plano por_motorista traz a quantidade no body
+  // e o unitário só no banco. Por isso carregamos a linha atual e mesclamos antes
+  // de calcular — senão a quantidade mudaria e o preço não.
+  //
+  // Só carrega/recalcula quando o body toca preço/modelo/quantidade. Arquivar,
+  // desarquivar, ativar e inativar mandam só { arquivar } ou { ativo }: não
+  // pagam query nem recálculo, e seguem exatamente como na frente #6.
+  if (bodyTocaPreco(req.body)) {
+    const { data: planoAtual, error: loadErr } = await supabase
+      .from('planos')
+      .select('id, preco_mensal, preco_por_motorista, limite_motoristas, modelo_cobranca, ja_utilizado')
+      .eq('id', req.params.id)
+      .maybeSingle();
+    if (loadErr) return res.status(500).json({ message: 'Erro ao carregar o plano.' });
+
+    const decisao = decidirEdicaoPreco({ planoAtual, body: req.body });
+
+    if (decisao.acao === 'erro') return res.status(decisao.status).json(decisao.body);
+
+    // Plano já usado + preço efetivo mudando: 409 com o diff, e nada é aplicado.
+    // A trava é aqui no backend, não no modal — um curl ou um painel
+    // desatualizado não podem furar mudança de preço de plano em uso.
+    if (decisao.acao === 'confirmar') {
+      const { count } = await supabase
+        .from('empresas')
+        .select('id', { count: 'exact', head: true })
+        .eq('plano_id', req.params.id);
+      return res.status(409).json(montarErroReprecificacao({
+        preco_atual: decisao.preco_atual,
+        preco_novo: decisao.preco_novo,
+        empresas_afetadas: count || 0,
+      }));
+    }
+
+    if (decisao.acao === 'aplicar') Object.assign(upd, decisao.patch);
+  }
+
   // Arquivar/desarquivar (autoria vem do token, nunca do body). Arquivar seta
   // ativo=false; desarquivar NÃO reativa (reativar no app é ação separada).
   Object.assign(upd, montarPatchArquivamento(req.body, req.user.uid));

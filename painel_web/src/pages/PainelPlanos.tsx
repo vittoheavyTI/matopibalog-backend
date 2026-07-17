@@ -1,10 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { AlertTriangle, Archive, ArchiveRestore, Check, Eye, Plus, Shield, Trash2, X } from 'lucide-react';
 import api from '../api';
+import { formatCurrency } from '../utils';
+
+type ModeloCobranca = 'fixo' | 'por_motorista';
 
 type FormPlano = {
   nome: string;
+  modelo_cobranca: ModeloCobranca;
   preco_mensal: string;
+  preco_por_motorista: string;
   descricao: string;
   limite_motoristas: string;
   dias_trial: string;
@@ -15,7 +20,9 @@ type FormPlano = {
 
 const FORM_VAZIO: FormPlano = {
   nome: '',
+  modelo_cobranca: 'fixo',
   preco_mensal: '',
+  preco_por_motorista: '',
   descricao: '',
   limite_motoristas: '5',
   dias_trial: '7',
@@ -23,6 +30,18 @@ const FORM_VAZIO: FormPlano = {
   categoria: 'ambos',
   recursos: '',
 };
+
+const MODELOS_COBRANCA: { chave: ModeloCobranca; titulo: string; ajuda: string }[] = [
+  { chave: 'fixo', titulo: 'Valor fixo', ajuda: 'Um valor mensal para o plano inteiro.' },
+  { chave: 'por_motorista', titulo: 'Por motorista', ajuda: 'Valor unitário × motoristas contratados.' },
+];
+
+// Espelho da política do backend (planoPrecoService). Existe para o super-admin
+// VER o valor e o erro antes de salvar — nunca para decidir o que será cobrado.
+// O backend é a autoridade: se divergirem, o 422 dele manda.
+const SENTINELA_ILIMITADO = 999;
+const LIMITE_MOTORISTAS_MAX = 200;
+const VALOR_FINAL_MAX = 500000;
 
 // Público-alvo do plano. Dirige o que aparece no app do autônomo.
 const CATEGORIAS_PLANO: { chave: string; titulo: string }[] = [
@@ -128,6 +147,58 @@ function textoParaRecursos(texto: string): string[] {
   return normalizarRecursosParaLista(texto);
 }
 
+// Texto monetário → centavos inteiros. null = não é dinheiro válido (vazio, lixo
+// ou mais de 2 casas decimais — que o backend recusa em vez de arredondar).
+function paraCentavos(texto: string): number | null {
+  const limpo = texto.trim();
+  if (!limpo) return null;
+  const n = Number(limpo);
+  if (!Number.isFinite(n)) return null;
+  const centavos = n * 100;
+  const inteiro = Math.round(centavos);
+  if (Math.abs(centavos - inteiro) > 1e-6) return null;
+  return inteiro;
+}
+
+type Previa =
+  | { ok: true; centavos: number; unitarioCentavos: number; quantidade: number }
+  | { ok: false; erro: string };
+
+// Prévia do valor final de um plano por motorista. Conta em centavos inteiros,
+// igual à do backend — em float, 149,90 × 3 dá 449.70000000000005.
+function calcularPrevia(form: FormPlano): Previa {
+  const unitarioCentavos = paraCentavos(form.preco_por_motorista);
+  if (unitarioCentavos === null) {
+    return { ok: false, erro: 'Informe o valor por motorista (no máximo 2 casas decimais).' };
+  }
+  if (unitarioCentavos <= 0) {
+    return { ok: false, erro: 'O valor por motorista deve ser maior que zero.' };
+  }
+
+  const quantidade = Number(form.limite_motoristas);
+  if (!Number.isInteger(quantidade)) {
+    return { ok: false, erro: 'A quantidade de motoristas contratados deve ser um número inteiro.' };
+  }
+  if (quantidade < 1) {
+    return { ok: false, erro: 'A quantidade de motoristas contratados deve ser de pelo menos 1.' };
+  }
+  if (quantidade === SENTINELA_ILIMITADO) {
+    return {
+      ok: false,
+      erro: '999 é reservado como sentinela de ilimitado; planos por motorista exigem quantidade finita.',
+    };
+  }
+  if (quantidade > LIMITE_MOTORISTAS_MAX) {
+    return { ok: false, erro: `Planos por motorista aceitam no máximo ${LIMITE_MOTORISTAS_MAX} motoristas.` };
+  }
+
+  const centavos = unitarioCentavos * quantidade;
+  if (centavos > VALOR_FINAL_MAX * 100) {
+    return { ok: false, erro: `O valor final ultrapassa o teto de ${formatCurrency(VALOR_FINAL_MAX)}.` };
+  }
+  return { ok: true, centavos, unitarioCentavos, quantidade };
+}
+
 export const PainelPlanos: React.FC = () => {
   const [planos, setPlanos] = useState<any[]>([]);
   const [showModal, setShowModal] = useState(false);
@@ -139,6 +210,17 @@ export const PainelPlanos: React.FC = () => {
   // Plano sob confirmação forte de exclusão (modal exige digitar o nome).
   const [confirmarExcluir, setConfirmarExcluir] = useState<any>(null);
   const [excluirTexto, setExcluirTexto] = useState('');
+  // Reprecificação de plano em uso: preenchido a partir do 409 do backend, que
+  // já traz o diff pronto. Guarda o payload para reenviar com a flag.
+  const [confirmarReprec, setConfirmarReprec] = useState<{
+    preco_atual: number;
+    preco_novo: number;
+    empresas_afetadas: number;
+    planoId: string;
+    payload: Record<string, unknown>;
+  } | null>(null);
+  const [aceiteAsaas, setAceiteAsaas] = useState(false);
+  const [salvando, setSalvando] = useState(false);
 
   useEffect(() => { carregar(); }, []);
 
@@ -167,7 +249,11 @@ export const PainelPlanos: React.FC = () => {
     setEditing(plano);
     setForm({
       nome: plano.nome || '',
+      // Qualquer coisa que não seja 'por_motorista' é fixo — inclusive plano
+      // antigo cujo modelo_cobranca nem existia.
+      modelo_cobranca: plano.modelo_cobranca === 'por_motorista' ? 'por_motorista' : 'fixo',
       preco_mensal: String(plano.preco_mensal ?? ''),
+      preco_por_motorista: plano.preco_por_motorista != null ? String(plano.preco_por_motorista) : '',
       descricao: plano.descricao || '',
       limite_motoristas: String(plano.limite_motoristas ?? 5),
       dias_trial: String(plano.dias_trial ?? 7),
@@ -179,26 +265,47 @@ export const PainelPlanos: React.FC = () => {
   }
 
   async function handleSalvar() {
-    const preco = Number(form.preco_mensal);
     const limite = Number(form.limite_motoristas);
     const diasTrial = Number(form.dias_trial);
 
     if (!form.nome.trim()) { setToast({ message: 'Nome é obrigatório', tipo: 'erro' }); return; }
-    if (!Number.isFinite(preco) || preco < 0) { setToast({ message: 'Preço deve ser igual ou maior que zero', tipo: 'erro' }); return; }
     if (!Number.isInteger(limite) || limite < 0) { setToast({ message: 'Limite de motoristas deve ser um inteiro igual ou maior que zero', tipo: 'erro' }); return; }
     if (!Number.isInteger(diasTrial) || diasTrial < 0) { setToast({ message: 'Dias de trial deve ser um inteiro igual ou maior que zero', tipo: 'erro' }); return; }
 
-    const payload = {
+    const base = {
       nome: form.nome.trim(),
-      preco_mensal: preco,
       descricao: form.descricao.trim(),
       limite_motoristas: limite,
       dias_trial: diasTrial,
       ativo: form.ativo,
       categoria: form.categoria,
       recursos: textoParaRecursos(form.recursos),
+      modelo_cobranca: form.modelo_cobranca,
     };
 
+    let payload: Record<string, unknown>;
+    if (form.modelo_cobranca === 'por_motorista') {
+      const previa = calcularPrevia(form);
+      if (!previa.ok) { setToast({ message: previa.erro, tipo: 'erro' }); return; }
+      // preco_mensal NÃO entra no payload: quem deriva o valor final é o backend.
+      // Mandar o total daqui seria dar ao frontend a autoridade sobre a cobrança.
+      payload = { ...base, preco_por_motorista: Number(form.preco_por_motorista) };
+    } else {
+      const preco = Number(form.preco_mensal);
+      if (!Number.isFinite(preco) || preco < 0) { setToast({ message: 'Preço deve ser igual ou maior que zero', tipo: 'erro' }); return; }
+      payload = { ...base, preco_mensal: preco };
+    }
+
+    await enviarPlano(payload);
+  }
+
+  // Envia o plano e traduz a resposta do backend. Dois caminhos importam:
+  //   409 reprecificacaoRequerConfirmacao → o backend NÃO aplicou nada e mandou o
+  //     diff; abrimos a confirmação e o mesmo payload volta com a flag;
+  //   422 → traz a mensagem específica (sentinela 999, teto, casas decimais).
+  //     Sem repassá-la, o usuário veria só "Erro ao criar" sem saber o que corrigir.
+  async function enviarPlano(payload: Record<string, unknown>) {
+    setSalvando(true);
     try {
       if (editing) {
         await api.put('/painel-admin/planos/' + editing.id, payload);
@@ -210,8 +317,43 @@ export const PainelPlanos: React.FC = () => {
       setShowModal(false);
       setEditing(null);
       carregar();
-    } catch {
-      setToast({ message: editing ? 'Erro ao atualizar' : 'Erro ao criar', tipo: 'erro' });
+    } catch (err: any) {
+      const dados = err?.response?.data;
+      if (err?.response?.status === 409 && dados?.reprecificacaoRequerConfirmacao && editing) {
+        setConfirmarReprec({
+          preco_atual: Number(dados.preco_atual),
+          preco_novo: Number(dados.preco_novo),
+          empresas_afetadas: Number(dados.empresas_afetadas) || 0,
+          planoId: editing.id,
+          payload,
+        });
+        setAceiteAsaas(false);
+        return; // mantém o formulário aberto por trás da confirmação
+      }
+      setToast({ message: dados?.message || (editing ? 'Erro ao atualizar' : 'Erro ao criar'), tipo: 'erro' });
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  // Reenvia o MESMO payload com a flag. O backend revalida tudo de novo — a flag
+  // só destrava a confirmação, não pula validação.
+  async function aplicarReprecificacao() {
+    if (!confirmarReprec || !aceiteAsaas) return;
+    const { planoId, payload } = confirmarReprec;
+    setSalvando(true);
+    try {
+      await api.put('/painel-admin/planos/' + planoId, { ...payload, confirmar_reprecificacao: true });
+      setToast({ message: 'Plano atualizado!', tipo: 'sucesso' });
+      setConfirmarReprec(null);
+      setAceiteAsaas(false);
+      setShowModal(false);
+      setEditing(null);
+      carregar();
+    } catch (err: any) {
+      setToast({ message: err?.response?.data?.message || 'Erro ao atualizar', tipo: 'erro' });
+    } finally {
+      setSalvando(false);
     }
   }
 
@@ -268,6 +410,13 @@ export const PainelPlanos: React.FC = () => {
         <p className="text-sm text-gray-500 mb-4">{plano.descricao || 'Sem descrição'}</p>
         <div className="flex flex-wrap gap-2 mb-4 text-xs font-semibold">
           <span className="px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 capitalize">{plano.categoria || 'ambos'}</span>
+          {/* Composição do preço: só aparece em plano por motorista. O valor de
+              cima continua sendo o FINAL cobrado, em qualquer modelo. */}
+          {plano.modelo_cobranca === 'por_motorista' && plano.preco_por_motorista != null && (
+            <span className="px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700">
+              {Number(plano.limite_motoristas ?? 0)} × {formatCurrency(Number(plano.preco_por_motorista))}
+            </span>
+          )}
           <span className="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700">Até {Number(plano.limite_motoristas ?? 0)} motoristas</span>
           <span className="px-2.5 py-1 rounded-lg bg-amber-50 text-amber-700">Trial: {Number(plano.dias_trial ?? 0)} dias</span>
           <span className={`px-2.5 py-1 rounded-lg ${!inativo ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>{!inativo ? 'Ativo' : 'Inativo'}</span>
@@ -295,6 +444,11 @@ export const PainelPlanos: React.FC = () => {
       </div>
     );
   }
+
+  // Prévia só existe no modelo por motorista — no fixo, o próprio campo já é o
+  // valor final e não há o que compor.
+  const previa = form.modelo_cobranca === 'por_motorista' ? calcularPrevia(form) : null;
+  const podeSalvar = !salvando && (previa === null || previa.ok);
 
   // Visão principal = não arquivados. Arquivados vão para seção recolhida.
   const naoArquivados = planos.filter((p) => !p.arquivado_em);
@@ -382,13 +536,45 @@ export const PainelPlanos: React.FC = () => {
                 <label htmlFor="plano-descricao" className="block text-xs font-bold text-gray-500 uppercase mb-1.5 ml-1">Descrição</label>
                 <input id="plano-descricao" type="text" className="w-full border-2 border-gray-100 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" value={form.descricao} onChange={(e) => setForm({ ...form, descricao: e.target.value })} placeholder="Descrição do plano" />
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div>
-                  <label htmlFor="plano-preco" className="block text-xs font-bold text-gray-500 uppercase mb-1.5 ml-1">Preço mensal</label>
-                  <input id="plano-preco" type="number" min="0" step="0.01" className="w-full border-2 border-gray-100 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" value={form.preco_mensal} onChange={(e) => setForm({ ...form, preco_mensal: e.target.value })} placeholder="99,90" />
+              {/* Modelo de cobrança: define QUAL campo de valor é editável abaixo.
+                  Nunca existem dois campos disputando "qual é o valor cobrado". */}
+              <div>
+                <span className="block text-xs font-bold text-gray-500 uppercase mb-1.5 ml-1">Modelo de cobrança</span>
+                <div className="grid grid-cols-2 gap-2" role="group" aria-label="Modelo de cobrança do plano">
+                  {MODELOS_COBRANCA.map((op) => {
+                    const escolhido = form.modelo_cobranca === op.chave;
+                    return (
+                      <button
+                        key={op.chave}
+                        type="button"
+                        aria-pressed={escolhido}
+                        onClick={() => setForm({ ...form, modelo_cobranca: op.chave })}
+                        className={`text-left rounded-xl border-2 p-3 transition-colors ${escolhido ? 'border-blue-500 bg-blue-50/50' : 'border-gray-100 bg-gray-50/50 hover:border-gray-200'}`}
+                      >
+                        <span className={`block text-sm font-bold ${escolhido ? 'text-blue-700' : 'text-gray-700'}`}>{op.titulo}</span>
+                        <span className="block text-xs text-gray-400 mt-0.5">{op.ajuda}</span>
+                      </button>
+                    );
+                  })}
                 </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                {form.modelo_cobranca === 'fixo' ? (
+                  <div>
+                    <label htmlFor="plano-preco" className="block text-xs font-bold text-gray-500 uppercase mb-1.5 ml-1">Preço mensal</label>
+                    <input id="plano-preco" type="number" min="0" step="0.01" className="w-full border-2 border-gray-100 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" value={form.preco_mensal} onChange={(e) => setForm({ ...form, preco_mensal: e.target.value })} placeholder="99,90" />
+                  </div>
+                ) : (
+                  <div>
+                    <label htmlFor="plano-unitario" className="block text-xs font-bold text-gray-500 uppercase mb-1.5 ml-1">Valor por motorista</label>
+                    <input id="plano-unitario" type="number" min="0" step="0.01" className="w-full border-2 border-gray-100 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" value={form.preco_por_motorista} onChange={(e) => setForm({ ...form, preco_por_motorista: e.target.value })} placeholder="100,00" />
+                  </div>
+                )}
                 <div>
-                  <label htmlFor="plano-limite" className="block text-xs font-bold text-gray-500 uppercase mb-1.5 ml-1">Motoristas</label>
+                  <label htmlFor="plano-limite" className="block text-xs font-bold text-gray-500 uppercase mb-1.5 ml-1">
+                    {form.modelo_cobranca === 'por_motorista' ? 'Motoristas contratados' : 'Motoristas'}
+                  </label>
                   <input id="plano-limite" type="number" min="0" step="1" className="w-full border-2 border-gray-100 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" value={form.limite_motoristas} onChange={(e) => setForm({ ...form, limite_motoristas: e.target.value })} />
                 </div>
                 <div>
@@ -396,6 +582,33 @@ export const PainelPlanos: React.FC = () => {
                   <input id="plano-trial" type="number" min="0" step="1" className="w-full border-2 border-gray-100 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" value={form.dias_trial} onChange={(e) => setForm({ ...form, dias_trial: e.target.value })} />
                 </div>
               </div>
+
+              {/* Prévia do valor final — SOMENTE LEITURA, nunca input. É o que
+                  impede o erro que originou esta frente: o valor que será cobrado
+                  aparece antes de salvar. Quem calcula de verdade é o backend. */}
+              {previa && (
+                <div
+                  role="status"
+                  aria-live="polite"
+                  className={`rounded-xl border-2 p-3 ${previa.ok ? 'border-blue-100 bg-blue-50/50' : 'border-red-100 bg-red-50/50'}`}
+                >
+                  <span className="block text-xs font-bold uppercase text-gray-500 mb-0.5">Valor final mensal</span>
+                  {previa.ok ? (
+                    <>
+                      <span className="block text-sm text-gray-600">
+                        {previa.quantidade} motorista(s) × {formatCurrency(previa.unitarioCentavos / 100)} ={' '}
+                        <strong className="text-lg text-blue-700">{formatCurrency(previa.centavos / 100)}</strong>
+                        <span className="text-gray-500">/mês</span>
+                      </span>
+                      <span className="block text-xs text-gray-400 mt-1">
+                        Conferência. O valor cobrado é calculado pelo backend ao salvar.
+                      </span>
+                    </>
+                  ) : (
+                    <span className="block text-sm text-red-600">{previa.erro}</span>
+                  )}
+                </div>
+              )}
               <div>
                 <label htmlFor="plano-recursos" className="block text-xs font-bold text-gray-500 uppercase mb-1.5 ml-1">Recursos</label>
                 <textarea id="plano-recursos" rows={4} className="w-full border-2 border-gray-100 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50 resize-y" value={form.recursos} onChange={(e) => setForm({ ...form, recursos: e.target.value })} placeholder={'Um recurso por linha\nou separados por vírgula'} />
@@ -420,7 +633,64 @@ export const PainelPlanos: React.FC = () => {
             </div>
             <div className="p-4 bg-gray-50 border-t flex justify-end gap-3 sticky bottom-0">
               <button onClick={() => setShowModal(false)} title="Cancelar edição" aria-label="Cancelar edição" className="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded-lg text-sm font-medium">Cancelar</button>
-              <button onClick={handleSalvar} title="Salvar plano" aria-label="Salvar plano" className="flex items-center px-5 py-2 bg-green-700 text-white rounded-lg font-medium text-sm hover:bg-green-800"><Check size={16} className="mr-1.5" /> Salvar</button>
+              <button onClick={handleSalvar} disabled={!podeSalvar} title="Salvar plano" aria-label="Salvar plano" className="flex items-center px-5 py-2 bg-green-700 text-white rounded-lg font-medium text-sm hover:bg-green-800 disabled:opacity-40 disabled:cursor-not-allowed"><Check size={16} className="mr-1.5" /> Salvar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reprecificação de plano em uso. Só abre a partir do 409 do backend — a
+          trava real está lá, não aqui: este modal é o aviso, não o guarda. Fica
+          acima do formulário (z-70), que continua aberto por trás. */}
+      {confirmarReprec && (
+        <div className="fixed inset-0 bg-black/60 z-[70] flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
+            <div className="p-6 border-b flex items-center gap-2">
+              <AlertTriangle className="text-amber-600" size={22} />
+              <h3 className="text-lg font-bold text-gray-800">Alterar preço de plano em uso</h3>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="flex items-center justify-center gap-4 rounded-xl bg-gray-50 p-3">
+                <div className="text-center">
+                  <span className="block text-[10px] font-bold uppercase text-gray-400">Preço atual</span>
+                  <span className="block text-base font-bold text-gray-500 line-through">{formatCurrency(confirmarReprec.preco_atual)}</span>
+                </div>
+                <span className="text-gray-300 text-xl">→</span>
+                <div className="text-center">
+                  <span className="block text-[10px] font-bold uppercase text-gray-400">Novo preço</span>
+                  <span className="block text-lg font-black text-blue-700">{formatCurrency(confirmarReprec.preco_novo)}</span>
+                </div>
+              </div>
+              <p className="text-sm text-gray-600">
+                Este plano está em uso por <strong>{confirmarReprec.empresas_afetadas} empresa(s)</strong>.
+              </p>
+              <label className="flex items-start gap-3 rounded-xl border-2 border-amber-100 bg-amber-50/50 p-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={aceiteAsaas}
+                  onChange={(e) => setAceiteAsaas(e.target.checked)}
+                  className="mt-0.5 h-5 w-5 shrink-0 accent-amber-600"
+                />
+                <span className="text-sm text-gray-700">
+                  Entendo que alterar o preço deste plano <strong>NÃO atualiza automaticamente assinaturas Asaas já
+                  criadas</strong>; elas continuarão cobrando o valor antigo até uma frente futura de sincronização.
+                </span>
+              </label>
+            </div>
+            <div className="p-4 bg-gray-50 border-t flex justify-end gap-3">
+              <button
+                onClick={() => { setConfirmarReprec(null); setAceiteAsaas(false); }}
+                className="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded-lg text-sm font-medium"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={aplicarReprecificacao}
+                disabled={!aceiteAsaas || salvando}
+                className="flex items-center px-5 py-2 bg-amber-600 text-white rounded-lg font-medium text-sm hover:bg-amber-700 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Check size={16} className="mr-1.5" /> Confirmar alteração
+              </button>
             </div>
           </div>
         </div>
