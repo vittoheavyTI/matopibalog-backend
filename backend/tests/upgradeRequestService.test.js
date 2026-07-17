@@ -6,7 +6,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { solicitarUpgrade } = require('../services/upgradeRequestService');
+const { solicitarUpgrade, montarSnapshotFatura } = require('../services/upgradeRequestService');
 
 const CONFIG = { apiKey: 'k-sandbox', baseURL: 'https://sandbox.asaas.com/api/v3' };
 const PLANO_NOVO_UUID = '11111111-1111-1111-1111-111111111111';
@@ -295,4 +295,161 @@ test('corrida 23505 na solicitação com fatura existente → 200 idempotente', 
   assert.equal(resultado.idempotente, true);
   assert.equal(resultado.fatura.id, 'fat-7');
   assert.equal(countPayments(http), 0);
+});
+
+// ── Frente #4 (PR 6): snapshot de plano na fatura (migration 030) ─────────────
+
+// Devolve o payload do INSERT em `faturas` (o que de fato foi gravado).
+function faturaInserida(rec) {
+  const ins = rec.inserts.filter((i) => i.tabela === 'faturas');
+  assert.equal(ins.length, 1, 'esperava exatamente 1 insert em faturas');
+  return ins[0].payload;
+}
+
+const PLANO_POR_MOTORISTA = {
+  id: PLANO_NOVO_UUID,
+  nome: 'Plano Frota 10',
+  preco_mensal: 1000, // derivado pelo backend: 100,00 × 10
+  ativo: true,
+  modelo_cobranca: 'por_motorista',
+  preco_por_motorista: 100,
+  limite_motoristas: 10,
+};
+
+const PLANO_FIXO = {
+  id: PLANO_NOVO_UUID,
+  nome: 'Plano Profissional',
+  preco_mensal: 99.9,
+  ativo: true,
+  modelo_cobranca: 'fixo',
+  preco_por_motorista: null,
+  limite_motoristas: 10,
+};
+
+test('upgrade com plano FIXO grava snapshot fixo (unitário e quantidade NULL)', async () => {
+  const supabase = makeSupabase({ empresa: empresaBase(), planoNovo: PLANO_FIXO, pendentes: [] });
+  const http = makeHttp({});
+  await solicitarUpgrade({
+    empresaId: 'e1', planoNovoId: PLANO_NOVO_UUID, clientRequestId: 'req-snap-1', config: CONFIG, supabase, http,
+  });
+
+  const fatura = faturaInserida(supabase.__rec);
+  assert.equal(fatura.plano_id, PLANO_NOVO_UUID);
+  assert.equal(fatura.plano_nome_snapshot, 'Plano Profissional');
+  assert.equal(fatura.modelo_cobranca_snapshot, 'fixo');
+  // Não houve conta: o valor foi digitado. NULL = "não se aplica".
+  assert.equal(fatura.preco_unitario_snapshot, null);
+  assert.equal(fatura.quantidade_snapshot, null);
+  // O valor cobrado continua sendo o final do plano.
+  assert.equal(fatura.valor, 99.9);
+});
+
+test('upgrade com plano POR MOTORISTA grava snapshot completo', async () => {
+  const supabase = makeSupabase({ empresa: empresaBase(), planoNovo: PLANO_POR_MOTORISTA, pendentes: [] });
+  const http = makeHttp({});
+  await solicitarUpgrade({
+    empresaId: 'e1', planoNovoId: PLANO_NOVO_UUID, clientRequestId: 'req-snap-2', config: CONFIG, supabase, http,
+  });
+
+  const fatura = faturaInserida(supabase.__rec);
+  assert.equal(fatura.plano_id, PLANO_NOVO_UUID);
+  assert.equal(fatura.plano_nome_snapshot, 'Plano Frota 10');
+  assert.equal(fatura.modelo_cobranca_snapshot, 'por_motorista');
+  assert.equal(fatura.preco_unitario_snapshot, 100);
+  assert.equal(fatura.quantidade_snapshot, 10);
+  // A conta fecha: 100,00 × 10 = 1.000,00 — e é ISSO que foi cobrado.
+  assert.equal(fatura.valor, 1000);
+  assert.equal(fatura.preco_unitario_snapshot * fatura.quantidade_snapshot, fatura.valor);
+});
+
+test('o valor cobrado é o preco_mensal do plano, nunca recalculado aqui', async () => {
+  // Plano incoerente de propósito: unitário × quantidade daria 500, mas
+  // preco_mensal diz 1000. A fatura tem que seguir preco_mensal — quem deriva o
+  // valor é o painel/backend de planos (PR 3), não este serviço.
+  const incoerente = { ...PLANO_POR_MOTORISTA, preco_por_motorista: 50 };
+  const supabase = makeSupabase({ empresa: empresaBase(), planoNovo: incoerente, pendentes: [] });
+  const http = makeHttp({});
+  await solicitarUpgrade({
+    empresaId: 'e1', planoNovoId: PLANO_NOVO_UUID, clientRequestId: 'req-snap-3', config: CONFIG, supabase, http,
+  });
+
+  const fatura = faturaInserida(supabase.__rec);
+  assert.equal(fatura.valor, 1000); // preco_mensal, não 50 × 10
+  assert.equal(fatura.preco_unitario_snapshot, 50); // snapshot registra o que estava lá
+});
+
+test('o valor enviado ao Asaas é o mesmo da fatura (snapshot não interfere)', async () => {
+  const supabase = makeSupabase({ empresa: empresaBase(), planoNovo: PLANO_POR_MOTORISTA, pendentes: [] });
+  const http = makeHttp({});
+  await solicitarUpgrade({
+    empresaId: 'e1', planoNovoId: PLANO_NOVO_UUID, clientRequestId: 'req-snap-4', config: CONFIG, supabase, http,
+  });
+
+  const payment = http.calls.posts.find((p) => p.url.endsWith('/payments'));
+  const fatura = faturaInserida(supabase.__rec);
+  assert.equal(payment.body.value, 1000);
+  assert.equal(payment.body.value, fatura.valor);
+});
+
+test('a solicitação continua vinculada à fatura e o plano_id da empresa não muda', async () => {
+  const supabase = makeSupabase({ empresa: empresaBase(), planoNovo: PLANO_POR_MOTORISTA, pendentes: [] });
+  const http = makeHttp({});
+  const { resultado } = await solicitarUpgrade({
+    empresaId: 'e1', planoNovoId: PLANO_NOVO_UUID, clientRequestId: 'req-snap-5', config: CONFIG, supabase, http,
+  });
+
+  const vinculo = supabase.__rec.updates.find(
+    (u) => u.tabela === 'solicitacoes_upgrade_plano' && u.payload && u.payload.fatura_id
+  );
+  assert.ok(vinculo, 'a solicitação precisa receber fatura_id');
+  assert.equal(vinculo.payload.fatura_id, 'fat-1');
+  assert.equal(resultado.fatura.id, 'fat-1');
+  assert.ok(nenhumUpdatePlanoId(supabase.__rec), 'não pode atualizar empresas.plano_id');
+});
+
+test('idempotência: reuso de solicitação com fatura NÃO cria fatura nem cobrança extra', async () => {
+  const supabase = makeSupabase({
+    empresa: empresaBase(),
+    planoNovo: PLANO_POR_MOTORISTA,
+    pendentes: [{ id: 'sol-9', status: 'pendente', plano_novo_id: PLANO_NOVO_UUID, fatura_id: 'fat-9' }],
+    faturaById: { id: 'fat-9', valor: 1000, tipo_pagamento: 'PIX', status: 'pendente', invoice_url: 'u', pix_qr_code: 'p', due_date: '2026-07-23' },
+  });
+  const http = makeHttp({});
+  const { httpStatus, resultado } = await solicitarUpgrade({
+    empresaId: 'e1', planoNovoId: PLANO_NOVO_UUID, clientRequestId: 'req-snap-6', config: CONFIG, supabase, http,
+  });
+
+  assert.equal(httpStatus, 200);
+  assert.equal(resultado.idempotente, true);
+  assert.equal(countPayments(http), 0);
+  assert.equal(supabase.__rec.inserts.filter((i) => i.tabela === 'faturas').length, 0);
+});
+
+// ── montarSnapshotFatura isolado ─────────────────────────────────────────────
+
+test('montarSnapshotFatura: plano sem modelo_cobranca (legado) resolve como fixo', async () => {
+  const s = montarSnapshotFatura({ id: 'p1', nome: 'Legado', preco_mensal: 50 });
+  assert.equal(s.modelo_cobranca_snapshot, 'fixo');
+  assert.equal(s.preco_unitario_snapshot, null);
+  assert.equal(s.quantidade_snapshot, null);
+});
+
+test('montarSnapshotFatura: fixo IGNORA unitário/quantidade fantasma do plano', async () => {
+  // Defesa: mesmo que a linha tenha unitário sobrando, plano fixo não compõe.
+  const s = montarSnapshotFatura({
+    id: 'p1', nome: 'Fixo', modelo_cobranca: 'fixo', preco_por_motorista: 50, limite_motoristas: 3,
+  });
+  assert.equal(s.preco_unitario_snapshot, null);
+  assert.equal(s.quantidade_snapshot, null);
+});
+
+test('montarSnapshotFatura: campos nulos não explodem (fatura antiga segue possível)', async () => {
+  const s = montarSnapshotFatura(undefined);
+  assert.deepEqual(s, {
+    plano_id: null,
+    plano_nome_snapshot: null,
+    modelo_cobranca_snapshot: 'fixo',
+    preco_unitario_snapshot: null,
+    quantidade_snapshot: null,
+  });
 });

@@ -68,6 +68,31 @@ function dueDatePadrao(referencia = new Date()) {
   return new Date(referencia.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
+// Snapshot da composição do preço, CONGELADO no momento da cobrança (migration
+// 030). Puro: só transforma o plano em colunas. Não decide valor — `valor` é e
+// continua sendo preco_mensal.
+//
+// Por que congelar: editar o plano depois NÃO reescreve estas colunas. Sem elas,
+// responder "por que esta fatura foi R$ 1.000,00?" exigiria reconstruir a conta a
+// partir do plano de HOJE — que pode ter outro preço, outra quantidade, ou nem
+// existir mais.
+//
+// Em plano fixo, unitário e quantidade ficam NULL: não houve conta, o valor foi
+// digitado. NULL aqui significa "não se aplica", não "esqueceram de preencher".
+function montarSnapshotFatura(planoNovo) {
+  const p = planoNovo || {};
+  const porMotorista = p.modelo_cobranca === 'por_motorista';
+  return {
+    plano_id: p.id || null,
+    plano_nome_snapshot: p.nome != null ? String(p.nome) : null,
+    modelo_cobranca_snapshot: porMotorista ? 'por_motorista' : 'fixo',
+    preco_unitario_snapshot:
+      porMotorista && p.preco_por_motorista != null ? Number(p.preco_por_motorista) : null,
+    quantidade_snapshot:
+      porMotorista && p.limite_motoristas != null ? Number(p.limite_motoristas) : null,
+  };
+}
+
 function montarResultado(solicitacao, fatura, idempotente) {
   return {
     solicitacao_id: solicitacao.id,
@@ -144,6 +169,12 @@ async function criarCobrancaEFatura({ solicitacao, empresa, planoNovo, clientReq
     pix_qr_code: pixQrCode,
     due_date: dueDate,
     client_request_id: clientRequestId,
+    // Rastreabilidade (migration 030). Este é o único caminho de fatura cujo
+    // valor DERIVA de um plano — por isso é o único que recebe snapshot. A
+    // cobrança avulsa manual (valor vem do req.body) e a importação do Asaas
+    // (valor vem do payment.value) não derivam de precificação: gravar snapshot
+    // nelas seria inventar uma proveniência que não existe.
+    ...montarSnapshotFatura(planoNovo),
   };
 
   let fatura;
@@ -203,10 +234,12 @@ async function solicitarUpgrade({
   if (empErr || !empresa) throw erroHttp(404, 'Empresa não encontrada.');
   const planoAtual = planoDe(empresa);
 
-  // 2. Plano novo (destino).
+  // 2. Plano novo (destino). Os três campos de composição são lidos só para o
+  //    SNAPSHOT da fatura (migration 030) — o valor cobrado continua vindo de
+  //    preco_mensal, que o backend já derivou ao salvar o plano.
   const { data: planoNovo, error: pnErr } = await supabase
     .from('planos')
-    .select('id, nome, preco_mensal, ativo')
+    .select('id, nome, preco_mensal, ativo, modelo_cobranca, preco_por_motorista, limite_motoristas')
     .eq('id', planoNovoId)
     .maybeSingle();
   if (pnErr) throw erroHttp(500, 'Erro ao carregar o plano selecionado.');
@@ -305,4 +338,5 @@ module.exports = {
   criarCobrancaEFatura,
   dueDatePadrao,
   montarResultado,
+  montarSnapshotFatura,
 };
