@@ -10,6 +10,7 @@ const { classificarResponsavelRegularizacao } = require('../utils/billingProfile
 const { garantirAssinatura, conciliarAssinatura } = require('../services/asaasSubscriptionService');
 const { sincronizarCobrancas } = require('../services/asaasInvoiceSyncService');
 const { solicitarUpgrade } = require('../services/upgradeRequestService');
+const { gerarFaturaRecorrenteEmLote, CAMPOS_EMPRESA } = require('../services/faturaRecorrenteService');
 const {
   normalizarStatusAsaas,
   decidirAtualizacaoFatura,
@@ -701,6 +702,86 @@ router.post('/webhook/asaas', async (req, res) => {
     // Erro não tratado no serviço: 500 para retry do Asaas.
     console.error('Webhook Asaas error:', sanitizar(err.message));
     return res.status(500).json({ message: 'Erro ao processar webhook.' });
+  }
+});
+
+// ─── GERAÇÃO DE FATURA RECORRENTE (Frente #5 / PR 3 — sandbox) ────────────────
+// Aciona MANUALMENTE a geração de fatura recorrente mensal (cobrança avulsa PIX)
+// através do faturaRecorrenteService. NÃO é job/cron: acionamento explícito por
+// super-admin. Gate hard de sandbox ANTES de config/serviço/rede. A coreografia
+// idempotente (reserva-primeiro + reconciliação) e a decisão de elegibilidade
+// vivem no serviço/domínio, testados à parte.
+//
+//   body: { empresa_id?, data_referencia? (YYYY-MM-DD), dry_run?, limite? }
+//   - dry_run=true: apenas AVALIA (sem Asaas, sem insert, sem customer);
+//   - empresa_id: processa só aquela empresa;
+//   - sem empresa_id: lote conservador de empresas ativas SEM assinatura Asaas.
+const LIMITE_LOTE_PADRAO = 20;
+const LIMITE_LOTE_MAX = 100;
+
+router.post('/faturas-recorrentes/gerar', verifyToken, isSuperAdmin, async (req, res) => {
+  try {
+    // GATE de sandbox ANTES de qualquer config/serviço/rede.
+    if (await bloquearSeNaoSandbox(res)) return;
+
+    const empresaId = (req.body && req.body.empresa_id) || null;
+    const dataReferencia =
+      (req.body && /^\d{4}-\d{2}-\d{2}$/.test(String(req.body.data_referencia || '')))
+        ? req.body.data_referencia
+        : new Date().toISOString().slice(0, 10);
+    const dryRun = req.body && req.body.dry_run === true;
+
+    let limite = Number(req.body && req.body.limite);
+    if (!Number.isInteger(limite) || limite <= 0) limite = LIMITE_LOTE_PADRAO;
+    if (limite > LIMITE_LOTE_MAX) limite = LIMITE_LOTE_MAX;
+
+    const selectEmpresa =
+      `${CAMPOS_EMPRESA}, planos(id, nome, ativo, arquivado_em, preco_mensal, modelo_cobranca, preco_por_motorista, limite_motoristas)`;
+
+    let empresas;
+    if (empresaId) {
+      const { data, error } = await supabase
+        .from('empresas')
+        .select(selectEmpresa)
+        .eq('id', empresaId)
+        .maybeSingle();
+      if (error) return res.status(500).json({ message: 'Erro ao carregar empresa.' });
+      if (!data) return res.status(404).json({ message: 'Empresa não encontrada.' });
+      empresas = [data];
+    } else {
+      // Lote conservador: só ativas e SEM assinatura Asaas (evita duplicidade com
+      // a cobrança recorrente da própria assinatura). O recorte fino de
+      // elegibilidade (plano, gratuito, recorrente já existente) fica no serviço.
+      const { data, error } = await supabase
+        .from('empresas')
+        .select(selectEmpresa)
+        .eq('status', 'ativo')
+        .is('asaas_subscription_id', null)
+        .limit(limite);
+      if (error) return res.status(500).json({ message: 'Erro ao listar empresas.' });
+      empresas = data || [];
+    }
+
+    // dry_run não resolve a apiKey (não há chamada externa); só o modo real precisa.
+    let config = {};
+    if (!dryRun) {
+      const { apiKey, baseURL } = await getAsaasConfig();
+      config = { apiKey, baseURL };
+    }
+
+    const resumo = await gerarFaturaRecorrenteEmLote({
+      supabase,
+      http: axios,
+      config,
+      empresas,
+      dataReferencia,
+      dryRun,
+    });
+    return res.json(resumo);
+  } catch (err) {
+    // Log seguro: sem apiKey/payload/PII.
+    console.error('[pagamentos/faturas-recorrentes/gerar] Falha', { status: 500 });
+    return res.status(500).json({ message: 'Erro ao gerar faturas recorrentes.' });
   }
 });
 
