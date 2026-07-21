@@ -1,15 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // Clipboard
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../models/fatura.dart';
 import '../providers/finance_provider.dart';
 import '../services/api_service.dart';
 import '../services/app_logger.dart';
 
 /// Tela READ-ONLY de faturas do autônomo. Consome GET /pagamentos/me/faturas
-/// (ApiService.getMinhasFaturas). Neste PR não há ações externas (abrir
-/// invoice_url / copiar Pix / baixar boleto) — isso é o PR 2. Nenhuma escrita,
-/// nenhuma cobrança, nenhum endpoint admin/recorrente.
+/// (ApiService.getMinhasFaturas). Ações são só de LEITURA/consulta: abrir a
+/// cobrança/boleto no navegador externo (url_launcher, nunca WebView) e copiar
+/// o código Pix (consulta GET /faturas/:id/pix + Clipboard). NÃO paga dentro do
+/// app, NÃO cria cobrança, NÃO chama endpoint admin/recorrente.
 class MinhasFaturasScreen extends StatefulWidget {
   const MinhasFaturasScreen({super.key});
 
@@ -53,6 +56,47 @@ class _MinhasFaturasScreenState extends State<MinhasFaturasScreen> {
         _erro = 'Não foi possível carregar suas faturas agora. Tente novamente em instantes.';
         _loading = false;
       });
+    }
+  }
+
+  // ── Ações (somente leitura/consulta) ────────────────────────────────────────
+  void _snack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  /// Abre invoice_url / bank_slip_url no navegador externo. NÃO abre WebView e
+  /// NÃO processa pagamento no app — apenas encaminha o usuário à página oficial.
+  Future<void> _abrirUrl(String url, String descricao) async {
+    final uri = Uri.tryParse(url);
+    if (uri == null) {
+      _snack('Link inválido.');
+      return;
+    }
+    try {
+      final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!ok) _snack('Não foi possível abrir $descricao.');
+    } catch (e) {
+      AppLogger.error('MinhasFaturasScreen', 'abrir url', e);
+      _snack('Não foi possível abrir $descricao.');
+    }
+  }
+
+  /// Busca o código Pix (copia-e-cola) da fatura e copia para a área de
+  /// transferência. Consulta GET /pagamentos/faturas/:id/pix (read-only).
+  Future<void> _copiarPix(Fatura fatura) async {
+    _snack('Buscando código Pix…');
+    try {
+      final payload = await ApiService.getFaturaPix(fatura.id);
+      await Clipboard.setData(ClipboardData(text: payload));
+      _snack('Código Pix copiado para a área de transferência.');
+    } on ApiException catch (e) {
+      _snack(e.message);
+    } catch (e) {
+      AppLogger.error('MinhasFaturasScreen', 'copiar pix', e);
+      _snack('Não foi possível obter o Pix agora.');
     }
   }
 
@@ -146,6 +190,7 @@ class _MinhasFaturasScreenState extends State<MinhasFaturasScreen> {
       itemBuilder: (context, index) {
         if (planoCard != null && index == 0) return planoCard;
         final fatura = _faturas[index - (planoCard != null ? 1 : 0)];
+        final podeCopiarPix = fatura.status == 'pendente' || fatura.status == 'vencido';
         return _FaturaCard(
           fatura: fatura,
           moeda: _moeda,
@@ -153,6 +198,13 @@ class _MinhasFaturasScreenState extends State<MinhasFaturasScreen> {
           mesCompetencia: _mesCompetencia,
           statusLabel: _statusLabel,
           statusCor: _statusCor,
+          onAbrirCobranca: fatura.invoiceUrl != null
+              ? () => _abrirUrl(fatura.invoiceUrl!, 'a cobrança')
+              : null,
+          onBoleto: fatura.bankSlipUrl != null
+              ? () => _abrirUrl(fatura.bankSlipUrl!, 'o boleto')
+              : null,
+          onCopiarPix: podeCopiarPix ? () => _copiarPix(fatura) : null,
         );
       },
     );
@@ -182,6 +234,9 @@ class _FaturaCard extends StatelessWidget {
     required this.mesCompetencia,
     required this.statusLabel,
     required this.statusCor,
+    this.onAbrirCobranca,
+    this.onBoleto,
+    this.onCopiarPix,
   });
 
   final Fatura fatura;
@@ -190,6 +245,9 @@ class _FaturaCard extends StatelessWidget {
   final String Function(String?) mesCompetencia;
   final String Function(String) statusLabel;
   final Color Function(String) statusCor;
+  final VoidCallback? onAbrirCobranca;
+  final VoidCallback? onBoleto;
+  final VoidCallback? onCopiarPix;
 
   @override
   Widget build(BuildContext context) {
@@ -223,6 +281,33 @@ class _FaturaCard extends StatelessWidget {
               ),
             if (fatura.planoNomeSnapshot != null)
               _linha(Icons.workspace_premium_outlined, fatura.planoNomeSnapshot!),
+            if (onAbrirCobranca != null || onBoleto != null || onCopiarPix != null) ...[
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                children: [
+                  if (onAbrirCobranca != null)
+                    OutlinedButton.icon(
+                      onPressed: onAbrirCobranca,
+                      icon: const Icon(Icons.open_in_new, size: 18),
+                      label: const Text('Abrir cobrança'),
+                    ),
+                  if (onCopiarPix != null)
+                    OutlinedButton.icon(
+                      onPressed: onCopiarPix,
+                      icon: const Icon(Icons.content_copy, size: 18),
+                      label: const Text('Copiar Pix'),
+                    ),
+                  if (onBoleto != null)
+                    OutlinedButton.icon(
+                      onPressed: onBoleto,
+                      icon: const Icon(Icons.receipt_long_outlined, size: 18),
+                      label: const Text('Boleto'),
+                    ),
+                ],
+              ),
+            ],
           ],
         ),
       ),

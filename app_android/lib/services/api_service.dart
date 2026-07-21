@@ -431,6 +431,34 @@ class ApiService {
     }
   }
 
+  /// Código Pix (copia-e-cola) de uma fatura, SOB DEMANDA. Consome
+  /// GET /pagamentos/faturas/:id/pix (read-only; isolado por tenant no backend,
+  /// e gated a sandbox). Retorna o `payload` (EMV) ou LANÇA ApiException. NÃO
+  /// persiste nada, NÃO cria cobrança.
+  static Future<String> getFaturaPix(String faturaId) async {
+    try {
+      final response = await http
+          .get(
+            Uri.parse('$_baseUrl/pagamentos/faturas/$faturaId/pix'),
+            headers: await _getHeaders(),
+          )
+          .timeout(_timeoutGet);
+      AppLogger.api('ApiService', 'GET /pagamentos/faturas/:id/pix', response.statusCode);
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        final payload = decoded is Map ? decoded['payload'] : null;
+        if (payload is String && payload.trim().isNotEmpty) return payload.trim();
+        throw const ApiException('Pix indisponível para esta fatura no momento.');
+      }
+      throw ApiException(_mensagemErroHttpGet(response), statusCode: response.statusCode);
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      AppLogger.error('ApiService', 'GET /pagamentos/faturas/:id/pix exception', e);
+      throw const ApiException('Não foi possível obter o Pix agora. Tente novamente em instantes.');
+    }
+  }
+
   static Future<Map<String, dynamic>?> updateMe(Map<String, dynamic> data) async {
     try {
       final response = await http
