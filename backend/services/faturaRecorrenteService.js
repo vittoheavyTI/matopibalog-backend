@@ -64,6 +64,34 @@ function planoDe(empresa) {
   return Array.isArray(p) ? (p[0] || null) : (p || null);
 }
 
+// SELECT das empresas candidatas à recorrência (com o plano no join, no formato
+// que o domínio espera). Exportado para ser reutilizado pelo job one-shot sem
+// duplicar a string de select. NÃO decide elegibilidade fina (isso é do domínio,
+// dentro do lote) — só faz o recorte grosso e barato no banco.
+const SELECT_EMPRESA_RECORRENTE =
+  `${CAMPOS_EMPRESA}, planos(id, nome, ativo, arquivado_em, preco_mensal, modelo_cobranca, preco_por_motorista, limite_motoristas)`;
+
+// Seleciona empresas ATIVAS, SEM assinatura Asaas, com o plano carregado.
+// `allowlist` (array de UUIDs) é OBRIGATÓRIA para o job: quando passada, restringe
+// a esses ids; recorte grosso + fail-closed do caller garantem que ninguém fora
+// da lista é tocado. `limite` limita o lote. NÃO filtra por período/plano pago —
+// isso o domínio decide por empresa no lote (com os motivos corretos).
+async function selecionarEmpresasRecorrentes(supabase, { allowlist = null, limite = 20 } = {}) {
+  let query = supabase
+    .from('empresas')
+    .select(SELECT_EMPRESA_RECORRENTE)
+    .eq('status', 'ativo')
+    .is('asaas_subscription_id', null);
+  if (Array.isArray(allowlist)) {
+    // Sentinela impossível quando a lista está vazia — não retorna ninguém
+    // (fail-closed), embora o job já aborte antes nesse caso.
+    query = query.in('id', allowlist.length ? allowlist : ['00000000-0000-0000-0000-000000000000']);
+  }
+  const { data, error } = await query.limit(limite);
+  if (error) throw erroServico('erro_selecionar_empresas');
+  return data || [];
+}
+
 // Faturas recorrentes já existentes desta empresa (só o necessário para o
 // domínio decidir dedupe por período).
 async function carregarFaturasRecorrentes(supabase, empresaId) {
@@ -324,6 +352,8 @@ module.exports = {
   CAMPOS_PLANO,
   gerarFaturaRecorrenteParaEmpresa,
   gerarFaturaRecorrenteEmLote,
+  selecionarEmpresasRecorrentes,
+  SELECT_EMPRESA_RECORRENTE,
   // exportados para teste isolado
   buscarPaymentPorReferencia,
   carregarFaturasRecorrentes,
