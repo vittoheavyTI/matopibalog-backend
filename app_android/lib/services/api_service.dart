@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config.dart';
 import '../models/plano_publico.dart';
+import '../models/fatura.dart';
 import 'app_logger.dart';
 
 /// Erro de carregamento (GET) com mensagem já pronta para o usuário. Serve para
@@ -394,6 +395,39 @@ class ApiService {
       return null;
     } catch (_) {
       return null;
+    }
+  }
+
+  /// Faturas da PRÓPRIA empresa (read-only), para o app do autônomo. Consome
+  /// GET /pagamentos/me/faturas (tenant-scoped no backend; liberado só a
+  /// empresa.tipo='autonomo' — vinculado recebe 403 com mensagem clara). NÃO
+  /// cria/sincroniza nada. Em falha (403/500/rede/timeout) LANÇA ApiException
+  /// para a tela distinguir erro de lista vazia; 200 com [] retorna [].
+  static Future<List<Fatura>> getMinhasFaturas() async {
+    try {
+      final response = await http
+          .get(
+            Uri.parse('$_baseUrl/pagamentos/me/faturas'),
+            headers: await _getHeaders(),
+          )
+          .timeout(_timeoutGet);
+      AppLogger.api('ApiService', 'GET /pagamentos/me/faturas', response.statusCode);
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        if (decoded is List) {
+          return decoded
+              .whereType<Map>()
+              .map((item) => Fatura.fromJson(Map<String, dynamic>.from(item)))
+              .toList();
+        }
+        return [];
+      }
+      throw ApiException(_mensagemErroHttpGet(response), statusCode: response.statusCode);
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      AppLogger.error('ApiService', 'GET /pagamentos/me/faturas exception', e);
+      throw const ApiException('Não foi possível carregar suas faturas agora. Tente novamente em instantes.');
     }
   }
 
