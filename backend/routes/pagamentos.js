@@ -389,6 +389,63 @@ router.get('/me/plano-status', verifyToken, verificarEmpresa, async (req, res) =
   }
 });
 
+// ─── MINHAS FATURAS NO APP (autônomo) — read-only ────────────────────────────
+// Lista as faturas da PRÓPRIA empresa (escopo do token via verificarEmpresa),
+// para o app do motorista autônomo. SEM isAdmin: o app é motorista-only, e o
+// autônomo é o dono do próprio negócio. Restrito a empresa.tipo='autonomo' — um
+// motorista VINCULADO não deve ver o billing da transportadora (dado do dono).
+//
+// Read-only e defensivo por design:
+//   * nenhuma escrita (sem INSERT/UPDATE/DELETE), nenhuma chamada ao Asaas,
+//     nenhuma sincronização — o app só LÊ; a conciliação continua via webhook;
+//   * whitelist de colunas no próprio SELECT: NUNCA retorna asaas_id,
+//     pix_qr_code, client_request_id, plano_id nem a composição de preço
+//     (preco_unitario/quantidade_snapshot) — só o que a tela precisa;
+//   * isolamento tenant por empresa_id do token: faturas de outra empresa não
+//     aparecem, e o ?empresa_id= só teria efeito para super-admin (que não usa
+//     o app).
+// O QR Pix continua sob demanda em GET /pagamentos/faturas/:id/pix (já isolado
+// por tenant), reutilizável pelo app depois.
+router.get('/me/faturas', verifyToken, verificarEmpresa, async (req, res) => {
+  try {
+    if (!req.empresa_id) {
+      return res.status(400).json({ message: 'Empresa não identificada.' });
+    }
+
+    // Gate de tipo: faturas no app são só para autônomo.
+    const { data: empresa, error: empErr } = await supabase
+      .from('empresas')
+      .select('id, tipo')
+      .eq('id', req.empresa_id)
+      .single();
+    if (empErr || !empresa) {
+      return res.status(404).json({ message: 'Empresa não encontrada.' });
+    }
+    if (empresa.tipo !== 'autonomo') {
+      return res.status(403).json({ message: 'Faturas disponíveis apenas para autônomos no app.' });
+    }
+
+    // Whitelist explícita de colunas (o SELECT é a fronteira: nada fora daqui vaza).
+    const { data, error } = await supabase
+      .from('faturas')
+      .select(
+        'id, valor, tipo_pagamento, status, due_date, pago_em, invoice_url, ' +
+        'bank_slip_url, periodo_referencia, origem, plano_nome_snapshot, ' +
+        'modelo_cobranca_snapshot, created_at'
+      )
+      .eq('empresa_id', req.empresa_id)
+      .order('due_date', { ascending: false, nullsFirst: false })
+      .order('created_at', { ascending: false });
+    if (error) {
+      return res.status(500).json({ message: 'Erro ao carregar faturas.' });
+    }
+    return res.json(data || []);
+  } catch (err) {
+    console.error('[pagamentos/me/faturas] Falha', { status: 500 });
+    return res.status(500).json({ message: 'Erro ao carregar faturas.' });
+  }
+});
+
 router.get('/cobrancas/:empresa_id', verifyToken, isAdmin, verificarEmpresa, async (req, res) => {
   try {
     // Admin comum: IGNORA o :empresa_id da URL e usa SEMPRE a própria empresa.
