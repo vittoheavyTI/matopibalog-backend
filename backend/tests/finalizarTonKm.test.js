@@ -56,10 +56,13 @@ const executarFinalizar = async (frete, body = {}) => {
   return { resposta, capt };
 };
 
+// valor_tonelada_km em escala REALISTA (0,15 R$/t·km). O valor 150, usado antes da
+// trava de sanidade, agora é recusado (> VALOR_TONELADA_KM_MAX=10) — ver teste de
+// finalização abaixo e limitesFrete.test.js.
 const freteTonKm = (over = {}) => ({
   id: 'frete-1', motorista_id: 'm-1', empresa_id: 'e-1', status: 'ativo',
   km_inicial: 1000, km_final: null, modalidade_calculo: 'tonelada_km',
-  toneladas: 50, valor_tonelada_km: 150, ...over,
+  toneladas: 50, valor_tonelada_km: 0.15, ...over,
 });
 
 test('finalizar tonelada_km SEM km_final → 422 e não finaliza', async () => {
@@ -70,11 +73,11 @@ test('finalizar tonelada_km SEM km_final → 422 e não finaliza', async () => {
 });
 
 test('finalizar tonelada_km COM km_final válido → calcula valor e finaliza', async () => {
-  // 50 t * (1500 - 1000 = 500 km) * 150 = 3.750.000
+  // 50 t * (1500 - 1000 = 500 km) * 0,15 = 3.750
   const { resposta, capt } = await executarFinalizar(freteTonKm(), { km_final: 1500 });
   assert.equal(resposta.status, 200);
   assert.equal(capt.updatePayload.status, 'finalizado');
-  assert.equal(capt.updatePayload.valor_frete, 50 * 500 * 150);
+  assert.equal(capt.updatePayload.valor_frete, 50 * 500 * 0.15);
   assert.equal(capt.updatePayload.km_final, 1500);
 });
 
@@ -123,7 +126,30 @@ test('novo fluxo com fotos inicial e final → calcula e finaliza', async () => 
   }), { km_final: 1500 });
   assert.equal(resposta.status, 200);
   assert.equal(capt.updatePayload.status, 'finalizado');
-  assert.equal(capt.updatePayload.valor_frete, 50 * 500 * 150);
+  assert.equal(capt.updatePayload.valor_frete, 50 * 500 * 0.15);
+});
+
+// Trava de sanidade na finalização: um frete tonelada_km com insumos absurdos
+// (ex.: valor_tonelada_km = 150, acima do teto) NÃO pode virar valor final.
+test('finalizar tonelada_km com valor_tonelada_km > 10 (legado absurdo) → 422, não finaliza', async () => {
+  const { resposta, capt } = await executarFinalizar(
+    freteTonKm({ valor_tonelada_km: 150 }),
+    { km_final: 1500 },
+  );
+  assert.equal(resposta.status, 422);
+  assert.match(resposta.body.message, /limites operacionais/i);
+  assert.equal(capt.updatePayload, undefined, 'não deve finalizar / não grava valor absurdo');
+});
+
+test('finalizar tonelada_km cujo valor derivado passaria de R$1.000.000 → 422, não finaliza', async () => {
+  // toneladas 50, vtk 10 (no teto), distância 3000 → 50*3000*10 = 1.500.000 > teto.
+  const { resposta, capt } = await executarFinalizar(
+    freteTonKm({ toneladas: 50, valor_tonelada_km: 10, km_inicial: 1000 }),
+    { km_final: 4000 },
+  );
+  assert.equal(resposta.status, 422);
+  assert.match(resposta.body.message, /limites operacionais/i);
+  assert.equal(capt.updatePayload, undefined);
 });
 
 test('novo fluxo valor_fixo com fotos mas sem KM final → 422', async () => {

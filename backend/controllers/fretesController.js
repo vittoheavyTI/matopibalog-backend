@@ -2,6 +2,7 @@ const supabase = require('../config/supabase');
 const notificacaoService = require('../services/notificacaoService');
 const { calcularComissao } = require('../utils/comissao');
 const { normalizarModalidade, calcularValorToneladaKm } = require('../utils/calculoFrete');
+const { validarLimitesFrete } = require('../utils/limitesFrete');
 
 const BUCKET_ODOMETRO = 'fretes-odometro';
 const SIGNED_URL_TTL_SECONDS = 300;
@@ -279,6 +280,19 @@ exports.create = async (req, res) => {
       valorFreteFinal = calc !== null ? calc : 0;
     }
 
+    // Trava de sanidade operacional: barra valores absurdos (ex.: R$150/t·km no lugar
+    // de R$0,15) ANTES de gravar. Valida os campos de tonelada/km, a ordem dos KMs e o
+    // valor final (derivado ou fixo). Reprova → 422, sem insert.
+    const limite = validarLimitesFrete({
+      modalidade,
+      valorFrete: valorFreteFinal,
+      toneladas,
+      valorToneladaKm: valor_tonelada_km,
+      kmInicial: km_inicial,
+      kmFinal: km_final,
+    });
+    if (!limite.ok) return res.status(422).json({ message: limite.message });
+
     // Comissão só para VINCULADO (empresa.tipo conhecido e ≠ 'autonomo'). Autônomo e
     // tipo desconhecido → 0 (nunca assume 12%). Campo comissao_calculada mantido no
     // contrato da resposta, apenas zerado quando não há comissão fixa (inclui
@@ -497,6 +511,19 @@ exports.update = async (req, res) => {
       }
     }
 
+    // Trava de sanidade operacional (espelha o create): valida os valores EFETIVOS
+    // após o merge (o que veio no body sobre o já gravado) antes de persistir.
+    // Reprova → 422, sem update.
+    const limite = validarLimitesFrete({
+      modalidade: modalidadeEfetiva,
+      valorFrete: 'valor_frete' in allowedUpdate ? allowedUpdate.valor_frete : undefined,
+      toneladas: allowedUpdate.toneladas ?? checkData.toneladas,
+      valorToneladaKm: allowedUpdate.valor_tonelada_km ?? checkData.valor_tonelada_km,
+      kmInicial: allowedUpdate.km_inicial ?? checkData.km_inicial,
+      kmFinal: allowedUpdate.km_final ?? checkData.km_final,
+    });
+    if (!limite.ok) return res.status(422).json({ message: limite.message });
+
     const { data, error } = await supabase
       .from('fretes')
       .update(allowedUpdate)
@@ -648,6 +675,18 @@ exports.finalizar = async (req, res) => {
       if (calc === null) {
         return res.status(422).json({ message: 'O KM final deve ser maior que o KM inicial.' });
       }
+      // Trava de sanidade operacional: o valor derivado na finalização também respeita
+      // os tetos (toneladas, valor por tonelada/km e valor final). Reprova → 422, sem
+      // finalizar (impede que um frete legado com insumos absurdos vire valor final).
+      const limite = validarLimitesFrete({
+        modalidade: 'tonelada_km',
+        valorFrete: calc,
+        toneladas: frete.toneladas,
+        valorToneladaKm: frete.valor_tonelada_km,
+        kmInicial: kmInicialEfetivo,
+        kmFinal: kmFinalEfetivo,
+      });
+      if (!limite.ok) return res.status(422).json({ message: limite.message });
       updatePayload.valor_frete = calc;
     }
 
