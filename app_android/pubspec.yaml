@@ -27,6 +27,10 @@ dependencies:
   share_plus: ^10.1.4
   uuid: ^4.3.3
   intl: ^0.18.1
+  # Abre invoice_url (página de cobrança Asaas) e bank_slip_url (boleto) no
+  # navegador externo, a partir da tela Minhas Faturas. Só launchUrl externo —
+  # NÃO usamos WebView (nenhum pagamento dentro do app).
+  url_launcher: ^6.3.1
   connectivity_plus: ^5.0.2
   workmanager: ^0.9.0
   sqflite: ^2.3.0

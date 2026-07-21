@@ -15,6 +15,7 @@ import 'add_abastecimento_screen.dart';
 import 'add_vale_screen.dart';
 import 'perfil_screen.dart';
 import 'notificacoes_screen.dart';
+import 'minhas_faturas_screen.dart';
 
 class AppShell extends StatefulWidget {
   const AppShell({super.key});
@@ -222,6 +223,18 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                 _navegarPara(context, const HistoricoScreen());
               },
             ),
+            // Faturas só para AUTÔNOMO (dono do próprio negócio). Motorista
+            // vinculado não vê o billing da transportadora (o backend também
+            // barra com 403). A tela é read-only.
+            if (auth.isAutonomo)
+              ListTile(
+                leading: const Icon(Icons.receipt_long_outlined),
+                title: const Text('Minhas Faturas'),
+                onTap: () {
+                  AppLogger.action('menu_nav', params: {'destino': 'minhas_faturas'});
+                  _navegarPara(context, const MinhasFaturasScreen());
+                },
+              ),
             ListTile(
               leading: const Icon(Icons.notifications_outlined),
               title: const Text('Notificações'),
