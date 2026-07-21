@@ -1,0 +1,7 @@
+[build]
+builder = "nixpacks"
+buildCommand = "npm install"
+
+[deploy]
+startCommand = "node jobs/gerarFaturasRecorrentes.js --dry-run --limite=1"
+restartPolicyType = "never"
