@@ -92,7 +92,7 @@ export const Configuracoes: React.FC = () => {
   const [regenerandoCodigo, setRegenerandoCodigo] = useState(false);
   // Config. Sistema (super-admin) — migrada da antiga página solta "Config. Sistema"
   // para uma aba aqui, evitando página duplicada no menu.
-  const [sistema, setSistema] = useState({ nome_sistema: 'Matopiba Log', email_suporte: 'suporte@matopibalog.com.br', trial_dias: '7' });
+  const [sistema, setSistema] = useState({ nome_sistema: 'Matopiba Log', email_suporte: 'suporte@matopibalog.com.br', whatsapp_suporte: '', telefone_suporte: '', trial_dias: '7' });
   const [sistemaSalvo, setSistemaSalvo] = useState(false);
   const [company, setCompany] = useState<CompanyData>({
     nome: '', cnpj: '', endereco: '', cep: '',
@@ -184,6 +184,8 @@ export const Configuracoes: React.FC = () => {
         setSistema((s) => ({
           nome_sistema: d.nome_sistema ?? s.nome_sistema,
           email_suporte: d.email_suporte ?? s.email_suporte,
+          whatsapp_suporte: d.whatsapp_suporte ?? s.whatsapp_suporte,
+          telefone_suporte: d.telefone_suporte ?? s.telefone_suporte,
           trial_dias: d.trial_dias !== undefined && d.trial_dias !== null ? String(d.trial_dias) : s.trial_dias,
         }));
         // Sincroniza sidebar logo do backend → localStorage (persiste entre dispositivos)
@@ -509,6 +511,16 @@ export const Configuracoes: React.FC = () => {
             <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">E-mail de Suporte</label>
             <input type="email" className="w-full border-2 border-gray-50 rounded-xl p-2.5 outline-none focus:border-green-700 bg-gray-50/50" value={sistema.email_suporte} onChange={e => setSistema({ ...sistema, email_suporte: e.target.value })} />
             <p className="text-xs text-gray-400 mt-1 ml-1">Exibido no caminho de regularização (contato de suporte para autônomos).</p>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">WhatsApp de Suporte</label>
+            <input type="tel" placeholder="Ex.: 5599999999999 (com DDI e DDD)" className="w-full border-2 border-gray-50 rounded-xl p-2.5 outline-none focus:border-green-700 bg-gray-50/50" value={sistema.whatsapp_suporte} onChange={e => setSistema({ ...sistema, whatsapp_suporte: e.target.value })} />
+            <p className="text-xs text-gray-400 mt-1 ml-1">Número usado no botão de WhatsApp do app durante a regularização. Vazio = não exibir.</p>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Telefone de Suporte</label>
+            <input type="tel" placeholder="Ex.: (99) 99999-9999" className="w-full border-2 border-gray-50 rounded-xl p-2.5 outline-none focus:border-green-700 bg-gray-50/50" value={sistema.telefone_suporte} onChange={e => setSistema({ ...sistema, telefone_suporte: e.target.value })} />
+            <p className="text-xs text-gray-400 mt-1 ml-1">Telefone alternativo exibido ao cliente. Se vazio, o app usa o telefone de contato da aparência do login, quando houver.</p>
           </div>
           {/* Recursos ainda sem efeito no servidor — marcados como "Em preparação" para não confundir. */}
           {[

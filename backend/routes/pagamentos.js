@@ -305,6 +305,24 @@ router.get('/cobrancas/all', verifyToken, isSuperAdmin, async (req, res) => {
   }
 });
 
+// Contatos de suporte para o caminho de regularização, com fallback: as chaves
+// dedicadas (email_suporte/whatsapp_suporte/telefone_suporte, aba Sistema) têm
+// precedência; na ausência, reusa os contatos públicos da aparência do login
+// (contactEmail/contactPhone), que já são configurados na prática. Nunca devolve
+// string vazia — campo sem valor útil sai como null para o app decidir.
+function montarContatosSuporte(dados) {
+  const d = dados || {};
+  const limpar = (v) => {
+    const s = typeof v === 'string' ? v.trim() : '';
+    return s || null;
+  };
+  return {
+    suporte_email: limpar(d.email_suporte) || limpar(d.contactEmail),
+    suporte_whatsapp: limpar(d.whatsapp_suporte),
+    suporte_telefone: limpar(d.telefone_suporte) || limpar(d.contactPhone),
+  };
+}
+
 async function carregarPlanoStatus(empresaId, user) {
   const [empresaResult, adminsResult, configResult] = await Promise.all([
     supabase
@@ -351,7 +369,7 @@ async function carregarPlanoStatus(empresaId, user) {
     plano: empresa.planos || null,
     regularizacao: {
       responsavel,
-      suporte_email: configResult.data?.dados?.email_suporte || null,
+      ...montarContatosSuporte(configResult.data?.dados),
     },
   };
 }
