@@ -1,5 +1,6 @@
 const supabase = require('../config/supabase');
 const { avaliarElegibilidadeSuspensao } = require('../services/paymentDomainService');
+const { patchSuspensaoFinanceiraAutomatica } = require('../utils/suspensao');
 
 // Proteção: uma conta não pode ser suspensa automaticamente se não houver
 // fatura pendente/vencida com link de pagamento e vencimento já passado.
@@ -63,7 +64,8 @@ const verificarPlano = async (req, res, next) => {
     // Se for trial e expirou, verifica se existe fatura pendente/vencida COM link e vencimento passado
     if (trialExpirado) {
       if (await podeSuspenderAutomaticamente(req.empresa_id)) {
-        await supabase.from('empresas').update({ status: 'suspenso' }).eq('id', req.empresa_id);
+        // Metadados da 024: sem reason='financial' o pagamento não reativa.
+        await supabase.from('empresas').update(patchSuspensaoFinanceiraAutomatica()).eq('id', req.empresa_id);
         return res.status(403).json({ message: 'Período de teste expirado. Assine um plano para continuar.' });
       }
       // Sem fatura/link: não suspende, mas ainda bloqueia a escrita (sem acesso sem pagamento)

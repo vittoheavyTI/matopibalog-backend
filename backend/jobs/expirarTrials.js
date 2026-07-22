@@ -1,5 +1,6 @@
 const supabase = require('../config/supabase');
 const { decidirSuspensaoPorInadimplencia } = require('../services/paymentDomainService');
+const { patchSuspensaoFinanceiraAutomatica } = require('../utils/suspensao');
 
 async function buscarFaturaElegivel(empresaId, hoje) {
   return supabase
@@ -52,9 +53,12 @@ async function expirarTrials() {
           continue;
         }
 
+        // Suspensão por inadimplência é FINANCEIRA e AUTOMÁTICA: grava os
+        // metadados da 024, senão o pagamento da fatura nunca reativa a conta
+        // (o webhook exige reason='financial' para limpar a suspensão).
         const { error: updateError } = await supabase
           .from('empresas')
-          .update({ status: decisao.novoStatus })
+          .update(patchSuspensaoFinanceiraAutomatica())
           .eq('id', empresa.id);
 
         if (updateError) {

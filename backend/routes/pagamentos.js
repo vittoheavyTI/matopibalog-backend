@@ -19,6 +19,7 @@ const {
 } = require('../services/paymentDomainService');
 const { processarWebhook } = require('../services/asaasWebhookService');
 const { sanitizar } = require('../services/asaasWebhookEventRepository');
+const { patchSuspensaoFinanceiraAutomatica, patchLimparSuspensao } = require('../utils/suspensao');
 
 // Comparação em tempo constante (hash de tamanho fixo evita vazar comprimento)
 function safeEqual(a, b) {
@@ -533,15 +534,22 @@ router.post('/cobrancas/:id/conciliar', verifyToken, isSuperAdmin, async (req, r
     if (fatura.empresa_id) {
       const { data: empresa, error: empresaErr } = await supabase
         .from('empresas')
-        .select('id, status, trial_ends_at')
+        .select('id, status, trial_ends_at, suspension_reason, suspension_source')
         .eq('id', fatura.empresa_id)
         .single();
       if (empresaErr) throw empresaErr;
 
       if (decisaoFatura.statusFinal === 'pago') {
-        const decisaoConta = decidirTransicaoContaPorPagamento(empresa?.status, 'pago');
+        // Mesmos metadados que o webhook: sem reason/source a decisão trataria
+        // toda suspensão como 'motivo desconhecido' e nunca reativaria.
+        const decisaoConta = decidirTransicaoContaPorPagamento(empresa?.status, 'pago', {
+          suspensionReason: empresa?.suspension_reason,
+          suspensionSource: empresa?.suspension_source,
+        });
         if (decisaoConta.deveAtualizar) {
-          await supabase.from('empresas').update({ status: decisaoConta.novoStatus }).eq('id', fatura.empresa_id);
+          const upd = { status: decisaoConta.novoStatus };
+          if (decisaoConta.deveLimparSuspensao) Object.assign(upd, patchLimparSuspensao());
+          await supabase.from('empresas').update(upd).eq('id', fatura.empresa_id);
         }
       } else if (decisaoFatura.statusFinal === 'vencido') {
         const decisaoSuspensao = decidirSuspensaoPorInadimplencia({
@@ -549,7 +557,7 @@ router.post('/cobrancas/:id/conciliar', verifyToken, isSuperAdmin, async (req, r
           fatura: { ...fatura, status: decisaoFatura.statusFinal },
         });
         if (decisaoSuspensao.deveSuspender) {
-          await supabase.from('empresas').update({ status: decisaoSuspensao.novoStatus }).eq('id', fatura.empresa_id);
+          await supabase.from('empresas').update(patchSuspensaoFinanceiraAutomatica()).eq('id', fatura.empresa_id);
         }
       }
     }

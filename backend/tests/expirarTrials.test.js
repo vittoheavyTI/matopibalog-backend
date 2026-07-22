@@ -79,7 +79,15 @@ test('expirarTrials: trial encerrado com fatura vencida e link suspende', async 
   await expirarTrials();
 
   assert.equal(supabase.chamadas.updates.length, 1);
-  assert.deepEqual(supabase.chamadas.updates[0], { tabela: 'empresas', payload: { status: 'suspenso' } });
+  const { tabela, payload } = supabase.chamadas.updates[0];
+  assert.equal(tabela, 'empresas');
+  // Suspensão financeira automática PRECISA gravar os metadados da 024 —
+  // sem reason='financial', o pagamento posterior não reativa a conta.
+  assert.equal(payload.status, 'suspenso');
+  assert.equal(payload.suspension_reason, 'financial');
+  assert.equal(payload.suspension_source, 'automatic');
+  assert.ok(payload.suspended_at, 'suspended_at deve ser preenchido');
+  assert.equal(payload.suspended_by, null);
 });
 
 test('expirarTrials: vencimento hoje nao suspende e falha Supabase e fail-safe', async () => {

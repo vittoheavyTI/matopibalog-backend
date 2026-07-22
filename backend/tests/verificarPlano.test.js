@@ -174,7 +174,12 @@ test('trial vencido COM fatura com link suspende e bloqueia', async () => {
   assert.equal(resultado.nextChamado, 0);
   assert.equal(resultado.resposta.status, 403);
   assert.equal(resultado.chamadas.updates.length, 1);
-  assert.equal(resultado.chamadas.updates[0].payload.status, 'suspenso');
+  const payload = resultado.chamadas.updates[0].payload;
+  assert.equal(payload.status, 'suspenso');
+  // Metadados da 024 obrigatórios: sem reason='financial' o pagamento não reativa.
+  assert.equal(payload.suspension_reason, 'financial');
+  assert.equal(payload.suspension_source, 'automatic');
+  assert.ok(payload.suspended_at, 'suspended_at deve ser preenchido');
   assert.match(resultado.resposta.body.message, /teste expirado/i);
 });
 
