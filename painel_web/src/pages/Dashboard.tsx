@@ -879,7 +879,7 @@ export const Dashboard: React.FC = () => {
                   {isAutonomo ? (
                     <>
                       <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
-                        <span className="text-gray-600">Faturamento:</span>
+                        <span className="text-gray-600">Em andamento (previsto):</span>
                         <span className="font-bold text-gray-800">{formatCurrency(opTotalFretes)}</span>
                       </div>
                       <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
@@ -894,7 +894,7 @@ export const Dashboard: React.FC = () => {
                   ) : (
                     <>
                       <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
-                        <span className="text-gray-600">Valor Total do Frete:</span>
+                        <span className="text-gray-600">Em andamento (previsto):</span>
                         <span className="font-bold text-gray-800">{formatCurrency(opTotalFretes)}</span>
                       </div>
                       <div className="flex justify-between items-center text-sm border-b border-gray-50 pb-2">
