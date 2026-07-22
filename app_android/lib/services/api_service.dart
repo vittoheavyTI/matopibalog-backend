@@ -431,6 +431,35 @@ class ApiService {
     }
   }
 
+  /// Gera (idempotente) a fatura de regularização da PRÓPRIA conta. Consome
+  /// POST /pagamentos/me/regularizacao (só autônomo; gate sandbox no backend).
+  /// Se já existir fatura aberta, o backend devolve-a sem criar outra.
+  /// Retorna {'ok': true, 'resultado': ...} em 200/201, ou
+  /// {'ok': false, 'message': ...} nas recusas de negócio (422/403/...).
+  static Future<Map<String, dynamic>> gerarFaturaRegularizacao() async {
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$_baseUrl/pagamentos/me/regularizacao'),
+            headers: await _getHeaders(),
+          )
+          .timeout(_timeoutPostJson);
+      AppLogger.api('ApiService', 'POST /pagamentos/me/regularizacao', response.statusCode);
+      final decoded = response.body.isNotEmpty ? jsonDecode(response.body) : <String, dynamic>{};
+      final body = decoded is Map ? Map<String, dynamic>.from(decoded) : <String, dynamic>{};
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        return {'ok': true, 'resultado': body['resultado'] ?? 'gerada'};
+      }
+      return {
+        'ok': false,
+        'message': body['message'] ?? 'Não foi possível gerar a fatura agora. Tente novamente em instantes.',
+      };
+    } catch (e) {
+      AppLogger.error('ApiService', 'POST /pagamentos/me/regularizacao exception', e);
+      return {'ok': false, 'message': 'Não foi possível gerar a fatura agora. Verifique sua conexão.'};
+    }
+  }
+
   /// Código Pix (copia-e-cola) de uma fatura, SOB DEMANDA. Consome
   /// GET /pagamentos/faturas/:id/pix (read-only; isolado por tenant no backend,
   /// e gated a sandbox). Retorna o `payload` (EMV) ou LANÇA ApiException. NÃO
