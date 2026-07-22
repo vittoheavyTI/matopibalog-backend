@@ -225,12 +225,16 @@ class _HomeScreenState extends State<HomeScreen> {
                           const Text('Resumo do Mês', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                           const Divider(),
                           if (finance.isAutonomo) ...[
-                            _infoRow('Faturamento', finance.totalFretesMes),
+                            _infoRow('Faturamento realizado', finance.totalFretesMes),
+                            if (finance.emAndamentoMes > 0)
+                              _infoRow('Em andamento (previsto)', finance.emAndamentoMes, color: Colors.grey),
                             _infoRow('Despesas', finance.deducoesMes, color: Colors.red),
                             const Divider(),
                             _infoRow('Resultado', finance.saldoMes, color: finance.saldoMes >= 0 ? Colors.green : Colors.red, bold: true),
                           ] else ...[
-                            _infoRow('Total Fretes', finance.totalFretesMes),
+                            _infoRow('Fretes realizados', finance.totalFretesMes),
+                            if (finance.emAndamentoMes > 0)
+                              _infoRow('Em andamento (previsto)', finance.emAndamentoMes, color: Colors.grey),
                             _infoRow(
                               'Comissão (${finance.percentualComissao.toStringAsFixed(1)}%)',
                               finance.comissaoMes,

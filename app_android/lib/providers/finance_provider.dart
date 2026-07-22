@@ -3,12 +3,14 @@ import '../services/api_service.dart';
 import '../services/app_logger.dart';
 
 class FinanceProvider extends ChangeNotifier {
-  double _totalFretes = 0.0;
+  double _totalFretes = 0.0; // receita REALIZADA (só fretes finalizados) — regra A
+  double _emAndamento = 0.0; // ativo/pendente = previsto (nunca é receita realizada)
   double _comissao = 0.0;
   double _deducoes = 0.0;
   double _saldo = 0.0;
   // Campos mensais para o card "Resumo do Mês"
   double _totalFretesMes = 0.0;
+  double _emAndamentoMes = 0.0; // ativo/pendente do recorte = previsto
   double _comissaoMes = 0.0;
   double _deducoesMes = 0.0;
   double _saldoMes = 0.0;
@@ -29,10 +31,12 @@ class FinanceProvider extends ChangeNotifier {
   Map<String, dynamic> _planoStatus = {};
 
   double get totalFretes => _totalFretes;
+  double get emAndamento => _emAndamento;
   double get comissao => _comissao;
   double get deducoes => _deducoes;
   double get saldo => _saldo;
   double get totalFretesMes => _totalFretesMes;
+  double get emAndamentoMes => _emAndamentoMes;
   double get comissaoMes => _comissaoMes;
   double get deducoesMes => _deducoesMes;
   double get saldoMes => _saldoMes;
@@ -162,10 +166,20 @@ class FinanceProvider extends ChangeNotifier {
           if ((f['status'] ?? '').toString() == 'cancelado') f['id']?.toString()
       };
 
+      // Regra A: receita REALIZADA soma só fretes 'finalizado'. Ativo/pendente é
+      // valor EM ANDAMENTO (previsto) — somado à parte, nunca como receita. Cancelado
+      // fica fora dos dois. (Espelha o backend agregacaoFinanceiraFretes e o painel.)
       double tf = 0.0;
+      double emAndamento = 0.0;
       for (var f in fretes) {
-        if ((f['status'] ?? '').toString() == 'cancelado') continue;
-        tf += double.tryParse(f['valor_frete'].toString()) ?? 0.0;
+        final s = (f['status'] ?? '').toString();
+        if (s == 'cancelado') continue;
+        final valor = double.tryParse(f['valor_frete'].toString()) ?? 0.0;
+        if (s == 'finalizado') {
+          tf += valor;
+        } else {
+          emAndamento += valor;
+        }
       }
 
       // Regras de dedução (rejeitados e lançamentos de frete cancelado SEMPRE fora;
@@ -200,6 +214,7 @@ class FinanceProvider extends ChangeNotifier {
       }
 
       _totalFretes = tf;
+      _emAndamento = emAndamento;
 
       if (_isAutonomo) {
         // Autônomo: sem comissão por percentual do cadastro
@@ -218,16 +233,23 @@ class FinanceProvider extends ChangeNotifier {
       }
 
       // ─── Cálculo mensal (Resumo do Mês) ─────────────────────────────────────
-      // Fretes que entram no resumo: ativos (qualquer mês) + finalizados do mês vigente.
+      // Regra A: o RESUMO REALIZADO do mês = fretes FINALIZADOS do mês vigente. Fretes
+      // ativos/pendentes NÃO entram na receita/saldo realizado — seu valor é somado à
+      // parte como "em andamento (previsto)" e exibido separadamente. Cancelado fora.
       final ymAtual = DateTime.now().toString().substring(0, 7); // yyyy-MM
       final fretesResumoIds = <String>{};
+      double emAndamentoMes = 0.0;
       for (var f in fretes) {
         final status = (f['status'] ?? '').toString();
         if (status == 'cancelado') continue;
-        final data = f['data']?.toString() ?? '';
+        final valor = double.tryParse(f['valor_frete'].toString()) ?? 0.0;
         final isAtivo = _statusAtivoPrioritario.contains(status) || status == _statusAtivoFallback;
-        final isMesVigente = data.startsWith(ymAtual);
-        if (isAtivo || isMesVigente) {
+        if (isAtivo) {
+          emAndamentoMes += valor; // previsto (qualquer mês), fora do realizado
+          continue;
+        }
+        final data = f['data']?.toString() ?? '';
+        if (status == 'finalizado' && data.startsWith(ymAtual)) {
           fretesResumoIds.add(f['id']?.toString() ?? '');
         }
       }
@@ -287,6 +309,7 @@ class FinanceProvider extends ChangeNotifier {
       }
 
       _totalFretesMes = tfMes;
+      _emAndamentoMes = emAndamentoMes;
       if (_isAutonomo) {
         _comissaoMes = 0.0;
         _deducoesMes = tdMes;
