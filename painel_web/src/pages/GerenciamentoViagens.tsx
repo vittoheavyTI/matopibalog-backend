@@ -5,6 +5,7 @@ import { format } from 'date-fns';
 import { formatCurrency } from '../utils';
 import api, { newClientRequestId } from '../api';
 import { mensagemErro } from '../utils/mensagemErro';
+import { erroSanidadeTonKm, erroSanidadeValorFixo, TONELADAS_MAX } from '../utils/limitesFrete';
 import { PlanoBloqueadoCard } from '../components/PlanoBloqueadoCard';
 import { EVENTO_NOTIFICACOES_NOVAS } from '../components/NotificacoesDropdown';
 
@@ -473,6 +474,17 @@ export const GerenciamentoViagens: React.FC = () => {
       const valorFrete = parseFloat(formData.valor_frete);
       if (!formData.valor_frete || isNaN(valorFrete) || valorFrete <= 0) { alert('Informe um valor de frete válido.'); return; }
     }
+    // Guardrail de sanidade (espelha o backend): mesma checagem do botão desabilitado,
+    // aqui como rede de segurança caso o clique escape. Bloqueia antes de chamar a API.
+    const erroSanidade = isTonKm
+      ? erroSanidadeTonKm({
+          toneladas: formData.toneladas,
+          valorToneladaKm: formData.valor_tonelada_km,
+          kmInicial: formData.km_inicial,
+          kmFinal: formData.km_final,
+        })
+      : erroSanidadeValorFixo(formData.valor_frete);
+    if (erroSanidade) { alert(erroSanidade); return; }
     try {
       setIsSubmitting(true);
       const payload: any = {
@@ -1464,6 +1476,18 @@ export const GerenciamentoViagens: React.FC = () => {
   );
   };
 
+  // Guardrail de sanidade do modal (espelha as travas do backend em utils/limitesFrete):
+  // avisa/bloqueia valores absurdos ANTES de salvar. Só reprova campos preenchidos, então
+  // não alarma enquanto o formulário está incompleto. null = sem problema de sanidade.
+  const sanidadeFreteErro = formData.modalidade_calculo === 'tonelada_km'
+    ? erroSanidadeTonKm({
+        toneladas: formData.toneladas,
+        valorToneladaKm: formData.valor_tonelada_km,
+        kmInicial: formData.km_inicial,
+        kmFinal: formData.km_final,
+      })
+    : erroSanidadeValorFixo(formData.valor_frete);
+
   return (
 
     <div className="space-y-3 pb-20 px-6">
@@ -1590,8 +1614,16 @@ export const GerenciamentoViagens: React.FC = () => {
               {formData.modalidade_calculo === 'tonelada_km' ? (
                 <>
                   <div className="grid grid-cols-2 gap-3">
-                    <div><label className="block text-xs font-bold text-gray-600 uppercase mb-1">Toneladas *</label><input type="number" step="0.001" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" value={formData.toneladas} onChange={e => setFormData({...formData, toneladas: e.target.value})} placeholder="0" /></div>
-                    <div><label className="block text-xs font-bold text-gray-600 uppercase mb-1">Valor por Tonelada/km *</label><input type="number" step="0.0001" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" value={formData.valor_tonelada_km} onChange={e => setFormData({...formData, valor_tonelada_km: e.target.value})} placeholder="0,00" /></div>
+                    <div>
+                      <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Toneladas *</label>
+                      <input type="number" step="0.001" min="0" max={TONELADAS_MAX} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" value={formData.toneladas} onChange={e => setFormData({...formData, toneladas: e.target.value})} placeholder="Ex.: 30" />
+                      <p className="text-[10px] text-gray-400 mt-0.5">Peso da carga, até {TONELADAS_MAX} t.</p>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Valor por Tonelada/km (R$/t·km) *</label>
+                      <input type="number" step="0.0001" min="0" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" value={formData.valor_tonelada_km} onChange={e => setFormData({...formData, valor_tonelada_km: e.target.value})} placeholder="Ex.: 0,20" />
+                      <p className="text-[10px] text-gray-400 mt-0.5">Valor por tonelada a cada km. Ex.: 0,20 = R$ 0,20.</p>
+                    </div>
                   </div>
                   {(() => {
                     // Prévia do valor: toneladas × (km_final − km_inicial) × valor_tonelada_km.
@@ -1603,6 +1635,16 @@ export const GerenciamentoViagens: React.FC = () => {
                     const kmFim = Number(formData.km_final);
                     const temInsumos = ton > 0 && vtk > 0;
                     const kmTotal = (Number.isFinite(kmIni) && Number.isFinite(kmFim) && kmFim > kmIni) ? kmFim - kmIni : null;
+                    // Erro de sanidade tem prioridade: caixa vermelha explicando o problema
+                    // (escala do valor por t·km, toneladas, ordem de KM ou valor total previsto).
+                    if (sanidadeFreteErro) {
+                      return (
+                        <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700 flex items-start">
+                          <AlertTriangle size={14} className="mr-1.5 mt-0.5 shrink-0" />
+                          <span>{sanidadeFreteErro}</span>
+                        </div>
+                      );
+                    }
                     return (
                       <div className="rounded-lg bg-blue-50 border border-blue-100 px-3 py-2 text-xs text-blue-800">
                         {temInsumos && kmTotal !== null ? (
@@ -1616,7 +1658,13 @@ export const GerenciamentoViagens: React.FC = () => {
                 </>
               ) : (
                 <div className="grid grid-cols-2 gap-3">
-                  <div><label className="block text-xs font-bold text-gray-600 uppercase mb-1">Valor do Frete *</label><input type="number" step="0.01" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" value={formData.valor_frete} onChange={e => setFormData({...formData, valor_frete: e.target.value})} placeholder="0,00" /></div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Valor do Frete *</label>
+                    <input type="number" step="0.01" min="0" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" value={formData.valor_frete} onChange={e => setFormData({...formData, valor_frete: e.target.value})} placeholder="0,00" />
+                    {sanidadeFreteErro && (
+                      <p className="text-[11px] text-red-600 mt-1 flex items-start"><AlertTriangle size={12} className="mr-1 mt-0.5 shrink-0" />{sanidadeFreteErro}</p>
+                    )}
+                  </div>
                   <div />
                 </div>
               )}
@@ -1661,7 +1709,7 @@ export const GerenciamentoViagens: React.FC = () => {
             </div>
             <div className="p-5 pt-0 flex justify-end gap-3">
               <button onClick={() => setShowModal(false)} className="px-4 py-2 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">Cancelar</button>
-              <button onClick={handleSave} disabled={isSubmitting} className="px-4 py-2 text-sm font-bold bg-green-700 text-white rounded-lg hover:bg-green-800 transition-colors disabled:opacity-50 flex items-center">
+              <button onClick={handleSave} disabled={isSubmitting || !!sanidadeFreteErro} title={sanidadeFreteErro || undefined} className="px-4 py-2 text-sm font-bold bg-green-700 text-white rounded-lg hover:bg-green-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center">
                 <Check size={18} className="mr-2" />{isSubmitting ? 'Salvando...' : 'Salvar'}
               </button>
             </div>
