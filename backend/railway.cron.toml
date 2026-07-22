@@ -3,5 +3,9 @@ builder = "nixpacks"
 buildCommand = "npm install"
 
 [deploy]
-startCommand = "node jobs/gerarFaturasRecorrentes.js --dry-run --limite=1"
+# MODO REAL SANDBOX (macrofrente fluxo financeiro): sem --dry-run, o job cria a
+# fatura recorrente de verdade — mas SÓ em Asaas sandbox (gate fail-closed no
+# próprio job) e SÓ para empresas da FATURAS_RECORRENTES_ALLOWLIST (env no
+# Railway; vazia = ninguém). limite=1 mantém o lote mínimo do piloto.
+startCommand = "node jobs/gerarFaturasRecorrentes.js --limite=1"
 restartPolicyType = "never"
