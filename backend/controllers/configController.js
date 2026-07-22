@@ -12,7 +12,7 @@ const APPEARANCE_KEYS = [
 const ADMIN_EXTRA_KEYS = ['cardOffsetX', 'cardOffsetY', 'printers', 'sidebarLogo', 'sidebarLogoScale', 'sidebarLogoY'];
 
 // Config de SISTEMA — só super-admin (PainelConfigSistema)
-const SYSTEM_KEYS = ['nome_sistema', 'email_suporte', 'trial_dias', 'manutencao', 'registros_abertos'];
+const SYSTEM_KEYS = ['nome_sistema', 'email_suporte', 'whatsapp_suporte', 'telefone_suporte', 'trial_dias', 'manutencao', 'registros_abertos'];
 
 // Monta objeto só com as chaves permitidas (whitelist — nunca blacklist)
 function pick(obj, keys) {
