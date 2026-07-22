@@ -204,22 +204,22 @@ test('empresa elegível sem asaas_customer_id: cria customer e cobra', async () 
 });
 
 // ─── Cadastro incompleto → pulada controlada, sem cobrança ───────────────────
-test('sem customer e cadastro incompleto: erro controlado, sem cobrança', async () => {
+test('sem customer e cadastro incompleto: pulada ANTES da reserva (anti-órfã)', async () => {
   const supabase = makeSupabase();
   const http = makeHttp();
-  // garantirCustomer lança falha(400) porque cnpj é inválido; a reserva já existe
-  // (sem asaas_id) e nenhuma cobrança é criada.
+  // Comportamento NOVO (pré-validação): o cadastro inválido é barrado ANTES da
+  // reserva — nenhuma fatura local órfã, nenhuma chamada ao Asaas.
   const r = await gerarFaturaRecorrenteParaEmpresa({
     supabase, http, config: CONFIG,
     empresa: empresaAtiva({ asaas_customer_id: null, cnpj: '123' }),
     dataReferencia: DATA_REF,
-  }).then((x) => ({ ok: x })).catch((e) => ({ err: e }));
+  });
 
-  assert.ok(r.err, 'deve lançar erro controlado do garantirCustomer');
-  assert.equal(http._calls.posts.some((p) => p.url.endsWith('/payments')), false);
-  // Reserva permanece sem asaas_id → recuperável no retry.
-  const reserva = supabase._store.faturas.find((f) => f.client_request_id === CRID);
-  assert.ok(reserva && !reserva.asaas_id);
+  assert.equal(r.resultado, 'pulada');
+  assert.equal(r.motivo, 'cadastro_incompleto');
+  assert.equal(http._calls.posts.length, 0);
+  assert.equal(supabase._calls.inserts.length, 0, 'reserva órfã não pode mais nascer');
+  assert.equal(supabase._store.faturas.some((f) => f.client_request_id === CRID), false);
 });
 
 // ─── Idempotência: recorrente já existe e completa ───────────────────────────
@@ -312,4 +312,52 @@ test('valor = preco_mensal (não recalcula); snapshot por_motorista correto', as
   // valor cobrado no Asaas = preco_mensal, não unitário×qtd recalculado divergente.
   const post = http._calls.posts.find((p) => p.url.endsWith('/payments'));
   assert.equal(post.body.value, 1000);
+});
+
+// ─── Pré-validação de cadastro ANTES da reserva (anti-órfã) ──────────────────
+
+test('recorrência: sem customer e sem CPF/CNPJ → pulada cadastro_incompleto, ZERO reserva, ZERO Asaas', async () => {
+  const supabase = makeSupabase();
+  const http = makeHttp();
+
+  const r = await gerarFaturaRecorrenteParaEmpresa({
+    supabase, http, config: { apiKey: 'k', baseURL: 'https://sandbox.asaas.com/api/v3' },
+    empresa: empresaAtiva({ asaas_customer_id: null, cnpj: '' }),
+    dataReferencia: DATA_REF,
+  });
+
+  assert.equal(r.resultado, 'pulada');
+  assert.equal(r.motivo, 'cadastro_incompleto');
+  assert.deepEqual(r.camposFaltantes, ['cpf_cnpj']);
+  assert.equal(supabase._calls.inserts.length, 0, 'não pode criar reserva órfã');
+  assert.equal(http._calls.posts.length, 0);
+});
+
+test('recorrência: sem customer e sem e-mail → pulada cadastro_incompleto sem reserva', async () => {
+  const supabase = makeSupabase();
+  const http = makeHttp();
+
+  const r = await gerarFaturaRecorrenteParaEmpresa({
+    supabase, http, config: { apiKey: 'k', baseURL: 'https://sandbox.asaas.com/api/v3' },
+    empresa: empresaAtiva({ asaas_customer_id: null, email_contato: 'invalido' }),
+    dataReferencia: DATA_REF,
+  });
+
+  assert.equal(r.resultado, 'pulada');
+  assert.equal(r.motivo, 'cadastro_incompleto');
+  assert.equal(supabase._calls.inserts.length, 0);
+});
+
+test('recorrência: customer existente com cadastro incompleto → segue cobrando (validação não se aplica)', async () => {
+  const supabase = makeSupabase();
+  const http = makeHttp();
+
+  const r = await gerarFaturaRecorrenteParaEmpresa({
+    supabase, http, config: { apiKey: 'k', baseURL: 'https://sandbox.asaas.com/api/v3' },
+    empresa: empresaAtiva({ cnpj: '', email_contato: '' }), // tem cus_1
+    dataReferencia: DATA_REF,
+  });
+
+  assert.equal(r.resultado, 'gerada');
+  assert.equal(supabase._calls.inserts.length, 1);
 });

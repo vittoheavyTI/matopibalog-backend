@@ -18,6 +18,7 @@ const {
 const { garantirCustomer } = require('./asaasSubscriptionService');
 const { buscarPaymentPorReferencia } = require('./faturaRecorrenteService');
 const { normalizarStatusAsaas } = require('./paymentDomainService');
+const { podeCriarCobranca, MOTIVO_CADASTRO_INCOMPLETO } = require('../utils/cadastroAsaas');
 
 function headersAsaas(apiKey) {
   return { access_token: apiKey, 'Content-Type': 'application/json' };
@@ -186,6 +187,20 @@ async function gerarFaturaRegularizacao({ supabase, http, config, empresaId, dat
 
   if (decisao.resultado === 'fatura_aberta') {
     return { resultado: 'fatura_aberta', motivo: decisao.motivo, periodo: decisao.periodo, fatura: decisao.faturaAberta };
+  }
+
+  // PRÉ-VALIDAÇÃO DO CADASTRO ANTES DA RESERVA: sem nome+CPF/CNPJ+e-mail não
+  // há como criar o customer no Asaas — e a reserva viraria fatura local órfã
+  // (sem asaas_id, impagável). Fail-closed: nenhum insert, nenhuma cobrança.
+  // Com asaas_customer_id existente a checagem não se aplica.
+  const cadastro = podeCriarCobranca(empresa);
+  if (!cadastro.ok) {
+    return {
+      resultado: 'pulada',
+      motivo: MOTIVO_CADASTRO_INCOMPLETO,
+      periodo: decisao.periodo,
+      camposFaltantes: cadastro.camposFaltantes,
+    };
   }
 
   const payload = montarPayloadFaturaRegularizacao({ empresa, plano, dataReferencia });

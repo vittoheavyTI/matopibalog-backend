@@ -490,6 +490,7 @@ function projetarFaturaApp(fatura) {
 
 // Mensagens amigáveis por motivo de "pulada" (o app exibe direto).
 const MENSAGENS_REGULARIZACAO = {
+  cadastro_incompleto: 'Complete seu cadastro (nome, CPF/CNPJ e e-mail) para gerar a fatura. Fale com o suporte se precisar de ajuda.',
   trial_ainda_ativo: 'Seu período de teste ainda está ativo — nada a regularizar.',
   suspensao_nao_financeira: 'Esta conta não pode ser regularizada por pagamento. Fale com o suporte.',
   estado_sem_pendencia_financeira: 'Sua conta não tem pendência financeira no momento.',

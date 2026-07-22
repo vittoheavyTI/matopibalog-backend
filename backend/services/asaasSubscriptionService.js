@@ -22,8 +22,7 @@ const BILLING = {
   INATIVO: 'inativo',
 };
 
-function soDigitos(v) { return String(v == null ? '' : v).replace(/\D+/g, ''); }
-function emailValido(v) { return typeof v === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim()); }
+const { soDigitos, emailValido, validarCadastroAsaasEmpresa } = require('../utils/cadastroAsaas');
 
 // Primeiro vencimento da assinatura:
 //   - trial_ends_at, se for uma data FUTURA;
@@ -128,14 +127,17 @@ async function buscarAssinaturaPorReferencia(http, config, empresaId) {
 async function garantirCustomer(empresa, { config, supabase, http }) {
   if (empresa.asaas_customer_id) return { customerId: empresa.asaas_customer_id, created: false };
 
-  const nome = typeof empresa.nome === 'string' ? empresa.nome.trim() : '';
-  const doc = soDigitos(empresa.cnpj);
-  const email = typeof empresa.email_contato === 'string' ? empresa.email_contato.trim() : '';
-  if (!nome || (doc.length !== 11 && doc.length !== 14) || !emailValido(email)) {
+  // Mesma regra do helper puro (utils/cadastroAsaas) — quem chama a coreografia
+  // reserva-primeiro DEVE pré-validar com podeCriarCobranca ANTES da reserva.
+  const validacao = validarCadastroAsaasEmpresa(empresa);
+  if (!validacao.ok) {
     await persistBilling(supabase, empresa.id, { billing_status: BILLING.PENDENTE_CLIENTE, billing_last_error: 'cadastro incompleto' });
     throw falha(400, 'Cadastro incompleto: informe nome, CPF/CNPJ e e-mail válidos em Empresas.');
   }
 
+  const nome = empresa.nome.trim();
+  const doc = soDigitos(empresa.cnpj);
+  const email = empresa.email_contato.trim();
   const payload = { name: nome, cpfCnpj: doc, email, notificationDisabled: false };
   const tel = soDigitos(empresa.telefone_contato);
   if (tel.length === 10 || tel.length === 11) payload.phone = tel;
