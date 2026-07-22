@@ -246,3 +246,54 @@ test('empresa inexistente → erro controlado', async () => {
   assert.equal(r.resultado, 'erro');
   assert.equal(http.chamadas.posts.length, 0);
 });
+
+// ─── Pré-validação de cadastro ANTES da reserva (anti-órfã) ──────────────────
+
+test('sem customer e sem CPF/CNPJ (caso José): pulada cadastro_incompleto, ZERO insert, ZERO Asaas', async () => {
+  const supabase = criarSupabaseMock({ empresa: empresaRow({ asaas_customer_id: null, cnpj: '' }) });
+  const http = criarHttpMock();
+
+  const r = await gerarFaturaRegularizacao({ supabase, http, config: CONFIG, empresaId: EMPRESA, dataReferencia: '2026-07-22' });
+
+  assert.equal(r.resultado, 'pulada');
+  assert.equal(r.motivo, 'cadastro_incompleto');
+  assert.deepEqual(r.camposFaltantes, ['cpf_cnpj']);
+  assert.equal(supabase.__registro.inserts.length, 0, 'não pode criar reserva órfã');
+  assert.equal(http.chamadas.posts.length, 0);
+  assert.equal(http.chamadas.gets.length, 0);
+});
+
+test('sem customer e sem e-mail: pulada cadastro_incompleto sem reserva', async () => {
+  const supabase = criarSupabaseMock({ empresa: empresaRow({ asaas_customer_id: null, email_contato: '' }) });
+  const http = criarHttpMock();
+
+  const r = await gerarFaturaRegularizacao({ supabase, http, config: CONFIG, empresaId: EMPRESA, dataReferencia: '2026-07-22' });
+
+  assert.equal(r.resultado, 'pulada');
+  assert.equal(r.motivo, 'cadastro_incompleto');
+  assert.equal(supabase.__registro.inserts.length, 0);
+});
+
+test('customer JÁ existente com cadastro incompleto: cobrança segue (validação não se aplica)', async () => {
+  const supabase = criarSupabaseMock({ empresa: empresaRow({ cnpj: '', email_contato: '' }) }); // tem cus_1
+  const http = criarHttpMock();
+
+  const r = await gerarFaturaRegularizacao({ supabase, http, config: CONFIG, empresaId: EMPRESA, dataReferencia: '2026-07-22' });
+
+  assert.equal(r.resultado, 'gerada');
+  assert.equal(http.chamadas.posts.filter((p) => /\/payments$/.test(p.url)).length, 1);
+});
+
+test('cadastro incompleto NÃO impede devolver fatura aberta existente', async () => {
+  const aberta = { id: 'f-aberta', status: 'vencido', due_date: '2026-06-10', origem: null };
+  const supabase = criarSupabaseMock({
+    empresa: empresaRow({ asaas_customer_id: null, cnpj: '' }),
+    faturasAbertas: [aberta],
+  });
+  const http = criarHttpMock();
+
+  const r = await gerarFaturaRegularizacao({ supabase, http, config: CONFIG, empresaId: EMPRESA, dataReferencia: '2026-07-22' });
+
+  assert.equal(r.resultado, 'fatura_aberta');
+  assert.equal(r.fatura.id, 'f-aberta');
+});

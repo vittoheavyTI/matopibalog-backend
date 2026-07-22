@@ -33,6 +33,7 @@ const {
 } = require('./faturaRecorrenteDomainService');
 const { garantirCustomer } = require('./asaasSubscriptionService');
 const { normalizarStatusAsaas } = require('./paymentDomainService');
+const { podeCriarCobranca, MOTIVO_CADASTRO_INCOMPLETO } = require('../utils/cadastroAsaas');
 
 const TIPO_PAGAMENTO = 'PIX';
 
@@ -275,6 +276,14 @@ async function gerarFaturaRecorrenteParaEmpresa({ supabase, http, config, empres
   // Demais skips e erros do domínio: nenhum Asaas, nenhum insert.
   if (decisao.resultado !== 'cobrar') {
     return { resultado: decisao.resultado === 'erro' ? 'erro' : 'pulada', motivo: decisao.motivo, periodo };
+  }
+
+  // PRÉ-VALIDAÇÃO DO CADASTRO ANTES DA RESERVA: empresa sem customer e sem
+  // nome+CPF/CNPJ+e-mail não pode ser cobrada — reservar aqui criaria fatura
+  // local órfã (sem asaas_id). Fail-closed: nenhum insert, nenhuma cobrança.
+  const cadastro = podeCriarCobranca(empresa);
+  if (!cadastro.ok) {
+    return { resultado: 'pulada', motivo: MOTIVO_CADASTRO_INCOMPLETO, periodo, camposFaltantes: cadastro.camposFaltantes };
   }
 
   // Reserva: insere a fatura local SEM asaas_id. As travas 021+031 garantem
