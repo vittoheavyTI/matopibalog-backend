@@ -1,5 +1,10 @@
 const supabase = require('../config/supabase');
 const { calcularComissao } = require('../utils/comissao');
+const {
+  STATUS_FRETE_RECEITA_REALIZADA,
+  STATUS_FRETE_EXCLUIDOS,
+  lancamentoVinculadoAFreteCancelado,
+} = require('../utils/agregacaoFinanceiraFretes');
 
 exports.getSummary = async (req, res) => {
   const { mes, ano } = req.query;
@@ -73,7 +78,7 @@ exports.getSummary = async (req, res) => {
       // 1. Todos os fretes do período (finalizados)
       comFiltroEmpresa(supabase.from('fretes')
         .select('*, motoristas(usuarios(nome), percentual_comissao)')
-        .eq('status', 'finalizado')
+        .eq('status', STATUS_FRETE_RECEITA_REALIZADA)
         .gte('data', dataInicio)
         .lte('data', dataFim))
         .order('data', { ascending: false }),
@@ -81,7 +86,7 @@ exports.getSummary = async (req, res) => {
       // data: um lançamento do período pode estar vinculado a um frete cancelado de outro mês.
       // Lançamentos vinculados a esses fretes ficam FORA de todas as somas; soltos (sem frete_id)
       // são preservados. Os fretes cancelados em si já estão fora (fretes acima filtra 'finalizado').
-      comFiltroEmpresa(supabase.from('fretes').select('id').eq('status', 'cancelado')),
+      comFiltroEmpresa(supabase.from('fretes').select('id').eq('status', STATUS_FRETE_EXCLUIDOS[0])),
       // 2. Deduções e abastecimentos FINALIZADOS (pagos pelo proprietário)
       comFiltroEmpresa(supabase.from('despesas').select('valor, motorista_id, frete_id').eq('quem_pagou', 'proprietario').in('status', ['aprovado', 'finalizado']).gte('data', dataInicio).lte('data', dataFim)),
       comFiltroEmpresa(supabase.from('abastecimentos').select('valor_total, motorista_id, frete_id').eq('quem_pagou', 'proprietario').in('status', ['aprovado', 'finalizado']).gte('data', dataInicio).lte('data', dataFim)),
@@ -113,13 +118,10 @@ exports.getSummary = async (req, res) => {
     });
     const isAuto = (id) => tipoDe[id] === 'autonomo';
 
+    // Regra oficial centralizada (utils/agregacaoFinanceiraFretes): lançamento
+    // vinculado a frete cancelado fica FORA; solto (sem frete_id) é preservado.
     const fretesCanceladosIds = new Set((canceladosRaw || []).map(f => f.id));
-    const ehDeFreteCancelado = (item) => {
-      const fid = item.frete_id;
-      if (fid === null || fid === undefined || fid === '') return false; // sem frete_id → preserva
-      return fretesCanceladosIds.has(fid);
-    };
-    const naoCancelado = (item) => !ehDeFreteCancelado(item);
+    const naoCancelado = (item) => !lancamentoVinculadoAFreteCancelado(item, fretesCanceladosIds);
 
     // Garantir arrays nunca nulos.
     // [PR-C2] Lançamentos vinculados a fretes cancelados são removidos AQUI (uma vez), antes de
