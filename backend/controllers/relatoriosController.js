@@ -1,5 +1,6 @@
 const supabase = require('../config/supabase');
 const { calcularComissao } = require('../utils/comissao');
+const { freteEstaCancelado } = require('../utils/agregacaoFinanceiraFretes');
 
 exports.getFichaViagem = async (req, res) => {
   const { motorista_id, fretes_ids } = req.query;
@@ -46,6 +47,18 @@ exports.getFichaViagem = async (req, res) => {
       .eq('motorista_id', motorista_id);
 
     if (fretesError) throw fretesError;
+
+    // Status guard (regra oficial — decisão A): uma ficha de viagem é documento
+    // financeiro; um frete CANCELADO não pode compor o consolidado como se fosse
+    // válido. Se algum id solicitado estiver cancelado, recusa com 422 e NÃO soma
+    // nada (nem os fretes, nem despesas/abastecimentos/vales vinculados). Fretes
+    // ativos/pendentes seguem permitidos aqui (a ficha é por seleção explícita);
+    // a regra de RECEITA REALIZADA por finalizado é aplicada no dashboard.
+    if ((fretesRaw || []).some(freteEstaCancelado)) {
+      return res.status(422).json({
+        message: 'Não é possível gerar a ficha: há frete cancelado na seleção. Remova-o e tente novamente.',
+      });
+    }
 
     // 3. Movimentações vinculadas
     const { data: abastecimentosRaw, error: eAbast } = await supabase
