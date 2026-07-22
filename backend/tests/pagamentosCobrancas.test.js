@@ -286,6 +286,59 @@ test('conciliação: OVERDUE marca fatura vencida e empresa suspensa', async () 
   assert.equal(res.body.status, 'vencido');
   const updEmpresa = supabase.__registro.updates.find((u) => u.tabela === 'empresas');
   assert.equal(updEmpresa.payload.status, 'suspenso');
+  // Suspensão automática grava os metadados da 024 (senão pagar nunca reativa).
+  assert.equal(updEmpresa.payload.suspension_reason, 'financial');
+  assert.equal(updEmpresa.payload.suspension_source, 'automatic');
+  assert.ok(updEmpresa.payload.suspended_at, 'suspended_at deve ser preenchido');
+});
+
+test('conciliação: pagamento REATIVA suspensão financeira automática e limpa metadados', async () => {
+  const cenario = {
+    faturaById: { id: 'f1', empresa_id: 'e1', asaas_id: 'pay_1', status: 'vencido', pago_em: null },
+    empresa: {
+      id: 'e1', status: 'suspenso', trial_ends_at: null,
+      suspension_reason: 'financial', suspension_source: 'automatic',
+    },
+    config: { dados: { integracao_asaas: { apiKey: 'chave-teste' } } },
+    asaasPaymentGet: { id: 'pay_1', status: 'RECEIVED' },
+  };
+  const supabase = criarSupabaseMock(cenario);
+  const axios = criarAxiosMock(cenario);
+  const router = carregarRouter(supabase, axios);
+  const handler = getHandler(router, 'POST', '/cobrancas/:id/conciliar');
+
+  const res = fakeRes();
+  await handler({ user: superAdmin, params: { id: 'f1' }, body: {} }, res, () => {});
+
+  assert.equal(res.body.status, 'pago');
+  const updEmpresa = supabase.__registro.updates.find((u) => u.tabela === 'empresas');
+  assert.ok(updEmpresa, 'empresa deve ser atualizada');
+  assert.equal(updEmpresa.payload.status, 'ativo');
+  assert.equal(updEmpresa.payload.suspension_reason, null);
+  assert.equal(updEmpresa.payload.suspension_source, null);
+  assert.equal(updEmpresa.payload.suspended_at, null);
+});
+
+test('conciliação: pagamento NAO reativa suspensão administrativa', async () => {
+  const cenario = {
+    faturaById: { id: 'f1', empresa_id: 'e1', asaas_id: 'pay_1', status: 'pendente', pago_em: null },
+    empresa: {
+      id: 'e1', status: 'suspenso', trial_ends_at: null,
+      suspension_reason: 'administrative', suspension_source: 'manual',
+    },
+    config: { dados: { integracao_asaas: { apiKey: 'chave-teste' } } },
+    asaasPaymentGet: { id: 'pay_1', status: 'RECEIVED' },
+  };
+  const supabase = criarSupabaseMock(cenario);
+  const axios = criarAxiosMock(cenario);
+  const router = carregarRouter(supabase, axios);
+  const handler = getHandler(router, 'POST', '/cobrancas/:id/conciliar');
+
+  const res = fakeRes();
+  await handler({ user: superAdmin, params: { id: 'f1' }, body: {} }, res, () => {});
+
+  assert.equal(res.body.status, 'pago');
+  assert.equal(supabase.__registro.updates.filter((u) => u.tabela === 'empresas').length, 0);
 });
 
 test('conciliação: pagamento nao reativa conta suspensa', async () => {
