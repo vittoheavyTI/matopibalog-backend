@@ -53,6 +53,9 @@ class FinanceProvider extends ChangeNotifier {
   bool get planoBloqueado => _planoStatus['trial_expirado'] == true || const ['suspenso', 'expirado', 'bloqueado'].contains(statusPlano);
   String get responsavelRegularizacao => ((_planoStatus['regularizacao'] as Map?)?['responsavel'] ?? '').toString();
   String get suporteEmail => ((_planoStatus['regularizacao'] as Map?)?['suporte_email'] ?? '').toString();
+  String get suporteWhatsapp => ((_planoStatus['regularizacao'] as Map?)?['suporte_whatsapp'] ?? '').toString();
+  String get suporteTelefone => ((_planoStatus['regularizacao'] as Map?)?['suporte_telefone'] ?? '').toString();
+  bool get temContatoSuporte => suporteEmail.isNotEmpty || suporteWhatsapp.isNotEmpty || suporteTelefone.isNotEmpty;
   String get mensagemRegularizacao {
     switch (responsavelRegularizacao) {
       case 'admin_empresa': return 'Sua empresa está com acesso temporariamente limitado. Procure o administrador.';

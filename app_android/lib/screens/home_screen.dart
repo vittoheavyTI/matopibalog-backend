@@ -12,6 +12,9 @@ import 'add_abastecimento_screen.dart';
 import 'add_vale_screen.dart';
 import 'historico_screen.dart';
 import 'detalhe_viagem_screen.dart';
+import 'minhas_faturas_screen.dart';
+import '../services/api_service.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -32,6 +35,52 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _refresh() async {
     await context.read<FinanceProvider>().loadData();
+  }
+
+  bool _gerandoRegularizacao = false;
+
+  /// Gera (idempotente) a fatura de regularização e leva o usuário para
+  /// Minhas Faturas, onde ele paga (link/Pix). Recusas de negócio (422)
+  /// mostram a mensagem do backend; aí o suporte é o fallback.
+  Future<void> _regularizarAgora(FinanceProvider finance) async {
+    AppLogger.action('regularizacao_gerar_fatura');
+    setState(() => _gerandoRegularizacao = true);
+    try {
+      final r = await ApiService.gerarFaturaRegularizacao();
+      if (!mounted) return;
+      if (r['ok'] == true) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Fatura disponível em Minhas Faturas. Pague para liberar sua conta.'),
+        ));
+        await Navigator.push(context, MaterialPageRoute(builder: (_) => const MinhasFaturasScreen()));
+        if (mounted) await _refresh();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(r['message'].toString())));
+      }
+    } finally {
+      if (mounted) setState(() => _gerandoRegularizacao = false);
+    }
+  }
+
+  Future<void> _abrirWhatsappSuporte(String numero) async {
+    AppLogger.action('regularizacao_whatsapp');
+    final digitos = numero.replaceAll(RegExp(r'\D'), '');
+    final uri = Uri.parse('https://wa.me/$digitos');
+    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (ok) return;
+    await Clipboard.setData(ClipboardData(text: numero));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Número copiado: $numero')));
+  }
+
+  Future<void> _ligarSuporte(String telefone) async {
+    AppLogger.action('regularizacao_telefone');
+    final uri = Uri(scheme: 'tel', path: telefone.replaceAll(RegExp(r'[^\d+]'), ''));
+    final ok = await launchUrl(uri);
+    if (ok) return;
+    await Clipboard.setData(ClipboardData(text: telefone));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Telefone copiado: $telefone')));
   }
 
   Future<void> _navegarERefresh(Widget tela) async {
@@ -180,19 +229,51 @@ class _HomeScreenState extends State<HomeScreen> {
                           Row(children: [Icon(Icons.lock_outline, color: Colors.red.shade700), const SizedBox(width: 8), const Expanded(child: Text('Regularização necessária', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)))]),
                           const SizedBox(height: 8),
                           Text(finance.mensagemRegularizacao, style: TextStyle(color: Colors.red.shade900)),
-                          if (finance.responsavelRegularizacao == 'autonomo' && finance.suporteEmail.isNotEmpty) ...[
+                          if (finance.responsavelRegularizacao == 'autonomo') ...[
                             const SizedBox(height: 12),
+                            // Caminho principal: gerar/ver a fatura e pagar.
+                            // O backend é idempotente: se já existe fatura
+                            // aberta, devolve-a sem criar outra.
                             ElevatedButton.icon(
-                              icon: const Icon(Icons.support_agent),
-                              label: const Text('Falar com suporte'),
-                              onPressed: () async {
-                                await Clipboard.setData(ClipboardData(text: finance.suporteEmail));
-                                if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Contato copiado: ${finance.suporteEmail}')));
+                              icon: const Icon(Icons.receipt_long),
+                              label: const Text('Regularizar agora'),
+                              onPressed: _gerandoRegularizacao ? null : () => _regularizarAgora(finance),
+                            ),
+                            const SizedBox(height: 8),
+                            OutlinedButton.icon(
+                              icon: const Icon(Icons.receipt_long_outlined),
+                              label: const Text('Ver minhas faturas'),
+                              onPressed: () {
+                                AppLogger.action('regularizacao_ver_faturas');
+                                Navigator.push(context, MaterialPageRoute(builder: (_) => const MinhasFaturasScreen()));
                               },
                             ),
-                          ] else if (finance.responsavelRegularizacao == 'autonomo') ...[
-                            const SizedBox(height: 10),
-                            Text('O contato de suporte ainda não está configurado. Tente novamente mais tarde.', style: TextStyle(color: Colors.red.shade700, fontSize: 12)),
+                            if (finance.temContatoSuporte) ...[
+                              const SizedBox(height: 8),
+                              Wrap(spacing: 8, runSpacing: 4, children: [
+                                if (finance.suporteWhatsapp.isNotEmpty)
+                                  TextButton.icon(
+                                    icon: const Icon(Icons.chat, size: 18),
+                                    label: const Text('WhatsApp'),
+                                    onPressed: () => _abrirWhatsappSuporte(finance.suporteWhatsapp),
+                                  ),
+                                if (finance.suporteTelefone.isNotEmpty)
+                                  TextButton.icon(
+                                    icon: const Icon(Icons.phone, size: 18),
+                                    label: const Text('Ligar'),
+                                    onPressed: () => _ligarSuporte(finance.suporteTelefone),
+                                  ),
+                                if (finance.suporteEmail.isNotEmpty)
+                                  TextButton.icon(
+                                    icon: const Icon(Icons.support_agent, size: 18),
+                                    label: const Text('E-mail'),
+                                    onPressed: () async {
+                                      await Clipboard.setData(ClipboardData(text: finance.suporteEmail));
+                                      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Contato copiado: ${finance.suporteEmail}')));
+                                    },
+                                  ),
+                              ]),
+                            ],
                           ],
                         ]),
                       ),
