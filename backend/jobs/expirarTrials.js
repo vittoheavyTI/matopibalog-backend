@@ -1,6 +1,52 @@
 const supabase = require('../config/supabase');
 const { decidirSuspensaoPorInadimplencia } = require('../services/paymentDomainService');
 const { patchSuspensaoFinanceiraAutomatica } = require('../utils/suspensao');
+const { gerarFaturaRegularizacao } = require('../services/regularizacaoService');
+const { resolveAsaasApiKey } = require('../utils/asaasConfig');
+
+// Config Asaas SOMENTE quando o ambiente é sandbox (fail-closed, mesma trava do
+// job de recorrência): fora do sandbox o job volta ao comportamento antigo
+// (não gera cobrança nenhuma). Erro de leitura/descriptografia → null.
+async function configAsaasSandbox() {
+  try {
+    const { data, error } = await supabase
+      .from('configuracoes')
+      .select('dados')
+      .eq('id', 1)
+      .single();
+    if (error) return null;
+    const integ = (data && data.dados && data.dados.integracao_asaas) || {};
+    if (integ.environment !== 'sandbox') return null;
+    return { apiKey: resolveAsaasApiKey(integ), baseURL: 'https://sandbox.asaas.com/api/v3' };
+  } catch (_) {
+    return null;
+  }
+}
+
+// Garante a fatura de regularização do trial vencido (primeira mensalidade).
+// Idempotente por natureza (fatura aberta existente é devolvida; chave única
+// por empresa/mês) — seguro mesmo com o setInterval rodando em várias
+// instâncias. Best-effort: falha aqui NÃO impede a avaliação de suspensão.
+async function garantirFaturaTrialVencido(config, empresaId) {
+  if (!config) return { resultado: 'pulada', motivo: 'ambiente_nao_sandbox' };
+  try {
+    // require tardio do axios: só o caminho sandbox usa HTTP.
+    const axios = require('axios');
+    const r = await gerarFaturaRegularizacao({ supabase, http: axios, config, empresaId });
+    console.log('[expirarTrials] Regularização de trial vencido', {
+      empresa_id: empresaId,
+      resultado: r.resultado,
+      motivo: r.motivo,
+    });
+    return r;
+  } catch (err) {
+    console.error('[expirarTrials] Falha ao garantir fatura de regularização', {
+      empresa_id: empresaId,
+      motivo: (err && (err.motivo || err.message)) || 'desconhecido',
+    });
+    return { resultado: 'erro', motivo: 'excecao' };
+  }
+}
 
 async function buscarFaturaElegivel(empresaId, hoje) {
   return supabase
@@ -34,8 +80,16 @@ async function expirarTrials() {
     if (expirados && expirados.length > 0) {
       let suspensas = 0;
       let preservadas = 0;
+      // Config resolvida uma vez por rodada; null fora do sandbox (fail-closed).
+      const configSandbox = await configAsaasSandbox();
 
       for (const empresa of expirados) {
+        // Trial venceu → a conta precisa de um caminho de pagamento. Garante a
+        // fatura de regularização ANTES de avaliar suspensão: a fatura nova
+        // (due_date futuro) não suspende hoje, mas já aparece no app/painel;
+        // se nunca for paga, vence e a suspensão ocorre nas próximas rodadas.
+        await garantirFaturaTrialVencido(configSandbox, empresa.id);
+
         const { data: fatura, error: faturaError } = await buscarFaturaElegivel(empresa.id, hoje);
         const decisao = decidirSuspensaoPorInadimplencia({
           empresa,
