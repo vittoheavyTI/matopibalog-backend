@@ -20,6 +20,7 @@ const {
 const { processarWebhook } = require('../services/asaasWebhookService');
 const { sanitizar } = require('../services/asaasWebhookEventRepository');
 const { patchSuspensaoFinanceiraAutomatica, patchLimparSuspensao } = require('../utils/suspensao');
+const { gerarFaturaRegularizacao } = require('../services/regularizacaoService');
 
 // Comparação em tempo constante (hash de tamanho fixo evita vazar comprimento)
 function safeEqual(a, b) {
@@ -462,6 +463,101 @@ router.get('/me/faturas', verifyToken, verificarEmpresa, async (req, res) => {
   } catch (err) {
     console.error('[pagamentos/me/faturas] Falha', { status: 500 });
     return res.status(500).json({ message: 'Erro ao carregar faturas.' });
+  }
+});
+
+// ─── FATURA DE REGULARIZAÇÃO (macrofrente fluxo financeiro) ──────────────────
+// Gera (idempotente) a fatura que destrava a conta com pendência financeira e
+// SEM fatura aberta: trial vencido ou suspensão financeira/sem motivo. Se já há
+// fatura aberta, devolve-a sem criar nada. Gate hard de sandbox ANTES de tudo.
+// A coreografia anti-duplicidade (reserva-primeiro + client_request_id
+// determinístico + reconciliação por externalReference) vive no serviço.
+
+// Whitelist de colunas devolvidas ao APP (mesma fronteira do GET /me/faturas):
+// nunca vaza asaas_id, pix_qr_code, client_request_id, plano_id nem composição
+// de preço. O QR Pix continua sob demanda em GET /faturas/:id/pix.
+const CAMPOS_FATURA_APP = [
+  'id', 'valor', 'tipo_pagamento', 'status', 'due_date', 'pago_em',
+  'invoice_url', 'bank_slip_url', 'periodo_referencia', 'origem',
+  'plano_nome_snapshot', 'modelo_cobranca_snapshot', 'created_at',
+];
+function projetarFaturaApp(fatura) {
+  if (!fatura) return null;
+  const out = {};
+  for (const c of CAMPOS_FATURA_APP) out[c] = fatura[c] !== undefined ? fatura[c] : null;
+  return out;
+}
+
+// Mensagens amigáveis por motivo de "pulada" (o app exibe direto).
+const MENSAGENS_REGULARIZACAO = {
+  trial_ainda_ativo: 'Seu período de teste ainda está ativo — nada a regularizar.',
+  suspensao_nao_financeira: 'Esta conta não pode ser regularizada por pagamento. Fale com o suporte.',
+  estado_sem_pendencia_financeira: 'Sua conta não tem pendência financeira no momento.',
+  plano_invalido: 'Seu plano atual não permite gerar cobrança. Fale com o suporte.',
+  plano_gratuito: 'Seu plano atual não gera cobrança. Fale com o suporte.',
+};
+
+async function executarRegularizacao(req, res, empresaId) {
+  const { apiKey, baseURL } = await getAsaasConfig();
+  const r = await gerarFaturaRegularizacao({
+    supabase,
+    http: axios,
+    config: { apiKey, baseURL },
+    empresaId,
+  });
+
+  if (r.resultado === 'gerada') {
+    return res.status(201).json({ resultado: 'gerada', fatura: projetarFaturaApp(r.fatura) });
+  }
+  if (r.resultado === 'idempotente' || r.resultado === 'fatura_aberta') {
+    return res.status(200).json({ resultado: r.resultado, fatura: projetarFaturaApp(r.fatura) });
+  }
+  if (r.resultado === 'pulada') {
+    return res.status(422).json({
+      resultado: 'pulada',
+      motivo: r.motivo,
+      message: MENSAGENS_REGULARIZACAO[r.motivo] || 'Não foi possível gerar a fatura de regularização.',
+    });
+  }
+  // erro
+  console.error('[pagamentos/regularizacao] Falha', { motivo: r.motivo || 'desconhecido' });
+  return res.status(500).json({ message: 'Erro ao gerar fatura de regularização.' });
+}
+
+// APP (autônomo): a própria empresa do token. Sem isAdmin — o autônomo é
+// motorista dono do negócio (mesmo gate de tipo do GET /me/faturas).
+router.post('/me/regularizacao', verifyToken, verificarEmpresa, async (req, res) => {
+  try {
+    if (await bloquearSeNaoSandbox(res)) return;
+    if (!req.empresa_id) {
+      return res.status(400).json({ message: 'Empresa não identificada.' });
+    }
+    const { data: empresa, error: empErr } = await supabase
+      .from('empresas')
+      .select('id, tipo')
+      .eq('id', req.empresa_id)
+      .single();
+    if (empErr || !empresa) {
+      return res.status(404).json({ message: 'Empresa não encontrada.' });
+    }
+    if (empresa.tipo !== 'autonomo') {
+      return res.status(403).json({ message: 'Regularização pelo app disponível apenas para autônomos.' });
+    }
+    return await executarRegularizacao(req, res, req.empresa_id);
+  } catch (err) {
+    console.error('[pagamentos/me/regularizacao] Falha', { motivo: err.motivo || err.message || 'desconhecido' });
+    return res.status(500).json({ message: 'Erro ao gerar fatura de regularização.' });
+  }
+});
+
+// SUPER-ADMIN: qualquer empresa (painel).
+router.post('/regularizacao/:empresa_id', verifyToken, isSuperAdmin, async (req, res) => {
+  try {
+    if (await bloquearSeNaoSandbox(res)) return;
+    return await executarRegularizacao(req, res, req.params.empresa_id);
+  } catch (err) {
+    console.error('[pagamentos/regularizacao/:empresa_id] Falha', { motivo: err.motivo || err.message || 'desconhecido' });
+    return res.status(500).json({ message: 'Erro ao gerar fatura de regularização.' });
   }
 });
 
