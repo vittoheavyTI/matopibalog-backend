@@ -1419,7 +1419,7 @@ export const GerenciamentoViagens: React.FC = () => {
             {isAutonomo ? (
               <>
                 <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-sm border-b border-gray-50 pb-1">
-                  <span className="text-gray-600 min-w-0">Faturamento:</span>
+                  <span className="text-gray-600 min-w-0">Em andamento (previsto):</span>
                   <span className="font-bold text-gray-800 text-right whitespace-nowrap tabular-nums min-w-[96px]">{formatCurrency(opTotalFretes)}</span>
                 </div>
                 <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-sm border-b border-gray-50 pb-1">
@@ -1434,7 +1434,7 @@ export const GerenciamentoViagens: React.FC = () => {
             ) : (
               <>
                 <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-sm border-b border-gray-50 pb-1">
-                  <span className="text-gray-600 min-w-0">Valor Total do Frete:</span>
+                  <span className="text-gray-600 min-w-0">Em andamento (previsto):</span>
                   <span className="font-bold text-gray-800 text-right whitespace-nowrap tabular-nums min-w-[96px]">{formatCurrency(opTotalFretes)}</span>
                 </div>
                 <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-sm border-b border-gray-50 pb-1">
@@ -1783,7 +1783,7 @@ export const GerenciamentoViagens: React.FC = () => {
                   // Espelha o card "Balanço Atual"; reusa opTotalFretes/autGastos/autResultado.
                   <>
                     <div className="flex justify-between text-sm">
-                      <span className="text-gray-600">Total de Fretes (Faturamento):</span>
+                      <span className="text-gray-600">Em andamento (previsto):</span>
                       <span className="font-bold text-gray-800">{formatCurrency(opTotalFretes)}</span>
                     </div>
                     <div className="flex justify-between text-sm">
@@ -1798,7 +1798,7 @@ export const GerenciamentoViagens: React.FC = () => {
                 ) : (
                   <>
                     <div className="flex justify-between text-sm">
-                      <span className="text-gray-600">Total de Fretes:</span>
+                      <span className="text-gray-600">Em andamento (previsto):</span>
                       <span className="font-bold text-gray-800">{formatCurrency(opTotalFretes)}</span>
                     </div>
                     {!isAutonomo && (

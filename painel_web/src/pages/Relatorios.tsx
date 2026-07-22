@@ -6,6 +6,7 @@ import { ptBR } from 'date-fns/locale';
 import { formatCurrency } from '../utils';
 import { Calendar, FileText, Users, User, Download, Filter, Truck, ChevronDown, ChevronRight } from 'lucide-react';
 import api from '../api';
+import { freteContaComoReceitaRealizada } from '../utils/fretesFinanceiro';
 
 const estaVinculadoAFreteCancelado = (item: any, fretesCanceladosIds: Set<any>) =>
   item.frete_id !== null && item.frete_id !== undefined && fretesCanceladosIds.has(item.frete_id);
@@ -94,7 +95,7 @@ const renderResumoGrupo = (
   doc.setFontSize(10).setFont('helvetica', 'normal');
   if (isAuto) {
     const resultado = totals.totalFrete - totals.totalGastos;
-    doc.text('Faturamento Total:', labelX, finalY + 10);
+    doc.text('Receita realizada:', labelX, finalY + 10);
     doc.text(`${formatCurrency(totals.totalFrete)}`, rightEdge, finalY + 10, { align: 'right' });
 
     doc.text('Total Gastos:', labelX, finalY + 18);
@@ -347,14 +348,14 @@ export const Relatorios: React.FC = () => {
       const abastecimentosParaCalculo = mAbs.filter(a => !estaVinculadoAFreteCancelado(a, fretesCanceladosIds));
       const valesParaCalculo = mVales.filter(v => !estaVinculadoAFreteCancelado(v, fretesCanceladosIds));
 
-      const totalFrete = mFretes.filter(f => f.status !== 'cancelado').reduce((s, f) => s + (f.valorFrete || 0), 0);
+      const totalFrete = mFretes.filter(f => freteContaComoReceitaRealizada(f)).reduce((s, f) => s + (f.valorFrete || 0), 0);
       const comissao = totalFrete * ((m.percentualComissao || 0) / 100);
       const totalGastos = despesasParaCalculo.reduce((s, d) => s + (d.valor || 0), 0) +
                           abastecimentosParaCalculo.reduce((s, a) => s + (a.valorTotal || 0), 0) +
                           valesParaCalculo.reduce((s, v) => s + (v.valor || 0), 0);
       const saldoLiq = comissao - totalGastos;
       
-      const totalKm = mFretes.filter(f => f.status !== 'cancelado').reduce((s, f) => s + (f.km_final && f.km_inicial ? f.km_final - f.km_inicial : 0), 0);
+      const totalKm = mFretes.filter(f => freteContaComoReceitaRealizada(f)).reduce((s, f) => s + (f.km_final && f.km_inicial ? f.km_final - f.km_inicial : 0), 0);
       const totalLitros = abastecimentosParaCalculo.reduce((s, a) => s + (a.litros || 0), 0);
       const media = totalLitros > 0 ? (totalKm / totalLitros).toFixed(2) : '0.00';
 
@@ -362,7 +363,7 @@ export const Relatorios: React.FC = () => {
         nome: m.nomeCompleto,
         uid: m.uid,
         isAutonomo: m.empresaTipo === 'autonomo',
-        viagens: mFretes.filter(f => f.status !== 'cancelado').length,
+        viagens: mFretes.filter(f => freteContaComoReceitaRealizada(f)).length,
         totalFrete,
         comissao,
         totalGastos,
@@ -459,7 +460,7 @@ export const Relatorios: React.FC = () => {
           }),
           foot: [[
             'TOTAIS', '', '', '', '', '', '',
-            formatCurrency(mFretes.filter(f => f.status !== 'cancelado').reduce((s, f) => s + (f.valorFrete || 0), 0)),
+            formatCurrency(mFretes.filter(f => freteContaComoReceitaRealizada(f)).reduce((s, f) => s + (f.valorFrete || 0), 0)),
             '', ''
           ]],
           headStyles: { fillColor: [59, 130, 246], fontSize: 7 },
@@ -647,14 +648,14 @@ export const Relatorios: React.FC = () => {
       const abastecimentosParaCalculo = mAbs.filter(a => !estaVinculadoAFreteCancelado(a, fretesCanceladosIds));
       const valesParaCalculo = mVales.filter(v => !estaVinculadoAFreteCancelado(v, fretesCanceladosIds));
 
-      const totalFrete = mFretes.filter(f => f.status !== 'cancelado').reduce((s, f) => s + (f.valorFrete || 0), 0);
+      const totalFrete = mFretes.filter(f => freteContaComoReceitaRealizada(f)).reduce((s, f) => s + (f.valorFrete || 0), 0);
       const comissao = totalFrete * ((m.percentualComissao || 0) / 100);
       const totalGastos = despesasParaCalculo.reduce((s, d) => s + (d.valor || 0), 0) +
                           abastecimentosParaCalculo.reduce((s, a) => s + (a.valorTotal || 0), 0) +
                           valesParaCalculo.reduce((s, v) => s + (v.valor || 0), 0);
       const saldoLiq = comissao - totalGastos;
 
-      const totalKm = mFretes.filter(f => f.status !== 'cancelado').reduce((s, f) => s + (f.km_final && f.km_inicial ? f.km_final - f.km_inicial : 0), 0);
+      const totalKm = mFretes.filter(f => freteContaComoReceitaRealizada(f)).reduce((s, f) => s + (f.km_final && f.km_inicial ? f.km_final - f.km_inicial : 0), 0);
       const totalLitros = abastecimentosParaCalculo.reduce((s, a) => s + (a.litros || 0), 0);
       const media = totalLitros > 0 ? (totalKm / totalLitros).toFixed(2) : '0.00';
 
@@ -662,7 +663,7 @@ export const Relatorios: React.FC = () => {
         nome: m.nomeCompleto,
         uid: m.uid,
         isAutonomo: m.empresaTipo === 'autonomo',
-        viagens: mFretes.filter(f => f.status !== 'cancelado').length,
+        viagens: mFretes.filter(f => freteContaComoReceitaRealizada(f)).length,
         totalFrete,
         comissao,
         totalGastos,
@@ -747,7 +748,7 @@ export const Relatorios: React.FC = () => {
           }),
           foot: [[
             'TOTAIS', '', '', '', '', '', '',
-            formatCurrency(mFretes.filter(f => f.status !== 'cancelado').reduce((s, f) => s + (f.valorFrete || 0), 0)),
+            formatCurrency(mFretes.filter(f => freteContaComoReceitaRealizada(f)).reduce((s, f) => s + (f.valorFrete || 0), 0)),
             '', ''
           ]],
           headStyles: { fillColor: [59, 130, 246], fontSize: 7 },
@@ -1091,7 +1092,7 @@ export const Relatorios: React.FC = () => {
                   const despesasParaCalculo = despesas.filter(d => !estaVinculadoAFreteCancelado(d, fretesCanceladosIds));
                   const abastecimentosParaCalculo = abastecimentos.filter(a => !estaVinculadoAFreteCancelado(a, fretesCanceladosIds));
                   const valesParaCalculo = vales.filter(v => !estaVinculadoAFreteCancelado(v, fretesCanceladosIds));
-                  const totalFrete = fretes.filter(f=>f.status!=='cancelado').reduce((s,f)=>s+(f.valorFrete||0), 0);
+                  const totalFrete = fretes.filter(f => freteContaComoReceitaRealizada(f)).reduce((s,f)=>s+(f.valorFrete||0), 0);
                   const gastosTotais = despesasParaCalculo.reduce((s,d)=>s+(d.valor||0),0) + abastecimentosParaCalculo.reduce((s,a)=>s+(a.valorTotal||0),0) + valesParaCalculo.reduce((s,v)=>s+(v.valor||0),0);
                   const card = (label: string, value: number, opts: any = {}) => (
                     <div key={label} className={`p-4 rounded-2xl border ${opts.box || 'bg-gray-50 border-gray-100'}`}>
@@ -1105,10 +1106,10 @@ export const Relatorios: React.FC = () => {
                     const resultado = totalFrete - gastosTotais;
                     return (
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-                        {card('Faturamento', totalFrete)}
+                        {card('Faturamento realizado', totalFrete)}
                         {card('Gastos', gastosTotais, { box: 'bg-red-50 border-red-100', labelCls: 'text-red-600', valCls: 'text-red-700' })}
                         {card('Resultado', resultado, { box: 'bg-green-50 border-green-100', labelCls: 'text-green-600', valCls: resultado >= 0 ? 'text-green-700' : 'text-red-700' })}
-                        {card('Viagens', fretes.filter(f => f.status !== 'cancelado').length, { box: 'bg-blue-50 border-blue-100', labelCls: 'text-blue-600', valCls: 'text-blue-700', raw: true })}
+                        {card('Viagens', fretes.filter(f => freteContaComoReceitaRealizada(f)).length, { box: 'bg-blue-50 border-blue-100', labelCls: 'text-blue-600', valCls: 'text-blue-700', raw: true })}
                       </div>
                     );
                   }
@@ -1119,12 +1120,12 @@ export const Relatorios: React.FC = () => {
                     motoristas.forEach(m => {
                       const mTodosFretes = fretes.filter(f => f.motoristaUid === m.uid);
                       const mFretesCanceladosIds = new Set(mTodosFretes.filter(f => f.status === 'cancelado').map(f => f.id));
-                      const mF = mTodosFretes.filter(f => f.status !== 'cancelado');
+                      const mF = mTodosFretes.filter(f => freteContaComoReceitaRealizada(f));
                       const g = despesas.filter(d => d.motoristaUid === m.uid && !estaVinculadoAFreteCancelado(d, mFretesCanceladosIds)).reduce((s,d)=>s+(d.valor||0),0)
                         + abastecimentos.filter(a => a.motoristaUid === m.uid && !estaVinculadoAFreteCancelado(a, mFretesCanceladosIds)).reduce((s,a)=>s+(a.valorTotal||0),0)
                         + vales.filter(v => v.motoristaUid === m.uid && !estaVinculadoAFreteCancelado(v, mFretesCanceladosIds)).reduce((s,v)=>s+(v.valor||0),0);
                       if (mF.length === 0 && g === 0) return;
-                      const tot = mF.filter(f=>f.status!=='cancelado').reduce((s,f)=>s+(f.valorFrete||0),0);
+                      const tot = mF.filter(f => freteContaComoReceitaRealizada(f)).reduce((s,f)=>s+(f.valorFrete||0),0);
                       if (m.empresaTipo === 'autonomo') { tfAut+=tot; gAut+=g; nAut++; }
                       else { tfVinc+=tot; comVinc += tot*((m.percentualComissao||0)/100); gVinc+=g; nVinc++; }
                     });
@@ -1135,7 +1136,7 @@ export const Relatorios: React.FC = () => {
                           <div>
                             <p className="text-[10px] font-bold text-gray-400 uppercase mb-2 tracking-widest">Vinculados</p>
                             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                              {card('Total Frete', tfVinc)}
+                              {card('Receita realizada', tfVinc)}
                               {card('Comissões', comVinc, { box: 'bg-green-50 border-green-100', labelCls: 'text-green-600', valCls: 'text-green-700' })}
                               {card('Despesas', gVinc, { box: 'bg-red-50 border-red-100', labelCls: 'text-red-600', valCls: 'text-red-700' })}
                             </div>
@@ -1145,7 +1146,7 @@ export const Relatorios: React.FC = () => {
                           <div>
                             <p className="text-[10px] font-bold text-amber-500 uppercase mb-2 tracking-widest">Autônomos</p>
                             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                              {card('Faturamento', tfAut)}
+                              {card('Faturamento realizado', tfAut)}
                               {card('Gastos', gAut, { box: 'bg-red-50 border-red-100', labelCls: 'text-red-600', valCls: 'text-red-700' })}
                               {card('Resultado', resAut, { box: 'bg-green-50 border-green-100', labelCls: 'text-green-600', valCls: resAut >= 0 ? 'text-green-700' : 'text-red-700' })}
                             </div>
@@ -1159,16 +1160,16 @@ export const Relatorios: React.FC = () => {
                   }
 
                   // 3) Vinculado selecionado → comportamento atual (Total Frete / Comissões / Despesas / Viagens)
-                  const comissaoVinc = fretes.filter(f=>f.status!=='cancelado').reduce((s,f) => {
+                  const comissaoVinc = fretes.filter(f => freteContaComoReceitaRealizada(f)).reduce((s,f) => {
                     const m = motoristas.find(mot => mot.uid === f.motoristaUid);
                     return s + (m?.empresaTipo === 'autonomo' ? 0 : (f.valorFrete||0) * ((m?.percentualComissao || 0)/100));
                   }, 0);
                   return (
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-                      {card('Total Frete', totalFrete)}
+                      {card('Receita realizada', totalFrete)}
                       {card('Comissões', comissaoVinc, { box: 'bg-green-50 border-green-100', labelCls: 'text-green-600', valCls: 'text-green-700' })}
                       {card('Despesas', gastosTotais, { box: 'bg-red-50 border-red-100', labelCls: 'text-red-600', valCls: 'text-red-700' })}
-                      {card('Viagens', fretes.filter(f => f.status !== 'cancelado').length, { box: 'bg-blue-50 border-blue-100', labelCls: 'text-blue-600', valCls: 'text-blue-700', raw: true })}
+                      {card('Viagens', fretes.filter(f => freteContaComoReceitaRealizada(f)).length, { box: 'bg-blue-50 border-blue-100', labelCls: 'text-blue-600', valCls: 'text-blue-700', raw: true })}
                     </div>
                   );
                 })()}
@@ -1277,7 +1278,7 @@ export const Relatorios: React.FC = () => {
                         const mFretes = fretes.filter(f => f.motoristaUid === m.uid);
                         if (mFretes.length === 0) return null;
                         const fretesCanceladosIds = new Set(mFretes.filter(f=>f.status==='cancelado').map(f=>f.id));
-                        const total = mFretes.filter(f=>f.status!=='cancelado').reduce((s,f)=>s+f.valorFrete,0);
+                        const total = mFretes.filter(f => freteContaComoReceitaRealizada(f)).reduce((s,f)=>s+f.valorFrete,0);
                         // PR3A: autônomo = Faturamento − Gastos (sem comissão). Gastos = desp+abast+vales
                         // (já filtrados aprovado/finalizado no load), ignorando quem_pagou. `|| 0` evita NaN.
                         const isAut = m.empresaTipo === 'autonomo';
