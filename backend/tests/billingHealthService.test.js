@@ -32,11 +32,37 @@ test('base saudável → ok=true e contadores zerados', () => {
   for (const v of Object.values(r.contadores)) assert.equal(v, 0);
 });
 
-test('fatura sem asaas_id é sinalizada (reserva órfã)', () => {
-  const r = resumirBillingHealth({ faturas: [fatura({ asaas_id: null, origem: 'regularizacao' })], hoje: HOJE });
+test('fatura ABERTA sem asaas_id é sinalizada (reserva órfã crítica)', () => {
+  const r = resumirBillingHealth({ faturas: [fatura({ asaas_id: null, origem: 'regularizacao', status: 'pendente' })], hoje: HOJE });
   assert.equal(r.contadores.faturas_sem_asaas_id, 1);
   assert.equal(r.detalhes.faturas_sem_asaas_id[0].origem, 'regularizacao');
   assert.equal(r.ok, false);
+});
+
+test('fatura VENCIDA sem asaas_id também entra no alerta crítico', () => {
+  const r = resumirBillingHealth({ faturas: [fatura({ asaas_id: null, origem: 'regularizacao', status: 'vencido', due_date: '2026-07-01' })], hoje: HOJE });
+  assert.equal(r.contadores.faturas_sem_asaas_id, 1);
+  assert.equal(r.ok, false);
+});
+
+test('fatura CANCELADA sem asaas_id NÃO entra no alerta crítico (vai p/ informativo)', () => {
+  // Espelha a limpeza da migration 034: órfã soft-cancelada é inofensiva.
+  const r = resumirBillingHealth({ faturas: [fatura({ asaas_id: null, origem: 'regularizacao', status: 'cancelado' })], hoje: HOJE });
+  assert.equal(r.contadores.faturas_sem_asaas_id, 0, 'cancelada não é problema crítico');
+  assert.equal(r.contadores.faturas_canceladas_sem_asaas_id, 1, 'entra no contador informativo');
+  assert.equal(r.detalhes.faturas_canceladas_sem_asaas_id[0].status, 'cancelado');
+  assert.equal(r.ok, true, 'órfã cancelada não derruba o ok');
+});
+
+test('cenário pós-034: 9 canceladas sem asaas_id + 0 abertas órfãs → ok=true', () => {
+  const faturas = [];
+  for (let i = 0; i < 9; i++) faturas.push(fatura({ asaas_id: null, origem: 'regularizacao', status: 'cancelado' }));
+  // 4 regularizações reais com asaas_id, abertas
+  for (let i = 0; i < 4; i++) faturas.push(fatura({ status: 'pendente', origem: 'regularizacao', asaas_id: 'pay_' + i }));
+  const r = resumirBillingHealth({ faturas, hoje: HOJE });
+  assert.equal(r.contadores.faturas_sem_asaas_id, 0);
+  assert.equal(r.contadores.faturas_canceladas_sem_asaas_id, 9);
+  assert.equal(r.ok, true);
 });
 
 test('fatura aberta sem link (nem invoice_url nem boleto) é sinalizada', () => {
