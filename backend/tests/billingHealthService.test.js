@@ -161,3 +161,82 @@ test('entradas vazias não quebram (retorna estrutura zerada)', () => {
   assert.equal(r.ok, true);
   assert.equal(r.totais.total, 0);
 });
+
+// ─── Sinais INFORMATIVOS (não derrubam `ok`) ─────────────────────────────────
+
+test('empresa ativa sem plano → informativo, ok NÃO cai', () => {
+  const r = resumirBillingHealth({
+    faturas: [],
+    empresas: [{ id: 'e1', nome: 'SemPlano', tipo: 'transportadora', status: 'ativo', plano_id: null, planos: null }],
+    hoje: HOJE,
+  });
+  assert.equal(r.contadores.empresa_sem_plano, 1);
+  assert.equal(r.detalhes.empresa_sem_plano[0].nome, 'SemPlano');
+  assert.equal(r.ok, true, 'sinal informativo não derruba o ok');
+});
+
+test('empresa suspensa sem plano NÃO conta como empresa_sem_plano (não é cobrável esperado)', () => {
+  const r = resumirBillingHealth({
+    faturas: [{ ...fatura(), empresa_id: 'e1', status: 'pendente' }],
+    empresas: [{ id: 'e1', nome: 'Susp', tipo: 'transportadora', status: 'suspenso', plano_id: null, planos: null, suspension_reason: 'financial' }],
+    hoje: HOJE,
+  });
+  assert.equal(r.contadores.empresa_sem_plano, 0);
+});
+
+test('plano inativo/arquivado vinculado a conta cobrável → informativo', () => {
+  const r = resumirBillingHealth({
+    faturas: [],
+    empresas: [
+      { id: 'e1', nome: 'A', tipo: 'transportadora', status: 'ativo', plano_id: 'p1', planos: { id: 'p1', nome: 'Velho', categoria: 'empresa', ativo: false, arquivado_em: null } },
+      { id: 'e2', nome: 'B', tipo: 'transportadora', status: 'trial', plano_id: 'p2', planos: { id: 'p2', nome: 'Arq', categoria: 'empresa', ativo: true, arquivado_em: '2026-01-01T00:00:00Z' } },
+    ],
+    hoje: HOJE,
+  });
+  assert.equal(r.contadores.plano_inativo_ou_arquivado, 2);
+  assert.equal(r.ok, true);
+});
+
+test('trial vencido sem fatura aberta → informativo; com fatura aberta NÃO conta', () => {
+  const r = resumirBillingHealth({
+    faturas: [{ ...fatura(), empresa_id: 'e2', status: 'pendente' }],
+    empresas: [
+      { id: 'e1', nome: 'TrialVenc', tipo: 'autonomo', status: 'trial', trial_ends_at: '2026-07-01', plano_id: 'p1', planos: { id: 'p1', categoria: 'autonomo', ativo: true, arquivado_em: null } },
+      { id: 'e2', nome: 'TrialVencComFat', tipo: 'autonomo', status: 'trial', trial_ends_at: '2026-07-01', plano_id: 'p1', planos: { id: 'p1', categoria: 'autonomo', ativo: true, arquivado_em: null } },
+    ],
+    hoje: HOJE,
+  });
+  assert.equal(r.contadores.trial_vencido_sem_fatura, 1);
+  assert.equal(r.detalhes.trial_vencido_sem_fatura[0].nome, 'TrialVenc');
+  assert.equal(r.ok, true);
+});
+
+test('assinatura Asaas ativa é informativa', () => {
+  const r = resumirBillingHealth({
+    faturas: [],
+    empresas: [{ id: 'e1', nome: 'ComAssinatura', tipo: 'transportadora', status: 'ativo', plano_id: 'p1', asaas_subscription_id: 'sub_123', planos: { id: 'p1', categoria: 'empresa', ativo: true, arquivado_em: null } }],
+    hoje: HOJE,
+  });
+  assert.equal(r.contadores.assinatura_asaas_ativa, 1);
+  assert.equal(r.detalhes.assinatura_asaas_ativa[0].asaas_subscription_id, 'sub_123');
+  assert.equal(r.ok, true);
+});
+
+test('suspensa sem motivo registrado → suspension_reason_inconsistente (informativo)', () => {
+  const r = resumirBillingHealth({
+    faturas: [{ ...fatura(), empresa_id: 'e1', status: 'pendente' }],
+    empresas: [{ id: 'e1', nome: 'SemMotivo', tipo: 'transportadora', status: 'suspenso', suspension_reason: null, plano_id: 'p1', planos: { id: 'p1', categoria: 'empresa', ativo: true, arquivado_em: null } }],
+    hoje: HOJE,
+  });
+  assert.equal(r.contadores.suspension_reason_inconsistente, 1);
+  assert.equal(r.ok, true, 'informativo não derruba ok');
+});
+
+test('suspensa com motivo válido (financial) NÃO é inconsistente', () => {
+  const r = resumirBillingHealth({
+    faturas: [{ ...fatura(), empresa_id: 'e1', status: 'pendente' }],
+    empresas: [{ id: 'e1', nome: 'ComMotivo', tipo: 'transportadora', status: 'suspenso', suspension_reason: 'financial', plano_id: 'p1', planos: { id: 'p1', categoria: 'empresa', ativo: true, arquivado_em: null } }],
+    hoje: HOJE,
+  });
+  assert.equal(r.contadores.suspension_reason_inconsistente, 0);
+});
