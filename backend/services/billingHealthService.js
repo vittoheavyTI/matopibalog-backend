@@ -42,7 +42,12 @@ function resumirBillingHealth({ faturas = [], empresas = [], webhookEvents = [],
     abertas: 0,
   };
 
-  const faturas_sem_asaas_id = [];
+  // Sinal CRÍTICO: reserva órfã só é problema operacional quando a fatura está
+  // ABERTA (pendente/vencido) — o cliente não tem como pagar. Uma órfã já
+  // cancelada é inofensiva (ex.: soft-cancel da migration 034) e vai para um
+  // contador informativo à parte, sem poluir o alerta principal.
+  const faturas_sem_asaas_id = [];          // abertas sem asaas_id (crítico)
+  const faturas_canceladas_sem_asaas_id = []; // canceladas/terminais sem asaas_id (informativo)
   const faturas_abertas_sem_link = [];
   const vencidas = [];
   const chavesPeriodo = new Map(); // "empresa|origem|periodo" → contagem
@@ -55,7 +60,9 @@ function resumirBillingHealth({ faturas = [], empresas = [], webhookEvents = [],
     if (STATUS_ABERTO.has(f.status)) totais.abertas += 1;
 
     if (!f.asaas_id) {
-      faturas_sem_asaas_id.push({ id: f.id, empresa_id: f.empresa_id, status: f.status, origem: f.origem });
+      const registro = { id: f.id, empresa_id: f.empresa_id, status: f.status, origem: f.origem };
+      if (STATUS_ABERTO.has(f.status)) faturas_sem_asaas_id.push(registro);
+      else faturas_canceladas_sem_asaas_id.push(registro); // pago/cancelado/estornado
     }
     if (STATUS_ABERTO.has(f.status) && !f.invoice_url && !f.bank_slip_url) {
       faturas_abertas_sem_link.push({ id: f.id, empresa_id: f.empresa_id, status: f.status });
@@ -133,6 +140,7 @@ function resumirBillingHealth({ faturas = [], empresas = [], webhookEvents = [],
     totais,
     contadores: {
       faturas_sem_asaas_id: faturas_sem_asaas_id.length,
+      faturas_canceladas_sem_asaas_id: faturas_canceladas_sem_asaas_id.length, // informativo
       faturas_abertas_sem_link: faturas_abertas_sem_link.length,
       vencidas: vencidas.length,
       duplicidade: duplicidade.length,
@@ -143,6 +151,7 @@ function resumirBillingHealth({ faturas = [], empresas = [], webhookEvents = [],
     },
     detalhes: {
       faturas_sem_asaas_id,
+      faturas_canceladas_sem_asaas_id,
       faturas_abertas_sem_link,
       vencidas,
       duplicidade,
