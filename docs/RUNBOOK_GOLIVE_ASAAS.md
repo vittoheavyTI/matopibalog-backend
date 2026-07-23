@@ -146,6 +146,43 @@ Qualquer sinal de erro (webhook failed, cobrança errada, duplicidade):
 
 ---
 
+## 6.1 Verificar a execução do cron (ex.: 01/08/2026 06:00 UTC)
+
+O job imprime **uma linha JSON** no stdout (Railway logs do serviço `vivacious-flow`)
+e sai. Não há endpoint de status — a verificação é pelos logs.
+
+**Onde:** Railway → serviço `vivacious-flow` → aba Deployments/Logs, na janela do
+horário agendado.
+
+**Resultado SAUDÁVEL (gerou a recorrente do mês):**
+```json
+{"periodo":"2026-08-01","dryRun":false,"totalCandidatas":1,
+ "geradas":[{"empresa_id":"<Alfa>","resultado":"gerada","fatura_id":"...","periodo":"2026-08-01"}],
+ "puladas":[],"erros":[],"dur_ms":1234}
+```
+
+**Resultado IDEMPOTENTE (competência já existia):** igual, mas
+`"geradas":[{...,"resultado":"idempotente"}]` ou a empresa aparece em `puladas`
+com `motivo:"fatura_recorrente_ja_existe"`. **Não** é erro.
+
+**Abortos ESPERADOS (fail-closed — nenhuma cobrança):**
+- `{"abort":"ambiente_nao_sandbox",...}` → o ambiente Asaas não está `sandbox`.
+- `{"abort":"allowlist_vazia",...}` → `FATURAS_RECORRENTES_ALLOWLIST` vazia.
+- `{"abort":"erro_ler_configuracao",...}` → falha ao ler `configuracoes` (exit 1).
+
+**Sinais de ATENÇÃO (investigar):** array `erros` não-vazio, ou `geradas` com mais
+empresas que o esperado (deveria ser só a allowlist), ou duplicidade — cruzar com
+`GET /painel-admin/billing-health` (`duplicidade` e `faturas_sem_asaas_id` devem
+seguir 0).
+
+**Esperado especificamente em 01/08/2026:** allowlist = só Empresa Alfa; como a
+recorrente de julho já existe, o resultado deve ser **1 gerada da competência
+2026-08-01** (a de agosto ainda não existe) — PIX sandbox, sem duplicidade. Se a
+Alfa não tiver `asaas_customer_id` válido, aparece em `puladas`/`erros` com motivo
+de cadastro — nesse caso, completar o cadastro e reexecutar (idempotente).
+
+---
+
 ## 7. Checklist final antes de declarar go-live
 
 - [ ] Preços comerciais aplicados e conferidos.
