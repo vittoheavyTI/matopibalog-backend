@@ -6,6 +6,12 @@
 >
 > Estado: **preços comerciais PENDENTES de decisão** — enquanto não decididos, o
 > go-live NÃO está pronto. Base: auditoria 2026-07-23.
+>
+> Docs relacionadas (mega-frente go-live):
+> - Referência técnica do modelo: [`MODELO_COBRANCA.md`](MODELO_COBRANCA.md).
+> - Como aplicar com segurança (preview → 409 → validar → rollback):
+>   [`RUNBOOK_APLICACAO_PRECOS.md`](RUNBOOK_APLICACAO_PRECOS.md).
+> - Dinheiro real (frente separada): [`RUNBOOK_GOLIVE_ASAAS.md`](RUNBOOK_GOLIVE_ASAAS.md).
 
 ## 1. Catálogo atual (valores de trabalho / placeholder)
 
@@ -55,6 +61,25 @@
   garante que preço não muda por acidente.** (Frente #4 de billing, testada.)
 
 Impacto é **forward-only**: nenhuma fatura paga muda.
+
+### 4.1 Simular ANTES de aplicar (preview read-only)
+
+`GET /painel-admin/planos/:id/impacto-preco?novo_preco=...` (super-admin, não grava)
+mostra `preco_atual → preco_novo`, `empresas_afetadas`, `faturas_abertas` (não mudam),
+`proximas_recorrencias` (usarão o valor novo) e um `aviso_snapshot`. Use para
+conferir o valor derivado e o alcance antes do `PUT`. Passo a passo em
+[`RUNBOOK_APLICACAO_PRECOS.md`](RUNBOOK_APLICACAO_PRECOS.md) §2–§3.
+
+### 4.2 "O que acontece se eu mudar o preço agora?" (resumo)
+
+| Pergunta | Resposta |
+|---|---|
+| Faturas **já pagas**? | Nada muda. `total_pago` e `pagas` no billing-health ficam iguais. |
+| Faturas **abertas** (pendente/vencido)? | Não mudam — valor congelado no snapshot da fatura. O cliente paga o valor antigo. |
+| **Recorrência do próximo mês**? | Passa a usar o valor novo (só contas ativas sem assinatura Asaas). |
+| Assinatura Asaas já criada? | Segue cobrando o valor antigo até a frente futura de sincronização. |
+| Como **validar**? | `billing-health.ok=true` + `total_pago` inalterado; conferir uma empresa afetada. |
+| Como **rollback**? | Reaplicar o preço antigo (mesmo `PUT`, forward-only). |
 
 ## 5. Matriz para preencher (proposta de escada coerente — ajuste os números)
 
