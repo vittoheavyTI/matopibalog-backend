@@ -13,6 +13,7 @@ const {
   resolverCriacaoPreco,
 } = require('../services/planoPrecoService');
 const { categoriaCompativelComTipo, mensagemIncompatibilidade } = require('../utils/planoCategoria');
+const { resumirBillingHealth } = require('../services/billingHealthService');
 
 router.use(verifyToken, isAdmin, isSuperAdmin);
 
@@ -44,6 +45,36 @@ function checarCategoriaPlano(tipoEmpresa, categoriaPlano) {
   if (categoriaCompativelComTipo(tipoEmpresa, categoriaPlano)) return null;
   return { status: 400, message: mensagemIncompatibilidade(tipoEmpresa) };
 }
+
+// BILLING HEALTH (go-live — observabilidade read-only, super-admin).
+// Lê faturas, empresas (com categoria do plano) e eventos de webhook e devolve
+// o retrato de saúde do billing (reservas órfãs, vencidas, duplicidade,
+// suspensas sem fatura / com fatura paga, webhooks com erro, categoria
+// incompatível). NÃO escreve nada e NÃO chama o Asaas.
+router.get('/billing-health', async (req, res) => {
+  try {
+    const [faturasR, empresasR, eventosR] = await Promise.all([
+      supabase.from('faturas').select('id, empresa_id, status, valor, origem, periodo_referencia, asaas_id, invoice_url, bank_slip_url, due_date, pago_em'),
+      supabase.from('empresas').select('id, nome, tipo, status, suspension_reason, plano_id, planos(categoria)'),
+      supabase.from('asaas_webhook_events').select('event_type, status, last_error, asaas_payment_id').order('created_at', { ascending: false }).limit(500),
+    ]);
+    if (faturasR.error) return res.status(500).json({ message: 'Erro ao ler faturas.' });
+    if (empresasR.error) return res.status(500).json({ message: 'Erro ao ler empresas.' });
+    // Eventos de webhook são opcionais: se a leitura falhar, seguimos sem eles.
+    const webhookEvents = eventosR && !eventosR.error ? (eventosR.data || []) : [];
+
+    const resumo = resumirBillingHealth({
+      faturas: faturasR.data || [],
+      empresas: empresasR.data || [],
+      webhookEvents,
+    });
+    if (eventosR && eventosR.error) resumo.aviso_webhook = 'nao_foi_possivel_ler_eventos_webhook';
+    return res.json(resumo);
+  } catch (err) {
+    console.error('[painel-admin/billing-health] Falha', { status: 500 });
+    return res.status(500).json({ message: 'Erro ao gerar billing health.' });
+  }
+});
 
 // DASHBOARD
 router.get('/dashboard', async (req, res) => {
