@@ -14,10 +14,28 @@
 //   * suspensas_com_fatura_paga → sinal do bug de reativação (deveria ser 0);
 //   * webhook_com_erro          → eventos Asaas não processados;
 //   * categoria_incompativel    → autônomo em plano de empresa (ou vice-versa).
+//
+// SINAIS INFORMATIVOS (não derrubam `ok` — não são "billing quebrado agora", mas
+// merecem olho antes do go-live e na operação diária):
+//   * empresa_sem_plano             → conta ativa/trial sem plano vinculado (não há o que cobrar);
+//   * plano_inativo_ou_arquivado    → conta aponta para plano inativo/arquivado (recorrência pula);
+//   * trial_vencido_sem_fatura      → trial vencido ainda sem fatura de regularização (transitório);
+//   * assinatura_asaas_ativa        → contas com asaas_subscription_id (o motor recorrente as pula);
+//   * suspension_reason_inconsistente → conta suspensa sem motivo registrado (auditoria).
+// A decisão de mantê-los FORA de `ok` é deliberada: `ok` só fica vermelho para
+// falha crítica e acionável, para o painel não "gritar" por situação esperada.
 
 const { categoriaCompativelComTipo } = require('../utils/planoCategoria');
 
 const STATUS_ABERTO = new Set(['pendente', 'vencido']);
+// Estados de conta que a plataforma espera vir a cobrar (logo, precisam de plano).
+const STATUS_COBRAVEL_ESPERADO = new Set(['ativo', 'trial']);
+// Motivos de suspensão reconhecidos — espelham o CHECK da migration 024
+// (empresas_suspension_reason_check). O banco já recusa string fora deste conjunto,
+// então a ÚNICA inconsistência possível em runtime é a ausência de motivo (NULL/'').
+const SUSPENSION_REASONS_CONHECIDOS = new Set([
+  'financial', 'administrative', 'security', 'legacy_unknown',
+]);
 
 function soData(v) {
   if (!v) return null;
@@ -25,10 +43,16 @@ function soData(v) {
   return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : null;
 }
 
-// planoDe: a empresa pode vir com planos como objeto (join) ou array.
-function categoriaDoPlano(empresa) {
+// planoDe: a empresa pode vir com planos como objeto (join) ou array. Devolve o
+// plano resolvido (ou null quando não há vínculo).
+function planoDe(empresa) {
   const p = empresa && empresa.planos;
   const plano = Array.isArray(p) ? p[0] : p;
+  return plano || null;
+}
+
+function categoriaDoPlano(empresa) {
+  const plano = planoDe(empresa);
   return plano ? plano.categoria : null;
 }
 
@@ -98,6 +122,12 @@ function resumirBillingHealth({ faturas = [], empresas = [], webhookEvents = [],
   const suspensas_sem_fatura = [];
   const suspensas_com_fatura_paga = [];
   const categoria_incompativel = [];
+  // Sinais informativos (não entram no `ok`).
+  const empresa_sem_plano = [];
+  const plano_inativo_ou_arquivado = [];
+  const trial_vencido_sem_fatura = [];
+  const assinatura_asaas_ativa = [];
+  const suspension_reason_inconsistente = [];
 
   for (const e of empresas) {
     if (e.status === 'suspenso') {
@@ -108,10 +138,47 @@ function resumirBillingHealth({ faturas = [], empresas = [], webhookEvents = [],
         // Sinal do bug de reativação (deveria ser 0 após #298).
         suspensas_com_fatura_paga.push({ id: e.id, nome: e.nome, suspension_reason: e.suspension_reason });
       }
+      // Suspensa sem motivo registrado: o banco (CHECK da 024) só aceita motivos
+      // válidos ou NULL, então "inconsistente" aqui é exatamente a ausência de motivo.
+      if (!e.suspension_reason || !SUSPENSION_REASONS_CONHECIDOS.has(String(e.suspension_reason))) {
+        suspension_reason_inconsistente.push({ id: e.id, nome: e.nome, suspension_reason: e.suspension_reason || null });
+      }
     }
-    const cat = categoriaDoPlano(e);
+
+    const plano = planoDe(e);
+
+    const cat = plano ? plano.categoria : null;
     if (cat != null && !categoriaCompativelComTipo(e.tipo, cat)) {
       categoria_incompativel.push({ id: e.id, nome: e.nome, tipo: e.tipo, categoria: cat });
+    }
+
+    // Conta que a plataforma espera vir a cobrar precisa de um plano vinculado.
+    if (STATUS_COBRAVEL_ESPERADO.has(e.status)) {
+      if (!plano && e.plano_id == null) {
+        empresa_sem_plano.push({ id: e.id, nome: e.nome, tipo: e.tipo, status: e.status });
+      }
+      // Plano vinculado porém inativo/arquivado: a recorrência PULA essa conta
+      // (faturaRecorrenteDomainService trata ativo=false/arquivado_em como inválido).
+      if (plano && (plano.ativo === false || plano.arquivado_em != null)) {
+        plano_inativo_ou_arquivado.push({
+          id: e.id, nome: e.nome, status: e.status,
+          plano_nome: plano.nome || null,
+          plano_ativo: plano.ativo !== false,
+          plano_arquivado: plano.arquivado_em != null,
+        });
+      }
+    }
+
+    // Trial vencido ainda sem fatura de regularização (o job expirarTrials gera).
+    const trialFim = soData(e.trial_ends_at);
+    if (e.status === 'trial' && trialFim && trialFim < hojeStr && !abertasPorEmpresa.has(e.id)) {
+      trial_vencido_sem_fatura.push({ id: e.id, nome: e.nome, trial_ends_at: trialFim });
+    }
+
+    // Contas com assinatura Asaas: informativo — o motor recorrente as pula de
+    // propósito (a própria assinatura cobra). Útil antes do go-live de recorrência.
+    if (e.asaas_subscription_id) {
+      assinatura_asaas_ativa.push({ id: e.id, nome: e.nome, asaas_subscription_id: e.asaas_subscription_id });
     }
   }
 
@@ -148,6 +215,12 @@ function resumirBillingHealth({ faturas = [], empresas = [], webhookEvents = [],
       suspensas_com_fatura_paga: suspensas_com_fatura_paga.length,
       webhook_com_erro: webhook_com_erro.length,
       categoria_incompativel: categoria_incompativel.length,
+      // Informativos (não afetam `ok`).
+      empresa_sem_plano: empresa_sem_plano.length,
+      plano_inativo_ou_arquivado: plano_inativo_ou_arquivado.length,
+      trial_vencido_sem_fatura: trial_vencido_sem_fatura.length,
+      assinatura_asaas_ativa: assinatura_asaas_ativa.length,
+      suspension_reason_inconsistente: suspension_reason_inconsistente.length,
     },
     detalhes: {
       faturas_sem_asaas_id,
@@ -159,6 +232,11 @@ function resumirBillingHealth({ faturas = [], empresas = [], webhookEvents = [],
       suspensas_com_fatura_paga,
       webhook_com_erro,
       categoria_incompativel,
+      empresa_sem_plano,
+      plano_inativo_ou_arquivado,
+      trial_vencido_sem_fatura,
+      assinatura_asaas_ativa,
+      suspension_reason_inconsistente,
       webhook_por_status,
     },
   };

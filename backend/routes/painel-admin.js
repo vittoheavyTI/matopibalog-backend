@@ -55,7 +55,7 @@ router.get('/billing-health', async (req, res) => {
   try {
     const [faturasR, empresasR, eventosR] = await Promise.all([
       supabase.from('faturas').select('id, empresa_id, status, valor, origem, periodo_referencia, asaas_id, invoice_url, bank_slip_url, due_date, pago_em'),
-      supabase.from('empresas').select('id, nome, tipo, status, suspension_reason, plano_id, planos(categoria)'),
+      supabase.from('empresas').select('id, nome, tipo, status, suspension_reason, plano_id, trial_ends_at, asaas_subscription_id, planos(id, nome, categoria, ativo, arquivado_em, preco_mensal)'),
       supabase.from('asaas_webhook_events').select('event_type, status, last_error, asaas_payment_id').order('created_at', { ascending: false }).limit(500),
     ]);
     if (faturasR.error) return res.status(500).json({ message: 'Erro ao ler faturas.' });
