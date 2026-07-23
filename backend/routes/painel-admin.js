@@ -12,6 +12,7 @@ const {
   montarErroReprecificacao,
   resolverCriacaoPreco,
 } = require('../services/planoPrecoService');
+const { categoriaCompativelComTipo, mensagemIncompatibilidade } = require('../utils/planoCategoria');
 
 router.use(verifyToken, isAdmin, isSuperAdmin);
 
@@ -27,12 +28,21 @@ async function resolverPlanoId(valor) {
   }
   const { data, error } = await supabase
     .from('planos')
-    .select('id')
+    .select('id, categoria')
     .eq('id', plano_id)
     .maybeSingle();
   if (error) return { status: 500, message: 'Erro ao validar plano.' };
   if (!data) return { status: 400, message: 'Plano informado não foi encontrado.' };
-  return { plano_id };
+  return { plano_id, categoria: data.categoria };
+}
+
+// Trava de compatibilidade categoria×tipo. Retorna { status, message } quando
+// incompatível (o handler responde direto), ou null quando ok / não aplicável
+// (sem plano ou categoria 'ambos'). tipoEmpresa 'autonomo' vs demais.
+function checarCategoriaPlano(tipoEmpresa, categoriaPlano) {
+  if (categoriaPlano == null) return null; // sem plano definido
+  if (categoriaCompativelComTipo(tipoEmpresa, categoriaPlano)) return null;
+  return { status: 400, message: mensagemIncompatibilidade(tipoEmpresa) };
 }
 
 // DASHBOARD
@@ -61,10 +71,14 @@ router.post('/empresas', async (req, res) => {
   try {
     // Só validamos plano_id quando o cliente informou algum. Se veio vazio, o
     // serviço aplica sua própria resolução (alias/default) e pode nascer sem plano.
+    const tipoEmpresa = req.body.tipo || 'transportadora';
     let planoIdValidado;
     if (req.body.plano_id !== undefined && req.body.plano_id !== null && String(req.body.plano_id).trim() !== '') {
       const r = await resolverPlanoId(req.body.plano_id);
       if (r.status) return res.status(r.status).json({ message: r.message });
+      // Trava categoria×tipo: autônomo não pode nascer em plano de empresa (e vice-versa).
+      const incompat = checarCategoriaPlano(tipoEmpresa, r.categoria);
+      if (incompat) return res.status(incompat.status).json({ message: incompat.message });
       planoIdValidado = r.plano_id;
     }
     const { empresa, error, status } = await criarEmpresaCompleta({
@@ -100,6 +114,20 @@ router.put('/empresas/:id', async (req, res) => {
     // UUID inexistente → 400. Nunca deixa 22P02 virar 500.
     const r = await resolverPlanoId(req.body.plano_id);
     if (r.status) return res.status(r.status).json({ message: r.message });
+    // Trava categoria×tipo. O tipo vem do body (se enviado) ou do registro atual;
+    // só consulta o banco quando há plano com categoria restritiva a checar.
+    if (r.categoria != null) {
+      let tipoEmpresa = req.body.tipo;
+      if (tipoEmpresa === undefined) {
+        const { data: atual, error: tipoErr } = await supabase
+          .from('empresas').select('tipo').eq('id', req.params.id).maybeSingle();
+        if (tipoErr) return res.status(500).json({ message: 'Erro ao validar plano.' });
+        if (!atual) return res.status(404).json({ message: 'Empresa não encontrada.' });
+        tipoEmpresa = atual.tipo;
+      }
+      const incompat = checarCategoriaPlano(tipoEmpresa, r.categoria);
+      if (incompat) return res.status(incompat.status).json({ message: incompat.message });
+    }
     upd.plano_id = r.plano_id;
   }
   if (req.body.status !== undefined) upd.status = req.body.status;
