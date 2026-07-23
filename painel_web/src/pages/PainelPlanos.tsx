@@ -33,7 +33,7 @@ const FORM_VAZIO: FormPlano = {
 
 const MODELOS_COBRANCA: { chave: ModeloCobranca; titulo: string; ajuda: string }[] = [
   { chave: 'fixo', titulo: 'Valor fixo', ajuda: 'Um valor mensal para o plano inteiro.' },
-  { chave: 'por_motorista', titulo: 'Por motorista', ajuda: 'Valor unitário × motoristas contratados.' },
+  { chave: 'por_motorista', titulo: 'Por motorista', ajuda: 'Valor unitário × capacidade contratada (não conta motoristas ativos).' },
 ];
 
 // Espelho da política do backend (planoPrecoService). Existe para o super-admin
@@ -663,6 +663,10 @@ export const PainelPlanos: React.FC = () => {
               </div>
               <p className="text-sm text-gray-600">
                 Este plano está em uso por <strong>{confirmarReprec.empresas_afetadas} empresa(s)</strong>.
+              </p>
+              <p className="text-sm text-gray-600">
+                As faturas <strong>já emitidas</strong> (pagas ou abertas) <strong>não mudam</strong> — o valor foi
+                congelado em cada fatura. O novo preço vale a partir da <strong>próxima</strong> fatura.
               </p>
               <label className="flex items-start gap-3 rounded-xl border-2 border-amber-100 bg-amber-50/50 p-3 cursor-pointer">
                 <input
