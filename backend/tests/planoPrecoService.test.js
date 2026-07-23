@@ -20,6 +20,7 @@ const {
   SENTINELA_ILIMITADO,
   LIMITE_MOTORISTAS_MAX,
   VALOR_FINAL_MAX,
+  montarImpactoPreco,
 } = require('../services/planoPrecoService');
 
 // Atalhos de leitura.
@@ -362,4 +363,51 @@ test('resolverPrecificacao devolve 422 amigável em erro', () => {
   assert.equal(r.body.motivo, 'sentinela_999');
   assert.match(r.body.message, /sentinela de ilimitado/);
   assert.equal(r.patch, undefined);
+});
+
+// ─── FASE 5 (mega-frente go-live): preview de impacto de reprecificação ──────
+
+test('impacto: plano ausente → 404', () => {
+  const r = montarImpactoPreco({ planoAtual: null, novo: { preco_mensal: 200 } });
+  assert.equal(r.ok, false);
+  assert.equal(r.status, 404);
+});
+
+test('impacto: sem campos de preço → impacto zero (preço não muda)', () => {
+  const planoAtual = { id: 'p1', nome: 'Básico', preco_mensal: 149.9, modelo_cobranca: 'fixo', preco_por_motorista: null, limite_motoristas: 5 };
+  const r = montarImpactoPreco({ planoAtual, novo: {}, empresas_afetadas: 3 });
+  assert.equal(r.ok, true);
+  assert.equal(r.impacto.preco_atual, 149.9);
+  assert.equal(r.impacto.preco_novo, 149.9);
+  assert.equal(r.impacto.mudou_preco, false);
+  assert.equal(r.impacto.empresas_afetadas, 3);
+  assert.match(r.impacto.aviso_snapshot, /NÃO mudam/);
+});
+
+test('impacto: fixo novo_preco muda o valor e marca mudou_preco', () => {
+  const planoAtual = { id: 'p1', nome: 'Básico', preco_mensal: 149.9, modelo_cobranca: 'fixo', preco_por_motorista: null, limite_motoristas: 5 };
+  const r = montarImpactoPreco({ planoAtual, novo: { preco_mensal: '299.90' }, empresas_afetadas: 2, faturas_abertas: 1, proximas_recorrencias: 2 });
+  assert.equal(r.ok, true);
+  assert.equal(r.impacto.preco_novo, 299.9);
+  assert.equal(r.impacto.mudou_preco, true);
+  assert.equal(r.impacto.faturas_abertas, 1);
+  assert.equal(r.impacto.proximas_recorrencias, 2);
+});
+
+test('impacto: mudar para por_motorista deriva unitário × quantidade', () => {
+  const planoAtual = { id: 'p1', nome: 'Profissional', preco_mensal: 149.99, modelo_cobranca: 'fixo', preco_por_motorista: null, limite_motoristas: 5 };
+  const r = montarImpactoPreco({ planoAtual, novo: { modelo_cobranca: 'por_motorista', preco_por_motorista: '100.00', novo_limite: undefined } });
+  // limite_motoristas herda do plano atual (5) → 100 × 5 = 500
+  assert.equal(r.ok, true);
+  assert.equal(r.impacto.modelo_novo, 'por_motorista');
+  assert.equal(r.impacto.preco_novo, 500);
+  assert.equal(r.impacto.preco_por_motorista_novo, 100);
+});
+
+test('impacto: preço novo inválido (3 casas) → 422 propagado', () => {
+  const planoAtual = { id: 'p1', nome: 'Básico', preco_mensal: 149.9, modelo_cobranca: 'fixo', preco_por_motorista: null, limite_motoristas: 5 };
+  const r = montarImpactoPreco({ planoAtual, novo: { preco_mensal: '149.999' } });
+  assert.equal(r.ok, false);
+  assert.equal(r.status, 422);
+  assert.equal(r.body.campo, 'preco_mensal');
 });
