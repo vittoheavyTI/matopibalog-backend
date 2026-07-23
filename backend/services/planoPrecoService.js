@@ -357,6 +357,60 @@ function decidirEdicaoPreco({ planoAtual, body }) {
   return { acao: 'aplicar', patch: pre.patch };
 }
 
+// ─── FASE 5 (mega-frente go-live): PREVIEW de impacto de reprecificação ──────
+// Read-only. Serve para o super-admin DECIDIR um preço novo antes de aplicar:
+// mostra preço atual × preço novo derivado, e o alcance (empresas, faturas
+// abertas, próximas recorrências). PURA — a rota faz as leituras e passa os
+// números prontos.
+//
+// Regra que a preview deixa explícita (a mesma de montarErroReprecificacao):
+//   * faturas JÁ EMITIDAS não mudam — snapshot congelado (migration 030);
+//   * assinaturas Asaas já criadas seguem cobrando o valor antigo (sync é frente futura);
+//   * o preço novo só vale para a PRÓXIMA recorrência das contas elegíveis.
+function montarImpactoPreco({ planoAtual, novo, empresas_afetadas = 0, faturas_abertas = 0, proximas_recorrencias = 0 }) {
+  if (!planoAtual || !planoAtual.id) {
+    return { ok: false, status: 404, body: { message: 'Plano não encontrado.' } };
+  }
+
+  // Deriva o preço novo pelo MESMO caminho do PUT: mescla plano atual + campos
+  // enviados e recalcula. Sem campos de preço no `novo`, o resultado é o próprio
+  // preço atual (impacto zero) — a preview continua respondendo.
+  const pre = resolverPrecificacao(mesclarParaPrecificacao(planoAtual, novo || {}));
+  if (!pre.ok) return { ok: false, status: pre.status, body: pre.body };
+
+  const preco_atual = Number(planoAtual.preco_mensal);
+  const preco_novo = pre.patch.preco_mensal;
+  const mudou_preco = !mesmoPreco(planoAtual.preco_mensal, preco_novo);
+
+  return {
+    ok: true,
+    impacto: {
+      plano_id: planoAtual.id,
+      plano_nome: planoAtual.nome != null ? String(planoAtual.nome) : null,
+      modelo_atual: normalizarModelo(planoAtual.modelo_cobranca),
+      modelo_novo: pre.patch.modelo_cobranca,
+      preco_atual,
+      preco_novo,
+      preco_por_motorista_atual:
+        planoAtual.preco_por_motorista != null ? Number(planoAtual.preco_por_motorista) : null,
+      preco_por_motorista_novo: pre.patch.preco_por_motorista,
+      limite_motoristas_atual:
+        planoAtual.limite_motoristas != null ? Number(planoAtual.limite_motoristas) : null,
+      limite_motoristas_novo:
+        novo && novo.limite_motoristas !== undefined
+          ? normalizarQuantidade(novo.limite_motoristas)
+          : (planoAtual.limite_motoristas != null ? Number(planoAtual.limite_motoristas) : null),
+      mudou_preco,
+      // Alcance (números vindos da rota).
+      empresas_afetadas: Number(empresas_afetadas) || 0,
+      faturas_abertas: Number(faturas_abertas) || 0,          // NÃO mudam (snapshot)
+      proximas_recorrencias: Number(proximas_recorrencias) || 0, // passam a usar o novo valor
+      aviso_snapshot:
+        'Faturas já emitidas (incluindo as abertas) NÃO mudam — o valor foi congelado no snapshot da fatura. Assinaturas Asaas já criadas seguem cobrando o valor antigo até uma frente futura de sincronização. O novo preço vale a partir da PRÓXIMA recorrência das contas elegíveis.',
+    },
+  };
+}
+
 module.exports = {
   MODELOS_COBRANCA,
   MODELO_PADRAO,
@@ -374,6 +428,7 @@ module.exports = {
   montarErroReprecificacao,
   resolverCriacaoPreco,
   decidirEdicaoPreco,
+  montarImpactoPreco,
   // exportados para teste isolado
   paraCentavos,
   normalizarModelo,

@@ -11,6 +11,7 @@ const {
   decidirEdicaoPreco,
   montarErroReprecificacao,
   resolverCriacaoPreco,
+  montarImpactoPreco,
 } = require('../services/planoPrecoService');
 const { categoriaCompativelComTipo, mensagemIncompatibilidade } = require('../utils/planoCategoria');
 const { resumirBillingHealth } = require('../services/billingHealthService');
@@ -363,6 +364,66 @@ router.put('/planos/:id', async (req, res) => {
 router.delete('/planos/:id', async (req, res) => {
   const resultado = await excluirPlano({ supabase, planoId: req.params.id });
   res.status(resultado.status).json(resultado.body);
+});
+
+// PREVIEW de impacto de reprecificação (FASE 5 / mega-frente go-live). READ-ONLY:
+// não grava nada, só simula o preço novo e mede o alcance para o super-admin
+// decidir antes de aplicar o PUT. Query params (todos opcionais; ausentes = sem
+// mudança, impacto zero):
+//   novo_preco               → preco_mensal (planos fixos);
+//   novo_modelo              → modelo_cobranca ('fixo' | 'por_motorista');
+//   novo_preco_por_motorista → preco_por_motorista (planos por motorista);
+//   novo_limite_motoristas   → limite_motoristas (planos por motorista).
+router.get('/planos/:id/impacto-preco', async (req, res) => {
+  const { data: planoAtual, error: planoErr } = await supabase
+    .from('planos')
+    .select('id, nome, preco_mensal, preco_por_motorista, limite_motoristas, modelo_cobranca')
+    .eq('id', req.params.id)
+    .maybeSingle();
+  if (planoErr) return res.status(500).json({ message: 'Erro ao carregar o plano.' });
+  if (!planoAtual) return res.status(404).json({ message: 'Plano não encontrado.' });
+
+  // Traduz a query (só o que veio) para os campos que o serviço puro entende.
+  const q = req.query || {};
+  const novo = {};
+  if (q.novo_preco !== undefined) novo.preco_mensal = q.novo_preco;
+  if (q.novo_modelo !== undefined) novo.modelo_cobranca = q.novo_modelo;
+  if (q.novo_preco_por_motorista !== undefined) novo.preco_por_motorista = q.novo_preco_por_motorista;
+  if (q.novo_limite_motoristas !== undefined) novo.limite_motoristas = q.novo_limite_motoristas;
+
+  // Alcance: empresas no plano, faturas abertas dessas empresas (não mudam), e
+  // quantas receberiam o novo valor na próxima recorrência (ativas, sem assinatura).
+  const [afetadasR, recorrentesR] = await Promise.all([
+    supabase.from('empresas').select('id', { count: 'exact', head: true }).eq('plano_id', req.params.id),
+    supabase.from('empresas')
+      .select('id', { count: 'exact', head: true })
+      .eq('plano_id', req.params.id)
+      .eq('status', 'ativo')
+      .is('asaas_subscription_id', null),
+  ]);
+  if (afetadasR.error) return res.status(500).json({ message: 'Erro ao contar empresas afetadas.' });
+
+  const empresas_afetadas = afetadasR.count || 0;
+  const proximas_recorrencias = recorrentesR && !recorrentesR.error ? (recorrentesR.count || 0) : 0;
+
+  // Faturas abertas das empresas afetadas (só conta; não são alteradas).
+  let faturas_abertas = 0;
+  if (empresas_afetadas > 0) {
+    const { data: empIds } = await supabase.from('empresas').select('id').eq('plano_id', req.params.id);
+    const ids = (empIds || []).map((e) => e.id);
+    if (ids.length) {
+      const fatR = await supabase
+        .from('faturas')
+        .select('id', { count: 'exact', head: true })
+        .in('empresa_id', ids)
+        .in('status', ['pendente', 'vencido']);
+      faturas_abertas = fatR && !fatR.error ? (fatR.count || 0) : 0;
+    }
+  }
+
+  const r = montarImpactoPreco({ planoAtual, novo, empresas_afetadas, faturas_abertas, proximas_recorrencias });
+  if (!r.ok) return res.status(r.status).json(r.body);
+  return res.json(r.impacto);
 });
 
 // ASSINATURAS (virtuais - derivadas de empresas + planos)
