@@ -220,3 +220,22 @@ Regras (em [`backend/services/implantacaoDomainService.js`](../backend/services/
   (já com desconto); `0` vira isenção. O motor de promoções (FASE 5) o calcula.
 
 Nada de Asaas/cobrança real aqui — só a decisão e o payload lógico.
+
+---
+
+## 11. Promoções / tickets / códigos (FASE 5 — motor, sem campanhas)
+
+> **Estado:** motor criado (migration 040 + `promocaoDomainService.js`, puro).
+> **Nenhuma campanha cadastrada**, migration não aplicada. Detalhe completo em
+> [`RUNBOOK_PROMOCOES.md`](RUNBOOK_PROMOCOES.md).
+
+3 tabelas (migration 040): `promocoes` (campanha), `promocao_codigos`
+(códigos/tickets, único case-insensitive), `promocao_resgates` (auditoria +
+snapshot). 7 tipos: desconto % / fixo de mensalidade, preço promocional, desconto
+% / fixo de implantação, isenção de implantação, trial estendido.
+
+`avaliarResgate` valida janela/ativo/limites/uso-único/plano-alvo — o **manual** do
+super-admin fura janela e `ativo` (aplicar após a campanha), mas **não** os limites.
+`aplicarPromocao` calcula o preço final em **centavos inteiros**. O desconto de
+implantação conversa com a FASE 4 via `valorEfetivo`. `montarResgate` congela
+`preco_original`/`preco_final`/`desconto_valor` + quem aplicou + motivo.
