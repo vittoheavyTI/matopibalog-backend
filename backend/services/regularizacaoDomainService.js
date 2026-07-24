@@ -126,19 +126,25 @@ function montarClientRequestIdRegularizacao(empresaId, periodo) {
 // Payload lógico da fatura de regularização. `valor` = plano.preco_mensal (o
 // backend é a autoridade do preço; nunca recalculado aqui). periodo_referencia
 // no dia 1 (CHECK dia-1 da migration 031 vale para toda fatura com período).
-function montarPayloadFaturaRegularizacao({ empresa, plano, dataReferencia }) {
+// `valorEfetivo`/`extras` (mega-frente extras por empresa): quando informado, o
+// valor da regularização é o total base+extras e o snapshot congela a composição.
+// Ausente → plano.preco_mensal (compat). Autônomo não tem extra (helper garante).
+function montarPayloadFaturaRegularizacao({ empresa, plano, dataReferencia, valorEfetivo = null, extras = null }) {
   const empresaId = empresa && empresa.id ? empresa.id : null;
   const periodo = calcularPeriodoReferencia(dataReferencia);
+  const valor = valorEfetivo != null && Number.isFinite(Number(valorEfetivo)) && Number(valorEfetivo) > 0
+    ? Number(valorEfetivo)
+    : Number(plano && plano.preco_mensal);
   return {
     empresa_id: empresaId,
-    valor: Number(plano && plano.preco_mensal),
+    valor,
     tipo_pagamento: TIPO_PAGAMENTO,
     status: 'pendente',
     due_date: calcularDueDate(dataReferencia),
     periodo_referencia: periodo,
     origem: ORIGEM_REGULARIZACAO,
     client_request_id: montarClientRequestIdRegularizacao(empresaId, periodo),
-    ...montarSnapshotFaturaRecorrente(plano),
+    ...montarSnapshotFaturaRecorrente(plano, extras),
   };
 }
 
