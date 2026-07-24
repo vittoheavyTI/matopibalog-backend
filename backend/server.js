@@ -28,10 +28,51 @@ app.set('trust proxy', 1);
 // Hardening HTTP básico.
 // - Remove o header "x-powered-by: Express" (não revelar a stack).
 // - Helmet adiciona headers de segurança (x-content-type-options, hsts, etc.).
-//   CSP desabilitado neste primeiro PR para não arriscar quebrar o frontend
-//   (SPA servida por este mesmo backend) nem chamadas cross-origin do app/painel.
 app.disable('x-powered-by');
-app.use(helmet({ contentSecurityPolicy: false }));
+
+// Content-Security-Policy CONSERVADORA (hardening). Este backend serve o SPA
+// (express.static + fallback index.html), então o CSP vale para o painel servido
+// AQUI (a Railway). O painel principal em GitHub Pages tem headers próprios e NÃO
+// é afetado por este CSP — logo, o "blast radius" de um erro aqui é só o caminho
+// de fallback pela Railway.
+//
+// FONTES LIBERADAS (documentadas — nada além disto):
+//   default-src   'self'
+//   script-src    'self' 'unsafe-inline'  → o index.html tem um script inline
+//                 (redirect de SPA do GitHub Pages). 'unsafe-inline' é necessário
+//                 porque um hash é frágil entre builds do Vite. A proteção real
+//                 contra EXFILTRAÇÃO de token vem de connect-src/img-src abaixo:
+//                 mesmo um script injetado NÃO consegue enviar o token para fora
+//                 (fetch/XHR/img só para 'self' + Railway + Supabase).
+//   style-src     'self' 'unsafe-inline'  → estilos inline do React + Tailwind.
+//   img-src       'self' data: blob: + Supabase (imagens de storage).
+//   font-src      'self' data:
+//   connect-src   'self' + API Railway + Supabase (fetch/XHR/beacon/ws) — trava
+//                 de exfiltração: destino de rede é allowlist.
+//   object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'.
+const SUPABASE_ORIGIN = (() => {
+  try { return new URL(process.env.SUPABASE_URL || 'https://rjahjogidyndphdxevom.supabase.co').origin; }
+  catch (_) { return 'https://rjahjogidyndphdxevom.supabase.co'; }
+})();
+const API_ORIGIN = 'https://matopibalog-backend-production.up.railway.app';
+app.use(helmet({
+  contentSecurityPolicy: {
+    useDefaults: true,
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", 'data:', 'blob:', SUPABASE_ORIGIN],
+      fontSrc: ["'self'", 'data:'],
+      connectSrc: ["'self'", API_ORIGIN, SUPABASE_ORIGIN],
+      objectSrc: ["'none'"],
+      baseUri: ["'self'"],
+      frameAncestors: ["'none'"],
+      formAction: ["'self'"],
+      workerSrc: ["'self'", 'blob:'],
+    },
+  },
+}));
 
 const FRONTEND_URL = process.env.FRONTEND_URL || 'https://matopibalog.com.br';
 const allowedOrigins = [
