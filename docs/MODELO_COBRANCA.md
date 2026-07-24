@@ -186,3 +186,37 @@ capacidade inclusa** (mais folga pelo mesmo valor) — não muda preço, só a s
 pelo backend (autoridade). O snapshot comercial (`montarSnapshotComercial`) congela
 `capacidade_contratada`, `capacidade_inclusa`, `extras_qtd`, `extra_unitario` e o
 `plano_recomendado_id` no ato — mesma filosofia forward-only do §6.
+
+---
+
+## 10. Taxa de implantação/aquisição (FASE 4 — estrutura, sem valores)
+
+> **Estado:** estrutura criada (migration 039 + `implantacaoDomainService.js`),
+> **nenhum valor aplicado** (`valor_implantacao` NULL em todos os planos). Serviço
+> **não fiado** a rota/job ainda (código morto de propósito) — não cobra sozinho.
+
+Taxa **única** de aquisição, **separada da mensalidade**, cobrada de **empresas**
+na entrada. Campos (migration 039, aditivos):
+
+| Campo | Onde | Papel |
+|-------|------|-------|
+| `valor_implantacao` | `planos` | valor da taxa (NULL/0 = plano sem implantação) |
+| `implantacao_isenta` | `faturas` | marca a implantação como dispensada |
+| `implantacao_isencao_motivo` / `implantacao_isento_por` | `faturas` | auditoria da isenção |
+
+Regras (em [`backend/services/implantacaoDomainService.js`](../backend/services/implantacaoDomainService.js), **puro**):
+
+- **Autônomo é isento por regra** (tipo empresa ou categoria do plano = `autonomo`);
+- fatura **separada**: `origem='implantacao'`, `periodo_referencia` NULL (não é
+  competência mensal), snapshot do plano congelado;
+- **idempotência lifetime**: `client_request_id = 'implantacao:<empresa_id>'` (sem
+  mês) contra o índice único da migration 021 → **no máximo uma implantação por
+  empresa, para sempre**. Cobrança e isenção **compartilham a mesma chave**;
+- **isenção manual** do super-admin (ou promoção que zera a taxa) = fatura
+  `valor 0`, `status 'cancelado'`, `implantacao_isenta=true` + autoria — fica no
+  domínio de status válido (sem inventar `isento`), não infla receita e bloqueia
+  recobrança;
+- **aberta a desconto por promoção**: `avaliarImplantacao` aceita `valorEfetivo`
+  (já com desconto); `0` vira isenção. O motor de promoções (FASE 5) o calcula.
+
+Nada de Asaas/cobrança real aqui — só a decisão e o payload lógico.
