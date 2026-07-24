@@ -9,6 +9,7 @@ const { resolveAsaasApiKey } = require('../utils/asaasConfig');
 const { classificarResponsavelRegularizacao } = require('../utils/billingProfile');
 const { garantirAssinatura, conciliarAssinatura, atualizarValorAssinatura } = require('../services/asaasSubscriptionService');
 const asaasSync = require('../services/asaasSyncDomainService');
+const { derivarValorEfetivoFatura } = require('../services/calculadoraComercialService');
 const { sincronizarCobrancas } = require('../services/asaasInvoiceSyncService');
 const { solicitarUpgrade } = require('../services/upgradeRequestService');
 const { gerarFaturaRecorrenteEmLote, CAMPOS_EMPRESA } = require('../services/faturaRecorrenteService');
@@ -1059,9 +1060,11 @@ router.post('/asaas-sync/processar', verifyToken, isSuperAdmin, async (req, res)
     const empresaId = item.empresa_id;
     let empresa = null;
     try {
+      // `*` no empresa é deploy-safe p/ quantidade_contratada (044); o join de
+      // planos traz os campos comerciais (038 já aplicada).
       const { data: e } = await supabase
         .from('empresas')
-        .select('id, status, arquivada_em, cnpj, email_contato, asaas_subscription_id, planos(id, preco_mensal, requer_negociacao)')
+        .select('*, planos(id, preco_mensal, requer_negociacao, capacidade_inclusa, preco_motorista_extra)')
         .eq('id', empresaId)
         .single();
       empresa = e;
@@ -1069,7 +1072,10 @@ router.post('/asaas-sync/processar', verifyToken, isSuperAdmin, async (req, res)
 
     const plano = empresa && (Array.isArray(empresa.planos) ? empresa.planos[0] : empresa.planos);
     const cadastroCompleto = Boolean(empresa && empresa.cnpj);
-    const decisao = asaasSync.avaliarSync({ empresa: empresa || { id: empresaId, status: null }, plano, cadastroCompleto });
+    // valor-alvo = valor EFETIVO (base + extras) pela quantidade contratada; sem
+    // quantidade / não acomoda → null → avaliarSync cai para plano.preco_mensal.
+    const { valorEfetivo } = derivarValorEfetivoFatura({ plano, quantidade_contratada: empresa && empresa.quantidade_contratada });
+    const decisao = asaasSync.avaliarSync({ empresa: empresa || { id: empresaId, status: null }, plano, valorExplicito: valorEfetivo, cadastroCompleto });
 
     let ok = false; let erro = null; let valorAntes = null; let valorDepois = decisao.valorAlvo; let subId = empresa && empresa.asaas_subscription_id;
     try {

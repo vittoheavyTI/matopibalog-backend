@@ -431,12 +431,34 @@ function valorEfetivoEmpresa({ plano, quantidade_contratada, planos = [], limite
   };
 }
 
+// Adaptador para os fluxos de FATURA/SYNC: dado o plano e a quantidade CONTRATADA
+// da empresa, devolve { valorEfetivo, extras } prontos para o payload da fatura /
+// valorExplicito do sync. Retorna { valorEfetivo: null } quando não há quantidade
+// contratada válida ou o plano não acomoda — o chamador então cai para
+// plano.preco_mensal (compat forward-safe). NÃO recomenda upgrade (isso é do painel).
+function derivarValorEfetivoFatura({ plano, quantidade_contratada } = {}) {
+  if (quantidade_contratada == null) return { valorEfetivo: null, extras: null };
+  const ve = valorEfetivoEmpresa({ plano, quantidade_contratada });
+  if (!ve.ok || ve.acomoda !== true || ve.valor_total == null) return { valorEfetivo: null, extras: null };
+  return {
+    valorEfetivo: ve.valor_total,
+    extras: {
+      quantidade_contratada: ve.quantidade_contratada,
+      capacidade_inclusa: ve.capacidade_inclusa,
+      quantidade_extra: ve.quantidade_extra,
+      valor_extra: ve.valor_extra,
+      preco_motorista_extra: plano && plano.preco_motorista_extra != null ? Number(plano.preco_motorista_extra) : null,
+    },
+  };
+}
+
 module.exports = {
   LIMITE_NEGOCIACAO_PADRAO,
   MOTIVOS,
   calcularCustoPlano,
   recomendarPlano,
   valorEfetivoEmpresa,
+  derivarValorEfetivoFatura,
   montarSnapshotComercial,
   // exportados para teste isolado
   validarQuantidade,

@@ -32,6 +32,7 @@ const {
   montarPayloadFaturaRecorrente,
 } = require('./faturaRecorrenteDomainService');
 const { garantirCustomer } = require('./asaasSubscriptionService');
+const { derivarValorEfetivoFatura } = require('./calculadoraComercialService');
 const { normalizarStatusAsaas } = require('./paymentDomainService');
 const { podeCriarCobranca, MOTIVO_CADASTRO_INCOMPLETO } = require('../utils/cadastroAsaas');
 
@@ -58,7 +59,7 @@ const CAMPOS_EMPRESA =
 // Snapshot do plano vive na fatura (migration 030). Aqui só carregamos o plano
 // e deixamos o domínio montar o snapshot dentro do payload.
 const CAMPOS_PLANO =
-  'id, nome, ativo, arquivado_em, preco_mensal, modelo_cobranca, preco_por_motorista, limite_motoristas';
+  'id, nome, ativo, arquivado_em, preco_mensal, modelo_cobranca, preco_por_motorista, limite_motoristas, capacidade_inclusa, preco_motorista_extra';
 
 function planoDe(empresa) {
   const p = empresa && empresa.planos;
@@ -73,7 +74,7 @@ function planoDe(empresa) {
 // (deploy-safe: antes da migration 036 a coluna some do retorno, sem erro). É
 // superset das colunas que o domínio usa — nada quebra.
 const SELECT_EMPRESA_RECORRENTE =
-  `*, planos(id, nome, ativo, arquivado_em, preco_mensal, modelo_cobranca, preco_por_motorista, limite_motoristas)`;
+  `*, planos(id, nome, ativo, arquivado_em, preco_mensal, modelo_cobranca, preco_por_motorista, limite_motoristas, capacidade_inclusa, preco_motorista_extra)`;
 
 // Seleciona empresas ATIVAS, SEM assinatura Asaas, com o plano carregado.
 // `allowlist` (array de UUIDs) é OBRIGATÓRIA para o job: quando passada, restringe
@@ -261,7 +262,10 @@ async function gerarFaturaRecorrenteParaEmpresa({ supabase, http, config, empres
 
   // payload é puro; a client_request_id determinística serve tanto para a reserva
   // quanto para localizar/recuperar uma recorrente já existente do período.
-  const payload = montarPayloadFaturaRecorrente({ empresa, plano, dataReferencia });
+  // Valor EFETIVO (base + extras) pela quantidade CONTRATADA (mega-frente extras).
+  // Forward-safe: sem quantidade_contratada / não acomoda → cai para preco_mensal.
+  const { valorEfetivo, extras } = derivarValorEfetivoFatura({ plano, quantidade_contratada: empresa && empresa.quantidade_contratada });
+  const payload = montarPayloadFaturaRecorrente({ empresa, plano, dataReferencia, valorEfetivo, extras });
 
   // "Já existe recorrente do período" NÃO é um pular de verdade — é idempotência.
   // Se a existente for uma reserva sem asaas_id, completa/reconcilia (retry seguro);

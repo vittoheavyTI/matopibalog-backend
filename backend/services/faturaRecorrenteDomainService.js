@@ -98,10 +98,14 @@ function montarClientRequestId(empresaId, periodoReferencia) {
 // fixo          → unitário e quantidade NULL (não houve conta; o valor foi digitado);
 // por_motorista → unitário=preco_por_motorista, quantidade=limite_motoristas.
 // O `valor` final NÃO sai daqui: vem de plano.preco_mensal (já derivado pelo backend).
-function montarSnapshotFaturaRecorrente(plano) {
+// `extras` (opcional, mega-frente extras por empresa): quando presente, congela a
+// composição base+extras na fatura — quantidade_snapshot passa a ser a quantidade
+// CONTRATADA, e grava capacidade_inclusa/quantidade_extra/valor_extra + o unitário
+// do extra. Ausente → comportamento idêntico ao anterior (compat).
+function montarSnapshotFaturaRecorrente(plano, extras = null) {
   const p = plano || {};
   const porMotorista = p.modelo_cobranca === 'por_motorista';
-  return {
+  const base = {
     plano_id: p.id || null,
     plano_nome_snapshot: p.nome != null ? String(p.nome) : null,
     modelo_cobranca_snapshot: porMotorista ? 'por_motorista' : 'fixo',
@@ -109,6 +113,16 @@ function montarSnapshotFaturaRecorrente(plano) {
       porMotorista && p.preco_por_motorista != null ? Number(p.preco_por_motorista) : null,
     quantidade_snapshot:
       porMotorista && p.limite_motoristas != null ? Number(p.limite_motoristas) : null,
+  };
+  if (!extras) return base;
+  return {
+    ...base,
+    quantidade_snapshot: extras.quantidade_contratada != null ? Number(extras.quantidade_contratada) : base.quantidade_snapshot,
+    capacidade_inclusa_snapshot: extras.capacidade_inclusa != null ? Number(extras.capacidade_inclusa) : null,
+    quantidade_extra_snapshot: extras.quantidade_extra != null ? Number(extras.quantidade_extra) : null,
+    valor_extra_snapshot: extras.valor_extra != null ? Number(extras.valor_extra) : null,
+    // unitário do extra, quando houve extra (informativo — o base é preco_mensal).
+    preco_unitario_snapshot: extras.preco_motorista_extra != null ? Number(extras.preco_motorista_extra) : base.preco_unitario_snapshot,
   };
 }
 
@@ -208,19 +222,26 @@ function avaliarElegibilidadeFaturaRecorrente({ empresa, plano, faturasExistente
 //
 // Chamar somente quando avaliarElegibilidade... retornou resultado 'cobrar'.
 // Ainda assim é puro: se receber lixo, monta o objeto correspondente.
-function montarPayloadFaturaRecorrente({ empresa, plano, dataReferencia }) {
+// `valorEfetivo` (opcional): valor total base+extras (mega-frente extras por
+// empresa). Quando informado (>0), é o `valor` da fatura; senão cai para
+// plano.preco_mensal (compat forward-safe: com quantidade = capacidade inclusa,
+// valorEfetivo == preco_mensal). `extras` alimenta o snapshot da composição.
+function montarPayloadFaturaRecorrente({ empresa, plano, dataReferencia, valorEfetivo = null, extras = null }) {
   const empresaId = empresa && empresa.id ? empresa.id : null;
   const periodo = calcularPeriodoReferencia(dataReferencia);
+  const valor = valorEfetivo != null && Number.isFinite(Number(valorEfetivo)) && Number(valorEfetivo) > 0
+    ? Number(valorEfetivo)
+    : precoDe(plano);
   return {
     empresa_id: empresaId,
-    valor: precoDe(plano),
+    valor,
     tipo_pagamento: TIPO_PAGAMENTO,
     status: 'pendente',
     due_date: calcularDueDate(dataReferencia),
     periodo_referencia: periodo,
     origem: ORIGEM_RECORRENTE,
     client_request_id: montarClientRequestId(empresaId, periodo),
-    ...montarSnapshotFaturaRecorrente(plano),
+    ...montarSnapshotFaturaRecorrente(plano, extras),
   };
 }
 
