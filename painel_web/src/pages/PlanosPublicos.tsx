@@ -17,6 +17,8 @@ interface PlanoPublico {
   limite_motoristas: number | null;
   dias_trial: number | null;
   recursos: string[];
+  // Plano "sob negociação" (41+): sem preço de tabela, fora do self-service.
+  requer_negociacao?: boolean;
 }
 
 // Fallback local mínimo — usado APENAS se a API pública falhar, para a página de
@@ -121,6 +123,9 @@ export const PlanosPublicos: React.FC = () => {
   // usuário logado abre o modal de upgrade — nunca cai no /cadastro (a empresa
   // e o admin já existem).
   function aoEscolherPlano(plano: PlanoPublico) {
+    // Plano sob negociação: nunca entra no self-service (o CTA já é "Fale com o
+    // suporte"; esta guarda cobre qualquer outra via).
+    if (plano.requer_negociacao) return;
     if (user) {
       setErroModal(null);
       setAcaoRegularizar(null);
@@ -236,8 +241,14 @@ export const PlanosPublicos: React.FC = () => {
                   <h3 className="text-2xl font-bold text-gray-900 mb-2">{plano.nome}</h3>
                   <p className="text-gray-500 mb-6">{plano.descricao}</p>
                   <div className="mb-1">
-                    <span className="text-4xl font-bold text-gray-900">R$ {plano.preco_mensal.toFixed(2)}</span>
-                    <span className="text-gray-500">/mês</span>
+                    {plano.requer_negociacao ? (
+                      <span className="text-3xl font-bold text-gray-900">Sob negociação</span>
+                    ) : (
+                      <>
+                        <span className="text-4xl font-bold text-gray-900">R$ {plano.preco_mensal.toFixed(2)}</span>
+                        <span className="text-gray-500">/mês</span>
+                      </>
+                    )}
                   </div>
                   {/* Composição como SUBTÍTULO. O headline acima segue sendo o
                       valor final cobrado — em plano fixo isto some e o card fica
@@ -260,12 +271,21 @@ export const PlanosPublicos: React.FC = () => {
                       </li>
                     ))}
                   </ul>
-                  <button
-                    className={`w-full py-3 rounded-xl text-white font-semibold transition-colors ${destaque ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-800 hover:bg-gray-900'}`}
-                    onClick={() => aoEscolherPlano(plano)}
-                  >
-                    {user ? 'Solicitar upgrade' : 'Começar Agora'}
-                  </button>
+                  {plano.requer_negociacao ? (
+                    <div className="w-full">
+                      <div className="w-full py-3 rounded-xl text-white font-semibold text-center bg-amber-600 cursor-default select-none">
+                        Fale com o suporte
+                      </div>
+                      <p className="mt-2 text-xs text-gray-500 text-center">Acima de 40 motoristas/caminhões — contratação sob negociação.</p>
+                    </div>
+                  ) : (
+                    <button
+                      className={`w-full py-3 rounded-xl text-white font-semibold transition-colors ${destaque ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-800 hover:bg-gray-900'}`}
+                      onClick={() => aoEscolherPlano(plano)}
+                    >
+                      {user ? 'Solicitar upgrade' : 'Começar Agora'}
+                    </button>
+                  )}
                 </div>
               );
             })}
