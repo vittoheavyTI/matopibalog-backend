@@ -18,6 +18,7 @@ const { categoriaCompativelComTipo, mensagemIncompatibilidade } = require('../ut
 const { resumirBillingHealth } = require('../services/billingHealthService');
 const { recomendarPlano } = require('../services/calculadoraComercialService');
 const asaasSync = require('../services/asaasSyncDomainService');
+const { criarPromocaoSchema, editarPromocaoSchema, gerarCodigoSchema, validar: validarPromo } = require('../schemas/promocao');
 const {
   TIPOS: PROMO_TIPOS,
   normalizarCodigo,
@@ -581,24 +582,22 @@ router.get('/planos/recomendar', async (req, res) => {
 
 // POST /painel-admin/promocoes — criar campanha.
 router.post('/promocoes', async (req, res) => {
-  const b = req.body || {};
-  if (!b.nome || !String(b.nome).trim()) return res.status(400).json({ message: 'Informe o nome da campanha.' });
-  if (!PROMO_TIPOS.includes(b.tipo)) return res.status(400).json({ message: 'Tipo de promoção inválido.' });
-  if (!b.data_inicio || !b.data_fim) return res.status(400).json({ message: 'Informe início e fim da campanha.' });
-  if (new Date(b.data_fim) < new Date(b.data_inicio)) return res.status(400).json({ message: 'A data de fim deve ser posterior ao início.' });
+  const v = validarPromo(criarPromocaoSchema, req.body);
+  if (!v.ok) return res.status(v.status).json(v.body);
+  const b = v.data;
 
   const linha = {
-    nome: String(b.nome).trim(),
+    nome: b.nome,
     descricao: b.descricao != null ? String(b.descricao) : null,
     tipo: b.tipo,
-    percentual: b.percentual != null ? Number(b.percentual) : null,
-    valor: b.valor != null ? Number(b.valor) : null,
-    duracao_meses: b.duracao_meses != null ? Number(b.duracao_meses) : null,
-    dias_trial_extra: b.dias_trial_extra != null ? Number(b.dias_trial_extra) : null,
+    percentual: b.percentual != null ? b.percentual : null,
+    valor: b.valor != null ? b.valor : null,
+    duracao_meses: b.duracao_meses != null ? b.duracao_meses : null,
+    dias_trial_extra: b.dias_trial_extra != null ? b.dias_trial_extra : null,
     data_inicio: b.data_inicio,
     data_fim: b.data_fim,
     ativo: b.ativo !== undefined ? b.ativo === true : true,
-    limite_usos_total: b.limite_usos_total != null ? Number(b.limite_usos_total) : null,
+    limite_usos_total: b.limite_usos_total != null ? b.limite_usos_total : null,
     uso_unico_por_empresa: b.uso_unico_por_empresa !== undefined ? b.uso_unico_por_empresa === true : true,
     plano_alvo_id: b.plano_alvo_id || null,
     criado_por: req.user && req.user.uid ? req.user.uid : null,
@@ -620,17 +619,16 @@ router.get('/promocoes', async (req, res) => {
 
 // PATCH /painel-admin/promocoes/:id — ativar/desativar, editar datas/limites.
 router.patch('/promocoes/:id', async (req, res) => {
-  const b = req.body || {};
+  const v = validarPromo(editarPromocaoSchema, req.body);
+  if (!v.ok) return res.status(v.status).json(v.body);
+  const b = v.data;
   const upd = { atualizado_em: new Date().toISOString() };
   if (b.ativo !== undefined) upd.ativo = b.ativo === true;
   if (b.data_inicio !== undefined) upd.data_inicio = b.data_inicio;
   if (b.data_fim !== undefined) upd.data_fim = b.data_fim;
-  if (b.limite_usos_total !== undefined) upd.limite_usos_total = b.limite_usos_total != null ? Number(b.limite_usos_total) : null;
-  if (b.nome !== undefined) upd.nome = String(b.nome);
+  if (b.limite_usos_total !== undefined) upd.limite_usos_total = b.limite_usos_total != null ? b.limite_usos_total : null;
+  if (b.nome !== undefined) upd.nome = b.nome;
   if (b.descricao !== undefined) upd.descricao = b.descricao != null ? String(b.descricao) : null;
-  if (upd.data_inicio && upd.data_fim && new Date(upd.data_fim) < new Date(upd.data_inicio)) {
-    return res.status(400).json({ message: 'A data de fim deve ser posterior ao início.' });
-  }
   const { data, error } = await supabase.from('promocoes').update(upd).eq('id', req.params.id).select().single();
   if (error) return erroPromocao(res, error, 'Erro ao atualizar promoção.');
   if (!data) return res.status(404).json({ message: 'Promoção não encontrada.' });
@@ -639,15 +637,23 @@ router.patch('/promocoes/:id', async (req, res) => {
 
 // POST /painel-admin/promocoes/:id/codigos — gerar código/ticket.
 router.post('/promocoes/:id/codigos', async (req, res) => {
-  const codigo = normalizarCodigo(req.body && req.body.codigo);
-  if (!codigo) return res.status(400).json({ message: 'Informe o código.' });
+  const v = validarPromo(gerarCodigoSchema, req.body);
+  if (!v.ok) return res.status(v.status).json(v.body);
   const linha = {
     promocao_id: req.params.id,
-    codigo,
-    limite_usos: req.body.limite_usos != null ? Number(req.body.limite_usos) : null,
-    ativo: req.body.ativo !== undefined ? req.body.ativo === true : true,
+    codigo: normalizarCodigo(v.data.codigo),
+    limite_usos: v.data.limite_usos != null ? v.data.limite_usos : null,
+    ativo: v.data.ativo !== undefined ? v.data.ativo === true : true,
+    criado_por: req.user && req.user.uid ? req.user.uid : null, // auditoria: quem gerou (migration 043)
   };
-  const { data, error } = await supabase.from('promocao_codigos').insert(linha).select().single();
+  let { data, error } = await supabase.from('promocao_codigos').insert(linha).select().single();
+  // Deploy-safe: enquanto a migration 043 não for aplicada, a coluna criado_por
+  // não existe — reinsere sem ela (o código continua funcionando; só a auditoria
+  // do autor fica pendente até aplicar a 043).
+  if (error && /criado_por/i.test(error.message || '') && (error.code === 'PGRST204' || /column|does not exist|schema cache/i.test(error.message || ''))) {
+    const { criado_por, ...semAutor } = linha;
+    ({ data, error } = await supabase.from('promocao_codigos').insert(semAutor).select().single());
+  }
   if (error) {
     if (conflitoUnico(error)) return res.status(409).json({ message: 'Já existe um código com esse nome.' });
     return erroPromocao(res, error, 'Erro ao gerar código.');
