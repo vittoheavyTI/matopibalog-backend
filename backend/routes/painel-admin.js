@@ -16,6 +16,14 @@ const {
 } = require('../services/planoPrecoService');
 const { categoriaCompativelComTipo, mensagemIncompatibilidade } = require('../utils/planoCategoria');
 const { resumirBillingHealth } = require('../services/billingHealthService');
+const { recomendarPlano } = require('../services/calculadoraComercialService');
+const {
+  TIPOS: PROMO_TIPOS,
+  normalizarCodigo,
+  avaliarResgate,
+  aplicarPromocao,
+  montarResgate,
+} = require('../services/promocaoDomainService');
 
 router.use(verifyToken, isAdmin, isSuperAdmin);
 
@@ -472,6 +480,229 @@ router.patch('/motoristas/:id/reprovar', async (req, res) => {
   const { error } = await supabase.from('motoristas').update({ status_cadastro: 'reprovado' }).eq('id', req.params.id);
   if (error) return res.status(500).json({ message: 'Erro ao reprovar.' });
   res.json({ message: 'Motorista reprovado.' });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MEGA-FRENTE Billing Comercial Avançado — endpoints (FASE 3 + FASE 5)
+//
+// Adaptadores FINOS sobre serviços PUROS já testados
+// (calculadoraComercialService, promocaoDomainService). A decisão/dinheiro mora
+// nos serviços; aqui só há leitura/escrita no banco. As tabelas de promoção
+// (migration 040) podem ainda NÃO estar aplicadas — por isso todo acesso trata
+// "tabela ausente" como 503 amigável, sem quebrar o painel.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Detecta relação inexistente (migration ainda não aplicada) para responder 503
+// em vez de 500 genérico.
+function tabelaAusente(error) {
+  if (!error) return false;
+  if (error.code === '42P01' || error.code === 'PGRST205') return true;
+  return /relation .* does not exist|could not find the table|does not exist/i.test(error.message || '');
+}
+function erroPromocao(res, error, contexto) {
+  if (tabelaAusente(error)) {
+    return res.status(503).json({ message: 'Recurso de promoções ainda não provisionado (migration 040 pendente).' });
+  }
+  return res.status(500).json({ message: contexto || 'Erro ao processar promoção.' });
+}
+
+// ── FASE 3: recomendação de plano (read-only) ────────────────────────────────
+// GET /painel-admin/planos/recomendar?quantidade=10&planoAtualId=<uuid>
+// Compara o custo real (base + extras) entre os planos de empresa ativos e
+// devolve o mais barato + economia. 41+ → sob negociação.
+router.get('/planos/recomendar', async (req, res) => {
+  const quantidade = Number(req.query.quantidade);
+  const planoAtualId = req.query.planoAtualId ? String(req.query.planoAtualId) : null;
+  const { data, error } = await supabase
+    .from('planos')
+    .select('*')
+    .eq('ativo', true)
+    .is('arquivado_em', null);
+  if (error) return res.status(500).json({ message: 'Erro ao carregar planos.' });
+  // Recomendação é para empresa: só planos de empresa/ambos, e nunca os marcados
+  // como sob negociação (não têm preço de tabela).
+  const candidatos = (data || []).filter(
+    (p) => (p.categoria === 'empresa' || p.categoria === 'ambos') && p.requer_negociacao !== true,
+  );
+  const r = recomendarPlano({ planos: candidatos, quantidade, planoAtualId });
+  if (!r.ok) return res.status(400).json({ message: r.message || 'Parâmetros inválidos.' });
+  res.json(r);
+});
+
+// ── FASE 5: promoções / tickets (super-admin) ────────────────────────────────
+
+// POST /painel-admin/promocoes — criar campanha.
+router.post('/promocoes', async (req, res) => {
+  const b = req.body || {};
+  if (!b.nome || !String(b.nome).trim()) return res.status(400).json({ message: 'Informe o nome da campanha.' });
+  if (!PROMO_TIPOS.includes(b.tipo)) return res.status(400).json({ message: 'Tipo de promoção inválido.' });
+  if (!b.data_inicio || !b.data_fim) return res.status(400).json({ message: 'Informe início e fim da campanha.' });
+  if (new Date(b.data_fim) < new Date(b.data_inicio)) return res.status(400).json({ message: 'A data de fim deve ser posterior ao início.' });
+
+  const linha = {
+    nome: String(b.nome).trim(),
+    descricao: b.descricao != null ? String(b.descricao) : null,
+    tipo: b.tipo,
+    percentual: b.percentual != null ? Number(b.percentual) : null,
+    valor: b.valor != null ? Number(b.valor) : null,
+    duracao_meses: b.duracao_meses != null ? Number(b.duracao_meses) : null,
+    dias_trial_extra: b.dias_trial_extra != null ? Number(b.dias_trial_extra) : null,
+    data_inicio: b.data_inicio,
+    data_fim: b.data_fim,
+    ativo: b.ativo !== undefined ? b.ativo === true : true,
+    limite_usos_total: b.limite_usos_total != null ? Number(b.limite_usos_total) : null,
+    uso_unico_por_empresa: b.uso_unico_por_empresa !== undefined ? b.uso_unico_por_empresa === true : true,
+    plano_alvo_id: b.plano_alvo_id || null,
+    criado_por: req.user && req.user.uid ? req.user.uid : null,
+  };
+  const { data, error } = await supabase.from('promocoes').insert(linha).select().single();
+  if (error) return erroPromocao(res, error, 'Erro ao criar promoção.');
+  res.status(201).json(data);
+});
+
+// GET /painel-admin/promocoes — listar campanhas (com códigos).
+router.get('/promocoes', async (req, res) => {
+  const { data, error } = await supabase
+    .from('promocoes')
+    .select('*, promocao_codigos(*)')
+    .order('criado_em', { ascending: false });
+  if (error) return erroPromocao(res, error, 'Erro ao listar promoções.');
+  res.json(data || []);
+});
+
+// PATCH /painel-admin/promocoes/:id — ativar/desativar, editar datas/limites.
+router.patch('/promocoes/:id', async (req, res) => {
+  const b = req.body || {};
+  const upd = { atualizado_em: new Date().toISOString() };
+  if (b.ativo !== undefined) upd.ativo = b.ativo === true;
+  if (b.data_inicio !== undefined) upd.data_inicio = b.data_inicio;
+  if (b.data_fim !== undefined) upd.data_fim = b.data_fim;
+  if (b.limite_usos_total !== undefined) upd.limite_usos_total = b.limite_usos_total != null ? Number(b.limite_usos_total) : null;
+  if (b.nome !== undefined) upd.nome = String(b.nome);
+  if (b.descricao !== undefined) upd.descricao = b.descricao != null ? String(b.descricao) : null;
+  if (upd.data_inicio && upd.data_fim && new Date(upd.data_fim) < new Date(upd.data_inicio)) {
+    return res.status(400).json({ message: 'A data de fim deve ser posterior ao início.' });
+  }
+  const { data, error } = await supabase.from('promocoes').update(upd).eq('id', req.params.id).select().single();
+  if (error) return erroPromocao(res, error, 'Erro ao atualizar promoção.');
+  if (!data) return res.status(404).json({ message: 'Promoção não encontrada.' });
+  res.json(data);
+});
+
+// POST /painel-admin/promocoes/:id/codigos — gerar código/ticket.
+router.post('/promocoes/:id/codigos', async (req, res) => {
+  const codigo = normalizarCodigo(req.body && req.body.codigo);
+  if (!codigo) return res.status(400).json({ message: 'Informe o código.' });
+  const linha = {
+    promocao_id: req.params.id,
+    codigo,
+    limite_usos: req.body.limite_usos != null ? Number(req.body.limite_usos) : null,
+    ativo: req.body.ativo !== undefined ? req.body.ativo === true : true,
+  };
+  const { data, error } = await supabase.from('promocao_codigos').insert(linha).select().single();
+  if (error) {
+    if (conflitoUnico(error)) return res.status(409).json({ message: 'Já existe um código com esse nome.' });
+    return erroPromocao(res, error, 'Erro ao gerar código.');
+  }
+  res.status(201).json(data);
+});
+
+// POST /painel-admin/promocoes/validar — validar um código (preview, read-only).
+// Body: { codigo, empresa_id?, planoEscolhidoId?, precoMensalidade?, valorImplantacao?, trialDiasBase? }
+router.post('/promocoes/validar', async (req, res) => {
+  const codigo = normalizarCodigo(req.body && req.body.codigo);
+  if (!codigo) return res.status(400).json({ message: 'Informe o código.' });
+  const { data: cod, error: e1 } = await supabase
+    .from('promocao_codigos')
+    .select('*, promocoes(*)')
+    .ilike('codigo', codigo)
+    .maybeSingle();
+  if (e1) return erroPromocao(res, e1, 'Erro ao validar código.');
+  if (!cod || !cod.promocoes) return res.status(404).json({ codigoInvalido: true, message: 'Código não encontrado.' });
+
+  const promocao = cod.promocoes;
+  const empresa = req.body.empresa_id ? { id: req.body.empresa_id } : { id: '__preview__' };
+  let resgatesDaEmpresa = [];
+  if (req.body.empresa_id && promocao.uso_unico_por_empresa) {
+    const { data: rs } = await supabase
+      .from('promocao_resgates')
+      .select('id')
+      .eq('promocao_id', promocao.id)
+      .eq('empresa_id', req.body.empresa_id);
+    resgatesDaEmpresa = rs || [];
+  }
+  const aval = avaliarResgate({
+    promocao,
+    codigoRegistro: cod,
+    empresa,
+    planoEscolhidoId: req.body.planoEscolhidoId || null,
+    resgatesDaEmpresa,
+    agora: new Date(),
+    manual: false,
+  });
+  if (!aval.ok) return res.status(422).json({ codigoInvalido: true, motivo: aval.motivo, message: aval.message });
+
+  const efeito = aplicarPromocao({
+    promocao,
+    precoMensalidade: req.body.precoMensalidade != null ? Number(req.body.precoMensalidade) : null,
+    valorImplantacao: req.body.valorImplantacao != null ? Number(req.body.valorImplantacao) : null,
+    trialDiasBase: req.body.trialDiasBase != null ? Number(req.body.trialDiasBase) : null,
+  });
+  if (!efeito.ok) return res.status(422).json({ codigoInvalido: true, motivo: efeito.motivo, message: efeito.message });
+  res.json({ ok: true, promocao_id: promocao.id, tipo: promocao.tipo, efeito });
+});
+
+// POST /painel-admin/promocoes/:id/aplicar — aplicar MANUALMENTE a uma empresa
+// (super-admin), inclusive após o fim da campanha. Registra o resgate (auditoria).
+// Body: { empresa_id, motivo?, precoMensalidade?, valorImplantacao?, trialDiasBase?, planoEscolhidoId?, fatura_id? }
+router.post('/promocoes/:id/aplicar', async (req, res) => {
+  const empresa_id = req.body && req.body.empresa_id;
+  if (!empresa_id) return res.status(400).json({ message: 'Informe a empresa.' });
+
+  const { data: promocao, error: e1 } = await supabase.from('promocoes').select('*').eq('id', req.params.id).maybeSingle();
+  if (e1) return erroPromocao(res, e1, 'Erro ao carregar promoção.');
+  if (!promocao) return res.status(404).json({ message: 'Promoção não encontrada.' });
+
+  let resgatesDaEmpresa = [];
+  if (promocao.uso_unico_por_empresa) {
+    const { data: rs } = await supabase.from('promocao_resgates').select('id').eq('promocao_id', promocao.id).eq('empresa_id', empresa_id);
+    resgatesDaEmpresa = rs || [];
+  }
+  const aval = avaliarResgate({
+    promocao,
+    empresa: { id: empresa_id },
+    planoEscolhidoId: req.body.planoEscolhidoId || null,
+    resgatesDaEmpresa,
+    agora: new Date(),
+    manual: true, // super-admin fura janela/ativo, não os limites
+  });
+  if (!aval.ok) return res.status(422).json({ motivo: aval.motivo, message: aval.message });
+
+  const efeito = aplicarPromocao({
+    promocao,
+    precoMensalidade: req.body.precoMensalidade != null ? Number(req.body.precoMensalidade) : null,
+    valorImplantacao: req.body.valorImplantacao != null ? Number(req.body.valorImplantacao) : null,
+    trialDiasBase: req.body.trialDiasBase != null ? Number(req.body.trialDiasBase) : null,
+  });
+  if (!efeito.ok) return res.status(422).json({ motivo: efeito.motivo, message: efeito.message });
+
+  const resgate = montarResgate({
+    promocao,
+    empresa: { id: empresa_id },
+    aplicadoPor: req.user && req.user.uid ? req.user.uid : null,
+    manual: true,
+    efeito,
+    motivo: req.body.motivo || null,
+    faturaId: req.body.fatura_id || null,
+    precoOriginal: req.body.precoMensalidade != null ? Number(req.body.precoMensalidade) : (req.body.valorImplantacao != null ? Number(req.body.valorImplantacao) : null),
+  });
+  const { data: inserido, error: e2 } = await supabase.from('promocao_resgates').insert(resgate).select().single();
+  if (e2) return erroPromocao(res, e2, 'Erro ao registrar aplicação.');
+
+  // Incrementa contadores (best-effort; não desfaz o resgate se falhar).
+  await supabase.from('promocoes').update({ usos_total: (Number(promocao.usos_total) || 0) + 1 }).eq('id', promocao.id);
+
+  res.status(201).json({ ok: true, resgate: inserido, efeito });
 });
 
 module.exports = router;
