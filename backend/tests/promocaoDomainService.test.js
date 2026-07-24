@@ -11,6 +11,7 @@ const {
   aplicarPromocao,
   montarResgate,
   normalizarCodigo,
+  ajustarValorPorResgate,
   ALVO,
 } = require('../services/promocaoDomainService');
 
@@ -176,4 +177,24 @@ test('config inválida (percentual ausente) → recusa', () => {
   const e = aplicarPromocao({ promocao: promo, precoMensalidade: 499.90 });
   assert.equal(e.ok, false);
   assert.equal(e.motivo, 'config_invalida');
+});
+
+// ─── FASE 1 (checkout) — desconto da promoção pendente na 1ª fatura ─────────
+test('ajustarValorPorResgate: alvo mensalidade com preco_final desconta', () => {
+  const r = ajustarValorPorResgate({ valorBase: 499.90, resgatePendente: { alvo: 'mensalidade', preco_final: 399.92, desconto_valor: 99.98 } });
+  assert.equal(r.aplicou, true);
+  assert.equal(r.valor, 399.92);
+  assert.equal(r.desconto, 99.98);
+});
+
+test('ajustarValorPorResgate: sem resgate → valor base intacto', () => {
+  const r = ajustarValorPorResgate({ valorBase: 499.90, resgatePendente: null });
+  assert.equal(r.aplicou, false);
+  assert.equal(r.valor, 499.90);
+});
+
+test('ajustarValorPorResgate: alvo implantacao NÃO altera mensalidade', () => {
+  const r = ajustarValorPorResgate({ valorBase: 499.90, resgatePendente: { alvo: 'implantacao', preco_final: 0 } });
+  assert.equal(r.aplicou, false);
+  assert.equal(r.valor, 499.90);
 });

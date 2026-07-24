@@ -16,6 +16,7 @@ const {
   montarPayloadFaturaRegularizacao,
 } = require('./regularizacaoDomainService');
 const { garantirCustomer } = require('./asaasSubscriptionService');
+const { ajustarValorPorResgate } = require('./promocaoDomainService');
 const { buscarPaymentPorReferencia } = require('./faturaRecorrenteService');
 const { normalizarStatusAsaas } = require('./paymentDomainService');
 const { podeCriarCobranca, MOTIVO_CADASTRO_INCOMPLETO } = require('../utils/cadastroAsaas');
@@ -205,6 +206,28 @@ async function gerarFaturaRegularizacao({ supabase, http, config, empresaId, dat
 
   const payload = montarPayloadFaturaRegularizacao({ empresa, plano, dataReferencia });
 
+  // Promoção pendente (mega-frente comercial): resgate gravado no cadastro
+  // (fatura_id NULL, alvo 'mensalidade') desconta ESTA fatura (a 1ª) e é
+  // consumido (fatura_id preenchido) depois. Forward-only: nunca toca fatura
+  // emitida. DEFENSIVO: sem a tabela / sem resgate → comportamento normal.
+  let resgatePendente = null;
+  try {
+    const { data: r } = await supabase
+      .from('promocao_resgates')
+      .select('id, alvo, preco_final, desconto_valor')
+      .eq('empresa_id', empresaId)
+      .is('fatura_id', null)
+      .eq('alvo', 'mensalidade')
+      .order('criado_em', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    resgatePendente = r || null;
+  } catch (_) { resgatePendente = null; }
+  if (resgatePendente) {
+    const aj = ajustarValorPorResgate({ valorBase: payload.valor, resgatePendente });
+    if (aj.aplicou) payload.valor = aj.valor;
+  }
+
   // Reserva-primeiro: insere a fatura local SEM asaas_id. O índice único de
   // client_request_id (021) segura corrida/duplo clique: 23505 → recupera.
   let reserva;
@@ -227,6 +250,13 @@ async function gerarFaturaRegularizacao({ supabase, http, config, empresaId, dat
     }
   } else {
     reserva = inserida;
+  }
+
+  // Consome o resgate: liga-o à fatura criada (idempotente: só se ainda pendente).
+  if (resgatePendente && reserva && reserva.id) {
+    try {
+      await supabase.from('promocao_resgates').update({ fatura_id: reserva.id }).eq('id', resgatePendente.id).is('fatura_id', null);
+    } catch (_) { /* best-effort: o desconto já foi aplicado ao valor */ }
   }
 
   const fatura = await garantirCobrancaParaReserva({ supabase, http, config, empresa, plano, fatura: reserva, payload });
