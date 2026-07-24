@@ -63,6 +63,7 @@ const FORM_VAZIO = {
   data_fim: '',
   limite_usos_total: '',
   uso_unico_por_empresa: true,
+  plano_alvo_id: '',
 };
 
 function tituloTipo(tipo: TipoPromocao): string {
@@ -81,6 +82,10 @@ export function PainelPromocoes() {
   const [form, setForm] = useState({ ...FORM_VAZIO });
   const [salvando, setSalvando] = useState(false);
   const [novoCodigo, setNovoCodigo] = useState<Record<string, string>>({});
+  const [novoLimite, setNovoLimite] = useState<Record<string, string>>({});
+  const [planos, setPlanos] = useState<{ id: string; nome: string }[]>([]);
+  const [manual, setManual] = useState<Record<string, string>>({}); // promoId -> empresa_id
+  const [manualMsg, setManualMsg] = useState<Record<string, string>>({});
 
   async function carregar() {
     setCarregando(true);
@@ -100,6 +105,9 @@ export function PainelPromocoes() {
 
   useEffect(() => {
     carregar();
+    api.get('/painel-admin/planos')
+      .then(({ data }) => setPlanos((Array.isArray(data) ? data : []).map((p: { id: string; nome: string }) => ({ id: p.id, nome: p.nome }))))
+      .catch(() => setPlanos([]));
   }, []);
 
   async function criar(ev: React.FormEvent) {
@@ -120,6 +128,7 @@ export function PainelPromocoes() {
       if (campo === 'dias' && form.dias_trial_extra) payload.dias_trial_extra = Number(form.dias_trial_extra);
       if (form.tipo === 'preco_promocional' && form.duracao_meses) payload.duracao_meses = Number(form.duracao_meses);
       if (form.limite_usos_total) payload.limite_usos_total = Number(form.limite_usos_total);
+      if (form.plano_alvo_id) payload.plano_alvo_id = form.plano_alvo_id;
 
       await api.post('/painel-admin/promocoes', payload);
       setForm({ ...FORM_VAZIO });
@@ -145,13 +154,32 @@ export function PainelPromocoes() {
   async function gerarCodigo(p: Promocao) {
     const codigo = (novoCodigo[p.id] || '').trim();
     if (!codigo) return;
+    const lim = (novoLimite[p.id] || '').trim();
     try {
-      await api.post(`/painel-admin/promocoes/${p.id}/codigos`, { codigo });
+      await api.post(`/painel-admin/promocoes/${p.id}/codigos`, { codigo, limite_usos: lim ? Number(lim) : undefined });
       setNovoCodigo((s) => ({ ...s, [p.id]: '' }));
+      setNovoLimite((s) => ({ ...s, [p.id]: '' }));
       await carregar();
     } catch (e: unknown) {
       const resp = (e as { response?: { status?: number; data?: { message?: string } } })?.response;
       setErro(resp?.data?.message ?? 'Não foi possível gerar o código.');
+    }
+  }
+
+  // Aplicação MANUAL do super-admin a uma empresa (fura janela/ativo; respeita
+  // limites). Vale inclusive após a campanha expirar.
+  async function aplicarManual(p: Promocao) {
+    const empresa_id = (manual[p.id] || '').trim();
+    if (!empresa_id) return;
+    setManualMsg((s) => ({ ...s, [p.id]: '' }));
+    try {
+      await api.post(`/painel-admin/promocoes/${p.id}/aplicar`, { empresa_id, motivo: 'aplicacao_manual_painel' });
+      setManual((s) => ({ ...s, [p.id]: '' }));
+      setManualMsg((s) => ({ ...s, [p.id]: 'Aplicada ✓' }));
+      await carregar();
+    } catch (e: unknown) {
+      const resp = (e as { response?: { data?: { message?: string } } })?.response;
+      setManualMsg((s) => ({ ...s, [p.id]: resp?.data?.message ?? 'Falha ao aplicar.' }));
     }
   }
 
@@ -239,6 +267,14 @@ export function PainelPromocoes() {
             <input type="number" min="0" step="1" className="mt-1 rounded border border-gray-300 p-2 dark:bg-gray-900"
               value={form.limite_usos_total} onChange={(e) => setForm({ ...form, limite_usos_total: e.target.value })} />
           </label>
+          <label className="flex flex-col text-sm">
+            Plano-alvo (vazio = todos)
+            <select className="mt-1 rounded border border-gray-300 p-2 dark:bg-gray-900"
+              value={form.plano_alvo_id} onChange={(e) => setForm({ ...form, plano_alvo_id: e.target.value })}>
+              <option value="">Todos os planos</option>
+              {planos.map((p) => <option key={p.id} value={p.id}>{p.nome}</option>)}
+            </select>
+          </label>
           <label className="flex items-center gap-2 text-sm sm:col-span-2">
             <input type="checkbox" checked={form.uso_unico_por_empresa}
               onChange={(e) => setForm({ ...form, uso_unico_por_empresa: e.target.checked })} />
@@ -295,11 +331,27 @@ export function PainelPromocoes() {
                   <input placeholder="NOVO-CODIGO" value={novoCodigo[p.id] ?? ''}
                     onChange={(e) => setNovoCodigo((s) => ({ ...s, [p.id]: e.target.value }))}
                     className="flex-1 rounded border border-gray-300 p-1.5 text-sm font-mono dark:bg-gray-900" />
+                  <input type="number" min="0" placeholder="limite" value={novoLimite[p.id] ?? ''}
+                    onChange={(e) => setNovoLimite((s) => ({ ...s, [p.id]: e.target.value }))}
+                    className="w-20 rounded border border-gray-300 p-1.5 text-sm dark:bg-gray-900" />
                   <button onClick={() => gerarCodigo(p)}
                     className="flex items-center gap-1 rounded-lg bg-gray-800 px-3 py-1.5 text-sm text-white">
                     <Ticket size={14} /> Gerar
                   </button>
                 </div>
+              </div>
+
+              {/* Aplicação manual (super-admin) — vale mesmo após expirar */}
+              <div className="mt-3 border-t border-gray-100 pt-3 dark:border-gray-700">
+                <p className="mb-1 text-xs text-gray-500">Aplicar manualmente a uma empresa (ID):</p>
+                <div className="flex gap-2">
+                  <input placeholder="empresa_id (uuid)" value={manual[p.id] ?? ''}
+                    onChange={(e) => setManual((s) => ({ ...s, [p.id]: e.target.value }))}
+                    className="flex-1 rounded border border-gray-300 p-1.5 text-xs font-mono dark:bg-gray-900" />
+                  <button onClick={() => aplicarManual(p)}
+                    className="rounded-lg bg-green-700 px-3 py-1.5 text-sm text-white">Aplicar</button>
+                </div>
+                {manualMsg[p.id] && <p className="mt-1 text-xs text-gray-600">{manualMsg[p.id]}</p>}
               </div>
             </div>
           ))}
