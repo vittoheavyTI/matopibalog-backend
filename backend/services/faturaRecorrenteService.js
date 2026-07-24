@@ -69,8 +69,11 @@ function planoDe(empresa) {
 // que o domínio espera). Exportado para ser reutilizado pelo job one-shot sem
 // duplicar a string de select. NÃO decide elegibilidade fina (isso é do domínio,
 // dentro do lote) — só faz o recorte grosso e barato no banco.
+// `*` (em vez de CAMPOS_EMPRESA) traz arquivada_em SÓ SE a coluna existir
+// (deploy-safe: antes da migration 036 a coluna some do retorno, sem erro). É
+// superset das colunas que o domínio usa — nada quebra.
 const SELECT_EMPRESA_RECORRENTE =
-  `${CAMPOS_EMPRESA}, planos(id, nome, ativo, arquivado_em, preco_mensal, modelo_cobranca, preco_por_motorista, limite_motoristas)`;
+  `*, planos(id, nome, ativo, arquivado_em, preco_mensal, modelo_cobranca, preco_por_motorista, limite_motoristas)`;
 
 // Seleciona empresas ATIVAS, SEM assinatura Asaas, com o plano carregado.
 // `allowlist` (array de UUIDs) é OBRIGATÓRIA para o job: quando passada, restringe

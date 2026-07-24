@@ -34,6 +34,7 @@ const ORIGEM_RECORRENTE = 'recorrente';
 const MOTIVOS = Object.freeze({
   OK: 'ok',
   EMPRESA_AUSENTE: 'empresa_ausente',
+  EMPRESA_ARQUIVADA: 'empresa_arquivada',
   PERIODO_INVALIDO: 'periodo_invalido',
   STATUS_NAO_COBRAVEL: 'empresa_status_nao_cobravel',
   ASSINATURA_ASAAS_EXISTENTE: 'assinatura_asaas_existente',
@@ -155,6 +156,13 @@ function avaliarElegibilidadeFaturaRecorrente({ empresa, plano, faturasExistente
   const periodo = calcularPeriodoReferencia(dataReferencia);
   if (!periodo) {
     return { resultado: 'erro', motivo: MOTIVOS.PERIODO_INVALIDO, elegivel: false, periodo: null };
+  }
+
+  // 2.5 Conta arquivada (tirada da operação) NÃO é cobrada — nunca. arquivada_em
+  // só existe após a migration 036; antes disso é undefined e ninguém é pulado
+  // por este motivo (deploy-safe).
+  if (empresa.arquivada_em != null) {
+    return { resultado: 'pular', motivo: MOTIVOS.EMPRESA_ARQUIVADA, elegivel: false, periodo };
   }
 
   // 3. Estado da conta: só 'ativo' cobra (fail-closed; trial não cobra neste PR).

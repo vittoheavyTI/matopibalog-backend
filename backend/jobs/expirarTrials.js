@@ -3,6 +3,7 @@ const { decidirSuspensaoPorInadimplencia } = require('../services/paymentDomainS
 const { patchSuspensaoFinanceiraAutomatica } = require('../utils/suspensao');
 const { gerarFaturaRegularizacao } = require('../services/regularizacaoService');
 const { resolveAsaasApiKey } = require('../utils/asaasConfig');
+const { isArquivada } = require('../services/empresaArquivamentoService');
 
 // Config Asaas SOMENTE quando o ambiente é sandbox (fail-closed, mesma trava do
 // job de recorrência): fora do sandbox o job volta ao comportamento antigo
@@ -65,10 +66,12 @@ async function expirarTrials() {
     const now = new Date().toISOString();
     const hoje = now.slice(0, 10);
 
-    // Expirar trials vencidos
-    const { data: expirados, error: queryError } = await supabase
+    // Expirar trials vencidos. `*` traz arquivada_em só se a coluna existir
+    // (deploy-safe). Contas arquivadas (tiradas da operação) são ignoradas — não
+    // geram fatura de regularização nem suspensão.
+    const { data: expiradosRaw, error: queryError } = await supabase
       .from('empresas')
-      .select('id, nome, status, trial_ends_at')
+      .select('*')
       .eq('status', 'trial')
       .lt('trial_ends_at', now);
 
@@ -76,6 +79,7 @@ async function expirarTrials() {
       console.error('[expirarTrials] Erro na consulta:', queryError.message);
       return;
     }
+    const expirados = (expiradosRaw || []).filter((e) => !isArquivada(e));
 
     if (expirados && expirados.length > 0) {
       let suspensas = 0;
