@@ -26,6 +26,9 @@
 // falha crítica e acionável, para o painel não "gritar" por situação esperada.
 
 const { categoriaCompativelComTipo } = require('../utils/planoCategoria');
+const { valorEfetivoEmpresa } = require('./calculadoraComercialService');
+
+const TETO_SELF_SERVICE_QTD = 40;
 
 const STATUS_ABERTO = new Set(['pendente', 'vencido']);
 // Estados de conta que a plataforma espera vir a cobrar (logo, precisam de plano).
@@ -164,6 +167,16 @@ function resumirBillingHealth({
   // FASE 5 (sync Asaas).
   const empresa_sem_assinatura_esperada = [];       // cobrável + plano pago, mas sem asaas_subscription_id
   const empresa_com_assinatura_mas_plano_invalido = []; // tem assinatura, mas plano inválido p/ cobrança
+  // Extras por empresa (mega-frente quantidade contratada).
+  const empresa_quantidade_contratada_null = [];
+  const empresa_quantidade_contratada_menor_que_motoristas_ativos = [];
+  const empresa_quantidade_contratada_acima_limite_self_service = [];
+  const empresa_upgrade_recomendado = [];
+  const empresa_valor_sync_desatualizado_por_quantidade = [];
+  // Catálogo de planos de empresa para recomendação (dos `planos` recebidos).
+  const candidatosUpgrade = (Array.isArray(planos) ? planos : []).filter((p) => p && p.ativo !== false && p.requer_negociacao !== true && ['empresa', 'ambos'].includes(p.categoria));
+  // Índice valor_sincronizado por empresa (da fila de sync).
+  const syncPorEmpresa = new Map((Array.isArray(asaasSyncEstado) ? asaasSyncEstado : []).map((s) => [s.empresa_id, s]));
   // Arquivadas: fora do escrutínio operacional (contas de teste tiradas da
   // operação). Contadas à parte, nunca como problema. Quando uma conta de teste é
   // arquivada, ela para de poluir suspensas_sem_fatura/categoria/etc.
@@ -253,6 +266,32 @@ function resumirBillingHealth({
         || plano.requer_negociacao === true || !(Number(plano.preco_mensal) > 0);
       if (planoInvalido) {
         empresa_com_assinatura_mas_plano_invalido.push({ id: e.id, nome: e.nome, plano_nome: plano ? (plano.nome || null) : null });
+      }
+    }
+
+    // Extras por empresa: só faz sentido para plano comercial (com capacidade_inclusa).
+    if (STATUS_COBRAVEL_ESPERADO.has(e.status) && plano && plano.capacidade_inclusa != null && plano.requer_negociacao !== true) {
+      const qc = e.quantidade_contratada != null ? Number(e.quantidade_contratada) : null;
+      const motoristas = Number(contagemMotoristasPorEmpresa[e.id]) || 0;
+      if (qc == null) {
+        empresa_quantidade_contratada_null.push({ id: e.id, nome: e.nome, plano_nome: plano.nome || null });
+      } else {
+        if (motoristas > qc) {
+          empresa_quantidade_contratada_menor_que_motoristas_ativos.push({ id: e.id, nome: e.nome, quantidade_contratada: qc, motoristas_ativos: motoristas });
+        }
+        if (qc > TETO_SELF_SERVICE_QTD) {
+          empresa_quantidade_contratada_acima_limite_self_service.push({ id: e.id, nome: e.nome, quantidade_contratada: qc });
+        }
+        const ve = valorEfetivoEmpresa({ plano, quantidade_contratada: qc, planos: candidatosUpgrade });
+        if (ve.ok && ve.recomendacao_upgrade) {
+          empresa_upgrade_recomendado.push({ id: e.id, nome: e.nome, quantidade_contratada: qc, valor_atual: ve.valor_total, plano_recomendado: ve.plano_recomendado_nome, economia: ve.economia_upgrade });
+        }
+        // Valor efetivo diverge do último sincronizado no Asaas (por quantidade).
+        const s = syncPorEmpresa.get(e.id);
+        if (ve.ok && ve.valor_total != null && s && s.valor_sincronizado != null
+            && Math.round(Number(ve.valor_total) * 100) !== Math.round(Number(s.valor_sincronizado) * 100)) {
+          empresa_valor_sync_desatualizado_por_quantidade.push({ id: e.id, nome: e.nome, valor_efetivo: ve.valor_total, valor_sincronizado: Number(s.valor_sincronizado) });
+        }
       }
     }
 
@@ -365,6 +404,12 @@ function resumirBillingHealth({
       assinatura_asaas_desatualizada: assinatura_asaas_desatualizada.length,
       empresa_sem_assinatura_esperada: empresa_sem_assinatura_esperada.length,
       empresa_com_assinatura_mas_plano_invalido: empresa_com_assinatura_mas_plano_invalido.length,
+      // Extras por empresa (quantidade contratada) — informativos.
+      empresa_quantidade_contratada_null: empresa_quantidade_contratada_null.length,
+      empresa_quantidade_contratada_menor_que_motoristas_ativos: empresa_quantidade_contratada_menor_que_motoristas_ativos.length,
+      empresa_quantidade_contratada_acima_limite_self_service: empresa_quantidade_contratada_acima_limite_self_service.length,
+      empresa_upgrade_recomendado: empresa_upgrade_recomendado.length,
+      empresa_valor_sync_desatualizado_por_quantidade: empresa_valor_sync_desatualizado_por_quantidade.length,
     },
     detalhes: {
       faturas_sem_asaas_id,
@@ -398,6 +443,12 @@ function resumirBillingHealth({
       assinatura_asaas_desatualizada,
       empresa_sem_assinatura_esperada,
       empresa_com_assinatura_mas_plano_invalido,
+      // Extras por empresa (quantidade contratada) — informativos.
+      empresa_quantidade_contratada_null,
+      empresa_quantidade_contratada_menor_que_motoristas_ativos,
+      empresa_quantidade_contratada_acima_limite_self_service,
+      empresa_upgrade_recomendado,
+      empresa_valor_sync_desatualizado_por_quantidade,
       webhook_por_status,
     },
   };

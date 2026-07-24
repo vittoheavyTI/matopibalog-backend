@@ -16,7 +16,7 @@ const {
 } = require('../services/planoPrecoService');
 const { categoriaCompativelComTipo, mensagemIncompatibilidade } = require('../utils/planoCategoria');
 const { resumirBillingHealth } = require('../services/billingHealthService');
-const { recomendarPlano } = require('../services/calculadoraComercialService');
+const { recomendarPlano, valorEfetivoEmpresa } = require('../services/calculadoraComercialService');
 const asaasSync = require('../services/asaasSyncDomainService');
 const { criarPromocaoSchema, editarPromocaoSchema, gerarCodigoSchema, validar: validarPromo } = require('../schemas/promocao');
 const {
@@ -226,6 +226,113 @@ router.delete('/empresas/:id', async (req, res) => {
   const { error } = await supabase.from('empresas').delete().eq('id', req.params.id);
   if (error) return res.status(500).json({ message: 'Erro ao excluir empresa.' });
   res.json({ message: 'Empresa excluída.' });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// QUANTIDADE CONTRATADA (mega-frente extras por empresa) — super-admin.
+// Cobranca e por CAPACIDADE CONTRATADA (nao uso real). Preview mostra base+extras
+// + recomendacao de upgrade. Aplicar marca sync Asaas pendente. NAO toca fatura.
+// ═══════════════════════════════════════════════════════════════════════════
+const TETO_SELF_SERVICE = 40; // acima disso: negociacao (regra 8)
+
+function colunaQuantidadeAusente(error) {
+  if (!error) return false;
+  if (error.code === 'PGRST204' || error.code === '42703') return true;
+  return /quantidade_contratada/i.test(error.message || '') && /column|does not exist|schema cache/i.test(error.message || '');
+}
+
+// Carrega empresa (deploy-safe `*`) + plano + catalogo de planos de empresa (p/ recomendacao).
+async function carregarParaValorEfetivo(empresaId) {
+  const { data: empresa, error } = await supabase
+    .from('empresas')
+    .select('*, planos(id, nome, categoria, preco_mensal, capacidade_inclusa, preco_motorista_extra, requer_negociacao, ativo, limite_motoristas)')
+    .eq('id', empresaId).maybeSingle();
+  if (error || !empresa) return { erro: true };
+  const plano = Array.isArray(empresa.planos) ? empresa.planos[0] : empresa.planos;
+  const { data: catalogo } = await supabase
+    .from('planos')
+    .select('id, nome, categoria, preco_mensal, capacidade_inclusa, preco_motorista_extra, requer_negociacao, ativo')
+    .eq('ativo', true).in('categoria', ['empresa', 'ambos']);
+  const candidatos = (catalogo || []).filter((p) => p.requer_negociacao !== true);
+  return { empresa, plano, candidatos };
+}
+
+function montarPreviewValorEfetivo({ empresa, plano, candidatos, quantidade }) {
+  const atualQtd = empresa.quantidade_contratada != null ? Number(empresa.quantidade_contratada) : (plano && plano.capacidade_inclusa != null ? Number(plano.capacidade_inclusa) : null);
+  const antes = atualQtd != null ? valorEfetivoEmpresa({ plano, quantidade_contratada: atualQtd, planos: candidatos }) : null;
+  const depois = valorEfetivoEmpresa({ plano, quantidade_contratada: quantidade, planos: candidatos });
+  return {
+    plano_id: plano ? plano.id : null,
+    plano_nome: plano ? plano.nome : null,
+    capacidade_inclusa: plano ? plano.capacidade_inclusa : null,
+    quantidade_atual: atualQtd,
+    quantidade_desejada: quantidade,
+    valor_antes: antes && antes.ok ? antes.valor_total : null,
+    valor_depois: depois && depois.ok ? depois.valor_total : null,
+    valor_base: depois && depois.ok ? depois.valor_base : null,
+    quantidade_extra: depois && depois.ok ? depois.quantidade_extra : null,
+    valor_extra: depois && depois.ok ? depois.valor_extra : null,
+    requer_negociacao: quantidade > TETO_SELF_SERVICE || (depois && depois.requer_negociacao === true),
+    recomendacao_upgrade: depois && depois.ok ? depois.recomendacao_upgrade : null,
+    plano_recomendado_nome: depois && depois.ok ? depois.plano_recomendado_nome : null,
+    economia_upgrade: depois && depois.ok ? depois.economia_upgrade : null,
+    mensagem_upgrade: depois && depois.ok ? depois.mensagem : null,
+  };
+}
+
+// GET /empresas/:id/valor-efetivo?quantidade=N — PREVIEW read-only (nao grava).
+router.get('/empresas/:id/valor-efetivo', async (req, res) => {
+  const ctx = await carregarParaValorEfetivo(req.params.id);
+  if (ctx.erro) return res.status(404).json({ message: 'Empresa não encontrada.' });
+  if (!ctx.plano) return res.status(422).json({ message: 'Empresa sem plano vinculado.' });
+  const q = req.query.quantidade !== undefined ? Number(req.query.quantidade) : (ctx.empresa.quantidade_contratada != null ? Number(ctx.empresa.quantidade_contratada) : Number(ctx.plano.capacidade_inclusa));
+  if (!Number.isInteger(q) || q < 1) return res.status(422).json({ message: 'Quantidade inválida.' });
+  res.json(montarPreviewValorEfetivo({ ...ctx, quantidade: q }));
+});
+
+// PATCH /empresas/:id/quantidade-contratada — aplica (marca sync; nao toca fatura).
+router.patch('/empresas/:id/quantidade-contratada', async (req, res) => {
+  const q = Number(req.body && req.body.quantidade_contratada);
+  const motivo = req.body && req.body.motivo != null ? String(req.body.motivo).slice(0, 200) : null;
+  if (!Number.isInteger(q) || q < 1) return res.status(422).json({ message: 'quantidade_contratada deve ser um inteiro >= 1.' });
+
+  const ctx = await carregarParaValorEfetivo(req.params.id);
+  if (ctx.erro) return res.status(404).json({ message: 'Empresa não encontrada.' });
+  if (!ctx.plano) return res.status(422).json({ message: 'Empresa sem plano vinculado.' });
+
+  // Acima do teto self-service → negociacao (regra 8). Nao aplica.
+  if (q > TETO_SELF_SERVICE) {
+    return res.status(422).json({
+      requer_negociacao: true,
+      message: `Acima de ${TETO_SELF_SERVICE} a contratação é sob negociação. Fale com o comercial.`,
+    });
+  }
+  // Autônomo/plano sem extra que não acomoda → orienta plano adequado (regra 10).
+  const preview = montarPreviewValorEfetivo({ ...ctx, quantidade: q });
+  if (preview.valor_depois == null) {
+    return res.status(422).json({ message: 'Este plano não acomoda essa quantidade. Selecione um plano de empresa adequado.' });
+  }
+
+  const upd = {
+    quantidade_contratada: q,
+    quantidade_contratada_atualizada_em: new Date().toISOString(),
+    quantidade_contratada_atualizada_por: req.user && req.user.uid ? req.user.uid : null,
+    quantidade_contratada_motivo: motivo,
+  };
+  const { error } = await supabase.from('empresas').update(upd).eq('id', req.params.id);
+  if (error) {
+    if (colunaQuantidadeAusente(error)) return res.status(503).json({ message: 'Quantidade contratada ainda não provisionada (migration 044 pendente).' });
+    return res.status(500).json({ message: 'Erro ao atualizar a quantidade contratada.' });
+  }
+
+  // Marca sync Asaas pendente (valor futuro) — best-effort/defensivo.
+  try {
+    await supabase.from('asaas_sync_estado').upsert(
+      asaasSync.montarEstadoPendente({ empresaId: req.params.id, motivo: 'quantidade_contratada_alterada', valorAlvo: preview.valor_depois, asaasSubscriptionId: ctx.empresa.asaas_subscription_id || null }),
+      { onConflict: 'empresa_id' });
+  } catch (_) { /* migration 042 ausente / falha transitória — não bloqueia */ }
+
+  res.json({ ok: true, ...preview });
 });
 
 // TRIAL — prorrogar/liberar trial de uma empresa (super-admin only, herda do router.use)
