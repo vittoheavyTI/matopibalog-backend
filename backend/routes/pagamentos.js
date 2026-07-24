@@ -7,7 +7,8 @@ const { verifyToken, isAdmin, isSuperAdmin } = require('../middlewares/auth');
 const { verificarEmpresa } = require('../middlewares/tenant');
 const { resolveAsaasApiKey } = require('../utils/asaasConfig');
 const { classificarResponsavelRegularizacao } = require('../utils/billingProfile');
-const { garantirAssinatura, conciliarAssinatura } = require('../services/asaasSubscriptionService');
+const { garantirAssinatura, conciliarAssinatura, atualizarValorAssinatura } = require('../services/asaasSubscriptionService');
+const asaasSync = require('../services/asaasSyncDomainService');
 const { sincronizarCobrancas } = require('../services/asaasInvoiceSyncService');
 const { solicitarUpgrade } = require('../services/upgradeRequestService');
 const { gerarFaturaRecorrenteEmLote, CAMPOS_EMPRESA } = require('../services/faturaRecorrenteService');
@@ -963,6 +964,145 @@ router.post('/faturas-recorrentes/gerar', verifyToken, isSuperAdmin, async (req,
     console.error('[pagamentos/faturas-recorrentes/gerar] Falha', { status: 500 });
     return res.status(500).json({ message: 'Erro ao gerar faturas recorrentes.' });
   }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SYNC AUTOMÁTICO ASAAS (SANDBOX) — mega-frente comercial, FASE 4 (wiring)
+//
+// Matopiba é a fonte da verdade do valor; o Asaas é processador. O sync ajusta o
+// VALOR FUTURO da assinatura por empresa (forward-only). Decisão pura em
+// asaasSyncDomainService; a chamada ao Asaas em asaasSubscriptionService. Todo o
+// processamento é SANDBOX-GATED (bloquearSeNaoSandbox) — nunca production. As
+// tabelas (migration 042) podem não existir ainda → tratamos como 503.
+// ═══════════════════════════════════════════════════════════════════════════
+
+function tabelaSyncAusente(error) {
+  if (!error) return false;
+  if (error.code === '42P01' || error.code === 'PGRST205') return true;
+  return /relation .* does not exist|could not find the table|does not exist/i.test(error.message || '');
+}
+
+// GET /pagamentos/asaas-sync/estado — observabilidade da fila de sync.
+router.get('/asaas-sync/estado', verifyToken, isSuperAdmin, async (req, res) => {
+  const { data, error } = await supabase
+    .from('asaas_sync_estado')
+    .select('*')
+    .order('atualizado_em', { ascending: false })
+    .limit(500);
+  if (error) {
+    if (tabelaSyncAusente(error)) return res.status(503).json({ message: 'Sync Asaas ainda não provisionado (migration 042 pendente).' });
+    return res.status(500).json({ message: 'Erro ao ler estado de sync.' });
+  }
+  const linhas = data || [];
+  const contadores = {
+    pendente: linhas.filter((l) => l.status === 'pendente').length,
+    sincronizado: linhas.filter((l) => l.status === 'sincronizado').length,
+    erro: linhas.filter((l) => l.status === 'erro').length,
+  };
+  res.json({ contadores, estado: linhas });
+});
+
+// POST /pagamentos/asaas-sync/marcar — marca as empresas de um plano como
+// pendentes de sync (ex.: após reprecificar o plano). Body: { plano_id, motivo }.
+router.post('/asaas-sync/marcar', verifyToken, isSuperAdmin, async (req, res) => {
+  const plano_id = req.body && req.body.plano_id;
+  const motivo = (req.body && req.body.motivo) || 'plano_editado';
+  if (!plano_id) return res.status(400).json({ message: 'Informe o plano_id.' });
+
+  const { data: empresas, error: empErr } = await supabase
+    .from('empresas')
+    .select('id, plano_id, status, arquivada_em, asaas_subscription_id')
+    .eq('plano_id', plano_id);
+  if (empErr) return res.status(500).json({ message: 'Erro ao carregar empresas do plano.' });
+
+  const afetadas = asaasSync.empresasAfetadasPorPlano({ empresas: empresas || [], planoId: plano_id });
+  if (afetadas.length === 0) return res.json({ marcadas: 0, empresas: [] });
+
+  const subById = new Map((empresas || []).map((e) => [e.id, e.asaas_subscription_id || null]));
+  const linhas = afetadas.map((id) =>
+    asaasSync.montarEstadoPendente({ empresaId: id, motivo, asaasSubscriptionId: subById.get(id) }));
+  const { error: upErr } = await supabase.from('asaas_sync_estado').upsert(linhas, { onConflict: 'empresa_id' });
+  if (upErr) {
+    if (tabelaSyncAusente(upErr)) return res.status(503).json({ message: 'Sync Asaas ainda não provisionado (migration 042 pendente).' });
+    return res.status(500).json({ message: 'Erro ao marcar empresas para sync.' });
+  }
+  res.json({ marcadas: afetadas.length, empresas: afetadas });
+});
+
+// POST /pagamentos/asaas-sync/processar — processa a fila pendente (SANDBOX).
+// Para cada empresa: decide (avaliarSync) e cria/atualiza a assinatura sandbox,
+// registrando estado + auditoria. Idempotente; forward-only; nunca toca fatura.
+router.post('/asaas-sync/processar', verifyToken, isSuperAdmin, async (req, res) => {
+  if (await bloquearSeNaoSandbox(res)) return;
+
+  const limite = Math.min(Number(req.body && req.body.limite) || 25, 100);
+  const { data: fila, error: filaErr } = await supabase
+    .from('asaas_sync_estado')
+    .select('empresa_id, tentativas')
+    .eq('status', 'pendente')
+    .limit(limite);
+  if (filaErr) {
+    if (tabelaSyncAusente(filaErr)) return res.status(503).json({ message: 'Sync Asaas ainda não provisionado (migration 042 pendente).' });
+    return res.status(500).json({ message: 'Erro ao ler fila de sync.' });
+  }
+  if (!fila || fila.length === 0) return res.json({ processadas: 0, sincronizadas: 0, puladas: 0, erros: 0 });
+
+  const config = await getAsaasConfig();
+  const resumo = { processadas: 0, sincronizadas: 0, puladas: 0, erros: 0, detalhes: [] };
+
+  for (const item of fila) {
+    resumo.processadas += 1;
+    const empresaId = item.empresa_id;
+    let empresa = null;
+    try {
+      const { data: e } = await supabase
+        .from('empresas')
+        .select('id, status, arquivada_em, cnpj, email_contato, asaas_subscription_id, planos(id, preco_mensal, requer_negociacao)')
+        .eq('id', empresaId)
+        .single();
+      empresa = e;
+    } catch (_) { empresa = null; }
+
+    const plano = empresa && (Array.isArray(empresa.planos) ? empresa.planos[0] : empresa.planos);
+    const cadastroCompleto = Boolean(empresa && empresa.cnpj);
+    const decisao = asaasSync.avaliarSync({ empresa: empresa || { id: empresaId, status: null }, plano, cadastroCompleto });
+
+    let ok = false; let erro = null; let valorAntes = null; let valorDepois = decisao.valorAlvo; let subId = empresa && empresa.asaas_subscription_id;
+    try {
+      if (decisao.acao === asaasSync.ACAO.CRIAR) {
+        const r = await garantirAssinatura({ empresaId, config, supabase, http: axios });
+        ok = true; subId = r && r.subscription_configured ? subId : subId;
+      } else if (decisao.acao === asaasSync.ACAO.ATUALIZAR_VALOR) {
+        const r = await atualizarValorAssinatura({ empresaId, valorAlvo: decisao.valorAlvo, config, supabase, http: axios });
+        if (r.needsCreate) { await garantirAssinatura({ empresaId, config, supabase, http: axios }); }
+        valorAntes = r.valor_antes; subId = r.asaas_subscription_id || subId; ok = true;
+      } else if (decisao.acao === asaasSync.ACAO.PULAR) {
+        ok = true; valorDepois = null;
+        resumo.puladas += 1;
+      } else {
+        erro = decisao.motivo; ok = false;
+      }
+    } catch (err) {
+      ok = false; erro = (err && (err.message || err.motivo)) || 'falha no sync';
+    }
+
+    // Auditoria (append) + estado (upsert). Best-effort: falha aqui não derruba o lote.
+    try {
+      await supabase.from('asaas_sync_tentativas').insert(asaasSync.montarTentativa({
+        empresaId, acao: decisao.acao, valorAntes, valorDepois,
+        resultado: decisao.acao === asaasSync.ACAO.PULAR ? 'pulado' : (ok ? 'ok' : 'erro'),
+        erro, asaasSubscriptionId: subId,
+      }));
+      await supabase.from('asaas_sync_estado').upsert(
+        asaasSync.montarEstadoResultado({ empresaId, ok, valorAlvo: decisao.valorAlvo, erro, asaasSubscriptionId: subId, tentativasAtual: item.tentativas }),
+        { onConflict: 'empresa_id' });
+    } catch (_) { /* melhor esforço */ }
+
+    if (decisao.acao !== asaasSync.ACAO.PULAR) { if (ok) resumo.sincronizadas += 1; else resumo.erros += 1; }
+    resumo.detalhes.push({ empresa_id: empresaId, acao: decisao.acao, ok, erro });
+  }
+
+  res.json(resumo);
 });
 
 module.exports = router;

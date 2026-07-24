@@ -301,10 +301,55 @@ async function conciliarAssinatura({ empresaId, config, supabase, http }) {
   };
 }
 
+// ─── Sync FORWARD-ONLY do VALOR da assinatura (mega-frente comercial) ────────
+// Atualiza o `value` da assinatura sandbox para o valor-alvo (derivado do plano
+// pelo backend). NÃO altera cobranças já emitidas: updatePendingPayments=false —
+// o novo valor vale para a PRÓXIMA competência. Idempotente: se o value atual já
+// é o alvo, não chama o Asaas. NÃO cria assinatura (se não existir, devolve
+// needsCreate para o chamador decidir chamar garantirAssinatura).
+//
+// Retorno: { empresa_id, atualizado, needsCreate, valor_antes, valor_depois,
+//            asaas_subscription_id, mensagem }.
+async function atualizarValorAssinatura({ empresaId, valorAlvo, config, supabase, http }) {
+  const empresa = await carregarEmpresa(supabase, empresaId);
+  const subId = empresa.asaas_subscription_id;
+
+  const alvo = Number(valorAlvo);
+  if (!Number.isFinite(alvo) || alvo <= 0) {
+    throw falha(400, 'Valor-alvo inválido para a assinatura.');
+  }
+
+  // Sem assinatura → não é papel desta função criar (evita duplicar/decidir aqui).
+  if (!subId) {
+    return { empresa_id: empresaId, atualizado: false, needsCreate: true, valor_antes: null, valor_depois: alvo, asaas_subscription_id: null, mensagem: 'Assinatura inexistente — criar antes de sincronizar valor.' };
+  }
+
+  // Idempotência: consulta o valor atual; se já é o alvo, não toca no Asaas.
+  const sub = await buscarAssinatura(http, config, subId);
+  const valorAtual = sub && sub.value != null ? Number(sub.value) : null;
+  if (valorAtual != null && Math.round(valorAtual * 100) === Math.round(alvo * 100)) {
+    return { empresa_id: empresaId, atualizado: false, needsCreate: false, valor_antes: valorAtual, valor_depois: alvo, asaas_subscription_id: subId, mensagem: 'Assinatura já está no valor-alvo.' };
+  }
+
+  // Atualiza o VALOR FUTURO. updatePendingPayments=false → NÃO mexe em cobrança
+  // pendente já emitida (hard stop: não alterar fatura emitida).
+  try {
+    await http.put(`${config.baseURL}/subscriptions/${subId}`, {
+      value: alvo,
+      updatePendingPayments: false,
+    }, { headers: headers(config.apiKey) });
+  } catch (err) {
+    throw erroAsaas(err, 'Não foi possível atualizar o valor da assinatura no Asaas.');
+  }
+
+  return { empresa_id: empresaId, atualizado: true, needsCreate: false, valor_antes: valorAtual, valor_depois: alvo, asaas_subscription_id: subId, mensagem: 'Valor da assinatura atualizado (vale para a próxima competência).' };
+}
+
 module.exports = {
   garantirAssinatura,
   conciliarAssinatura,
   garantirCustomer,
+  atualizarValorAssinatura,
   calcularPrimeiroVencimento,
   BILLING_STATES: BILLING,
 };

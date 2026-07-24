@@ -17,6 +17,7 @@ const {
 const { categoriaCompativelComTipo, mensagemIncompatibilidade } = require('../utils/planoCategoria');
 const { resumirBillingHealth } = require('../services/billingHealthService');
 const { recomendarPlano } = require('../services/calculadoraComercialService');
+const asaasSync = require('../services/asaasSyncDomainService');
 const {
   TIPOS: PROMO_TIPOS,
   normalizarCodigo,
@@ -399,6 +400,26 @@ router.put('/planos/:id', async (req, res) => {
   Object.assign(upd, montarPatchArquivamento(req.body, req.user.uid));
   const { data, error } = await supabase.from('planos').update(upd).eq('id', req.params.id).select().single();
   if (error) return res.status(500).json({ message: 'Erro ao atualizar plano.' });
+
+  // Sync Asaas (mega-frente comercial, FASE 4): se o PREÇO mudou, marca as
+  // empresas cobráveis deste plano como pendentes de sync (valor futuro da
+  // assinatura). Best-effort e DEFENSIVO: se a migration 042 não foi aplicada,
+  // apenas ignora — jamais quebra a edição de plano.
+  if (upd.preco_mensal !== undefined) {
+    try {
+      const { data: empresas } = await supabase
+        .from('empresas')
+        .select('id, plano_id, status, arquivada_em, asaas_subscription_id')
+        .eq('plano_id', req.params.id);
+      const afetadas = asaasSync.empresasAfetadasPorPlano({ empresas: empresas || [], planoId: req.params.id });
+      if (afetadas.length > 0) {
+        const subById = new Map((empresas || []).map((e) => [e.id, e.asaas_subscription_id || null]));
+        const linhas = afetadas.map((id) => asaasSync.montarEstadoPendente({ empresaId: id, motivo: 'plano_reprecificado', asaasSubscriptionId: subById.get(id) }));
+        await supabase.from('asaas_sync_estado').upsert(linhas, { onConflict: 'empresa_id' });
+      }
+    } catch (_) { /* migration 042 ausente ou falha transitória — não bloqueia a edição */ }
+  }
+
   res.json(data);
 });
 
