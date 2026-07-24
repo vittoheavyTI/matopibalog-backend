@@ -140,6 +140,8 @@ test('a whitelist nao vaza campo alem do previsto', async () => {
     'id', 'nome', 'descricao', 'preco_mensal', 'modelo_cobranca',
     'preco_por_motorista', 'limite_motoristas', 'dias_trial', 'recursos',
     'ativo', 'categoria',
+    // Campos comerciais (mega-frente) — expostos de propósito à vitrine/cadastro.
+    'capacidade_inclusa', 'preco_motorista_extra', 'valor_implantacao', 'requer_negociacao',
   ].sort();
   const res = await chamar({});
   for (const plano of res.body.planos) {
