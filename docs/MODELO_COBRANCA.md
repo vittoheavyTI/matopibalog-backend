@@ -148,3 +148,41 @@ usa `plano.preco_mensal` do momento da emissão.**
 - `billing-health` sinaliza `categoria_incompativel` (crítico) e, desde a
   mega-frente, também `empresa_sem_plano` e `plano_inativo_ou_arquivado`
   (informativos) — ver [`RUNBOOK_APLICACAO_PRECOS.md`](RUNBOOK_APLICACAO_PRECOS.md) §Observabilidade.
+
+---
+
+## 9. Modelo comercial "base + capacidade inclusa + extra" (FASE 2 — estrutura, sem valores)
+
+> **Estado:** estrutura criada (migration 038 + `calculadoraComercialService.js`),
+> **nenhum valor comercial aplicado** ao catálogo. Os campos existem e o cálculo
+> está testado; preencher preços é frente à parte, com autorização.
+
+Os dois modelos do §2 (`fixo` e `por_motorista`) **não** descrevem um plano com
+uma **base que já inclui N motoristas** e um **preço só para o excedente**. Ex.:
+*Empresa Start = R$ 299,90 já com 5 inclusos; o 6º motorista custa +R$ 100,00.*
+Para isso, a `planos` ganhou campos **aditivos** (migration 038):
+
+| Campo | Papel |
+|-------|-------|
+| `capacidade_inclusa` | motoristas/caminhões cobertos pela base (`NULL` → cai para `limite_motoristas`, compat legado) |
+| `preco_motorista_extra` | unitário do extra acima da capacidade inclusa (`NULL` → plano não admite extra: autônomo/fixo) |
+| `limite_negociacao` | teto self-service; acima → sob proposta (`NULL` → usa o global de 40 do serviço) |
+| `requer_negociacao` | o plano é "sob proposta" (41+), sem preço de tabela |
+
+Regras (em [`backend/services/calculadoraComercialService.js`](../backend/services/calculadoraComercialService.js), **puro, em centavos inteiros**):
+
+- `qtd ≤ capacidade_inclusa` → total = base (sem extras);
+- `qtd > capacidade_inclusa` e há extra → total = base + `(qtd − inclusa) × extra`;
+- sem `preco_motorista_extra` e `qtd > inclusa` → plano **não acomoda** (o
+  recomendador aponta outro plano);
+- `qtd > 40` (global, sobrescrevível) → **`requer_negociacao`**, sem preço de tabela.
+
+`recomendarPlano({ planos, quantidade, planoAtualId })` compara o custo real (base
++ extras) entre os planos candidatos e devolve o **mais barato**, a **economia**
+frente ao plano atual e a **mensagem**. Empate de preço desempata pela **maior
+capacidade inclusa** (mais folga pelo mesmo valor) — não muda preço, só a sugestão.
+
+`preco_mensal` continua sendo o **valor final da BASE**; o extra é somado por fora
+pelo backend (autoridade). O snapshot comercial (`montarSnapshotComercial`) congela
+`capacidade_contratada`, `capacidade_inclusa`, `extras_qtd`, `extra_unitario` e o
+`plano_recomendado_id` no ato — mesma filosofia forward-only do §6.
