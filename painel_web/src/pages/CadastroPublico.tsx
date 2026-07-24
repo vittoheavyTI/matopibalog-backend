@@ -14,6 +14,16 @@ interface FormData {
   telefone: string;
   plano_id: string;   // UUID do catálogo público (preferido)
   plano: string;      // alias legado (fallback: basico/profissional/empresarial)
+  codigo_promocional: string;
+}
+
+interface PromoPreview {
+  valido: boolean;
+  campanha: string;
+  preco_original: number | null;
+  preco_promocional: number | null;
+  implantacao_original: number | null;
+  implantacao_promocional: number | null;
 }
 
 interface PlanoOpcao {
@@ -51,9 +61,12 @@ export const CadastroPublico: React.FC = () => {
   const [reenviando, setReenviando] = useState(false);
   const [reenvioMsg, setReenvioMsg] = useState('');
   const [catalogo, setCatalogo] = useState<PlanoOpcao[]>([]);
+  const [promoPreview, setPromoPreview] = useState<PromoPreview | null>(null);
+  const [promoErro, setPromoErro] = useState('');
+  const [validandoPromo, setValidandoPromo] = useState(false);
   const [form, setForm] = useState<FormData>({
     nome: '', email: '', senha: '', confirmarSenha: '',
-    empresa: '', cnpj: '', telefone: '', plano_id: '', plano: 'basico',
+    empresa: '', cnpj: '', telefone: '', plano_id: '', plano: 'basico', codigo_promocional: '',
   });
   // Sem auto-redirecionamento: o cadastro NÃO libera acesso imediato. O usuário
   // precisa confirmar o e-mail antes de entrar, então ele decide quando ir ao
@@ -109,6 +122,22 @@ export const CadastroPublico: React.FC = () => {
     return p.alias ? form.plano === p.alias : form.plano_id === p.id;
   }
 
+  async function validarPromo() {
+    const codigo = (form.codigo_promocional || '').trim();
+    setPromoErro(''); setPromoPreview(null);
+    if (!codigo) { setPromoErro('Informe o código.'); return; }
+    setValidandoPromo(true);
+    try {
+      const { data } = await api.post('/planos/validar-promocao', { codigo, plano_id: form.plano_id || undefined });
+      setPromoPreview(data);
+    } catch (err: unknown) {
+      const resp = (err as { response?: { data?: { message?: string } } })?.response;
+      setPromoErro(resp?.data?.message ?? 'Código inválido.');
+    } finally {
+      setValidandoPromo(false);
+    }
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -136,6 +165,7 @@ export const CadastroPublico: React.FC = () => {
       // Preferir plano_id (catálogo); cair para alias legado quando não houver.
       if (form.plano_id) payload.plano_id = form.plano_id;
       else if (form.plano) payload.plano = form.plano;
+      if (form.codigo_promocional && form.codigo_promocional.trim()) payload.codigo_promocional = form.codigo_promocional.trim();
       await api.post('/auth/register-empresa', payload);
       setSuccess('Sua conta foi criada.');
       setStep(3);
@@ -253,6 +283,41 @@ export const CadastroPublico: React.FC = () => {
                       </button>
                     ))}
                   </div>
+                </div>
+
+                {/* Código promocional (opcional) */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Código promocional (opcional)</label>
+                  <div className="flex gap-2">
+                    <input
+                      value={form.codigo_promocional}
+                      onChange={(e) => { updateField('codigo_promocional', e.target.value.toUpperCase()); setPromoPreview(null); setPromoErro(''); }}
+                      placeholder="EX: FEIRA2026"
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-xl font-mono text-sm"
+                    />
+                    <button type="button" onClick={validarPromo} disabled={validandoPromo}
+                      className="px-4 py-2 bg-gray-800 text-white rounded-xl text-sm font-medium disabled:opacity-50">
+                      {validandoPromo ? '...' : 'Aplicar'}
+                    </button>
+                  </div>
+                  {promoErro && <p className="mt-2 text-sm text-red-600">{promoErro}</p>}
+                  {promoPreview && promoPreview.valido && (
+                    <div className="mt-2 rounded-xl border border-green-300 bg-green-50 p-3 text-sm text-green-800">
+                      <div className="font-semibold">{promoPreview.campanha}</div>
+                      {promoPreview.preco_promocional != null && (
+                        <div>
+                          Mensalidade: <span className="line-through opacity-60">{precoBRL(promoPreview.preco_original || 0)}</span>{' '}
+                          <span className="font-bold">{precoBRL(promoPreview.preco_promocional)}</span>
+                        </div>
+                      )}
+                      {promoPreview.implantacao_promocional != null && (promoPreview.implantacao_original || 0) > 0 && (
+                        <div>
+                          Implantação: <span className="line-through opacity-60">{precoBRL(promoPreview.implantacao_original || 0)}</span>{' '}
+                          <span className="font-bold">{promoPreview.implantacao_promocional === 0 ? 'Grátis' : precoBRL(promoPreview.implantacao_promocional)}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
 
