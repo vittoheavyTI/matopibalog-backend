@@ -56,8 +56,29 @@ function categoriaDoPlano(empresa) {
   return plano ? plano.categoria : null;
 }
 
-function resumirBillingHealth({ faturas = [], empresas = [], webhookEvents = [], hoje = new Date() } = {}) {
+// paraData: normaliza timestamptz/Date para Date (ou null). Para comparar janela
+// de promoção (que tem hora), diferente de soData que compara só o dia.
+function paraDataHora(v) {
+  if (!v) return null;
+  const d = v instanceof Date ? v : new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function resumirBillingHealth({
+  faturas = [],
+  empresas = [],
+  webhookEvents = [],
+  // FASE 4 (mega-frente comercial) — entradas NOVAS, todas OPCIONAIS. Ausentes
+  // (tabelas ainda não provisionadas / rota antiga) → arrays vazios → nenhum
+  // sinal comercial dispara e `ok` fica idêntico ao de hoje. Fail-closed.
+  promocoes = [],
+  promocaoResgates = [],
+  planos = [],
+  contagemMotoristasPorEmpresa = {},
+  hoje = new Date(),
+} = {}) {
   const hojeStr = soData(hoje) || new Date().toISOString().slice(0, 10);
+  const agora = paraDataHora(hoje) || new Date();
 
   const totais = {
     total: faturas.length,
@@ -74,6 +95,7 @@ function resumirBillingHealth({ faturas = [], empresas = [], webhookEvents = [],
   const faturas_canceladas_sem_asaas_id = []; // canceladas/terminais sem asaas_id (informativo)
   const faturas_abertas_sem_link = [];
   const vencidas = [];
+  const implantacao_pendente = []; // faturas origem='implantacao' ainda abertas (informativo)
   const chavesPeriodo = new Map(); // "empresa|origem|periodo" → contagem
 
   for (const f of faturas) {
@@ -94,6 +116,10 @@ function resumirBillingHealth({ faturas = [], empresas = [], webhookEvents = [],
     const due = soData(f.due_date);
     if (STATUS_ABERTO.has(f.status) && due && due < hojeStr) {
       vencidas.push({ id: f.id, empresa_id: f.empresa_id, due_date: due, valor: Number(f.valor) || 0 });
+    }
+    // Implantação ainda em aberto (cobrança de aquisição não quitada).
+    if (f.origem === 'implantacao' && STATUS_ABERTO.has(f.status)) {
+      implantacao_pendente.push({ id: f.id, empresa_id: f.empresa_id, status: f.status, valor: Number(f.valor) || 0 });
     }
     // Duplicidade só faz sentido para faturas com origem+período (recorrente/regularizacao).
     if (f.origem && f.periodo_referencia) {
@@ -128,6 +154,10 @@ function resumirBillingHealth({ faturas = [], empresas = [], webhookEvents = [],
   const trial_vencido_sem_fatura = [];
   const assinatura_asaas_ativa = [];
   const suspension_reason_inconsistente = [];
+  // FASE 4 (comercial) — sinais informativos novos.
+  const empresas_sob_negociacao = [];            // conta em plano requer_negociacao=true
+  const empresas_plano_automatico_invalido = []; // conta cobrável em plano requer_negociacao (cron não deve cobrar)
+  const empresas_acima_capacidade = [];          // motoristas ativos > capacidade_inclusa do plano
   // Arquivadas: fora do escrutínio operacional (contas de teste tiradas da
   // operação). Contadas à parte, nunca como problema. Quando uma conta de teste é
   // arquivada, ela para de poluir suspensas_sem_fatura/categoria/etc.
@@ -182,6 +212,30 @@ function resumirBillingHealth({ faturas = [], empresas = [], webhookEvents = [],
       }
     }
 
+    // Plano marcado como "sob negociação" (41+): não deve ser contratado nem
+    // cobrado automaticamente. Informativo — o operador confere se é intencional.
+    if (plano && plano.requer_negociacao === true) {
+      empresas_sob_negociacao.push({ id: e.id, nome: e.nome, tipo: e.tipo, plano_nome: plano.nome || null, status: e.status });
+      // Subconjunto acionável: conta cobrável (ativo/trial) num plano sob
+      // negociação — o cron recorrente tentaria cobrar um preço que é "sob proposta".
+      if (STATUS_COBRAVEL_ESPERADO.has(e.status)) {
+        empresas_plano_automatico_invalido.push({ id: e.id, nome: e.nome, status: e.status, plano_nome: plano.nome || null });
+      }
+    }
+
+    // Motoristas ativos acima da capacidade inclusa do plano (só quando a contagem
+    // foi fornecida e o plano tem capacidade_inclusa — pós-migration 038).
+    if (plano && plano.capacidade_inclusa != null) {
+      const usados = Number(contagemMotoristasPorEmpresa[e.id]) || 0;
+      const inclusa = Number(plano.capacidade_inclusa);
+      if (Number.isFinite(inclusa) && usados > inclusa) {
+        empresas_acima_capacidade.push({
+          id: e.id, nome: e.nome, plano_nome: plano.nome || null,
+          motoristas: usados, capacidade_inclusa: inclusa, excedente: usados - inclusa,
+        });
+      }
+    }
+
     // Trial vencido ainda sem fatura de regularização (o job expirarTrials gera).
     const trialFim = soData(e.trial_ends_at);
     if (e.status === 'trial' && trialFim && trialFim < hojeStr && !abertasPorEmpresa.has(e.id)) {
@@ -194,6 +248,32 @@ function resumirBillingHealth({ faturas = [], empresas = [], webhookEvents = [],
       assinatura_asaas_ativa.push({ id: e.id, nome: e.nome, asaas_subscription_id: e.asaas_subscription_id });
     }
   }
+
+  // FASE 4 (comercial) — sinais de promoções e catálogo (fora dos loops acima).
+  const promocoes_ativas = [];
+  const promocoes_expiradas = [];
+  for (const p of promocoes) {
+    if (!p) continue;
+    const inicio = paraDataHora(p.data_inicio);
+    const fim = paraDataHora(p.data_fim);
+    const dentroDaJanela = (!inicio || inicio <= agora) && (!fim || agora <= fim);
+    if (p.ativo === true && dentroDaJanela) {
+      promocoes_ativas.push({ id: p.id, nome: p.nome, tipo: p.tipo, data_fim: p.data_fim });
+    }
+    if (fim && fim < agora) {
+      // Expirada, mas ainda com a flag ativo=true → candidata a desligar.
+      promocoes_expiradas.push({ id: p.id, nome: p.nome, ativa_ainda: p.ativo === true });
+    }
+  }
+  // Resgates aplicados MANUALMENTE pelo super-admin (inclui os pós-expiração).
+  const promocoes_aplicadas_manualmente = (Array.isArray(promocaoResgates) ? promocaoResgates : [])
+    .filter((r) => r && r.manual === true)
+    .map((r) => ({ promocao_id: r.promocao_id, empresa_id: r.empresa_id, criado_em: r.criado_em }));
+  // Planos "sob negociação" que estão ATIVOS no catálogo (não deveriam ser
+  // contratáveis automaticamente — o self-service os filtra).
+  const planos_requer_negociacao_ativos = (Array.isArray(planos) ? planos : [])
+    .filter((p) => p && p.requer_negociacao === true && p.ativo !== false)
+    .map((p) => ({ id: p.id, nome: p.nome }));
 
   // Webhook: contagem por status e lista de eventos com erro.
   const webhook_por_status = {};
@@ -236,6 +316,15 @@ function resumirBillingHealth({ faturas = [], empresas = [], webhookEvents = [],
       suspension_reason_inconsistente: suspension_reason_inconsistente.length,
       arquivadas: arquivadas.length,
       arquivadas_com_fatura_paga: arquivadas_com_fatura_paga.length,
+      // FASE 4 (comercial) — informativos.
+      implantacao_pendente: implantacao_pendente.length,
+      promocoes_ativas: promocoes_ativas.length,
+      promocoes_expiradas: promocoes_expiradas.length,
+      promocoes_aplicadas_manualmente: promocoes_aplicadas_manualmente.length,
+      planos_requer_negociacao_ativos: planos_requer_negociacao_ativos.length,
+      empresas_sob_negociacao: empresas_sob_negociacao.length,
+      empresas_plano_automatico_invalido: empresas_plano_automatico_invalido.length,
+      empresas_acima_capacidade: empresas_acima_capacidade.length,
     },
     detalhes: {
       faturas_sem_asaas_id,
@@ -254,6 +343,15 @@ function resumirBillingHealth({ faturas = [], empresas = [], webhookEvents = [],
       suspension_reason_inconsistente,
       arquivadas,
       arquivadas_com_fatura_paga,
+      // FASE 4 (comercial) — informativos.
+      implantacao_pendente,
+      promocoes_ativas,
+      promocoes_expiradas,
+      promocoes_aplicadas_manualmente,
+      planos_requer_negociacao_ativos,
+      empresas_sob_negociacao,
+      empresas_plano_automatico_invalido,
+      empresas_acima_capacidade,
       webhook_por_status,
     },
   };

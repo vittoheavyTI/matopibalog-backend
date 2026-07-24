@@ -286,3 +286,93 @@ test('sem arquivadas (coluna inexistente) → contador zerado, base intacta', ()
   assert.equal(r.contadores.arquivadas, 0);
   assert.equal(r.contadores.arquivadas_com_fatura_paga, 0);
 });
+
+// ─── FASE 4 (mega-frente comercial) — sinais comerciais ─────────────────────
+// Regra: são todos INFORMATIVOS — nunca derrubam `ok`. E sem as entradas novas,
+// nada muda em relação a hoje (compatibilidade).
+
+test('sem entradas comerciais, contadores novos ficam 0 e ok inalterado', () => {
+  const r = resumirBillingHealth({
+    faturas: [fatura({ status: 'pago', valor: 100 })],
+    empresas: [{ id: 'e1', nome: 'Alfa', tipo: 'transportadora', status: 'ativo', planos: { categoria: 'empresa' } }],
+    hoje: HOJE,
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.contadores.implantacao_pendente, 0);
+  assert.equal(r.contadores.promocoes_ativas, 0);
+  assert.equal(r.contadores.empresas_sob_negociacao, 0);
+  assert.equal(r.contadores.empresas_acima_capacidade, 0);
+});
+
+test('implantação em aberto entra em implantacao_pendente (informativo, ok=true)', () => {
+  const r = resumirBillingHealth({
+    faturas: [
+      fatura({ origem: 'implantacao', status: 'pendente', valor: 299 }),
+      fatura({ origem: 'implantacao', status: 'pago', valor: 299 }), // paga não conta
+    ],
+    hoje: HOJE,
+  });
+  assert.equal(r.contadores.implantacao_pendente, 1);
+  assert.equal(r.detalhes.implantacao_pendente[0].valor, 299);
+  assert.equal(r.ok, true);
+});
+
+test('promoções ativas x expiradas conforme a janela e a flag ativo', () => {
+  const r = resumirBillingHealth({
+    faturas: [],
+    promocoes: [
+      { id: 'p1', nome: 'Ativa', tipo: 'desconto_fixo_mensalidade', ativo: true, data_inicio: '2026-07-01T00:00:00Z', data_fim: '2026-07-31T23:59:59Z' },
+      { id: 'p2', nome: 'Expirada ativa', tipo: 'isencao_implantacao', ativo: true, data_inicio: '2026-06-01T00:00:00Z', data_fim: '2026-07-10T00:00:00Z' },
+      { id: 'p3', nome: 'Inativa futura', tipo: 'trial_estendido', ativo: false, data_inicio: '2026-08-01T00:00:00Z', data_fim: '2026-08-31T00:00:00Z' },
+    ],
+    hoje: HOJE, // 2026-07-22
+  });
+  assert.equal(r.contadores.promocoes_ativas, 1); // só p1
+  assert.equal(r.contadores.promocoes_expiradas, 1); // p2 (fim < hoje)
+  assert.equal(r.detalhes.promocoes_expiradas[0].ativa_ainda, true);
+  assert.equal(r.ok, true);
+});
+
+test('resgates manuais são contados', () => {
+  const r = resumirBillingHealth({
+    faturas: [],
+    promocaoResgates: [
+      { promocao_id: 'p1', empresa_id: 'e1', manual: true, criado_em: '2026-07-20' },
+      { promocao_id: 'p1', empresa_id: 'e2', manual: false, criado_em: '2026-07-20' },
+    ],
+    hoje: HOJE,
+  });
+  assert.equal(r.contadores.promocoes_aplicadas_manualmente, 1);
+});
+
+test('plano requer_negociacao: empresa sob negociação + subconjunto cobrável inválido + catálogo', () => {
+  const planoNeg = { id: 'pn', nome: 'Enterprise', categoria: 'empresa', requer_negociacao: true, ativo: true };
+  const r = resumirBillingHealth({
+    faturas: [],
+    empresas: [
+      { id: 'e1', nome: 'Big', tipo: 'transportadora', status: 'ativo', planos: planoNeg },
+      { id: 'e2', nome: 'BigSusp', tipo: 'transportadora', status: 'suspenso', planos: planoNeg },
+    ],
+    planos: [planoNeg, { id: 'p2', nome: 'Start', requer_negociacao: false, ativo: true }],
+    hoje: HOJE,
+  });
+  assert.equal(r.contadores.empresas_sob_negociacao, 2);
+  assert.equal(r.contadores.empresas_plano_automatico_invalido, 1); // só a ativa (cobrável)
+  assert.equal(r.contadores.planos_requer_negociacao_ativos, 1);
+  assert.equal(r.ok, true);
+});
+
+test('empresas acima da capacidade inclusa (motoristas > capacidade)', () => {
+  const r = resumirBillingHealth({
+    faturas: [],
+    empresas: [
+      { id: 'e1', nome: 'Cheia', tipo: 'transportadora', status: 'ativo', planos: { categoria: 'empresa', nome: 'Start', capacidade_inclusa: 5 } },
+      { id: 'e2', nome: 'Ok', tipo: 'transportadora', status: 'ativo', planos: { categoria: 'empresa', nome: 'Start', capacidade_inclusa: 5 } },
+    ],
+    contagemMotoristasPorEmpresa: { e1: 7, e2: 5 },
+    hoje: HOJE,
+  });
+  assert.equal(r.contadores.empresas_acima_capacidade, 1);
+  assert.equal(r.detalhes.empresas_acima_capacidade[0].excedente, 2);
+  assert.equal(r.ok, true);
+});

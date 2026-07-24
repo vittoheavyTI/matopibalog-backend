@@ -63,22 +63,45 @@ function checarCategoriaPlano(tipoEmpresa, categoriaPlano) {
 // incompatível). NÃO escreve nada e NÃO chama o Asaas.
 router.get('/billing-health', async (req, res) => {
   try {
-    const [faturasR, empresasR, eventosR] = await Promise.all([
+    const [faturasR, empresasR, eventosR, promocoesR, resgatesR, planosR, motoristasR] = await Promise.all([
       supabase.from('faturas').select('id, empresa_id, status, valor, origem, periodo_referencia, asaas_id, invoice_url, bank_slip_url, due_date, pago_em'),
-      // `*` (em vez de lista explícita) traz arquivada_em SÓ SE a coluna existir —
-      // deploy-safe: antes da migration 036 a coluna some do retorno sem erro.
-      supabase.from('empresas').select('*, planos(id, nome, categoria, ativo, arquivado_em, preco_mensal)'),
+      // `planos(*)` (em vez de lista explícita) traz capacidade_inclusa/
+      // requer_negociacao SÓ SE as colunas existirem — deploy-safe: antes da
+      // migration 038 elas somem do retorno sem erro (idem `*` em empresas p/ 036).
+      supabase.from('empresas').select('*, planos(*)'),
       supabase.from('asaas_webhook_events').select('event_type, status, last_error, asaas_payment_id').order('created_at', { ascending: false }).limit(500),
+      // FASE 4 (comercial) — leituras OPCIONAIS. Se a tabela ainda não existe
+      // (migration 040 pendente) ou dá erro, seguimos com [] (fail-closed).
+      supabase.from('promocoes').select('id, nome, tipo, ativo, data_inicio, data_fim'),
+      supabase.from('promocao_resgates').select('promocao_id, empresa_id, manual, criado_em'),
+      supabase.from('planos').select('*'),
+      supabase.from('motoristas').select('empresa_id, status_cadastro'),
     ]);
     if (faturasR.error) return res.status(500).json({ message: 'Erro ao ler faturas.' });
     if (empresasR.error) return res.status(500).json({ message: 'Erro ao ler empresas.' });
     // Eventos de webhook são opcionais: se a leitura falhar, seguimos sem eles.
     const webhookEvents = eventosR && !eventosR.error ? (eventosR.data || []) : [];
+    const promocoes = promocoesR && !promocoesR.error ? (promocoesR.data || []) : [];
+    const promocaoResgates = resgatesR && !resgatesR.error ? (resgatesR.data || []) : [];
+    const planos = planosR && !planosR.error ? (planosR.data || []) : [];
+    // Contagem de motoristas APROVADOS por empresa (base de "acima da capacidade").
+    const contagemMotoristasPorEmpresa = {};
+    if (motoristasR && !motoristasR.error) {
+      for (const m of motoristasR.data || []) {
+        if (!m || !m.empresa_id) continue;
+        if (m.status_cadastro && m.status_cadastro !== 'aprovado') continue;
+        contagemMotoristasPorEmpresa[m.empresa_id] = (contagemMotoristasPorEmpresa[m.empresa_id] || 0) + 1;
+      }
+    }
 
     const resumo = resumirBillingHealth({
       faturas: faturasR.data || [],
       empresas: empresasR.data || [],
       webhookEvents,
+      promocoes,
+      promocaoResgates,
+      planos,
+      contagemMotoristasPorEmpresa,
     });
     if (eventosR && eventosR.error) resumo.aviso_webhook = 'nao_foi_possivel_ler_eventos_webhook';
     return res.json(resumo);
