@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Shield, Search, Plus, X, Check, AlertTriangle, Eye, Ban, Unlock, Trash2, KeyRound, CalendarClock, UserPlus, CreditCard } from 'lucide-react';
+import { Shield, Search, Plus, X, Check, AlertTriangle, Eye, Ban, Unlock, Trash2, KeyRound, CalendarClock, UserPlus, CreditCard, Archive, ArchiveRestore } from 'lucide-react';
 import api from '../api';
 import { maskCNPJ, maskCPF, maskPhone } from '../utils/masks';
 
@@ -75,8 +75,14 @@ export const PainelEmpresas: React.FC = () => {
   const [customDate, setCustomDate] = useState('');
   const [confirmAtivo, setConfirmAtivo] = useState(false);
   const [toast, setToast] = useState<{ message: string; tipo: 'sucesso' | 'erro' } | null>(null);
+  // Arquivamento: por padrão a listagem oculta arquivadas; o toggle traz todas.
+  const [showArchived, setShowArchived] = useState(false);
+  const [archiveTarget, setArchiveTarget] = useState<any>(null);
+  const [archiveMotivo, setArchiveMotivo] = useState('');
 
-  useEffect(() => { carregar(); carregarPlanos(); carregarAdmins(); }, []);
+  useEffect(() => { carregarPlanos(); carregarAdmins(); }, []);
+  // Recarrega a lista quando alterna "mostrar arquivadas" (roda também na montagem).
+  useEffect(() => { carregar(); }, [showArchived]);
 
   // Auto-dismiss do toast: some sozinho após 3,5s. Cada novo toast reinicia o
   // timer (o cleanup limpa o anterior) e o unmount também limpa — evita a
@@ -88,8 +94,24 @@ export const PainelEmpresas: React.FC = () => {
   }, [toast]);
 
   async function carregar() {
-    const response = await api.get('/painel-admin/empresas');
+    const response = await api.get('/painel-admin/empresas' + (showArchived ? '?includeArchived=true' : ''));
     setEmpresas(response.data || []);
+  }
+
+  // Arquivar/restaurar conta. Arquivar tira da operação SEM apagar nada (faturas e
+  // histórico permanecem); restaurar traz de volta. Ortogonal a suspensão.
+  async function confirmarArquivar() {
+    if (!archiveTarget) return;
+    const arquivando = !archiveTarget.arquivada_em;
+    try {
+      await api.put('/painel-admin/empresas/' + archiveTarget.id,
+        arquivando ? { arquivar: true, motivo: archiveMotivo.trim() || null } : { arquivar: false });
+    } catch {
+      setToast({ message: arquivando ? 'Erro ao arquivar' : 'Erro ao restaurar', tipo: 'erro' });
+      return;
+    }
+    setToast({ message: arquivando ? 'Conta arquivada!' : 'Conta restaurada!', tipo: 'sucesso' });
+    setArchiveTarget(null); setArchiveMotivo(''); carregar();
   }
 
   // Uma única consulta de usuários (super-admin recebe todos, com empresa_id + tipo).
@@ -263,6 +285,13 @@ export const PainelEmpresas: React.FC = () => {
             <option value="empresas">Empresas</option>
             <option value="autonomos">Autônomos</option>
           </select>
+          <button
+            onClick={() => setShowArchived(v => !v)}
+            title={showArchived ? 'Ocultar contas arquivadas' : 'Mostrar contas arquivadas'}
+            className={`flex items-center gap-1.5 border rounded-xl px-3 py-2.5 text-sm font-medium shadow-sm ${showArchived ? 'bg-slate-700 text-white border-slate-700' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+          >
+            <Archive size={16} /> {showArchived ? 'Ocultando operação' : 'Mostrar arquivadas'}
+          </button>
         </div>
         <button onClick={() => { setEditing(null); setFormDados({ nome: '', cnpj: '', email: '', telefone: '', plano_id: '', tipo: 'transportadora' }); setShowModal(true); }} className="flex items-center px-4 py-2.5 bg-green-700 text-white rounded-xl font-medium text-sm hover:bg-green-800 active:scale-95"><Plus size={18} className="mr-1.5" /> Nova Conta</button>
       </div>
@@ -310,6 +339,9 @@ export const PainelEmpresas: React.FC = () => {
                 </td>
                 <td className="px-4 py-2.5">
                   <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest ${e.status === 'ativo' ? 'bg-green-50 text-green-700' : e.status === 'trial' ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-700'}`}>{e.status}</span>
+                  {e.arquivada_em && (
+                    <span className="ml-1 px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest bg-slate-100 text-slate-600" title={`Arquivada em ${formatData(e.arquivada_em)}`}>Arquivada</span>
+                  )}
                   <div className="mt-1 text-[10px] font-semibold">
                     {e.trial_ends_at
                       ? (trialVencido(e.trial_ends_at)
@@ -324,6 +356,7 @@ export const PainelEmpresas: React.FC = () => {
                     <button onClick={() => suspender(e.id)} title={e.status === 'suspenso' ? 'Reativar empresa' : 'Suspender empresa'} aria-label={e.status === 'suspenso' ? 'Reativar empresa' : 'Suspender empresa'} className="p-1.5 text-orange-500 hover:bg-orange-50 rounded-lg">{e.status === 'suspenso' ? <Unlock size={16} /> : <Ban size={16} />}</button>
                     <button onClick={() => { setTrialTarget(e); setCustomDate(''); setConfirmAtivo(false); }} title="Gerenciar trial" aria-label="Gerenciar trial da empresa" className="p-1.5 text-amber-600 hover:bg-amber-50 rounded-lg"><CalendarClock size={16} /></button>
                     <button onClick={() => resetSenhaAdmin(e.id, e.nome)} className="p-1.5 text-gray-500 hover:bg-gray-100 rounded-lg" title="Resetar senha do admin" aria-label="Resetar senha do admin"><KeyRound size={16} /></button>
+                    <button onClick={() => { setArchiveTarget(e); setArchiveMotivo(''); }} title={e.arquivada_em ? 'Restaurar conta' : 'Arquivar conta (tira da operação, mantém histórico)'} aria-label={e.arquivada_em ? 'Restaurar conta' : 'Arquivar conta'} className="p-1.5 text-slate-500 hover:bg-slate-100 rounded-lg">{e.arquivada_em ? <ArchiveRestore size={16} /> : <Archive size={16} />}</button>
                     <button onClick={() => setDeleteTarget(e)} title="Excluir empresa" aria-label="Excluir empresa" className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg"><Trash2 size={16} /></button>
                     {(() => {
                       const { showAction } = estadoAssinatura(e);
@@ -432,6 +465,51 @@ export const PainelEmpresas: React.FC = () => {
             <div className="p-4 bg-gray-50 border-t flex justify-end gap-3">
               <button onClick={() => setDeleteTarget(null)} className="px-5 py-2.5 font-bold text-gray-500 hover:bg-gray-200 rounded-xl">Cancelar</button>
               <button onClick={excluir} className="flex items-center px-6 py-2.5 bg-red-600 text-white font-bold rounded-xl shadow hover:bg-red-700"><Trash2 size={18} className="mr-2" /> Excluir</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {archiveTarget && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+            <div className="p-6 space-y-4">
+              <div className="flex flex-col items-center text-center space-y-3">
+                <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center">
+                  {archiveTarget.arquivada_em ? <ArchiveRestore size={30} className="text-slate-600" /> : <Archive size={30} className="text-slate-600" />}
+                </div>
+                <h3 className="text-xl font-bold text-gray-800">{archiveTarget.arquivada_em ? 'Restaurar conta' : 'Arquivar conta'}</h3>
+                <p className="text-gray-500 text-sm">
+                  <strong className="text-gray-800">{archiveTarget.nome}</strong>
+                </p>
+              </div>
+              {archiveTarget.arquivada_em ? (
+                <p className="text-sm text-gray-600 bg-slate-50 rounded-xl p-3">
+                  Traz a conta de volta para a operação e para a listagem padrão. Nenhum dado foi perdido.
+                </p>
+              ) : (
+                <>
+                  <div className="text-sm text-gray-600 bg-amber-50/60 border border-amber-100 rounded-xl p-3 space-y-1">
+                    <p><strong>Não apaga nada.</strong> Faturas e histórico permanecem.</p>
+                    <p>Tira a conta da operação: some da listagem padrão, dos jobs de cobrança/trial e do escrutínio do billing-health.</p>
+                    <p>É reversível a qualquer momento (Restaurar).</p>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold uppercase text-gray-400 mb-1">Motivo (opcional)</label>
+                    <input
+                      type="text" value={archiveMotivo} onChange={ev => setArchiveMotivo(ev.target.value)}
+                      placeholder="ex.: conta de teste"
+                      className="w-full border-2 border-gray-100 rounded-xl p-2.5 outline-none focus:border-slate-400 bg-gray-50/50 text-sm"
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+            <div className="p-4 bg-gray-50 border-t flex justify-end gap-3">
+              <button onClick={() => { setArchiveTarget(null); setArchiveMotivo(''); }} className="px-5 py-2.5 font-bold text-gray-500 hover:bg-gray-200 rounded-xl">Cancelar</button>
+              <button onClick={confirmarArquivar} className="flex items-center px-6 py-2.5 bg-slate-700 text-white font-bold rounded-xl shadow hover:bg-slate-800">
+                {archiveTarget.arquivada_em ? <><ArchiveRestore size={18} className="mr-2" /> Restaurar</> : <><Archive size={18} className="mr-2" /> Arquivar</>}
+              </button>
             </div>
           </div>
         </div>
