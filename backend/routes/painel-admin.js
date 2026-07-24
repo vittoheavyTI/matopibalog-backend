@@ -417,7 +417,8 @@ router.put('/planos/:id', async (req, res) => {
       const afetadas = asaasSync.empresasAfetadasPorPlano({ empresas: empresas || [], planoId: req.params.id });
       if (afetadas.length > 0) {
         const subById = new Map((empresas || []).map((e) => [e.id, e.asaas_subscription_id || null]));
-        const linhas = afetadas.map((id) => asaasSync.montarEstadoPendente({ empresaId: id, motivo: 'plano_reprecificado', asaasSubscriptionId: subById.get(id) }));
+        const valorAlvo = Number(upd.preco_mensal);
+        const linhas = afetadas.map((id) => asaasSync.montarEstadoPendente({ empresaId: id, motivo: 'plano_reprecificado', valorAlvo: Number.isFinite(valorAlvo) ? valorAlvo : null, asaasSubscriptionId: subById.get(id) }));
         await supabase.from('asaas_sync_estado').upsert(linhas, { onConflict: 'empresa_id' });
       }
     } catch (_) { /* migration 042 ausente ou falha transitória — não bloqueia a edição */ }
