@@ -435,3 +435,49 @@ test('assinatura existente com plano inválido (sob negociação) → empresa_co
   assert.equal(r.contadores.empresa_com_assinatura_mas_plano_invalido, 1);
   assert.equal(r.ok, true);
 });
+
+// ─── Extras por empresa (quantidade contratada) — informativos ──────────────
+test('sinais de quantidade contratada: null, < motoristas, >40, upgrade recomendado', () => {
+  const START = { id: 'start', nome: 'Start', categoria: 'empresa', preco_mensal: 299.90, capacidade_inclusa: 5, preco_motorista_extra: 100, ativo: true };
+  const ESSENCIAL = { id: 'essencial', nome: 'Essencial', categoria: 'empresa', preco_mensal: 499.90, capacidade_inclusa: 10, preco_motorista_extra: 90, ativo: true };
+  const r = resumirBillingHealth({
+    faturas: [],
+    empresas: [
+      // sem quantidade → null
+      { id: 'e1', nome: 'SemQtd', tipo: 'transportadora', status: 'ativo', planos: START },
+      // 15 contratados no Start → upgrade recomendado (Growth/Essencial) + acima? 15<=40
+      { id: 'e2', nome: 'Muitos', tipo: 'transportadora', status: 'ativo', quantidade_contratada: 15, planos: START },
+      // quantidade 3 < 6 motoristas ativos
+      { id: 'e3', nome: 'Menor', tipo: 'transportadora', status: 'ativo', quantidade_contratada: 3, planos: START },
+    ],
+    planos: [START, ESSENCIAL],
+    contagemMotoristasPorEmpresa: { e3: 6 },
+    hoje: HOJE,
+  });
+  assert.equal(r.contadores.empresa_quantidade_contratada_null, 1);
+  assert.equal(r.contadores.empresa_quantidade_contratada_menor_que_motoristas_ativos, 1);
+  assert.equal(r.contadores.empresa_upgrade_recomendado >= 1, true); // e2 (15 no Start) recomenda outro
+  assert.equal(r.ok, true);
+});
+
+test('quantidade contratada acima do teto self-service (>40) é sinalizada', () => {
+  const SCALE = { id: 'scale', nome: 'Scale', categoria: 'empresa', preco_mensal: 1199.90, capacidade_inclusa: 40, preco_motorista_extra: 70, ativo: true };
+  const r = resumirBillingHealth({
+    faturas: [],
+    empresas: [{ id: 'e1', nome: 'Grande', tipo: 'transportadora', status: 'ativo', quantidade_contratada: 45, planos: SCALE }],
+    planos: [SCALE],
+    hoje: HOJE,
+  });
+  assert.equal(r.contadores.empresa_quantidade_contratada_acima_limite_self_service, 1);
+});
+
+test('sem quantidade contratada em nenhuma empresa → contadores 0, ok inalterado', () => {
+  const r = resumirBillingHealth({
+    faturas: [fatura({ status: 'pago', valor: 100 })],
+    empresas: [{ id: 'e1', nome: 'Alfa', tipo: 'transportadora', status: 'ativo', planos: { categoria: 'empresa' } }],
+    hoje: HOJE,
+  });
+  assert.equal(r.contadores.empresa_quantidade_contratada_null, 0);
+  assert.equal(r.contadores.empresa_upgrade_recomendado, 0);
+  assert.equal(r.ok, true);
+});
