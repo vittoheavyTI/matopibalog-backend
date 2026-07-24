@@ -1018,9 +1018,13 @@ router.post('/asaas-sync/marcar', verifyToken, isSuperAdmin, async (req, res) =>
   const afetadas = asaasSync.empresasAfetadasPorPlano({ empresas: empresas || [], planoId: plano_id });
   if (afetadas.length === 0) return res.json({ marcadas: 0, empresas: [] });
 
+  // Valor-alvo = preço atual do plano (autoridade do backend). Preenche a fila.
+  const { data: planoRow } = await supabase.from('planos').select('preco_mensal').eq('id', plano_id).maybeSingle();
+  const valorAlvo = planoRow && planoRow.preco_mensal != null ? Number(planoRow.preco_mensal) : null;
+
   const subById = new Map((empresas || []).map((e) => [e.id, e.asaas_subscription_id || null]));
   const linhas = afetadas.map((id) =>
-    asaasSync.montarEstadoPendente({ empresaId: id, motivo, asaasSubscriptionId: subById.get(id) }));
+    asaasSync.montarEstadoPendente({ empresaId: id, motivo, valorAlvo, asaasSubscriptionId: subById.get(id) }));
   const { error: upErr } = await supabase.from('asaas_sync_estado').upsert(linhas, { onConflict: 'empresa_id' });
   if (upErr) {
     if (tabelaSyncAusente(upErr)) return res.status(503).json({ message: 'Sync Asaas ainda não provisionado (migration 042 pendente).' });
