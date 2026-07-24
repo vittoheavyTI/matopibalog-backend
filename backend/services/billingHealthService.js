@@ -128,8 +128,21 @@ function resumirBillingHealth({ faturas = [], empresas = [], webhookEvents = [],
   const trial_vencido_sem_fatura = [];
   const assinatura_asaas_ativa = [];
   const suspension_reason_inconsistente = [];
+  // Arquivadas: fora do escrutínio operacional (contas de teste tiradas da
+  // operação). Contadas à parte, nunca como problema. Quando uma conta de teste é
+  // arquivada, ela para de poluir suspensas_sem_fatura/categoria/etc.
+  const arquivadas = [];
+  const arquivadas_com_fatura_paga = [];
 
   for (const e of empresas) {
+    // arquivada_em só existe após a migration 036; antes disso é undefined e
+    // nenhuma empresa entra aqui (comportamento idêntico ao de hoje).
+    if (e.arquivada_em != null) {
+      arquivadas.push({ id: e.id, nome: e.nome, tipo: e.tipo });
+      if (pagasPorEmpresa.has(e.id)) arquivadas_com_fatura_paga.push({ id: e.id, nome: e.nome });
+      continue; // não conta em nenhum outro sinal operacional
+    }
+
     if (e.status === 'suspenso') {
       if (!abertasPorEmpresa.has(e.id)) {
         suspensas_sem_fatura.push({ id: e.id, nome: e.nome, tipo: e.tipo, suspension_reason: e.suspension_reason });
@@ -221,6 +234,8 @@ function resumirBillingHealth({ faturas = [], empresas = [], webhookEvents = [],
       trial_vencido_sem_fatura: trial_vencido_sem_fatura.length,
       assinatura_asaas_ativa: assinatura_asaas_ativa.length,
       suspension_reason_inconsistente: suspension_reason_inconsistente.length,
+      arquivadas: arquivadas.length,
+      arquivadas_com_fatura_paga: arquivadas_com_fatura_paga.length,
     },
     detalhes: {
       faturas_sem_asaas_id,
@@ -237,6 +252,8 @@ function resumirBillingHealth({ faturas = [], empresas = [], webhookEvents = [],
       trial_vencido_sem_fatura,
       assinatura_asaas_ativa,
       suspension_reason_inconsistente,
+      arquivadas,
+      arquivadas_com_fatura_paga,
       webhook_por_status,
     },
   };

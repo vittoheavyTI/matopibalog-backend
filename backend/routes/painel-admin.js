@@ -6,6 +6,7 @@ const { criarEmpresaCompleta } = require('../services/empresaService');
 const { plano_idValido, normalizarPlanoId } = require('../utils/plano');
 const { conflitoUnico } = require('../utils/pgError');
 const { montarPatchArquivamento, excluirPlano } = require('../services/planoAdminService');
+const { aplicarFiltroArquivamento, montarPatchArquivamentoEmpresa } = require('../services/empresaArquivamentoService');
 const {
   bodyTocaPreco,
   decidirEdicaoPreco,
@@ -56,7 +57,9 @@ router.get('/billing-health', async (req, res) => {
   try {
     const [faturasR, empresasR, eventosR] = await Promise.all([
       supabase.from('faturas').select('id, empresa_id, status, valor, origem, periodo_referencia, asaas_id, invoice_url, bank_slip_url, due_date, pago_em'),
-      supabase.from('empresas').select('id, nome, tipo, status, suspension_reason, plano_id, trial_ends_at, asaas_subscription_id, planos(id, nome, categoria, ativo, arquivado_em, preco_mensal)'),
+      // `*` (em vez de lista explícita) traz arquivada_em SÓ SE a coluna existir —
+      // deploy-safe: antes da migration 036 a coluna some do retorno sem erro.
+      supabase.from('empresas').select('*, planos(id, nome, categoria, ativo, arquivado_em, preco_mensal)'),
       supabase.from('asaas_webhook_events').select('event_type, status, last_error, asaas_payment_id').order('created_at', { ascending: false }).limit(500),
     ]);
     if (faturasR.error) return res.status(500).json({ message: 'Erro ao ler faturas.' });
@@ -93,10 +96,16 @@ router.get('/dashboard', async (req, res) => {
 });
 
 // EMPRESAS
+// Por padrão a listagem OCULTA empresas arquivadas (contas de teste tiradas da
+// operação). `?includeArchived=true` (super-admin, herdado do router.use) traz
+// todas — para a visão de "Arquivadas" no painel. O filtro é em nível de aplicação
+// (empresaArquivamentoService): onde a coluna arquivada_em ainda não existe, nada
+// é filtrado e o comportamento é idêntico ao de hoje.
 router.get('/empresas', async (req, res) => {
   const { data, error } = await supabase.from('empresas').select('*, planos(id, nome, preco_mensal)').order('created_at', { ascending: false });
   if (error) return res.status(500).json({ message: 'Erro ao listar empresas.' });
-  res.json(data);
+  const includeArchived = req.query.includeArchived === 'true';
+  res.json(aplicarFiltroArquivamento(data || [], { includeArchived }));
 });
 
 router.post('/empresas', async (req, res) => {
@@ -163,6 +172,9 @@ router.put('/empresas/:id', async (req, res) => {
     upd.plano_id = r.plano_id;
   }
   if (req.body.status !== undefined) upd.status = req.body.status;
+  // Arquivar/desarquivar (autoria vem do token, nunca do body). Ortogonal a
+  // status — arquivar NÃO altera suspensão. Mesmo padrão dos planos (frente #6).
+  Object.assign(upd, montarPatchArquivamentoEmpresa(req.body, req.user.uid));
   const { data, error } = await supabase.from('empresas').update(upd).eq('id', req.params.id).select().single();
   if (error) {
     // Trocar o documento para um já usado por outra conta → 409 amigável.

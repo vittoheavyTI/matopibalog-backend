@@ -240,3 +240,49 @@ test('suspensa com motivo válido (financial) NÃO é inconsistente', () => {
   });
   assert.equal(r.contadores.suspension_reason_inconsistente, 0);
 });
+
+// ─── Arquivadas: fora do escrutínio operacional (mega-frente higiene) ─────────
+
+test('empresa arquivada é contada como arquivada e SAI dos outros sinais', () => {
+  // Conta de teste arquivada: suspensa, sem plano, sem motivo — nada disso deve
+  // pontuar, porque ela está fora da operação.
+  const r = resumirBillingHealth({
+    faturas: [],
+    empresas: [{
+      id: 'e1', nome: 'TesteArquivada', tipo: 'transportadora', status: 'suspenso',
+      suspension_reason: null, plano_id: null, planos: null,
+      arquivada_em: '2026-07-24T00:00:00Z',
+    }],
+    hoje: HOJE,
+  });
+  assert.equal(r.contadores.arquivadas, 1);
+  assert.equal(r.detalhes.arquivadas[0].nome, 'TesteArquivada');
+  assert.equal(r.contadores.suspensas_sem_fatura, 0, 'arquivada não polui suspensas_sem_fatura');
+  assert.equal(r.contadores.empresa_sem_plano, 0, 'arquivada não polui empresa_sem_plano');
+  assert.equal(r.contadores.suspension_reason_inconsistente, 0);
+  assert.equal(r.ok, true);
+});
+
+test('arquivada com fatura paga entra no sinal arquivadas_com_fatura_paga', () => {
+  const r = resumirBillingHealth({
+    faturas: [{ ...fatura({ status: 'pago', valor: 100 }), empresa_id: 'e1' }],
+    empresas: [{ id: 'e1', nome: 'ArqPaga', tipo: 'transportadora', status: 'ativo', arquivada_em: '2026-07-24T00:00:00Z', planos: null }],
+    hoje: HOJE,
+  });
+  assert.equal(r.contadores.arquivadas, 1);
+  assert.equal(r.contadores.arquivadas_com_fatura_paga, 1);
+  assert.equal(r.detalhes.arquivadas_com_fatura_paga[0].nome, 'ArqPaga');
+  // A fatura paga ainda soma no total_pago (histórico preservado).
+  assert.equal(r.totais.total_pago, 100);
+  assert.equal(r.ok, true);
+});
+
+test('sem arquivadas (coluna inexistente) → contador zerado, base intacta', () => {
+  const r = resumirBillingHealth({
+    faturas: [],
+    empresas: [{ id: 'e1', nome: 'Normal', tipo: 'transportadora', status: 'ativo', planos: { categoria: 'empresa' } }],
+    hoje: HOJE,
+  });
+  assert.equal(r.contadores.arquivadas, 0);
+  assert.equal(r.contadores.arquivadas_com_fatura_paga, 0);
+});
