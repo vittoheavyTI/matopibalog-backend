@@ -1,8 +1,25 @@
 # Runbook — Promoções / Tickets / Códigos de campanha
 
 > **Estado:** motor criado (migration 040 + `promocaoDomainService.js`, puro e
-> testado). **Nenhuma promoção real cadastrada**, migration **não aplicada**,
-> endpoints/painel entram nas fases seguintes. Nada de Asaas/cobrança real.
+> testado) **e endpoints super-admin fiados** (`routes/painel-admin.js`, adaptadores
+> finos sobre o serviço puro). **Nenhuma promoção real cadastrada**, migration
+> **não aplicada** — os endpoints respondem **503** ("não provisionado") até a 040
+> ser aplicada. Painel entra na fase seguinte. Nada de Asaas/cobrança real.
+
+## Endpoints super-admin (todos sob `/painel-admin`, guardados por `isSuperAdmin`)
+
+| Método | Rota | Papel |
+|--------|------|-------|
+| `GET` | `/planos/recomendar?quantidade=&planoAtualId=` | recomenda plano mais barato (FASE 3) |
+| `POST` | `/promocoes` | criar campanha |
+| `GET` | `/promocoes` | listar campanhas (com códigos) |
+| `PATCH` | `/promocoes/:id` | ativar/desativar, editar datas/limites |
+| `POST` | `/promocoes/:id/codigos` | gerar código/ticket |
+| `POST` | `/promocoes/validar` | validar código (preview, read-only) |
+| `POST` | `/promocoes/:id/aplicar` | aplicar **manual** a uma empresa (auditoria) |
+
+Enquanto a migration 040 não é aplicada, os endpoints de promoção retornam
+**503** de forma amigável (sem quebrar o painel).
 
 ## Modelo (3 tabelas — migration 040)
 
