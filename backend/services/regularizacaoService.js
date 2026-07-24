@@ -17,6 +17,7 @@ const {
 } = require('./regularizacaoDomainService');
 const { garantirCustomer } = require('./asaasSubscriptionService');
 const { ajustarValorPorResgate } = require('./promocaoDomainService');
+const { derivarValorEfetivoFatura } = require('./calculadoraComercialService');
 const { buscarPaymentPorReferencia } = require('./faturaRecorrenteService');
 const { normalizarStatusAsaas } = require('./paymentDomainService');
 const { podeCriarCobranca, MOTIVO_CADASTRO_INCOMPLETO } = require('../utils/cadastroAsaas');
@@ -34,10 +35,11 @@ function erroServico(motivo, recuperavel = false) {
 
 // Colunas da empresa: elegibilidade + metadados de suspensão + o que
 // garantirCustomer precisa. Plano no join, formato do domínio.
+// `*` no empresa: deploy-safe para quantidade_contratada (traz a coluna só quando
+// a migration 044 existir; antes vem undefined → fallback preco_mensal). O join
+// de planos ganha capacidade_inclusa/preco_motorista_extra (038 já aplicada).
 const SELECT_EMPRESA_REGULARIZACAO =
-  'id, status, trial_ends_at, suspension_reason, suspension_source, ' +
-  'asaas_customer_id, asaas_subscription_id, plano_id, nome, cnpj, email_contato, telefone_contato, ' +
-  'planos(id, nome, ativo, arquivado_em, preco_mensal, modelo_cobranca, preco_por_motorista, limite_motoristas)';
+  '*, planos(id, nome, ativo, arquivado_em, preco_mensal, modelo_cobranca, preco_por_motorista, limite_motoristas, capacidade_inclusa, preco_motorista_extra)';
 
 function planoDe(empresa) {
   const p = empresa && empresa.planos;
@@ -204,7 +206,12 @@ async function gerarFaturaRegularizacao({ supabase, http, config, empresaId, dat
     };
   }
 
-  const payload = montarPayloadFaturaRegularizacao({ empresa, plano, dataReferencia });
+  // Valor EFETIVO (base + extras) pela quantidade CONTRATADA da empresa
+  // (mega-frente extras). Forward-safe: sem quantidade_contratada / plano que não
+  // acomoda → { valorEfetivo:null } → cai para plano.preco_mensal (comportamento
+  // anterior). Autônomo não tem extra (o helper garante).
+  const { valorEfetivo, extras } = derivarValorEfetivoFatura({ plano, quantidade_contratada: empresa && empresa.quantidade_contratada });
+  const payload = montarPayloadFaturaRegularizacao({ empresa, plano, dataReferencia, valorEfetivo, extras });
 
   // Promoção pendente (mega-frente comercial): resgate gravado no cadastro
   // (fatura_id NULL, alvo 'mensalidade') desconta ESTA fatura (a 1ª) e é
