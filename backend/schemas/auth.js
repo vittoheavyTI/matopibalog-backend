@@ -52,6 +52,9 @@ const registerEmpresaSchema = z.object({
   // plano_id (UUID do catálogo público) tem precedência; `plano` (alias legado) é fallback.
   plano_id: planoIdSchema.optional(),
   plano: z.enum(['basico', 'profissional', 'empresarial']).optional(),
+  // Código promocional opcional (mega-frente comercial). Validado/aplicado no
+  // controller; código inválido NÃO bloqueia o cadastro.
+  codigo_promocional: z.string().max(40).optional(),
 });
 
 module.exports = { loginSchema, registerSchema, esqueceuSenhaSchema, resetSenhaSchema, registerEmpresaSchema };

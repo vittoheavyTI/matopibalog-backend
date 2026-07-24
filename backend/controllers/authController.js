@@ -728,6 +728,38 @@ exports.registerEmpresa = async (req, res) => {
       return res.status(500).json({ message: 'Erro ao salvar dados do usuário.' });
     }
 
+    // Código promocional (mega-frente comercial): registra um RESGATE pendente
+    // (fatura_id NULL) com o snapshot do preço promocional. É consumido quando a
+    // 1ª fatura for gerada. Best-effort e DEFENSIVO: código inválido/expirado ou
+    // tabela ausente NÃO bloqueia o cadastro (que já foi concluído acima).
+    let promocao_aplicada = null;
+    const codigoPromo = req.body && req.body.codigo_promocional;
+    if (codigoPromo) {
+      try {
+        const { normalizarCodigo, avaliarResgate, aplicarPromocao, montarResgate } = require('../services/promocaoDomainService');
+        const codigo = normalizarCodigo(codigoPromo);
+        const { data: cod } = await supabase.from('promocao_codigos').select('*, promocoes(*)').ilike('codigo', codigo).maybeSingle();
+        if (cod && cod.promocoes) {
+          const promocao = cod.promocoes;
+          const { data: planoRow } = await supabase.from('planos').select('id, preco_mensal, valor_implantacao').eq('id', empresaData.plano_id).maybeSingle();
+          const aval = avaliarResgate({ promocao, codigoRegistro: cod, empresa: { id: empresaData.id }, planoEscolhidoId: empresaData.plano_id || null, resgatesDaEmpresa: [], agora: new Date(), manual: false });
+          if (aval.ok && planoRow) {
+            const efeito = aplicarPromocao({ promocao, precoMensalidade: Number(planoRow.preco_mensal), valorImplantacao: planoRow.valor_implantacao != null ? Number(planoRow.valor_implantacao) : null });
+            if (efeito.ok) {
+              const resgate = montarResgate({ promocao, codigoRegistro: cod, empresa: { id: empresaData.id }, aplicadoPor: null, manual: false, efeito, motivo: 'cadastro', precoOriginal: Number(planoRow.preco_mensal) });
+              await supabase.from('promocao_resgates').insert(resgate); // fatura_id NULL = pendente
+              // Contadores de uso (best-effort).
+              await supabase.from('promocoes').update({ usos_total: (Number(promocao.usos_total) || 0) + 1 }).eq('id', promocao.id);
+              if (cod.limite_usos != null) await supabase.from('promocao_codigos').update({ usos: (Number(cod.usos) || 0) + 1 }).eq('id', cod.id);
+              promocao_aplicada = { tipo: promocao.tipo, campanha: promocao.nome, preco_promocional: efeito.mensalidade_final, implantacao_promocional: efeito.implantacao_final };
+            }
+          }
+        }
+      } catch (promoErr) {
+        console.error('[registerEmpresa] promo (não-fatal):', promoErr.message);
+      }
+    }
+
     // Dispara o e-mail de confirmação (não-fatal) e sinaliza pendência ao cliente.
     await enviarConfirmacaoEmail(email);
 
@@ -735,6 +767,7 @@ exports.registerEmpresa = async (req, res) => {
       message: 'Cadastro realizado com sucesso!',
       empresa_id: empresaData.id,
       email_confirmacao_pendente: true,
+      promocao_aplicada,
     });
   } catch (err) {
     console.error('Erro no register-empresa:', err);
