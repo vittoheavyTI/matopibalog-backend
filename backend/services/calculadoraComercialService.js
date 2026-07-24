@@ -388,11 +388,55 @@ function recomendarPlano({ planos, quantidade, planoAtualId = null, limiteNegoci
   };
 }
 
+// ─── VALOR EFETIVO da empresa (base + extras) — MEGA-FRENTE extras por empresa ─
+// Combina calcularCustoPlano (custo pela quantidade CONTRATADA) com recomendarPlano
+// (upgrade mais vantajoso) na forma que os fluxos financeiros/painel consomem.
+// PURA. `planos` (catálogo de candidatos) é opcional — sem ele, não há recomendação.
+//
+// Saída: { ok, valor_base, capacidade_inclusa, quantidade_contratada,
+//          quantidade_extra, valor_extra, valor_total, valor_total_centavos,
+//          acomoda, requer_negociacao, motivo, recomendacao_upgrade,
+//          plano_recomendado, plano_recomendado_nome, economia_upgrade, mensagem }.
+function valorEfetivoEmpresa({ plano, quantidade_contratada, planos = [], limiteNegociacao } = {}) {
+  const custo = calcularCustoPlano({ plano, quantidade: quantidade_contratada, limiteNegociacao });
+  if (!custo.ok) return { ok: false, motivo: custo.motivo, message: custo.message };
+
+  let rec = null;
+  if (Array.isArray(planos) && planos.length > 0 && plano && plano.id) {
+    const r = recomendarPlano({ planos, quantidade: quantidade_contratada, planoAtualId: plano.id, limiteNegociacao });
+    if (r.ok) rec = r;
+  }
+  // Recomenda upgrade só quando há um plano DIFERENTE do atual que acomoda a
+  // quantidade por preço melhor OU igual (regra 11: melhor ou igual → recomendar).
+  const recomendaOutro = Boolean(rec && rec.planoRecomendado && rec.planoRecomendado !== plano.id);
+
+  return {
+    ok: true,
+    valor_base: custo.base,
+    capacidade_inclusa: custo.capacidade_inclusa,
+    quantidade_contratada: Number(quantidade_contratada),
+    quantidade_extra: custo.extras_qtd,
+    valor_extra: custo.extras_valor,
+    valor_total: custo.total,               // null quando requer_negociacao / não acomoda
+    valor_total_centavos: custo.total_centavos,
+    acomoda: custo.acomoda === true,
+    requer_negociacao: custo.requer_negociacao === true,
+    motivo: custo.motivo,
+    recomendacao_upgrade: recomendaOutro ? rec.planoRecomendado : null,
+    plano_recomendado: rec ? rec.planoRecomendado : null,
+    plano_recomendado_nome: rec ? (rec.planoRecomendadoNome || null) : null,
+    economia_upgrade: rec ? rec.economia : null,
+    empate_upgrade: rec ? rec.empate === true : false,
+    mensagem: rec ? rec.mensagem : null,
+  };
+}
+
 module.exports = {
   LIMITE_NEGOCIACAO_PADRAO,
   MOTIVOS,
   calcularCustoPlano,
   recomendarPlano,
+  valorEfetivoEmpresa,
   montarSnapshotComercial,
   // exportados para teste isolado
   validarQuantidade,
