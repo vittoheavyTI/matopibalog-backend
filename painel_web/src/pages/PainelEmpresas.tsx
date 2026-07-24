@@ -70,6 +70,11 @@ export const PainelEmpresas: React.FC = () => {
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<any>(null);
   const [formDados, setFormDados] = useState({ nome: '', cnpj: '', email: '', telefone: '', plano_id: '', tipo: 'transportadora' });
+  // Capacidade contratada (mega-frente extras por empresa).
+  const [qcValue, setQcValue] = useState('');
+  const [qcPreview, setQcPreview] = useState<any>(null);
+  const [qcMsg, setQcMsg] = useState('');
+  const [qcLoading, setQcLoading] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<any>(null);
   const [trialTarget, setTrialTarget] = useState<any>(null);
   const [customDate, setCustomDate] = useState('');
@@ -149,6 +154,36 @@ export const PainelEmpresas: React.FC = () => {
     } finally {
       setPlanosLoading(false);
     }
+  }
+
+  async function previewQuantidade() {
+    if (!editing) return;
+    const q = Number(qcValue);
+    setQcMsg('');
+    if (!Number.isInteger(q) || q < 1) { setQcMsg('Informe um inteiro ≥ 1.'); return; }
+    setQcLoading(true);
+    try {
+      const { data } = await api.get(`/painel-admin/empresas/${editing.id}/valor-efetivo?quantidade=${q}`);
+      setQcPreview(data);
+    } catch (err: any) {
+      setQcMsg(err?.response?.data?.message || 'Não foi possível calcular.');
+    } finally { setQcLoading(false); }
+  }
+
+  async function aplicarQuantidade() {
+    if (!editing) return;
+    const q = Number(qcValue);
+    if (!Number.isInteger(q) || q < 1) { setQcMsg('Informe um inteiro ≥ 1.'); return; }
+    setQcLoading(true); setQcMsg('');
+    try {
+      const { data } = await api.patch(`/painel-admin/empresas/${editing.id}/quantidade-contratada`, { quantidade_contratada: q, motivo: 'ajuste_painel' });
+      setQcPreview(data);
+      setQcMsg('Quantidade aplicada. Sync Asaas marcado (vale para a próxima competência).');
+      carregar();
+    } catch (err: any) {
+      const d = err?.response?.data;
+      setQcMsg(d?.requer_negociacao ? (d.message || 'Acima do limite — negociação.') : (d?.message || 'Não foi possível aplicar.'));
+    } finally { setQcLoading(false); }
   }
 
   async function handleSalvar() {
@@ -352,7 +387,7 @@ export const PainelEmpresas: React.FC = () => {
                 </td>
                 <td className="px-4 py-2.5">
                   <div className="flex items-center justify-center gap-1">
-                    <button onClick={() => { setEditing(e); setFormDados({ nome: e.nome || '', cnpj: e.cnpj || '', email: e.email_contato || '', telefone: e.telefone_contato || '', plano_id: e.plano_id || '', tipo: e.tipo || 'transportadora' }); setShowModal(true); }} title="Editar empresa" aria-label="Editar empresa" className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg"><Eye size={16} /></button>
+                    <button onClick={() => { setEditing(e); setFormDados({ nome: e.nome || '', cnpj: e.cnpj || '', email: e.email_contato || '', telefone: e.telefone_contato || '', plano_id: e.plano_id || '', tipo: e.tipo || 'transportadora' }); setQcValue(e.quantidade_contratada != null ? String(e.quantidade_contratada) : ''); setQcPreview(null); setQcMsg(''); setShowModal(true); }} title="Editar empresa" aria-label="Editar empresa" className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg"><Eye size={16} /></button>
                     <button onClick={() => suspender(e.id)} title={e.status === 'suspenso' ? 'Reativar empresa' : 'Suspender empresa'} aria-label={e.status === 'suspenso' ? 'Reativar empresa' : 'Suspender empresa'} className="p-1.5 text-orange-500 hover:bg-orange-50 rounded-lg">{e.status === 'suspenso' ? <Unlock size={16} /> : <Ban size={16} />}</button>
                     <button onClick={() => { setTrialTarget(e); setCustomDate(''); setConfirmAtivo(false); }} title="Gerenciar trial" aria-label="Gerenciar trial da empresa" className="p-1.5 text-amber-600 hover:bg-amber-50 rounded-lg"><CalendarClock size={16} /></button>
                     <button onClick={() => resetSenhaAdmin(e.id, e.nome)} className="p-1.5 text-gray-500 hover:bg-gray-100 rounded-lg" title="Resetar senha do admin" aria-label="Resetar senha do admin"><KeyRound size={16} /></button>
@@ -445,6 +480,29 @@ export const PainelEmpresas: React.FC = () => {
                   </>
                 )}
               </div>
+
+              {/* Capacidade contratada (extras por empresa) — só ao editar empresa com plano */}
+              {editing && formDados.tipo !== 'autonomo' && formDados.plano_id && (
+                <div className="border-2 border-blue-50 rounded-xl p-3 bg-blue-50/30">
+                  <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">Capacidade contratada (motoristas/caminhões)</label>
+                  <p className="text-xs text-gray-500 mb-2">Cobrança por capacidade contratada (não por motoristas ativos). Extras acima da capacidade inclusa do plano.</p>
+                  <div className="flex gap-2">
+                    <input type="number" min="1" value={qcValue} onChange={e => { setQcValue(e.target.value); setQcPreview(null); }} className="w-28 border-2 border-gray-100 rounded-xl p-2.5 outline-none focus:border-blue-500" />
+                    <button type="button" onClick={previewQuantidade} disabled={qcLoading} className="px-3 py-2 border border-gray-300 rounded-xl text-sm font-medium disabled:opacity-50">Prévia</button>
+                    <button type="button" onClick={aplicarQuantidade} disabled={qcLoading} className="px-3 py-2 bg-green-700 text-white rounded-xl text-sm font-medium disabled:opacity-50">Aplicar</button>
+                  </div>
+                  {qcPreview && (
+                    <div className="mt-2 text-sm text-gray-700 space-y-0.5">
+                      <div>Base: <b>R$ {Number(qcPreview.valor_base ?? 0).toFixed(2)}</b> (inclui {qcPreview.capacidade_inclusa})</div>
+                      {qcPreview.quantidade_extra > 0 && <div>Extras: {qcPreview.quantidade_extra} × → <b>R$ {Number(qcPreview.valor_extra ?? 0).toFixed(2)}</b></div>}
+                      <div>Total mensal: <b className="text-green-800">R$ {qcPreview.valor_depois != null ? Number(qcPreview.valor_depois).toFixed(2) : '—'}</b>{qcPreview.valor_antes != null && qcPreview.valor_antes !== qcPreview.valor_depois && <span className="text-gray-400"> (antes R$ {Number(qcPreview.valor_antes).toFixed(2)})</span>}</div>
+                      {qcPreview.requer_negociacao && <div className="text-amber-700 font-medium">Acima de 40 → sob negociação.</div>}
+                      {qcPreview.recomendacao_upgrade && <div className="mt-1 rounded-lg bg-amber-50 border border-amber-200 p-2 text-amber-800 text-xs">{qcPreview.mensagem_upgrade || `Com essa quantidade, o plano ${qcPreview.plano_recomendado_nome} fica mais vantajoso.`}{qcPreview.economia_upgrade > 0 && ` (economia R$ ${Number(qcPreview.economia_upgrade).toFixed(2)}/mês)`}</div>}
+                    </div>
+                  )}
+                  {qcMsg && <p className="mt-2 text-xs text-gray-600">{qcMsg}</p>}
+                </div>
+              )}
             </div>
             <div className="p-4 bg-gray-50 border-t flex justify-end gap-3 flex-shrink-0">
               <button onClick={() => setShowModal(false)} className="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded-lg text-sm font-medium">Cancelar</button>
