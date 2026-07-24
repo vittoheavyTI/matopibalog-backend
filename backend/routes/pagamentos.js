@@ -1074,11 +1074,20 @@ router.post('/asaas-sync/processar', verifyToken, isSuperAdmin, async (req, res)
     let ok = false; let erro = null; let valorAntes = null; let valorDepois = decisao.valorAlvo; let subId = empresa && empresa.asaas_subscription_id;
     try {
       if (decisao.acao === asaasSync.ACAO.CRIAR) {
-        const r = await garantirAssinatura({ empresaId, config, supabase, http: axios });
-        ok = true; subId = r && r.subscription_configured ? subId : subId;
+        await garantirAssinatura({ empresaId, config, supabase, http: axios });
+        ok = true;
+        // Re-lê o id da assinatura recém-criada (garantirAssinatura o salva em
+        // empresas) para gravar no snapshot da fila/auditoria.
+        try {
+          const { data: eNova } = await supabase.from('empresas').select('asaas_subscription_id').eq('id', empresaId).single();
+          if (eNova && eNova.asaas_subscription_id) subId = eNova.asaas_subscription_id;
+        } catch (_) { /* snapshot do id é best-effort */ }
       } else if (decisao.acao === asaasSync.ACAO.ATUALIZAR_VALOR) {
         const r = await atualizarValorAssinatura({ empresaId, valorAlvo: decisao.valorAlvo, config, supabase, http: axios });
-        if (r.needsCreate) { await garantirAssinatura({ empresaId, config, supabase, http: axios }); }
+        if (r.needsCreate) {
+          await garantirAssinatura({ empresaId, config, supabase, http: axios });
+          try { const { data: eNova } = await supabase.from('empresas').select('asaas_subscription_id').eq('id', empresaId).single(); if (eNova && eNova.asaas_subscription_id) subId = eNova.asaas_subscription_id; } catch (_) { /* best-effort */ }
+        }
         valorAntes = r.valor_antes; subId = r.asaas_subscription_id || subId; ok = true;
       } else if (decisao.acao === asaasSync.ACAO.PULAR) {
         ok = true; valorDepois = null;
