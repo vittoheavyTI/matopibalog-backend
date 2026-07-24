@@ -282,6 +282,21 @@ function montarResgate({ promocao, codigoRegistro = null, empresa, aplicadoPor =
   };
 }
 
+// Ajusta o valor de uma fatura de MENSALIDADE por um resgate PENDENTE (gravado
+// no cadastro, fatura_id NULL). Forward-only: é aplicado na PRÓXIMA fatura a ser
+// gerada, NUNCA em fatura já emitida. Só age em resgate de alvo 'mensalidade' com
+// preco_final definido; caso contrário devolve o valor base intacto.
+// Retorna { valor, desconto, aplicou }.
+function ajustarValorPorResgate({ valorBase, resgatePendente } = {}) {
+  const base = Number(valorBase);
+  if (!resgatePendente || resgatePendente.alvo !== ALVO.MENSALIDADE || resgatePendente.preco_final == null) {
+    return { valor: base, desconto: 0, aplicou: false };
+  }
+  const promo = Number(resgatePendente.preco_final);
+  if (!Number.isFinite(promo) || promo < 0) return { valor: base, desconto: 0, aplicou: false };
+  return { valor: promo, desconto: Number(resgatePendente.desconto_valor) || 0, aplicou: true };
+}
+
 module.exports = {
   TIPOS,
   ALVO,
@@ -290,4 +305,5 @@ module.exports = {
   avaliarResgate,
   aplicarPromocao,
   montarResgate,
+  ajustarValorPorResgate,
 };
