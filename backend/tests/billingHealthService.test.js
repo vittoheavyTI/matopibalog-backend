@@ -376,3 +376,62 @@ test('empresas acima da capacidade inclusa (motoristas > capacidade)', () => {
   assert.equal(r.detalhes.empresas_acima_capacidade[0].excedente, 2);
   assert.equal(r.ok, true);
 });
+
+// ─── FASE 5 (sync Asaas) — sinais de sync (informativos, não afetam ok) ─────
+test('sem asaasSyncEstado, contadores de sync ficam 0 e ok inalterado', () => {
+  const r = resumirBillingHealth({
+    faturas: [fatura({ status: 'pago', valor: 100 })],
+    empresas: [{ id: 'e1', nome: 'Alfa', tipo: 'transportadora', status: 'ativo', planos: { categoria: 'empresa' } }],
+    hoje: HOJE,
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.contadores.sync_asaas_pendente, 0);
+  assert.equal(r.contadores.sync_asaas_erro, 0);
+  assert.equal(r.contadores.assinatura_asaas_desatualizada, 0);
+});
+
+test('fila de sync: pendente, erro e desatualizada são contados', () => {
+  const r = resumirBillingHealth({
+    faturas: [],
+    asaasSyncEstado: [
+      { empresa_id: 'e1', status: 'pendente', motivo: 'plano_reprecificado', valor_alvo: 299.90, valor_sincronizado: 149.90 },
+      { empresa_id: 'e2', status: 'erro', ultimo_erro: 'timeout', tentativas: 3, valor_alvo: 499.90, valor_sincronizado: 499.90 },
+      { empresa_id: 'e3', status: 'sincronizado', valor_alvo: 799.90, valor_sincronizado: 799.90 },
+    ],
+    hoje: HOJE,
+  });
+  assert.equal(r.contadores.sync_asaas_pendente, 1);
+  assert.equal(r.contadores.sync_asaas_erro, 1);
+  // e1 (alvo 299,90 != sync 149,90) → desatualizada; e2/e3 batem.
+  assert.equal(r.contadores.assinatura_asaas_desatualizada, 1);
+  assert.equal(r.detalhes.assinatura_asaas_desatualizada[0].empresa_id, 'e1');
+  assert.equal(r.ok, true);
+});
+
+test('empresa cobrável + plano pago sem assinatura → empresa_sem_assinatura_esperada', () => {
+  const r = resumirBillingHealth({
+    faturas: [],
+    empresas: [
+      { id: 'e1', nome: 'Sem sub', tipo: 'transportadora', status: 'ativo', asaas_subscription_id: null,
+        planos: { categoria: 'empresa', nome: 'Start', preco_mensal: 299.90, ativo: true, arquivado_em: null, requer_negociacao: false } },
+      { id: 'e2', nome: 'Com sub', tipo: 'transportadora', status: 'ativo', asaas_subscription_id: 'sub_2',
+        planos: { categoria: 'empresa', nome: 'Start', preco_mensal: 299.90, ativo: true } },
+    ],
+    hoje: HOJE,
+  });
+  assert.equal(r.contadores.empresa_sem_assinatura_esperada, 1);
+  assert.equal(r.detalhes.empresa_sem_assinatura_esperada[0].id, 'e1');
+});
+
+test('assinatura existente com plano inválido (sob negociação) → empresa_com_assinatura_mas_plano_invalido', () => {
+  const r = resumirBillingHealth({
+    faturas: [],
+    empresas: [
+      { id: 'e1', nome: 'Neg', tipo: 'transportadora', status: 'ativo', asaas_subscription_id: 'sub_1',
+        planos: { categoria: 'empresa', nome: 'Enterprise', preco_mensal: 0, requer_negociacao: true, ativo: true } },
+    ],
+    hoje: HOJE,
+  });
+  assert.equal(r.contadores.empresa_com_assinatura_mas_plano_invalido, 1);
+  assert.equal(r.ok, true);
+});

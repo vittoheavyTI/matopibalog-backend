@@ -75,6 +75,9 @@ function resumirBillingHealth({
   promocaoResgates = [],
   planos = [],
   contagemMotoristasPorEmpresa = {},
+  // FASE 5 (sync Asaas) — estado da fila de sync por empresa (migration 042).
+  // Ausente (tabela não provisionada) → [] → nenhum sinal de sync dispara.
+  asaasSyncEstado = [],
   hoje = new Date(),
 } = {}) {
   const hojeStr = soData(hoje) || new Date().toISOString().slice(0, 10);
@@ -158,6 +161,9 @@ function resumirBillingHealth({
   const empresas_sob_negociacao = [];            // conta em plano requer_negociacao=true
   const empresas_plano_automatico_invalido = []; // conta cobrável em plano requer_negociacao (cron não deve cobrar)
   const empresas_acima_capacidade = [];          // motoristas ativos > capacidade_inclusa do plano
+  // FASE 5 (sync Asaas).
+  const empresa_sem_assinatura_esperada = [];       // cobrável + plano pago, mas sem asaas_subscription_id
+  const empresa_com_assinatura_mas_plano_invalido = []; // tem assinatura, mas plano inválido p/ cobrança
   // Arquivadas: fora do escrutínio operacional (contas de teste tiradas da
   // operação). Contadas à parte, nunca como problema. Quando uma conta de teste é
   // arquivada, ela para de poluir suspensas_sem_fatura/categoria/etc.
@@ -236,6 +242,20 @@ function resumirBillingHealth({
       }
     }
 
+    // FASE 5 (sync Asaas): assinatura esperada × existente.
+    const planoPagoValido = plano && plano.ativo !== false && plano.arquivado_em == null
+      && plano.requer_negociacao !== true && Number(plano.preco_mensal) > 0;
+    if (STATUS_COBRAVEL_ESPERADO.has(e.status) && planoPagoValido && !e.asaas_subscription_id) {
+      empresa_sem_assinatura_esperada.push({ id: e.id, nome: e.nome, status: e.status, plano_nome: plano.nome || null });
+    }
+    if (e.asaas_subscription_id) {
+      const planoInvalido = !plano || plano.ativo === false || plano.arquivado_em != null
+        || plano.requer_negociacao === true || !(Number(plano.preco_mensal) > 0);
+      if (planoInvalido) {
+        empresa_com_assinatura_mas_plano_invalido.push({ id: e.id, nome: e.nome, plano_nome: plano ? (plano.nome || null) : null });
+      }
+    }
+
     // Trial vencido ainda sem fatura de regularização (o job expirarTrials gera).
     const trialFim = soData(e.trial_ends_at);
     if (e.status === 'trial' && trialFim && trialFim < hojeStr && !abertasPorEmpresa.has(e.id)) {
@@ -274,6 +294,20 @@ function resumirBillingHealth({
   const planos_requer_negociacao_ativos = (Array.isArray(planos) ? planos : [])
     .filter((p) => p && p.requer_negociacao === true && p.ativo !== false)
     .map((p) => ({ id: p.id, nome: p.nome }));
+
+  // FASE 5 (sync Asaas) — sinais da fila de sync (migration 042).
+  const sync_asaas_pendente = [];
+  const sync_asaas_erro = [];
+  const assinatura_asaas_desatualizada = [];
+  for (const s of (Array.isArray(asaasSyncEstado) ? asaasSyncEstado : [])) {
+    if (!s || !s.empresa_id) continue;
+    if (s.status === 'pendente') sync_asaas_pendente.push({ empresa_id: s.empresa_id, motivo: s.motivo || null, valor_alvo: s.valor_alvo != null ? Number(s.valor_alvo) : null });
+    if (s.status === 'erro') sync_asaas_erro.push({ empresa_id: s.empresa_id, ultimo_erro: s.ultimo_erro || null, tentativas: Number(s.tentativas) || 0 });
+    // Assinatura desatualizada: alvo conhecido e diferente do último sincronizado.
+    if (s.valor_alvo != null && (s.valor_sincronizado == null || Math.round(Number(s.valor_alvo) * 100) !== Math.round(Number(s.valor_sincronizado) * 100))) {
+      assinatura_asaas_desatualizada.push({ empresa_id: s.empresa_id, valor_alvo: Number(s.valor_alvo), valor_sincronizado: s.valor_sincronizado != null ? Number(s.valor_sincronizado) : null });
+    }
+  }
 
   // Webhook: contagem por status e lista de eventos com erro.
   const webhook_por_status = {};
@@ -325,6 +359,12 @@ function resumirBillingHealth({
       empresas_sob_negociacao: empresas_sob_negociacao.length,
       empresas_plano_automatico_invalido: empresas_plano_automatico_invalido.length,
       empresas_acima_capacidade: empresas_acima_capacidade.length,
+      // FASE 5 (sync Asaas) — informativos.
+      sync_asaas_pendente: sync_asaas_pendente.length,
+      sync_asaas_erro: sync_asaas_erro.length,
+      assinatura_asaas_desatualizada: assinatura_asaas_desatualizada.length,
+      empresa_sem_assinatura_esperada: empresa_sem_assinatura_esperada.length,
+      empresa_com_assinatura_mas_plano_invalido: empresa_com_assinatura_mas_plano_invalido.length,
     },
     detalhes: {
       faturas_sem_asaas_id,
@@ -352,6 +392,12 @@ function resumirBillingHealth({
       empresas_sob_negociacao,
       empresas_plano_automatico_invalido,
       empresas_acima_capacidade,
+      // FASE 5 (sync Asaas) — informativos.
+      sync_asaas_pendente,
+      sync_asaas_erro,
+      assinatura_asaas_desatualizada,
+      empresa_sem_assinatura_esperada,
+      empresa_com_assinatura_mas_plano_invalido,
       webhook_por_status,
     },
   };

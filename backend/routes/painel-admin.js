@@ -64,7 +64,7 @@ function checarCategoriaPlano(tipoEmpresa, categoriaPlano) {
 // incompatível). NÃO escreve nada e NÃO chama o Asaas.
 router.get('/billing-health', async (req, res) => {
   try {
-    const [faturasR, empresasR, eventosR, promocoesR, resgatesR, planosR, motoristasR] = await Promise.all([
+    const [faturasR, empresasR, eventosR, promocoesR, resgatesR, planosR, motoristasR, syncEstadoR] = await Promise.all([
       supabase.from('faturas').select('id, empresa_id, status, valor, origem, periodo_referencia, asaas_id, invoice_url, bank_slip_url, due_date, pago_em'),
       // `planos(*)` (em vez de lista explícita) traz capacidade_inclusa/
       // requer_negociacao SÓ SE as colunas existirem — deploy-safe: antes da
@@ -77,6 +77,7 @@ router.get('/billing-health', async (req, res) => {
       supabase.from('promocao_resgates').select('promocao_id, empresa_id, manual, criado_em'),
       supabase.from('planos').select('*'),
       supabase.from('motoristas').select('empresa_id, status_cadastro'),
+      supabase.from('asaas_sync_estado').select('empresa_id, status, motivo, valor_alvo, valor_sincronizado, ultimo_erro, tentativas'),
     ]);
     if (faturasR.error) return res.status(500).json({ message: 'Erro ao ler faturas.' });
     if (empresasR.error) return res.status(500).json({ message: 'Erro ao ler empresas.' });
@@ -85,6 +86,7 @@ router.get('/billing-health', async (req, res) => {
     const promocoes = promocoesR && !promocoesR.error ? (promocoesR.data || []) : [];
     const promocaoResgates = resgatesR && !resgatesR.error ? (resgatesR.data || []) : [];
     const planos = planosR && !planosR.error ? (planosR.data || []) : [];
+    const asaasSyncEstado = syncEstadoR && !syncEstadoR.error ? (syncEstadoR.data || []) : [];
     // Contagem de motoristas APROVADOS por empresa (base de "acima da capacidade").
     const contagemMotoristasPorEmpresa = {};
     if (motoristasR && !motoristasR.error) {
@@ -103,6 +105,7 @@ router.get('/billing-health', async (req, res) => {
       promocaoResgates,
       planos,
       contagemMotoristasPorEmpresa,
+      asaasSyncEstado,
     });
     if (eventosR && eventosR.error) resumo.aviso_webhook = 'nao_foi_possivel_ler_eventos_webhook';
     return res.json(resumo);
