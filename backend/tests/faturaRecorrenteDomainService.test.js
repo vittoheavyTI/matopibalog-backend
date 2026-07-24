@@ -99,6 +99,29 @@ test('trial → pular (status não cobrável)', () => {
   assert.equal(r.status, 'trial');
 });
 
+// ─── 3.5 conta arquivada não cobra (mega-frente higiene) ─────────────────────
+test('empresa arquivada → pular (empresa_arquivada), mesmo ativa e elegível', () => {
+  const r = avaliarElegibilidadeFaturaRecorrente({
+    empresa: { ...EMPRESA_OK, arquivada_em: '2026-07-24T00:00:00Z' },
+    plano: PLANO_FIXO,
+    faturasExistentes: [],
+    dataReferencia: '2026-07-20',
+  });
+  assert.equal(r.resultado, 'pular');
+  assert.equal(r.motivo, MOTIVOS.EMPRESA_ARQUIVADA);
+  assert.equal(r.elegivel, false);
+});
+
+test('arquivada_em ausente (coluna inexistente) NÃO pula por arquivamento', () => {
+  const r = avaliarElegibilidadeFaturaRecorrente({
+    empresa: EMPRESA_OK, // sem arquivada_em
+    plano: PLANO_FIXO,
+    faturasExistentes: [],
+    dataReferencia: '2026-07-20',
+  });
+  assert.equal(r.resultado, 'cobrar');
+});
+
 // ─── 4. suspensa/desconhecida não cobra ──────────────────────────────────────
 test('suspenso e status desconhecido → pular (fail-closed)', () => {
   for (const status of ['suspenso', 'bloqueado', 'expirado', 'qualquer', null]) {
