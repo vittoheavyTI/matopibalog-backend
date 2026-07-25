@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { Plus, X, Search, Filter, Truck, MapPin, Calendar, DollarSign, Gauge, Trash2, Edit, Check, AlertTriangle, ChevronLeft, ChevronDown, ChevronRight, Fuel, FileText, TrendingUp, Save, Unlock, Lock, Camera, Upload } from 'lucide-react';
+import { Plus, X, Search, Filter, Truck, MapPin, Calendar, DollarSign, Gauge, Trash2, Edit, Check, AlertTriangle, ChevronLeft, ChevronDown, ChevronRight, Fuel, FileText, TrendingUp, Save, Unlock, Lock, Camera, Upload, RefreshCw } from 'lucide-react';
 import { format } from 'date-fns';
 import { formatCurrency } from '../utils';
 import api, { newClientRequestId } from '../api';
@@ -317,8 +317,9 @@ export const GerenciamentoViagens: React.FC = () => {
       else next.add(freteId);
       return next;
     });
-    // Lazy-load dos documentos na primeira expansão.
-    if (!jaAberto && !(freteId in docsPorFrete)) carregarDocumentosFrete(freteId);
+    // Ao expandir, recarrega os documentos do frete (sem usar cache): garante
+    // que anexos feitos pelo app apareçam ao reabrir o frete sem recarregar a página.
+    if (!jaAberto) carregarDocumentosFrete(freteId);
   };
 
   const rotuloTipoDoc = (t: string): string =>
@@ -344,7 +345,19 @@ export const GerenciamentoViagens: React.FC = () => {
     const carregando = docsCarregando.has(freteId);
     return (
       <div className="border-t border-gray-100 pt-2 mt-1">
-        <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-1">Documentos</p>
+        <div className="flex items-center justify-between mb-1">
+          <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Documentos</p>
+          <button
+            type="button"
+            onClick={() => carregarDocumentosFrete(freteId)}
+            disabled={carregando}
+            title="Atualizar documentos"
+            className="flex items-center gap-1 text-[11px] font-semibold text-gray-400 hover:text-gray-600 disabled:opacity-40"
+          >
+            <RefreshCw size={12} className={carregando ? 'animate-spin' : ''} />
+            Atualizar
+          </button>
+        </div>
         {carregando ? (
           <p className="text-xs text-gray-400">Carregando documentos…</p>
         ) : !docs || docs.length === 0 ? (

@@ -44,6 +44,12 @@ dependencies:
   # automaticamente em background/terminado). Requer coreLibraryDesugaring no
   # android/app/build.gradle.kts (habilitado neste PR; minSdk 21 usa java.time).
   flutter_local_notifications: ^17.2.3
+  # Scanner de documentos (POC). Usa o ML Kit Document Scanner no Android
+  # (detecção de borda + crop + realce, sem C++/NDK). Encapsulado em
+  # services/document_scanner_service.dart e AINDA NÃO ligado à UI — o anexo por
+  # câmera/galeria/arquivo segue como fluxo/fallback. minSdk 21 já atende (README
+  # exige >=21). Traz permission_handler transitivo (só usado no iOS pelo plugin).
+  cunning_document_scanner: ^2.6.0
 
 dev_dependencies:
   flutter_test:
