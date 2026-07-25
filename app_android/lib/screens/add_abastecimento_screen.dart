@@ -106,7 +106,7 @@ class _AddAbastecimentoScreenState extends State<AddAbastecimentoScreen> {
           children: [
             ListTile(
               leading: const Icon(Icons.document_scanner_outlined),
-              title: const Text('Escanear documento'),
+              title: const Text('Escanear comprovante'),
               onTap: () { Navigator.pop(ctx); _escanearComprovante(); },
             ),
             ListTile(
