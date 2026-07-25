@@ -42,15 +42,17 @@ void main() {
   });
 
   group('Scanner — acesso na UI (as 4 telas que anexam documento)', () {
-    const telas = <String>[
-      'lib/screens/detalhe_viagem_screen.dart',
-      'lib/screens/add_frete_screen.dart',
-      'lib/screens/add_despesa_screen.dart',
-      'lib/screens/add_abastecimento_screen.dart',
-    ];
+    const telas = <String, String>{
+      'lib/screens/detalhe_viagem_screen.dart': 'Escanear documento',
+      'lib/screens/add_frete_screen.dart': 'Escanear documento',
+      'lib/screens/add_despesa_screen.dart': 'Escanear comprovante',
+      'lib/screens/add_abastecimento_screen.dart': 'Escanear comprovante',
+    };
 
-    for (final tela in telas) {
-      test('$tela importa o serviço e oferece "Escanear documento"', () {
+    for (final entry in telas.entries) {
+      final tela = entry.key;
+      final textoScanner = entry.value;
+      test('$tela importa o serviço e oferece "$textoScanner"', () {
         final src = _ler(tela);
         expect(
           src.contains("services/document_scanner_service.dart"),
@@ -58,9 +60,9 @@ void main() {
           reason: 'A tela deixou de importar o DocumentScannerService.',
         );
         expect(
-          src.contains('Escanear documento'),
+          src.contains(textoScanner),
           isTrue,
-          reason: 'O item de menu "Escanear documento" sumiu de $tela.',
+          reason: 'O item de menu "$textoScanner" sumiu de $tela.',
         );
       });
     }
