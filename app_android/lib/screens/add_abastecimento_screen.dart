@@ -8,6 +8,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import '../providers/auth_provider.dart';
 import '../services/api_service.dart';
 import '../services/app_logger.dart';
+import '../services/document_scanner_service.dart';
 import '../services/offline_sync.dart';
 
 class AddAbastecimentoScreen extends StatefulWidget {
@@ -77,6 +78,25 @@ class _AddAbastecimentoScreenState extends State<AddAbastecimentoScreen> {
     }
   }
 
+  // Escaneia o comprovante como imagem (JPG). Cancelar volta sem mensagem;
+  // indisponível/erro mostra aviso e o usuário usa câmera/galeria (fallback).
+  Future<void> _escanearComprovante() async {
+    final resultado = await DocumentScannerService.escanearDocumento(
+      maxPaginas: 1,
+      comoPdf: false,
+    );
+    if (!mounted) return;
+    if (resultado.cancelado) return;
+    if (!resultado.ok || resultado.caminhos.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(resultado.mensagem ??
+            'Não foi possível escanear. Use câmera ou galeria.')),
+      );
+      return;
+    }
+    setState(() => _image = File(resultado.caminhos.first));
+  }
+
   void _showPhotoOptions() {
     showModalBottomSheet(
       context: context,
@@ -84,6 +104,11 @@ class _AddAbastecimentoScreenState extends State<AddAbastecimentoScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            ListTile(
+              leading: const Icon(Icons.document_scanner_outlined),
+              title: const Text('Escanear documento'),
+              onTap: () { Navigator.pop(ctx); _escanearComprovante(); },
+            ),
             ListTile(
               leading: const Icon(Icons.camera_alt),
               title: const Text('Tirar Foto'),

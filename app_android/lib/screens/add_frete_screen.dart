@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 import '../services/app_logger.dart';
+import '../services/document_scanner_service.dart';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
@@ -225,10 +226,70 @@ class _AddFreteScreenState extends State<AddFreteScreen> {
     );
   }
 
-  Future<void> _adicionarDocumento() async {
-    final tipo = await _escolherTipoDocumento();
-    if (tipo == null || !mounted) return;
+  // Origem do documento fiscal: scanner (gera PDF) ou arquivo do dispositivo/drive.
+  // Retorna 'scan', 'arquivo' ou null se o usuário fechar a folha.
+  Future<String?> _escolherOrigemDocumento() {
+    return showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text('Anexar documento',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            ),
+            ListTile(
+              leading: const Icon(Icons.document_scanner_outlined),
+              title: const Text('Escanear documento'),
+              onTap: () => Navigator.pop(ctx, 'scan'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.attach_file),
+              title: const Text('Anexar arquivo (PDF, XML ou imagem)'),
+              onTap: () => Navigator.pop(ctx, 'arquivo'),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
 
+  // Escaneia o documento fiscal como PDF quando o plugin suportar e adiciona à
+  // lista de pendentes. Cancelar volta sem mensagem; indisponível/erro mostra
+  // aviso e o usuário anexa um arquivo (fallback).
+  Future<void> _escanearDocumentoFrete(String tipo) async {
+    final resultado = await DocumentScannerService.escanearDocumento(
+      maxPaginas: 10,
+      comoPdf: true,
+    );
+    if (!mounted) return;
+    if (resultado.cancelado) return;
+    if (!resultado.ok || resultado.caminhos.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(resultado.mensagem ??
+            'Não foi possível escanear. Anexe um arquivo.')),
+      );
+      return;
+    }
+    setState(() {
+      for (final caminho in resultado.caminhos) {
+        _documentosPendentes.add(
+          _DocumentoPendente(
+            tipo: tipo,
+            path: caminho,
+            nome: caminho.split(RegExp(r'[\\/]')).last,
+          ),
+        );
+      }
+    });
+  }
+
+  // Seleciona um arquivo do dispositivo/drive (PDF, XML ou imagem) e adiciona à
+  // lista de pendentes. Mesma allowlist do backend.
+  Future<void> _selecionarArquivoDocumento(String tipo) async {
     FilePickerResult? escolhido;
     try {
       escolhido = await FilePicker.platform.pickFiles(
@@ -259,6 +320,20 @@ class _AddFreteScreenState extends State<AddFreteScreen> {
         ),
       );
     });
+  }
+
+  Future<void> _adicionarDocumento() async {
+    final tipo = await _escolherTipoDocumento();
+    if (tipo == null || !mounted) return;
+
+    final origem = await _escolherOrigemDocumento();
+    if (origem == null || !mounted) return;
+
+    if (origem == 'scan') {
+      await _escanearDocumentoFrete(tipo);
+    } else {
+      await _selecionarArquivoDocumento(tipo);
+    }
   }
 
   Future<int> _enviarDocumentosPendentes(String freteId) async {

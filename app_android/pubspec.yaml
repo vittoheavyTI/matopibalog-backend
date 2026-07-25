@@ -20,6 +20,11 @@ dependencies:
   # Seleção de documentos fiscais do frete (PDF/XML/imagem) no detalhe do frete.
   # image_picker só pega imagens/galeria; file_picker cobre PDF e XML.
   file_picker: ^8.1.2
+  # Scanner de documentos (ML Kit Document Scanner no Android via GMS: detecção
+  # de borda + crop + realce, sem C++/NDK). Encapsulado em
+  # services/document_scanner_service.dart, com guard de plataforma (Android) e
+  # fallback para câmera/galeria/arquivo. minSdk 21 já atende.
+  cunning_document_scanner: ^2.6.0
   # Abrir/compartilhar documentos do frete: baixa o arquivo (signed URL do
   # bucket privado) para um temp com path_provider e abre a folha de
   # compartilhamento nativa (WhatsApp, visualizadores etc.). path_provider já
