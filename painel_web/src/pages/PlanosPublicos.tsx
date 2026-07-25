@@ -59,6 +59,20 @@ function composicaoLabel(plano: PlanoPublico): string | null {
   return `${motoristas} × R$ ${plano.preco_por_motorista.toFixed(2)}`;
 }
 
+// Ordenação da vitrine: planos self-service (automáticos) primeiro, por preço
+// crescente; planos "sob negociação" (Enterprise, sem preço de tabela) SEMPRE
+// por último — nunca no topo só porque o preço de tabela vem 0. Sem isso, o
+// backend ordena por preco_mensal ASC e o card de negociação (preço 0) sobe
+// para o primeiro lugar.
+function ordenarVitrine(lista: PlanoPublico[]): PlanoPublico[] {
+  return [...lista].sort((a, b) => {
+    const na = a.requer_negociacao ? 1 : 0;
+    const nb = b.requer_negociacao ? 1 : 0;
+    if (na !== nb) return na - nb; // negociação sempre depois dos automáticos
+    return (a.preco_mensal || 0) - (b.preco_mensal || 0); // preço crescente
+  });
+}
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export const PlanosPublicos: React.FC = () => {
@@ -108,8 +122,11 @@ export const PlanosPublicos: React.FC = () => {
     return () => { vivo = false; };
   }, []);
 
-  // Destaque visual: o plano do meio quando há 3+ planos.
-  const idxDestaque = planos.length >= 3 ? 1 : -1;
+  // Vitrine ordenada: automáticos por preço crescente, negociação por último.
+  const planosOrdenados = React.useMemo(() => ordenarVitrine(planos), [planos]);
+  // Destaque visual: o 2º card (índice 1) quando há 3+ planos. Como a negociação
+  // fica sempre por último, o destaque nunca cai sobre ela.
+  const idxDestaque = planosOrdenados.length >= 3 ? 1 : -1;
 
   function irParaCadastro(plano: PlanoPublico) {
     // UUID real → plano_id; alias de fallback → ?plano= (compat legado).
@@ -231,7 +248,7 @@ export const PlanosPublicos: React.FC = () => {
           <div className="text-center text-gray-500 py-16">Carregando planos...</div>
         ) : (
           <div className="grid md:grid-cols-3 gap-8 max-w-5xl mx-auto">
-            {planos.map((plano, idx) => {
+            {planosOrdenados.map((plano, idx) => {
               const destaque = idx === idxDestaque;
               return (
                 <div key={plano.id} className={`relative bg-white rounded-2xl shadow-lg p-8 flex flex-col transition-transform hover:scale-105 ${destaque ? 'ring-2 ring-blue-500 shadow-xl' : ''}`}>
@@ -274,9 +291,9 @@ export const PlanosPublicos: React.FC = () => {
                   {plano.requer_negociacao ? (
                     <div className="w-full">
                       <div className="w-full py-3 rounded-xl text-white font-semibold text-center bg-amber-600 cursor-default select-none">
-                        Fale com o suporte
+                        Fale com o comercial
                       </div>
-                      <p className="mt-2 text-xs text-gray-500 text-center">Acima de 40 motoristas/caminhões — contratação sob negociação.</p>
+                      <p className="mt-2 text-xs text-gray-500 text-center">Para frotas acima de 40 motoristas — contratação sob negociação.</p>
                     </div>
                   ) : (
                     <button

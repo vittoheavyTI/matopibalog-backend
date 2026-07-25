@@ -81,7 +81,12 @@ export const CadastroPublico: React.FC = () => {
     // "ambos" (autônomo se cadastra pelo app). Filtro por categoria, nunca por nome.
     api.get('/planos/publicos?categoria=empresa')
       .then((res) => {
-        const bruto = res.data?.planos || [];
+        // Planos "sob negociação" (Enterprise 41+) NÃO são self-service: não
+        // entram na seleção do cadastro (evita card "R$ 0,00" e default errado).
+        // Ordena por preço crescente — o backend já ordena, mas garantimos aqui.
+        const bruto = (res.data?.planos || [])
+          .filter((p: any) => p?.requer_negociacao !== true)
+          .sort((a: any, b: any) => (Number(a?.preco_mensal) || 0) - (Number(b?.preco_mensal) || 0));
         const lista: PlanoOpcao[] = bruto.map((p: any) => ({
           id: p.id, nome: p.nome, precoLabel: precoBRL(p.preco_mensal),
         }));
