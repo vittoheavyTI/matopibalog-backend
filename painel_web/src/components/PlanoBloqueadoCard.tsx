@@ -1,5 +1,7 @@
 import React from 'react';
 import { Lock, Receipt, LifeBuoy } from 'lucide-react';
+import { useLoginConfig } from '../hooks/useLoginConfig';
+import { montarLinkComercial } from '../utils/contatoComercial';
 
 interface PlanoBloqueadoCardProps {
   /** Mensagem real vinda do backend (middleware verificarPlano). */
@@ -14,8 +16,17 @@ interface PlanoBloqueadoCardProps {
  * período de teste expirado (middleware verificarPlano). Mostra a mensagem real do
  * backend e oferece o caminho de regularização (Minhas Faturas). É apenas
  * apresentação: NÃO altera nenhuma regra de bloqueio, tenant ou permissão.
+ *
+ * O contato de suporte usa a config pública existente (contactEmail/contactPhone
+ * via /configuracoes/public): vira link clicável (mailto/tel) quando houver; sem
+ * canal, mantém o texto neutro de sempre.
  */
 export const PlanoBloqueadoCard: React.FC<PlanoBloqueadoCardProps> = ({ message, onRegularizar, className }) => {
+  const { contactEmail, contactPhone } = useLoginConfig();
+  const suporte = montarLinkComercial(
+    { whatsapp: null, email: contactEmail, telefone: contactPhone },
+    { assunto: 'Suporte - Matopiba Log' }
+  );
   return (
     <div className={`bg-white rounded-xl shadow-sm border border-gray-100 p-8 max-w-xl mx-auto text-center ${className || ''}`}>
       <div className="mx-auto w-14 h-14 rounded-full bg-red-50 flex items-center justify-center mb-4">
@@ -32,9 +43,24 @@ export const PlanoBloqueadoCard: React.FC<PlanoBloqueadoCardProps> = ({ message,
       >
         <Receipt size={16} /> Ir para Faturas / Regularização
       </button>
-      <p className="flex items-center justify-center gap-1.5 text-xs text-gray-400 mt-4">
-        <LifeBuoy size={14} /> Se precisar de ajuda, entre em contato com o suporte.
-      </p>
+      {suporte.disponivel ? (
+        <p className="flex flex-wrap items-center justify-center gap-x-1.5 gap-y-1 text-xs text-gray-500 mt-4">
+          <LifeBuoy size={14} /> Precisa de ajuda?{' '}
+          <a href={suporte.href!} {...(suporte.externo ? { target: '_blank', rel: 'noopener noreferrer' } : {})} className="text-green-700 hover:underline font-semibold">
+            Falar com o suporte
+          </a>
+          {suporte.telHref && (
+            <>
+              {' · '}
+              <a href={suporte.telHref} className="text-green-700 hover:underline font-semibold">Ligar</a>
+            </>
+          )}
+        </p>
+      ) : (
+        <p className="flex items-center justify-center gap-1.5 text-xs text-gray-400 mt-4">
+          <LifeBuoy size={14} /> Se precisar de ajuda, entre em contato com o suporte.
+        </p>
+      )}
     </div>
   );
 };

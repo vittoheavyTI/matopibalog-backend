@@ -8,6 +8,9 @@ import { useAuth } from '../contexts/AuthContext';
 import { PlanosVitrine } from '../components/PlanosVitrine';
 import { normalizarRecursos } from '../utils/planosCatalogo';
 import type { PlanoPublico } from '../utils/planosCatalogo';
+import { montarLinkComercial } from '../utils/contatoComercial';
+
+const ASSUNTO_ENTERPRISE = 'Interesse no plano Enterprise - Matopiba Log';
 
 // Fallback local mínimo — usado APENAS se a API pública falhar, para a página de
 // planos não ficar em branco. O backend (/planos/publicos) é a fonte principal.
@@ -24,7 +27,7 @@ export const PlanosPublicos: React.FC = () => {
   const navigate = useNavigate();
   // Reaproveita a logomarca global configurável (mesma fonte do Login, via
   // /configuracoes/public). Sem exigir login: o endpoint é público.
-  const { loginLogo, loginLogoScale, loginLogoY, configLoading } = useLoginConfig();
+  const { loginLogo, loginLogoScale, loginLogoY, configLoading, contactEmail, contactPhone } = useLoginConfig();
   // Detecta sessão para decidir o destino do CTA. `user` é null para visitante
   // (rota pública dentro do AuthProvider). NÃO buscamos o plano atual aqui.
   const { user } = useAuth();
@@ -149,6 +152,15 @@ export const PlanosPublicos: React.FC = () => {
     ? 'Gerenciar planos'
     : (enviando ? 'Gerando cobrança...' : 'Confirmar upgrade');
 
+  // Canal comercial do CTA do Enterprise, a partir da config pública existente.
+  // whatsapp não é público (SYSTEM_KEY) → hoje resolve para e-mail (contactEmail)
+  // com telefone (contactPhone) como "Ligar" secundário; wa.me entra quando uma
+  // fonte pública de WhatsApp existir.
+  const canalComercial = montarLinkComercial(
+    { whatsapp: null, email: contactEmail, telefone: contactPhone },
+    { assunto: ASSUNTO_ENTERPRISE }
+  );
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50">
       <div className="max-w-7xl mx-auto px-4 py-16">
@@ -192,6 +204,9 @@ export const PlanosPublicos: React.FC = () => {
             planos={planos}
             onEscolher={aoEscolherPlano}
             ctaLabel={user ? 'Solicitar upgrade' : 'Começar Agora'}
+            negociacaoHref={canalComercial.href}
+            negociacaoExterno={canalComercial.externo}
+            negociacaoTelHref={canalComercial.telHref}
           />
         )}
 

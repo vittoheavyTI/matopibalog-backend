@@ -25,6 +25,14 @@ interface PlanosVitrineProps {
   // Enterprise / sob negociação — textos padronizados com a página de upgrade.
   negociacaoCta?: string;
   negociacaoHint?: string;
+  // Canal comercial do CTA do Enterprise. Quando `negociacaoHref` existe, o CTA
+  // vira um link real (wa.me/mailto); senão, mostra um estado claramente NÃO
+  // clicável ("Canal comercial em configuração"). `negociacaoExterno` abre em
+  // nova aba (WhatsApp). `negociacaoTelHref` é a opção secundária "Ligar".
+  negociacaoHref?: string | null;
+  negociacaoExterno?: boolean;
+  negociacaoTelHref?: string | null;
+  negociacaoIndisponivelLabel?: string;
 }
 
 // Grade de cards da vitrine. O destaque "Mais Popular" cai no 2º card (índice 1)
@@ -38,6 +46,10 @@ export const PlanosVitrine: React.FC<PlanosVitrineProps> = ({
   ctaSelecionadoLabel = '✓ Plano selecionado',
   negociacaoCta = 'Fale com o comercial',
   negociacaoHint = 'Para frotas acima de 40 motoristas — contratação sob negociação.',
+  negociacaoHref = null,
+  negociacaoExterno = false,
+  negociacaoTelHref = null,
+  negociacaoIndisponivelLabel = 'Canal comercial em configuração',
 }) => {
   const ordenados = React.useMemo(() => ordenarVitrine(planos), [planos]);
   const idxDestaque = ordenados.length >= 3 ? 1 : -1;
@@ -93,9 +105,26 @@ export const PlanosVitrine: React.FC<PlanosVitrineProps> = ({
             </ul>
             {plano.requer_negociacao ? (
               <div className="w-full">
-                <div className="w-full py-3 rounded-xl text-white font-semibold text-center bg-amber-600 cursor-default select-none">
-                  {negociacaoCta}
-                </div>
+                {negociacaoHref ? (
+                  // Canal configurado → CTA é um link REAL (wa.me/mailto).
+                  <a
+                    href={negociacaoHref}
+                    {...(negociacaoExterno ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+                    className="block w-full py-3 rounded-xl text-white font-semibold text-center bg-amber-600 hover:bg-amber-700 transition-colors"
+                  >
+                    {negociacaoCta}
+                  </a>
+                ) : (
+                  // Sem canal → estado claramente NÃO clicável (não parece botão).
+                  <div className="w-full py-3 rounded-xl text-center bg-gray-100 text-gray-500 font-medium cursor-default select-none">
+                    {negociacaoIndisponivelLabel}
+                  </div>
+                )}
+                {negociacaoTelHref && (
+                  <a href={negociacaoTelHref} className="block mt-2 text-sm text-amber-700 hover:underline text-center font-medium">
+                    Ligar
+                  </a>
+                )}
                 <p className="mt-2 text-xs text-gray-500 text-center">{negociacaoHint}</p>
               </div>
             ) : (

@@ -7,6 +7,9 @@ import { useLoginConfig } from '../hooks/useLoginConfig';
 import { PlanosVitrine } from '../components/PlanosVitrine';
 import { normalizarRecursos, primeiroPlanoSelfService } from '../utils/planosCatalogo';
 import type { PlanoPublico } from '../utils/planosCatalogo';
+import { montarLinkComercial } from '../utils/contatoComercial';
+
+const ASSUNTO_ENTERPRISE = 'Interesse no plano Enterprise - Matopiba Log';
 
 interface FormData {
   nome: string;
@@ -58,7 +61,12 @@ export const CadastroPublico: React.FC = () => {
   const [searchParams] = useSearchParams();
   // Mesma logomarca configurável da página de upgrade (/planos), via endpoint
   // público /configuracoes/public — sem exigir login.
-  const { loginLogo, loginLogoScale, loginLogoY, configLoading } = useLoginConfig();
+  const { loginLogo, loginLogoScale, loginLogoY, configLoading, contactEmail, contactPhone } = useLoginConfig();
+  // Canal comercial do CTA do Enterprise (mesma fonte/regra do /planos).
+  const canalComercial = montarLinkComercial(
+    { whatsapp: null, email: contactEmail, telefone: contactPhone },
+    { assunto: ASSUNTO_ENTERPRISE }
+  );
   // Etapas: 1 = escolha do plano · 2 = dados do administrador · 3 = dados da
   // empresa (com resumo + promoção). `concluido` mostra a tela de sucesso.
   const [step, setStep] = useState(1);
@@ -332,6 +340,9 @@ export const CadastroPublico: React.FC = () => {
                 onEscolher={(p) => selecionarPlano(p)}
                 ctaLabel="Selecionar plano"
                 ctaSelecionadoLabel="✓ Selecionado"
+                negociacaoHref={canalComercial.href}
+                negociacaoExterno={canalComercial.externo}
+                negociacaoTelHref={canalComercial.telHref}
               />
             )}
             <div className="max-w-5xl mx-auto mt-8 flex flex-col sm:flex-row items-center justify-between gap-4">
