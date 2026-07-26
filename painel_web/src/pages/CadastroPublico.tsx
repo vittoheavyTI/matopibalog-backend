@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
-import { Truck, User, Building2, Mail, Lock, Phone, Eye, EyeOff } from 'lucide-react';
+import { Truck, User, Building2, Mail, Lock, Phone, Eye, EyeOff, ArrowLeft, Tag, Check } from 'lucide-react';
 import api from '../api';
 import { maskCNPJ, maskPhone } from '../utils/masks';
+import { PlanosVitrine } from '../components/PlanosVitrine';
+import { normalizarRecursos, primeiroPlanoSelfService } from '../utils/planosCatalogo';
+import type { PlanoPublico } from '../utils/planosCatalogo';
 
 interface FormData {
   nome: string;
@@ -26,18 +29,12 @@ interface PromoPreview {
   implantacao_promocional: number | null;
 }
 
-interface PlanoOpcao {
-  id: string;
-  alias?: string;        // preenchido só no fallback (id não-UUID)
-  nome: string;
-  precoLabel: string;
-}
-
-// Fallback usado APENAS se /planos/publicos falhar — mantém o cadastro funcionando.
-const PLANOS_FALLBACK: PlanoOpcao[] = [
-  { id: 'basico', alias: 'basico', nome: 'Básico', precoLabel: 'R$ 49,90' },
-  { id: 'profissional', alias: 'profissional', nome: 'Profissional', precoLabel: 'R$ 99,90' },
-  { id: 'empresarial', alias: 'empresarial', nome: 'Empresarial', precoLabel: 'R$ 199,90' },
+// Fallback usado APENAS se /planos/publicos falhar — mantém o cadastro funcionando
+// e a vitrine com o mesmo visual. ids são aliases legados (não-UUID).
+const PLANOS_FALLBACK: PlanoPublico[] = [
+  { id: 'basico', nome: 'Plano Básico', descricao: 'Para pequenas frotas', preco_mensal: 49.9, modelo_cobranca: 'fixo', preco_por_motorista: null, limite_motoristas: 3, dias_trial: 7, recursos: ['Gestão de fretes', 'Relatórios básicos', 'Suporte via email'] },
+  { id: 'profissional', nome: 'Plano Profissional', descricao: 'Para frotas em crescimento', preco_mensal: 99.9, modelo_cobranca: 'fixo', preco_por_motorista: null, limite_motoristas: 10, dias_trial: 7, recursos: ['Gestão de fretes + despesas', 'Relatórios avançados', 'Suporte prioritário', 'App motorista'] },
+  { id: 'empresarial', nome: 'Plano Enterprise', descricao: 'Para operações completas', preco_mensal: 199.9, modelo_cobranca: 'fixo', preco_por_motorista: null, limite_motoristas: null, dias_trial: 7, recursos: ['Motoristas ilimitados', 'Todas as funcionalidades', 'Suporte 24h'] },
 ];
 
 // Mapeia alias legado (?plano=) para um plano real do catálogo, por nome.
@@ -47,85 +44,97 @@ const ALIAS_NOME: Record<string, string[]> = {
   empresarial: ['enterprise', 'empresarial'],
 };
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function precoBRL(v: number): string {
   return 'R$ ' + (Number(v) || 0).toFixed(2).replace('.', ',');
 }
 
+const PASSOS = ['Plano', 'Administrador', 'Empresa'];
+
 export const CadastroPublico: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  // Etapas: 1 = escolha do plano · 2 = dados do administrador · 3 = dados da
+  // empresa (com resumo + promoção). `concluido` mostra a tela de sucesso.
   const [step, setStep] = useState(1);
+  const [concluido, setConcluido] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [reenviando, setReenviando] = useState(false);
   const [reenvioMsg, setReenvioMsg] = useState('');
-  const [catalogo, setCatalogo] = useState<PlanoOpcao[]>([]);
+  const [planos, setPlanos] = useState<PlanoPublico[]>([]);
   const [promoPreview, setPromoPreview] = useState<PromoPreview | null>(null);
   const [promoErro, setPromoErro] = useState('');
   const [validandoPromo, setValidandoPromo] = useState(false);
   const [form, setForm] = useState<FormData>({
     nome: '', email: '', senha: '', confirmarSenha: '',
-    empresa: '', cnpj: '', telefone: '', plano_id: '', plano: 'basico', codigo_promocional: '',
+    empresa: '', cnpj: '', telefone: '', plano_id: '', plano: '', codigo_promocional: '',
   });
-  // Sem auto-redirecionamento: o cadastro NÃO libera acesso imediato. O usuário
-  // precisa confirmar o e-mail antes de entrar, então ele decide quando ir ao
-  // login (ou reenviar a confirmação).
 
-  // Carrega o catálogo público e aplica a seleção inicial vinda da URL
-  // (?plano_id=<uuid> preferido; ?plano=<alias> legado como fallback).
+  // Carrega o catálogo público completo (mesma vitrine da página de upgrade) e
+  // aplica a seleção inicial vinda da URL (?plano_id=<uuid> preferido; ?plano=
+  // <alias> legado como fallback). A seleção NUNCA cai sobre um plano sob
+  // negociação (Enterprise): ele aparece na vitrine, mas não é self-service.
   useEffect(() => {
     const qpId = searchParams.get('plano_id');
     const qpAlias = searchParams.get('plano');
-    // Cadastro público é de empresa/transportadora: só planos de empresa ou
-    // "ambos" (autônomo se cadastra pelo app). Filtro por categoria, nunca por nome.
     api.get('/planos/publicos?categoria=empresa')
       .then((res) => {
-        // Planos "sob negociação" (Enterprise 41+) NÃO são self-service: não
-        // entram na seleção do cadastro (evita card "R$ 0,00" e default errado).
-        // Ordena por preço crescente — o backend já ordena, mas garantimos aqui.
-        const bruto = (res.data?.planos || [])
-          .filter((p: any) => p?.requer_negociacao !== true)
-          .sort((a: any, b: any) => (Number(a?.preco_mensal) || 0) - (Number(b?.preco_mensal) || 0));
-        const lista: PlanoOpcao[] = bruto.map((p: any) => ({
-          id: p.id, nome: p.nome, precoLabel: precoBRL(p.preco_mensal),
+        const lista: PlanoPublico[] = (res.data?.planos || []).map((p: any) => ({
+          ...p,
+          preco_mensal: Number(p.preco_mensal) || 0,
+          modelo_cobranca: p.modelo_cobranca === 'por_motorista' ? 'por_motorista' : 'fixo',
+          preco_por_motorista: p.preco_por_motorista != null ? Number(p.preco_por_motorista) : null,
+          recursos: normalizarRecursos(p.recursos),
         }));
-        if (!lista.length) { setCatalogo(PLANOS_FALLBACK); return; }
-        setCatalogo(lista);
-        if (qpId && lista.some((p) => p.id === qpId)) {
-          setForm((f) => ({ ...f, plano_id: qpId, plano: '' }));
-        } else if (qpAlias) {
-          const chaves = ALIAS_NOME[qpAlias] || [qpAlias.toLowerCase()];
-          const match = bruto.find((p: any) =>
-            chaves.some((k) => String(p.nome || '').toLowerCase().includes(k)));
-          if (match) setForm((f) => ({ ...f, plano_id: match.id, plano: '' }));
-          else setForm((f) => ({ ...f, plano: qpAlias }));
-        } else {
-          setForm((f) => ({ ...f, plano_id: lista[0].id, plano: '' }));
-        }
+        const catalogo = lista.length ? lista : PLANOS_FALLBACK;
+        setPlanos(catalogo);
+        aplicarSelecaoInicial(catalogo, qpId, qpAlias);
       })
       .catch(() => {
-        // Sem catálogo: mantém fallback por alias (comportamento antigo).
-        setCatalogo(PLANOS_FALLBACK);
-        if (qpAlias && ['basico', 'profissional', 'empresarial'].includes(qpAlias)) {
-          setForm((f) => ({ ...f, plano: qpAlias, plano_id: '' }));
-        }
+        setPlanos(PLANOS_FALLBACK);
+        aplicarSelecaoInicial(PLANOS_FALLBACK, null, qpAlias);
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Resolve a seleção inicial contra o catálogo, sempre num plano self-service.
+  function aplicarSelecaoInicial(catalogo: PlanoPublico[], qpId: string | null, qpAlias: string | null) {
+    const selfService = catalogo.filter((p) => !p.requer_negociacao);
+    // 1. ?plano_id explícito, desde que seja self-service.
+    if (qpId) {
+      const alvo = selfService.find((p) => p.id === qpId);
+      if (alvo) { selecionarPlano(alvo, false); return; }
+    }
+    // 2. ?plano alias → casa por nome (Enterprise/empresarial cai no default).
+    if (qpAlias) {
+      const chaves = ALIAS_NOME[qpAlias] || [qpAlias.toLowerCase()];
+      const alvo = selfService.find((p) => chaves.some((k) => String(p.nome || '').toLowerCase().includes(k)));
+      if (alvo) { selecionarPlano(alvo, false); return; }
+    }
+    // 3. Default: primeiro self-service por preço.
+    const def = primeiroPlanoSelfService(catalogo);
+    if (def) selecionarPlano(def, false);
+  }
+
   const updateField = (field: keyof FormData, value: string) => {
-    setForm(prev => ({ ...prev, [field]: value }));
+    setForm((prev) => ({ ...prev, [field]: value }));
   };
 
-  function selecionarPlano(p: PlanoOpcao) {
-    if (p.alias) setForm((f) => ({ ...f, plano: p.alias as string, plano_id: '' }));
-    else setForm((f) => ({ ...f, plano_id: p.id, plano: '' }));
+  // Seleciona um plano self-service. UUID real → plano_id; alias de fallback →
+  // plano. `avancar` leva à próxima etapa (usado no clique dos cards da vitrine).
+  function selecionarPlano(p: PlanoPublico, avancar: boolean) {
+    if (p.requer_negociacao) return; // guarda: negociação nunca é self-service
+    if (UUID_RE.test(p.id)) setForm((f) => ({ ...f, plano_id: p.id, plano: '' }));
+    else setForm((f) => ({ ...f, plano: p.id, plano_id: '' }));
+    if (avancar) setStep(2);
   }
 
-  function planoSelecionado(p: PlanoOpcao): boolean {
-    return p.alias ? form.plano === p.alias : form.plano_id === p.id;
-  }
+  // id atualmente selecionado (UUID ou alias), para destacar o card na vitrine.
+  const selecionadoId = form.plano_id || form.plano || null;
+  const planoSelecionado = planos.find((p) => p.id === selecionadoId) || null;
 
   async function validarPromo() {
     const codigo = (form.codigo_promocional || '').trim();
@@ -141,6 +150,21 @@ export const CadastroPublico: React.FC = () => {
     } finally {
       setValidandoPromo(false);
     }
+  }
+
+  function removerPromo() {
+    setPromoPreview(null);
+    setPromoErro('');
+    updateField('codigo_promocional', '');
+  }
+
+  // Validação dos dados do administrador (etapa 2 → 3). Mantém as regras do
+  // submit final e apenas antecipa o feedback ao avançar.
+  function validarAdministrador(): boolean {
+    if (form.senha !== form.confirmarSenha) { setError('Senhas não conferem.'); return false; }
+    if (form.senha.length < 6) { setError('Senha deve ter no mínimo 6 caracteres.'); return false; }
+    setError('');
+    return true;
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -173,7 +197,7 @@ export const CadastroPublico: React.FC = () => {
       if (form.codigo_promocional && form.codigo_promocional.trim()) payload.codigo_promocional = form.codigo_promocional.trim();
       await api.post('/auth/register-empresa', payload);
       setSuccess('Sua conta foi criada.');
-      setStep(3);
+      setConcluido(true);
     } catch (err: any) {
       setError(err.response?.data?.message || 'Erro ao cadastrar. Tente novamente.');
     } finally {
@@ -197,32 +221,54 @@ export const CadastroPublico: React.FC = () => {
     }
   };
 
+  // Preço/mensalidade a exibir no resumo, considerando promoção aplicada.
+  const precoMensalidade = planoSelecionado ? planoSelecionado.preco_mensal : 0;
+  const temPromo = !!(promoPreview && promoPreview.valido && promoPreview.preco_promocional != null);
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 py-10 px-4">
+      <div className="max-w-7xl mx-auto">
+        {/* Cabeçalho + indicador de etapas */}
         <div className="text-center mb-8">
           <div className="flex items-center justify-center gap-2 mb-2">
             <Truck className="text-blue-600" size={28} />
             <h1 className="text-2xl font-bold text-gray-900">Matopiba Log</h1>
           </div>
-          <p className="text-gray-500">Crie sua conta gratuitamente</p>
+          <p className="text-gray-500">Crie sua conta em poucos passos</p>
         </div>
 
-        <div className="bg-white rounded-2xl shadow-lg p-8">
-          {/* Steps indicator */}
-          <div className="flex justify-center gap-2 mb-8">
-            {[1, 2].map((s) => (
-              <div key={s} className={`w-3 h-3 rounded-full ${step >= s ? 'bg-blue-600' : 'bg-gray-200'}`} />
-            ))}
+        {!concluido && (
+          <div className="flex items-center justify-center gap-3 mb-10">
+            {PASSOS.map((rotulo, i) => {
+              const n = i + 1;
+              const ativo = step === n;
+              const feito = step > n;
+              return (
+                <React.Fragment key={rotulo}>
+                  <div className="flex items-center gap-2">
+                    <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold ${
+                      feito ? 'bg-green-600 text-white' : ativo ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-500'
+                    }`}>
+                      {feito ? <Check size={14} /> : n}
+                    </div>
+                    <span className={`text-sm hidden sm:inline ${ativo ? 'text-gray-900 font-semibold' : 'text-gray-500'}`}>{rotulo}</span>
+                  </div>
+                  {n < PASSOS.length && <div className="w-8 h-px bg-gray-300" />}
+                </React.Fragment>
+              );
+            })}
           </div>
+        )}
 
-          {error && (
-            <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm mb-4">{error}</div>
-          )}
+        {error && (
+          <div className="max-w-2xl mx-auto bg-red-50 text-red-600 p-3 rounded-lg text-sm mb-4">{error}</div>
+        )}
 
-          {success && (
-            <div className="bg-blue-50 text-blue-800 p-4 rounded-lg text-sm mb-4">
-              <p className="font-semibold mb-1">✅ {success}</p>
+        {/* Tela de sucesso */}
+        {concluido && (
+          <div className="max-w-md mx-auto bg-white rounded-2xl shadow-lg p-8">
+            <div className="bg-blue-50 text-blue-800 p-4 rounded-lg text-sm">
+              <p className="font-semibold mb-1">✅ {success || 'Sua conta foi criada.'}</p>
               <p className="mb-2">
                 Enviamos um link de confirmação para <strong>{form.email}</strong>.
                 Confirme seu e-mail antes de entrar — verifique também a caixa de spam.
@@ -246,101 +292,159 @@ export const CadastroPublico: React.FC = () => {
                 </button>
               </div>
             </div>
-          )}
+          </div>
+        )}
 
-          {step === 1 && (
-            <form onSubmit={(e) => { e.preventDefault(); setStep(2); }}>
-              <h2 className="text-lg font-semibold text-gray-900 mb-6">Dados do Administrador</h2>
+        {/* Etapa 1 — Escolha do plano (vitrine compartilhada com a página de upgrade) */}
+        {!concluido && step === 1 && (
+          <div>
+            {planos.length === 0 ? (
+              <div className="text-center text-gray-500 py-16">Carregando planos...</div>
+            ) : (
+              <PlanosVitrine
+                planos={planos}
+                planoSelecionadoId={selecionadoId}
+                onEscolher={(p) => selecionarPlano(p, true)}
+                ctaLabel="Selecionar plano"
+                ctaSelecionadoLabel="✓ Selecionado"
+              />
+            )}
+            <div className="max-w-5xl mx-auto mt-8 flex flex-col sm:flex-row items-center justify-between gap-4">
+              <Link to="/login" className="text-sm text-gray-500 hover:text-blue-600">Já tem conta? Fazer login</Link>
+              {planoSelecionado && (
+                <button
+                  type="button"
+                  onClick={() => setStep(2)}
+                  className="w-full sm:w-auto py-3 px-8 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-colors"
+                >
+                  Continuar com {planoSelecionado.nome} →
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Etapa 2 — Dados do administrador */}
+        {!concluido && step === 2 && (
+          <div className="max-w-md mx-auto bg-white rounded-2xl shadow-lg p-8">
+            <h2 className="text-lg font-semibold text-gray-900 mb-6">Dados do Administrador</h2>
+            <form onSubmit={(e) => { e.preventDefault(); if (validarAdministrador()) setStep(3); }}>
               <div className="space-y-4">
-                <InputField icon={<User size={18} />} placeholder="Nome completo" value={form.nome} onChange={v => updateField('nome', v)} required />
-                <InputField icon={<Mail size={18} />} placeholder="Email" type="email" value={form.email} onChange={v => updateField('email', v)} required />
-                <InputField icon={<Phone size={18} />} placeholder="Telefone" value={form.telefone} onChange={v => updateField('telefone', maskPhone(v))} required />
-                <InputField icon={<Lock size={18} />} placeholder="Senha" type="password" value={form.senha} onChange={v => updateField('senha', v)} required />
-                <InputField icon={<Lock size={18} />} placeholder="Confirmar senha" type="password" value={form.confirmarSenha} onChange={v => updateField('confirmarSenha', v)} required />
+                <InputField icon={<User size={18} />} placeholder="Nome completo" value={form.nome} onChange={(v) => updateField('nome', v)} required />
+                <InputField icon={<Mail size={18} />} placeholder="Email" type="email" value={form.email} onChange={(v) => updateField('email', v)} required />
+                <InputField icon={<Phone size={18} />} placeholder="Telefone" value={form.telefone} onChange={(v) => updateField('telefone', maskPhone(v))} required />
+                <InputField icon={<Lock size={18} />} placeholder="Senha" type="password" value={form.senha} onChange={(v) => updateField('senha', v)} required />
+                <InputField icon={<Lock size={18} />} placeholder="Confirmar senha" type="password" value={form.confirmarSenha} onChange={(v) => updateField('confirmarSenha', v)} required />
               </div>
-              <button type="submit" className="w-full mt-6 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-colors">
-                Continuar
-              </button>
+              <div className="flex gap-3 mt-6">
+                <button type="button" onClick={() => setStep(1)} className="flex items-center justify-center gap-1 flex-1 py-3 border border-gray-300 text-gray-700 rounded-xl font-medium hover:bg-gray-50 transition-colors">
+                  <ArrowLeft size={16} /> Voltar
+                </button>
+                <button type="submit" className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-colors">
+                  Continuar
+                </button>
+              </div>
             </form>
-          )}
+          </div>
+        )}
 
-          {step === 2 && (
-            <form onSubmit={handleSubmit}>
+        {/* Etapa 3 — Dados da empresa + resumo do plano (com promoção) */}
+        {!concluido && step === 3 && (
+          <form onSubmit={handleSubmit} className="max-w-5xl mx-auto grid lg:grid-cols-3 gap-6 items-start">
+            {/* Dados da empresa */}
+            <div className="lg:col-span-2 bg-white rounded-2xl shadow-lg p-8">
               <h2 className="text-lg font-semibold text-gray-900 mb-6">Dados da Empresa</h2>
               <div className="space-y-4">
-                <InputField icon={<Building2 size={18} />} placeholder="Nome da empresa" value={form.empresa} onChange={v => updateField('empresa', v)} required />
-                <InputField icon={<Building2 size={18} />} placeholder="CNPJ" value={form.cnpj} onChange={v => updateField('cnpj', maskCNPJ(v))} required />
+                <InputField icon={<Building2 size={18} />} placeholder="Nome da empresa" value={form.empresa} onChange={(v) => updateField('empresa', v)} required />
+                <InputField icon={<Building2 size={18} />} placeholder="CNPJ" value={form.cnpj} onChange={(v) => updateField('cnpj', maskCNPJ(v))} required />
+              </div>
+              <div className="flex gap-3 mt-6">
+                <button type="button" onClick={() => setStep(2)} className="flex items-center justify-center gap-1 flex-1 py-3 border border-gray-300 text-gray-700 rounded-xl font-medium hover:bg-gray-50 transition-colors">
+                  <ArrowLeft size={16} /> Voltar
+                </button>
+                <button type="submit" disabled={loading} className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors">
+                  {loading ? 'Cadastrando...' : 'Finalizar cadastro'}
+                </button>
+              </div>
+            </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Plano</label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {(catalogo.length ? catalogo : PLANOS_FALLBACK).map(p => (
-                      <button
-                        key={p.id}
-                        type="button"
-                        onClick={() => selecionarPlano(p)}
-                        className={`p-3 rounded-xl border-2 text-center transition-all ${
-                          planoSelecionado(p) ? 'border-blue-600 bg-blue-50' : 'border-gray-200 hover:border-gray-300'
-                        }`}
-                      >
-                        <div className="text-sm font-semibold text-gray-900">{p.nome}</div>
-                        <div className="text-xs text-gray-500">{p.precoLabel}</div>
-                      </button>
-                    ))}
+            {/* Resumo do plano + código promocional */}
+            <aside className="bg-white rounded-2xl shadow-lg p-6 lg:sticky lg:top-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-base font-semibold text-gray-900">Resumo</h3>
+                <button type="button" onClick={() => setStep(1)} className="text-xs text-blue-600 hover:underline">Trocar plano</button>
+              </div>
+
+              {planoSelecionado ? (
+                <div className="mb-4">
+                  <div className="text-sm text-gray-500">Plano escolhido</div>
+                  <div className="text-lg font-bold text-gray-900">{planoSelecionado.nome}</div>
+                  <div className="mt-1">
+                    {temPromo ? (
+                      <div>
+                        <span className="line-through text-gray-400 mr-2">{precoBRL(promoPreview!.preco_original ?? precoMensalidade)}</span>
+                        <span className="text-2xl font-bold text-green-700">{precoBRL(promoPreview!.preco_promocional!)}</span>
+                        <span className="text-gray-500">/mês</span>
+                      </div>
+                    ) : (
+                      <div>
+                        <span className="text-2xl font-bold text-gray-900">{precoBRL(precoMensalidade)}</span>
+                        <span className="text-gray-500">/mês</span>
+                      </div>
+                    )}
                   </div>
+                  {planoSelecionado.dias_trial ? (
+                    <div className="mt-1 text-sm text-green-600 font-medium">{planoSelecionado.dias_trial} dias de teste grátis</div>
+                  ) : null}
                 </div>
+              ) : (
+                <div className="mb-4 text-sm text-gray-500">Nenhum plano selecionado.</div>
+              )}
 
-                {/* Código promocional (opcional) */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Código promocional (opcional)</label>
-                  <div className="flex gap-2">
+              <div className="border-t border-gray-100 pt-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">Código promocional (opcional)</label>
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"><Tag size={16} /></div>
                     <input
                       value={form.codigo_promocional}
                       onChange={(e) => { updateField('codigo_promocional', e.target.value.toUpperCase()); setPromoPreview(null); setPromoErro(''); }}
                       placeholder="EX: FEIRA2026"
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded-xl font-mono text-sm"
+                      className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-xl font-mono text-sm outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     />
-                    <button type="button" onClick={validarPromo} disabled={validandoPromo}
-                      className="px-4 py-2 bg-gray-800 text-white rounded-xl text-sm font-medium disabled:opacity-50">
+                  </div>
+                  {temPromo ? (
+                    <button type="button" onClick={removerPromo} className="px-4 py-2 bg-gray-100 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-200">
+                      Remover
+                    </button>
+                  ) : (
+                    <button type="button" onClick={validarPromo} disabled={validandoPromo} className="px-4 py-2 bg-gray-800 text-white rounded-xl text-sm font-medium disabled:opacity-50">
                       {validandoPromo ? '...' : 'Aplicar'}
                     </button>
-                  </div>
-                  {promoErro && <p className="mt-2 text-sm text-red-600">{promoErro}</p>}
-                  {promoPreview && promoPreview.valido && (
-                    <div className="mt-2 rounded-xl border border-green-300 bg-green-50 p-3 text-sm text-green-800">
-                      <div className="font-semibold">{promoPreview.campanha}</div>
-                      {promoPreview.preco_promocional != null && (
-                        <div>
-                          Mensalidade: <span className="line-through opacity-60">{precoBRL(promoPreview.preco_original || 0)}</span>{' '}
-                          <span className="font-bold">{precoBRL(promoPreview.preco_promocional)}</span>
-                        </div>
-                      )}
-                      {promoPreview.implantacao_promocional != null && (promoPreview.implantacao_original || 0) > 0 && (
-                        <div>
-                          Implantação: <span className="line-through opacity-60">{precoBRL(promoPreview.implantacao_original || 0)}</span>{' '}
-                          <span className="font-bold">{promoPreview.implantacao_promocional === 0 ? 'Grátis' : precoBRL(promoPreview.implantacao_promocional)}</span>
-                        </div>
-                      )}
-                    </div>
                   )}
                 </div>
+                {promoErro && <p className="mt-2 text-sm text-red-600">{promoErro}</p>}
+                {temPromo && (
+                  <div className="mt-3 rounded-xl border border-green-300 bg-green-50 p-3 text-sm text-green-800">
+                    <div className="font-semibold">{promoPreview!.campanha}</div>
+                    {promoPreview!.preco_promocional != null && (
+                      <div>
+                        Mensalidade: <span className="line-through opacity-60">{precoBRL(promoPreview!.preco_original || 0)}</span>{' '}
+                        <span className="font-bold">{precoBRL(promoPreview!.preco_promocional)}</span>
+                      </div>
+                    )}
+                    {promoPreview!.implantacao_promocional != null && (promoPreview!.implantacao_original || 0) > 0 && (
+                      <div>
+                        Implantação: <span className="line-through opacity-60">{precoBRL(promoPreview!.implantacao_original || 0)}</span>{' '}
+                        <span className="font-bold">{promoPreview!.implantacao_promocional === 0 ? 'Grátis' : precoBRL(promoPreview!.implantacao_promocional)}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-
-              <div className="flex gap-3 mt-6">
-                <button type="button" onClick={() => setStep(1)} className="flex-1 py-3 border border-gray-300 text-gray-700 rounded-xl font-medium hover:bg-gray-50 transition-colors">
-                  Voltar
-                </button>
-                <button type="submit" disabled={loading} className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors">
-                  {loading ? 'Cadastrando...' : 'Finalizar'}
-                </button>
-              </div>
-            </form>
-          )}
-
-          <div className="text-center mt-6">
-            <Link to="/login" className="text-sm text-gray-500 hover:text-blue-600">Já tem conta? Fazer login</Link>
-          </div>
-        </div>
+            </aside>
+          </form>
+        )}
       </div>
     </div>
   );
@@ -361,14 +465,14 @@ function InputField({ icon, placeholder, type = 'text', value, onChange, require
         type={inputType}
         placeholder={placeholder}
         value={value}
-        onChange={e => onChange(e.target.value)}
+        onChange={(e) => onChange(e.target.value)}
         required={required}
         className={`w-full pl-10 ${isPassword ? 'pr-10' : 'pr-4'} py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-sm`}
       />
       {isPassword && (
         <button
           type="button"
-          onClick={() => setReveal(r => !r)}
+          onClick={() => setReveal((r) => !r)}
           aria-label={reveal ? 'Ocultar senha' : 'Mostrar senha'}
           className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
         >

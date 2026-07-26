@@ -1,25 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Check, Truck, X } from 'lucide-react';
+import { Truck, X } from 'lucide-react';
 import api, { newClientRequestId } from '../api';
 import { mensagemErro } from '../utils/mensagemErro';
 import { useLoginConfig } from '../hooks/useLoginConfig';
 import { useAuth } from '../contexts/AuthContext';
-
-interface PlanoPublico {
-  id: string;
-  nome: string;
-  descricao: string;
-  // Valor FINAL cobrado, em qualquer modelo — é sempre ele o headline do card.
-  preco_mensal: number;
-  modelo_cobranca: 'fixo' | 'por_motorista';
-  preco_por_motorista: number | null;
-  limite_motoristas: number | null;
-  dias_trial: number | null;
-  recursos: string[];
-  // Plano "sob negociação" (41+): sem preço de tabela, fora do self-service.
-  requer_negociacao?: boolean;
-}
+import { PlanosVitrine } from '../components/PlanosVitrine';
+import { normalizarRecursos } from '../utils/planosCatalogo';
+import type { PlanoPublico } from '../utils/planosCatalogo';
 
 // Fallback local mínimo — usado APENAS se a API pública falhar, para a página de
 // planos não ficar em branco. O backend (/planos/publicos) é a fonte principal.
@@ -29,49 +17,6 @@ const PLANOS_FALLBACK: PlanoPublico[] = [
   { id: 'profissional', nome: 'Plano Profissional', descricao: 'Para frotas em crescimento', preco_mensal: 99.9, modelo_cobranca: 'fixo', preco_por_motorista: null, limite_motoristas: 10, dias_trial: 7, recursos: ['Gestão de fretes + despesas', 'Relatórios avançados', 'Suporte prioritário', 'App motorista'] },
   { id: 'empresarial', nome: 'Plano Enterprise', descricao: 'Para operações completas', preco_mensal: 199.9, modelo_cobranca: 'fixo', preco_por_motorista: null, limite_motoristas: null, dias_trial: 7, recursos: ['Motoristas ilimitados', 'Todas as funcionalidades', 'Suporte 24h'] },
 ];
-
-// Defesa extra: o backend já normaliza `recursos` para array de strings.
-function normalizarRecursos(recursos: any): string[] {
-  if (Array.isArray(recursos)) return recursos.map((r) => String(r).trim()).filter(Boolean);
-  if (typeof recursos === 'string' && recursos.trim()) {
-    const s = recursos.trim();
-    if (s.startsWith('[')) {
-      try { const a = JSON.parse(s); if (Array.isArray(a)) return a.map((r) => String(r).trim()).filter(Boolean); } catch (_) { /* split abaixo */ }
-    }
-    return s.split(/[,;\n]/).map((r) => r.trim()).filter(Boolean);
-  }
-  return [];
-}
-
-function limiteLabel(limite: number | null): string {
-  if (limite == null) return 'Motoristas ilimitados';
-  return `Até ${limite} motorista${limite === 1 ? '' : 's'}`;
-}
-
-// Composição do preço — subtítulo, nunca headline. Só existe em plano por
-// motorista; plano fixo devolve null e o card fica idêntico ao de hoje.
-// O valor em destaque continua sendo o FINAL: anunciar o unitário grande e
-// cobrar o total seria anunciar um preço e cobrar outro.
-function composicaoLabel(plano: PlanoPublico): string | null {
-  if (plano.modelo_cobranca !== 'por_motorista') return null;
-  if (plano.preco_por_motorista == null || plano.limite_motoristas == null) return null;
-  const motoristas = `${plano.limite_motoristas} motorista${plano.limite_motoristas === 1 ? '' : 's'}`;
-  return `${motoristas} × R$ ${plano.preco_por_motorista.toFixed(2)}`;
-}
-
-// Ordenação da vitrine: planos self-service (automáticos) primeiro, por preço
-// crescente; planos "sob negociação" (Enterprise, sem preço de tabela) SEMPRE
-// por último — nunca no topo só porque o preço de tabela vem 0. Sem isso, o
-// backend ordena por preco_mensal ASC e o card de negociação (preço 0) sobe
-// para o primeiro lugar.
-function ordenarVitrine(lista: PlanoPublico[]): PlanoPublico[] {
-  return [...lista].sort((a, b) => {
-    const na = a.requer_negociacao ? 1 : 0;
-    const nb = b.requer_negociacao ? 1 : 0;
-    if (na !== nb) return na - nb; // negociação sempre depois dos automáticos
-    return (a.preco_mensal || 0) - (b.preco_mensal || 0); // preço crescente
-  });
-}
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -122,12 +67,6 @@ export const PlanosPublicos: React.FC = () => {
     return () => { vivo = false; };
   }, []);
 
-  // Vitrine ordenada: automáticos por preço crescente, negociação por último.
-  const planosOrdenados = React.useMemo(() => ordenarVitrine(planos), [planos]);
-  // Destaque visual: o 2º card (índice 1) quando há 3+ planos. Como a negociação
-  // fica sempre por último, o destaque nunca cai sobre ela.
-  const idxDestaque = planosOrdenados.length >= 3 ? 1 : -1;
-
   function irParaCadastro(plano: PlanoPublico) {
     // UUID real → plano_id; alias de fallback → ?plano= (compat legado).
     const q = UUID_RE.test(plano.id)
@@ -140,8 +79,8 @@ export const PlanosPublicos: React.FC = () => {
   // usuário logado abre o modal de upgrade — nunca cai no /cadastro (a empresa
   // e o admin já existem).
   function aoEscolherPlano(plano: PlanoPublico) {
-    // Plano sob negociação: nunca entra no self-service (o CTA já é "Fale com o
-    // suporte"; esta guarda cobre qualquer outra via).
+    // Plano sob negociação: nunca entra no self-service (o componente já não
+    // dispara este callback para ele; esta guarda cobre qualquer outra via).
     if (plano.requer_negociacao) return;
     if (user) {
       setErroModal(null);
@@ -247,66 +186,13 @@ export const PlanosPublicos: React.FC = () => {
         {loading ? (
           <div className="text-center text-gray-500 py-16">Carregando planos...</div>
         ) : (
-          <div className="grid md:grid-cols-3 gap-8 max-w-5xl mx-auto">
-            {planosOrdenados.map((plano, idx) => {
-              const destaque = idx === idxDestaque;
-              return (
-                <div key={plano.id} className={`relative bg-white rounded-2xl shadow-lg p-8 flex flex-col transition-transform hover:scale-105 ${destaque ? 'ring-2 ring-blue-500 shadow-xl' : ''}`}>
-                  {destaque && (
-                    <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-4 py-1 rounded-full text-sm font-semibold">Mais Popular</div>
-                  )}
-                  <h3 className="text-2xl font-bold text-gray-900 mb-2">{plano.nome}</h3>
-                  <p className="text-gray-500 mb-6">{plano.descricao}</p>
-                  <div className="mb-1">
-                    {plano.requer_negociacao ? (
-                      <span className="text-3xl font-bold text-gray-900">Sob negociação</span>
-                    ) : (
-                      <>
-                        <span className="text-4xl font-bold text-gray-900">R$ {plano.preco_mensal.toFixed(2)}</span>
-                        <span className="text-gray-500">/mês</span>
-                      </>
-                    )}
-                  </div>
-                  {/* Composição como SUBTÍTULO. O headline acima segue sendo o
-                      valor final cobrado — em plano fixo isto some e o card fica
-                      exatamente como era. */}
-                  {composicaoLabel(plano) && (
-                    <p className="text-sm text-gray-500 mb-1">{composicaoLabel(plano)}</p>
-                  )}
-                  {plano.dias_trial ? (
-                    <p className="text-sm text-green-600 font-medium mb-6">{plano.dias_trial} dias de teste grátis</p>
-                  ) : <div className="mb-6" />}
-                  <ul className="space-y-3 mb-8 flex-1">
-                    <li className="flex items-center gap-2 text-gray-800 font-semibold">
-                      <Check size={18} className="text-green-500 shrink-0" />
-                      <span>{limiteLabel(plano.limite_motoristas)}</span>
-                    </li>
-                    {plano.recursos.map((f) => (
-                      <li key={f} className="flex items-center gap-2 text-gray-700">
-                        <Check size={18} className="text-green-500 shrink-0" />
-                        <span>{f}</span>
-                      </li>
-                    ))}
-                  </ul>
-                  {plano.requer_negociacao ? (
-                    <div className="w-full">
-                      <div className="w-full py-3 rounded-xl text-white font-semibold text-center bg-amber-600 cursor-default select-none">
-                        Fale com o comercial
-                      </div>
-                      <p className="mt-2 text-xs text-gray-500 text-center">Para frotas acima de 40 motoristas — contratação sob negociação.</p>
-                    </div>
-                  ) : (
-                    <button
-                      className={`w-full py-3 rounded-xl text-white font-semibold transition-colors ${destaque ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-800 hover:bg-gray-900'}`}
-                      onClick={() => aoEscolherPlano(plano)}
-                    >
-                      {user ? 'Solicitar upgrade' : 'Começar Agora'}
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+          // Vitrine compartilhada (mesma fonte visual do cadastro público). CTA
+          // depende da sessão; negociação renderizada por último e não-clicável.
+          <PlanosVitrine
+            planos={planos}
+            onEscolher={aoEscolherPlano}
+            ctaLabel={user ? 'Solicitar upgrade' : 'Começar Agora'}
+          />
         )}
 
         <div className="text-center mt-12">
