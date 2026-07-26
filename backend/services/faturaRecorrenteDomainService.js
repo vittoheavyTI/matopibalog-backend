@@ -30,6 +30,14 @@ const TIPO_PAGAMENTO = 'PIX';
 // índice único parcial da 031 observa.
 const ORIGEM_RECORRENTE = 'recorrente';
 
+// Teto comercial padrão (motoristas/caminhões) acima do qual não há preço de
+// tabela — é "sob proposta". Espelha LIMITE_NEGOCIACAO_PADRAO da
+// calculadoraComercialService de propósito: este módulo é ZERO-REQUIRE (pura
+// decisão, sem I/O e sem acoplar a calculadora). A regra "acima do teto → sob
+// proposta" é um invariante comercial estável; um plano pode declarar o seu
+// próprio teto em `limite_negociacao`.
+const LIMITE_NEGOCIACAO_PADRAO = 40;
+
 // Motivos de decisão (estáveis, para log/telemetria do job futuro).
 const MOTIVOS = Object.freeze({
   OK: 'ok',
@@ -41,8 +49,23 @@ const MOTIVOS = Object.freeze({
   CUSTOMER_ASAAS_AUSENTE: 'customer_asaas_ausente',
   PLANO_INVALIDO: 'plano_invalido',
   PLANO_GRATUITO: 'plano_gratuito',
+  // Plano marcado como sob negociação (Enterprise): não tem preço de tabela, então
+  // a recorrência self-service NÃO cobra — o valor é fechado fora do fluxo automático.
+  PLANO_REQUER_NEGOCIACAO: 'plano_requer_negociacao',
+  // A quantidade contratada estoura o teto comercial do plano (> limite_negociacao,
+  // padrão 40): acima disso é "sob proposta", sem preço de tabela para cobrar.
+  QUANTIDADE_REQUER_NEGOCIACAO: 'quantidade_requer_negociacao',
   FATURA_RECORRENTE_JA_EXISTE: 'fatura_recorrente_ja_existe',
 });
+
+// Teto de negociação efetivo do plano: o próprio (se declarar um inteiro >= 1) ou
+// o padrão global. Réplica mínima e estável de tetoNegociacao da calculadora,
+// mantida aqui para preservar a pureza zero-require deste módulo.
+function tetoNegociacaoDe(plano) {
+  const doPlano = plano && plano.limite_negociacao;
+  if (typeof doPlano === 'number' && Number.isInteger(doPlano) && doPlano >= 1) return doPlano;
+  return LIMITE_NEGOCIACAO_PADRAO;
+}
 
 // Normaliza qualquer entrada de data para um Date válido, ou null.
 // Aceita Date ou string/number parseável. Não muta a entrada.
@@ -202,10 +225,29 @@ function avaliarElegibilidadeFaturaRecorrente({ empresa, plano, faturasExistente
     return { resultado: 'pular', motivo: MOTIVOS.PLANO_INVALIDO, elegivel: false, periodo };
   }
 
+  // 6.5 Plano sob negociação (Enterprise): não há preço de tabela para o motor
+  // automático cobrar — o valor é fechado fora do self-service. ANTES da checagem
+  // de preço, para dar o motivo correto mesmo quando o placeholder do plano é 0.
+  // Fecha a borda em que, sem esta trava, a recorrência cairia no fallback
+  // preco_mensal e cobraria um valor que não é o negociado.
+  if (plano.requer_negociacao === true) {
+    return { resultado: 'pular', motivo: MOTIVOS.PLANO_REQUER_NEGOCIACAO, elegivel: false, periodo };
+  }
+
   // 7. Plano gratuito / sem preço válido não gera cobrança.
   const preco = precoDe(plano);
   if (!Number.isFinite(preco) || preco <= 0) {
     return { resultado: 'pular', motivo: MOTIVOS.PLANO_GRATUITO, elegivel: false, periodo };
+  }
+
+  // 7.5 Quantidade contratada acima do teto comercial do plano → sob proposta.
+  // Sem preço de tabela para a quantidade, a recorrência NÃO cobra (evita o
+  // fallback silencioso para preco_mensal, que cobraria só a base ignorando o
+  // excedente). Só se aplica quando há quantidade contratada declarada; planos
+  // normais (sem quantidade ou dentro do teto) seguem inalterados.
+  const qtd = empresa.quantidade_contratada;
+  if (qtd != null && Number.isFinite(Number(qtd)) && Number(qtd) > tetoNegociacaoDe(plano)) {
+    return { resultado: 'pular', motivo: MOTIVOS.QUANTIDADE_REQUER_NEGOCIACAO, elegivel: false, periodo };
   }
 
   // 8. Já existe fatura recorrente desta competência → idempotência.
@@ -249,7 +291,9 @@ module.exports = {
   STATUS_COBRAVEL,
   TIPO_PAGAMENTO,
   ORIGEM_RECORRENTE,
+  LIMITE_NEGOCIACAO_PADRAO,
   MOTIVOS,
+  tetoNegociacaoDe,
   calcularPeriodoReferencia,
   calcularDueDate,
   montarClientRequestId,

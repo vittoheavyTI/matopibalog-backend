@@ -222,7 +222,7 @@ test('recorrente já PAGA do período → idempotente, valor preservado, zero in
 });
 
 // ─── 4. Enterprise / sob negociação não gera self-service ────────────────────
-test('plano Enterprise / sob negociação (sem preço de tabela) → recorrência NÃO gera, zero Asaas', async () => {
+test('plano Enterprise / sob negociação (requer_negociacao) → recorrência NÃO gera, zero Asaas', async () => {
   const supabase = makeSupabase();
   const http = makeHttp();
   const r = await gerarFaturaRecorrenteParaEmpresa({
@@ -232,9 +232,43 @@ test('plano Enterprise / sob negociação (sem preço de tabela) → recorrênci
   });
 
   assert.equal(r.resultado, 'pulada');
-  // Enterprise não tem preço de tabela (preco_mensal = 0) → pulado pela regra de
-  // plano sem preço válido; nenhuma cobrança self-service é emitida.
-  assert.equal(r.motivo, 'plano_gratuito');
+  // Enterprise é marcado requer_negociacao=true → o motor automático não cobra
+  // (o valor é fechado fora do self-service). O guard vem ANTES da checagem de
+  // preço, então o motivo é o específico — nunca o fallback preco_mensal.
+  assert.equal(r.motivo, 'plano_requer_negociacao');
+  assert.equal(supabase._calls.inserts.length, 0);
+  assert.equal(http._calls.posts.length, 0);
+});
+
+// ─── 4b. Plano precificado anômalo com quantidade acima do teto → não cobra ──
+test('plano precificado com quantidade_contratada acima do teto (41 > 40) → pulada, sem fallback preco_mensal', async () => {
+  const supabase = makeSupabase();
+  const http = makeHttp();
+  const r = await gerarFaturaRecorrenteParaEmpresa({
+    supabase, http, config: CONFIG,
+    empresa: empresaAtiva({ quantidade_contratada: 41 }), // Start, teto padrão 40
+    dataReferencia: DATA_REF,
+  });
+
+  assert.equal(r.resultado, 'pulada');
+  assert.equal(r.motivo, 'quantidade_requer_negociacao');
+  // Não caiu no fallback preco_mensal: nenhuma reserva local, nenhuma cobrança.
+  assert.equal(supabase._calls.inserts.length, 0);
+  assert.equal(http._calls.posts.length, 0);
+});
+
+// ─── 4c. Plano precificado marcado requer_negociacao (preço > 0) → não cobra ─
+test('plano precificado marcado requer_negociacao=true → pulada plano_requer_negociacao', async () => {
+  const supabase = makeSupabase();
+  const http = makeHttp();
+  const r = await gerarFaturaRecorrenteParaEmpresa({
+    supabase, http, config: CONFIG,
+    empresa: empresaAtiva({ planos: { ...START, requer_negociacao: true } }), // preço > 0
+    dataReferencia: DATA_REF,
+  });
+
+  assert.equal(r.resultado, 'pulada');
+  assert.equal(r.motivo, 'plano_requer_negociacao');
   assert.equal(supabase._calls.inserts.length, 0);
   assert.equal(http._calls.posts.length, 0);
 });

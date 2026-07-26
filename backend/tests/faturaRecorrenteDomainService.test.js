@@ -174,6 +174,55 @@ test('plano gratuito (preco_mensal <= 0) → pular', () => {
   }
 });
 
+// ─── 7.1 plano sob negociação (Enterprise) não cobra self-service ────────────
+test('plano requer_negociacao=true → pular (plano_requer_negociacao), antes da checagem de preço', () => {
+  // Mesmo com preço placeholder 0 (Enterprise real), o motivo é o específico, não
+  // plano_gratuito — a trava vem antes da checagem de preço.
+  for (const preco of [0, 299.9]) {
+    const r = avaliarElegibilidadeFaturaRecorrente({
+      empresa: EMPRESA_OK,
+      plano: { ...PLANO_FIXO, preco_mensal: preco, requer_negociacao: true },
+      faturasExistentes: [],
+      dataReferencia: '2026-07-20',
+    });
+    assert.equal(r.resultado, 'pular', `preco=${preco}`);
+    assert.equal(r.motivo, MOTIVOS.PLANO_REQUER_NEGOCIACAO, `preco=${preco}`);
+  }
+});
+
+// ─── 7.2 quantidade contratada acima do teto não cobra (sob proposta) ────────
+test('quantidade_contratada > teto → pular (quantidade_requer_negociacao); no teto e abaixo → cobrar', () => {
+  const plano = { ...PLANO_FIXO, limite_negociacao: 40 };
+  // 41 > 40 → sob proposta.
+  const acima = avaliarElegibilidadeFaturaRecorrente({
+    empresa: { ...EMPRESA_OK, quantidade_contratada: 41 },
+    plano, faturasExistentes: [], dataReferencia: '2026-07-20',
+  });
+  assert.equal(acima.resultado, 'pular');
+  assert.equal(acima.motivo, MOTIVOS.QUANTIDADE_REQUER_NEGOCIACAO);
+
+  // Exatamente no teto (40) → ainda cobra (não é "acima").
+  const noTeto = avaliarElegibilidadeFaturaRecorrente({
+    empresa: { ...EMPRESA_OK, quantidade_contratada: 40 },
+    plano, faturasExistentes: [], dataReferencia: '2026-07-20',
+  });
+  assert.equal(noTeto.resultado, 'cobrar');
+
+  // Sem quantidade contratada → comportamento normal preservado (cobrar).
+  const semQtd = avaliarElegibilidadeFaturaRecorrente({
+    empresa: EMPRESA_OK, plano, faturasExistentes: [], dataReferencia: '2026-07-20',
+  });
+  assert.equal(semQtd.resultado, 'cobrar');
+
+  // Teto padrão 40 quando o plano não declara limite_negociacao.
+  const padrao = avaliarElegibilidadeFaturaRecorrente({
+    empresa: { ...EMPRESA_OK, quantidade_contratada: 41 },
+    plano: PLANO_FIXO, faturasExistentes: [], dataReferencia: '2026-07-20',
+  });
+  assert.equal(padrao.resultado, 'pular');
+  assert.equal(padrao.motivo, MOTIVOS.QUANTIDADE_REQUER_NEGOCIACAO);
+});
+
 // ─── 8. plano inativo/arquivado/ausente não cobra ────────────────────────────
 test('plano inativo, arquivado ou ausente → pular (plano inválido)', () => {
   const casos = [
