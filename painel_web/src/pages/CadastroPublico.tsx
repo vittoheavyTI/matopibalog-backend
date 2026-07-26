@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { Truck, User, Building2, Mail, Lock, Phone, Eye, EyeOff, ArrowLeft, Tag, Check } from 'lucide-react';
 import api from '../api';
 import { maskCNPJ, maskPhone } from '../utils/masks';
+import { useLoginConfig } from '../hooks/useLoginConfig';
 import { PlanosVitrine } from '../components/PlanosVitrine';
 import { normalizarRecursos, primeiroPlanoSelfService } from '../utils/planosCatalogo';
 import type { PlanoPublico } from '../utils/planosCatalogo';
@@ -55,6 +56,9 @@ const PASSOS = ['Plano', 'Administrador', 'Empresa'];
 export const CadastroPublico: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  // Mesma logomarca configurável da página de upgrade (/planos), via endpoint
+  // público /configuracoes/public — sem exigir login.
+  const { loginLogo, loginLogoScale, loginLogoY, configLoading } = useLoginConfig();
   // Etapas: 1 = escolha do plano · 2 = dados do administrador · 3 = dados da
   // empresa (com resumo + promoção). `concluido` mostra a tela de sucesso.
   const [step, setStep] = useState(1);
@@ -106,30 +110,30 @@ export const CadastroPublico: React.FC = () => {
     // 1. ?plano_id explícito, desde que seja self-service.
     if (qpId) {
       const alvo = selfService.find((p) => p.id === qpId);
-      if (alvo) { selecionarPlano(alvo, false); return; }
+      if (alvo) { selecionarPlano(alvo); return; }
     }
     // 2. ?plano alias → casa por nome (Enterprise/empresarial cai no default).
     if (qpAlias) {
       const chaves = ALIAS_NOME[qpAlias] || [qpAlias.toLowerCase()];
       const alvo = selfService.find((p) => chaves.some((k) => String(p.nome || '').toLowerCase().includes(k)));
-      if (alvo) { selecionarPlano(alvo, false); return; }
+      if (alvo) { selecionarPlano(alvo); return; }
     }
     // 3. Default: primeiro self-service por preço.
     const def = primeiroPlanoSelfService(catalogo);
-    if (def) selecionarPlano(def, false);
+    if (def) selecionarPlano(def);
   }
 
   const updateField = (field: keyof FormData, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
-  // Seleciona um plano self-service. UUID real → plano_id; alias de fallback →
-  // plano. `avancar` leva à próxima etapa (usado no clique dos cards da vitrine).
-  function selecionarPlano(p: PlanoPublico, avancar: boolean) {
+  // Seleciona um plano self-service (apenas seleciona/destaca — NÃO avança de
+  // etapa; o avanço é só pelo botão "Continuar"). UUID real → plano_id; alias de
+  // fallback → plano.
+  function selecionarPlano(p: PlanoPublico) {
     if (p.requer_negociacao) return; // guarda: negociação nunca é self-service
     if (UUID_RE.test(p.id)) setForm((f) => ({ ...f, plano_id: p.id, plano: '' }));
     else setForm((f) => ({ ...f, plano: p.id, plano_id: '' }));
-    if (avancar) setStep(2);
   }
 
   // id atualmente selecionado (UUID ou alias), para destacar o card na vitrine.
@@ -228,12 +232,31 @@ export const CadastroPublico: React.FC = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 py-10 px-4">
       <div className="max-w-7xl mx-auto">
-        {/* Cabeçalho + indicador de etapas */}
+        {/* Cabeçalho + indicador de etapas. Logomarca configurável (mesma fonte
+            do /planos e do Login): usa a logo quando houver; senão, cai para o
+            ícone + texto. Placeholder de altura fixa enquanto a config carrega,
+            para não "pular" o layout. */}
         <div className="text-center mb-8">
-          <div className="flex items-center justify-center gap-2 mb-2">
-            <Truck className="text-blue-600" size={28} />
-            <h1 className="text-2xl font-bold text-gray-900">Matopiba Log</h1>
-          </div>
+          {configLoading ? (
+            <div className="h-16 mb-2" />
+          ) : loginLogo ? (
+            <div className="flex items-center justify-center mb-2">
+              <img
+                src={loginLogo}
+                alt="Matopiba Log"
+                style={{
+                  transform: `scale(${loginLogoScale / 100}) translateY(${loginLogoY}px)`,
+                  transformOrigin: 'center',
+                }}
+                className="max-h-16 max-w-full object-contain"
+              />
+            </div>
+          ) : (
+            <div className="flex items-center justify-center gap-2 mb-2">
+              <Truck className="text-blue-600" size={28} />
+              <h1 className="text-2xl font-bold text-gray-900">Matopiba Log</h1>
+            </div>
+          )}
           <p className="text-gray-500">Crie sua conta em poucos passos</p>
         </div>
 
@@ -301,16 +324,21 @@ export const CadastroPublico: React.FC = () => {
             {planos.length === 0 ? (
               <div className="text-center text-gray-500 py-16">Carregando planos...</div>
             ) : (
+              // Clicar no card APENAS seleciona e destaca o plano. O avanço de
+              // etapa é só pelo botão "Continuar com [Plano] →" abaixo.
               <PlanosVitrine
                 planos={planos}
                 planoSelecionadoId={selecionadoId}
-                onEscolher={(p) => selecionarPlano(p, true)}
+                onEscolher={(p) => selecionarPlano(p)}
                 ctaLabel="Selecionar plano"
                 ctaSelecionadoLabel="✓ Selecionado"
               />
             )}
             <div className="max-w-5xl mx-auto mt-8 flex flex-col sm:flex-row items-center justify-between gap-4">
-              <Link to="/login" className="text-sm text-gray-500 hover:text-blue-600">Já tem conta? Fazer login</Link>
+              <p className="text-sm text-gray-600">
+                Já tem conta?{' '}
+                <Link to="/login" className="text-blue-600 hover:underline font-semibold">Fazer login</Link>
+              </p>
               {planoSelecionado && (
                 <button
                   type="button"
