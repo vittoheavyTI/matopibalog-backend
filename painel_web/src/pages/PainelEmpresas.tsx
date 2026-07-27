@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Shield, Search, Plus, X, Check, AlertTriangle, Eye, Ban, Unlock, Trash2, KeyRound, CalendarClock, UserPlus, CreditCard, Archive, ArchiveRestore } from 'lucide-react';
+import { Shield, Search, Plus, X, Check, AlertTriangle, Eye, Ban, Unlock, Trash2, KeyRound, CalendarClock, Clock, UserPlus, CreditCard, Archive, ArchiveRestore } from 'lucide-react';
 import api from '../api';
 import { maskCNPJ, maskCPF, maskPhone } from '../utils/masks';
 
@@ -78,6 +78,12 @@ export const PainelEmpresas: React.FC = () => {
   const [deleteTarget, setDeleteTarget] = useState<any>(null);
   const [trialTarget, setTrialTarget] = useState<any>(null);
   const [customDate, setCustomDate] = useState('');
+  // Extensão manual do prazo de suspensão por inadimplência (super-admin).
+  const [prazoTarget, setPrazoTarget] = useState<any>(null);
+  const [prazoInfo, setPrazoInfo] = useState<any>(null);
+  const [prazoLoading, setPrazoLoading] = useState(false);
+  const [prazoData, setPrazoData] = useState('');
+  const [prazoMotivo, setPrazoMotivo] = useState('');
   const [confirmAtivo, setConfirmAtivo] = useState(false);
   const [toast, setToast] = useState<{ message: string; tipo: 'sucesso' | 'erro' } | null>(null);
   // Arquivamento: por padrão a listagem oculta arquivadas; o toggle traz todas.
@@ -260,6 +266,41 @@ export const PainelEmpresas: React.FC = () => {
     }
   }
 
+  // Abre o modal de prazo e carrega a extensão atual + faturas abertas.
+  async function abrirPrazo(e: any) {
+    setPrazoTarget(e); setPrazoInfo(null); setPrazoData(''); setPrazoMotivo(''); setPrazoLoading(true);
+    try {
+      const { data } = await api.get('/painel-admin/empresas/' + e.id + '/prazo-suspensao');
+      setPrazoInfo(data);
+    } catch (err: any) {
+      setToast({ message: err?.response?.data?.message || 'Erro ao carregar prazo', tipo: 'erro' });
+    } finally { setPrazoLoading(false); }
+  }
+
+  // Concede/atualiza a extensão. Motivo obrigatório; data futura.
+  async function concederPrazo() {
+    if (!prazoTarget) return;
+    try {
+      await api.patch('/painel-admin/empresas/' + prazoTarget.id + '/prazo-suspensao', { prazo_ate: prazoData, motivo: prazoMotivo.trim() });
+      setToast({ message: 'Prazo concedido até ' + formatData(prazoData) + '!', tipo: 'sucesso' });
+      setPrazoTarget(null); carregar();
+    } catch (err: any) {
+      setToast({ message: err?.response?.data?.message || 'Erro ao conceder prazo', tipo: 'erro' });
+    }
+  }
+
+  // Remove a extensão (mantém a trilha no backend).
+  async function removerPrazo() {
+    if (!prazoTarget) return;
+    try {
+      await api.delete('/painel-admin/empresas/' + prazoTarget.id + '/prazo-suspensao');
+      setToast({ message: 'Prazo removido.', tipo: 'sucesso' });
+      setPrazoTarget(null); carregar();
+    } catch (err: any) {
+      setToast({ message: err?.response?.data?.message || 'Erro ao remover prazo', tipo: 'erro' });
+    }
+  }
+
   const filtered = empresas.filter(e => {
     const porBusca = (e.nome || '').toLowerCase().includes(searchTerm.toLowerCase()) || (e.cnpj || '').includes(searchTerm);
     // 'autonomos' → só tipo autonomo; 'empresas' → todo o resto (transportadora, fazenda etc).
@@ -390,6 +431,7 @@ export const PainelEmpresas: React.FC = () => {
                     <button onClick={() => { setEditing(e); setFormDados({ nome: e.nome || '', cnpj: e.cnpj || '', email: e.email_contato || '', telefone: e.telefone_contato || '', plano_id: e.plano_id || '', tipo: e.tipo || 'transportadora' }); setQcValue(e.quantidade_contratada != null ? String(e.quantidade_contratada) : ''); setQcPreview(null); setQcMsg(''); setShowModal(true); }} title="Editar empresa" aria-label="Editar empresa" className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg"><Eye size={16} /></button>
                     <button onClick={() => suspender(e.id)} title={e.status === 'suspenso' ? 'Reativar empresa' : 'Suspender empresa'} aria-label={e.status === 'suspenso' ? 'Reativar empresa' : 'Suspender empresa'} className="p-1.5 text-orange-500 hover:bg-orange-50 rounded-lg">{e.status === 'suspenso' ? <Unlock size={16} /> : <Ban size={16} />}</button>
                     <button onClick={() => { setTrialTarget(e); setCustomDate(''); setConfirmAtivo(false); }} title="Gerenciar trial" aria-label="Gerenciar trial da empresa" className="p-1.5 text-amber-600 hover:bg-amber-50 rounded-lg"><CalendarClock size={16} /></button>
+                    <button onClick={() => abrirPrazo(e)} title="Prazo de suspensão (inadimplência)" aria-label="Prazo de suspensão por inadimplência" className={`p-1.5 rounded-lg ${e.suspensao_prazo_ate ? 'text-blue-600 hover:bg-blue-50' : 'text-gray-500 hover:bg-gray-100'}`}><Clock size={16} /></button>
                     <button onClick={() => resetSenhaAdmin(e.id, e.nome)} className="p-1.5 text-gray-500 hover:bg-gray-100 rounded-lg" title="Resetar senha do admin" aria-label="Resetar senha do admin"><KeyRound size={16} /></button>
                     <button onClick={() => { setArchiveTarget(e); setArchiveMotivo(''); }} title={e.arquivada_em ? 'Restaurar conta' : 'Arquivar conta (tira da operação, mantém histórico)'} aria-label={e.arquivada_em ? 'Restaurar conta' : 'Arquivar conta'} className="p-1.5 text-slate-500 hover:bg-slate-100 rounded-lg">{e.arquivada_em ? <ArchiveRestore size={16} /> : <Archive size={16} />}</button>
                     <button onClick={() => setDeleteTarget(e)} title="Excluir empresa" aria-label="Excluir empresa" className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg"><Trash2 size={16} /></button>
@@ -688,6 +730,77 @@ export const PainelEmpresas: React.FC = () => {
               </div>
               <div className="p-4 bg-gray-50 border-t flex justify-end">
                 <button onClick={() => setTrialTarget(null)} className="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded-lg text-sm font-medium">Fechar</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Modal — Prazo de suspensão (extensão manual por inadimplência) */}
+      {prazoTarget && (() => {
+        const amanha = new Date(); amanha.setDate(amanha.getDate() + 1);
+        const min = amanha.toISOString().slice(0, 10);
+        const max = new Date(Date.now() + 90 * 86400000).toISOString().slice(0, 10);
+        const ativa = prazoInfo?.extensao_ativa === true;
+        const faturas = prazoInfo?.faturas_abertas || [];
+        return (
+          <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setPrazoTarget(null)}>
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg" onClick={ev => ev.stopPropagation()}>
+              <div className="flex items-center justify-between p-4 border-b">
+                <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2"><Clock size={20} className="text-blue-600" /> Prazo de suspensão · {prazoTarget.nome}</h3>
+                <button onClick={() => setPrazoTarget(null)} title="Fechar" aria-label="Fechar" className="p-2 hover:bg-gray-200 rounded-full"><X size={22} /></button>
+              </div>
+              <div className="p-5 space-y-4">
+                {prazoLoading ? (
+                  <p className="text-sm text-gray-500">Carregando...</p>
+                ) : (
+                  <>
+                    {/* Extensão ativa */}
+                    {ativa ? (
+                      <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-sm text-blue-800">
+                        <div className="font-bold flex items-center gap-1.5"><Check size={15} /> Extensão ativa até {formatData(prazoInfo.suspensao_prazo_ate)}</div>
+                        {prazoInfo.suspensao_prazo_motivo && <div className="mt-1">Motivo: {prazoInfo.suspensao_prazo_motivo}</div>}
+                        <p className="mt-1 text-xs text-blue-600">A empresa não será suspensa por inadimplência até esse prazo.</p>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-500">Sem extensão ativa. A suspensão automática segue a carência padrão (D+3 após o vencimento).</p>
+                    )}
+
+                    {/* Faturas abertas/vencidas */}
+                    <div>
+                      <div className="text-xs font-bold text-gray-400 uppercase mb-1.5">Faturas abertas/vencidas</div>
+                      {faturas.length === 0 ? (
+                        <p className="text-sm text-gray-500">Nenhuma fatura em aberto.</p>
+                      ) : (
+                        <ul className="text-sm divide-y divide-gray-100 border border-gray-100 rounded-xl">
+                          {faturas.map((f: any) => (
+                            <li key={f.id} className="flex items-center justify-between px-3 py-2">
+                              <span className={f.status === 'vencido' ? 'text-red-600 font-medium' : 'text-gray-700'}>{f.status} · venc. {formatData(f.due_date)}</span>
+                              <span className="font-semibold text-gray-800">R$ {Number(f.valor || 0).toFixed(2).replace('.', ',')}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+
+                    {/* Conceder / atualizar */}
+                    <div className="border-t pt-4">
+                      <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">{ativa ? 'Atualizar prazo até' : 'Conceder prazo até'}</label>
+                      <input type="date" min={min} max={max} value={prazoData} onChange={ev => setPrazoData(ev.target.value)} className="w-full border-2 border-gray-50 rounded-xl p-2.5 outline-none focus:border-blue-500 bg-gray-50/50 text-sm mb-2" />
+                      <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5">Motivo (obrigatório)</label>
+                      <textarea value={prazoMotivo} onChange={ev => setPrazoMotivo(ev.target.value)} rows={2} placeholder="Ex.: acordo comercial / falha bancária confirmada" className="w-full border-2 border-gray-50 rounded-xl p-2.5 outline-none focus:border-blue-500 bg-gray-50/50 text-sm" />
+                    </div>
+                  </>
+                )}
+              </div>
+              <div className="p-4 bg-gray-50 border-t flex items-center justify-between gap-2">
+                {ativa ? (
+                  <button onClick={removerPrazo} className="px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg text-sm font-medium">Remover prazo</button>
+                ) : <span />}
+                <div className="flex gap-2">
+                  <button onClick={() => setPrazoTarget(null)} className="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded-lg text-sm font-medium">Fechar</button>
+                  <button disabled={!prazoData || !prazoMotivo.trim()} onClick={concederPrazo} className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium text-sm hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed">{ativa ? 'Atualizar' : 'Conceder prazo'}</button>
+                </div>
               </div>
             </div>
           </div>
