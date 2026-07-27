@@ -12,6 +12,8 @@ export interface LoginConfig {
   footerText: string;
   contactPhone: string;
   contactEmail: string;
+  // WhatsApp comercial/suporte (canal único). Vem do público via whatsapp_suporte.
+  whatsappSuporte: string;
   footerColor: string;
   footerOpacity: number;
   footerFontSize: number;
@@ -77,6 +79,7 @@ export function readFromLS(): LoginConfig {
     footerText: localStorage.getItem(`${PREFIX}login_footer`) || '',
     contactPhone: localStorage.getItem(`${PREFIX}contact_phone`) || '',
     contactEmail: localStorage.getItem(`${PREFIX}contact_email`) || '',
+    whatsappSuporte: localStorage.getItem(`${PREFIX}whatsapp_suporte`) || '',
     footerColor: localStorage.getItem(`${PREFIX}footer_color`) || '#ffffff',
     footerOpacity: Number(localStorage.getItem(`${PREFIX}footer_opacity`)) || 70,
     footerFontSize: Number(localStorage.getItem(`${PREFIX}footer_font_size`)) || 14,
@@ -102,6 +105,8 @@ export function writeToLS(data: Record<string, any>) {
     footerText: `${PREFIX}login_footer`,
     contactPhone: `${PREFIX}contact_phone`,
     contactEmail: `${PREFIX}contact_email`,
+    // Chave vinda do público em snake_case (whatsapp_suporte), igual ao backend.
+    whatsapp_suporte: `${PREFIX}whatsapp_suporte`,
     footerColor: `${PREFIX}footer_color`,
     footerOpacity: `${PREFIX}footer_opacity`,
     footerFontSize: `${PREFIX}footer_font_size`,
