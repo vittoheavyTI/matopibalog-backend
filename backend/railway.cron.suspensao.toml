@@ -1,0 +1,18 @@
+[build]
+builder = "nixpacks"
+buildCommand = "npm install"
+
+[deploy]
+# CRON DETERMINÍSTICO de trial/inadimplência/suspensão (Pacote 2). One-shot: roda
+# UMA vez e sai (restartPolicyType = never). Substitui o antigo setInterval que
+# rodava em toda instância da web (server.js). Usa a REGRA CENTRAL do domínio
+# (carência D+3 + extensão manual). É SEGURO em produção: só muda status de
+# empresa (suspensão financeira) — NÃO cria cobrança fora do sandbox (a geração de
+# fatura de regularização é fail-closed sandbox), NÃO toca fatura paga/emitida,
+# NÃO fala com Asaas production.
+#
+# Configurar no Railway como um SERVIÇO DE CRON separado apontando este arquivo
+# como "Config File Path" e definindo a expressão cron (ex.: uma vez ao dia, de
+# manhã: "0 9 * * *"). O agendamento é externo (dashboard), fora do código.
+startCommand = "node jobs/expirarTrials.js"
+restartPolicyType = "never"

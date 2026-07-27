@@ -161,7 +161,9 @@ app.use((err, req, res, next) => {
   return next(err);
 });
 
-require('./jobs/expirarTrials');
+// Verificação de trial/inadimplência/suspensão NÃO roda mais aqui (era um
+// setInterval em toda instância). Agora é job one-shot determinístico agendado
+// por cron externo: node jobs/expirarTrials.js (ver backend/railway.cron.suspensao.toml).
 
 const path = require('path');
 app.use(express.static(path.join(__dirname, '..', 'painel_web', 'dist')));
