@@ -4,22 +4,24 @@ const Module = require('node:module');
 
 const jobPath = require.resolve('../jobs/expirarTrials');
 
+// Mock mínimo do supabase-js para o job one-shot. Suporta:
+//   empresas.select('*').in('status',[...])              → lista (via then)
+//   configuracoes.select('dados').eq('id',1).single()    → ambiente/carência
+//   faturas...maybeSingle()                              → fatura elegível
+//   empresas.update(...).eq('id',...)                    → registra update
 function criarSupabaseMock({ empresas = [], fatura = null, faturaError = null, queryError = null, ambiente = null } = {}) {
   const chamadas = { updates: [], selects: [] };
-
   function builder(tabela) {
-    const ctx = { tabela, op: 'select', payload: null };
+    const ctx = { tabela, op: 'select' };
     const api = {
       select(cols) { chamadas.selects.push({ tabela, cols }); return api; },
-      update(payload) { ctx.op = 'update'; ctx.payload = payload; chamadas.updates.push({ tabela, payload }); return api; },
+      update(payload) { ctx.op = 'update'; chamadas.updates.push({ tabela, payload }); return api; },
       eq() { return api; },
       in() { return api; },
       lt() { return api; },
       order() { return api; },
       limit() { return api; },
       single() {
-        // Config global: define o ambiente Asaas do teste. Default null →
-        // não-sandbox → o job NÃO gera fatura (comportamento antigo).
         if (tabela === 'configuracoes') {
           return Promise.resolve({
             data: { dados: { integracao_asaas: ambiente ? { environment: ambiente, apiKey: 'k' } : {} } },
@@ -40,149 +42,147 @@ function criarSupabaseMock({ empresas = [], fatura = null, faturaError = null, q
     };
     return api;
   }
-
   return { from: builder, chamadas };
 }
 
-function carregarJob(supabaseMock, { regularizacaoMock = null } = {}) {
+// Carrega o núcleo com o regularizacaoService opcionalmente mockado.
+function carregarCore(regularizacaoMock = null) {
   const originalLoad = Module._load;
-  const originalEnv = process.env.NODE_ENV;
-  process.env.NODE_ENV = 'test';
   delete require.cache[jobPath];
-
   try {
     Module._load = function (request, parent, isMain) {
-      if (request === '../config/supabase') return supabaseMock;
       if (request === '../services/regularizacaoService' && regularizacaoMock) return regularizacaoMock;
       return originalLoad.call(this, request, parent, isMain);
     };
-    return require(jobPath).expirarTrials;
+    return require(jobPath).executarVerificacaoSuspensao;
   } finally {
     Module._load = originalLoad;
-    process.env.NODE_ENV = originalEnv;
   }
 }
+const rodar = (supabase, regMock) => carregarCore(regMock)({ supabase, http: {} });
+const rodarDry = (supabase, regMock) => carregarCore(regMock)({ supabase, http: {}, dryRun: true });
 
-const empresaTrial = { id: 'empresa-1', nome: 'Empresa 1', status: 'trial', trial_ends_at: '2000-01-01T00:00:00.000Z' };
+const empresaTrialVencido = { id: 'empresa-1', nome: 'E1', status: 'trial', trial_ends_at: '2000-01-01T00:00:00.000Z' };
+const faturaVencidaComLink = { id: 'f1', empresa_id: 'empresa-1', status: 'pendente', due_date: '2000-01-01', invoice_url: 'https://ex/pay', bank_slip_url: null };
 
-test('expirarTrials: trial encerrado sem fatura nao suspende', async () => {
-  const supabase = criarSupabaseMock({ empresas: [empresaTrial], fatura: null });
-  const expirarTrials = carregarJob(supabase);
-
-  await expirarTrials();
-
+test('trial vencido SEM fatura → sem_fatura, não suspende', async () => {
+  const supabase = criarSupabaseMock({ empresas: [empresaTrialVencido], fatura: null });
+  const { relatorio } = await rodar(supabase);
   assert.equal(supabase.chamadas.updates.length, 0);
+  assert.equal(relatorio.sem_fatura, 1);
+  assert.equal(relatorio.suspensas, 0);
 });
 
-test('expirarTrials: trial encerrado com fatura vencida e link suspende', async () => {
-  const supabase = criarSupabaseMock({
-    empresas: [empresaTrial],
-    fatura: {
-      id: 'f1',
-      empresa_id: 'empresa-1',
-      status: 'pendente',
-      due_date: '2000-01-01',
-      invoice_url: 'https://example.com/pay',
-      bank_slip_url: null,
-    },
-  });
-  const expirarTrials = carregarJob(supabase);
-
-  await expirarTrials();
-
-  assert.equal(supabase.chamadas.updates.length, 1);
+test('trial vencido COM fatura vencida (>D+3) + link → suspende com metadados', async () => {
+  const supabase = criarSupabaseMock({ empresas: [empresaTrialVencido], fatura: faturaVencidaComLink });
+  const { relatorio } = await rodar(supabase);
+  assert.equal(relatorio.suspensas, 1);
   const { tabela, payload } = supabase.chamadas.updates[0];
   assert.equal(tabela, 'empresas');
-  // Suspensão financeira automática PRECISA gravar os metadados da 024 —
-  // sem reason='financial', o pagamento posterior não reativa a conta.
   assert.equal(payload.status, 'suspenso');
   assert.equal(payload.suspension_reason, 'financial');
   assert.equal(payload.suspension_source, 'automatic');
-  assert.ok(payload.suspended_at, 'suspended_at deve ser preenchido');
+  assert.ok(payload.suspended_at);
   assert.equal(payload.suspended_by, null);
 });
 
-test('expirarTrials: vencimento hoje nao suspende e falha Supabase e fail-safe', async () => {
+test('carência: vencimento recente (dentro de D+3) → dentro_carencia, não suspende', async () => {
   const hoje = new Date().toISOString().slice(0, 10);
-  const supabaseHoje = criarSupabaseMock({
-    empresas: [empresaTrial],
-    fatura: {
-      id: 'f1',
-      empresa_id: 'empresa-1',
-      status: 'pendente',
-      due_date: hoje,
-      invoice_url: 'https://example.com/pay',
-    },
+  const supabase = criarSupabaseMock({
+    empresas: [{ id: 'empresa-1', status: 'ativo' }],
+    fatura: { id: 'f1', empresa_id: 'empresa-1', status: 'pendente', due_date: hoje, invoice_url: 'https://ex/pay' },
   });
-  await carregarJob(supabaseHoje)();
-  assert.equal(supabaseHoje.chamadas.updates.length, 0);
-
-  const supabaseErro = criarSupabaseMock({ empresas: [empresaTrial], faturaError: new Error('db indisponivel') });
-  await carregarJob(supabaseErro)();
-  assert.equal(supabaseErro.chamadas.updates.length, 0);
+  const { relatorio } = await rodar(supabase);
+  assert.equal(supabase.chamadas.updates.length, 0);
+  assert.equal(relatorio.dentro_carencia, 1);
 });
 
-// ─── Regularização no fim do trial (macrofrente fluxo financeiro) ────────────
-
-test('expirarTrials: sandbox → garante fatura de regularização do trial vencido', async () => {
-  const chamadasReg = [];
-  const supabase = criarSupabaseMock({ empresas: [empresaTrial], fatura: null, ambiente: 'sandbox' });
-  const expirarTrials = carregarJob(supabase, {
-    regularizacaoMock: {
-      async gerarFaturaRegularizacao(args) {
-        chamadasReg.push(args);
-        return { resultado: 'gerada', motivo: 'ok', fatura: { id: 'f-reg' } };
-      },
-    },
+test('extensão manual ativa → prazo_estendido, não suspende (mesmo pós-D+3)', async () => {
+  const futuro = new Date(Date.now() + 10 * 86400000).toISOString().slice(0, 10);
+  const supabase = criarSupabaseMock({
+    empresas: [{ id: 'empresa-1', status: 'ativo', suspensao_prazo_ate: futuro }],
+    fatura: faturaVencidaComLink, // due 2000 (bem pós-D+3)
   });
+  const { relatorio } = await rodar(supabase);
+  assert.equal(supabase.chamadas.updates.length, 0);
+  assert.equal(relatorio.prazo_estendido, 1);
+});
 
-  await expirarTrials();
+test('conta ATIVA com fatura vencida (>D+3) + link → suspende', async () => {
+  const supabase = criarSupabaseMock({
+    empresas: [{ id: 'empresa-1', status: 'ativo' }],
+    fatura: faturaVencidaComLink,
+  });
+  const { relatorio } = await rodar(supabase);
+  assert.equal(relatorio.suspensas, 1);
+  assert.equal(supabase.chamadas.updates[0].payload.status, 'suspenso');
+});
 
+test('já suspensa → ja_suspensa, NÃO faz nada (idempotência, não regride)', async () => {
+  const supabase = criarSupabaseMock({ empresas: [{ id: 'empresa-1', status: 'suspenso' }], fatura: faturaVencidaComLink });
+  const { relatorio } = await rodar(supabase);
+  assert.equal(supabase.chamadas.updates.length, 0);
+  assert.equal(relatorio.ja_suspensa, 1);
+  assert.equal(relatorio.suspensas, 0);
+});
+
+test('trial ainda vigente (trial_ends_at futuro) → trial_ativa, não suspende', async () => {
+  const futuro = new Date(Date.now() + 5 * 86400000).toISOString();
+  const supabase = criarSupabaseMock({ empresas: [{ id: 'empresa-1', status: 'trial', trial_ends_at: futuro }] });
+  const { relatorio } = await rodar(supabase);
+  assert.equal(supabase.chamadas.updates.length, 0);
+  assert.equal(relatorio.trial_ativa, 1);
+});
+
+test('arquivada → arquivadas, fora da avaliação', async () => {
+  const supabase = criarSupabaseMock({ empresas: [{ id: 'empresa-1', status: 'trial', trial_ends_at: '2000-01-01', arquivada_em: '2026-01-01T00:00:00Z' }], fatura: faturaVencidaComLink });
+  const { relatorio } = await rodar(supabase);
+  assert.equal(supabase.chamadas.updates.length, 0);
+  assert.equal(relatorio.arquivadas, 1);
+  assert.equal(relatorio.total_avaliadas, 0);
+});
+
+test('falha na consulta de fatura → fail-safe, não suspende', async () => {
+  const supabase = criarSupabaseMock({ empresas: [{ id: 'empresa-1', status: 'ativo' }], faturaError: new Error('db') });
+  const { relatorio } = await rodar(supabase);
+  assert.equal(supabase.chamadas.updates.length, 0);
+  assert.equal(relatorio.suspensas, 0);
+});
+
+// ─── Regularização (sandbox-gated) ───────────────────────────────────────────
+test('sandbox → gera fatura de regularização do trial vencido', async () => {
+  const chamadasReg = [];
+  const supabase = criarSupabaseMock({ empresas: [empresaTrialVencido], fatura: null, ambiente: 'sandbox' });
+  const { relatorio } = await rodar(supabase, {
+    async gerarFaturaRegularizacao(args) { chamadasReg.push(args); return { resultado: 'gerada', fatura: { id: 'f-reg' } }; },
+  });
   assert.equal(chamadasReg.length, 1);
   assert.equal(chamadasReg[0].empresaId, 'empresa-1');
   assert.equal(chamadasReg[0].config.baseURL, 'https://sandbox.asaas.com/api/v3');
-  // Fatura nova tem vencimento futuro: hoje continua sem suspender.
-  assert.equal(supabase.chamadas.updates.length, 0);
+  assert.equal(relatorio.regularizacoes_geradas, 1);
 });
 
-test('expirarTrials: fora do sandbox NÃO gera cobrança (fail-closed, comportamento antigo)', async () => {
+test('fora do sandbox NÃO gera cobrança (fail-closed)', async () => {
   const chamadasReg = [];
-  const supabase = criarSupabaseMock({ empresas: [empresaTrial], fatura: null, ambiente: 'production' });
-  const expirarTrials = carregarJob(supabase, {
-    regularizacaoMock: {
-      async gerarFaturaRegularizacao(args) { chamadasReg.push(args); return { resultado: 'gerada' }; },
-    },
-  });
-
-  await expirarTrials();
-
+  const supabase = criarSupabaseMock({ empresas: [empresaTrialVencido], fatura: null, ambiente: 'production' });
+  await rodar(supabase, { async gerarFaturaRegularizacao(a) { chamadasReg.push(a); return { resultado: 'gerada' }; } });
   assert.equal(chamadasReg.length, 0);
-  assert.equal(supabase.chamadas.updates.length, 0);
 });
 
-test('expirarTrials: falha na regularização NÃO impede a avaliação de suspensão', async () => {
-  const supabase = criarSupabaseMock({
-    empresas: [empresaTrial],
-    ambiente: 'sandbox',
-    fatura: {
-      id: 'f1',
-      empresa_id: 'empresa-1',
-      status: 'vencido',
-      due_date: '2000-01-05',
-      invoice_url: 'https://example.com/pay',
-      bank_slip_url: null,
-    },
-  });
-  const expirarTrials = carregarJob(supabase, {
-    regularizacaoMock: {
-      async gerarFaturaRegularizacao() { throw new Error('asaas fora do ar'); },
-    },
-  });
-
-  await expirarTrials();
-
-  // A fatura vencida com link continua suspendendo com metadados.
-  assert.equal(supabase.chamadas.updates.length, 1);
+test('falha na regularização NÃO impede a avaliação de suspensão', async () => {
+  const supabase = criarSupabaseMock({ empresas: [empresaTrialVencido], ambiente: 'sandbox', fatura: faturaVencidaComLink });
+  const { relatorio } = await rodar(supabase, { async gerarFaturaRegularizacao() { throw new Error('asaas fora'); } });
+  assert.equal(relatorio.suspensas, 1);
   assert.equal(supabase.chamadas.updates[0].payload.status, 'suspenso');
-  assert.equal(supabase.chamadas.updates[0].payload.suspension_reason, 'financial');
+});
+
+test('dry-run: conta quantas SERIAM suspensas SEM gravar nem gerar fatura', async () => {
+  const chamadasReg = [];
+  const supabase = criarSupabaseMock({ empresas: [empresaTrialVencido], ambiente: 'sandbox', fatura: faturaVencidaComLink });
+  const { relatorio } = await rodarDry(supabase, { async gerarFaturaRegularizacao(a) { chamadasReg.push(a); return { resultado: 'gerada' }; } });
+  assert.equal(relatorio.dry_run, true);
+  assert.equal(relatorio.suspensas, 1);         // seria suspensa
+  assert.equal(supabase.chamadas.updates.length, 0); // mas NÃO gravou
+  assert.equal(chamadasReg.length, 0);          // NÃO gerou fatura
+  assert.equal(relatorio.regularizacoes_geradas, 0);
 });
