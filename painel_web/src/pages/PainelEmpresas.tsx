@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Shield, Search, Plus, X, Check, AlertTriangle, Eye, Ban, Unlock, Trash2, KeyRound, CalendarClock, Clock, UserPlus, CreditCard, Archive, ArchiveRestore } from 'lucide-react';
+import { Shield, Search, Plus, X, Check, AlertTriangle, Eye, Ban, Unlock, Trash2, KeyRound, CalendarClock, ShieldAlert, UserPlus, CreditCard, Archive, ArchiveRestore } from 'lucide-react';
 import api from '../api';
 import { maskCNPJ, maskCPF, maskPhone } from '../utils/masks';
 
@@ -10,6 +10,15 @@ function formatData(iso?: string) {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return '-';
   return d.toLocaleDateString('pt-BR');
+}
+
+// Formata uma data-only ('YYYY-MM-DD') SEM conversão de fuso — preserva
+// exatamente o dia escolhido (evita o -1 dia que new Date(UTC) causa em fuso
+// negativo). Para timestamps completos, cai no formatData.
+function formatDia(s?: string) {
+  if (!s) return '-';
+  const m = String(s).slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : formatData(s);
 }
 
 // Trial vencido = data no passado.
@@ -282,7 +291,7 @@ export const PainelEmpresas: React.FC = () => {
     if (!prazoTarget) return;
     try {
       await api.patch('/painel-admin/empresas/' + prazoTarget.id + '/prazo-suspensao', { prazo_ate: prazoData, motivo: prazoMotivo.trim() });
-      setToast({ message: 'Prazo concedido até ' + formatData(prazoData) + '!', tipo: 'sucesso' });
+      setToast({ message: 'Prazo concedido até ' + formatDia(prazoData) + '!', tipo: 'sucesso' });
       setPrazoTarget(null); carregar();
     } catch (err: any) {
       setToast({ message: err?.response?.data?.message || 'Erro ao conceder prazo', tipo: 'erro' });
@@ -431,7 +440,7 @@ export const PainelEmpresas: React.FC = () => {
                     <button onClick={() => { setEditing(e); setFormDados({ nome: e.nome || '', cnpj: e.cnpj || '', email: e.email_contato || '', telefone: e.telefone_contato || '', plano_id: e.plano_id || '', tipo: e.tipo || 'transportadora' }); setQcValue(e.quantidade_contratada != null ? String(e.quantidade_contratada) : ''); setQcPreview(null); setQcMsg(''); setShowModal(true); }} title="Editar empresa" aria-label="Editar empresa" className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg"><Eye size={16} /></button>
                     <button onClick={() => suspender(e.id)} title={e.status === 'suspenso' ? 'Reativar empresa' : 'Suspender empresa'} aria-label={e.status === 'suspenso' ? 'Reativar empresa' : 'Suspender empresa'} className="p-1.5 text-orange-500 hover:bg-orange-50 rounded-lg">{e.status === 'suspenso' ? <Unlock size={16} /> : <Ban size={16} />}</button>
                     <button onClick={() => { setTrialTarget(e); setCustomDate(''); setConfirmAtivo(false); }} title="Gerenciar trial" aria-label="Gerenciar trial da empresa" className="p-1.5 text-amber-600 hover:bg-amber-50 rounded-lg"><CalendarClock size={16} /></button>
-                    <button onClick={() => abrirPrazo(e)} title="Prazo de suspensão (inadimplência)" aria-label="Prazo de suspensão por inadimplência" className={`p-1.5 rounded-lg ${e.suspensao_prazo_ate ? 'text-blue-600 hover:bg-blue-50' : 'text-gray-500 hover:bg-gray-100'}`}><Clock size={16} /></button>
+                    <button onClick={() => abrirPrazo(e)} title="Prazo de suspensão (inadimplência)" aria-label="Conceder prazo de suspensão por inadimplência" className={`p-1.5 rounded-lg ${e.suspensao_prazo_ate ? 'text-indigo-600 hover:bg-indigo-50' : 'text-slate-500 hover:bg-slate-100'}`}><ShieldAlert size={16} /></button>
                     <button onClick={() => resetSenhaAdmin(e.id, e.nome)} className="p-1.5 text-gray-500 hover:bg-gray-100 rounded-lg" title="Resetar senha do admin" aria-label="Resetar senha do admin"><KeyRound size={16} /></button>
                     <button onClick={() => { setArchiveTarget(e); setArchiveMotivo(''); }} title={e.arquivada_em ? 'Restaurar conta' : 'Arquivar conta (tira da operação, mantém histórico)'} aria-label={e.arquivada_em ? 'Restaurar conta' : 'Arquivar conta'} className="p-1.5 text-slate-500 hover:bg-slate-100 rounded-lg">{e.arquivada_em ? <ArchiveRestore size={16} /> : <Archive size={16} />}</button>
                     <button onClick={() => setDeleteTarget(e)} title="Excluir empresa" aria-label="Excluir empresa" className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg"><Trash2 size={16} /></button>
@@ -747,7 +756,7 @@ export const PainelEmpresas: React.FC = () => {
           <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setPrazoTarget(null)}>
             <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg" onClick={ev => ev.stopPropagation()}>
               <div className="flex items-center justify-between p-4 border-b">
-                <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2"><Clock size={20} className="text-blue-600" /> Prazo de suspensão · {prazoTarget.nome}</h3>
+                <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2"><ShieldAlert size={20} className="text-indigo-600" /> Prazo de suspensão · {prazoTarget.nome}</h3>
                 <button onClick={() => setPrazoTarget(null)} title="Fechar" aria-label="Fechar" className="p-2 hover:bg-gray-200 rounded-full"><X size={22} /></button>
               </div>
               <div className="p-5 space-y-4">
@@ -758,7 +767,7 @@ export const PainelEmpresas: React.FC = () => {
                     {/* Extensão ativa */}
                     {ativa ? (
                       <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-sm text-blue-800">
-                        <div className="font-bold flex items-center gap-1.5"><Check size={15} /> Extensão ativa até {formatData(prazoInfo.suspensao_prazo_ate)}</div>
+                        <div className="font-bold flex items-center gap-1.5"><Check size={15} /> Extensão ativa até {formatDia(prazoInfo.suspensao_prazo_ate)}</div>
                         {prazoInfo.suspensao_prazo_motivo && <div className="mt-1">Motivo: {prazoInfo.suspensao_prazo_motivo}</div>}
                         <p className="mt-1 text-xs text-blue-600">A empresa não será suspensa por inadimplência até esse prazo.</p>
                       </div>
@@ -775,7 +784,7 @@ export const PainelEmpresas: React.FC = () => {
                         <ul className="text-sm divide-y divide-gray-100 border border-gray-100 rounded-xl">
                           {faturas.map((f: any) => (
                             <li key={f.id} className="flex items-center justify-between px-3 py-2">
-                              <span className={f.status === 'vencido' ? 'text-red-600 font-medium' : 'text-gray-700'}>{f.status} · venc. {formatData(f.due_date)}</span>
+                              <span className={f.status === 'vencido' ? 'text-red-600 font-medium' : 'text-gray-700'}>{f.status} · venc. {formatDia(f.due_date)}</span>
                               <span className="font-semibold text-gray-800">R$ {Number(f.valor || 0).toFixed(2).replace('.', ',')}</span>
                             </li>
                           ))}
