@@ -412,6 +412,94 @@ router.patch('/empresas/:id/trial', async (req, res) => {
   res.json(data);
 });
 
+// ── EXTENSÃO MANUAL DE PRAZO DE SUSPENSÃO (super-admin, herda do router.use) ──
+// Concede um prazo adicional antes da suspensão automática por inadimplência.
+// Empresa com `suspensao_prazo_ate` futuro NÃO é suspensa até o prazo vencer
+// (respeitado no domínio avaliarElegibilidadeSuspensao). NÃO toca faturas, plano,
+// preço nem Asaas. Depende da migration 047 (colunas suspensao_prazo_*).
+
+// GET — consulta a extensão atual + faturas abertas/vencidas (para o painel).
+router.get('/empresas/:id/prazo-suspensao', async (req, res) => {
+  try {
+    const hoje = new Date().toISOString().slice(0, 10);
+    const [{ data: empresa, error: empErr }, { data: faturas }] = await Promise.all([
+      supabase.from('empresas').select('*').eq('id', req.params.id).maybeSingle(),
+      supabase.from('faturas')
+        .select('id, valor, status, due_date, invoice_url')
+        .eq('empresa_id', req.params.id)
+        .in('status', ['pendente', 'vencido'])
+        .order('due_date', { ascending: true }),
+    ]);
+    if (empErr) return res.status(500).json({ message: 'Erro ao buscar empresa.' });
+    if (!empresa) return res.status(404).json({ message: 'Empresa não encontrada.' });
+    const prazo = empresa.suspensao_prazo_ate || null;
+    res.json({
+      empresa_id: empresa.id,
+      status: empresa.status,
+      suspensao_prazo_ate: prazo,
+      suspensao_prazo_motivo: empresa.suspensao_prazo_motivo || null,
+      suspensao_prazo_criado_em: empresa.suspensao_prazo_criado_em || null,
+      suspensao_prazo_criado_por: empresa.suspensao_prazo_criado_por || null,
+      extensao_ativa: Boolean(prazo && String(prazo).slice(0, 10) >= hoje),
+      faturas_abertas: faturas || [],
+    });
+  } catch (_) {
+    // Provável ausência das colunas antes da migration 047.
+    res.status(503).json({ message: 'Recurso de extensão de prazo indisponível (aplique a migration 047).' });
+  }
+});
+
+// PATCH — concede/atualiza a extensão. body: { prazo_ate: 'YYYY-MM-DD', motivo }.
+// motivo OBRIGATÓRIO; prazo_ate deve ser futuro (>= amanhã) e no máximo hoje+90.
+router.patch('/empresas/:id/prazo-suspensao', async (req, res) => {
+  const { prazo_ate, motivo } = req.body || {};
+  const motivoLimpo = typeof motivo === 'string' ? motivo.trim() : '';
+  if (!motivoLimpo) return res.status(400).json({ message: 'Informe o motivo da extensão.' });
+  if (!prazo_ate || !/^\d{4}-\d{2}-\d{2}$/.test(String(prazo_ate))) {
+    return res.status(400).json({ message: 'Informe prazo_ate no formato YYYY-MM-DD.' });
+  }
+  const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+  const alvo = new Date(String(prazo_ate) + 'T00:00:00');
+  if (isNaN(alvo.getTime()) || alvo <= hoje) {
+    return res.status(400).json({ message: 'O prazo deve ser uma data futura.' });
+  }
+  const limite = new Date(hoje.getTime() + 90 * 24 * 60 * 60 * 1000);
+  if (alvo > limite) {
+    return res.status(400).json({ message: 'O prazo não pode passar de 90 dias a partir de hoje.' });
+  }
+  try {
+    const { data, error } = await supabase.from('empresas').update({
+      suspensao_prazo_ate: String(prazo_ate),
+      suspensao_prazo_motivo: motivoLimpo,
+      suspensao_prazo_criado_em: new Date().toISOString(),
+      suspensao_prazo_criado_por: (req.user && req.user.uid) ? req.user.uid : null,
+      suspensao_prazo_removido_em: null,
+      suspensao_prazo_removido_por: null,
+    }).eq('id', req.params.id).select('id, suspensao_prazo_ate, suspensao_prazo_motivo').maybeSingle();
+    if (error) return res.status(500).json({ message: 'Erro ao conceder o prazo.' });
+    if (!data) return res.status(404).json({ message: 'Empresa não encontrada.' });
+    res.json(data);
+  } catch (_) {
+    res.status(503).json({ message: 'Recurso de extensão de prazo indisponível (aplique a migration 047).' });
+  }
+});
+
+// DELETE — remove a extensão (mantém a trilha: criado_* preservado + removido_*).
+router.delete('/empresas/:id/prazo-suspensao', async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('empresas').update({
+      suspensao_prazo_ate: null,
+      suspensao_prazo_removido_em: new Date().toISOString(),
+      suspensao_prazo_removido_por: (req.user && req.user.uid) ? req.user.uid : null,
+    }).eq('id', req.params.id).select('id, suspensao_prazo_ate').maybeSingle();
+    if (error) return res.status(500).json({ message: 'Erro ao remover o prazo.' });
+    if (!data) return res.status(404).json({ message: 'Empresa não encontrada.' });
+    res.json(data);
+  } catch (_) {
+    res.status(503).json({ message: 'Recurso de extensão de prazo indisponível (aplique a migration 047).' });
+  }
+});
+
 // PLANOS
 router.get('/planos', async (req, res) => {
   const { data, error } = await supabase.from('planos').select('*').order('preco_mensal', { ascending: true });

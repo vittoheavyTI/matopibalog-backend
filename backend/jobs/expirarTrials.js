@@ -1,5 +1,5 @@
 const supabase = require('../config/supabase');
-const { decidirSuspensaoPorInadimplencia } = require('../services/paymentDomainService');
+const { decidirSuspensaoPorInadimplencia, lerDiasCarenciaSuspensao } = require('../services/paymentDomainService');
 const { patchSuspensaoFinanceiraAutomatica } = require('../utils/suspensao');
 const { gerarFaturaRegularizacao } = require('../services/regularizacaoService');
 const { resolveAsaasApiKey } = require('../utils/asaasConfig');
@@ -86,6 +86,12 @@ async function expirarTrials() {
       let preservadas = 0;
       // Config resolvida uma vez por rodada; null fora do sandbox (fail-closed).
       const configSandbox = await configAsaasSandbox();
+      // Carência de suspensão (config; default 3). Lida uma vez por rodada.
+      let diasCarencia;
+      try {
+        const { data: cfgCar } = await supabase.from('configuracoes').select('dados').eq('id', 1).single();
+        diasCarencia = lerDiasCarenciaSuspensao(cfgCar && cfgCar.dados);
+      } catch (_) { diasCarencia = undefined; } // undefined → default do domínio
 
       for (const empresa of expirados) {
         // Trial venceu → a conta precisa de um caminho de pagamento. Garante a
@@ -100,6 +106,7 @@ async function expirarTrials() {
           fatura,
           hoje,
           erroConsulta: faturaError,
+          diasCarencia,
         });
 
         if (!decisao.deveSuspender) {

@@ -175,7 +175,34 @@ function dataISO(data) {
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString().slice(0, 10);
 }
 
-function avaliarElegibilidadeSuspensao({ empresa, fatura, hoje = new Date(), erroConsulta = null } = {}) {
+// Soma `n` dias a uma data (string/Date) e devolve 'YYYY-MM-DD' (UTC), ou null.
+function addDiasISO(data, n) {
+  const iso = dataISO(data);
+  if (!iso) return null;
+  const d = new Date(iso + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + Number(n || 0));
+  return d.toISOString().slice(0, 10);
+}
+
+// Carência (dias após o vencimento) antes da suspensão automática. Vem da config
+// `dias_carencia_suspensao` (super-admin); default 3 (política de lançamento).
+// Inteiro >= 0; valor inválido/ausente cai no padrão.
+const DIAS_CARENCIA_PADRAO = 3;
+function lerDiasCarenciaSuspensao(dados) {
+  const v = dados && dados.dias_carencia_suspensao;
+  const n = Number(v);
+  return Number.isInteger(n) && n >= 0 ? n : DIAS_CARENCIA_PADRAO;
+}
+
+// Elegibilidade de suspensão por inadimplência, com CARÊNCIA e EXTENSÃO MANUAL.
+//   * `diasCarencia` (default 3): só suspende quando hoje >= due_date + carência
+//     (D+3 na política de lançamento). Antes disso → razão 'dentro_carencia'.
+//   * extensão manual (`empresa.suspensao_prazo_ate`): se ativa (>= hoje), NÃO
+//     suspende até vencer → razão 'prazo_estendido'. Depois de vencida, volta a
+//     regra normal (carência).
+// Motivos de saída relevantes: 'dentro_carencia', 'prazo_estendido',
+// 'elegivel_suspensao'. Demais motivos de invalidez preservados.
+function avaliarElegibilidadeSuspensao({ empresa, fatura, hoje = new Date(), erroConsulta = null, diasCarencia = DIAS_CARENCIA_PADRAO } = {}) {
   if (erroConsulta) return { elegivel: false, razao: 'fail_safe_erro_consulta' };
   if (!empresa || !empresa.id) return { elegivel: false, razao: 'empresa_ausente' };
   if (!fatura) return { elegivel: false, razao: 'fatura_ausente' };
@@ -185,25 +212,37 @@ function avaliarElegibilidadeSuspensao({ empresa, fatura, hoje = new Date(), err
   if (!['pendente', 'vencido'].includes(fatura.status)) {
     return { elegivel: false, razao: 'status_fatura_nao_elegivel' };
   }
+  const hojeStr = dataISO(hoje);
   if (empresa.status === 'trial') {
     const trialFim = dataISO(empresa.trial_ends_at);
-    const hojeStr = dataISO(hoje);
     if (!trialFim || trialFim >= hojeStr) return { elegivel: false, razao: 'trial_ativo' };
   }
 
   const dueDate = dataISO(fatura.due_date);
-  const hojeStr = dataISO(hoje);
   if (!dueDate) return { elegivel: false, razao: 'vencimento_ausente' };
-  if (dueDate >= hojeStr) return { elegivel: false, razao: 'vencimento_nao_passado' };
+
+  // Extensão manual concedida pelo super-admin: se o prazo ainda não venceu,
+  // preserva o acesso (não suspende), mesmo que a carência já tenha passado.
+  const prazoEstendido = dataISO(empresa.suspensao_prazo_ate);
+  if (prazoEstendido && prazoEstendido >= hojeStr) {
+    return { elegivel: false, razao: 'prazo_estendido', prazo_ate: prazoEstendido };
+  }
+
+  // Carência: suspende só a partir de due_date + diasCarencia (D+3 no padrão).
+  const dataSuspensao = addDiasISO(dueDate, diasCarencia);
+  if (dataSuspensao && hojeStr < dataSuspensao) {
+    return { elegivel: false, razao: 'dentro_carencia', suspende_em: dataSuspensao };
+  }
+
   if (!fatura.invoice_url && !fatura.bank_slip_url) {
     return { elegivel: false, razao: 'sem_caminho_regularizacao' };
   }
 
-  return { elegivel: true, razao: 'fatura_vencida_com_regularizacao' };
+  return { elegivel: true, razao: 'elegivel_suspensao' };
 }
 
-function decidirSuspensaoPorInadimplencia({ empresa, fatura, hoje, erroConsulta } = {}) {
-  const elegibilidade = avaliarElegibilidadeSuspensao({ empresa, fatura, hoje, erroConsulta });
+function decidirSuspensaoPorInadimplencia({ empresa, fatura, hoje, erroConsulta, diasCarencia } = {}) {
+  const elegibilidade = avaliarElegibilidadeSuspensao({ empresa, fatura, hoje, erroConsulta, diasCarencia });
   if (!elegibilidade.elegivel) {
     return { deveSuspender: false, novoStatus: empresa?.status || null, razao: elegibilidade.razao };
   }
@@ -234,7 +273,7 @@ function decidirSuspensaoPorInadimplencia({ empresa, fatura, hoje, erroConsulta 
  *   razao: string,
  * }}
  */
-function decidirTransicaoFaturaEvento({ eventType, fatura, empresa, paymentStatus, pagoEmDetectado }) {
+function decidirTransicaoFaturaEvento({ eventType, fatura, empresa, paymentStatus, pagoEmDetectado, diasCarencia }) {
   const evento = normalizarEventoAsaas(eventType, fatura?.status);
   if (!evento.conhecido) {
     return { conhecido: false, acaoFinanceira: false, razao: evento.razao };
@@ -253,7 +292,7 @@ function decidirTransicaoFaturaEvento({ eventType, fatura, empresa, paymentStatu
           pagoEmAtual: fatura?.pago_em,
           pagoEmDetectado,
         });
-        const acaoEmpresa = processarAcaoEmpresa(decisao, empresa, fatura);
+        const acaoEmpresa = processarAcaoEmpresa(decisao, empresa, fatura, diasCarencia);
         return { conhecido: true, acaoFinanceira: !decisao.ignorar, fatura: decisao, empresa: acaoEmpresa, razao: decisao.razao };
       }
     }
@@ -270,15 +309,16 @@ function decidirTransicaoFaturaEvento({ eventType, fatura, empresa, paymentStatu
     pagoEmDetectado,
   });
 
-  const acaoEmpresa = processarAcaoEmpresa(decisao, empresa, fatura);
+  const acaoEmpresa = processarAcaoEmpresa(decisao, empresa, fatura, diasCarencia);
 
   return { conhecido: true, acaoFinanceira: !decisao.ignorar, fatura: decisao, empresa: acaoEmpresa, razao: decisao.razao };
 }
 
 /**
  * Processa a ação na empresa baseada na decisão da fatura.
+ * `diasCarencia` propaga a carência para a decisão de suspensão (default no domínio).
  */
-function processarAcaoEmpresa(decisaoFatura, empresa, fatura) {
+function processarAcaoEmpresa(decisaoFatura, empresa, fatura, diasCarencia) {
   if (decisaoFatura.ignorar) return null;
   if (!fatura?.empresa_id || !empresa) return null;
 
@@ -293,6 +333,7 @@ function processarAcaoEmpresa(decisaoFatura, empresa, fatura) {
     const decisaoSusp = decidirSuspensaoPorInadimplencia({
       empresa,
       fatura: { ...fatura, status: decisaoFatura.statusFinal },
+      diasCarencia,
     });
     if (decisaoSusp.deveSuspender) {
       return {
@@ -315,6 +356,9 @@ module.exports = {
   decidirTransicaoFaturaEvento,
   avaliarElegibilidadeSuspensao,
   decidirSuspensaoPorInadimplencia,
+  lerDiasCarenciaSuspensao,
+  DIAS_CARENCIA_PADRAO,
+  addDiasISO,
   STATUS_ASAAS,
   EVENTOS_ASAAS,
   EVENTOS_SEM_TRANSICAO,
