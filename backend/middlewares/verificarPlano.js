@@ -1,5 +1,5 @@
 const supabase = require('../config/supabase');
-const { avaliarElegibilidadeSuspensao } = require('../services/paymentDomainService');
+const { avaliarElegibilidadeSuspensao, lerDiasCarenciaSuspensao } = require('../services/paymentDomainService');
 const { patchSuspensaoFinanceiraAutomatica } = require('../utils/suspensao');
 
 // Proteção: uma conta não pode ser suspensa automaticamente se não houver
@@ -7,10 +7,12 @@ const { patchSuspensaoFinanceiraAutomatica } = require('../utils/suspensao');
 async function podeSuspenderAutomaticamente(empresaId) {
   try {
     const hoje = new Date().toISOString().split('T')[0];
-    const [{ data: empresa, error: empresaError }, { data: fatura, error: faturaError }] = await Promise.all([
+    const [{ data: empresa, error: empresaError }, { data: fatura, error: faturaError }, { data: cfgCar }] = await Promise.all([
       supabase
+        // `*` (deploy-safe): traz suspensao_prazo_ate só se a coluna existir
+        // (antes da migration 047 ela some do retorno, sem erro).
         .from('empresas')
-        .select('id, status, trial_ends_at')
+        .select('*')
         .eq('id', empresaId)
         .single(),
       supabase
@@ -22,6 +24,7 @@ async function podeSuspenderAutomaticamente(empresaId) {
       .order('due_date', { ascending: true })
       .limit(1)
         .maybeSingle(),
+      supabase.from('configuracoes').select('dados').eq('id', 1).single(),
     ]);
 
     const decisao = avaliarElegibilidadeSuspensao({
@@ -29,6 +32,7 @@ async function podeSuspenderAutomaticamente(empresaId) {
       fatura,
       hoje,
       erroConsulta: empresaError || faturaError,
+      diasCarencia: lerDiasCarenciaSuspensao(cfgCar && cfgCar.dados),
     });
     return decisao.elegivel;
   } catch {

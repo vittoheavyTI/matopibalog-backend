@@ -69,20 +69,53 @@ function fatura(overrides = {}) {
   };
 }
 
-test('suspensao: vencimento ontem + fatura pendente + link -> elegivel', () => {
-  const r = avaliarElegibilidadeSuspensao({ empresa: empresa(), fatura: fatura(), hoje: '2026-07-10' });
+// Empresa ATIVA (trial já convertido) para isolar a regra de CARÊNCIA do trial.
+// due_date = 2026-07-09 (D0). Carência padrão = 3 → suspende só a partir de D+3.
+function empresaAtiva(overrides = {}) {
+  return { id: 'empresa-1', status: 'ativo', ...overrides };
+}
+
+test('carencia D+3: D+0/D+1/D+2 NAO suspendem (dentro_carencia); D+3 suspende', () => {
+  const base = { empresa: empresaAtiva(), fatura: fatura() }; // due 2026-07-09
+  const d0 = avaliarElegibilidadeSuspensao({ ...base, hoje: '2026-07-09' });
+  const d1 = avaliarElegibilidadeSuspensao({ ...base, hoje: '2026-07-10' });
+  const d2 = avaliarElegibilidadeSuspensao({ ...base, hoje: '2026-07-11' });
+  const d3 = avaliarElegibilidadeSuspensao({ ...base, hoje: '2026-07-12' });
+  assert.equal(d0.elegivel, false); assert.equal(d0.razao, 'dentro_carencia');
+  assert.equal(d1.elegivel, false); assert.equal(d1.razao, 'dentro_carencia');
+  assert.equal(d2.elegivel, false); assert.equal(d2.razao, 'dentro_carencia');
+  assert.equal(d3.elegivel, true);  assert.equal(d3.razao, 'elegivel_suspensao');
+});
+
+test('carencia configuravel: diasCarencia=0 suspende em D+1', () => {
+  const r = avaliarElegibilidadeSuspensao({ empresa: empresaAtiva(), fatura: fatura(), hoje: '2026-07-10', diasCarencia: 0 });
   assert.equal(r.elegivel, true);
 });
 
-test('suspensao: vencimento hoje ou futuro nao e elegivel', () => {
-  assert.equal(avaliarElegibilidadeSuspensao({ empresa: empresa(), fatura: fatura({ due_date: '2026-07-10' }), hoje: '2026-07-10' }).elegivel, false);
-  assert.equal(avaliarElegibilidadeSuspensao({ empresa: empresa(), fatura: fatura({ due_date: '2026-07-11' }), hoje: '2026-07-10' }).elegivel, false);
+test('extensao manual ativa impede suspensao mesmo apos D+3 (prazo_estendido)', () => {
+  const r = avaliarElegibilidadeSuspensao({
+    empresa: empresaAtiva({ suspensao_prazo_ate: '2026-07-20' }),
+    fatura: fatura(), hoje: '2026-07-12', // já seria D+3
+  });
+  assert.equal(r.elegivel, false);
+  assert.equal(r.razao, 'prazo_estendido');
 });
 
-test('suspensao: sem fatura, outro tenant, sem link, erro ou trial ativo nao suspendem', () => {
-  assert.equal(avaliarElegibilidadeSuspensao({ empresa: empresa(), fatura: null, hoje: '2026-07-10' }).elegivel, false);
-  assert.equal(avaliarElegibilidadeSuspensao({ empresa: empresa(), fatura: fatura({ empresa_id: 'outra' }), hoje: '2026-07-10' }).elegivel, false);
-  assert.equal(avaliarElegibilidadeSuspensao({ empresa: empresa(), fatura: fatura({ invoice_url: null, bank_slip_url: null }), hoje: '2026-07-10' }).elegivel, false);
-  assert.equal(avaliarElegibilidadeSuspensao({ empresa: empresa(), fatura: fatura(), hoje: '2026-07-10', erroConsulta: new Error('db') }).elegivel, false);
-  assert.equal(avaliarElegibilidadeSuspensao({ empresa: empresa({ trial_ends_at: '2026-07-10T23:59:59.000Z' }), fatura: fatura(), hoje: '2026-07-10' }).elegivel, false);
+test('extensao vencida volta a permitir suspensao', () => {
+  const r = avaliarElegibilidadeSuspensao({
+    empresa: empresaAtiva({ suspensao_prazo_ate: '2026-07-11' }), // ontem
+    fatura: fatura(), hoje: '2026-07-12',
+  });
+  assert.equal(r.elegivel, true);
+  assert.equal(r.razao, 'elegivel_suspensao');
+});
+
+test('suspensao: sem fatura, outro tenant, sem link (pos-carencia), erro ou trial ativo nao suspendem', () => {
+  assert.equal(avaliarElegibilidadeSuspensao({ empresa: empresaAtiva(), fatura: null, hoje: '2026-07-12' }).elegivel, false);
+  assert.equal(avaliarElegibilidadeSuspensao({ empresa: empresaAtiva(), fatura: fatura({ empresa_id: 'outra' }), hoje: '2026-07-12' }).elegivel, false);
+  const semLink = avaliarElegibilidadeSuspensao({ empresa: empresaAtiva(), fatura: fatura({ invoice_url: null, bank_slip_url: null }), hoje: '2026-07-12' });
+  assert.equal(semLink.elegivel, false); assert.equal(semLink.razao, 'sem_caminho_regularizacao');
+  assert.equal(avaliarElegibilidadeSuspensao({ empresa: empresaAtiva(), fatura: fatura(), hoje: '2026-07-12', erroConsulta: new Error('db') }).elegivel, false);
+  // trial ainda ativo (trial_ends_at futuro) nunca suspende.
+  assert.equal(avaliarElegibilidadeSuspensao({ empresa: empresa({ trial_ends_at: '2026-07-20T23:59:59.000Z' }), fatura: fatura(), hoje: '2026-07-12' }).elegivel, false);
 });

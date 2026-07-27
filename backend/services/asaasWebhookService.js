@@ -4,7 +4,7 @@
 // NÃO contém rota Express — a rota em pagamentos.js chama este serviço.
 
 const { normalizarParaHash, inserirOuReivindicar, marcarProcessado, marcarIgnorado, marcarFalhou, sanitizar } = require('./asaasWebhookEventRepository');
-const { decidirTransicaoFaturaEvento } = require('./paymentDomainService');
+const { decidirTransicaoFaturaEvento, lerDiasCarenciaSuspensao } = require('./paymentDomainService');
 const { aplicarUpgradePago } = require('./upgradeApplyService');
 
 // Eventos obrigatórios conhecidos e seguros (não geram transição financeira, mas
@@ -256,10 +256,13 @@ async function executarProcessamento({ supabase, body, eventType, evento, normal
     return;
   }
 
-  // 10. Resolver empresa (apenas após fatura confirmada localmente)
+  // 10. Resolver empresa (apenas após fatura confirmada localmente).
+  //     suspensao_prazo_ate: extensão manual de prazo (respeitada pela suspensão).
   const { data: empresa, error: empresaError } = await supabase
+    // `*` (deploy-safe): traz suspensao_prazo_ate só se a coluna existir (antes
+    // da migration 047 ela some do retorno, sem erro).
     .from('empresas')
-    .select('id, status, suspension_reason, suspension_source, trial_ends_at')
+    .select('*')
     .eq('id', fatura.empresa_id)
     .single();
 
@@ -272,12 +275,20 @@ async function executarProcessamento({ supabase, body, eventType, evento, normal
   const paymentStatus = obterPaymentStatus(body);
   const pagoEmDetectado = obterPagoEm(body);
 
+  // Carência de suspensão (config; default 3 no domínio se ausente/erro).
+  let diasCarencia;
+  try {
+    const { data: cfgCar } = await supabase.from('configuracoes').select('dados').eq('id', 1).single();
+    diasCarencia = lerDiasCarenciaSuspensao(cfgCar && cfgCar.dados);
+  } catch (_) { diasCarencia = undefined; }
+
   const decisao = decidirTransicaoFaturaEvento({
     eventType,
     fatura,
     empresa,
     paymentStatus,
     pagoEmDetectado,
+    diasCarencia,
   });
 
   if (!decisao.conhecido) {
