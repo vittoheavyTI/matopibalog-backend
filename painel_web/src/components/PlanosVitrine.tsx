@@ -94,7 +94,10 @@ export const PlanosVitrine: React.FC<PlanosVitrineProps> = ({
             <ul className="space-y-3 mb-8 flex-1">
               <li className="flex items-center gap-2 text-gray-800 font-semibold">
                 <Check size={18} className="text-green-500 shrink-0" />
-                <span>{limiteLabel(plano.limite_motoristas)}</span>
+                {/* Plano sob negociação não tem teto de tabela — o limite_motoristas
+                    é um placeholder (ex.: 999). Mostrar "Motoristas sob medida" em
+                    vez de "Até 999 motoristas". NÃO altera o dado, só o rótulo. */}
+                <span>{plano.requer_negociacao ? 'Motoristas sob medida' : limiteLabel(plano.limite_motoristas)}</span>
               </li>
               {plano.recursos.map((f) => (
                 <li key={f} className="flex items-center gap-2 text-gray-700">
