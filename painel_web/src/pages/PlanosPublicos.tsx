@@ -27,7 +27,7 @@ export const PlanosPublicos: React.FC = () => {
   const navigate = useNavigate();
   // Reaproveita a logomarca global configurável (mesma fonte do Login, via
   // /configuracoes/public). Sem exigir login: o endpoint é público.
-  const { loginLogo, loginLogoScale, loginLogoY, configLoading, contactEmail, contactPhone } = useLoginConfig();
+  const { loginLogo, loginLogoScale, loginLogoY, configLoading, contactEmail, contactPhone, whatsappSuporte } = useLoginConfig();
   // Detecta sessão para decidir o destino do CTA. `user` é null para visitante
   // (rota pública dentro do AuthProvider). NÃO buscamos o plano atual aqui.
   const { user } = useAuth();
@@ -153,12 +153,12 @@ export const PlanosPublicos: React.FC = () => {
     : (enviando ? 'Gerando cobrança...' : 'Confirmar upgrade');
 
   // Canal comercial do CTA do Enterprise, a partir da config pública existente.
-  // whatsapp não é público (SYSTEM_KEY) → hoje resolve para e-mail (contactEmail)
-  // com telefone (contactPhone) como "Ligar" secundário; wa.me entra quando uma
-  // fonte pública de WhatsApp existir.
+  // Prioridade WhatsApp (whatsapp_suporte, agora público) → e-mail (contactEmail),
+  // com telefone (contactPhone) como "Ligar" secundário. wa.me abre com mensagem
+  // inicial de interesse; sem nenhum canal, o CTA fica "em configuração".
   const canalComercial = montarLinkComercial(
-    { whatsapp: null, email: contactEmail, telefone: contactPhone },
-    { assunto: ASSUNTO_ENTERPRISE }
+    { whatsapp: whatsappSuporte, email: contactEmail, telefone: contactPhone },
+    { assunto: ASSUNTO_ENTERPRISE, mensagem: 'Olá! Tenho interesse no plano Enterprise do Matopiba Log.' }
   );
 
   return (

@@ -22,10 +22,10 @@ interface PlanoBloqueadoCardProps {
  * canal, mantém o texto neutro de sempre.
  */
 export const PlanoBloqueadoCard: React.FC<PlanoBloqueadoCardProps> = ({ message, onRegularizar, className }) => {
-  const { contactEmail, contactPhone } = useLoginConfig();
+  const { contactEmail, contactPhone, whatsappSuporte } = useLoginConfig();
   const suporte = montarLinkComercial(
-    { whatsapp: null, email: contactEmail, telefone: contactPhone },
-    { assunto: 'Suporte - Matopiba Log' }
+    { whatsapp: whatsappSuporte, email: contactEmail, telefone: contactPhone },
+    { assunto: 'Suporte - Matopiba Log', mensagem: 'Olá! Preciso de ajuda com minha conta no Matopiba Log.' }
   );
   return (
     <div className={`bg-white rounded-xl shadow-sm border border-gray-100 p-8 max-w-xl mx-auto text-center ${className || ''}`}>

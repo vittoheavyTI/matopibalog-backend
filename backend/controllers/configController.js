@@ -1,11 +1,15 @@
 const supabase = require('../config/supabase');
 
-// Whitelist de campos de APARÊNCIA (únicos que a tela de login precisa, sem auth)
+// Whitelist de campos de APARÊNCIA (únicos que a tela de login precisa, sem auth).
+// `whatsapp_suporte` entra aqui de propósito: é um contato PÚBLICO (canal comercial/
+// suporte único), usado pelos CTAs de /planos, /cadastro e no card de plano
+// bloqueado para montar links wa.me. É só um número de contato — não é segredo.
+// email_suporte/telefone_suporte seguem cobertos por contactEmail/contactPhone.
 const APPEARANCE_KEYS = [
   'loginLogo', 'loginLogoScale', 'loginLogoY', 'loginBg', 'loginBgScale', 'loginBgY',
   'loginTemplate', 'footerText', 'contactPhone', 'contactEmail', 'footerColor',
   'footerOpacity', 'footerFontSize', 'footerBold', 'footerFontFamily', 'footerWidth',
-  'footerHeight', 'inputBgColor', 'inputBorderColor'
+  'footerHeight', 'inputBgColor', 'inputBorderColor', 'whatsapp_suporte'
 ];
 
 // Campos extras que o admin logado usa (preview + empresa + impressoras + sidebar)

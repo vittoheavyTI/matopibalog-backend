@@ -61,11 +61,12 @@ export const CadastroPublico: React.FC = () => {
   const [searchParams] = useSearchParams();
   // Mesma logomarca configurável da página de upgrade (/planos), via endpoint
   // público /configuracoes/public — sem exigir login.
-  const { loginLogo, loginLogoScale, loginLogoY, configLoading, contactEmail, contactPhone } = useLoginConfig();
-  // Canal comercial do CTA do Enterprise (mesma fonte/regra do /planos).
+  const { loginLogo, loginLogoScale, loginLogoY, configLoading, contactEmail, contactPhone, whatsappSuporte } = useLoginConfig();
+  // Canal comercial do CTA do Enterprise (mesma fonte/regra do /planos): WhatsApp
+  // prioritário → e-mail → telefone; wa.me abre com mensagem de interesse.
   const canalComercial = montarLinkComercial(
-    { whatsapp: null, email: contactEmail, telefone: contactPhone },
-    { assunto: ASSUNTO_ENTERPRISE }
+    { whatsapp: whatsappSuporte, email: contactEmail, telefone: contactPhone },
+    { assunto: ASSUNTO_ENTERPRISE, mensagem: 'Olá! Tenho interesse no plano Enterprise do Matopiba Log.' }
   );
   // Etapas: 1 = escolha do plano · 2 = dados do administrador · 3 = dados da
   // empresa (com resumo + promoção). `concluido` mostra a tela de sucesso.
