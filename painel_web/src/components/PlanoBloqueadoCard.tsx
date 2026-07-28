@@ -35,7 +35,7 @@ export const PlanoBloqueadoCard: React.FC<PlanoBloqueadoCardProps> = ({ message,
       <h3 className="text-xl font-bold text-gray-800 mb-2">Sua empresa está suspensa ou bloqueada</h3>
       <p className="text-sm text-gray-600 mb-1">{message}</p>
       <p className="text-sm text-gray-500 mb-6">
-        Acesse Faturas / Regularização para regularizar o plano e voltar a operar.
+        Há uma fatura da assinatura em aberto. Pague via PIX ou boleto em Faturas / Regularização para voltar a operar.
       </p>
       <button
         onClick={onRegularizar}
