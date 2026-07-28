@@ -14,5 +14,10 @@ buildCommand = "npm install"
 # Configurar no Railway como um SERVIÇO DE CRON separado apontando este arquivo
 # como "Config File Path" e definindo a expressão cron (ex.: uma vez ao dia, de
 # manhã: "0 9 * * *"). O agendamento é externo (dashboard), fora do código.
-startCommand = "node jobs/expirarTrials.js"
+#
+# MODO SEGURO (--dry-run): o job apenas AVALIA e CONTA (suspensas = "quantas
+# SERIAM suspensas"), sem gravar status nem gerar fatura. Enquanto a operação
+# real não for explicitamente liberada, mantenha a flag. Remover --dry-run passa
+# a executar suspensões de verdade (status='suspenso' nas empresas elegíveis).
+startCommand = "node jobs/expirarTrials.js --dry-run"
 restartPolicyType = "never"
