@@ -1,0 +1,26 @@
+[build]
+builder = "nixpacks"
+buildCommand = "npm install"
+
+[deploy]
+# CRON DETERMINÍSTICO de NOTIFICAÇÃO PROATIVA de inadimplência (Pacote 3). One-shot:
+# roda UMA vez e sai (restartPolicyType = never). Agendamento EXTERNO (dashboard),
+# fora do código. Recomenda-se rodar ANTES do cron de suspensão do dia (ex.: este
+# às "0 8 * * *" e a suspensão às "0 9 * * *"), para que o aviso do dia da
+# suspensão saia com a conta ainda ativa.
+#
+# MODO SEGURO (--dry-run): criar notificação interna DISPARA PUSH REAL ao cliente
+# (notificacaoService → pushService). Portanto este serviço é implantado com
+# --dry-run: apenas AVALIA e CONTA (notificadas = "quantas SERIAM notificadas"),
+# sem criar notificação nem empurrar push. Enquanto a operação real não for
+# explicitamente liberada, mantenha a flag. Remover --dry-run passa a notificar de
+# verdade (e a empurrar push aos admins das empresas inadimplentes).
+#
+# É SEGURO em produção mesmo no modo real: só escreve na tabela `notificacoes`
+# (idempotente por dedupe_key). NÃO toca fatura paga/emitida, NÃO cria cobrança,
+# NÃO fala com Asaas, NÃO envia e-mail, NÃO altera preços/planos.
+#
+# Configurar no Railway como um SERVIÇO DE CRON separado apontando este arquivo
+# como "Config File Path" e definindo a expressão cron no dashboard.
+startCommand = "node jobs/notificarInadimplencia.js --dry-run"
+restartPolicyType = "never"
