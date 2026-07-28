@@ -4,30 +4,13 @@ import autoTable from 'jspdf-autotable';
 import { format, startOfMonth, endOfMonth, startOfYear, endOfYear } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { formatCurrency } from '../utils';
-import { Calendar, FileText, Users, User, Download, Filter, Truck, ChevronDown, ChevronRight } from 'lucide-react';
+import { Calendar, FileText, Users, User, Download, Filter, Truck, ChevronDown, ChevronRight, RotateCcw, AlertTriangle } from 'lucide-react';
 import api from '../api';
 import { freteContaComoReceitaRealizada } from '../utils/fretesFinanceiro';
+import { desenharBrandingRelatorio } from '../utils/relatorioBranding';
 
 const estaVinculadoAFreteCancelado = (item: any, fretesCanceladosIds: Set<any>) =>
   item.frete_id !== null && item.frete_id !== undefined && fretesCanceladosIds.has(item.frete_id);
-
-// Carrega a logo (data URL do localStorage) e calcula dimensões preservando o aspecto real.
-// Evita o esticamento: antes o addImage usava naturalWidth=0 (imagem ainda não decodificada)
-// e caía no fallback de caixa fixa 35x20.
-const loadLogoDims = (dataUrl: string, maxW = 35, maxH = 20): Promise<{ w: number; h: number }> =>
-  new Promise((resolve) => {
-    try {
-      const img = new Image();
-      img.onload = () => {
-        const nw = img.naturalWidth || maxW;
-        const nh = img.naturalHeight || maxH;
-        const ratio = Math.min(maxW / nw, maxH / nh);
-        resolve({ w: nw * ratio, h: nh * ratio });
-      };
-      img.onerror = () => resolve({ w: maxW, h: maxH });
-      img.src = dataUrl;
-    } catch { resolve({ w: maxW, h: maxH }); }
-  });
 
 // PR3B.2: renderiza a tabela-resumo + bloco de resumo de UM grupo (vinculados OU autônomos).
 // Compartilhado entre generatePDF e generatePDFSelected para evitar divergência.
@@ -145,6 +128,7 @@ export const Relatorios: React.FC = () => {
   
   const [isGenerating, setIsGenerating] = useState(false);
   const [loadingData, setLoadingData] = useState(false);
+  const [erro, setErro] = useState<string>('');
   const [selectedTripIds, setSelectedTripIds] = useState<string[]>([]);
   const [expandedTripId, setExpandedTripId] = useState<string | null>(null);
 
@@ -198,6 +182,7 @@ export const Relatorios: React.FC = () => {
     const eIso = end.toISOString();
 
     setLoadingData(true);
+    setErro('');
     try {
       let fUrl = '/fretes?data_inicio=' + sIso + '&data_fim=' + eIso;
       let dUrl = '/despesas?data_inicio=' + sIso + '&data_fim=' + eIso;
@@ -273,9 +258,21 @@ export const Relatorios: React.FC = () => {
 
     } catch (err) {
       console.error('Erro ao carregar dados do relatório', err);
+      setErro('Não foi possível carregar os dados do relatório. Verifique sua conexão e tente novamente.');
     } finally {
       setLoadingData(false);
     }
+  };
+
+  // Restaura os filtros ao padrão (mês corrente, todos os motoristas) e limpa a seleção.
+  const limparFiltros = () => {
+    setSelectedMot('todos');
+    setMotoristaBusca('');
+    setReportType('mensal');
+    setSelectedDate(format(new Date(), 'yyyy-MM'));
+    setStartDate(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
+    setEndDate(format(endOfMonth(new Date()), 'yyyy-MM-dd'));
+    setSelectedTripIds([]);
   };
 
   useEffect(() => {
@@ -292,36 +289,12 @@ export const Relatorios: React.FC = () => {
       }
 
       const doc = new jsPDF();
-    
-    // Header
-    const savedLogo = localStorage.getItem('matopibalog_logo');
-    const savedCompany = localStorage.getItem('matopibalog_company');
-    let company: any = null;
-    try {
-      company = savedCompany ? JSON.parse(savedCompany) : null;
-    } catch (e) {}
 
-    if (savedLogo) {
-      try {
-        const maxW = 35, maxH = 20;
-        // Aguarda o decode da imagem p/ usar dimensões reais e preservar o aspecto (não estica).
-        const { w, h } = await loadLogoDims(savedLogo, maxW, maxH);
-        doc.addImage(savedLogo, 'PNG', 12, 8 + (maxH - h) / 2, w, h);
-      } catch (e) {}
-    }
+    // Cabeçalho padrão (logo per-tenant + empresa/fallback + carimbo de geração).
+    await desenharBrandingRelatorio(doc);
 
-    doc.setFontSize(16).setFont("helvetica", "bold");
-    if (company && company.nome) {
-      doc.text(company.nome.toUpperCase(), 48, 14);
-      doc.setFontSize(8).setFont("helvetica", "normal");
-      doc.text(`${company.endereco || ''}, ${company.cidade || ''}-${company.estado || ''}`, 48, 22);
-      doc.text(`CNPJ: ${company.cnpj || ''} | Tel: ${company.telefone || ''}`, 48, 28);
-    } else {
-      doc.text('MATOPIBA LOG - GESTÃO DE FROTAS', 48, 20);
-    }
-
-    const periodLabel = reportType === 'mensal' ? format(new Date(selectedDate + '-01T12:00:00'), "MMMM 'de' yyyy", { locale: ptBR }) : 
-                        reportType === 'anual' ? selectedDate.split('-')[0] : 
+    const periodLabel = reportType === 'mensal' ? format(new Date(selectedDate + '-01T12:00:00'), "MMMM 'de' yyyy", { locale: ptBR }) :
+                        reportType === 'anual' ? selectedDate.split('-')[0] :
                         'PERÍODO PERSONALIZADO';
     const displayPeriod = periodLabel.toUpperCase();
 
@@ -590,31 +563,8 @@ export const Relatorios: React.FC = () => {
 
       const doc = new jsPDF();
 
-    const savedLogo = localStorage.getItem('matopibalog_logo');
-    const savedCompany = localStorage.getItem('matopibalog_company');
-    let company: any = null;
-    try {
-      company = savedCompany ? JSON.parse(savedCompany) : null;
-    } catch (e) {}
-
-    if (savedLogo) {
-      try {
-        const maxW = 35, maxH = 20;
-        // Aguarda o decode da imagem p/ usar dimensões reais e preservar o aspecto (não estica).
-        const { w, h } = await loadLogoDims(savedLogo, maxW, maxH);
-        doc.addImage(savedLogo, 'PNG', 12, 8 + (maxH - h) / 2, w, h);
-      } catch (e) {}
-    }
-
-    doc.setFontSize(16).setFont("helvetica", "bold");
-    if (company && company.nome) {
-      doc.text(company.nome.toUpperCase(), 48, 14);
-      doc.setFontSize(8).setFont("helvetica", "normal");
-      doc.text(`${company.endereco || ''}, ${company.cidade || ''}-${company.estado || ''}`, 48, 22);
-      doc.text(`CNPJ: ${company.cnpj || ''} | Tel: ${company.telefone || ''}`, 48, 28);
-    } else {
-      doc.text('MATOPIBA LOG - GESTÃO DE FROTAS', 48, 20);
-    }
+    // Cabeçalho padrão (logo per-tenant + empresa/fallback + carimbo de geração).
+    await desenharBrandingRelatorio(doc);
 
     const periodLabel = reportType === 'mensal' ? format(new Date(selectedDate + '-01T12:00:00'), "MMMM 'de' yyyy", { locale: ptBR }) :
                         reportType === 'anual' ? selectedDate.split('-')[0] :
@@ -1063,6 +1013,14 @@ export const Relatorios: React.FC = () => {
                   </>
                 )}
               </button>
+
+              <button
+                onClick={limparFiltros}
+                type="button"
+                className="w-full font-bold py-2.5 rounded-xl border border-gray-200 text-gray-500 hover:bg-gray-50 transition-all flex items-center justify-center active:scale-95"
+              >
+                <RotateCcw size={16} className="mr-2" /> Limpar filtros
+              </button>
             </div>
           </div>
         </div>
@@ -1081,6 +1039,19 @@ export const Relatorios: React.FC = () => {
 
             {loadingData ? (
                <div className="py-20 text-center text-gray-500">Carregando dados...</div>
+            ) : erro ? (
+              <div className="py-16 flex flex-col items-center text-center">
+                <div className="w-14 h-14 rounded-full bg-red-50 flex items-center justify-center mb-3">
+                  <AlertTriangle size={26} className="text-red-500" />
+                </div>
+                <p className="text-sm text-gray-600 max-w-sm mb-4">{erro}</p>
+                <button
+                  onClick={loadReportData}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl font-bold text-sm hover:bg-blue-700 transition-colors active:scale-95"
+                >
+                  <RotateCcw size={16} /> Tentar novamente
+                </button>
+              </div>
             ) : (
               <>
                 {(() => {

@@ -7,29 +7,12 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import api from '../api';
 import { useAuth } from '../contexts/AuthContext';
+import { desenharBrandingRelatorio } from '../utils/relatorioBranding';
 
 const safeFmt = (d: any, fmt: string) => {
   if (!d) return '-';
   try { const dt = new Date(d); if (isNaN(dt.getTime())) return '-'; return format(dt, fmt); } catch { return '-'; }
 };
-
-// Aguarda o carregamento/decodificação da imagem antes de calcular dimensões.
-// Evita usar naturalWidth=0 (imagem ainda não carregada) no cálculo de proporção,
-// que fazia a logo aparecer esticada nos PDFs.
-const loadLogoDims = (dataUrl: string, maxW = 35, maxH = 20): Promise<{ w: number; h: number }> =>
-  new Promise((resolve) => {
-    try {
-      const img = new Image();
-      img.onload = () => {
-        const nw = img.naturalWidth || maxW;
-        const nh = img.naturalHeight || maxH;
-        const ratio = Math.min(maxW / nw, maxH / nh);
-        resolve({ w: nw * ratio, h: nh * ratio });
-      };
-      img.onerror = () => resolve({ w: maxW, h: maxH });
-      img.src = dataUrl;
-    } catch { resolve({ w: maxW, h: maxH }); }
-  });
 
 class CatchError extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
@@ -413,27 +396,8 @@ export const ResumoMotorista: React.FC = () => {
     try {
       setIsGenerating(true);
       const doc = new jsPDF();
-      const savedLogo = localStorage.getItem('matopibalog_logo');
-      const savedCompany = localStorage.getItem('matopibalog_company');
-      let company: any = null;
-      try { company = savedCompany ? JSON.parse(savedCompany) : null; } catch (e) {}
-
-      if (savedLogo) {
-        try {
-          const { w, h } = await loadLogoDims(savedLogo);
-          doc.addImage(savedLogo, 'PNG', 12, 8 + (20 - h) / 2, w, h);
-        } catch (e) {}
-      }
-
-      doc.setFontSize(16).setFont("helvetica", "bold");
-      if (company && company.nome) {
-        doc.text(company.nome.toUpperCase(), 48, 14);
-        doc.setFontSize(8).setFont("helvetica", "normal");
-        doc.text(`${company.endereco || ''}, ${company.cidade || ''}-${company.estado || ''}`, 48, 22);
-        doc.text(`CNPJ: ${company.cnpj || ''} | Tel: ${company.telefone || ''}`, 48, 28);
-      } else {
-        doc.text('MATOPIBA LOG - GESTÃO DE FROTAS', 48, 20);
-      }
+      // Cabeçalho padrão (logo per-tenant + empresa/fallback + carimbo de geração).
+      await desenharBrandingRelatorio(doc);
 
       const monthLabel = format(new Date(selectedDate + '-01T12:00:00'), "MMMM 'de' yyyy", { locale: ptBR });
       const motLabel = selectedMot === 'todos' ? 'TODOS OS MOTORISTAS' : (motoristas.find(m => m.uid === selectedMot)?.nomeCompleto || 'SELECIONADO');
@@ -594,27 +558,8 @@ export const ResumoMotorista: React.FC = () => {
     try {
       setIsGenerating(true);
       const doc = new jsPDF();
-      const savedLogo = localStorage.getItem('matopibalog_logo');
-      const savedCompany = localStorage.getItem('matopibalog_company');
-      let company: any = null;
-      try { company = savedCompany ? JSON.parse(savedCompany) : null; } catch (e) {}
-
-      if (savedLogo) {
-        try {
-          const { w, h } = await loadLogoDims(savedLogo);
-          doc.addImage(savedLogo, 'PNG', 12, 8 + (20 - h) / 2, w, h);
-        } catch (e) {}
-      }
-
-      doc.setFontSize(16).setFont("helvetica", "bold");
-      if (company && company.nome) {
-        doc.text(company.nome.toUpperCase(), 48, 14);
-        doc.setFontSize(8).setFont("helvetica", "normal");
-        doc.text(`${company.endereco || ''}, ${company.cidade || ''}-${company.estado || ''}`, 48, 22);
-        doc.text(`CNPJ: ${company.cnpj || ''} | Tel: ${company.telefone || ''}`, 48, 28);
-      } else {
-        doc.text('MATOPIBA LOG - GESTÃO DE FROTAS', 48, 20);
-      }
+      // Cabeçalho padrão (logo per-tenant + empresa/fallback + carimbo de geração).
+      await desenharBrandingRelatorio(doc);
 
       doc.setFontSize(18).setFont("helvetica", "bold");
       doc.text('RELATÓRIO DE FRETE', 105, 42, { align: 'center' });
@@ -948,26 +893,8 @@ export const ResumoMotorista: React.FC = () => {
       const mapVale = (v: any) => ({ id: v.id, status: v.status, valor: parseFloat(v.valor), descricao: v.descricao || v.posto || '',
         posto: v.posto, quemPagou: v.quem_pagou, data: v.data, frete_id: v.frete_id, obsResolucao: v.obs_resolucao });
 
-      // Cabeçalho (mesmo padrão dos outros PDFs)
-      const savedLogo = localStorage.getItem('matopibalog_logo');
-      const savedCompany = localStorage.getItem('matopibalog_company');
-      let company: any = null;
-      try { company = savedCompany ? JSON.parse(savedCompany) : null; } catch (e) {}
-      if (savedLogo) {
-        try {
-          const { w, h } = await loadLogoDims(savedLogo);
-          doc.addImage(savedLogo, 'PNG', 12, 8 + (20 - h) / 2, w, h);
-        } catch (e) {}
-      }
-      doc.setFontSize(16).setFont("helvetica", "bold");
-      if (company && company.nome) {
-        doc.text(company.nome.toUpperCase(), 48, 14);
-        doc.setFontSize(8).setFont("helvetica", "normal");
-        doc.text(`${company.endereco || ''}, ${company.cidade || ''}-${company.estado || ''}`, 48, 22);
-        doc.text(`CNPJ: ${company.cnpj || ''} | Tel: ${company.telefone || ''}`, 48, 28);
-      } else {
-        doc.text('MATOPIBA LOG - GESTÃO DE FROTAS', 48, 20);
-      }
+      // Cabeçalho padrão (logo per-tenant + empresa/fallback + carimbo de geração).
+      await desenharBrandingRelatorio(doc);
       const monthLabel = format(new Date(selectedDate + '-01T12:00:00'), "MMMM 'de' yyyy", { locale: ptBR });
       doc.setFontSize(16).setFont("helvetica", "bold");
       doc.text('AUDITORIA MENSAL DE FRETES POR MOTORISTA', 105, 42, { align: 'center' });
