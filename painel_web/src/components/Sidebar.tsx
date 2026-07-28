@@ -29,17 +29,28 @@ export const Sidebar: React.FC = () => {
     // cache limpo. Só sobrescreve quando vier valor real; falha de rede mantém o cache.
     api.get('/configuracoes')
       .then(({ data }) => {
+        // Cache autoritativo POR TENANT: a config da empresa LOGADA manda. Com logo
+        // → grava; SEM logo → LIMPA o cache. Sem isso, a próxima empresa no mesmo
+        // navegador herdaria a logo da anterior (vazamento entre tenants) — inclusive
+        // no cabeçalho dos relatórios em PDF, que leem este cache.
         if (data?.sidebarLogo) {
           setLogoBase64(data.sidebarLogo);
           localStorage.setItem('matopibalog_logo', data.sidebarLogo);
-        }
-        if (data?.sidebarLogoScale !== undefined && data?.sidebarLogoScale !== null) {
-          setLogoScale(Number(data.sidebarLogoScale));
-          localStorage.setItem('matopibalog_logo_scale', String(data.sidebarLogoScale));
-        }
-        if (data?.sidebarLogoY !== undefined && data?.sidebarLogoY !== null) {
-          setLogoY(Number(data.sidebarLogoY));
-          localStorage.setItem('matopibalog_logo_y', String(data.sidebarLogoY));
+          if (data?.sidebarLogoScale !== undefined && data?.sidebarLogoScale !== null) {
+            setLogoScale(Number(data.sidebarLogoScale));
+            localStorage.setItem('matopibalog_logo_scale', String(data.sidebarLogoScale));
+          }
+          if (data?.sidebarLogoY !== undefined && data?.sidebarLogoY !== null) {
+            setLogoY(Number(data.sidebarLogoY));
+            localStorage.setItem('matopibalog_logo_y', String(data.sidebarLogoY));
+          }
+        } else {
+          setLogoBase64(null);
+          setLogoScale(100);
+          setLogoY(0);
+          localStorage.removeItem('matopibalog_logo');
+          localStorage.removeItem('matopibalog_logo_scale');
+          localStorage.removeItem('matopibalog_logo_y');
         }
       })
       .catch(() => {}); // offline / erro → mantém o cache local, não quebra nada

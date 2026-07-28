@@ -131,9 +131,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch {}
     // Remove token stored locally
     try { localStorage.removeItem('auth_token'); } catch(e) {}
-    // Limpa cache per-session para a próxima conta começar sem dados da anterior
-    // company é per-session (varia por empresa); logo é do sistema (persiste entre sessões)
+    // Limpa cache per-session para a próxima conta começar sem dados da anterior.
+    // company E logo são POR EMPRESA (multi-tenant): sem limpar, a próxima conta no
+    // mesmo navegador poderia herdar a logo da anterior até a config hidratar. O
+    // Sidebar re-hidrata a logo da empresa logada em seguida (/configuracoes).
     ['matopibalog_company', 'choferlog_company',
+     'matopibalog_logo', 'matopibalog_logo_scale', 'matopibalog_logo_y',
     ].forEach(k => localStorage.removeItem(k));
     setUser(null);
   };
