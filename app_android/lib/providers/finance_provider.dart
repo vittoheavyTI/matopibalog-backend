@@ -58,10 +58,10 @@ class FinanceProvider extends ChangeNotifier {
   bool get temContatoSuporte => suporteEmail.isNotEmpty || suporteWhatsapp.isNotEmpty || suporteTelefone.isNotEmpty;
   String get mensagemRegularizacao {
     switch (responsavelRegularizacao) {
-      case 'admin_empresa': return 'Sua empresa está com acesso temporariamente limitado. Procure o administrador.';
-      case 'admin_autonomo': return 'A regularização desta conta é feita pelo administrador responsável no painel web.';
-      case 'autonomo': return 'Seu acesso operacional está temporariamente limitado. Fale com o suporte para regularizar.';
-      default: return 'O acesso operacional está temporariamente limitado. Entre em contato com o suporte.';
+      case 'admin_empresa': return 'A assinatura da sua empresa está com uma fatura em aberto e o acesso foi temporariamente limitado. Peça ao administrador para regularizar o pagamento.';
+      case 'admin_autonomo': return 'Esta conta tem uma fatura de assinatura em aberto. A regularização é feita pelo administrador responsável, no painel web.';
+      case 'autonomo': return 'Sua assinatura está com uma fatura em aberto e o acesso foi limitado. Regularize gerando a cobrança e pagando via PIX ou boleto. Precisa de ajuda? Fale com o suporte.';
+      default: return 'Há uma fatura de assinatura em aberto e o acesso foi temporariamente limitado. Regularize o pagamento (PIX ou boleto) ou fale com o suporte.';
     }
   }
 
