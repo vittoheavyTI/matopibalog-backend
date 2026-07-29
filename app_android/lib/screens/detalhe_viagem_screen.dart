@@ -26,6 +26,11 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
   // Id do documento cujo download (para abrir/compartilhar) está em andamento,
   // para mostrar o spinner só naquela linha e evitar toques repetidos.
   String? _abrindoDocId;
+  // Comprovação de entrega (ePOD) do frete: null = ainda não comprovado.
+  Map<String, dynamic>? _epod;
+  List<dynamic> _evidenciasEpod = [];
+  bool _enviandoEpod = false; // trava anti-duplicação enquanto comprova/anexa
+  String? _abrindoEvidId;
   bool _loading = true;
   bool _finalizando = false;
   String _error = '';
@@ -54,15 +59,19 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
       final abast = ApiService.getListComFiltro('abastecimentos', {'frete_id': freteId});
       final vales = ApiService.getListComFiltro('vales', {'frete_id': freteId});
       final documentos = ApiService.getDocumentosFrete(freteId);
+      final epod = ApiService.getEpodFrete(freteId);
       final perfil = ApiService.getMe();
-      final results = await Future.wait([despesas, abast, vales, documentos]);
+      final results = await Future.wait([despesas, abast, vales, documentos, epod]);
       final perfilData = await perfil;
       if (mounted) {
+        final epodData = results[4] as Map<String, dynamic>;
         setState(() {
           _despesas = results[0];
           _abastecimentos = results[1];
           _vales = results[2];
           _documentos = results[3];
+          _epod = epodData['epod'] as Map<String, dynamic>?;
+          _evidenciasEpod = (epodData['evidencias'] as List<dynamic>?) ?? [];
           _perfilCache = perfilData;
           _loading = false;
         });
@@ -332,16 +341,16 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
   // Origem do arquivo do documento: scanner, câmera (foto na hora), galeria ou
   // arquivo do dispositivo/drive (PDF/XML/imagem). Retorna
   // 'scan'|'camera'|'galeria'|'arquivo' ou null se o usuário fechar a folha.
-  Future<String?> _escolherOrigemDocumento() {
+  Future<String?> _escolherOrigemDocumento({String titulo = 'Anexar documento'}) {
     return showModalBottomSheet<String>(
       context: context,
       builder: (ctx) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text('Anexar documento', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text(titulo, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             ),
             ListTile(
               leading: const Icon(Icons.document_scanner_outlined),
@@ -552,6 +561,261 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
     }
   }
 
+  void _snack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  // ── Comprovação de entrega (ePOD, sem expor o termo ao motorista) ───────────
+  // Captura foto/canhoto (scanner/câmera/galeria/arquivo). Retorna caminhos ou null.
+  Future<List<String>?> _capturarComprovante() async {
+    final origem = await _escolherOrigemDocumento(titulo: 'Adicionar comprovante');
+    if (origem == null || !mounted) return null;
+    switch (origem) {
+      case 'scan':
+        return _escanearDocumento();
+      case 'camera':
+        final c = await _selecionarImagemDocumento(ImageSource.camera);
+        return c == null ? null : [c];
+      case 'galeria':
+        final c = await _selecionarImagemDocumento(ImageSource.gallery);
+        return c == null ? null : [c];
+      default:
+        final c = await _selecionarArquivoDocumento();
+        return c == null ? null : [c];
+    }
+  }
+
+  // Diálogo opcional (quem recebeu + observação) antes de registrar a comprovação.
+  Future<Map<String, String>?> _coletarDadosComprovacao() async {
+    final recebidoCtrl = TextEditingController();
+    final obsCtrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Comprovar entrega'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: recebidoCtrl,
+              decoration: const InputDecoration(labelText: 'Quem recebeu (opcional)'),
+              textCapitalization: TextCapitalization.words,
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: obsCtrl,
+              decoration: const InputDecoration(labelText: 'Observação (opcional)'),
+              maxLines: 2,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+          ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Continuar')),
+        ],
+      ),
+    );
+    if (ok != true) return null;
+    return {'recebido_por': recebidoCtrl.text, 'observacao': obsCtrl.text};
+  }
+
+  // Fluxo: coleta dados (se ainda não comprovado) → registra → captura e anexa a
+  // evidência → atualiza. Anti-duplicação: 1 comprovação por frete (409 do backend
+  // não é erro fatal — segue para anexar). _enviandoEpod trava toques repetidos.
+  Future<void> _comprovarEntrega() async {
+    if (_enviandoEpod) return;
+    final freteId = _frete['id']?.toString() ?? '';
+    if (freteId.isEmpty) return;
+
+    if (_epod == null) {
+      final dados = await _coletarDadosComprovacao();
+      if (dados == null || !mounted) return;
+      setState(() => _enviandoEpod = true);
+      final reg = await ApiService.registrarEpod(freteId,
+          recebidoPor: dados['recebido_por'], observacao: dados['observacao']);
+      if (!mounted) return;
+      setState(() => _enviandoEpod = false);
+      if (reg['ok'] != true && reg['status'] != 409) {
+        _snack(reg['message']?.toString() ?? 'Erro ao registrar a comprovação.');
+        return;
+      }
+    }
+
+    final caminhos = await _capturarComprovante();
+    if (caminhos == null || caminhos.isEmpty || !mounted) {
+      _fetchDetalhes(); // comprovação pode ter sido registrada sem evidência ainda
+      return;
+    }
+
+    setState(() => _enviandoEpod = true);
+    var enviadas = 0;
+    String? erro;
+    for (final caminho in caminhos) {
+      final res = await ApiService.uploadEvidenciaEpod(freteId, caminho);
+      if (!mounted) return;
+      if (res['ok'] == true) {
+        enviadas++;
+      } else {
+        erro = res['message']?.toString();
+      }
+    }
+    if (!mounted) return;
+    setState(() => _enviandoEpod = false);
+    _snack(enviadas > 0
+        ? 'Comprovante enviado. Aguardando validação.'
+        : (erro ?? 'Erro ao enviar o comprovante. Tente novamente.'));
+    _fetchDetalhes();
+  }
+
+  // Abre/compartilha uma evidência (signed URL → arquivo temp → folha nativa).
+  Future<void> _abrirEvidenciaEpod(Map<String, dynamic> ev) async {
+    if (_abrindoEvidId != null) return;
+    final evidId = ev['id']?.toString() ?? '';
+    if (evidId.isEmpty) return;
+    final freteId = _frete['id']?.toString() ?? '';
+    setState(() => _abrindoEvidId = evidId);
+    try {
+      final url = await ApiService.getEvidenciaEpodUrl(freteId, evidId);
+      if (!mounted) return;
+      if (url == null || url.isEmpty) {
+        _snack('Não foi possível gerar o link da evidência.');
+        return;
+      }
+      final nome = ev['nome_arquivo']?.toString();
+      final nomeArquivo = (nome != null && nome.trim().isNotEmpty) ? nome.trim() : 'evidencia_$evidId';
+      final caminho = await ApiService.baixarDocumentoParaTemp(url, nomeArquivo);
+      if (!mounted) return;
+      if (caminho == null) {
+        _snack('Não foi possível baixar a evidência.');
+        return;
+      }
+      await Share.shareXFiles(
+        [XFile(caminho, mimeType: ev['mime']?.toString(), name: nomeArquivo)],
+        subject: nomeArquivo,
+      );
+    } catch (e) {
+      AppLogger.error('DetalheFrete', 'abrir evidencia epod', e);
+      if (mounted) _snack('Não foi possível abrir a evidência.');
+    } finally {
+      if (mounted) setState(() => _abrindoEvidId = null);
+    }
+  }
+
+  Widget _secaoComprovacao() {
+    final epod = _epod;
+    final temComprovacao = epod != null;
+    final status = epod?['status']?.toString();
+
+    String statusTexto;
+    Color statusCor;
+    IconData statusIcone;
+    if (status == 'validado') {
+      statusTexto = 'Validada';
+      statusCor = const Color(0xFF1B5E20);
+      statusIcone = Icons.verified_outlined;
+    } else if (status == 'rejeitado') {
+      statusTexto = 'Rejeitada';
+      statusCor = Colors.red.shade700;
+      statusIcone = Icons.error_outline;
+    } else {
+      statusTexto = 'Aguardando validação';
+      statusCor = Colors.orange.shade800;
+      statusIcone = Icons.hourglass_top_outlined;
+    }
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.assignment_turned_in_outlined, color: Color(0xFF1B5E20)),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text('Comprovante de entrega',
+                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                ),
+                if (temComprovacao) ...[
+                  Icon(statusIcone, size: 16, color: statusCor),
+                  const SizedBox(width: 4),
+                  Text(statusTexto,
+                      style: TextStyle(color: statusCor, fontWeight: FontWeight.w600, fontSize: 12)),
+                ],
+              ],
+            ),
+            const Divider(),
+            if (epod == null)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Text('Entrega ainda não comprovada.',
+                    style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+              )
+            else ...[
+              if ((epod['recebido_por']?.toString() ?? '').isNotEmpty)
+                Text('Recebido por: ${epod['recebido_por']}', style: const TextStyle(fontSize: 13)),
+              if ((epod['observacao']?.toString() ?? '').isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text('Observação: ${epod['observacao']}', style: const TextStyle(fontSize: 13)),
+                ),
+              if (status == 'rejeitado' && (epod['motivo_rejeicao']?.toString() ?? '').isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text('Motivo: ${epod['motivo_rejeicao']}',
+                      style: TextStyle(fontSize: 13, color: Colors.red.shade700)),
+                ),
+              const SizedBox(height: 6),
+              Text('Evidências (${_evidenciasEpod.length})',
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600, fontWeight: FontWeight.w600)),
+              ..._evidenciasEpod.map((e) {
+                final m = e as Map<String, dynamic>;
+                final id = m['id']?.toString() ?? '';
+                final abrindo = _abrindoEvidId == id;
+                return ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  leading: const Icon(Icons.image_outlined),
+                  title: Text(m['nome_arquivo']?.toString() ?? 'Evidência'),
+                  trailing: abrindo
+                      ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.ios_share, color: Color(0xFF1B5E20), size: 20),
+                  onTap: _abrindoEvidId != null ? null : () => _abrirEvidenciaEpod(m),
+                );
+              }),
+            ],
+            const SizedBox(height: 6),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                icon: _enviandoEpod
+                    ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : Icon(temComprovacao ? Icons.add_a_photo_outlined : Icons.assignment_turned_in_outlined),
+                label: Text(_enviandoEpod
+                    ? 'Enviando…'
+                    : temComprovacao
+                        ? 'Adicionar evidência'
+                        : 'Comprovar entrega'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF1B5E20),
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: _enviandoEpod ? null : _comprovarEntrega,
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text('Registre a entrega com foto/canhoto. O administrador valida no painel.',
+                  style: TextStyle(color: Colors.grey.shade500, fontSize: 11)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _secaoDocumentos() {
     IconData iconePorMime(String? mime) {
       if (mime == null) return Icons.insert_drive_file_outlined;
@@ -679,6 +943,8 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
                           const SizedBox(height: 12),
                         ],
                         _secaoDocumentos(),
+                        const SizedBox(height: 12),
+                        _secaoComprovacao(),
                         const SizedBox(height: 12),
                         _cardResumo(f),
                         const SizedBox(height: 16),
