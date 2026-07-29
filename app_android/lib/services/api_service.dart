@@ -915,6 +915,115 @@ class ApiService {
     }
   }
 
+  // ── Comprovação de entrega (ePOD) ──────────────────────────────────────────
+  // O motorista comprova a entrega no campo (foto/canhoto + observação). O painel
+  // valida. GPS/assinatura ficam para uma próxima frente (o backend já aceita os
+  // campos como opcionais).
+
+  /// GET /fretes/:id/epod → {epod, evidencias}. Retorna {epod: null, evidencias: []}
+  /// em falha/ausência (a tela trata "sem comprovação"). `epod` traz status,
+  /// comprovado_em, recebido_por, observacao, motivo_rejeicao etc.
+  static Future<Map<String, dynamic>> getEpodFrete(String freteId) async {
+    try {
+      final response = await http
+          .get(Uri.parse('$_baseUrl/fretes/$freteId/epod'), headers: await _getHeaders())
+          .timeout(_timeoutGet);
+      AppLogger.api('ApiService', 'GET /fretes/$freteId/epod', response.statusCode);
+      if (response.statusCode == 200) {
+        final body = jsonDecode(response.body) as Map<String, dynamic>;
+        return {'epod': body['epod'], 'evidencias': body['evidencias'] ?? []};
+      }
+      return {'epod': null, 'evidencias': []};
+    } catch (e) {
+      AppLogger.error('ApiService', 'GET epod frete exception', e);
+      return {'epod': null, 'evidencias': []};
+    }
+  }
+
+  /// POST /fretes/:id/epod → registra a comprovação (1 por frete). Envia só os
+  /// campos preenchidos. Retorna {ok, message?}. 409 (já existe) vira ok:false
+  /// com a mensagem do backend — a tela então parte direto para anexar evidência.
+  static Future<Map<String, dynamic>> registrarEpod(
+      String freteId, {String? recebidoPor, String? observacao}) async {
+    try {
+      final headers = await _getHeaders();
+      headers['Content-Type'] = 'application/json';
+      final corpo = <String, dynamic>{};
+      if (recebidoPor != null && recebidoPor.trim().isNotEmpty) corpo['recebido_por'] = recebidoPor.trim();
+      if (observacao != null && observacao.trim().isNotEmpty) corpo['observacao'] = observacao.trim();
+      final response = await http
+          .post(Uri.parse('$_baseUrl/fretes/$freteId/epod'), headers: headers, body: jsonEncode(corpo))
+          .timeout(_timeoutPostJson);
+      AppLogger.api('ApiService', 'POST /fretes/$freteId/epod', response.statusCode);
+      if (response.statusCode == 201) {
+        Map<String, dynamic> body = {};
+        try { body = jsonDecode(response.body) as Map<String, dynamic>; } catch (_) {}
+        return {'ok': true, ...body};
+      }
+      String msg = 'Erro ao registrar a comprovação.';
+      try {
+        final json = jsonDecode(response.body);
+        msg = json['message'] ?? json['error'] ?? msg;
+      } catch (_) {}
+      return {'ok': false, 'status': response.statusCode, 'message': msg};
+    } catch (e) {
+      AppLogger.error('ApiService', 'POST epod frete exception', e);
+      return {'ok': false, 'message': _mensagemErroRede(e)};
+    }
+  }
+
+  /// POST /fretes/:id/epod/evidencias → anexa foto/canhoto/PDF à comprovação.
+  /// Mesmo padrão de multipart dos documentos (campo 'evidencia'). Retorna {ok, message?}.
+  static Future<Map<String, dynamic>> uploadEvidenciaEpod(String freteId, String filePath) async {
+    try {
+      final contentType = _contentTypeDocumento(filePath);
+      if (contentType == null) {
+        return {'ok': false, 'message': 'Formato não permitido. Use PDF, XML ou imagem (JPEG, PNG, WebP).'};
+      }
+      final request = http.MultipartRequest('POST', Uri.parse('$_baseUrl/fretes/$freteId/epod/evidencias'));
+      request.headers.addAll(await _getHeaders());
+      request.headers.remove('Content-Type');
+      request.files.add(await http.MultipartFile.fromPath('evidencia', filePath, contentType: contentType));
+      final response = await request.send().timeout(_timeoutUpload);
+      final bodyText = await response.stream.bytesToString();
+      AppLogger.api('ApiService', 'POST /fretes/$freteId/epod/evidencias', response.statusCode);
+      if (response.statusCode == 201) {
+        Map<String, dynamic> body = {};
+        try { body = jsonDecode(bodyText) as Map<String, dynamic>; } catch (_) {}
+        return {'ok': true, ...body};
+      }
+      String msg = 'Erro ao enviar a evidência.';
+      try {
+        final json = jsonDecode(bodyText);
+        msg = json['message'] ?? json['error'] ?? msg;
+      } catch (_) {}
+      return {'ok': false, 'message': msg};
+    } catch (e) {
+      AppLogger.error('ApiService', 'POST evidencia epod exception', e);
+      return {'ok': false, 'message': _mensagemErroRede(e)};
+    }
+  }
+
+  /// GET /fretes/:id/epod/evidencias/:evidId/url → signed URL (TTL curto) da
+  /// evidência no bucket privado. Retorna a URL ou null.
+  static Future<String?> getEvidenciaEpodUrl(String freteId, String evidId) async {
+    try {
+      final response = await http
+          .get(Uri.parse('$_baseUrl/fretes/$freteId/epod/evidencias/$evidId/url'),
+              headers: await _getHeaders())
+          .timeout(_timeoutGet);
+      AppLogger.api('ApiService', 'GET /fretes/$freteId/epod/evidencias/$evidId/url', response.statusCode);
+      if (response.statusCode == 200) {
+        final body = jsonDecode(response.body) as Map<String, dynamic>;
+        return body['url']?.toString();
+      }
+      return null;
+    } catch (e) {
+      AppLogger.error('ApiService', 'GET evidencia epod url exception', e);
+      return null;
+    }
+  }
+
   // DESPESAS / ABASTECIMENTOS / VALES
 
   // Envia com foto (multipart). Retorna {ok, message}.
