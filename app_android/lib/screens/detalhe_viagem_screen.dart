@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../services/api_service.dart';
@@ -38,6 +39,9 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
   // Estado local do frete: parte do snapshot recebido, mas pode ser atualizado
   // (ex.: após finalizar pelo próprio app) sem depender de novo fetch da lista.
   late Map<String, dynamic> _frete;
+  // Polling leve enquanto a tela está aberta: reflete validação/rejeição feita no
+  // painel sem o motorista precisar reabrir a tela. Cancelado no dispose.
+  Timer? _pollTimer;
 
   @override
   void initState() {
@@ -45,13 +49,24 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
     _frete = widget.frete;
     AppLogger.action('screen_open', params: {'tela': 'detalhe_frete', 'frete_id': _frete['id']?.toString()});
     _fetchDetalhes();
+    _pollTimer = Timer.periodic(const Duration(seconds: 20), (_) {
+      if (mounted && !_enviandoEpod && !_enviandoDoc) _fetchDetalhes(silent: true);
+    });
   }
 
-  Future<void> _fetchDetalhes() async {
-    setState(() { _loading = true; _error = ''; });
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    super.dispose();
+  }
+
+  // silent=true (polling / após envio) não pisca o spinner nem troca a tela pelo
+  // banner de erro; só atualiza os dados em segundo plano.
+  Future<void> _fetchDetalhes({bool silent = false}) async {
+    if (!silent) setState(() { _loading = true; _error = ''; });
     final freteId = _frete['id']?.toString() ?? '';
     if (freteId.isEmpty) {
-      setState(() { _loading = false; });
+      if (!silent) setState(() { _loading = false; });
       return;
     }
     try {
@@ -85,9 +100,9 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
         });
       }
     } catch (e) {
-      if (mounted) {
+      AppLogger.error('DetalheFrete', 'fetchDetalhes', e);
+      if (mounted && !silent) {
         setState(() { _error = 'Erro ao carregar detalhes.'; _loading = false; });
-        AppLogger.error('DetalheFrete', 'fetchDetalhes', e);
       }
     }
   }
@@ -356,14 +371,16 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
               child: Text(titulo, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             ),
             ListTile(
-              leading: const Icon(Icons.document_scanner_outlined),
-              title: const Text('Escanear documento'),
-              onTap: () => Navigator.pop(ctx, 'scan'),
-            ),
-            ListTile(
               leading: const Icon(Icons.photo_camera_outlined),
               title: const Text('Tirar foto agora'),
+              subtitle: const Text('Mais rápido', style: TextStyle(fontSize: 11)),
               onTap: () => Navigator.pop(ctx, 'camera'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.document_scanner_outlined),
+              title: const Text('Escanear documento'),
+              subtitle: const Text('Detecta as bordas; pode levar alguns segundos', style: TextStyle(fontSize: 11)),
+              onTap: () => Navigator.pop(ctx, 'scan'),
             ),
             ListTile(
               leading: const Icon(Icons.photo_library_outlined),
@@ -631,6 +648,9 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
     final freteId = _frete['id']?.toString() ?? '';
     if (freteId.isEmpty) return;
 
+    // Se já há comprovação, a ação é anexar evidência à existente (1 por frete).
+    var jaExistia = _epod != null;
+
     if (_epod == null) {
       final dados = await _coletarDadosComprovacao();
       if (dados == null || !mounted) return;
@@ -639,15 +659,23 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
           recebidoPor: dados['recebido_por'], observacao: dados['observacao']);
       if (!mounted) return;
       setState(() => _enviandoEpod = false);
-      if (reg['ok'] != true && reg['status'] != 409) {
-        _snack(reg['message']?.toString() ?? 'Erro ao registrar a comprovação.');
-        return;
+      if (reg['ok'] != true) {
+        if (reg['status'] == 409) {
+          // 409 = já existe comprovação (estado desatualizado). NÃO diz "enviado"
+          // genérico: recarrega o estado real e segue anexando à existente.
+          jaExistia = true;
+          await _fetchDetalhes(silent: true);
+          if (!mounted) return;
+        } else {
+          _snack(reg['message']?.toString() ?? 'Erro ao registrar a comprovação.');
+          return;
+        }
       }
     }
 
     final caminhos = await _capturarComprovante();
     if (caminhos == null || caminhos.isEmpty || !mounted) {
-      _fetchDetalhes(); // comprovação pode ter sido registrada sem evidência ainda
+      _fetchDetalhes(silent: true); // comprovação pode ter sido registrada sem evidência
       return;
     }
 
@@ -665,10 +693,14 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
     }
     if (!mounted) return;
     setState(() => _enviandoEpod = false);
-    _snack(enviadas > 0
-        ? 'Comprovante enviado. Aguardando validação.'
-        : (erro ?? 'Erro ao enviar o comprovante. Tente novamente.'));
-    _fetchDetalhes();
+    if (enviadas > 0) {
+      _snack(jaExistia
+          ? 'Este frete já possui comprovação. Sua evidência foi anexada à comprovação existente.'
+          : 'Evidência enviada. Aguardando validação.');
+    } else {
+      _snack(erro ?? 'Erro ao enviar o comprovante. Tente novamente.');
+    }
+    _fetchDetalhes(silent: true);
   }
 
   // Abre/compartilha uma evidência (signed URL → arquivo temp → folha nativa).
@@ -721,6 +753,10 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
       statusTexto = 'Rejeitada';
       statusCor = Colors.red.shade700;
       statusIcone = Icons.error_outline;
+    } else if (status == 'parcial') {
+      statusTexto = 'Parcial';
+      statusCor = Colors.blue.shade700;
+      statusIcone = Icons.hourglass_bottom_outlined;
     } else {
       statusTexto = 'Aguardando validação';
       statusCor = Colors.orange.shade800;
@@ -777,11 +813,25 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
                 final m = e as Map<String, dynamic>;
                 final id = m['id']?.toString() ?? '';
                 final abrindo = _abrindoEvidId == id;
+                final st = m['status']?.toString() ?? 'pendente';
+                final stTxt = st == 'aprovada' ? 'Aprovada' : st == 'rejeitada' ? 'Rejeitada' : 'Pendente';
+                final stCor = st == 'aprovada'
+                    ? const Color(0xFF1B5E20)
+                    : st == 'rejeitada' ? Colors.red.shade700 : Colors.orange.shade800;
+                final motivo = m['motivo_rejeicao']?.toString() ?? '';
                 return ListTile(
                   contentPadding: EdgeInsets.zero,
                   dense: true,
                   leading: const Icon(Icons.image_outlined),
                   title: Text(m['nome_arquivo']?.toString() ?? 'Evidência'),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(stTxt, style: TextStyle(color: stCor, fontWeight: FontWeight.w600, fontSize: 12)),
+                      if (st == 'rejeitada' && motivo.isNotEmpty)
+                        Text('Motivo: $motivo', style: TextStyle(color: Colors.red.shade700, fontSize: 11)),
+                    ],
+                  ),
                   trailing: abrindo
                       ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
                       : const Icon(Icons.ios_share, color: Color(0xFF1B5E20), size: 20),
@@ -810,8 +860,14 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
             ),
             Padding(
               padding: const EdgeInsets.only(top: 6),
-              child: Text('Registre a entrega com foto/canhoto. O administrador valida no painel.',
-                  style: TextStyle(color: Colors.grey.shade500, fontSize: 11)),
+              child: Text(
+                !temComprovacao
+                    ? 'Registre a entrega com foto/canhoto. O administrador valida no painel.'
+                    : status == 'rejeitado'
+                        ? 'Comprovação rejeitada. Envie uma nova evidência.'
+                        : 'Novas evidências são anexadas a esta comprovação. O administrador valida cada uma no painel.',
+                style: TextStyle(color: Colors.grey.shade500, fontSize: 11),
+              ),
             ),
           ],
         ),
