@@ -8,6 +8,7 @@ import { mensagemErro } from '../utils/mensagemErro';
 import { erroSanidadeTonKm, erroSanidadeValorFixo, TONELADAS_MAX } from '../utils/limitesFrete';
 import { PlanoBloqueadoCard } from '../components/PlanoBloqueadoCard';
 import { EVENTO_NOTIFICACOES_NOVAS } from '../components/NotificacoesDropdown';
+import { FreteEpodOcorrencias } from '../components/FreteEpodOcorrencias';
 
 const gvFmt = (d: any, fmt: string) => {
   if (!d) return '-';
@@ -1373,6 +1374,7 @@ export const GerenciamentoViagens: React.FC = () => {
                           ? <p className="text-gray-400 text-sm text-center py-3">Nenhum lançamento vinculado a este frete.</p>
                           : itensFrete.map(renderLancamentoItem)}
                         {renderDocumentosFrete(f.id)}
+                        <FreteEpodOcorrencias freteId={f.id} />
                       </div>
                     )}
                   </div>
