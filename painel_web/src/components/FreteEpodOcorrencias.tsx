@@ -109,10 +109,14 @@ export const FreteEpodOcorrencias: React.FC<{ freteId: string }> = ({ freteId })
 
   useEffect(() => { carregar(); }, [carregar]);
 
-  // Polling leve enquanto a seção está aberta (montada). Reflete no painel as ações
-  // feitas pelo app/motorista sem refresh manual. Cleanup ao desmontar.
+  // Polling leve (60s) enquanto a seção está aberta, PAUSADO quando a aba não está
+  // visível — reflete no painel as ações do app/motorista sem refresh manual, sem
+  // pesar no rate limit. Ações do próprio usuário já fazem refetch imediato.
   useEffect(() => {
-    const id = setInterval(() => carregar(true), 20000);
+    const id = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      carregar(true);
+    }, 60000);
     return () => clearInterval(id);
   }, [carregar]);
 

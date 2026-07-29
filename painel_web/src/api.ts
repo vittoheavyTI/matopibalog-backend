@@ -23,7 +23,7 @@ api.interceptors.request.use((config) => {
 
 // Decodifica o payload de um JWT no formato base64url, sem dependência externa e
 // SEM logar o token. Retorna o objeto do payload ou null se não decodificar.
-function decodificarPayloadJwt(token: string): any | null {
+export function decodificarPayloadJwt(token: string): any | null {
   try {
     const payload = token.split('.')[1];
     if (!payload) return null;
@@ -57,6 +57,9 @@ function motivoPorToken(): 'expired' | 'invalid' {
 // várias requisições falham ao mesmo tempo. Uma resposta 2xx (ex.: novo login)
 // rearma naturalmente o disparo.
 let encerrando = false;
+// Debounce do aviso de 429 (rate limit) para não floodar a UI quando várias
+// requisições/polling batem no limite ao mesmo tempo.
+let ultimoAviso429 = 0;
 
 // Interceptor de resposta: avisa o sistema quando a SESSÃO expira, para acionar o
 // logout automático (AuthContext escuta 'auth:unauthorized').
@@ -86,6 +89,16 @@ api.interceptors.response.use((response) => {
       encerrando = true;
       registrarMotivoSessao(motivoPorToken());
       window.dispatchEvent(new Event('auth:unauthorized'));
+    }
+    // 429 (rate limit) NÃO é sessão expirada: NÃO desloga, NÃO apaga token.
+    // Só avisa (debounced) para a UI mostrar a mensagem certa. A sessão segue viva.
+    if (response.status === 429) {
+      const agora = Date.now();
+      if (agora - ultimoAviso429 > 10000) {
+        ultimoAviso429 = agora;
+        const msg = (data && data.message) || 'Muitas requisições. Aguarde alguns minutos e tente novamente.';
+        window.dispatchEvent(new CustomEvent('api:rate-limited', { detail: { message: msg } }));
+      }
     }
   }
   return Promise.reject(error);

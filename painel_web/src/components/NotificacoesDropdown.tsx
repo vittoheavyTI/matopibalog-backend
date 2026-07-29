@@ -75,10 +75,16 @@ export const NotificacoesDropdown: React.FC = () => {
 
   useEffect(() => {
     contadorAnterior.current = null;
-    carregarContador();
-    // 15s: aproxima o painel do tempo real sem sobrecarregar (endpoint leve de
-    // contagem). Antes era 60s, o que dava a sensacao de atraso (~35s).
-    const timer = window.setInterval(carregarContador, 15_000);
+    // Só consulta se autenticado (há token) e a aba está visível — evita 429 por
+    // polling em segundo plano / abas ocultas / usuário deslogado. 30s equilibra
+    // proximidade do tempo real com carga leve no rate limit.
+    const tick = () => {
+      try { if (!localStorage.getItem('auth_token')) return; } catch { /* ignore */ }
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      carregarContador();
+    };
+    tick();
+    const timer = window.setInterval(tick, 30_000);
     return () => window.clearInterval(timer);
   }, [feedEmpresaSelecionada, empresaIdUrl]);
 
