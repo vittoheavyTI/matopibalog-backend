@@ -11,7 +11,7 @@ const validate = require('../middlewares/validate');
 const upload = require('../middlewares/upload');
 const uploadDocumento = require('../middlewares/uploadDocumento');
 const { createFreteSchema, updateFreteSchema } = require('../schemas/fretes');
-const { registrarEpodSchema, atualizarEpodSchema, validarEpodSchema } = require('../schemas/freteEpod');
+const { registrarEpodSchema, atualizarEpodSchema, validarEvidenciaSchema, rejeitarComprovacaoSchema } = require('../schemas/freteEpod');
 const { criarOcorrenciaSchema, atualizarOcorrenciaSchema } = require('../schemas/freteOcorrencias');
 
 router.use(verifyToken, verificarEmpresa, verificarPlano);
@@ -34,9 +34,12 @@ router.get('/:id/documentos/:docId/url', freteDocumentosController.getSignedUrl)
 router.get('/:id/epod', freteEpodController.obter);
 router.post('/:id/epod', validate(registrarEpodSchema), freteEpodController.registrar);
 router.patch('/:id/epod', validate(atualizarEpodSchema), freteEpodController.atualizar);
-router.post('/:id/epod/validacao', validate(validarEpodSchema), freteEpodController.validar);
 router.post('/:id/epod/evidencias', uploadDocumento.single('evidencia'), freteEpodController.uploadEvidencia);
 router.get('/:id/epod/evidencias/:evidId/url', freteEpodController.getEvidenciaUrl);
+// Validação POR EVIDÊNCIA (admin) + overrides no ePOD inteiro.
+router.post('/:id/epod/evidencias/:evidId/validacao', validate(validarEvidenciaSchema), freteEpodController.validarEvidencia);
+router.post('/:id/epod/rejeitar', validate(rejeitarComprovacaoSchema), freteEpodController.rejeitarComprovacao);
+router.post('/:id/epod/aprovar-pendentes', freteEpodController.aprovarPendentes);
 
 // Ocorrencias logisticas (N por frete). So admin muda o status.
 router.get('/:id/ocorrencias', freteOcorrenciasController.listar);

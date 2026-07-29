@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const supabase = require('../config/supabase');
 const { buscarFreteComAcesso, ehAdmin } = require('./freteAcesso');
+const notificacaoService = require('../services/notificacaoService');
 
 // ePOD — comprovacao de entrega digital (1 por frete). Espelha o padrao dos
 // documentos fiscais: bucket PRIVADO + path por empresa/frete + signed URL.
@@ -21,7 +22,39 @@ const EXTENSAO_POR_MIME = {
 
 const COLUNAS_EPOD =
   'id, frete_id, status, comprovado_em, recebido_por, observacao, latitude, longitude, assinatura_path, criado_por, validado_por, validado_em, motivo_rejeicao, created_at, updated_at';
-const COLUNAS_EVIDENCIA = 'id, nome_arquivo, mime, tamanho_bytes, created_at';
+const COLUNAS_EVIDENCIA =
+  'id, nome_arquivo, mime, tamanho_bytes, status, validado_por, validado_em, rejeitado_por, rejeitado_em, motivo_rejeicao, created_at';
+
+// Status GERAL do ePOD DERIVADO das evidências (PURO — testável).
+// Regras (macrofrente ePOD v2): sem evidência não valida; parcial = há aprovada
+// e ainda há pendente/rejeitada; validado = todas aprovadas; rejeitado = todas
+// rejeitadas (inclui a rejeição da comprovação inteira, que marca todas).
+function derivarStatusEpod(evidencias) {
+  const n = (evidencias || []).length;
+  if (n === 0) return 'registrado';
+  const aprovadas = evidencias.filter((e) => e.status === 'aprovada').length;
+  const rejeitadas = evidencias.filter((e) => e.status === 'rejeitada').length;
+  if (aprovadas === n) return 'validado';
+  if (rejeitadas === n) return 'rejeitado';
+  if (aprovadas >= 1) return 'parcial';
+  return 'registrado'; // há pendente(s) e nenhuma aprovada
+}
+
+// Recalcula e persiste o status do ePOD a partir das evidências. Best-effort:
+// devolve o novo status (ou null em falha) sem quebrar o fluxo do chamador.
+async function recomputarStatusEpod(epodId) {
+  const { data: evs, error } = await supabase
+    .from('frete_epod_evidencias')
+    .select('status')
+    .eq('epod_id', epodId);
+  if (error) return null;
+  const novo = derivarStatusEpod(evs || []);
+  await supabase
+    .from('frete_epod')
+    .update({ status: novo, updated_at: new Date().toISOString() })
+    .eq('id', epodId);
+  return novo;
+}
 
 // GET /fretes/:id/epod → comprovacao do frete (ou null) + evidencias.
 exports.obter = async (req, res) => {
@@ -105,30 +138,105 @@ exports.atualizar = async (req, res) => {
   res.json(data);
 };
 
-// POST /fretes/:id/epod/validacao → admin aprova/rejeita a comprovacao.
-exports.validar = async (req, res) => {
-  if (!ehAdmin(req)) return res.status(403).json({ message: 'Apenas administradores podem validar a comprovação.' });
+// Busca o ePOD do frete (id). Responde 404 e retorna null quando não existe.
+async function buscarEpodDoFrete(res, freteId) {
+  const { data: epod, error } = await supabase
+    .from('frete_epod')
+    .select('id')
+    .eq('frete_id', freteId)
+    .maybeSingle();
+  if (error) { res.status(500).json({ message: 'Erro ao localizar a comprovação.' }); return null; }
+  if (!epod) { res.status(404).json({ message: 'Comprovação não encontrada. Registre primeiro.' }); return null; }
+  return epod;
+}
+
+// POST /fretes/:id/epod/evidencias/:evidId/validacao → admin aprova/rejeita UMA
+// evidência. Recalcula o status geral e avisa o motorista.
+exports.validarEvidencia = async (req, res) => {
+  if (!ehAdmin(req)) return res.status(403).json({ message: 'Apenas administradores podem validar evidências.' });
   const frete = await buscarFreteComAcesso(req, res);
   if (!frete) return;
 
-  const { status, motivo_rejeicao } = req.body;
-  const patch = {
-    status,
-    validado_por: req.user.uid,
-    validado_em: new Date().toISOString(),
-    motivo_rejeicao: status === 'rejeitado' ? (motivo_rejeicao ?? null) : null,
-    updated_at: new Date().toISOString(),
-  };
+  const { status, motivo_rejeicao } = req.body; // 'aprovada' | 'rejeitada'
+  const agora = new Date().toISOString();
+  const patch = status === 'aprovada'
+    ? { status, validado_por: req.user.uid, validado_em: agora, rejeitado_por: null, rejeitado_em: null, motivo_rejeicao: null }
+    : { status, rejeitado_por: req.user.uid, rejeitado_em: agora, motivo_rejeicao: motivo_rejeicao ?? null, validado_por: null, validado_em: null };
 
-  const { data, error } = await supabase
-    .from('frete_epod')
+  const { data: evid, error } = await supabase
+    .from('frete_epod_evidencias')
     .update(patch)
-    .eq('frete_id', frete.id)
-    .select(COLUNAS_EPOD)
+    .eq('id', req.params.evidId)
+    .eq('frete_id', frete.id) // a evidência tem que pertencer ao frete acessado
+    .select('id, epod_id')
     .maybeSingle();
-  if (error) return res.status(500).json({ message: 'Erro ao validar a comprovação.' });
-  if (!data) return res.status(404).json({ message: 'Comprovação não encontrada. Registre primeiro.' });
-  res.json(data);
+  if (error) return res.status(500).json({ message: 'Erro ao validar a evidência.' });
+  if (!evid) return res.status(404).json({ message: 'Evidência não encontrada.' });
+
+  const statusGeral = await recomputarStatusEpod(evid.epod_id);
+
+  // Avisa o motorista (best-effort).
+  if (status === 'aprovada') {
+    notificacaoService.notificarEpodEvidenciaAprovada(frete, evid.id).catch(() => {});
+  } else {
+    notificacaoService.notificarEpodEvidenciaRejeitada(frete, evid.id, motivo_rejeicao).catch(() => {});
+  }
+  res.json({ evidencia_id: evid.id, status, status_geral: statusGeral });
+};
+
+// POST /fretes/:id/epod/rejeitar → admin rejeita a COMPROVAÇÃO inteira: marca
+// todas as evidências não-rejeitadas como rejeitadas (com motivo) e grava o
+// motivo no ePOD. Recalcula (→ rejeitado) e avisa o motorista.
+exports.rejeitarComprovacao = async (req, res) => {
+  if (!ehAdmin(req)) return res.status(403).json({ message: 'Apenas administradores podem rejeitar a comprovação.' });
+  const frete = await buscarFreteComAcesso(req, res);
+  if (!frete) return;
+  const epod = await buscarEpodDoFrete(res, frete.id);
+  if (!epod) return;
+
+  const agora = new Date().toISOString();
+  const { motivo_rejeicao } = req.body;
+
+  const { error: evidErr } = await supabase
+    .from('frete_epod_evidencias')
+    .update({ status: 'rejeitada', rejeitado_por: req.user.uid, rejeitado_em: agora, motivo_rejeicao })
+    .eq('epod_id', epod.id)
+    .neq('status', 'rejeitada');
+  if (evidErr) return res.status(500).json({ message: 'Erro ao rejeitar as evidências.' });
+
+  await supabase
+    .from('frete_epod')
+    .update({ motivo_rejeicao, updated_at: agora })
+    .eq('id', epod.id);
+
+  const statusGeral = await recomputarStatusEpod(epod.id);
+  notificacaoService.notificarEpodEvidenciaRejeitada(frete, `epod:${epod.id}`, motivo_rejeicao).catch(() => {});
+  res.json({ epod_id: epod.id, status_geral: statusGeral });
+};
+
+// POST /fretes/:id/epod/aprovar-pendentes → atalho: admin aprova TODAS as
+// evidências pendentes de uma vez. Recalcula e avisa o motorista.
+exports.aprovarPendentes = async (req, res) => {
+  if (!ehAdmin(req)) return res.status(403).json({ message: 'Apenas administradores podem aprovar evidências.' });
+  const frete = await buscarFreteComAcesso(req, res);
+  if (!frete) return;
+  const epod = await buscarEpodDoFrete(res, frete.id);
+  if (!epod) return;
+
+  const agora = new Date().toISOString();
+  const { data: aprovadas, error } = await supabase
+    .from('frete_epod_evidencias')
+    .update({ status: 'aprovada', validado_por: req.user.uid, validado_em: agora, rejeitado_por: null, rejeitado_em: null, motivo_rejeicao: null })
+    .eq('epod_id', epod.id)
+    .eq('status', 'pendente')
+    .select('id');
+  if (error) return res.status(500).json({ message: 'Erro ao aprovar as evidências pendentes.' });
+
+  const statusGeral = await recomputarStatusEpod(epod.id);
+  if ((aprovadas || []).length > 0) {
+    notificacaoService.notificarEpodEvidenciaAprovada(frete, `epod:${epod.id}`).catch(() => {});
+  }
+  res.json({ epod_id: epod.id, aprovadas: (aprovadas || []).length, status_geral: statusGeral });
 };
 
 // POST /fretes/:id/epod/evidencias → anexa foto/canhoto/PDF a comprovacao.
@@ -191,6 +299,14 @@ exports.uploadEvidencia = async (req, res) => {
     console.error('[freteEpod:uploadEvidencia] Falha ao inserir metadados', insertError.message);
     return res.status(500).json({ message: 'Erro ao registrar a evidência.' });
   }
+
+  // Nova evidência = pendente → recalcula o status geral (ex.: validado→parcial)
+  // e avisa os admins que há algo a validar. Best-effort: não quebra o upload.
+  await recomputarStatusEpod(epod.id).catch(() => {});
+  notificacaoService
+    .notificarEpodEvidenciaEnviada(frete, evidId, { actorId: req.user.uid })
+    .catch(() => {});
+
   res.status(201).json(inserido);
 };
 
@@ -215,3 +331,4 @@ exports.getEvidenciaUrl = async (req, res) => {
 
 exports.BUCKET_EVIDENCIAS = BUCKET_EVIDENCIAS;
 exports.MAX_EVIDENCIAS = MAX_EVIDENCIAS;
+exports.derivarStatusEpod = derivarStatusEpod; // exposto p/ testes
