@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
-import api from '../api';
+import api, { decodificarPayloadJwt } from '../api';
 import { definirMotivoSessao, type MotivoSessao } from '../utils/sessionReason';
 
 export interface User {
@@ -33,6 +33,34 @@ const AuthContext = createContext<AuthContextType>({
 });
 
 export const useAuth = () => useContext(AuthContext);
+
+// Usuário MÍNIMO reconstruído do próprio JWT (localStorage), usado quando o
+// /auth/me falha por motivo TRANSITÓRIO (429/offline/5xx): preserva a sessão em
+// vez de jogar no login. Campos de gate (senha_temporaria/termos) ficam neutros e
+// são re-enriquecidos na próxima chamada bem-sucedida de /auth/me. Token expirado
+// (exp no passado) → null, para cair no login normalmente.
+function usuarioMinimoDoToken(): User | null {
+  try {
+    const t = localStorage.getItem('auth_token');
+    if (!t) return null;
+    const p = decodificarPayloadJwt(t);
+    if (!p || !p.uid) return null;
+    if (typeof p.exp === 'number' && p.exp * 1000 < Date.now()) return null;
+    return {
+      uid: p.uid,
+      email: p.email ?? '',
+      nome: p.email ?? '',
+      role: p.role ?? '',
+      status: 'ativo',
+      is_super_admin: p.is_super_admin ?? false,
+      senha_temporaria: false,
+      termos_pendentes: false,
+      termos_pendentes_count: 0,
+    };
+  } catch {
+    return null;
+  }
+}
 
 // Mapeia a resposta de /auth/me para o nosso User. Centralizado para que tanto a
 // restauração de sessão (montagem) quanto o enriquecimento pós-login usem o mesmo
@@ -78,10 +106,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       .then((res) => {
         setUser(mapMeToUser(res.data));
       })
-      .catch(() => {
-        // Se o token for inválido, remove e limpa estado
-        localStorage.removeItem('auth_token');
-        setUser(null);
+      .catch((err) => {
+        const status = err?.response?.status;
+        const authFalhou = status === 401
+          || (status === 403 && err?.response?.data?.error === 'Token inválido ou expirado.');
+        if (authFalhou) {
+          // Token realmente inválido/expirado no servidor → limpa e desloga.
+          localStorage.removeItem('auth_token');
+          setUser(null);
+        } else {
+          // Transitório (429 rate limit / offline / 5xx): NÃO apaga o token válido
+          // (JWT dura 7 dias). Restaura um usuário mínimo do token para não jogar o
+          // usuário no login por causa de um pico de requisições; o /auth/me
+          // re-enriquece (nome/empresa/gate) na próxima chamada que passar.
+          setUser(usuarioMinimoDoToken());
+        }
       })
       .finally(() => {
         loadingRef.current = false;

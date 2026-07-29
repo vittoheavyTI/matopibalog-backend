@@ -12,9 +12,28 @@ export const Layout: React.FC = () => {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
+  const [aviso429, setAviso429] = useState<string | null>(null);
+
   const handleLogout = () => {
     logout();
   };
+
+  // Banner de rate limit (429): mensagem clara, SEM deslogar (a sessão segue viva).
+  // Disparado pelo interceptor do api.ts via evento 'api:rate-limited'.
+  useEffect(() => {
+    const onRate = (e: Event) => {
+      const msg = (e as CustomEvent).detail?.message
+        || 'Muitas requisições. Aguarde alguns minutos e tente novamente.';
+      setAviso429(msg);
+    };
+    window.addEventListener('api:rate-limited', onRate);
+    return () => window.removeEventListener('api:rate-limited', onRate);
+  }, []);
+  useEffect(() => {
+    if (!aviso429) return;
+    const t = window.setTimeout(() => setAviso429(null), 6000);
+    return () => window.clearTimeout(t);
+  }, [aviso429]);
 
   // Fecha o dropdown se clicar fora dele
   useEffect(() => {
@@ -31,6 +50,11 @@ export const Layout: React.FC = () => {
 
   return (
     <div className="flex h-screen bg-gray-50 overflow-hidden" style={{ zoom: 1, maxWidth: '100vw' }}>
+      {aviso429 && (
+        <div className="fixed top-3 left-1/2 -translate-x-1/2 z-50 bg-amber-100 border border-amber-300 text-amber-800 text-sm font-medium rounded-lg px-4 py-2 shadow">
+          {aviso429}
+        </div>
+      )}
       {/* Logout automático por inatividade — ativo apenas no painel autenticado. */}
       <SessionTimeoutWatcher />
       <Sidebar />
