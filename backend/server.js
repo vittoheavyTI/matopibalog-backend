@@ -84,12 +84,21 @@ const allowedOrigins = [
   FRONTEND_URL,
 ].filter(Boolean);
 
-// Limite geral: 200 req/15min por IP
+// Limite geral: 600 req/15min POR USUÁRIO autenticado (fallback por IP).
+// Antes era 200/15min por IP — baixo demais para uma SPA autenticada que faz
+// polling e para vários usuários atrás do mesmo NAT/IP (todos dividiam o balde
+// e estouravam 429 no uso normal). Números: um usuário ativo, com o polling já
+// reduzido (sino 30s ≈ 30/15min + uma seção de frete 60s ≈ 15/15min + navegação/
+// ações ≈ 100–200/15min), fica ~250/15min no pico. 600/usuário dá folga (~40
+// req/min) sem afrouxar o login (limiter próprio por IP) nem virar vetor de abuso
+// (conta autenticada é rastreável/bloqueável). Chave em middlewares/rateLimitKey.
+const { chaveRateLimit } = require('./middlewares/rateLimitKey');
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 200,
+  max: 600,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: chaveRateLimit,
   message: { message: 'Muitas requisições. Tente novamente em alguns minutos.' },
 });
 
