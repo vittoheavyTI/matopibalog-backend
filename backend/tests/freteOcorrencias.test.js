@@ -4,6 +4,7 @@ const Module = require('node:module');
 
 const controllerPath = require.resolve('../controllers/freteOcorrenciasController');
 const acessoPath = require.resolve('../controllers/freteAcesso');
+const notifPath = require.resolve('../services/notificacaoService');
 
 function carregarController(cenario = {}) {
   const chamadas = { inserts: [], updates: [], uploads: [], signed: [], removes: [] };
@@ -13,6 +14,7 @@ function carregarController(cenario = {}) {
     const b = {
       select(_cols, opts) { if (opts && opts.count) state.count = true; return b; },
       eq() { return b; },
+      neq() { return b; },
       order() { return b; },
       insert(payload) { state.insert = true; chamadas.inserts.push({ tabela, payload }); return b; },
       update(payload) { state.update = true; chamadas.updates.push({ tabela, payload }); return b; },
@@ -65,14 +67,14 @@ function carregarController(cenario = {}) {
   };
 
   const originalLoad = Module._load;
-  [controllerPath, acessoPath].forEach((p) => delete require.cache[p]);
+  [controllerPath, acessoPath, notifPath].forEach((p) => delete require.cache[p]);
   Module._load = function (request, parent, isMain) {
     if (request === '../config/supabase') return supabaseMock;
     return originalLoad.call(this, request, parent, isMain);
   };
   const controller = require(controllerPath);
   Module._load = originalLoad;
-  [controllerPath, acessoPath].forEach((p) => delete require.cache[p]);
+  [controllerPath, acessoPath, notifPath].forEach((p) => delete require.cache[p]);
   return { controller, chamadas };
 }
 

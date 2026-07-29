@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const supabase = require('../config/supabase');
 const { buscarFreteComAcesso, ehAdmin } = require('./freteAcesso');
 const { TIPOS_OCORRENCIA, STATUS_OCORRENCIA } = require('../schemas/freteOcorrencias');
+const notificacaoService = require('../services/notificacaoService');
 
 // Ocorrencias logisticas (N por frete): atraso, avaria, recusa, reentrega,
 // extravio, divergencia, outro. Evidencias no bucket privado compartilhado
@@ -83,6 +84,8 @@ exports.criar = async (req, res) => {
     console.error('[freteOcorrencias:criar] Falha ao inserir', error.message);
     return res.status(500).json({ message: 'Erro ao registrar a ocorrência.' });
   }
+  // Avisa os admins da empresa (menos quem criou). Best-effort.
+  notificacaoService.notificarOcorrenciaCriada(frete, inserido.id, { actorId: req.user.uid }).catch(() => {});
   res.status(201).json(inserido);
 };
 
@@ -119,6 +122,10 @@ exports.atualizar = async (req, res) => {
     .select(COLUNAS_OCORRENCIA)
     .single();
   if (error) return res.status(500).json({ message: 'Erro ao atualizar a ocorrência.' });
+  // Resolvida agora → avisa quem abriu a ocorrência (se não for o próprio admin). Best-effort.
+  if (patch.status === 'resolvida' && ocorrencia.status !== 'resolvida') {
+    notificacaoService.notificarOcorrenciaResolvida(frete, data, { actorId: req.user.uid }).catch(() => {});
+  }
   res.json(data);
 };
 

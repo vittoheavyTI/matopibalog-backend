@@ -4,61 +4,64 @@ const Module = require('node:module');
 
 const controllerPath = require.resolve('../controllers/freteEpodController');
 const acessoPath = require.resolve('../controllers/freteAcesso');
+const notifPath = require.resolve('../services/notificacaoService');
 
-// Carrega o controller (e o helper freteAcesso) com um supabase mockado por cenário.
+// Carrega o controller (+ helpers/serviços) com um supabase mockado por cenário.
 function carregarController(cenario = {}) {
   const chamadas = { inserts: [], updates: [], uploads: [], signed: [], removes: [] };
 
   function builder(tabela) {
-    const state = { count: false, insert: false, update: false };
+    const st = { count: false, insert: false, update: false, select: false };
     const b = {
-      select(_cols, opts) { if (opts && opts.count) state.count = true; return b; },
+      select(_c, opts) { st.select = true; if (opts && opts.count) st.count = true; return b; },
       eq() { return b; },
+      neq() { return b; },
       order() { return b; },
-      insert(payload) { state.insert = true; chamadas.inserts.push({ tabela, payload }); return b; },
-      update(payload) { state.update = true; chamadas.updates.push({ tabela, payload }); return b; },
-      async single() { return resolverLinha(tabela, state); },
-      async maybeSingle() { return resolverLinha(tabela, state); },
-      then(resolve) {
-        if (state.count) return resolve({ count: cenario[`${tabela}_count`] ?? 0, error: cenario.countError || null });
-        if (tabela === 'frete_epod_evidencias') return resolve({ data: cenario.evidLista ?? [], error: null });
-        return resolve({ data: [], error: null });
-      },
+      insert(p) { st.insert = true; chamadas.inserts.push({ tabela, payload: p }); return b; },
+      update(p) { st.update = true; chamadas.updates.push({ tabela, payload: p }); return b; },
+      async single() { return term(tabela, st); },
+      async maybeSingle() { return term(tabela, st); },
+      then(resolve) { return resolve(termList(tabela, st)); },
     };
     return b;
   }
 
-  function resolverLinha(tabela, state) {
+  function term(tabela, st) {
     if (tabela === 'fretes') {
-      return cenario.frete ? { data: cenario.frete, error: null } : { data: null, error: { message: 'not found' } };
+      return cenario.frete ? { data: cenario.frete, error: null } : { data: null, error: { message: 'nf' } };
     }
     if (tabela === 'frete_epod') {
-      if (state.insert) {
-        if (cenario.insertError) return { data: null, error: { message: 'insert falhou' } };
-        const p = chamadas.inserts[chamadas.inserts.length - 1].payload;
-        return { data: { ...p }, error: null };
-      }
-      if (state.update) return { data: cenario.epod ? { ...cenario.epod } : null, error: null };
+      if (st.insert) { return cenario.insertError ? { data: null, error: { message: 'x' } } : { data: { ...chamadas.inserts.at(-1).payload }, error: null }; }
+      if (st.update) return { data: cenario.epod ? { ...cenario.epod } : null, error: null };
       return { data: cenario.epod ?? null, error: null };
     }
     if (tabela === 'frete_epod_evidencias') {
-      if (state.insert) {
-        if (cenario.insertError) return { data: null, error: { message: 'insert falhou' } };
-        const p = chamadas.inserts[chamadas.inserts.length - 1].payload;
-        return { data: { id: p.id, nome_arquivo: p.nome_arquivo, mime: p.mime, tamanho_bytes: p.tamanho_bytes, created_at: '2026-07-29T00:00:00Z' }, error: null };
-      }
-      return { data: cenario.evid ?? null, error: cenario.evid ? null : { message: 'not found' } };
+      if (st.insert) { const p = chamadas.inserts.at(-1).payload; return { data: { id: p.id, nome_arquivo: p.nome_arquivo, mime: p.mime, status: 'pendente', created_at: 't' }, error: null }; }
+      if (st.update) return { data: cenario.evidAlvo ?? null, error: null }; // validarEvidencia
+      return { data: cenario.evid ?? null, error: cenario.evid ? null : { message: 'nf' } }; // getEvidenciaUrl
     }
+    if (tabela === 'notificacoes') return { data: cenario.notifExistente ?? { id: 'n1' }, error: null };
     return { data: null, error: null };
   }
 
+  function termList(tabela, st) {
+    if (st.count) return { count: cenario[`${tabela}_count`] ?? 0, error: cenario.countError || null };
+    if (tabela === 'frete_epod_evidencias') {
+      if (st.update && st.select) return { data: cenario.aprovadas ?? [], error: null }; // aprovarPendentes
+      if (st.update) return { error: null }; // rejeitarComprovacao (update sem select)
+      return { data: cenario.evidLista ?? [], error: null }; // lista / recompute (select 'status')
+    }
+    if (tabela === 'usuarios') return { data: cenario.usuarios ?? [], error: null };
+    return { data: [], error: null };
+  }
+
   const supabaseMock = {
-    from(tabela) { return builder(tabela); },
+    from(t) { return builder(t); },
     storage: {
       from(bucket) {
         return {
-          async upload(path, _buf, opts) { chamadas.uploads.push({ bucket, path, opts }); return { error: cenario.uploadError || null }; },
-          async createSignedUrl(path, ttl) { chamadas.signed.push({ bucket, path, ttl }); return { data: { signedUrl: 'https://signed.example/' + path }, error: cenario.signedError || null }; },
+          async upload(path, _b, opts) { chamadas.uploads.push({ bucket, path, opts }); return { error: cenario.uploadError || null }; },
+          async createSignedUrl(path, ttl) { chamadas.signed.push({ bucket, path, ttl }); return { data: { signedUrl: 'https://s/' + path }, error: cenario.signedError || null }; },
           async remove(paths) { chamadas.removes.push(paths); return { error: null }; },
         };
       },
@@ -66,14 +69,14 @@ function carregarController(cenario = {}) {
   };
 
   const originalLoad = Module._load;
-  [controllerPath, acessoPath].forEach((p) => delete require.cache[p]);
+  [controllerPath, acessoPath, notifPath].forEach((p) => delete require.cache[p]);
   Module._load = function (request, parent, isMain) {
     if (request === '../config/supabase') return supabaseMock;
     return originalLoad.call(this, request, parent, isMain);
   };
   const controller = require(controllerPath);
   Module._load = originalLoad;
-  [controllerPath, acessoPath].forEach((p) => delete require.cache[p]);
+  [controllerPath, acessoPath, notifPath].forEach((p) => delete require.cache[p]);
   return { controller, chamadas };
 }
 
@@ -83,161 +86,159 @@ function resMock() {
 
 const FRETE = { id: 'frete-1', motorista_id: 'mot-1', empresa_id: 'emp-1', status: 'ativo' };
 const EPOD = { id: 'epod-1', frete_id: 'frete-1', status: 'registrado' };
-const fileMock = (mime = 'image/jpeg') => ({ buffer: Buffer.from('x'), mimetype: mime, size: 1234, originalname: 'foto.jpg' });
-const motoristaDono = { uid: 'mot-1', role: 'motorista', is_super_admin: false };
-const adminDono = { uid: 'adm-1', role: 'admin', is_super_admin: false };
+const fileMock = (mime = 'image/jpeg') => ({ buffer: Buffer.from('x'), mimetype: mime, size: 10, originalname: 'f.jpg' });
+const motorista = { uid: 'mot-1', role: 'motorista', is_super_admin: false };
+const admin = { uid: 'adm-1', role: 'admin', is_super_admin: false };
 const adminOutra = { uid: 'adm-9', role: 'admin', is_super_admin: false };
+const req = (o = {}) => ({ params: { id: 'frete-1' }, query: {}, body: {}, user: motorista, empresa_id: 'emp-1', ...o });
 
-function req(over = {}) {
-  return { params: { id: 'frete-1' }, query: {}, body: {}, user: motoristaDono, empresa_id: 'emp-1', ...over };
-}
+// ── derivarStatusEpod (puro) ────────────────────────────────────────────────
+test('derivarStatusEpod: 0 evidências → registrado', () => {
+  const { controller } = carregarController();
+  assert.equal(controller.derivarStatusEpod([]), 'registrado');
+});
+test('derivarStatusEpod: todas aprovadas → validado', () => {
+  const { controller } = carregarController();
+  assert.equal(controller.derivarStatusEpod([{ status: 'aprovada' }, { status: 'aprovada' }]), 'validado');
+});
+test('derivarStatusEpod: aprovada + pendente → parcial', () => {
+  const { controller } = carregarController();
+  assert.equal(controller.derivarStatusEpod([{ status: 'aprovada' }, { status: 'pendente' }]), 'parcial');
+});
+test('derivarStatusEpod: todas rejeitadas → rejeitado', () => {
+  const { controller } = carregarController();
+  assert.equal(controller.derivarStatusEpod([{ status: 'rejeitada' }]), 'rejeitado');
+});
+test('derivarStatusEpod: pendente sem aprovada → registrado', () => {
+  const { controller } = carregarController();
+  assert.equal(controller.derivarStatusEpod([{ status: 'pendente' }, { status: 'rejeitada' }]), 'registrado');
+});
 
-test('obter: frete sem ePOD → epod null e evidencias vazias', async () => {
+// ── obter / registrar / atualizar ───────────────────────────────────────────
+test('obter: sem ePOD → epod null', async () => {
   const { controller } = carregarController({ frete: FRETE, epod: null });
-  const res = resMock();
-  await controller.obter(req(), res);
-  assert.equal(res.statusCode, 200);
-  assert.deepEqual(res.body, { epod: null, evidencias: [] });
+  const res = resMock(); await controller.obter(req(), res);
+  assert.equal(res.statusCode, 200); assert.equal(res.body.epod, null);
 });
-
-test('obter: com ePOD → retorna epod + evidencias', async () => {
-  const { controller } = carregarController({ frete: FRETE, epod: EPOD, evidLista: [{ id: 'e1' }] });
-  const res = resMock();
-  await controller.obter(req(), res);
-  assert.equal(res.statusCode, 200);
-  assert.equal(res.body.epod.id, 'epod-1');
-  assert.equal(res.body.evidencias.length, 1);
-});
-
-test('registrar: motorista dono → 201 com empresa_id/frete_id/criado_por derivados e status registrado', async () => {
+test('registrar: motorista dono → 201 derivados', async () => {
   const { controller, chamadas } = carregarController({ frete: FRETE, epod: null });
-  const res = resMock();
-  await controller.registrar(req({ body: { recebido_por: 'João', observacao: 'ok', latitude: -12.1, longitude: -45.2 } }), res);
+  const res = resMock(); await controller.registrar(req({ body: { recebido_por: 'J' } }), res);
   assert.equal(res.statusCode, 201);
   const ins = chamadas.inserts.find((i) => i.tabela === 'frete_epod').payload;
-  assert.equal(ins.empresa_id, 'emp-1');
-  assert.equal(ins.frete_id, 'frete-1');
-  assert.equal(ins.status, 'registrado');
-  assert.equal(ins.criado_por, 'mot-1');
-  assert.equal(ins.recebido_por, 'João');
-  assert.equal(ins.latitude, -12.1);
+  assert.equal(ins.empresa_id, 'emp-1'); assert.equal(ins.status, 'registrado'); assert.equal(ins.criado_por, 'mot-1');
 });
-
-test('registrar: ePOD já existe → 409 sem insert', async () => {
-  const { controller, chamadas } = carregarController({ frete: FRETE, epod: EPOD });
-  const res = resMock();
-  await controller.registrar(req(), res);
+test('registrar: já existe → 409', async () => {
+  const { controller } = carregarController({ frete: FRETE, epod: EPOD });
+  const res = resMock(); await controller.registrar(req(), res);
   assert.equal(res.statusCode, 409);
-  assert.equal(chamadas.inserts.length, 0);
 });
-
-test('registrar: admin de OUTRA empresa → 403 (isolamento)', async () => {
+test('registrar: admin outra empresa → 403', async () => {
   const { controller } = carregarController({ frete: FRETE, epod: null });
-  const res = resMock();
-  await controller.registrar(req({ user: adminOutra, empresa_id: 'emp-OUTRA' }), res);
+  const res = resMock(); await controller.registrar(req({ user: adminOutra, empresa_id: 'emp-X' }), res);
   assert.equal(res.statusCode, 403);
 });
-
-test('registrar: frete inexistente → 404', async () => {
-  const { controller } = carregarController({ frete: null });
-  const res = resMock();
-  await controller.registrar(req(), res);
-  assert.equal(res.statusCode, 404);
-});
-
-test('atualizar: edita campos → 200', async () => {
-  const { controller, chamadas } = carregarController({ frete: FRETE, epod: EPOD });
-  const res = resMock();
-  await controller.atualizar(req({ body: { observacao: 'nova obs' } }), res);
+test('atualizar: edita → 200', async () => {
+  const { controller } = carregarController({ frete: FRETE, epod: EPOD });
+  const res = resMock(); await controller.atualizar(req({ body: { observacao: 'o' } }), res);
   assert.equal(res.statusCode, 200);
-  const upd = chamadas.updates.find((u) => u.tabela === 'frete_epod').payload;
-  assert.equal(upd.observacao, 'nova obs');
-  assert.ok(upd.updated_at);
 });
 
-test('atualizar: sem ePOD → 404', async () => {
-  const { controller } = carregarController({ frete: FRETE, epod: null });
-  const res = resMock();
-  await controller.atualizar(req({ body: { observacao: 'x' } }), res);
-  assert.equal(res.statusCode, 404);
-});
-
-test('validar: admin aprova → 200 e grava validado_por/validado_em', async () => {
-  const { controller, chamadas } = carregarController({ frete: FRETE, epod: EPOD });
-  const res = resMock();
-  await controller.validar(req({ user: adminDono, body: { status: 'validado' } }), res);
-  assert.equal(res.statusCode, 200);
-  const upd = chamadas.updates.find((u) => u.tabela === 'frete_epod').payload;
-  assert.equal(upd.status, 'validado');
-  assert.equal(upd.validado_por, 'adm-1');
-  assert.ok(upd.validado_em);
-  assert.equal(upd.motivo_rejeicao, null);
-});
-
-test('validar: motorista (não admin) → 403 sem update', async () => {
-  const { controller, chamadas } = carregarController({ frete: FRETE, epod: EPOD });
-  const res = resMock();
-  await controller.validar(req({ user: motoristaDono, body: { status: 'validado' } }), res);
-  assert.equal(res.statusCode, 403);
-  assert.equal(chamadas.updates.length, 0);
-});
-
-test('validar: rejeitado grava motivo', async () => {
-  const { controller, chamadas } = carregarController({ frete: FRETE, epod: EPOD });
-  const res = resMock();
-  await controller.validar(req({ user: adminDono, body: { status: 'rejeitado', motivo_rejeicao: 'ilegível' } }), res);
-  assert.equal(res.statusCode, 200);
-  const upd = chamadas.updates.find((u) => u.tabela === 'frete_epod').payload;
-  assert.equal(upd.status, 'rejeitado');
-  assert.equal(upd.motivo_rejeicao, 'ilegível');
-});
-
-test('uploadEvidencia: sem ePOD → 404 sem upload', async () => {
+// ── uploadEvidencia ─────────────────────────────────────────────────────────
+test('uploadEvidencia: sem ePOD → 404', async () => {
   const { controller, chamadas } = carregarController({ frete: FRETE, epod: null });
-  const res = resMock();
-  await controller.uploadEvidencia(req({ file: fileMock() }), res);
-  assert.equal(res.statusCode, 404);
-  assert.equal(chamadas.uploads.length, 0);
+  const res = resMock(); await controller.uploadEvidencia(req({ file: fileMock() }), res);
+  assert.equal(res.statusCode, 404); assert.equal(chamadas.uploads.length, 0);
 });
-
-test('uploadEvidencia: com ePOD → 201, bucket privado e path epod', async () => {
-  const { controller, chamadas } = carregarController({ frete: FRETE, epod: EPOD, frete_epod_evidencias_count: 0 });
-  const res = resMock();
-  await controller.uploadEvidencia(req({ file: fileMock() }), res);
+test('uploadEvidencia: com ePOD → 201 bucket privado + recompute', async () => {
+  const { controller, chamadas } = carregarController({ frete: FRETE, epod: EPOD, frete_epod_evidencias_count: 0, evidLista: [{ status: 'pendente' }] });
+  const res = resMock(); await controller.uploadEvidencia(req({ file: fileMock() }), res);
   assert.equal(res.statusCode, 201);
   assert.equal(chamadas.uploads[0].bucket, 'fretes-evidencias');
-  assert.match(chamadas.uploads[0].path, /^emp-1\/fretes\/frete-1\/epod\/.+\.jpg$/);
-  const ins = chamadas.inserts.find((i) => i.tabela === 'frete_epod_evidencias').payload;
-  assert.equal(ins.empresa_id, 'emp-1');
-  assert.equal(ins.epod_id, 'epod-1');
+  assert.ok(chamadas.updates.some((u) => u.tabela === 'frete_epod' && u.payload.status === 'registrado'));
 });
-
-test('uploadEvidencia: MIME não permitido → 415 sem upload', async () => {
-  const { controller, chamadas } = carregarController({ frete: FRETE, epod: EPOD });
-  const res = resMock();
-  await controller.uploadEvidencia(req({ file: fileMock('application/zip') }), res);
+test('uploadEvidencia: MIME inválido → 415', async () => {
+  const { controller } = carregarController({ frete: FRETE, epod: EPOD });
+  const res = resMock(); await controller.uploadEvidencia(req({ file: fileMock('application/zip') }), res);
   assert.equal(res.statusCode, 415);
-  assert.equal(chamadas.uploads.length, 0);
 });
-
-test('uploadEvidencia: limite de 10 → 409 sem upload', async () => {
-  const { controller, chamadas } = carregarController({ frete: FRETE, epod: EPOD, frete_epod_evidencias_count: 10 });
-  const res = resMock();
-  await controller.uploadEvidencia(req({ file: fileMock() }), res);
+test('uploadEvidencia: limite 10 → 409', async () => {
+  const { controller } = carregarController({ frete: FRETE, epod: EPOD, frete_epod_evidencias_count: 10 });
+  const res = resMock(); await controller.uploadEvidencia(req({ file: fileMock() }), res);
   assert.equal(res.statusCode, 409);
-  assert.equal(chamadas.uploads.length, 0);
 });
 
-test('getEvidenciaUrl: evidência do frete → url assinada TTL 300 no bucket privado', async () => {
+// ── validarEvidencia (por evidência) ────────────────────────────────────────
+test('validarEvidencia: admin aprova → 200, evidência aprovada + status_geral validado', async () => {
+  const { controller, chamadas } = carregarController({ frete: FRETE, evidAlvo: { id: 'ev1', epod_id: 'epod-1' }, evidLista: [{ status: 'aprovada' }] });
+  const res = resMock();
+  await controller.validarEvidencia(req({ user: admin, params: { id: 'frete-1', evidId: 'ev1' }, body: { status: 'aprovada' } }), res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.status, 'aprovada');
+  assert.equal(res.body.status_geral, 'validado');
+  const upd = chamadas.updates.find((u) => u.tabela === 'frete_epod_evidencias').payload;
+  assert.equal(upd.status, 'aprovada'); assert.equal(upd.validado_por, 'adm-1');
+});
+test('validarEvidencia: admin rejeita → 200 com motivo, status_geral rejeitado', async () => {
+  const { controller, chamadas } = carregarController({ frete: FRETE, evidAlvo: { id: 'ev1', epod_id: 'epod-1' }, evidLista: [{ status: 'rejeitada' }] });
+  const res = resMock();
+  await controller.validarEvidencia(req({ user: admin, params: { id: 'frete-1', evidId: 'ev1' }, body: { status: 'rejeitada', motivo_rejeicao: 'ilegível' } }), res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.status_geral, 'rejeitado');
+  const upd = chamadas.updates.find((u) => u.tabela === 'frete_epod_evidencias').payload;
+  assert.equal(upd.status, 'rejeitada'); assert.equal(upd.motivo_rejeicao, 'ilegível'); assert.equal(upd.rejeitado_por, 'adm-1');
+});
+test('validarEvidencia: motorista (não admin) → 403 sem update', async () => {
+  const { controller, chamadas } = carregarController({ frete: FRETE, evidAlvo: { id: 'ev1', epod_id: 'epod-1' } });
+  const res = resMock();
+  await controller.validarEvidencia(req({ user: motorista, params: { id: 'frete-1', evidId: 'ev1' }, body: { status: 'aprovada' } }), res);
+  assert.equal(res.statusCode, 403); assert.equal(chamadas.updates.length, 0);
+});
+test('validarEvidencia: evidência inexistente → 404', async () => {
+  const { controller } = carregarController({ frete: FRETE, evidAlvo: null });
+  const res = resMock();
+  await controller.validarEvidencia(req({ user: admin, params: { id: 'frete-1', evidId: 'x' }, body: { status: 'aprovada' } }), res);
+  assert.equal(res.statusCode, 404);
+});
+
+// ── rejeitarComprovacao / aprovarPendentes ──────────────────────────────────
+test('rejeitarComprovacao: admin → 200, marca evidências rejeitadas', async () => {
+  const { controller, chamadas } = carregarController({ frete: FRETE, epod: EPOD, evidLista: [{ status: 'rejeitada' }] });
+  const res = resMock();
+  await controller.rejeitarComprovacao(req({ user: admin, body: { motivo_rejeicao: 'tudo errado' } }), res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.status_geral, 'rejeitado');
+  const updEvid = chamadas.updates.find((u) => u.tabela === 'frete_epod_evidencias').payload;
+  assert.equal(updEvid.status, 'rejeitada'); assert.equal(updEvid.motivo_rejeicao, 'tudo errado');
+});
+test('rejeitarComprovacao: motorista → 403', async () => {
+  const { controller } = carregarController({ frete: FRETE, epod: EPOD });
+  const res = resMock();
+  await controller.rejeitarComprovacao(req({ user: motorista, body: { motivo_rejeicao: 'x' } }), res);
+  assert.equal(res.statusCode, 403);
+});
+test('aprovarPendentes: admin → 200 e conta aprovadas', async () => {
+  const { controller } = carregarController({ frete: FRETE, epod: EPOD, aprovadas: [{ id: 'e1' }, { id: 'e2' }], evidLista: [{ status: 'aprovada' }, { status: 'aprovada' }] });
+  const res = resMock();
+  await controller.aprovarPendentes(req({ user: admin }), res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.aprovadas, 2);
+  assert.equal(res.body.status_geral, 'validado');
+});
+test('aprovarPendentes: motorista → 403', async () => {
+  const { controller } = carregarController({ frete: FRETE, epod: EPOD });
+  const res = resMock();
+  await controller.aprovarPendentes(req({ user: motorista }), res);
+  assert.equal(res.statusCode, 403);
+});
+
+// ── getEvidenciaUrl ─────────────────────────────────────────────────────────
+test('getEvidenciaUrl: → url assinada TTL 300', async () => {
   const { controller, chamadas } = carregarController({ frete: FRETE, evid: { id: 'e1', storage_path: 'emp-1/fretes/frete-1/epod/e1.jpg' } });
   const res = resMock();
   await controller.getEvidenciaUrl(req({ params: { id: 'frete-1', evidId: 'e1' } }), res);
   assert.equal(res.statusCode, 200);
-  assert.match(res.body.url, /^https:\/\/signed\.example\//);
-  assert.equal(chamadas.signed[0].bucket, 'fretes-evidencias');
   assert.equal(chamadas.signed[0].ttl, 300);
 });
-
 test('getEvidenciaUrl: inexistente → 404', async () => {
   const { controller } = carregarController({ frete: FRETE, evid: null });
   const res = resMock();

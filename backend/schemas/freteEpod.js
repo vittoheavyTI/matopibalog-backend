@@ -5,7 +5,7 @@ const { z } = require('zod');
 const vazioComoIndefinido = (schema) =>
   z.preprocess((v) => (v === null || v === '' ? undefined : v), schema);
 
-const STATUS_EPOD = ['registrado', 'validado', 'rejeitado'];
+const STATUS_EPOD = ['registrado', 'parcial', 'validado', 'rejeitado'];
 
 // Campos que o motorista/admin preenche ao comprovar (ou editar) a entrega.
 // GPS (latitude/longitude) e assinatura ficam opcionais — o app preenche depois.
@@ -25,14 +25,26 @@ const registrarEpodSchema = z.object({ ...camposComprovacao });
 const atualizarEpodSchema = z.object({ ...camposComprovacao })
   .refine((d) => Object.keys(d).length > 0, { message: 'Nenhum campo fornecido para atualização.' });
 
-// Validação administrativa (POST /validacao): aprova ou rejeita a comprovação.
-const validarEpodSchema = z.object({
-  status: z.enum(['validado', 'rejeitado'], { invalid_type_error: 'Status inválido.' }),
+// Validação POR EVIDÊNCIA (POST /epod/evidencias/:evidId/validacao): admin aprova
+// ou rejeita uma evidência. Motivo obrigatório ao rejeitar.
+const validarEvidenciaSchema = z.object({
+  status: z.enum(['aprovada', 'rejeitada'], { invalid_type_error: 'Status inválido.' }),
   motivo_rejeicao: vazioComoIndefinido(z.string().trim().max(1000, 'Motivo muito longo.').optional()),
 }).superRefine((d, ctx) => {
-  if (d.status === 'rejeitado' && !d.motivo_rejeicao) {
+  if (d.status === 'rejeitada' && !d.motivo_rejeicao) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['motivo_rejeicao'], message: 'Informe o motivo da rejeição.' });
   }
 });
 
-module.exports = { STATUS_EPOD, registrarEpodSchema, atualizarEpodSchema, validarEpodSchema };
+// Rejeição da comprovação INTEIRA (POST /epod/rejeitar): motivo obrigatório.
+const rejeitarComprovacaoSchema = z.object({
+  motivo_rejeicao: z.string().trim().min(1, 'Informe o motivo da rejeição.').max(1000, 'Motivo muito longo.'),
+});
+
+module.exports = {
+  STATUS_EPOD,
+  registrarEpodSchema,
+  atualizarEpodSchema,
+  validarEvidenciaSchema,
+  rejeitarComprovacaoSchema,
+};

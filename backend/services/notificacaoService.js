@@ -207,6 +207,77 @@ async function notificarLancamentoResolvido(lancamento, tipo, aprovado) {
   });
 }
 
+// ── ePOD (comprovação de entrega) ──────────────────────────────────────────
+// Motorista envia uma evidência → avisa os admins da empresa (menos quem agiu).
+async function notificarEpodEvidenciaEnviada(frete, evidenciaId, { actorId = null } = {}) {
+  if (!frete || !frete.empresa_id) return [];
+  return criarParaEmpresa(frete.empresa_id, {
+    tipo: 'epod_evidencia',
+    titulo: 'Nova comprovação de entrega',
+    mensagem: 'Nova comprovação de entrega aguardando validação.',
+    entidade_id: frete.id,
+    entidade_tipo: 'frete',
+    dedupe_key: `epod_evid_enviada:${evidenciaId}`,
+  }, { somenteAdmins: true, excluir_usuario_id: actorId });
+}
+
+// Admin aprova uma evidência → avisa o motorista do frete.
+async function notificarEpodEvidenciaAprovada(frete, evidenciaId) {
+  if (!frete || !frete.motorista_id) return null;
+  return criarParaUsuario(frete.motorista_id, {
+    empresa_id: frete.empresa_id,
+    tipo: 'epod_aprovada',
+    titulo: 'Comprovante aprovado',
+    mensagem: 'Comprovante de entrega aprovado.',
+    entidade_id: frete.id,
+    entidade_tipo: 'frete',
+    dedupe_key: `epod_evid_aprovada:${evidenciaId}`,
+  });
+}
+
+// Admin rejeita uma evidência → avisa o motorista, com o motivo quando houver.
+async function notificarEpodEvidenciaRejeitada(frete, evidenciaId, motivo) {
+  if (!frete || !frete.motorista_id) return null;
+  const detalhe = motivo && String(motivo).trim() ? ` Motivo: ${String(motivo).trim()}` : '';
+  return criarParaUsuario(frete.motorista_id, {
+    empresa_id: frete.empresa_id,
+    tipo: 'epod_rejeitada',
+    titulo: 'Comprovante rejeitado',
+    mensagem: `Comprovante rejeitado. Envie uma nova evidência.${detalhe}`,
+    entidade_id: frete.id,
+    entidade_tipo: 'frete',
+    dedupe_key: `epod_evid_rejeitada:${evidenciaId}`,
+  });
+}
+
+// ── Ocorrências logísticas ─────────────────────────────────────────────────
+async function notificarOcorrenciaCriada(frete, ocorrenciaId, { actorId = null } = {}) {
+  if (!frete || !frete.empresa_id) return [];
+  return criarParaEmpresa(frete.empresa_id, {
+    tipo: 'ocorrencia_criada',
+    titulo: 'Nova ocorrência no frete',
+    mensagem: 'Uma ocorrência foi registrada em um frete.',
+    entidade_id: frete.id,
+    entidade_tipo: 'frete',
+    dedupe_key: `ocorrencia_criada:${ocorrenciaId}`,
+  }, { somenteAdmins: true, excluir_usuario_id: actorId });
+}
+
+// Admin resolve → avisa quem abriu a ocorrência (se não for o próprio autor da ação).
+async function notificarOcorrenciaResolvida(frete, ocorrencia, { actorId = null } = {}) {
+  const destino = ocorrencia?.criado_por;
+  if (!frete || !destino || destino === actorId) return null;
+  return criarParaUsuario(destino, {
+    empresa_id: frete.empresa_id,
+    tipo: 'ocorrencia_resolvida',
+    titulo: 'Ocorrência resolvida',
+    mensagem: 'Uma ocorrência do seu frete foi resolvida.',
+    entidade_id: frete.id,
+    entidade_tipo: 'frete',
+    dedupe_key: `ocorrencia_resolvida:${ocorrencia.id}`,
+  });
+}
+
 module.exports = {
   criarNotificacao,
   criarParaUsuario,
@@ -216,4 +287,9 @@ module.exports = {
   notificarLancamentoCriado,
   notificarLancamentoParaMotorista,
   notificarLancamentoResolvido,
+  notificarEpodEvidenciaEnviada,
+  notificarEpodEvidenciaAprovada,
+  notificarEpodEvidenciaRejeitada,
+  notificarOcorrenciaCriada,
+  notificarOcorrenciaResolvida,
 };
