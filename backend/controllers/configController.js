@@ -1,4 +1,5 @@
 const supabase = require('../config/supabase');
+const { mesclarConfigEmpresa } = require('../utils/configEmpresaMerge');
 
 // Whitelist de campos de APARÊNCIA (únicos que a tela de login precisa, sem auth).
 // `whatsapp_suporte` entra aqui de propósito: é um contato PÚBLICO (canal comercial/
@@ -219,9 +220,20 @@ exports.getEmpresaConfig = async (req, res) => {
 exports.updateEmpresaConfig = async (req, res) => {
   try {
     if (!req.empresa_id) return res.status(400).json({ message: 'Empresa não encontrada.' });
+    // Read-merge-write per-tenant: preserva as demais chaves de config_empresa. A
+    // logomarca (config_empresa.logomarca) e os dados da empresa convivem sem se
+    // apagar quando salvos separadamente. Escopo por empresa_id (multi-tenant).
+    const { data: atual, error: readErr } = await supabase
+      .from('empresas')
+      .select('config_empresa')
+      .eq('id', req.empresa_id)
+      .single();
+    if (readErr) throw readErr;
+
+    const merged = mesclarConfigEmpresa(atual?.config_empresa, req.body);
     const { error } = await supabase
       .from('empresas')
-      .update({ config_empresa: req.body })
+      .update({ config_empresa: merged })
       .eq('id', req.empresa_id);
     if (error) throw error;
     res.json({ message: 'Dados da empresa salvos.' });

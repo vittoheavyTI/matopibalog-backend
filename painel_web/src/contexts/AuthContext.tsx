@@ -137,6 +137,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Sidebar re-hidrata a logo da empresa logada em seguida (/configuracoes).
     ['matopibalog_company', 'choferlog_company',
      'matopibalog_logo', 'matopibalog_logo_scale', 'matopibalog_logo_y',
+     'matopibalog_empresa_logo',
     ].forEach(k => localStorage.removeItem(k));
     setUser(null);
   };

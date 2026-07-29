@@ -10,6 +10,17 @@ import { useAuth } from '../contexts/AuthContext';
 
 const PREFIX = 'matopibalog_';
 
+// Logomarca da EMPRESA (per-tenant): cache dedicado que os relatórios/Sidebar
+// preferem sobre a logo global do sistema.
+const EMPRESA_LOGO_KEY = 'matopibalog_empresa_logo';
+const LOGO_TIPOS_ACEITOS = ['image/png', 'image/jpeg', 'image/webp'];
+const LOGO_MAX_BYTES = 1024 * 1024; // 1 MB
+
+// Notifica o Sidebar (e outras telas) que a logomarca da empresa mudou — sync sem reload.
+function notificarLogoEmpresa() {
+  try { window.dispatchEvent(new Event('matopibalog:empresa-logo')); } catch { /* ignore */ }
+}
+
 const LOGIN_TEMPLATES = [
   {
     id: 'classico',
@@ -98,6 +109,13 @@ export const Configuracoes: React.FC = () => {
     nome: '', cnpj: '', endereco: '', cep: '',
     complemento: '', pontoReferencia: '', cidade: '', estado: '', telefone: '', email: '',
   });
+
+  // Logomarca da EMPRESA (per-tenant, config_empresa.logomarca)
+  const [empresaLogo, setEmpresaLogo] = useState<string | null>(() => localStorage.getItem(EMPRESA_LOGO_KEY) || null);
+  const [logoSalvando, setLogoSalvando] = useState(false);
+  const [logoErro, setLogoErro] = useState<string>('');
+  const [logoSalvo, setLogoSalvo] = useState(false);
+  const empresaLogoFileRef = useRef<HTMLInputElement>(null);
 
 
   // Estados de aparência — inicializados do localStorage diretamente
@@ -203,11 +221,23 @@ export const Configuracoes: React.FC = () => {
     api.get('/configuracoes/empresa')
       .then((response) => {
         if (response.data && Object.keys(response.data).length > 0) {
-          setCompany(response.data);
-          localStorage.setItem(`${PREFIX}company`, JSON.stringify(response.data));
+          // A logomarca vive no mesmo config_empresa, mas é tratada à parte: não é
+          // campo de formulário e não deve inflar o cache 'company' que os relatórios
+          // usam para o nome/CNPJ.
+          const { logomarca, ...dadosEmpresa } = response.data as any;
+          setCompany(dadosEmpresa as CompanyData);
+          localStorage.setItem(`${PREFIX}company`, JSON.stringify(dadosEmpresa));
+          const logo = typeof logomarca === 'string' && logomarca.trim() ? logomarca : null;
+          setEmpresaLogo(logo);
+          if (logo) localStorage.setItem(EMPRESA_LOGO_KEY, logo);
+          else localStorage.removeItem(EMPRESA_LOGO_KEY);
+          notificarLogoEmpresa();
         } else {
           // API retornou vazio: limpa cache antigo para não vazar dados de outra conta
           localStorage.removeItem(`${PREFIX}company`);
+          setEmpresaLogo(null);
+          localStorage.removeItem(EMPRESA_LOGO_KEY);
+          notificarLogoEmpresa();
         }
       })
       .catch(() => { });
@@ -281,6 +311,67 @@ export const Configuracoes: React.FC = () => {
       console.error('Erro ao salvar dados da empresa:', err);
     }
     showSavedFeedback();
+  };
+
+  // ── Logomarca da empresa (per-tenant) ──────────────────────────────────────
+  const salvarLogoEmpresa = async (dataUrl: string) => {
+    setLogoSalvando(true);
+    setLogoErro('');
+    try {
+      // Merge no backend (updateEmpresaConfig): salva só a logomarca sem apagar os
+      // dados da empresa. Escopo por empresa_id (multi-tenant).
+      await api.put('/configuracoes/empresa', { logomarca: dataUrl });
+      setEmpresaLogo(dataUrl);
+      localStorage.setItem(EMPRESA_LOGO_KEY, dataUrl);
+      notificarLogoEmpresa();
+      setLogoSalvo(true);
+      setTimeout(() => setLogoSalvo(false), 3000);
+    } catch (err) {
+      console.error('Erro ao salvar logomarca da empresa:', err);
+      setLogoErro('Não foi possível salvar a logomarca. Tente novamente.');
+    } finally {
+      setLogoSalvando(false);
+    }
+  };
+
+  const processarLogoEmpresa = (file: File) => {
+    setLogoErro('');
+    setLogoSalvo(false);
+    if (!LOGO_TIPOS_ACEITOS.includes(file.type)) {
+      setLogoErro('Formato inválido. Envie uma imagem PNG, JPEG ou WEBP.');
+      return;
+    }
+    if (file.size > LOGO_MAX_BYTES) {
+      setLogoErro('Imagem muito grande. Escolha um arquivo de até 1 MB.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onerror = () => setLogoErro('Não foi possível ler a imagem. Tente outra.');
+    reader.onload = (event) => {
+      const dataUrl = event.target?.result as string;
+      if (!dataUrl) { setLogoErro('Não foi possível ler a imagem. Tente outra.'); return; }
+      salvarLogoEmpresa(dataUrl);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const removerLogoEmpresa = async () => {
+    setLogoSalvando(true);
+    setLogoErro('');
+    try {
+      // '' (não null) = remoção intencional; o merge do backend preserva os dados.
+      await api.put('/configuracoes/empresa', { logomarca: '' });
+      setEmpresaLogo(null);
+      localStorage.removeItem(EMPRESA_LOGO_KEY);
+      notificarLogoEmpresa();
+      setLogoSalvo(true);
+      setTimeout(() => setLogoSalvo(false), 3000);
+    } catch (err) {
+      console.error('Erro ao remover logomarca da empresa:', err);
+      setLogoErro('Não foi possível remover a logomarca. Tente novamente.');
+    } finally {
+      setLogoSalvando(false);
+    }
   };
 
   const processFile = (file: File, target: 'logo' | 'bg') => {
@@ -458,6 +549,67 @@ export const Configuracoes: React.FC = () => {
               </div>
             </div>
           </div>
+          {/* ── Logomarca da empresa (per-tenant) ── */}
+          <div className="pt-4 border-t border-gray-50">
+            <div className="flex items-center gap-2 mb-1">
+              <Image size={16} className="text-gray-500" />
+              <label className="text-sm font-bold text-gray-700">Logomarca da empresa</label>
+            </div>
+            <p className="text-xs text-gray-500 mb-3 ml-1">
+              Esta logomarca será usada no painel e nos relatórios/PDFs da sua empresa. PNG, JPEG ou WEBP, até 1&nbsp;MB.
+            </p>
+            <input
+              ref={empresaLogoFileRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              className="hidden"
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) processarLogoEmpresa(f); e.target.value = ''; }}
+            />
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+              <div className="w-40 h-24 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50/50 flex items-center justify-center overflow-hidden flex-shrink-0">
+                {empresaLogo ? (
+                  <img src={empresaLogo} alt="Logomarca da empresa" className="max-w-full max-h-full object-contain p-2" />
+                ) : (
+                  <div className="text-center text-gray-400">
+                    <Image size={24} className="mx-auto mb-1" />
+                    <p className="text-[11px] font-medium">Sem logomarca</p>
+                  </div>
+                )}
+              </div>
+              <div className="flex flex-col gap-2">
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => empresaLogoFileRef.current?.click()}
+                    disabled={logoSalvando}
+                    className="inline-flex items-center px-4 py-2 bg-green-700 text-white rounded-xl font-medium text-sm hover:bg-green-800 disabled:opacity-50 transition-all active:scale-95"
+                  >
+                    {logoSalvando ? (
+                      <><span className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-2" />Salvando...</>
+                    ) : (
+                      <><Upload size={16} className="mr-2" />{empresaLogo ? 'Alterar logomarca' : 'Enviar logomarca'}</>
+                    )}
+                  </button>
+                  {empresaLogo && (
+                    <button
+                      type="button"
+                      onClick={removerLogoEmpresa}
+                      disabled={logoSalvando}
+                      className="inline-flex items-center px-4 py-2 bg-red-50 text-red-600 rounded-xl font-medium text-sm hover:bg-red-100 disabled:opacity-50 transition-colors"
+                    >
+                      <Trash2 size={16} className="mr-2" />Remover
+                    </button>
+                  )}
+                </div>
+                {logoErro && <p className="text-xs text-red-600 flex items-center gap-1"><X size={13} /> {logoErro}</p>}
+                {logoSalvo && !logoErro && <p className="text-xs text-green-600 flex items-center gap-1"><Check size={13} /> Logomarca salva!</p>}
+                {!empresaLogo && !logoErro && !logoSalvo && (
+                  <p className="text-xs text-gray-400">Sem logomarca própria, os relatórios usam o padrão profissional do sistema.</p>
+                )}
+              </div>
+            </div>
+          </div>
+
           {/* Código de convite para motoristas */}
           <div className="pt-4 border-t border-gray-50">
             <label className="block text-xs font-bold text-gray-400 uppercase mb-2 ml-1">
