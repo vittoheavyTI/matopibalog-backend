@@ -10,9 +10,6 @@ export const Sidebar: React.FC = () => {
   const [logoBase64, setLogoBase64] = useState<string | null>(null);
   const [logoScale, setLogoScale] = useState<number>(100);
   const [logoY, setLogoY] = useState<number>(0);
-  // Logo da EMPRESA (per-tenant, config_empresa.logomarca). Preferida sobre a logo
-  // global do sistema, tanto aqui quanto nos relatórios em PDF.
-  const [empresaLogo, setEmpresaLogo] = useState<string | null>(() => localStorage.getItem('matopibalog_empresa_logo') || null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isEditingLogo, setIsEditingLogo] = useState(false);
   const [tempLogo, setTempLogo] = useState<string | null>(null);
@@ -59,26 +56,21 @@ export const Sidebar: React.FC = () => {
       .catch(() => {}); // offline / erro → mantém o cache local, não quebra nada
   }, []);
 
-  // Logo da EMPRESA (per-tenant): hidrata do backend (escopo empresa_id) e mantém o
-  // cache dedicado `matopibalog_empresa_logo`, que os relatórios preferem. Com logo
-  // → grava; SEM → limpa (não herda logo de outra empresa). Sincroniza ao vivo com
-  // Configurações via evento, sem reload.
+  // Logo da EMPRESA (per-tenant) — branding DOCUMENTAL, usado APENAS nos
+  // relatórios/PDFs, NUNCA na Sidebar (que exibe só a logo GLOBAL do sistema).
+  // Aqui apenas mantemos o cache dedicado `matopibalog_empresa_logo` correto e
+  // multi-tenant, para que os relatórios da empresa logada saiam com a logo certa
+  // mesmo sem passar por Configurações. Com logo → grava; SEM → limpa (não herda
+  // logo de outra empresa). Sem estado/render aqui: trocar/remover a logo da
+  // empresa não altera a Sidebar.
   useEffect(() => {
-    const cache = localStorage.getItem('matopibalog_empresa_logo');
-    if (cache) setEmpresaLogo(cache);
-
     api.get('/configuracoes/empresa')
       .then(({ data }) => {
         const logo = data && typeof data.logomarca === 'string' && data.logomarca.trim() ? data.logomarca : null;
-        setEmpresaLogo(logo);
         if (logo) localStorage.setItem('matopibalog_empresa_logo', logo);
         else localStorage.removeItem('matopibalog_empresa_logo');
       })
       .catch(() => {}); // offline / erro → mantém o cache local
-
-    const onLogo = () => setEmpresaLogo(localStorage.getItem('matopibalog_empresa_logo') || null);
-    window.addEventListener('matopibalog:empresa-logo', onLogo);
-    return () => window.removeEventListener('matopibalog:empresa-logo', onLogo);
   }, []);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -198,17 +190,19 @@ export const Sidebar: React.FC = () => {
         {/* Logo fixo no topo */}
         <div style={{ flexShrink: 0, padding: collapsed ? '12px 8px' : '16px', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
           <div
-            className={`relative group ${!empresaLogo && !logoBase64 && user?.is_super_admin ? 'cursor-pointer' : ''}`}
-            onClick={() => { if (!empresaLogo && !logoBase64 && user?.is_super_admin) fileInputRef.current?.click(); }}
+            className={`relative group ${!logoBase64 && user?.is_super_admin ? 'cursor-pointer' : ''}`}
+            onClick={() => { if (!logoBase64 && user?.is_super_admin) fileInputRef.current?.click(); }}
             onDoubleClick={() => { if (user?.is_super_admin) handleEditExisting(); }}
             onDragOver={(e) => { if (user?.is_super_admin) e.preventDefault(); }}
             onDrop={(e) => { if (user?.is_super_admin) handleDrop(e); }}
           >
             <input type="file" accept="image/*" ref={fileInputRef} className="hidden" onChange={handleFileChange} />
-            {(empresaLogo || logoBase64) ? (
+            {logoBase64 ? (
               <div className="flex items-center justify-center overflow-hidden rounded" style={{ height: collapsed ? 48 : 80 }}>
-                {/* Logo da empresa (per-tenant) tem prioridade; a global usa escala/posição salvas. */}
-                <img src={empresaLogo || logoBase64!} alt="Logo" style={empresaLogo ? { transformOrigin: 'center' } : { transform: `scale(${logoScale / 100}) translateY(${logoY}px)`, transformOrigin: 'center' }} className="max-w-full max-h-full object-contain" />
+                {/* Sidebar exibe SOMENTE a logo GLOBAL do sistema (identidade da aplicação),
+                    com a escala/posição salvas. A logo da empresa é branding documental
+                    (relatórios/PDFs), nunca aqui. */}
+                <img src={logoBase64} alt="Logo" style={{ transform: `scale(${logoScale / 100}) translateY(${logoY}px)`, transformOrigin: 'center' }} className="max-w-full max-h-full object-contain" />
               </div>
             ) : (
               <div className="flex flex-col items-center justify-center border-2 border-dashed border-gray-700 rounded text-gray-500 hover:text-gray-300 hover:border-gray-500 transition-colors" style={{ height: collapsed ? 48 : 80 }}>
