@@ -81,6 +81,15 @@ export function formatarGeradoEm(d: Date): string {
   return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
 
+// Logo efetiva do relatório (PURO): PREFERE a logomarca da EMPRESA (per-tenant); a
+// logo global do sistema é só fallback. String vazia/whitespace conta como "sem logo".
+export function resolverLogoRelatorio(empresaLogo: string | null, globalLogo: string | null): string | null {
+  const emp = typeof empresaLogo === 'string' ? empresaLogo.trim() : '';
+  if (emp) return emp;
+  const glob = typeof globalLogo === 'string' ? globalLogo.trim() : '';
+  return glob || null;
+}
+
 /**
  * Desenha o cabeçalho de branding padrão no topo do PDF:
  *   - logo da empresa (per-tenant, robusta: só desenha se decodificar);
@@ -92,7 +101,13 @@ export function formatarGeradoEm(d: Date): string {
  */
 export async function desenharBrandingRelatorio(doc: jsPDF, opts: { geradoEm?: Date } = {}): Promise<void> {
   try {
-    const savedLogo = localStorage.getItem('matopibalog_logo');
+    // PREFERE a logomarca da EMPRESA (per-tenant, config_empresa.logomarca cacheada
+    // em matopibalog_empresa_logo); a logo global do sistema (matopibalog_logo) é só
+    // fallback. Sem nenhuma → fallback textual.
+    const savedLogo = resolverLogoRelatorio(
+      localStorage.getItem('matopibalog_empresa_logo'),
+      localStorage.getItem('matopibalog_logo'),
+    );
     const empresa = resolverEmpresaCabecalho(localStorage.getItem('matopibalog_company'));
 
     // Logo (só desenha se decodificar de verdade → sem imagem quebrada).
