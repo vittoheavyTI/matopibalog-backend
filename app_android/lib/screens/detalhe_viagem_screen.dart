@@ -18,7 +18,7 @@ class DetalheViagemScreen extends StatefulWidget {
   State<DetalheViagemScreen> createState() => _DetalheViagemScreenState();
 }
 
-class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
+class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsBindingObserver {
   List<dynamic> _despesas = [];
   List<dynamic> _abastecimentos = [];
   List<dynamic> _vales = [];
@@ -39,23 +39,36 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
   // Estado local do frete: parte do snapshot recebido, mas pode ser atualizado
   // (ex.: após finalizar pelo próprio app) sem depender de novo fetch da lista.
   late Map<String, dynamic> _frete;
-  // Polling leve enquanto a tela está aberta: reflete validação/rejeição feita no
-  // painel sem o motorista precisar reabrir a tela. Cancelado no dispose.
+  // Polling leve (60s) enquanto a tela está aberta E o app em primeiro plano —
+  // reflete validação/rejeição feita no painel sem reabrir a tela, sem pesar no
+  // rate limit. Pausa em background; ao voltar (resumed) faz um refetch imediato.
   Timer? _pollTimer;
+  bool _emPrimeiroPlano = true;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _frete = widget.frete;
     AppLogger.action('screen_open', params: {'tela': 'detalhe_frete', 'frete_id': _frete['id']?.toString()});
     _fetchDetalhes();
-    _pollTimer = Timer.periodic(const Duration(seconds: 20), (_) {
-      if (mounted && !_enviandoEpod && !_enviandoDoc) _fetchDetalhes(silent: true);
+    _pollTimer = Timer.periodic(const Duration(seconds: 60), (_) {
+      if (mounted && _emPrimeiroPlano && !_enviandoEpod && !_enviandoDoc) _fetchDetalhes(silent: true);
     });
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _emPrimeiroPlano = state == AppLifecycleState.resumed;
+    // Ao voltar ao app, atualiza uma vez (sincroniza o que mudou no painel).
+    if (_emPrimeiroPlano && mounted && !_enviandoEpod && !_enviandoDoc) {
+      _fetchDetalhes(silent: true);
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _pollTimer?.cancel();
     super.dispose();
   }
