@@ -59,12 +59,15 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> {
       final abast = ApiService.getListComFiltro('abastecimentos', {'frete_id': freteId});
       final vales = ApiService.getListComFiltro('vales', {'frete_id': freteId});
       final documentos = ApiService.getDocumentosFrete(freteId);
+      // ePOD retorna Map (não List) — awaited À PARTE do Future.wait das listas.
+      // No mesmo wait, o tipo comum viraria Object e results[i] deixaria de ser
+      // List<dynamic> (erro de compilação). Segue o mesmo padrão do `perfil`.
       final epod = ApiService.getEpodFrete(freteId);
       final perfil = ApiService.getMe();
-      final results = await Future.wait([despesas, abast, vales, documentos, epod]);
+      final results = await Future.wait([despesas, abast, vales, documentos]);
       final perfilData = await perfil;
+      final epodData = await epod;
       if (mounted) {
-        final epodData = results[4] as Map<String, dynamic>;
         setState(() {
           _despesas = results[0];
           _abastecimentos = results[1];
