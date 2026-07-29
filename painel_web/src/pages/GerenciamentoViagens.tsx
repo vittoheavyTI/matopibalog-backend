@@ -1371,7 +1371,7 @@ export const GerenciamentoViagens: React.FC = () => {
                     {aberto && (
                       <div className="p-3 space-y-3 bg-white">
                         {itensFrete.length === 0
-                          ? <p className="text-gray-400 text-sm text-center py-3">Nenhum lançamento vinculado a este frete.</p>
+                          ? <p className="text-gray-400 text-sm text-center py-3">Nenhum lançamento financeiro vinculado a este frete.</p>
                           : itensFrete.map(renderLancamentoItem)}
                         {renderDocumentosFrete(f.id)}
                         <FreteEpodOcorrencias freteId={f.id} />
