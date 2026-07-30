@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../services/api_service.dart';
 import '../services/app_logger.dart';
 import '../services/document_scanner_service.dart';
+import '../widgets/foto_preview.dart';
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
@@ -414,7 +415,12 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
 
   // Captura (câmera) ou seleciona (galeria) uma imagem e retorna o caminho, ou
   // null se cancelar/der erro. Mesmos limites das demais telas de foto do app.
+  // Câmera (foto manual): PREVIEW no app antes de enviar (Usar/Refazer/Cancelar),
+  // pois aqui o upload é imediato (não há formulário para revisar antes).
   Future<String?> _selecionarImagemDocumento(ImageSource source) async {
+    if (source == ImageSource.camera) {
+      return capturarFotoManualComPreview(context, imageQuality: 75, maxLado: 1800);
+    }
     try {
       final picked = await ImagePicker().pickImage(
         source: source, imageQuality: 75, maxWidth: 1800, maxHeight: 1800,
