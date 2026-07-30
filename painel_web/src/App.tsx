@@ -10,6 +10,7 @@ import { Dashboard } from './pages/Dashboard';
 import { Motoristas } from './pages/Motoristas';
 import { Relatorios } from './pages/Relatorios';
 import Rentabilidade from './pages/Rentabilidade';
+import { AcertoMotoristas } from './pages/AcertoMotoristas';
 import { GerenciamentoViagens } from './pages/GerenciamentoViagens';
 import { ResumoMotorista } from './pages/ResumoMotorista';
 import { Usuarios } from './pages/Usuarios';
@@ -78,6 +79,7 @@ const AppRoutes = () => {
         <Route path="relatorios/viagens" element={<GerenciamentoViagens />} />
         <Route path="relatorios/resumo" element={<ResumoMotorista />} />
         <Route path="relatorios/rentabilidade" element={<Rentabilidade />} />
+        <Route path="relatorios/acerto-motoristas" element={<AcertoMotoristas />} />
         <Route path="admins" element={<Usuarios />} />
         <Route path="painel-administrativo">
           <Route index element={<Navigate to="visao-geral" replace />} />
