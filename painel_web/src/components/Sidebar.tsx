@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Users, FileText, Truck, ChevronLeft, ChevronRight, Upload, X, Check, Trash2, Settings, UserCircle, Receipt, History, Building2, DollarSign, Bell, Plug, ClipboardList, Ticket } from 'lucide-react';
+import { LayoutDashboard, Users, FileText, Truck, ChevronLeft, ChevronRight, Upload, X, Check, Trash2, Settings, UserCircle, Receipt, History, Building2, DollarSign, Bell, Plug, ClipboardList, Ticket, TrendingUp } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../api';
 
@@ -145,6 +145,7 @@ export const Sidebar: React.FC = () => {
     { to: '/relatorios/viagens', icon: Truck, label: 'Gerenciamento de Fretes' },
     { to: '/relatorios/resumo', icon: History, label: 'Histórico de Fretes' },
     { to: '/relatorios', icon: FileText, label: 'Relatórios' },
+    { to: '/relatorios/rentabilidade', icon: TrendingUp, label: 'Rentabilidade' },
     { to: '/motoristas', icon: Users, label: 'Motoristas' },
     { to: '/admins', icon: UserCircle, label: 'Usuários' },
   ];

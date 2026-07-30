@@ -1,6 +1,7 @@
 const supabase = require('../config/supabase');
 const { calcularComissao } = require('../utils/comissao');
 const { freteEstaCancelado } = require('../utils/agregacaoFinanceiraFretes');
+const { calcularRentabilidadeFrete, resumirRentabilidade } = require('../utils/rentabilidadeFrete');
 
 exports.getFichaViagem = async (req, res) => {
   const { motorista_id, fretes_ids } = req.query;
@@ -133,5 +134,98 @@ exports.getFichaViagem = async (req, res) => {
   } catch (error) {
     console.error('Erro ao consolidar ficha de viagem:', error);
     res.status(500).json({ message: 'Erro ao consolidar ficha de viagem.' });
+  }
+};
+
+// GET /relatorios/rentabilidade — rentabilidade OPERACIONAL DIRETA por viagem no
+// período. Backend é a AUTORIDADE do cálculo (painel só apresenta). Tenant-safe
+// (empresa_id do token; super-admin pode passar ?empresa_id=). Agregação em BATCH
+// (2 queries de lançamentos, sem N+1). NÃO altera dado algum (read-only).
+exports.getRentabilidade = async (req, res) => {
+  const LIMITE_FRETES = 1000;
+  try {
+    const isSuperAdmin = req.user.is_super_admin === true;
+    const empresaAlvo = isSuperAdmin ? (req.query.empresa_id || null) : req.empresa_id;
+    if (!empresaAlvo) {
+      return res.status(400).json({ message: 'Empresa não identificada.' });
+    }
+
+    const { inicio, fim, motorista_id, status, resultado } = req.query;
+
+    let fretesQuery = supabase
+      .from('fretes')
+      .select('*, motoristas(usuarios(nome), percentual_comissao, empresas!left(tipo))')
+      .eq('empresa_id', empresaAlvo);
+    if (inicio) fretesQuery = fretesQuery.gte('data', inicio);
+    if (fim) fretesQuery = fretesQuery.lte('data', fim);
+    if (motorista_id) fretesQuery = fretesQuery.eq('motorista_id', motorista_id);
+    fretesQuery = fretesQuery.order('data', { ascending: false }).limit(LIMITE_FRETES);
+
+    const { data: fretesRaw, error: fretesErr } = await fretesQuery;
+    if (fretesErr) throw fretesErr;
+
+    // Cancelados NUNCA entram (canônico) — nem eles, nem seus lançamentos.
+    const fretes = (fretesRaw || []).filter((f) => !freteEstaCancelado(f));
+    const ids = fretes.map((f) => f.id);
+
+    let abastecimentos = [];
+    let despesas = [];
+    if (ids.length) {
+      const [abRes, dpRes] = await Promise.all([
+        supabase.from('abastecimentos').select('frete_id, valor_total, status').eq('empresa_id', empresaAlvo).in('frete_id', ids),
+        supabase.from('despesas').select('frete_id, valor, tipo, status').eq('empresa_id', empresaAlvo).in('frete_id', ids),
+      ]);
+      if (abRes.error) throw abRes.error;
+      if (dpRes.error) throw dpRes.error;
+      abastecimentos = abRes.data || [];
+      despesas = dpRes.data || [];
+    }
+
+    const porFrete = (linhas) => {
+      const mapa = new Map();
+      for (const l of linhas) {
+        if (!mapa.has(l.frete_id)) mapa.set(l.frete_id, []);
+        mapa.get(l.frete_id).push(l);
+      }
+      return mapa;
+    };
+    const abastPorFrete = porFrete(abastecimentos);
+    const despPorFrete = porFrete(despesas);
+
+    let itens = fretes.map((f) => {
+      const mot = f.motoristas || {};
+      const empresaTipo = Array.isArray(mot.empresas) ? mot.empresas[0]?.tipo : mot.empresas?.tipo;
+      const base = calcularRentabilidadeFrete(
+        f,
+        { abastecimentos: abastPorFrete.get(f.id) || [], despesas: despPorFrete.get(f.id) || [] },
+        empresaTipo,
+        mot.percentual_comissao,
+      );
+      return {
+        ...base,
+        data: f.data ?? null,
+        origem: f.origem ?? null,
+        destino: f.destino ?? null,
+        motorista_id: f.motorista_id ?? null,
+        motorista_nome: mot.usuarios?.nome ?? null,
+      };
+    });
+
+    // Filtros adicionais (aplicados no BACKEND; painel só apresenta).
+    if (status) itens = itens.filter((i) => i.status === status);
+    if (resultado === 'rentavel') itens = itens.filter((i) => i.realizada && i.resultado_operacional > 0);
+    if (resultado === 'prejuizo') itens = itens.filter((i) => i.realizada && i.resultado_operacional < 0);
+
+    const resumo = resumirRentabilidade(itens);
+
+    res.status(200).json({
+      resumo,
+      itens,
+      periodo: { inicio: inicio || null, fim: fim || null },
+      limite_aplicado: fretes.length >= LIMITE_FRETES,
+    });
+  } catch (error) {
+    console.error('Erro ao calcular rentabilidade por viagem:', error?.message || error);
+    res.status(500).json({ message: 'Erro ao calcular a rentabilidade por viagem.' });
   }
 };
