@@ -2,6 +2,7 @@ const supabase = require('../config/supabase');
 const { calcularComissao } = require('../utils/comissao');
 const { freteEstaCancelado } = require('../utils/agregacaoFinanceiraFretes');
 const { calcularRentabilidadeFrete, resumirRentabilidade } = require('../utils/rentabilidadeFrete');
+const { calcularAcertoMotoristas } = require('../utils/acertoMotorista');
 
 exports.getFichaViagem = async (req, res) => {
   const { motorista_id, fretes_ids } = req.query;
@@ -227,5 +228,88 @@ exports.getRentabilidade = async (req, res) => {
   } catch (error) {
     console.error('Erro ao calcular rentabilidade por viagem:', error?.message || error);
     res.status(500).json({ message: 'Erro ao calcular a rentabilidade por viagem.' });
+  }
+};
+
+// GET /relatorios/acerto-motoristas — apuração read-only do acerto financeiro
+// entre empresa e motorista. Backend é a autoridade: o painel só apresenta.
+exports.getAcertoMotoristas = async (req, res) => {
+  const LIMITE_FRETES = 1500;
+  try {
+    const isSuperAdmin = req.user.is_super_admin === true;
+    const empresaAlvo = isSuperAdmin ? (req.query.empresa_id || null) : req.empresa_id;
+    if (!empresaAlvo) {
+      return res.status(400).json({ message: 'Empresa não identificada.' });
+    }
+
+    const { inicio, fim, motorista_id } = req.query;
+
+    let fretesQuery = supabase
+      .from('fretes')
+      .select('id, empresa_id, motorista_id, data, origem, destino, status, valor_frete, motoristas(usuarios(nome), percentual_comissao, empresas!left(tipo, nome))')
+      .eq('empresa_id', empresaAlvo);
+    if (inicio) fretesQuery = fretesQuery.gte('data', inicio);
+    if (fim) fretesQuery = fretesQuery.lte('data', fim);
+    if (motorista_id) fretesQuery = fretesQuery.eq('motorista_id', motorista_id);
+    fretesQuery = fretesQuery.order('data', { ascending: true }).limit(LIMITE_FRETES);
+
+    const { data: fretesRaw, error: fretesErr } = await fretesQuery;
+    if (fretesErr) throw fretesErr;
+
+    const fretes = (fretesRaw || []).filter((f) => !freteEstaCancelado(f));
+    const ids = fretes.map((f) => f.id);
+    let despesas = [];
+    let abastecimentos = [];
+    let vales = [];
+
+    if (ids.length) {
+      let despesasQuery = supabase
+        .from('despesas')
+        .select('id, empresa_id, motorista_id, frete_id, data, tipo, descricao, valor, quem_pagou, status')
+        .eq('empresa_id', empresaAlvo)
+        .in('frete_id', ids);
+      let abastecimentosQuery = supabase
+        .from('abastecimentos')
+        .select('id, empresa_id, motorista_id, frete_id, data, posto, valor_total, quem_pagou, status')
+        .eq('empresa_id', empresaAlvo)
+        .in('frete_id', ids);
+      let valesQuery = supabase
+        .from('vales')
+        .select('id, empresa_id, motorista_id, frete_id, data, descricao, posto, valor, quem_pagou, status')
+        .eq('empresa_id', empresaAlvo)
+        .in('frete_id', ids);
+      if (inicio) {
+        despesasQuery = despesasQuery.gte('data', inicio);
+        abastecimentosQuery = abastecimentosQuery.gte('data', inicio);
+        valesQuery = valesQuery.gte('data', inicio);
+      }
+      if (fim) {
+        despesasQuery = despesasQuery.lte('data', fim);
+        abastecimentosQuery = abastecimentosQuery.lte('data', fim);
+        valesQuery = valesQuery.lte('data', fim);
+      }
+      const [dpRes, abRes, vlRes] = await Promise.all([
+        despesasQuery,
+        abastecimentosQuery,
+        valesQuery,
+      ]);
+      if (dpRes.error) throw dpRes.error;
+      if (abRes.error) throw abRes.error;
+      if (vlRes.error) throw vlRes.error;
+      despesas = dpRes.data || [];
+      abastecimentos = abRes.data || [];
+      vales = vlRes.data || [];
+    }
+
+    const acerto = calcularAcertoMotoristas({ fretes, despesas, abastecimentos, vales });
+
+    res.status(200).json({
+      ...acerto,
+      periodo: { inicio: inicio || null, fim: fim || null },
+      limite_aplicado: fretes.length >= LIMITE_FRETES,
+    });
+  } catch (error) {
+    console.error('Erro ao calcular acerto de motoristas:', error?.message || error);
+    res.status(500).json({ message: 'Erro ao calcular o acerto de motoristas.' });
   }
 };

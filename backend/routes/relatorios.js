@@ -10,4 +10,7 @@ router.get('/ficha-viagem', verifyToken, isAdmin, verificarEmpresa, verificarPla
 // Rentabilidade operacional direta por viagem (read-only, tenant-safe).
 router.get('/rentabilidade', verifyToken, isAdmin, verificarEmpresa, verificarPlano, relatoriosController.getRentabilidade);
 
+// Acerto financeiro consolidado de motoristas (read-only, tenant-safe).
+router.get('/acerto-motoristas', verifyToken, isAdmin, verificarEmpresa, verificarPlano, relatoriosController.getAcertoMotoristas);
+
 module.exports = router;

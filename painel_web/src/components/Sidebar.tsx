@@ -146,6 +146,7 @@ export const Sidebar: React.FC = () => {
     { to: '/relatorios/resumo', icon: History, label: 'Histórico de Fretes' },
     { to: '/relatorios', icon: FileText, label: 'Relatórios' },
     { to: '/relatorios/rentabilidade', icon: TrendingUp, label: 'Rentabilidade' },
+    { to: '/relatorios/acerto-motoristas', icon: Receipt, label: 'Acerto de Motoristas' },
     { to: '/motoristas', icon: Users, label: 'Motoristas' },
     { to: '/admins', icon: UserCircle, label: 'Usuários' },
   ];
@@ -163,6 +164,7 @@ export const Sidebar: React.FC = () => {
         { to: '/painel-administrativo/promocoes', icon: Ticket, label: 'Promoções' },
         { to: '/painel-administrativo/financeiro', icon: DollarSign, label: 'Financeiro' },
         { to: '/relatorios/resumo', icon: History, label: 'Histórico de Fretes' },
+        { to: '/relatorios/acerto-motoristas', icon: Receipt, label: 'Acerto de Motoristas' },
         { to: '/painel-administrativo/usuarios', icon: UserCircle, label: 'Usuários' },
         { to: '/painel-administrativo/motoristas', icon: Users, label: 'Motoristas / Autônomos' },
         { to: '/painel-administrativo/termos-lgpd', icon: FileText, label: 'Termos LGPD' },
