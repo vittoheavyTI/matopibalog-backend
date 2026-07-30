@@ -26,18 +26,23 @@ const COLUNAS_EVIDENCIA =
   'id, nome_arquivo, mime, tamanho_bytes, status, validado_por, validado_em, rejeitado_por, rejeitado_em, motivo_rejeicao, created_at';
 
 // Status GERAL do ePOD DERIVADO das evidências (PURO — testável).
-// Regras (macrofrente ePOD v2): sem evidência não valida; parcial = há aprovada
-// e ainda há pendente/rejeitada; validado = todas aprovadas; rejeitado = todas
-// rejeitadas (inclui a rejeição da comprovação inteira, que marca todas).
+// Regras (macrofrente ePOD v2 — a evidência rejeitada PERMANECE no histórico,
+// com motivo/responsável/timestamps, mas é considerada SUPERADA para o status
+// geral quando já existe aprovação e nada mais está pendente):
+//   • validado:   há ≥1 aprovada e NENHUMA pendente (rejeitadas históricas não bloqueiam);
+//   • parcial:    há ≥1 aprovada e ainda há evidência pendente;
+//   • rejeitado:  todas rejeitadas (sem nenhuma aprovada nem pendente);
+//   • registrado: sem evidência, ou não há aprovada e o fluxo ainda está pendente/inicial.
 function derivarStatusEpod(evidencias) {
   const n = (evidencias || []).length;
   if (n === 0) return 'registrado';
   const aprovadas = evidencias.filter((e) => e.status === 'aprovada').length;
+  const pendentes = evidencias.filter((e) => e.status === 'pendente').length;
   const rejeitadas = evidencias.filter((e) => e.status === 'rejeitada').length;
-  if (aprovadas === n) return 'validado';
-  if (rejeitadas === n) return 'rejeitado';
-  if (aprovadas >= 1) return 'parcial';
-  return 'registrado'; // há pendente(s) e nenhuma aprovada
+  if (aprovadas >= 1 && pendentes === 0) return 'validado';   // rejeitadas não bloqueiam
+  if (aprovadas >= 1) return 'parcial';                       // ≥1 aprovada e ainda há pendente
+  if (rejeitadas === n) return 'rejeitado';                   // todas rejeitadas, sem aprovada/pendente
+  return 'registrado';                                        // sem aprovada e ainda pendente/inicial
 }
 
 // Recalcula e persiste o status do ePOD a partir das evidências. Best-effort:

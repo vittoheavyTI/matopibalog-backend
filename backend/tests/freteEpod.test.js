@@ -113,6 +113,45 @@ test('derivarStatusEpod: pendente sem aprovada → registrado', () => {
   const { controller } = carregarController();
   assert.equal(controller.derivarStatusEpod([{ status: 'pendente' }, { status: 'rejeitada' }]), 'registrado');
 });
+// Regra B (rejeitada é SUPERADA para o status geral quando há aprovada e nada pendente).
+test('derivarStatusEpod: aprovada + rejeitada (histórica), sem pendente → validado', () => {
+  const { controller } = carregarController();
+  assert.equal(controller.derivarStatusEpod([{ status: 'aprovada' }, { status: 'rejeitada' }]), 'validado');
+});
+test('derivarStatusEpod: aprovada + pendente + rejeitada → parcial (ainda há pendente)', () => {
+  const { controller } = carregarController();
+  assert.equal(
+    controller.derivarStatusEpod([{ status: 'aprovada' }, { status: 'pendente' }, { status: 'rejeitada' }]),
+    'parcial',
+  );
+});
+test('derivarStatusEpod: E2E reenvio A(aprovada)+B(rejeitada)+C(aprovada) → validado', () => {
+  const { controller } = carregarController();
+  assert.equal(
+    controller.derivarStatusEpod([{ status: 'aprovada' }, { status: 'rejeitada' }, { status: 'aprovada' }]),
+    'validado',
+  );
+});
+test('derivarStatusEpod: várias rejeitadas + 1 aprovada, sem pendente → validado', () => {
+  const { controller } = carregarController();
+  assert.equal(
+    controller.derivarStatusEpod([
+      { status: 'rejeitada' }, { status: 'rejeitada' }, { status: 'aprovada' },
+    ]),
+    'validado',
+  );
+});
+test('derivarStatusEpod: rejeitada + pendente, sem aprovada → registrado (fluxo ainda aberto)', () => {
+  const { controller } = carregarController();
+  assert.equal(
+    controller.derivarStatusEpod([{ status: 'rejeitada' }, { status: 'pendente' }, { status: 'pendente' }]),
+    'registrado',
+  );
+});
+test('derivarStatusEpod: uma só pendente → registrado', () => {
+  const { controller } = carregarController();
+  assert.equal(controller.derivarStatusEpod([{ status: 'pendente' }]), 'registrado');
+});
 
 // ── obter / registrar / atualizar ───────────────────────────────────────────
 test('obter: sem ePOD → epod null', async () => {
