@@ -266,17 +266,17 @@ export const AcertoMotoristas: React.FC = () => {
                     className="w-full text-left px-3 py-3 hover:bg-gray-50"
                     aria-expanded={expandido === m.motorista_id}
                   >
-                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
-                      <div>
+                    <div className="flex flex-col gap-3 md:flex-row md:flex-wrap md:items-center md:justify-between lg:flex-nowrap">
+                      <div className="min-w-0">
                         <p className="font-bold text-gray-800">{m.motorista_nome}</p>
                         <p className="text-[11px] text-gray-400">{m.empresa_nome || 'Empresa'} · {m.resumo.viagens_consideradas} viagem(ns)</p>
                       </div>
-                      <div className="grid grid-cols-3 md:grid-cols-5 gap-2 text-right text-xs">
+                      <div className="grid w-full grid-cols-2 gap-x-4 gap-y-2 text-left text-xs sm:grid-cols-4 md:min-w-[540px] md:flex-1 md:grid-cols-[minmax(84px,1fr)_minmax(84px,1fr)_minmax(112px,1fr)_minmax(132px,1fr)_24px] md:text-right lg:w-auto lg:flex-none">
                         <div><p className="text-gray-400">Creditos</p><p className="font-semibold text-green-700">{formatCurrency(m.resumo.total_creditos)}</p></div>
                         <div><p className="text-gray-400">Debitos</p><p className="font-semibold text-rose-700">{formatCurrency(m.resumo.total_debitos)}</p></div>
                         <div><p className="text-gray-400">Saldo</p><p className={`font-bold ${classeSaldo(m.resumo.saldo_acerto)}`}>{formatCurrency(m.resumo.saldo_acerto)}</p></div>
-                        <div className="hidden md:block"><p className="text-gray-400">Situacao</p><p className="font-semibold text-gray-700">{m.resumo.situacao}</p></div>
-                        <div className="flex justify-end items-center text-gray-400">{expandido === m.motorista_id ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</div>
+                        <div><p className="text-gray-400">Situacao</p><p className="font-semibold text-gray-700 leading-snug break-words">{m.resumo.situacao}</p></div>
+                        <div className="col-span-2 flex items-center justify-end text-gray-400 sm:col-span-4 md:col-span-1 md:pl-1">{expandido === m.motorista_id ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</div>
                       </div>
                     </div>
                   </button>
