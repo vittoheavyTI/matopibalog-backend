@@ -7,4 +7,7 @@ const { verificarPlano } = require('../middlewares/verificarPlano');
 
 router.get('/ficha-viagem', verifyToken, isAdmin, verificarEmpresa, verificarPlano, relatoriosController.getFichaViagem);
 
+// Rentabilidade operacional direta por viagem (read-only, tenant-safe).
+router.get('/rentabilidade', verifyToken, isAdmin, verificarEmpresa, verificarPlano, relatoriosController.getRentabilidade);
+
 module.exports = router;
