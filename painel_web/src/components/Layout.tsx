@@ -61,7 +61,7 @@ export const Layout: React.FC = () => {
       
       <div className="flex-1 flex flex-col h-full overflow-hidden">
         {/* Cabeçalho Superior */}
-        <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-end px-6 shadow-sm z-10">
+        <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-end px-3 md:px-6 shadow-sm z-10">
           <div className="flex items-center gap-3">
             <NotificacoesDropdown />
             <div className="relative" ref={dropdownRef}>
@@ -112,7 +112,7 @@ export const Layout: React.FC = () => {
         </header>
 
         {/* Área Principal de Conteúdo */}
-        <main className="flex-1 overflow-auto p-8">
+        <main className="flex-1 overflow-auto p-4 md:p-8">
           <Outlet />
         </main>
       </div>

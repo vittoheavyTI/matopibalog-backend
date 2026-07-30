@@ -4,12 +4,15 @@ import { LayoutDashboard, Users, FileText, Truck, ChevronLeft, ChevronRight, Upl
 import { useAuth } from '../contexts/AuthContext';
 import api from '../api';
 
+const readLocalStorage = (key: string) => (typeof window !== 'undefined' ? localStorage.getItem(key) : null);
+
 export const Sidebar: React.FC = () => {
   const { user } = useAuth();
-  const [collapsed, setCollapsed] = useState(false);
-  const [logoBase64, setLogoBase64] = useState<string | null>(null);
-  const [logoScale, setLogoScale] = useState<number>(100);
-  const [logoY, setLogoY] = useState<number>(0);
+  const [collapsed, setCollapsed] = useState(() => (typeof window !== 'undefined' ? window.innerWidth < 768 : false));
+  const [isNarrow, setIsNarrow] = useState(() => (typeof window !== 'undefined' ? window.innerWidth < 768 : false));
+  const [logoBase64, setLogoBase64] = useState<string | null>(() => readLocalStorage('matopibalog_logo'));
+  const [logoScale, setLogoScale] = useState<number>(() => Number(readLocalStorage('matopibalog_logo_scale') || 100));
+  const [logoY, setLogoY] = useState<number>(() => Number(readLocalStorage('matopibalog_logo_y') || 0));
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isEditingLogo, setIsEditingLogo] = useState(false);
   const [tempLogo, setTempLogo] = useState<string | null>(null);
@@ -17,14 +20,18 @@ export const Sidebar: React.FC = () => {
   const [tempY, setTempY] = useState<number>(0);
 
   useEffect(() => {
-    // 1) Leitura imediata do cache local (comportamento atual — mostra sem esperar a rede)
-    const savedLogo = localStorage.getItem('matopibalog_logo');
-    if (savedLogo) setLogoBase64(savedLogo);
-    const savedScale = localStorage.getItem('matopibalog_logo_scale');
-    if (savedScale) setLogoScale(Number(savedScale));
-    const savedY = localStorage.getItem('matopibalog_logo_y');
-    if (savedY) setLogoY(Number(savedY));
+    const syncViewport = () => {
+      const narrow = window.innerWidth < 768;
+      setIsNarrow(narrow);
+      if (narrow) setCollapsed(true);
+    };
 
+    window.addEventListener('resize', syncViewport);
+    return () => window.removeEventListener('resize', syncViewport);
+  }, []);
+
+  useEffect(() => {
+    // 1) Leitura imediata do cache local (comportamento atual — mostra sem esperar a rede)
     // 2) Hidrata do backend (fonte durável) para sobreviver a troca de dispositivo /
     // cache limpo. Só sobrescreve quando vier valor real; falha de rede mantém o cache.
     api.get('/configuracoes')
@@ -122,10 +129,11 @@ export const Sidebar: React.FC = () => {
     setIsEditingLogo(false);
 
     // Persiste no backend para sobreviver a troca de dispositivo / cache limpo
-    const payload: Record<string, any> = {};
-    for (const [chave, valor] of Object.entries({ sidebarLogo: tempLogo || null, sidebarLogoScale: tempScale, sidebarLogoY: tempY })) {
-      if (valor !== null && valor !== undefined) payload[chave] = valor;
-    }
+    const payload: { sidebarLogo?: string; sidebarLogoScale: number; sidebarLogoY: number } = {
+      sidebarLogoScale: tempScale,
+      sidebarLogoY: tempY,
+    };
+    if (tempLogo) payload.sidebarLogo = tempLogo;
     api.put('/configuracoes', payload).catch(() => {});
   };
 
@@ -175,8 +183,9 @@ export const Sidebar: React.FC = () => {
 
   // Item de menu uniforme: mesma fonte/peso/tamanho para todos, espaçamento vertical
   // enxuto (py-2) e ícones alinhados. Evita que os itens fiquem soltos.
+  const compact = collapsed || isNarrow;
   const linkClass = ({ isActive }: { isActive: boolean }) =>
-    `flex items-center gap-3 rounded-lg transition-colors text-sm font-medium ${collapsed ? 'justify-center px-0 py-2.5' : 'px-3 py-2.5'} ${isActive ? 'bg-green-700 text-white' : 'text-gray-300 hover:bg-gray-800'}`;
+    `flex items-center gap-3 rounded-lg transition-colors text-sm font-medium ${compact ? 'justify-center px-0 py-2.5' : 'px-3 py-2.5'} ${isActive ? 'bg-green-700 text-white' : 'text-gray-300 hover:bg-gray-800'}`;
 
   return (
     <>
@@ -187,11 +196,11 @@ export const Sidebar: React.FC = () => {
         overflow: 'hidden',
         background: '#1e293b',
         color: 'white',
-        width: collapsed ? 80 : 256,
+        width: compact ? 80 : 256,
         transition: 'width 0.3s'
       }}>
         {/* Logo fixo no topo */}
-        <div style={{ flexShrink: 0, padding: collapsed ? '12px 8px' : '16px', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+        <div style={{ flexShrink: 0, padding: compact ? '12px 8px' : '16px', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
           <div
             className={`relative group ${!logoBase64 && user?.is_super_admin ? 'cursor-pointer' : ''}`}
             onClick={() => { if (!logoBase64 && user?.is_super_admin) fileInputRef.current?.click(); }}
@@ -201,16 +210,16 @@ export const Sidebar: React.FC = () => {
           >
             <input type="file" accept="image/*" ref={fileInputRef} className="hidden" onChange={handleFileChange} />
             {logoBase64 ? (
-              <div className="flex items-center justify-center overflow-hidden rounded" style={{ height: collapsed ? 48 : 80 }}>
+              <div className="flex items-center justify-center overflow-hidden rounded" style={{ height: compact ? 48 : 80 }}>
                 {/* Sidebar exibe SOMENTE a logo GLOBAL do sistema (identidade da aplicação),
                     com a escala/posição salvas. A logo da empresa é branding documental
                     (relatórios/PDFs), nunca aqui. */}
                 <img src={logoBase64} alt="Logo" style={{ transform: `scale(${logoScale / 100}) translateY(${logoY}px)`, transformOrigin: 'center' }} className="max-w-full max-h-full object-contain" />
               </div>
             ) : (
-              <div className="flex flex-col items-center justify-center border-2 border-dashed border-gray-700 rounded text-gray-500 hover:text-gray-300 hover:border-gray-500 transition-colors" style={{ height: collapsed ? 48 : 80 }}>
-                <Upload size={collapsed ? 16 : 24} />
-                {!collapsed && <span className="text-xs font-medium mt-1">Adicionar Logo</span>}
+              <div className="flex flex-col items-center justify-center border-2 border-dashed border-gray-700 rounded text-gray-500 hover:text-gray-300 hover:border-gray-500 transition-colors" style={{ height: compact ? 48 : 80 }}>
+                <Upload size={compact ? 16 : 24} />
+                {!compact && <span className="text-xs font-medium mt-1">Adicionar Logo</span>}
               </div>
             )}
           </div>
@@ -228,16 +237,16 @@ export const Sidebar: React.FC = () => {
             flex: 1,
             overflowY: 'auto',
             overflowX: 'hidden',
-            padding: collapsed ? '8px 4px' : '8px',
+            padding: compact ? '8px 4px' : '8px',
             scrollbarWidth: user?.is_super_admin ? 'thin' : 'none',
             scrollbarColor: user?.is_super_admin ? 'rgba(255,255,255,0.25) transparent' : undefined,
           }}
         >
           <nav className="space-y-1">
             {mainNav.map(item => (
-              <NavLink key={item.to} to={item.to} end={item.to === '/' || item.to === '/relatorios'} className={linkClass} title={collapsed ? item.label : undefined}>
+              <NavLink key={item.to} to={item.to} end={item.to === '/' || item.to === '/relatorios'} className={linkClass} title={compact ? item.label : undefined}>
                 <item.icon size={20} className="flex-shrink-0" />
-                {!collapsed && <span>{item.label}</span>}
+                {!compact && <span>{item.label}</span>}
               </NavLink>
             ))}
 
@@ -246,16 +255,16 @@ export const Sidebar: React.FC = () => {
               <NavLink
                 to="/minhas-faturas"
                 className={linkClass}
-                title={collapsed ? 'Faturas / Regularização' : undefined}
+                title={compact ? 'Faturas / Regularização' : undefined}
               >
                 <Receipt size={20} className="flex-shrink-0" />
-                {!collapsed && <span>Faturas / Regularização</span>}
+                {!compact && <span>Faturas / Regularização</span>}
               </NavLink>
             )}
 
-            <NavLink to="/configuracoes" className={linkClass} title={collapsed ? 'Configurações' : undefined}>
+            <NavLink to="/configuracoes" className={linkClass} title={compact ? 'Configurações' : undefined}>
               <Settings size={20} className="flex-shrink-0" />
-              {!collapsed && <span>Configurações</span>}
+              {!compact && <span>Configurações</span>}
             </NavLink>
           </nav>
         </div>
@@ -266,8 +275,8 @@ export const Sidebar: React.FC = () => {
             onClick={() => setCollapsed(!collapsed)}
             className="flex items-center justify-center w-full p-2 text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors"
           >
-            {collapsed ? <ChevronRight size={20} /> : <ChevronLeft size={20} />}
-            {!collapsed && <span className="ml-2 text-sm">Recolher</span>}
+            {compact ? <ChevronRight size={20} /> : <ChevronLeft size={20} />}
+            {!compact && <span className="ml-2 text-sm">Recolher</span>}
           </button>
         </div>
       </div>
