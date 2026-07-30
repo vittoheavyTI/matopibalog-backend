@@ -8,6 +8,15 @@ import '../services/push_service.dart';
 
 enum AuthStatus { initial, loading, authenticated, unauthenticated, error }
 
+/// Decide se uma falha do GET /auth/me durante o auto-login é TRANSITÓRIA e,
+/// portanto, NÃO deve encerrar a sessão (o token JWT dura 7 dias e as telas
+/// refazem o fetch quando o backend voltar). Espelha o tratamento do web
+/// (AuthContext, PR #376): 429 (rate limit), 5xx (servidor) e 0 (exceção de
+/// rede/timeout) são transitórios; 401/403 (token inválido/expirado) e demais
+/// 4xx são definitivos e DEVEM deslogar. Função pura para ser testável.
+bool ehFalhaTransitoriaAutoLogin(int status) =>
+    status == 0 || status == 429 || status >= 500;
+
 class AuthProvider extends ChangeNotifier {
   // Token JWT vive no secure storage (Keystore/EncryptedSharedPreferences),
   // não mais em SharedPreferences (texto claro). Só é persistido quando o
@@ -88,7 +97,8 @@ class AuthProvider extends ChangeNotifier {
     _uid = prefs.getString('user_uid') ?? '';
     _empresaTipo = prefs.getString('user_empresa_tipo') ?? '';
 
-    final profile = await ApiService.getMe();
+    final resultado = await ApiService.getMeDetalhado();
+    final profile = resultado.profile;
     if (profile != null) {
       _nome = profile['nome'] ?? _nome;
       _fotoUrl = profile['foto_url'] ?? '';
@@ -104,11 +114,20 @@ class AuthProvider extends ChangeNotifier {
       // Registra o token de push para este aparelho (best-effort, não bloqueia).
       PushService.registrarTokenAposLogin();
       AppLogger.action('try_auto_login', params: {'result': 'success', 'user': _nome});
+    } else if (ehFalhaTransitoriaAutoLogin(resultado.status)) {
+      // Falha TRANSITÓRIA (429 rate limit / 5xx / rede): NÃO desloga nem apaga o
+      // token. Mantém a sessão restaurada das prefs (nome/role/uid já lidos) e
+      // segue autenticado; as telas refazem o fetch quando o backend voltar.
+      _status = AuthStatus.authenticated;
+      AppLogger.action('try_auto_login',
+          params: {'result': 'transient_kept', 'status': resultado.status});
     } else {
+      // Definitiva (401/403 = token inválido/expirado, ou 4xx): encerra a sessão.
       await _limparSessao(prefs);
       _token = '';
       _status = AuthStatus.unauthenticated;
-      AppLogger.action('try_auto_login', params: {'result': 'api_failed'});
+      AppLogger.action('try_auto_login',
+          params: {'result': 'api_failed', 'status': resultado.status});
     }
     notifyListeners();
   }

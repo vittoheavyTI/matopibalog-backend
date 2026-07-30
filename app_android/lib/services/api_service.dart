@@ -364,7 +364,11 @@ class ApiService {
     }
   }
 
-  static Future<Map<String, dynamic>?> getMe() async {
+  /// Como [getMe], mas devolve também o status HTTP para o chamador decidir se a
+  /// falha é TRANSITÓRIA (429/5xx/rede) — caso em que a sessão NÃO deve ser
+  /// descartada — ou definitiva (401/403 = token inválido/expirado).
+  /// `status`: 200 sucesso · 0 exceção de rede/timeout · demais = HTTP recebido.
+  static Future<({Map<String, dynamic>? profile, int status})> getMeDetalhado() async {
     try {
       final response = await http
           .get(
@@ -372,17 +376,22 @@ class ApiService {
             headers: await _getHeaders(),
           )
           .timeout(_timeoutGet);
-      if (response.statusCode == 200) {
-        AppLogger.api('ApiService', 'GET /auth/me', response.statusCode);
-        return jsonDecode(response.body);
-      }
       AppLogger.api('ApiService', 'GET /auth/me', response.statusCode);
-      return null;
+      if (response.statusCode == 200) {
+        return (profile: jsonDecode(response.body) as Map<String, dynamic>, status: 200);
+      }
+      return (profile: null, status: response.statusCode);
     } catch (e) {
       AppLogger.error('ApiService', 'GET /auth/me exception', e);
-      return null;
+      return (profile: null, status: 0);
     }
   }
+
+  /// Perfil do usuário logado, ou null em qualquer falha (contrato preservado
+  /// para os chamadores que só precisam do perfil). Quem precisa distinguir a
+  /// causa da falha (ex.: auto-login) deve usar [getMeDetalhado].
+  static Future<Map<String, dynamic>?> getMe() async =>
+      (await getMeDetalhado()).profile;
 
   /// Estado read-only do plano para orientar o app. Não retorna faturas,
   /// dados Asaas ou credenciais; somente status e responsável.
