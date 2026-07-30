@@ -1,13 +1,23 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { CheckCircle2, XCircle, Clock, AlertTriangle, Upload, MapPin, RefreshCw, Plus } from 'lucide-react';
+import {
+  CheckCircle2, XCircle, Clock, AlertTriangle, Upload, MapPin, RefreshCw, Plus,
+  ChevronDown, ChevronRight, Eye, ShieldAlert,
+} from 'lucide-react';
 import api from '../api';
 import { useAuth } from '../contexts/AuthContext';
 
 // Painel de ePOD (comprovação de entrega) + ocorrências logísticas de UM frete.
 // Autocontido: busca os próprios dados ao montar (só monta quando o frete é
-// expandido → lazy) + polling leve (20s) enquanto aberto + refetch pós-ação.
+// expandido → lazy) + polling leve (60s) pausado em aba oculta + refetch pós-ação.
 // Validação é POR EVIDÊNCIA (aprovar/rejeitar cada uma); o status geral é
-// derivado no backend. Só admin valida/rejeita; o motorista registra/anexa.
+// DERIVADO no backend (regra B) — o painel apenas CONSOME `epod.status`, nunca
+// recalcula. Só admin valida/rejeita; o motorista registra/anexa.
+//
+// Organização visual (polimento):
+//   • resumo compacto no topo (status + contagens + última atualização);
+//   • evidências em 2 grupos: "Pendentes — ação necessária" e "Histórico";
+//   • ações individuais junto do item; ações gerais em região separada;
+//   • ocorrências separadas do ePOD, com empty-state claro.
 
 type StatusEpod = 'registrado' | 'parcial' | 'validado' | 'rejeitado';
 type StatusEvidencia = 'pendente' | 'aprovada' | 'rejeitada';
@@ -15,6 +25,7 @@ type Epod = {
   id: string; status: StatusEpod;
   comprovado_em: string; recebido_por: string | null; observacao: string | null;
   latitude: number | null; longitude: number | null; motivo_rejeicao: string | null;
+  updated_at?: string | null; // já retornado pelo backend (COLUNAS_EPOD) — só passamos a exibir
 };
 type Evidencia = {
   id: string; nome_arquivo: string | null; mime: string | null; created_at: string;
@@ -26,6 +37,10 @@ type Ocorrencia = {
   resolucao: string | null; resolvida_em: string | null;
 };
 
+// Espelha backend MAX_EVIDENCIAS (freteEpodController). O backend é a AUTORIDADE
+// (retorna 409 ao exceder); aqui só usamos para um aviso/desabilitar preventivo.
+const MAX_EVIDENCIAS_UI = 10;
+
 const TIPOS_OCORRENCIA: { v: string; l: string }[] = [
   { v: 'atraso', l: 'Atraso' }, { v: 'avaria', l: 'Avaria' }, { v: 'recusa', l: 'Recusa' },
   { v: 'reentrega', l: 'Reentrega' }, { v: 'extravio', l: 'Extravio' },
@@ -33,7 +48,7 @@ const TIPOS_OCORRENCIA: { v: string; l: string }[] = [
 ];
 const rotuloTipo = (t: string) => TIPOS_OCORRENCIA.find(x => x.v === t)?.l || 'Outro';
 
-const fmt = (iso: string | null): string => {
+const fmt = (iso: string | null | undefined): string => {
   if (!iso) return '—';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '—';
@@ -42,6 +57,17 @@ const fmt = (iso: string | null): string => {
 };
 
 const ACCEPT = 'image/png,image/jpeg,image/webp,application/pdf';
+// Foco visível para navegação por teclado (a11y) — aplicado nos controles de ação.
+const FOCO = 'focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-gray-400';
+
+// Extrai a mensagem de erro de uma ação de forma tipada (sem `any`) e trata 429
+// com orientação amigável — o 429 NÃO desloga (ver AuthContext/#376).
+type ApiErro = { response?: { status?: number; data?: { message?: string } } };
+const msgErro = (e: unknown, fallback: string): string => {
+  const err = e as ApiErro;
+  if (err?.response?.status === 429) return 'Muitas solicitações agora. Aguarde alguns segundos e tente novamente.';
+  return err?.response?.data?.message || fallback;
+};
 
 function BadgeEpod({ status }: { status: StatusEpod }) {
   const map = {
@@ -51,7 +77,7 @@ function BadgeEpod({ status }: { status: StatusEpod }) {
     rejeitado: { cls: 'bg-red-100 text-red-700', icon: XCircle, txt: 'Rejeitado' },
   }[status];
   const Icon = map.icon;
-  return <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${map.cls}`}><Icon size={12} /> {map.txt}</span>;
+  return <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${map.cls}`}><Icon size={12} aria-hidden="true" /> {map.txt}</span>;
 }
 
 function BadgeEvidencia({ status }: { status: StatusEvidencia }) {
@@ -73,8 +99,21 @@ function BadgeOcorrencia({ status }: { status: Ocorrencia['status'] }) {
 }
 
 const SecTitle: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-1">{children}</p>
+  <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">{children}</p>
 );
+
+// Chip de contagem do resumo. Comunica por número + rótulo (não só cor) — a11y.
+const Contagem: React.FC<{ n: number; label: string; cls: string; mudo?: boolean }> = ({ n, label, cls, mudo }) => (
+  <span
+    className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-semibold ${mudo ? 'bg-gray-100 text-gray-500' : cls}`}
+    aria-label={`${n} ${label}`}
+  >
+    <span className="tabular-nums">{n}</span> <span className="font-medium">{label}</span>
+  </span>
+);
+
+const ErroAcao: React.FC<{ msg: string }> = ({ msg }) =>
+  msg ? <p role="alert" className="text-xs text-red-600 mt-1">{msg}</p> : null;
 
 export const FreteEpodOcorrencias: React.FC<{ freteId: string }> = ({ freteId }) => {
   const { user } = useAuth();
@@ -107,6 +146,7 @@ export const FreteEpodOcorrencias: React.FC<{ freteId: string }> = ({ freteId })
     }
   }, [freteId]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- carga inicial ao montar (fetch-on-mount)
   useEffect(() => { carregar(); }, [carregar]);
 
   // Polling leve (60s) enquanto a seção está aberta, PAUSADO quando a aba não está
@@ -132,16 +172,16 @@ export const FreteEpodOcorrencias: React.FC<{ freteId: string }> = ({ freteId })
   }
   if (erro) {
     return (
-      <div className="border-t border-gray-100 pt-2 mt-1 flex items-center justify-between">
-        <p className="text-xs text-red-600">Não foi possível carregar a comprovação/ocorrências.</p>
-        <button onClick={() => carregar()} className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline font-semibold"><RefreshCw size={12} /> Tentar novamente</button>
+      <div className="border-t border-gray-100 pt-2 mt-1 flex items-center justify-between gap-2 flex-wrap">
+        <p role="alert" className="text-xs text-red-600">Não foi possível carregar a comprovação/ocorrências.</p>
+        <button onClick={() => carregar()} className={`inline-flex items-center gap-1 text-xs text-blue-600 hover:underline font-semibold ${FOCO}`}><RefreshCw size={12} aria-hidden="true" /> Tentar novamente</button>
       </div>
     );
   }
 
   return (
-    <div className="border-t border-gray-100 pt-2 mt-1 space-y-3">
-      {atualizando && <p className="text-[10px] text-gray-400 inline-flex items-center gap-1"><RefreshCw size={10} className="animate-spin" /> atualizando…</p>}
+    <div className="border-t border-gray-100 pt-2 mt-1 space-y-4">
+      {atualizando && <p className="text-[10px] text-gray-400 inline-flex items-center gap-1" aria-live="polite"><RefreshCw size={10} className="animate-spin" aria-hidden="true" /> atualizando…</p>}
       <BlocoEpod
         freteId={freteId} epod={epod} evidencias={evidencias} ehAdmin={ehAdmin}
         onMudou={() => carregar(true)} abrirEvidencia={abrirEvidencia}
@@ -167,7 +207,16 @@ const BlocoEpod: React.FC<{
   const [erroAcao, setErroAcao] = useState('');
   const [motivoComprov, setMotivoComprov] = useState('');
   const [rejeitandoComprov, setRejeitandoComprov] = useState(false);
+  const [confirmandoAprovar, setConfirmandoAprovar] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const pendentes = evidencias.filter(e => e.status === 'pendente');
+  const historico = evidencias.filter(e => e.status !== 'pendente'); // aprovadas + rejeitadas, ordem cronológica preservada
+  const nAprov = evidencias.filter(e => e.status === 'aprovada').length;
+  const nRej = evidencias.filter(e => e.status === 'rejeitada').length;
+  const noLimite = evidencias.length >= MAX_EVIDENCIAS_UI;
+  // Histórico começa aberto quando não há pendentes (nada mais a priorizar).
+  const [histAberto, setHistAberto] = useState(pendentes.length === 0);
 
   const registrar = async () => {
     setSalvando(true); setErroAcao('');
@@ -175,8 +224,8 @@ const BlocoEpod: React.FC<{
       await api.post(`/fretes/${freteId}/epod`, { recebido_por: recebidoPor || undefined, observacao: observacao || undefined });
       setForm(false); setRecebidoPor(''); setObservacao('');
       onMudou();
-    } catch (e: any) {
-      setErroAcao(e?.response?.data?.message || 'Não foi possível registrar a comprovação.');
+    } catch (e) {
+      setErroAcao(msgErro(e, 'Não foi possível registrar a comprovação.'));
     } finally { setSalvando(false); }
   };
 
@@ -188,15 +237,15 @@ const BlocoEpod: React.FC<{
       await api.post(`/fretes/${freteId}/epod/evidencias`, fd);
       if (fileRef.current) fileRef.current.value = '';
       onMudou();
-    } catch (e: any) {
-      setErroAcao(e?.response?.data?.message || 'Não foi possível anexar a evidência.');
+    } catch (e) {
+      setErroAcao(msgErro(e, 'Não foi possível anexar a evidência.'));
     } finally { setSalvando(false); }
   };
 
   const aprovarPendentes = async () => {
     setSalvando(true); setErroAcao('');
-    try { await api.post(`/fretes/${freteId}/epod/aprovar-pendentes`); onMudou(); }
-    catch (e: any) { setErroAcao(e?.response?.data?.message || 'Não foi possível aprovar as evidências.'); }
+    try { await api.post(`/fretes/${freteId}/epod/aprovar-pendentes`); setConfirmandoAprovar(false); onMudou(); }
+    catch (e) { setErroAcao(msgErro(e, 'Não foi possível aprovar as evidências.')); }
     finally { setSalvando(false); }
   };
 
@@ -206,16 +255,14 @@ const BlocoEpod: React.FC<{
       await api.post(`/fretes/${freteId}/epod/rejeitar`, { motivo_rejeicao: motivoComprov });
       setRejeitandoComprov(false); setMotivoComprov('');
       onMudou();
-    } catch (e: any) {
-      setErroAcao(e?.response?.data?.message || 'Não foi possível rejeitar a comprovação.');
+    } catch (e) {
+      setErroAcao(msgErro(e, 'Não foi possível rejeitar a comprovação.'));
     } finally { setSalvando(false); }
   };
 
-  const temPendente = evidencias.some(e => e.status === 'pendente');
-
   return (
-    <div>
-      <div className="flex items-center justify-between mb-1">
+    <section aria-label="Comprovante de entrega">
+      <div className="flex items-center justify-between gap-2 mb-1">
         <SecTitle>Comprovante de entrega</SecTitle>
         {epod && <BadgeEpod status={epod.status} />}
       </div>
@@ -223,77 +270,143 @@ const BlocoEpod: React.FC<{
       {!epod ? (
         <div>
           {!form ? (
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
               <p className="text-xs text-gray-400">Entrega ainda não comprovada.</p>
-              <button onClick={() => setForm(true)} className="inline-flex items-center gap-1 text-xs text-green-700 hover:underline font-semibold"><Plus size={12} /> Registrar comprovação</button>
+              <button onClick={() => setForm(true)} className={`inline-flex items-center gap-1 text-xs text-green-700 hover:underline font-semibold ${FOCO}`}><Plus size={12} aria-hidden="true" /> Registrar comprovação</button>
             </div>
           ) : (
             <div className="bg-gray-50 rounded-lg p-2 space-y-2">
-              <input value={recebidoPor} onChange={e => setRecebidoPor(e.target.value)} placeholder="Quem recebeu (opcional)" className="w-full text-xs border border-gray-200 rounded px-2 py-1" />
-              <textarea value={observacao} onChange={e => setObservacao(e.target.value)} placeholder="Observação (opcional)" rows={2} className="w-full text-xs border border-gray-200 rounded px-2 py-1" />
-              <div className="flex items-center gap-2">
-                <button disabled={salvando} onClick={registrar} className="text-xs bg-green-700 hover:bg-green-800 disabled:opacity-60 text-white rounded px-3 py-1 font-semibold">{salvando ? 'Salvando…' : 'Salvar comprovação'}</button>
-                <button onClick={() => setForm(false)} className="text-xs text-gray-500 hover:underline">Cancelar</button>
+              <input value={recebidoPor} onChange={e => setRecebidoPor(e.target.value)} placeholder="Quem recebeu (opcional)" aria-label="Quem recebeu" className="w-full text-xs border border-gray-200 rounded px-2 py-1.5" />
+              <textarea value={observacao} onChange={e => setObservacao(e.target.value)} placeholder="Observação (opcional)" aria-label="Observação" rows={2} className="w-full text-xs border border-gray-200 rounded px-2 py-1.5" />
+              <div className="flex items-center gap-2 flex-wrap">
+                <button disabled={salvando} onClick={registrar} className={`text-xs bg-green-700 hover:bg-green-800 disabled:opacity-60 text-white rounded px-3 py-1.5 font-semibold ${FOCO}`}>{salvando ? 'Salvando…' : 'Salvar comprovação'}</button>
+                <button onClick={() => setForm(false)} className={`text-xs text-gray-500 hover:underline ${FOCO}`}>Cancelar</button>
               </div>
             </div>
           )}
         </div>
       ) : (
-        <div className="bg-gray-50 rounded-lg p-2 space-y-1 text-xs text-gray-700">
-          <p><span className="font-semibold">Comprovado em:</span> {fmt(epod.comprovado_em)}</p>
-          {epod.recebido_por && <p><span className="font-semibold">Recebido por:</span> {epod.recebido_por}</p>}
-          {epod.observacao && <p><span className="font-semibold">Observação:</span> {epod.observacao}</p>}
-          {(epod.latitude != null && epod.longitude != null) && (
-            <p className="inline-flex items-center gap-1"><MapPin size={12} className="text-gray-400" /> {epod.latitude.toFixed(5)}, {epod.longitude.toFixed(5)}</p>
-          )}
-          {epod.status === 'rejeitado' && epod.motivo_rejeicao && (
-            <p className="text-red-600"><span className="font-semibold">Motivo da rejeição:</span> {epod.motivo_rejeicao}</p>
+        <div className="space-y-2">
+          {/* Resumo compacto: metadados + contagens + última atualização */}
+          <div className="bg-gray-50 rounded-lg p-2 space-y-1 text-xs text-gray-700">
+            <p><span className="font-semibold">Comprovado em:</span> {fmt(epod.comprovado_em)}</p>
+            {epod.recebido_por && <p><span className="font-semibold">Recebido por:</span> {epod.recebido_por}</p>}
+            {epod.observacao && <p><span className="font-semibold">Observação:</span> {epod.observacao}</p>}
+            {(epod.latitude != null && epod.longitude != null) && (
+              <p className="inline-flex items-center gap-1"><MapPin size={12} className="text-gray-400" aria-hidden="true" /> {epod.latitude.toFixed(5)}, {epod.longitude.toFixed(5)}</p>
+            )}
+            {epod.status === 'rejeitado' && epod.motivo_rejeicao && (
+              <p className="text-red-600"><span className="font-semibold">Motivo da rejeição:</span> {epod.motivo_rejeicao}</p>
+            )}
+            <div className="flex items-center gap-1.5 flex-wrap pt-1">
+              <Contagem n={evidencias.length} label={evidencias.length === 1 ? 'evidência' : 'evidências'} cls="bg-gray-200 text-gray-700" />
+              <Contagem n={pendentes.length} label="pendentes" cls="bg-amber-100 text-amber-700" mudo={pendentes.length === 0} />
+              <Contagem n={nAprov} label="aprovadas" cls="bg-green-100 text-green-700" mudo={nAprov === 0} />
+              <Contagem n={nRej} label="rejeitadas" cls="bg-red-100 text-red-700" mudo={nRej === 0} />
+              {epod.updated_at && <span className="text-[10px] text-gray-400 ml-auto">Atualizado em {fmt(epod.updated_at)}</span>}
+            </div>
+          </div>
+
+          {evidencias.length === 0 && (
+            <p className="text-xs text-gray-400">Nenhuma evidência anexada. É necessária pelo menos uma evidência aprovada para validar.</p>
           )}
 
-          {/* Evidências — status individual + validação por evidência (admin) */}
-          <div className="pt-1">
-            <p className="text-[11px] font-semibold text-gray-500">Evidências ({evidencias.length})</p>
-            {evidencias.length === 0 ? (
-              <p className="text-xs text-gray-400">Nenhuma evidência anexada. É necessária pelo menos uma evidência aprovada para validar.</p>
-            ) : (
-              <ul className="space-y-1 mt-1">
-                {evidencias.map(ev => (
+          {/* Grupo 1 — Pendentes (ação necessária): sempre visível e no topo */}
+          {pendentes.length > 0 && (
+            <div>
+              <p className="text-[11px] font-semibold text-amber-700 mb-1 inline-flex items-center gap-1">
+                <Clock size={12} aria-hidden="true" /> Pendentes — ação necessária ({pendentes.length})
+              </p>
+              <ul className="space-y-1">
+                {pendentes.map(ev => (
                   <EvidenciaItem key={ev.id} freteId={freteId} ev={ev} ehAdmin={ehAdmin} onMudou={onMudou} abrirEvidencia={abrirEvidencia} />
                 ))}
               </ul>
+            </div>
+          )}
+
+          {/* Grupo 2 — Histórico (aprovadas + rejeitadas), recolhível mas acessível */}
+          {historico.length > 0 && (
+            <div>
+              <button
+                onClick={() => setHistAberto(v => !v)}
+                aria-expanded={histAberto}
+                className={`w-full flex items-center gap-1 text-[11px] font-semibold text-gray-500 hover:text-gray-700 ${FOCO}`}
+              >
+                {histAberto ? <ChevronDown size={13} aria-hidden="true" /> : <ChevronRight size={13} aria-hidden="true" />}
+                Histórico ({nAprov} aprovadas · {nRej} rejeitadas)
+              </button>
+              {histAberto && (
+                <ul className="space-y-1 mt-1">
+                  {historico.map(ev => (
+                    <EvidenciaItem key={ev.id} freteId={freteId} ev={ev} ehAdmin={ehAdmin} onMudou={onMudou} abrirEvidencia={abrirEvidencia} />
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
+          {/* Anexar evidência (backend é a autoridade do limite; aqui só um aviso) */}
+          <div>
+            {noLimite ? (
+              <p className="text-[11px] text-gray-400">Limite de {MAX_EVIDENCIAS_UI} evidências atingido.</p>
+            ) : (
+              <label className={`inline-flex items-center gap-1 text-xs text-blue-600 hover:underline font-semibold cursor-pointer ${salvando ? 'opacity-60 pointer-events-none' : ''}`}>
+                <Upload size={12} aria-hidden="true" /> Anexar evidência
+                <input ref={fileRef} type="file" accept={ACCEPT} className="hidden" disabled={salvando} aria-label="Anexar evidência" onChange={e => anexar(e.target.files?.[0] || null)} />
+              </label>
             )}
-            <label className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline font-semibold cursor-pointer mt-1">
-              <Upload size={12} /> Anexar evidência
-              <input ref={fileRef} type="file" accept={ACCEPT} className="hidden" onChange={e => anexar(e.target.files?.[0] || null)} />
-            </label>
           </div>
 
-          {/* Ações gerais do admin: aprovar todas as pendentes + rejeitar comprovação */}
+          {/* Ações gerais do admin — região separada das ações por evidência */}
           {ehAdmin && evidencias.length > 0 && (
-            <div className="pt-1 border-t border-gray-200 mt-1 space-y-2">
-              <div className="flex flex-wrap items-center gap-2">
-                {temPendente && (
-                  <button disabled={salvando} onClick={aprovarPendentes} className="text-xs bg-green-700 hover:bg-green-800 disabled:opacity-60 text-white rounded px-3 py-1 font-semibold">Aprovar pendentes</button>
-                )}
-                {epod.status !== 'rejeitado' && !rejeitandoComprov && (
-                  <button disabled={salvando} onClick={() => setRejeitandoComprov(true)} className="text-xs bg-red-50 hover:bg-red-100 text-red-700 rounded px-3 py-1 font-semibold">Rejeitar comprovação</button>
-                )}
-              </div>
-              {rejeitandoComprov && (
-                <div className="space-y-2">
-                  <input value={motivoComprov} onChange={e => setMotivoComprov(e.target.value)} placeholder="Motivo da rejeição da comprovação" className="w-full text-xs border border-gray-200 rounded px-2 py-1" />
-                  <div className="flex items-center gap-2">
-                    <button disabled={salvando || !motivoComprov.trim()} onClick={rejeitarComprovacao} className="text-xs bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white rounded px-3 py-1 font-semibold">Confirmar rejeição</button>
-                    <button onClick={() => { setRejeitandoComprov(false); setMotivoComprov(''); }} className="text-xs text-gray-500 hover:underline">Cancelar</button>
+            <div className="pt-2 border-t border-gray-200">
+              <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-1">Ações da comprovação</p>
+
+              {/* Aprovar todas as pendentes: só com 2+ pendentes, com confirmação e contagem */}
+              {pendentes.length >= 2 && !confirmandoAprovar && (
+                <button disabled={salvando} onClick={() => setConfirmandoAprovar(true)} className={`text-xs bg-green-700 hover:bg-green-800 disabled:opacity-60 text-white rounded px-3 py-1.5 font-semibold ${FOCO}`}>
+                  Aprovar todas as {pendentes.length} pendentes
+                </button>
+              )}
+              {confirmandoAprovar && (
+                <div className="bg-green-50 border border-green-200 rounded p-2 space-y-2">
+                  <p className="text-xs text-green-800">Aprovar de uma vez as <span className="font-semibold">{pendentes.length}</span> evidências pendentes?</p>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button disabled={salvando} onClick={aprovarPendentes} className={`text-xs bg-green-700 hover:bg-green-800 disabled:opacity-60 text-white rounded px-3 py-1.5 font-semibold ${FOCO}`}>{salvando ? 'Aprovando…' : `Confirmar (${pendentes.length})`}</button>
+                    <button onClick={() => setConfirmandoAprovar(false)} className={`text-xs text-gray-500 hover:underline ${FOCO}`}>Cancelar</button>
                   </div>
+                </div>
+              )}
+
+              {/* Rejeitar comprovação: ação EXCEPCIONAL/destrutiva, com explicação do efeito */}
+              {epod.status !== 'rejeitado' && (
+                <div className="mt-2">
+                  {!rejeitandoComprov ? (
+                    <button disabled={salvando} onClick={() => setRejeitandoComprov(true)} className={`inline-flex items-center gap-1 text-xs text-red-700 hover:bg-red-50 border border-red-200 rounded px-3 py-1.5 font-semibold ${FOCO}`}>
+                      <ShieldAlert size={13} aria-hidden="true" /> Rejeitar comprovação inteira
+                    </button>
+                  ) : (
+                    <div className="bg-red-50 border border-red-200 rounded p-2 space-y-2">
+                      <p className="text-xs text-red-800 inline-flex items-start gap-1">
+                        <ShieldAlert size={13} className="mt-0.5 shrink-0" aria-hidden="true" />
+                        <span>Ação excepcional: <span className="font-semibold">marca TODAS as evidências como rejeitadas</span> e reprova a entrega. Informe o motivo.</span>
+                      </p>
+                      <input value={motivoComprov} onChange={e => setMotivoComprov(e.target.value)} placeholder="Motivo da rejeição da comprovação" aria-label="Motivo da rejeição da comprovação" className="w-full text-xs border border-red-200 rounded px-2 py-1.5" />
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <button disabled={salvando || !motivoComprov.trim()} onClick={rejeitarComprovacao} className={`text-xs bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white rounded px-3 py-1.5 font-semibold ${FOCO}`}>{salvando ? 'Rejeitando…' : 'Rejeitar comprovação'}</button>
+                        <button onClick={() => { setRejeitandoComprov(false); setMotivoComprov(''); }} className={`text-xs text-gray-500 hover:underline ${FOCO}`}>Cancelar</button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
           )}
         </div>
       )}
-      {erroAcao && <p className="text-xs text-red-600 mt-1">{erroAcao}</p>}
-    </div>
+      <ErroAcao msg={erroAcao} />
+    </section>
   );
 };
 
@@ -304,6 +417,9 @@ const EvidenciaItem: React.FC<{
   const [rejeitando, setRejeitando] = useState(false);
   const [motivo, setMotivo] = useState('');
   const [erroAcao, setErroAcao] = useState('');
+  const nome = ev.nome_arquivo || 'Evidência';
+  // Data de auditoria por status: aprovada→validado_em, rejeitada→rejeitado_em, senão created_at.
+  const quando = ev.status === 'aprovada' ? ev.validado_em : ev.status === 'rejeitada' ? ev.rejeitado_em : ev.created_at;
 
   const validar = async (status: StatusEvidencia, motivoTxt?: string) => {
     setSalvando(true); setErroAcao('');
@@ -311,42 +427,51 @@ const EvidenciaItem: React.FC<{
       await api.post(`/fretes/${freteId}/epod/evidencias/${ev.id}/validacao`, { status, motivo_rejeicao: motivoTxt || undefined });
       setRejeitando(false); setMotivo('');
       onMudou();
-    } catch (e: any) {
-      setErroAcao(e?.response?.data?.message || 'Não foi possível validar a evidência.');
+    } catch (e) {
+      setErroAcao(msgErro(e, 'Não foi possível validar a evidência.'));
     } finally { setSalvando(false); }
   };
 
   return (
-    <li className="bg-white rounded px-2 py-1">
+    <li className="bg-white border border-gray-100 rounded px-2 py-1.5 text-xs">
       <div className="flex items-center justify-between gap-2">
-        <span className="truncate text-gray-700 inline-flex items-center gap-1">
-          <BadgeEvidencia status={ev.status} /> {ev.nome_arquivo || 'Evidência'}
+        <span className="min-w-0 inline-flex items-center gap-1.5">
+          <BadgeEvidencia status={ev.status} />
+          <span className="truncate text-gray-700" title={nome}>{nome}</span>
         </span>
-        <button onClick={() => abrirEvidencia(`/fretes/${freteId}/epod/evidencias/${ev.id}/url`)} className="text-blue-600 hover:underline font-semibold whitespace-nowrap">Baixar</button>
+        <button
+          onClick={() => abrirEvidencia(`/fretes/${freteId}/epod/evidencias/${ev.id}/url`)}
+          aria-label={`Ver evidência ${nome}`}
+          className={`inline-flex items-center gap-1 text-blue-600 hover:underline font-semibold whitespace-nowrap ${FOCO}`}
+        >
+          <Eye size={12} aria-hidden="true" /> Ver
+        </button>
       </div>
+      <p className="text-gray-400 mt-0.5">{fmt(quando)}</p>
       {ev.status === 'rejeitada' && ev.motivo_rejeicao && (
-        <p className="text-red-600 mt-0.5">Motivo: {ev.motivo_rejeicao}</p>
+        <p className="text-red-600 mt-0.5"><span className="font-semibold">Motivo:</span> {ev.motivo_rejeicao}</p>
       )}
       {ehAdmin && (
         <div className="flex items-center gap-3 mt-1">
           {ev.status !== 'aprovada' && (
-            <button disabled={salvando} onClick={() => validar('aprovada')} className="text-green-700 hover:underline font-semibold">Aprovar</button>
+            <button disabled={salvando} onClick={() => validar('aprovada')} className={`text-green-700 hover:underline font-semibold ${FOCO}`}>Aprovar</button>
           )}
           {ev.status !== 'rejeitada' && !rejeitando && (
-            <button disabled={salvando} onClick={() => setRejeitando(true)} className="text-red-700 hover:underline font-semibold">Rejeitar</button>
+            <button disabled={salvando} onClick={() => setRejeitando(true)} className={`text-red-700 hover:underline font-semibold ${FOCO}`}>Rejeitar</button>
           )}
         </div>
       )}
       {rejeitando && (
         <div className="mt-1 space-y-1">
-          <input value={motivo} onChange={e => setMotivo(e.target.value)} placeholder="Motivo da rejeição" className="w-full text-xs border border-gray-200 rounded px-2 py-1" />
-          <div className="flex items-center gap-2">
-            <button disabled={salvando || !motivo.trim()} onClick={() => validar('rejeitada', motivo)} className="text-xs bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white rounded px-3 py-1 font-semibold">Confirmar</button>
-            <button onClick={() => { setRejeitando(false); setMotivo(''); }} className="text-xs text-gray-500 hover:underline">Cancelar</button>
+          <p className="text-red-800">Rejeitar <span className="font-semibold">{nome}</span>? Informe o motivo:</p>
+          <input value={motivo} onChange={e => setMotivo(e.target.value)} placeholder="Motivo da rejeição" aria-label={`Motivo da rejeição de ${nome}`} className="w-full text-xs border border-gray-200 rounded px-2 py-1.5" />
+          <div className="flex items-center gap-2 flex-wrap">
+            <button disabled={salvando || !motivo.trim()} onClick={() => validar('rejeitada', motivo)} className={`text-xs bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white rounded px-3 py-1.5 font-semibold ${FOCO}`}>{salvando ? 'Rejeitando…' : 'Confirmar rejeição'}</button>
+            <button onClick={() => { setRejeitando(false); setMotivo(''); }} className={`text-xs text-gray-500 hover:underline ${FOCO}`}>Cancelar</button>
           </div>
         </div>
       )}
-      {erroAcao && <p className="text-red-600 mt-1">{erroAcao}</p>}
+      <ErroAcao msg={erroAcao} />
     </li>
   );
 };
@@ -372,30 +497,30 @@ const BlocoOcorrencias: React.FC<{
       await api.post(`/fretes/${freteId}/ocorrencias`, { tipo, descricao, impacto: impacto || undefined });
       setForm(false); setDescricao(''); setImpacto(''); setTipo('atraso');
       onMudou();
-    } catch (e: any) {
-      setErroAcao(e?.response?.data?.message || 'Não foi possível registrar a ocorrência.');
+    } catch (e) {
+      setErroAcao(msgErro(e, 'Não foi possível registrar a ocorrência.'));
     } finally { setSalvando(false); }
   };
 
   const lista = filtro === 'todas' ? ocorrencias : ocorrencias.filter(o => o.status === filtro);
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-1">
+    <section aria-label="Ocorrências" className="border-t border-gray-100 pt-2">
+      <div className="flex items-center justify-between gap-2 mb-1">
         <SecTitle>Ocorrências {ocorrencias.length > 0 && <span className="text-gray-400 normal-case font-normal">({ocorrencias.length})</span>}</SecTitle>
-        <button onClick={() => setForm(v => !v)} className="inline-flex items-center gap-1 text-xs text-green-700 hover:underline font-semibold"><Plus size={12} /> Registrar ocorrência</button>
+        <button onClick={() => setForm(v => !v)} aria-expanded={form} className={`inline-flex items-center gap-1 text-xs text-green-700 hover:underline font-semibold ${FOCO}`}><Plus size={12} aria-hidden="true" /> Registrar ocorrência</button>
       </div>
 
       {form && (
         <div className="bg-gray-50 rounded-lg p-2 space-y-2 mb-2">
-          <select value={tipo} onChange={e => setTipo(e.target.value)} className="w-full text-xs border border-gray-200 rounded px-2 py-1 bg-white">
+          <select value={tipo} onChange={e => setTipo(e.target.value)} aria-label="Tipo da ocorrência" className="w-full text-xs border border-gray-200 rounded px-2 py-1.5 bg-white">
             {TIPOS_OCORRENCIA.map(t => <option key={t.v} value={t.v}>{t.l}</option>)}
           </select>
-          <textarea value={descricao} onChange={e => setDescricao(e.target.value)} placeholder="Descrição da ocorrência" rows={2} className="w-full text-xs border border-gray-200 rounded px-2 py-1" />
-          <input value={impacto} onChange={e => setImpacto(e.target.value)} placeholder="Impacto na entrega (opcional)" className="w-full text-xs border border-gray-200 rounded px-2 py-1" />
-          <div className="flex items-center gap-2">
-            <button disabled={salvando} onClick={criar} className="text-xs bg-green-700 hover:bg-green-800 disabled:opacity-60 text-white rounded px-3 py-1 font-semibold">{salvando ? 'Salvando…' : 'Salvar ocorrência'}</button>
-            <button onClick={() => setForm(false)} className="text-xs text-gray-500 hover:underline">Cancelar</button>
+          <textarea value={descricao} onChange={e => setDescricao(e.target.value)} placeholder="Descrição da ocorrência" aria-label="Descrição da ocorrência" rows={2} className="w-full text-xs border border-gray-200 rounded px-2 py-1.5" />
+          <input value={impacto} onChange={e => setImpacto(e.target.value)} placeholder="Impacto na entrega (opcional)" aria-label="Impacto na entrega" className="w-full text-xs border border-gray-200 rounded px-2 py-1.5" />
+          <div className="flex items-center gap-2 flex-wrap">
+            <button disabled={salvando} onClick={criar} className={`text-xs bg-green-700 hover:bg-green-800 disabled:opacity-60 text-white rounded px-3 py-1.5 font-semibold ${FOCO}`}>{salvando ? 'Salvando…' : 'Salvar ocorrência'}</button>
+            <button onClick={() => setForm(false)} className={`text-xs text-gray-500 hover:underline ${FOCO}`}>Cancelar</button>
           </div>
         </div>
       )}
@@ -404,9 +529,9 @@ const BlocoOcorrencias: React.FC<{
         <p className="text-xs text-gray-400">Nenhuma ocorrência registrada.</p>
       ) : (
         <>
-          <div className="flex items-center gap-1 mb-1">
+          <div className="flex items-center gap-1 mb-1 flex-wrap">
             {(['todas', 'aberta', 'em_analise', 'resolvida'] as const).map(f => (
-              <button key={f} onClick={() => setFiltro(f)} className={`text-[11px] rounded-full px-2 py-0.5 font-semibold ${filtro === f ? 'bg-gray-800 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+              <button key={f} onClick={() => setFiltro(f)} aria-pressed={filtro === f} className={`text-[11px] rounded-full px-2 py-0.5 font-semibold ${FOCO} ${filtro === f ? 'bg-gray-800 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
                 {f === 'todas' ? 'Todas' : f === 'aberta' ? 'Abertas' : f === 'em_analise' ? 'Em análise' : 'Resolvidas'}
               </button>
             ))}
@@ -419,8 +544,8 @@ const BlocoOcorrencias: React.FC<{
           </ul>
         </>
       )}
-      {erroAcao && <p className="text-xs text-red-600 mt-1">{erroAcao}</p>}
-    </div>
+      <ErroAcao msg={erroAcao} />
+    </section>
   );
 };
 
@@ -439,8 +564,8 @@ const OcorrenciaItem: React.FC<{
       await api.patch(`/fretes/${freteId}/ocorrencias/${o.id}`, { status, resolucao: resolucaoTxt || undefined });
       setResolvendo(false); setResolucao('');
       onMudou();
-    } catch (e: any) {
-      setErroAcao(e?.response?.data?.message || 'Não foi possível atualizar a ocorrência.');
+    } catch (e) {
+      setErroAcao(msgErro(e, 'Não foi possível atualizar a ocorrência.'));
     } finally { setSalvando(false); }
   };
 
@@ -452,44 +577,44 @@ const OcorrenciaItem: React.FC<{
       await api.post(`/fretes/${freteId}/ocorrencias/${o.id}/evidencias`, fd);
       if (fileRef.current) fileRef.current.value = '';
       onMudou();
-    } catch (e: any) {
-      setErroAcao(e?.response?.data?.message || 'Não foi possível anexar a evidência.');
+    } catch (e) {
+      setErroAcao(msgErro(e, 'Não foi possível anexar a evidência.'));
     } finally { setSalvando(false); }
   };
 
   return (
     <li className="bg-gray-50 rounded-lg px-2 py-1.5 text-xs">
       <div className="flex items-center justify-between gap-2">
-        <span className="font-semibold text-gray-700 inline-flex items-center gap-1"><AlertTriangle size={12} className="text-amber-500" /> {rotuloTipo(o.tipo)}</span>
+        <span className="font-semibold text-gray-700 inline-flex items-center gap-1"><AlertTriangle size={12} className="text-amber-500" aria-hidden="true" /> {rotuloTipo(o.tipo)}</span>
         <BadgeOcorrencia status={o.status} />
       </div>
-      <p className="text-gray-700 mt-0.5">{o.descricao}</p>
+      <p className="text-gray-700 mt-0.5 break-words">{o.descricao}</p>
       <p className="text-gray-400 mt-0.5">{fmt(o.ocorrido_em)}{o.impacto ? ` · Impacto: ${o.impacto}` : ''}</p>
       {o.status === 'resolvida' && o.resolucao && <p className="text-green-700 mt-0.5"><span className="font-semibold">Resolução:</span> {o.resolucao}</p>}
 
-      <div className="flex items-center gap-3 mt-1">
-        <label className="inline-flex items-center gap-1 text-blue-600 hover:underline font-semibold cursor-pointer">
-          <Upload size={12} /> Anexar
-          <input ref={fileRef} type="file" accept={ACCEPT} className="hidden" onChange={e => anexar(e.target.files?.[0] || null)} />
+      <div className="flex items-center gap-3 mt-1 flex-wrap">
+        <label className={`inline-flex items-center gap-1 text-blue-600 hover:underline font-semibold cursor-pointer ${salvando ? 'opacity-60 pointer-events-none' : ''}`}>
+          <Upload size={12} aria-hidden="true" /> Anexar
+          <input ref={fileRef} type="file" accept={ACCEPT} className="hidden" disabled={salvando} aria-label="Anexar evidência da ocorrência" onChange={e => anexar(e.target.files?.[0] || null)} />
         </label>
         {ehAdmin && o.status === 'aberta' && (
-          <button disabled={salvando} onClick={() => mudarStatus('em_analise')} className="text-blue-700 hover:underline font-semibold">Marcar em análise</button>
+          <button disabled={salvando} onClick={() => mudarStatus('em_analise')} className={`text-blue-700 hover:underline font-semibold ${FOCO}`}>Marcar em análise</button>
         )}
         {ehAdmin && o.status !== 'resolvida' && (
-          <button disabled={salvando} onClick={() => setResolvendo(v => !v)} className="text-green-700 hover:underline font-semibold">Resolver</button>
+          <button disabled={salvando} onClick={() => setResolvendo(v => !v)} aria-expanded={resolvendo} className={`text-green-700 hover:underline font-semibold ${FOCO}`}>Resolver</button>
         )}
       </div>
 
       {resolvendo && (
         <div className="mt-1 space-y-1">
-          <input value={resolucao} onChange={e => setResolucao(e.target.value)} placeholder="Como foi resolvida?" className="w-full text-xs border border-gray-200 rounded px-2 py-1" />
-          <div className="flex items-center gap-2">
-            <button disabled={salvando || !resolucao.trim()} onClick={() => mudarStatus('resolvida', resolucao)} className="text-xs bg-green-700 hover:bg-green-800 disabled:opacity-60 text-white rounded px-3 py-1 font-semibold">Confirmar</button>
-            <button onClick={() => { setResolvendo(false); setResolucao(''); }} className="text-xs text-gray-500 hover:underline">Cancelar</button>
+          <input value={resolucao} onChange={e => setResolucao(e.target.value)} placeholder="Como foi resolvida?" aria-label="Como foi resolvida" className="w-full text-xs border border-gray-200 rounded px-2 py-1.5" />
+          <div className="flex items-center gap-2 flex-wrap">
+            <button disabled={salvando || !resolucao.trim()} onClick={() => mudarStatus('resolvida', resolucao)} className={`text-xs bg-green-700 hover:bg-green-800 disabled:opacity-60 text-white rounded px-3 py-1.5 font-semibold ${FOCO}`}>{salvando ? 'Salvando…' : 'Confirmar'}</button>
+            <button onClick={() => { setResolvendo(false); setResolucao(''); }} className={`text-xs text-gray-500 hover:underline ${FOCO}`}>Cancelar</button>
           </div>
         </div>
       )}
-      {erroAcao && <p className="text-red-600 mt-1">{erroAcao}</p>}
+      <ErroAcao msg={erroAcao} />
     </li>
   );
 };
