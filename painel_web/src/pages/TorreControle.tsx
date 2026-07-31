@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { format, startOfMonth, endOfMonth } from 'date-fns';
-import { AlertTriangle, CheckCircle2, ChevronDown, Filter, Info, RotateCcw, Search, ShieldAlert, TowerControl } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronDown, ExternalLink, Filter, Info, RotateCcw, Search, ShieldAlert, TowerControl } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import api from '../api';
 import { useAuth } from '../contexts/AuthContext';
 import { formatCurrency } from '../utils';
@@ -118,6 +119,15 @@ const comprovanteDetalhe = (item: Item) => {
     partes.push(`${aprovadas}; ${pendentes}`);
   }
   return partes.join(' - ');
+};
+
+const linkOperacional = (item: Item, painel?: 'ocorrencias' | 'comprovante') => {
+  const params = new URLSearchParams();
+  if (item.motorista_id) params.set('motorista', item.motorista_id);
+  params.set('frete', item.frete_id);
+  params.set('origem', 'torre');
+  if (painel) params.set('painel', painel);
+  return `/relatorios/viagens?${params.toString()}`;
 };
 
 const normalizarBusca = (valor: string) => valor
@@ -263,6 +273,30 @@ const LinhaItem: React.FC<{ item: Item }> = ({ item }) => (
       {item.dados_incompletos.length > 0 && (
         <p className="mt-1 text-[11px] text-amber-700">Informações incompletas: {item.dados_incompletos.join(', ')}</p>
       )}
+      <div className="mt-2 flex flex-wrap gap-2">
+        <Link
+          to={linkOperacional(item)}
+          className="inline-flex items-center gap-1 rounded border border-gray-200 px-2 py-1 text-[11px] font-semibold text-gray-700 hover:bg-gray-50"
+        >
+          <ExternalLink size={11} aria-hidden="true" /> Ver viagem
+        </Link>
+        {item.ocorrencias.abertas > 0 && (
+          <Link
+            to={linkOperacional(item, 'ocorrencias')}
+            className="inline-flex items-center gap-1 rounded border border-amber-200 px-2 py-1 text-[11px] font-semibold text-amber-700 hover:bg-amber-50"
+          >
+            <ExternalLink size={11} aria-hidden="true" /> Ver ocorrência
+          </Link>
+        )}
+        {(item.epod.pendente_real || item.epod.sem_comprovacao) && (
+          <Link
+            to={linkOperacional(item, 'comprovante')}
+            className="inline-flex items-center gap-1 rounded border border-blue-200 px-2 py-1 text-[11px] font-semibold text-blue-700 hover:bg-blue-50"
+          >
+            <ExternalLink size={11} aria-hidden="true" /> Analisar comprovante
+          </Link>
+        )}
+      </div>
     </div>
   </div>
 );

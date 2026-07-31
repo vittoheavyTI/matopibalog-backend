@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Plus, X, Search, Filter, Truck, MapPin, Calendar, DollarSign, Gauge, Trash2, Edit, Check, AlertTriangle, ChevronLeft, ChevronDown, ChevronRight, Fuel, FileText, TrendingUp, Save, Unlock, Lock, Camera, Upload } from 'lucide-react';
 import { format } from 'date-fns';
@@ -52,6 +52,8 @@ export const GerenciamentoViagens: React.FC = () => {
   // A URL (?motorista=<id>) é a fonte de verdade do motorista em foco; filterMot é sincronizado a partir dela.
   const [searchParams, setSearchParams] = useSearchParams();
   const motoristaQuery = searchParams.get('motorista');
+  const freteQuery = searchParams.get('frete');
+  const painelQuery = searchParams.get('painel');
   // ?novoFrete=1 (vindo do botão "Adicionar Frete" do Dashboard) abre o modal "Novo Frete".
   const novoFreteQuery = searchParams.get('novoFrete');
   const [filterMot, setFilterMot] = useState(() => motoristaQuery || 'todos');
@@ -193,11 +195,11 @@ export const GerenciamentoViagens: React.FC = () => {
         api.get('/abastecimentos?motorista_id=' + motId),
         api.get('/vales?motorista_id=' + motId)
       ]);
-      const fretesData = (resF.data || []).filter((f: any) => f.status !== 'finalizado');
+      const fretesData = (resF.data || []).filter((f: any) => f.status !== 'finalizado' || f.id === freteQuery);
       const despesasData = (resD.data || []).filter((d: any) => d.status !== 'finalizado');
       const abastData = (resA.data || []).filter((a: any) => a.status !== 'finalizado');
       const valesData = (resV.data || []).filter((v: any) => v.status !== 'finalizado');
-      setFretes(fretesData.filter((f: any) => f.status !== 'finalizado').map((f: any) => ({
+      setFretes(fretesData.map((f: any) => ({
         id: f.id, motorista_id: f.motorista_id, motoristaUid: f.motorista_id,
         motoristas: f.motoristas,
         origem: f.origem, destino: f.destino,
@@ -262,7 +264,7 @@ export const GerenciamentoViagens: React.FC = () => {
       loadData();
     }
     isFirstFilterRun.current = false;
-  }, [filterMot]);
+  }, [filterMot, freteQuery]);
 
   // Refresh automático ao chegar notificação nova (evento global do sino):
   // refaz o fetch conforme o modo atual (todos x motorista), sem recarregar a
@@ -287,7 +289,7 @@ export const GerenciamentoViagens: React.FC = () => {
     setSemFreteExpandido(false);
   }, [filterMot, fretes]);
 
-  const carregarDocumentosFrete = async (freteId: string) => {
+  const carregarDocumentosFrete = useCallback(async (freteId: string) => {
     setDocsCarregando(prev => new Set(prev).add(freteId));
     try {
       const res = await api.get('/fretes/' + freteId + '/documentos');
@@ -297,7 +299,19 @@ export const GerenciamentoViagens: React.FC = () => {
     } finally {
       setDocsCarregando(prev => { const n = new Set(prev); n.delete(freteId); return n; });
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    if (!freteQuery) return;
+    let cancelado = false;
+    queueMicrotask(() => {
+      if (cancelado) return;
+      setFretesExpandidos(prev => new Set(prev).add(freteQuery));
+      if (!(freteQuery in docsPorFrete)) void carregarDocumentosFrete(freteQuery);
+      document.getElementById(`frete-${freteQuery}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+    return () => { cancelado = true; };
+  }, [freteQuery, fretes, docsPorFrete, carregarDocumentosFrete]);
 
   // Abre o documento numa nova aba via signed URL (gerada só na hora, TTL curto).
   const abrirDocumento = async (freteId: string, docId: string) => {
@@ -1289,7 +1303,7 @@ export const GerenciamentoViagens: React.FC = () => {
                   loadData()×loadMotoristaData() no mount com ?motorista=<id>, que pode
                   deixar finalizados (da carga global não filtrada) no estado. Display-only. */}
               {[...mFretes]
-                .filter((f: any) => f.status !== 'cancelado' && f.status !== 'finalizado')
+                .filter((f: any) => (f.status !== 'cancelado' && f.status !== 'finalizado') || f.id === freteQuery)
                 .sort((a: any, b: any) => {
                   const prioA = a.status === 'ativo' || a.status === 'pendente' ? 0 : 1;
                   const prioB = b.status === 'ativo' || b.status === 'pendente' ? 0 : 1;
@@ -1306,12 +1320,13 @@ export const GerenciamentoViagens: React.FC = () => {
                   .filter((i: any) => i.status === 'aprovado')
                   .reduce((acc: number, i: any) => acc + (parseFloat(i.valor ?? i.valorTotal) || 0), 0);
                 const aberto = fretesExpandidos.has(f.id);
+                const consultaFocada = f.id === freteQuery && (f.status === 'finalizado' || f.status === 'cancelado');
                 const editandoFrete = editingItem?.id === f.id;
                 const litrosFrete = abastFrete.filter((a: any) => a.status === 'aprovado').reduce((acc: number, a: any) => acc + (parseFloat(a.litros) || 0), 0);
                 const distFrete = (f.kmFinal || 0) - (f.kmInicial || 0);
 
                 return (
-                  <div key={f.id} className="border border-blue-100 rounded-lg overflow-hidden">
+                  <div key={f.id} id={`frete-${f.id}`} className="scroll-mt-4 border border-blue-100 rounded-lg overflow-hidden">
                     <div className="group flex justify-between items-center gap-3 p-3 bg-blue-50/40">
                       {editandoFrete ? (
                         <div className="flex-1 grid grid-cols-3 gap-2 pr-2">
@@ -1344,6 +1359,9 @@ export const GerenciamentoViagens: React.FC = () => {
                             <span className="bg-gray-100 px-1.5 py-0.5 rounded">{despFrete.length} desp · {abastFrete.length} abast · {valesFrete.length} vale</span>
                             {deducoesAprov > 0 && <span className="text-gray-600">Deduções aprov.: {formatCurrency(deducoesAprov)}</span>}
                             {pendentesFrete > 0 && <span className="bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded font-bold">{pendentesFrete} pendente(s)</span>}
+                            {consultaFocada && <span className="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded font-bold">consulta via Torre</span>}
+                            {f.id === freteQuery && painelQuery === 'ocorrencias' && <span className="bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-bold">ocorrências em foco</span>}
+                            {f.id === freteQuery && painelQuery === 'comprovante' && <span className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-bold">comprovante em foco</span>}
                           </div>
                         </button>
                       )}
@@ -1351,7 +1369,7 @@ export const GerenciamentoViagens: React.FC = () => {
                         <span className="font-bold text-blue-600">{formatCurrency(f.valorFrete)}</span>
                         {editandoFrete
                           ? <button onClick={handleSaveEdit} className="p-1 bg-green-600 text-white rounded shadow-sm"><Save size={16} /></button>
-                          : <button onClick={() => handleStartEdit(f, 'frete')} className="p-1 text-gray-400 hover:text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity"><Edit size={16} /></button>}
+                          : consultaFocada ? null : <button onClick={() => handleStartEdit(f, 'frete')} className="p-1 text-gray-400 hover:text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity"><Edit size={16} /></button>}
                         {/* Cancelar frete: só para fretes ativos/pendentes e fora do modo edição.
                             Reusa o fluxo de confirmação (setDeleteTarget → modal → handleDelete),
                             que faz soft-cancel (status 'cancelado', nunca delete físico). */}
