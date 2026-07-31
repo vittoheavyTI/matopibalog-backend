@@ -42,7 +42,9 @@ const resumirEpod = (epod, evidencias) => {
   if (!epod) {
     return {
       status: 'sem_epod',
-      rotulo: 'Sem comprovacao',
+      rotulo: 'Sem comprovante de entrega',
+      pendente_real: false,
+      sem_comprovacao: false,
       evidencias_total: 0,
       evidencias_pendentes: 0,
       evidencias_aprovadas: 0,
@@ -51,11 +53,15 @@ const resumirEpod = (epod, evidencias) => {
   }
 
   const lista = evidencias || [];
+  const status = statusTexto(epod.status) || 'registrado';
+  const evidenciasPendentes = lista.filter((e) => statusTexto(e.status) === 'pendente').length;
   return {
-    status: statusTexto(epod.status) || 'registrado',
+    status,
     rotulo: epod.status || 'registrado',
+    pendente_real: STATUS_EPOD_ATENCAO.has(status) && !STATUS_EPOD_OK.has(status),
+    sem_comprovacao: false,
     evidencias_total: lista.length,
-    evidencias_pendentes: lista.filter((e) => statusTexto(e.status) === 'pendente').length,
+    evidencias_pendentes: evidenciasPendentes,
     evidencias_aprovadas: lista.filter((e) => statusTexto(e.status) === 'aprovada').length,
     evidencias_rejeitadas: lista.filter((e) => statusTexto(e.status) === 'rejeitada').length,
     comprovado_em: epod.comprovado_em || null,
@@ -72,7 +78,7 @@ const decidirSituacao = ({ frete, ocorrenciasAbertas, epodResumo, faltantes }) =
     return {
       nivel: 'informativo',
       situacao: 'Cancelado',
-      motivo: 'Frete cancelado mantido apenas como informativo operacional.',
+      motivo: 'Viagem cancelada: exibida somente para consulta.',
     };
   }
 
@@ -80,40 +86,48 @@ const decidirSituacao = ({ frete, ocorrenciasAbertas, epodResumo, faltantes }) =
     return {
       nivel: 'critico',
       situacao: 'Atraso registrado',
-      motivo: 'Ha ocorrencia de atraso aberta ou em analise.',
+      motivo: 'Há ocorrência de atraso aberta ou em análise.',
     };
   }
 
   if (ocorrenciaCritica) {
     return {
       nivel: 'critico',
-      situacao: 'Ocorrencia critica',
-      motivo: `Ha ocorrencia de ${ocorrenciaCritica.tipo} aberta ou em analise.`,
+      situacao: 'Ocorrência crítica',
+      motivo: `Há ocorrência de ${ocorrenciaCritica.tipo} aberta ou em análise.`,
     };
   }
 
   if (ocorrenciasAbertas.length > 0) {
     return {
       nivel: 'atencao',
-      situacao: 'Ocorrencia aberta',
-      motivo: 'Ha ocorrencia aberta ou em analise.',
+      situacao: 'Ocorrência aberta',
+      motivo: 'Há ocorrência aberta ou em análise.',
+    };
+  }
+
+  if (STATUS_FINAIS.has(status) && epodResumo.status === 'sem_epod') {
+    return {
+      nivel: 'informativo',
+      situacao: 'Sem comprovante',
+      motivo: 'Viagem finalizada sem comprovante de entrega registrado.',
     };
   }
 
   if (STATUS_FINAIS.has(status) && STATUS_EPOD_ATENCAO.has(epodResumo.status)) {
     return {
       nivel: epodResumo.status === 'rejeitado' ? 'critico' : 'atencao',
-      situacao: epodResumo.status === 'rejeitado' ? 'ePOD rejeitado' : 'ePOD pendente',
+      situacao: epodResumo.status === 'rejeitado' ? 'Comprovante recusado' : 'Comprovação pendente',
       motivo: epodResumo.status === 'rejeitado'
-        ? 'Comprovacao de entrega rejeitada.'
-        : 'Frete finalizado sem ePOD validado.',
+        ? 'Comprovante de entrega recusado.'
+        : 'Comprovante de entrega aguardando análise.',
     };
   }
 
   if (STATUS_ATIVOS.has(status) && faltantes.length > 0) {
     return {
       nivel: 'atencao',
-      situacao: 'Dados incompletos',
+      situacao: 'Informações incompletas',
       motivo: `Campos pendentes: ${faltantes.join(', ')}.`,
     };
   }
@@ -121,8 +135,8 @@ const decidirSituacao = ({ frete, ocorrenciasAbertas, epodResumo, faltantes }) =
   if (STATUS_FINAIS.has(status) && STATUS_EPOD_OK.has(epodResumo.status)) {
     return {
       nivel: 'ok',
-      situacao: 'Concluido',
-      motivo: 'Frete finalizado com ePOD validado.',
+      situacao: 'Concluído',
+      motivo: 'Viagem finalizada com comprovante de entrega aprovado.',
     };
   }
 
@@ -130,14 +144,14 @@ const decidirSituacao = ({ frete, ocorrenciasAbertas, epodResumo, faltantes }) =
     return {
       nivel: 'ok',
       situacao: status === 'pendente' ? 'Pendente' : 'Em andamento',
-      motivo: status === 'pendente' ? 'Frete aguardando ativacao operacional.' : 'Frete ativo sem alerta aberto.',
+      motivo: status === 'pendente' ? 'Viagem aguardando ativação operacional.' : 'Viagem em andamento, sem alertas.',
     };
   }
 
   return {
     nivel: 'informativo',
     situacao: frete.status || 'Status nao informado',
-    motivo: 'Status sem regra de alerta especifica.',
+    motivo: 'Viagem sem alertas operacionais.',
   };
 };
 
@@ -159,6 +173,8 @@ function montarTorreControle({ fretes, ocorrencias, epods, evidencias }) {
     const ocorrenciasAbertas = todasOcorrencias.filter((o) => STATUS_OCORRENCIA_ABERTA.has(statusTexto(o.status)));
     const faltantes = dadosIncompletos(frete);
     const epod = resumirEpod(epodPorFrete.get(frete.id), evidPorFrete.get(frete.id) || []);
+    const status = statusTexto(frete.status);
+    epod.sem_comprovacao = STATUS_FINAIS.has(status) && epod.status === 'sem_epod' && !STATUS_CANCELADOS.has(status);
     const decisao = decidirSituacao({ frete, ocorrenciasAbertas, epodResumo: epod, faltantes });
 
     return {
@@ -186,7 +202,13 @@ function montarTorreControle({ fretes, ocorrencias, epods, evidencias }) {
     };
   }).sort(ordenarItens);
 
-  const resumo = {
+  const resumo = resumirItensTorre(itens);
+
+  return { resumo, itens };
+}
+
+function resumirItensTorre(itens = []) {
+  return {
     fretes_total: itens.length,
     criticos: itens.filter((i) => i.nivel === 'critico').length,
     atencao: itens.filter((i) => i.nivel === 'atencao').length,
@@ -196,14 +218,14 @@ function montarTorreControle({ fretes, ocorrencias, epods, evidencias }) {
     finalizados: itens.filter((i) => STATUS_FINAIS.has(statusTexto(i.status))).length,
     cancelados: itens.filter((i) => STATUS_CANCELADOS.has(statusTexto(i.status))).length,
     ocorrencias_abertas: itens.reduce((acc, i) => acc + i.ocorrencias.abertas, 0),
-    epods_pendentes: itens.filter((i) => STATUS_FINAIS.has(statusTexto(i.status)) && i.epod.status !== 'validado').length,
+    epods_pendentes: itens.filter((i) => !STATUS_CANCELADOS.has(statusTexto(i.status)) && i.epod.pendente_real).length,
+    sem_comprovacao: itens.filter((i) => i.epod.sem_comprovacao).length,
     dados_incompletos: itens.filter((i) => i.dados_incompletos.length > 0).length,
   };
-
-  return { resumo, itens };
 }
 
 module.exports = {
   montarTorreControle,
+  resumirItensTorre,
   statusTexto,
 };

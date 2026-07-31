@@ -128,7 +128,7 @@ function calcularAcertoMotoristas({ fretes = [], despesas = [], abastecimentos =
     if (!quemPagou) {
       classificacao = TIPO_ITEM.INCOMPLETO;
       sinal = 'incompleto';
-      alerta = 'Dados incompletos: responsável pelo pagamento ausente.';
+      alerta = 'Informações incompletas: responsável pelo pagamento ausente.';
       grupo.resumo.itens_incompletos += 1;
     } else if (cfg.origem === 'vales') {
       if (quemPagou === 'proprietario') {
