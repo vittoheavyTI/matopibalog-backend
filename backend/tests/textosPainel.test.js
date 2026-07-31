@@ -47,3 +47,17 @@ test('painel: combobox de empresa tem busca com normalizacao, teclado e estado v
   assert.match(torre, /Nenhuma empresa encontrada/);
   assert.match(torre, /aria-expanded/);
 });
+
+test('torre: itens encaminham para telas operacionais sem alterar status diretamente', () => {
+  const torre = ler('painel_web/src/pages/TorreControle.tsx');
+  const viagens = ler('painel_web/src/pages/GerenciamentoViagens.tsx');
+
+  assert.match(torre, /Ver viagem/);
+  assert.match(torre, /Ver ocorrência/);
+  assert.match(torre, /Analisar comprovante/);
+  assert.match(torre, /\/relatorios\/viagens\?/);
+  assert.match(torre, /params\.set\('frete', item\.frete_id\)/);
+  assert.match(viagens, /searchParams\.get\('frete'\)/);
+  assert.match(viagens, /scrollIntoView/);
+  assert.doesNotMatch(torre, /api\.(post|patch|put|delete)\(/);
+});
