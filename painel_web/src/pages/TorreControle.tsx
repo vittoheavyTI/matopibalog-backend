@@ -45,6 +45,12 @@ type Item = {
     pendente_real?: boolean;
     sem_comprovacao?: boolean;
   };
+  localizacao?: {
+    ultima_enviada_em: string | null;
+    recebida_em: string | null;
+    accuracy_m: number | null;
+    ativa: boolean;
+  };
 };
 type EmpresaApi = { id: string; nome?: string | null; tipo?: string | null };
 type MotoristaApi = { id: string; usuarios?: { nome?: string | null } | null };
@@ -121,7 +127,7 @@ const comprovanteDetalhe = (item: Item) => {
   return partes.join(' - ');
 };
 
-const linkOperacional = (item: Item, painel?: 'ocorrencias' | 'comprovante') => {
+const linkOperacional = (item: Item, painel?: 'ocorrencias' | 'comprovante' | 'localizacao') => {
   const params = new URLSearchParams();
   if (item.motorista_id) params.set('motorista', item.motorista_id);
   params.set('frete', item.frete_id);
@@ -139,6 +145,12 @@ const normalizarBusca = (valor: string) => valor
 const empresaLabel = (empresas: { id: string; nome: string }[], id: string) => (
   empresas.find((empresa) => empresa.id === id)?.nome || ''
 );
+
+const fmtDataHora = (iso: string | null | undefined) => {
+  if (!iso) return '-';
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '-' : d.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+};
 
 const EmpresaCombobox: React.FC<{
   empresas: { id: string; nome: string }[];
@@ -270,6 +282,12 @@ const LinhaItem: React.FC<{ item: Item }> = ({ item }) => (
       <p className="mt-1 text-[11px] text-gray-400">
         Ocorrências abertas: {item.ocorrencias.abertas} - {comprovanteDetalhe(item)}
       </p>
+      {item.localizacao?.ultima_enviada_em && (
+        <p className="mt-1 text-[11px] text-green-700">
+          Última localização enviada: {fmtDataHora(item.localizacao.ultima_enviada_em)}
+          {item.localizacao.accuracy_m != null ? ` - precisão ${Math.round(item.localizacao.accuracy_m)} m` : ''}
+        </p>
+      )}
       {item.dados_incompletos.length > 0 && (
         <p className="mt-1 text-[11px] text-amber-700">Informações incompletas: {item.dados_incompletos.join(', ')}</p>
       )}
@@ -294,6 +312,14 @@ const LinhaItem: React.FC<{ item: Item }> = ({ item }) => (
             className="inline-flex items-center gap-1 rounded border border-blue-200 px-2 py-1 text-[11px] font-semibold text-blue-700 hover:bg-blue-50"
           >
             <ExternalLink size={11} aria-hidden="true" /> Analisar comprovante
+          </Link>
+        )}
+        {item.localizacao?.ultima_enviada_em && (
+          <Link
+            to={linkOperacional(item, 'localizacao')}
+            className="inline-flex items-center gap-1 rounded border border-green-200 px-2 py-1 text-[11px] font-semibold text-green-700 hover:bg-green-50"
+          >
+            <ExternalLink size={11} aria-hidden="true" /> Ver localização
           </Link>
         )}
       </div>
