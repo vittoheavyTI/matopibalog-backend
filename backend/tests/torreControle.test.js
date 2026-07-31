@@ -55,12 +55,30 @@ test('torre: ePOD validado com rejeicao historica superada fica concluido', () =
   });
 
   assert.equal(item.nivel, 'ok');
-  assert.equal(item.situacao, 'Concluido');
+  assert.equal(item.situacao, 'Concluído');
   assert.equal(item.epod.evidencias_aprovadas, 1);
   assert.equal(item.epod.evidencias_rejeitadas, 1);
 });
 
-test('torre: finalizado sem ePOD validado entra em atencao', () => {
+test('torre: finalizado sem ePOD registrado vira sem comprovacao informativa', () => {
+  const { resumo, itens } = montarTorreControle({
+    fretes: [frete({ status: 'finalizado' })],
+    ocorrencias: [],
+    epods: [],
+    evidencias: [],
+  });
+  const item = itens[0];
+
+  assert.equal(item.nivel, 'informativo');
+  assert.equal(item.situacao, 'Sem comprovante');
+  assert.equal(item.epod.status, 'sem_epod');
+  assert.equal(item.epod.pendente_real, false);
+  assert.equal(item.epod.sem_comprovacao, true);
+  assert.equal(resumo.epods_pendentes, 0);
+  assert.equal(resumo.sem_comprovacao, 1);
+});
+
+test('torre: ePOD existente com evidencia pendente entra como pendencia real', () => {
   const item = itemUnico({
     fretes: [frete({ status: 'finalizado' })],
     ocorrencias: [],
@@ -72,7 +90,9 @@ test('torre: finalizado sem ePOD validado entra em atencao', () => {
   });
 
   assert.equal(item.nivel, 'atencao');
-  assert.equal(item.situacao, 'ePOD pendente');
+  assert.equal(item.situacao, 'Comprovação pendente');
+  assert.equal(item.epod.pendente_real, true);
+  assert.equal(item.epod.sem_comprovacao, false);
 });
 
 test('torre: cancelado permanece informativo', () => {
@@ -85,6 +105,49 @@ test('torre: cancelado permanece informativo', () => {
 
   assert.equal(item.nivel, 'informativo');
   assert.equal(item.situacao, 'Cancelado');
+  assert.equal(item.epod.sem_comprovacao, false);
+});
+
+test('torre: validado nao conta pendencia mesmo com rejeicao historica regra B', () => {
+  const { resumo, itens } = montarTorreControle({
+    fretes: [frete({ status: 'finalizado' })],
+    ocorrencias: [],
+    epods: [{ id: 'epod-1', frete_id: 'f-1', status: 'validado' }],
+    evidencias: [
+      { id: 'ev-1', frete_id: 'f-1', status: 'rejeitada' },
+      { id: 'ev-2', frete_id: 'f-1', status: 'aprovada' },
+    ],
+  });
+
+  assert.equal(itens[0].nivel, 'ok');
+  assert.equal(itens[0].epod.pendente_real, false);
+  assert.equal(resumo.epods_pendentes, 0);
+  assert.equal(resumo.sem_comprovacao, 0);
+});
+
+test('torre: cancelado sem ePOD nao conta sem comprovacao', () => {
+  const { resumo, itens } = montarTorreControle({
+    fretes: [frete({ status: 'cancelado' })],
+    ocorrencias: [],
+    epods: [],
+    evidencias: [],
+  });
+
+  assert.equal(itens[0].nivel, 'informativo');
+  assert.equal(resumo.sem_comprovacao, 0);
+});
+
+test('torre: ativo sem exigencia explicita de ePOD nao falha automaticamente', () => {
+  const { resumo, itens } = montarTorreControle({
+    fretes: [frete({ status: 'ativo' })],
+    ocorrencias: [],
+    epods: [],
+    evidencias: [],
+  });
+
+  assert.equal(itens[0].nivel, 'ok');
+  assert.equal(resumo.epods_pendentes, 0);
+  assert.equal(resumo.sem_comprovacao, 0);
 });
 
 test('torre: resumo consolida prioridades e pendencias', () => {
@@ -104,5 +167,26 @@ test('torre: resumo consolida prioridades e pendencias', () => {
   assert.equal(resumo.atencao, 1);
   assert.equal(resumo.informativos, 1);
   assert.equal(resumo.epods_pendentes, 1);
+  assert.equal(resumo.sem_comprovacao, 0);
   assert.deepEqual(itens.map((i) => i.nivel), ['critico', 'atencao', 'informativo']);
+});
+
+test('torre: resumo bate exatamente com flags dos itens', () => {
+  const { resumo, itens } = montarTorreControle({
+    fretes: [
+      frete({ id: 'f-1', status: 'finalizado' }),
+      frete({ id: 'f-2', status: 'finalizado' }),
+      frete({ id: 'f-3', status: 'finalizado' }),
+    ],
+    ocorrencias: [],
+    epods: [
+      { id: 'epod-2', frete_id: 'f-2', status: 'registrado' },
+      { id: 'epod-3', frete_id: 'f-3', status: 'validado' },
+    ],
+    evidencias: [{ id: 'ev-1', frete_id: 'f-2', status: 'pendente' }],
+  });
+
+  assert.equal(resumo.epods_pendentes, itens.filter((i) => i.epod.pendente_real).length);
+  assert.equal(resumo.sem_comprovacao, itens.filter((i) => i.epod.sem_comprovacao).length);
+  assert.equal(resumo.fretes_total, itens.length);
 });

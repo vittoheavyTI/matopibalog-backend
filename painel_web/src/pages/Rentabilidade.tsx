@@ -34,7 +34,7 @@ const fmtData = (iso: string | null) => {
 const rotuloStatus = (s: string) =>
   s === 'finalizado' ? 'Finalizado' : s === 'ativo' ? 'Em andamento' : s === 'pendente' ? 'Pendente' : s || '—';
 const rotuloAlerta = (a: string) => ({
-  em_andamento: 'Em andamento (não realizada)',
+  em_andamento: 'Viagem em andamento; receita ainda não realizada',
   lancamentos_pendentes: 'Há lançamentos pendentes',
   receita_zero: 'Receita zero',
   custo_sem_receita: 'Custo sem receita',
@@ -122,7 +122,7 @@ const Rentabilidade: React.FC = () => {
       </div>
       <p className="text-xs text-gray-500 mb-3 inline-flex items-start gap-1">
         <Info size={13} className="mt-0.5 shrink-0" aria-hidden="true" />
-        <span>Resultado operacional: considera a receita realizada (viagens finalizadas) e os custos diretos vinculados à viagem (combustível, pedágio, outras despesas e comissão). Não inclui custos fixos nem contabilidade completa.</span>
+        <span>Veja quanto cada viagem gerou de receita, quais foram os custos diretos e qual foi o resultado operacional. Receita realizada é o valor das viagens concluídas; custo direto inclui combustível, pedágio, outras despesas e comissão. Não inclui custos fixos nem representa a contabilidade completa da empresa.</span>
       </p>
 
       {/* Filtros */}
@@ -172,12 +172,12 @@ const Rentabilidade: React.FC = () => {
         <>
           {cards}
           {resumo && resumo.viagens_dados_incompletos > 0 && (
-            <p className="text-[11px] text-amber-700 inline-flex items-center gap-1 mb-2"><AlertTriangle size={12} aria-hidden="true" /> {resumo.viagens_dados_incompletos} viagem(ns) com dados incompletos (lançamentos pendentes).</p>
+              <p className="text-[11px] text-amber-700 inline-flex items-center gap-1 mb-2"><AlertTriangle size={12} aria-hidden="true" /> {resumo.viagens_dados_incompletos} {resumo.viagens_dados_incompletos === 1 ? 'viagem com informações incompletas' : 'viagens com informações incompletas'} por lançamentos pendentes.</p>
           )}
 
           {itens.length === 0 ? (
             <div className="bg-white rounded-xl border border-gray-100 p-8 text-center">
-              <p className="text-sm text-gray-400">Nenhuma viagem no período/filtros selecionados.</p>
+              <p className="text-sm text-gray-400">Nenhuma viagem encontrada para os filtros selecionados.</p>
             </div>
           ) : (
             <div className="bg-white rounded-xl border border-gray-100 overflow-x-auto">
@@ -202,7 +202,7 @@ const Rentabilidade: React.FC = () => {
                           <div className="text-gray-400">{(it.origem || '—')} → {(it.destino || '—')}</div>
                           <div className="mt-0.5">
                             <span className={`inline-block rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${it.realizada ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>{rotuloStatus(it.status)}</span>
-                            {!it.dados_completos && it.realizada && <span className="ml-1 inline-flex items-center gap-0.5 text-amber-600 text-[10px]"><AlertTriangle size={10} aria-hidden="true" /> incompleto</span>}
+                            {!it.dados_completos && it.realizada && <span className="ml-1 inline-flex items-center gap-0.5 text-amber-600 text-[10px]"><AlertTriangle size={10} aria-hidden="true" /> informações incompletas</span>}
                           </div>
                         </td>
                         <td className="px-2 py-2 text-gray-700">{it.motorista_nome || '—'}</td>

@@ -52,13 +52,13 @@ const fmtData = (iso: string | null) => {
 
 const classeSaldo = (v: number) => (v > 0 ? 'text-green-700' : v < 0 ? 'text-amber-700' : 'text-gray-700');
 const rotuloQuemPagou = (v: string | null) => (
-  v === 'proprietario' ? 'Empresa' : v === 'motorista' ? 'Motorista' : v === 'empresa' ? 'Empresa' : 'Nao informado'
+  v === 'proprietario' ? 'Empresa' : v === 'motorista' ? 'Motorista' : v === 'empresa' ? 'Empresa' : 'Não informado'
 );
 const rotuloClassificacao = (v: Item['classificacao']) => ({
-  credito: 'Credito',
-  debito: 'Debito',
-  informativo: 'Informativo - nao altera o acerto',
-  incompleto: 'Dados incompletos',
+  credito: 'Crédito do motorista',
+  debito: 'Débito',
+  informativo: 'Informativo: não altera o acerto',
+  incompleto: 'Informações incompletas',
 }[v]);
 const badgeClass = (v: Item['classificacao']) => ({
   credito: 'bg-green-50 text-green-700 border-green-100',
@@ -153,8 +153,8 @@ export const AcertoMotoristas: React.FC = () => {
     } catch (e) {
       const err = e as ApiError;
       setErro(err?.response?.status === 429
-        ? 'Muitas solicitacoes agora. Aguarde alguns segundos e tente novamente.'
-        : (err?.response?.data?.message || 'Nao foi possivel carregar o acerto de motoristas.'));
+        ? 'Muitas solicitações agora. Aguarde alguns segundos e tente novamente.'
+        : (err?.response?.data?.message || 'Não foi possível carregar o acerto de motoristas.'));
     } finally {
       setCarregando(false);
     }
@@ -179,11 +179,11 @@ export const AcertoMotoristas: React.FC = () => {
     <div className="p-4 max-w-6xl mx-auto">
       <div className="flex items-center gap-2 mb-1">
         <Receipt className="text-blue-700" size={21} aria-hidden="true" />
-        <h1 className="text-xl font-bold text-gray-800">Acerto de motoristas</h1>
+        <h1 className="text-xl font-bold text-gray-800">Acerto de Motoristas</h1>
       </div>
       <p className="text-xs text-gray-500 mb-3 inline-flex items-start gap-1">
         <Info size={13} className="mt-0.5 shrink-0" aria-hidden="true" />
-        <span>Acerto do motorista consolida comissoes, reembolsos, vales, adiantamentos e demais ajustes atribuídos ao motorista no periodo. Nao representa a rentabilidade da empresa nem confirma que o valor foi pago.</span>
+        <span>Confira as comissões, os reembolsos, os adiantamentos e os débitos de cada motorista no período. O valor apresentado é uma apuração; ele não confirma que o pagamento foi realizado.</span>
       </p>
 
       <div className="bg-white rounded-lg border border-gray-100 p-3 mb-3">
@@ -198,7 +198,7 @@ export const AcertoMotoristas: React.FC = () => {
               </select>
             </label>
           )}
-          <label className="text-xs text-gray-600">Inicio
+          <label className="text-xs text-gray-600">Início
             <input type="date" value={inicio} onChange={(e) => setInicio(e.target.value)} className="w-full mt-0.5 text-xs border border-gray-200 rounded px-2 py-1.5" />
           </label>
           <label className="text-xs text-gray-600">Fim
@@ -210,7 +210,7 @@ export const AcertoMotoristas: React.FC = () => {
               {motoristasFiltro.map((m) => <option key={m.id} value={m.id}>{m.nome}</option>)}
             </select>
           </label>
-          <label className="text-xs text-gray-600">Situacao
+          <label className="text-xs text-gray-600">Situação
             <select value={situacao} onChange={(e) => setSituacao(e.target.value)} className="w-full mt-0.5 text-xs border border-gray-200 rounded px-2 py-1.5 bg-white">
               <option value="">Todas</option>
               <option value="A pagar ao motorista">A pagar ao motorista</option>
@@ -240,17 +240,17 @@ export const AcertoMotoristas: React.FC = () => {
         <>
           {resumo && (
             <div className="grid grid-cols-2 md:grid-cols-6 gap-2 mb-3">
-              <Card label="Creditos" valor={formatCurrency(resumo.total_creditos)} cor="text-green-700" />
-              <Card label="Debitos" valor={formatCurrency(resumo.total_debitos)} cor="text-rose-700" />
-              <Card label="Saldo do acerto" valor={formatCurrency(resumo.saldo_acerto)} cor={classeSaldo(resumo.saldo_acerto)} sub={resumo.situacao} />
+              <Card label="Créditos do motorista" valor={formatCurrency(resumo.total_creditos)} cor="text-green-700" />
+              <Card label="Débitos" valor={formatCurrency(resumo.total_debitos)} cor="text-rose-700" />
+              <Card label="Valor do acerto" valor={formatCurrency(resumo.saldo_acerto)} cor={classeSaldo(resumo.saldo_acerto)} sub={resumo.situacao} />
               <Card label="Motoristas" valor={String(resumo.motoristas)} />
               <Card label="Viagens" valor={String(resumo.viagens_consideradas)} />
-              <Card label="Incompletos" valor={String(resumo.itens_incompletos)} cor={resumo.itens_incompletos > 0 ? 'text-amber-700' : 'text-gray-800'} />
+              <Card label="Informações incompletas" valor={String(resumo.itens_incompletos)} cor={resumo.itens_incompletos > 0 ? 'text-amber-700' : 'text-gray-800'} />
             </div>
           )}
 
           {resumo && resumo.total_informativo > 0 && (
-            <p className="text-[11px] text-gray-500 mb-2">Informativo - nao altera o acerto: {formatCurrency(resumo.total_informativo)}.</p>
+            <p className="text-[11px] text-gray-500 mb-2">Despesas da empresa: não alteram o acerto do motorista. Total informativo: {formatCurrency(resumo.total_informativo)}.</p>
           )}
 
           {motoristasFiltrados.length === 0 ? (
@@ -269,13 +269,13 @@ export const AcertoMotoristas: React.FC = () => {
                     <div className="flex flex-col gap-3 md:flex-row md:flex-wrap md:items-center md:justify-between lg:flex-nowrap">
                       <div className="min-w-0">
                         <p className="font-bold text-gray-800">{m.motorista_nome}</p>
-                        <p className="text-[11px] text-gray-400">{m.empresa_nome || 'Empresa'} · {m.resumo.viagens_consideradas} viagem(ns)</p>
+                        <p className="text-[11px] text-gray-400">{m.empresa_nome || 'Empresa'} · {m.resumo.viagens_consideradas} {m.resumo.viagens_consideradas === 1 ? 'viagem' : 'viagens'}</p>
                       </div>
                       <div className="grid w-full grid-cols-2 gap-x-4 gap-y-2 text-left text-xs sm:grid-cols-4 md:min-w-[540px] md:flex-1 md:grid-cols-[minmax(84px,1fr)_minmax(84px,1fr)_minmax(112px,1fr)_minmax(132px,1fr)_24px] md:text-right lg:w-auto lg:flex-none">
-                        <div><p className="text-gray-400">Creditos</p><p className="font-semibold text-green-700">{formatCurrency(m.resumo.total_creditos)}</p></div>
-                        <div><p className="text-gray-400">Debitos</p><p className="font-semibold text-rose-700">{formatCurrency(m.resumo.total_debitos)}</p></div>
+                        <div><p className="text-gray-400">Créditos</p><p className="font-semibold text-green-700">{formatCurrency(m.resumo.total_creditos)}</p></div>
+                        <div><p className="text-gray-400">Débitos</p><p className="font-semibold text-rose-700">{formatCurrency(m.resumo.total_debitos)}</p></div>
                         <div><p className="text-gray-400">Saldo</p><p className={`font-bold ${classeSaldo(m.resumo.saldo_acerto)}`}>{formatCurrency(m.resumo.saldo_acerto)}</p></div>
-                        <div><p className="text-gray-400">Situacao</p><p className="font-semibold text-gray-700 leading-snug break-words">{m.resumo.situacao}</p></div>
+                        <div><p className="text-gray-400">Situação</p><p className="font-semibold text-gray-700 leading-snug break-words">{m.resumo.situacao}</p></div>
                         <div className="col-span-2 flex items-center justify-end text-gray-400 sm:col-span-4 md:col-span-1 md:pl-1">{expandido === m.motorista_id ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</div>
                       </div>
                     </div>
@@ -288,8 +288,8 @@ export const AcertoMotoristas: React.FC = () => {
                             <th className="px-3 py-2 text-left font-semibold">Data</th>
                             <th className="px-3 py-2 text-left font-semibold">Viagem / rota</th>
                             <th className="px-3 py-2 text-left font-semibold">Natureza</th>
-                            <th className="px-3 py-2 text-left font-semibold">Responsavel</th>
-                            <th className="px-3 py-2 text-left font-semibold">Classificacao</th>
+                            <th className="px-3 py-2 text-left font-semibold">Responsável</th>
+                            <th className="px-3 py-2 text-left font-semibold">Classificação</th>
                             <th className="px-3 py-2 text-right font-semibold">Valor</th>
                           </tr>
                         </thead>

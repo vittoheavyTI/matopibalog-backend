@@ -3,7 +3,7 @@ const { calcularComissao } = require('../utils/comissao');
 const { freteEstaCancelado } = require('../utils/agregacaoFinanceiraFretes');
 const { calcularRentabilidadeFrete, resumirRentabilidade } = require('../utils/rentabilidadeFrete');
 const { calcularAcertoMotoristas } = require('../utils/acertoMotorista');
-const { montarTorreControle } = require('../utils/torreControle');
+const { montarTorreControle, resumirItensTorre } = require('../utils/torreControle');
 
 exports.getFichaViagem = async (req, res) => {
   const { motorista_id, fretes_ids } = req.query;
@@ -320,17 +320,30 @@ exports.getAcertoMotoristas = async (req, res) => {
 exports.getTorreControle = async (req, res) => {
   const LIMITE_FRETES = 1000;
   try {
-    const isSuperAdmin = req.user.is_super_admin === true;
-    const empresaAlvo = isSuperAdmin ? (req.query.empresa_id || null) : req.empresa_id;
+    const empresaAlvo = req.empresa_id;
     if (!empresaAlvo) {
       return res.status(400).json({ message: 'Empresa nao identificada.' });
     }
 
     const { inicio, fim, motorista_id, status, nivel } = req.query;
+    const niveisValidos = new Set(['critico', 'atencao', 'ok', 'informativo']);
+    if (nivel && !niveisValidos.has(nivel)) {
+      return res.status(400).json({ message: 'Prioridade invalida.' });
+    }
+
+    const { data: empresaExiste, error: empresaErr } = await supabase
+      .from('empresas')
+      .select('id')
+      .eq('id', empresaAlvo)
+      .maybeSingle();
+    if (empresaErr) throw empresaErr;
+    if (!empresaExiste) {
+      return res.status(404).json({ message: 'Empresa nao encontrada.' });
+    }
 
     let fretesQuery = supabase
       .from('fretes')
-      .select('id, empresa_id, motorista_id, data, origem, destino, placa, status, valor_frete, motoristas(usuarios(nome))')
+      .select('id, empresa_id, motorista_id, data, origem, destino, placa, status, valor_frete')
       .eq('empresa_id', empresaAlvo);
     if (inicio) fretesQuery = fretesQuery.gte('data', inicio);
     if (fim) fretesQuery = fretesQuery.lte('data', fim);
@@ -341,7 +354,23 @@ exports.getTorreControle = async (req, res) => {
     const { data: fretesRaw, error: fretesErr } = await fretesQuery;
     if (fretesErr) throw fretesErr;
 
-    const fretes = fretesRaw || [];
+    const fretesBase = fretesRaw || [];
+    const motoristasIds = [...new Set(fretesBase.map((f) => f.motorista_id).filter(Boolean))];
+    let motoristasPorId = new Map();
+    if (motoristasIds.length) {
+      const { data: motoristasRaw, error: motoristasErr } = await supabase
+        .from('motoristas')
+        .select('id, empresa_id, usuarios(nome)')
+        .eq('empresa_id', empresaAlvo)
+        .in('id', motoristasIds);
+      if (motoristasErr) throw motoristasErr;
+      motoristasPorId = new Map((motoristasRaw || []).map((m) => [m.id, m]));
+    }
+
+    const fretes = fretesBase.map((frete) => ({
+      ...frete,
+      motoristas: motoristasPorId.get(frete.motorista_id) || null,
+    }));
     const ids = fretes.map((f) => f.id).filter(Boolean);
     let ocorrencias = [];
     let epods = [];
@@ -375,9 +404,11 @@ exports.getTorreControle = async (req, res) => {
 
     let torre = montarTorreControle({ fretes, ocorrencias, epods, evidencias });
     if (nivel) {
+      const itensFiltrados = torre.itens.filter((item) => item.nivel === nivel);
       torre = {
         ...torre,
-        itens: torre.itens.filter((item) => item.nivel === nivel),
+        resumo: resumirItensTorre(itensFiltrados),
+        itens: itensFiltrados,
       };
     }
 
