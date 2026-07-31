@@ -106,6 +106,19 @@ class ApiService {
   /// Define o token usado nas requisições autenticadas da sessão atual.
   static void setSessionToken(String token) => _sessionToken = token;
 
+  static String get baseUrl => _baseUrl;
+
+  static Future<String?> currentSessionToken() async {
+    var token = _sessionToken;
+    if (token == null || token.isEmpty) {
+      token = await _secureStorage.read(key: _tokenKey);
+      if (token != null && token.isNotEmpty) {
+        _sessionToken = token;
+      }
+    }
+    return token;
+  }
+
   /// Limpa o token em memória (logout ou falha de auto-login).
   static void clearSessionToken() => _sessionToken = null;
 

@@ -4,6 +4,7 @@ const fretesController = require('../controllers/fretesController');
 const freteDocumentosController = require('../controllers/freteDocumentosController');
 const freteEpodController = require('../controllers/freteEpodController');
 const freteOcorrenciasController = require('../controllers/freteOcorrenciasController');
+const freteLocalizacaoController = require('../controllers/freteLocalizacaoController');
 const { verifyToken, isAdmin } = require('../middlewares/auth');
 const { verificarEmpresa } = require('../middlewares/tenant');
 const { verificarPlano } = require('../middlewares/verificarPlano');
@@ -13,6 +14,7 @@ const uploadDocumento = require('../middlewares/uploadDocumento');
 const { createFreteSchema, updateFreteSchema } = require('../schemas/fretes');
 const { registrarEpodSchema, atualizarEpodSchema, validarEvidenciaSchema, rejeitarComprovacaoSchema } = require('../schemas/freteEpod');
 const { criarOcorrenciaSchema, atualizarOcorrenciaSchema } = require('../schemas/freteOcorrencias');
+const { localizacaoSchema } = require('../schemas/freteLocalizacao');
 
 router.use(verifyToken, verificarEmpresa, verificarPlano);
 
@@ -31,6 +33,11 @@ router.get('/:id/documentos/:docId/url', freteDocumentosController.getSignedUrl)
 
 // ePOD — comprovacao de entrega digital (1 por frete). Bucket privado
 // `fretes-evidencias`. Motorista/admin registram e anexam; so admin valida.
+// Rastreamento leve: somente observacao operacional, sem alterar status.
+router.get('/:id/localizacao', freteLocalizacaoController.obter);
+router.post('/:id/localizacao', validate(localizacaoSchema), freteLocalizacaoController.registrar);
+router.post('/localizacoes/limpar-vencidas', isAdmin, freteLocalizacaoController.limparVencidas);
+
 router.get('/:id/epod', freteEpodController.obter);
 router.post('/:id/epod', validate(registrarEpodSchema), freteEpodController.registrar);
 router.patch('/:id/epod', validate(atualizarEpodSchema), freteEpodController.atualizar);

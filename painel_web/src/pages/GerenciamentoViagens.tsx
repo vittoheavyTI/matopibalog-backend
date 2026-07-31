@@ -9,6 +9,7 @@ import { erroSanidadeTonKm, erroSanidadeValorFixo, TONELADAS_MAX } from '../util
 import { PlanoBloqueadoCard } from '../components/PlanoBloqueadoCard';
 import { EVENTO_NOTIFICACOES_NOVAS } from '../components/NotificacoesDropdown';
 import { FreteEpodOcorrencias } from '../components/FreteEpodOcorrencias';
+import { FreteLocalizacao } from '../components/FreteLocalizacao';
 
 const gvFmt = (d: any, fmt: string) => {
   if (!d) return '-';
@@ -1362,6 +1363,7 @@ export const GerenciamentoViagens: React.FC = () => {
                             {consultaFocada && <span className="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded font-bold">consulta via Torre</span>}
                             {f.id === freteQuery && painelQuery === 'ocorrencias' && <span className="bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-bold">ocorrências em foco</span>}
                             {f.id === freteQuery && painelQuery === 'comprovante' && <span className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-bold">comprovante em foco</span>}
+                            {f.id === freteQuery && painelQuery === 'localizacao' && <span className="bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-bold">localizacao em foco</span>}
                           </div>
                         </button>
                       )}
@@ -1393,6 +1395,7 @@ export const GerenciamentoViagens: React.FC = () => {
                           : itensFrete.map(renderLancamentoItem)}
                         {renderDocumentosFrete(f.id)}
                         <FreteEpodOcorrencias freteId={f.id} />
+                        {(f.id === freteQuery && painelQuery === 'localizacao') && <FreteLocalizacao freteId={f.id} />}
                       </div>
                     )}
                   </div>

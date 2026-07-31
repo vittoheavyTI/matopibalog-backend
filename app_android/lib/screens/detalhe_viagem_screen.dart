@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../services/api_service.dart';
 import '../services/app_logger.dart';
 import '../services/document_scanner_service.dart';
+import '../services/location_tracking_service.dart';
 import '../widgets/foto_preview.dart';
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
@@ -35,6 +36,9 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
   String? _abrindoEvidId;
   bool _loading = true;
   bool _finalizando = false;
+  bool _rastreamentoAtivo = false;
+  bool _alterandoRastreamento = false;
+  String _rastreamentoMensagem = '';
   String _error = '';
   Map<String, dynamic>? _perfilCache;
   // Estado local do frete: parte do snapshot recebido, mas pode ser atualizado
@@ -133,6 +137,124 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
     if (isAutonomo) return true;
     final motorista = perfil['motoristas'] as Map<String, dynamic>?;
     return motorista?['pode_finalizar_viagem'] == true;
+  }
+
+  bool get _podeRastrearViagem {
+    final status = (_frete['status'] ?? '').toString();
+    return status == 'ativo' || status == 'em_viagem' || status == 'em_andamento';
+  }
+
+  Future<void> _alternarRastreamento() async {
+    if (_alterandoRastreamento) {
+      return;
+    }
+    if (_rastreamentoAtivo) {
+      setState(() => _alterandoRastreamento = true);
+      await LocationTrackingService.stop();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _rastreamentoAtivo = false;
+        _alterandoRastreamento = false;
+        _rastreamentoMensagem = 'Compartilhamento pausado neste aparelho.';
+      });
+      return;
+    }
+
+    if (!_podeRastrearViagem) {
+      setState(() => _rastreamentoMensagem = 'Compartilhamento disponivel somente durante uma viagem ativa.');
+      return;
+    }
+
+    final continuar = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Compartilhar localizacao da viagem?'),
+        content: const Text('O app enviara a ultima localizacao aproximadamente a cada 5 minutos somente enquanto esta viagem estiver ativa. Uma notificacao persistente sera exibida. Se voce negar a permissao, o app continuara funcionando sem compartilhamento.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Agora nao')),
+          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Continuar')),
+        ],
+      ),
+    );
+    if (continuar != true || !mounted) {
+      return;
+    }
+
+    setState(() {
+      _alterandoRastreamento = true;
+      _rastreamentoMensagem = '';
+    });
+    final result = await LocationTrackingService.startForTrip(_frete['id']?.toString() ?? '');
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _alterandoRastreamento = false;
+      _rastreamentoAtivo = result == LocationTrackingStartResult.started;
+      _rastreamentoMensagem = _mensagemRastreamento(result);
+    });
+  }
+
+  String _mensagemRastreamento(LocationTrackingStartResult result) {
+    switch (result) {
+      case LocationTrackingStartResult.started:
+        return 'Compartilhamento ativo. Ultima localizacao enviada sera atualizada durante a viagem.';
+      case LocationTrackingStartResult.serviceDisabled:
+        return 'Ative a localizacao do aparelho para compartilhar a viagem.';
+      case LocationTrackingStartResult.denied:
+        return 'Permissao negada. O app segue utilizavel, mas o compartilhamento nao esta ativo.';
+      case LocationTrackingStartResult.deniedForever:
+        return 'Permissao bloqueada nas configuracoes do Android. O compartilhamento nao esta ativo.';
+      case LocationTrackingStartResult.missingSession:
+        return 'Sessao nao encontrada para iniciar o compartilhamento.';
+      case LocationTrackingStartResult.unsupported:
+        return 'Compartilhamento disponivel apenas no app Android.';
+      case LocationTrackingStartResult.failed:
+        return 'Nao foi possivel iniciar o compartilhamento agora.';
+    }
+  }
+
+  Widget _secaoRastreamento() {
+    final ativoParaViagem = _podeRastrearViagem;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.location_on_outlined, color: ativoParaViagem ? const Color(0xFF1B5E20) : Colors.grey.shade500),
+                const SizedBox(width: 8),
+                const Expanded(child: Text('Ultima localizacao enviada', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold))),
+                Switch(
+                  value: _rastreamentoAtivo,
+                  onChanged: ativoParaViagem && !_alterandoRastreamento ? (_) => _alternarRastreamento() : null,
+                ),
+              ],
+            ),
+            Text(
+              ativoParaViagem
+                  ? 'Compartilhamento somente durante esta viagem, com notificacao persistente.'
+                  : 'Compartilhamento pausado porque a viagem nao esta ativa.',
+              style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+            ),
+            if (_rastreamentoMensagem.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(_rastreamentoMensagem, style: const TextStyle(fontSize: 12)),
+              ),
+            if (_alterandoRastreamento)
+              const Padding(
+                padding: EdgeInsets.only(top: 8),
+                child: LinearProgressIndicator(minHeight: 2),
+              ),
+          ],
+        ),
+      ),
+    );
   }
 
   bool get _isAutonomo {
@@ -296,6 +418,8 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
       if (!mounted) return;
       if (result != null && result['_error'] != true) {
         AppLogger.action('finalizar_frete_ok', params: {'frete_id': freteId});
+        await LocationTrackingService.stop();
+        if (!mounted) return;
         // Atualiza o status local para 'finalizado' para que o botão não
         // reapareça caso a tela permaneça/seja reaberta com este snapshot.
         setState(() => _frete['status'] = 'finalizado');
@@ -1023,6 +1147,8 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
                         _secaoDocumentos(),
                         const SizedBox(height: 12),
                         _secaoComprovacao(),
+                        const SizedBox(height: 12),
+                        _secaoRastreamento(),
                         const SizedBox(height: 12),
                         _cardResumo(f),
                         const SizedBox(height: 16),

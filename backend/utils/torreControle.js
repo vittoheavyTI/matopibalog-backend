@@ -163,10 +163,11 @@ const ordenarItens = (a, b) => {
   return String(b.data || '').localeCompare(String(a.data || ''));
 };
 
-function montarTorreControle({ fretes, ocorrencias, epods, evidencias }) {
+function montarTorreControle({ fretes, ocorrencias, epods, evidencias, localizacoes }) {
   const ocorrPorFrete = contarPorFrete(ocorrencias);
   const epodPorFrete = new Map((epods || []).map((e) => [e.frete_id, e]));
   const evidPorFrete = contarPorFrete(evidencias);
+  const locPorFrete = new Map((localizacoes || []).map((l) => [l.frete_id, l]));
 
   const itens = (fretes || []).map((frete) => {
     const todasOcorrencias = ocorrPorFrete.get(frete.id) || [];
@@ -199,6 +200,15 @@ function montarTorreControle({ fretes, ocorrencias, epods, evidencias }) {
         tipos_abertos: ocorrenciasAbertas.map((o) => o.tipo).filter(Boolean),
       },
       epod,
+      localizacao: (() => {
+        const loc = locPorFrete.get(frete.id);
+        return {
+          ultima_enviada_em: loc?.captured_at || null,
+          recebida_em: loc?.received_at || null,
+          accuracy_m: numero(loc?.accuracy_m),
+          ativa: STATUS_ATIVOS.has(status) && Boolean(loc?.captured_at),
+        };
+      })(),
     };
   }).sort(ordenarItens);
 

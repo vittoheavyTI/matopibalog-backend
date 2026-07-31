@@ -4,6 +4,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/api_service.dart';
 import '../services/app_logger.dart';
+import '../services/location_tracking_service.dart';
 import '../services/push_service.dart';
 
 enum AuthStatus { initial, loading, authenticated, unauthenticated, error }
@@ -273,6 +274,7 @@ class AuthProvider extends ChangeNotifier {
 
   Future<void> logout() async {
     AppLogger.action('logout', params: {'user': _nome});
+    await LocationTrackingService.stop();
     // Desativa o token de push deste aparelho antes de limpar a sessão.
     // Best-effort: se falhar (offline), o backend desativa no primeiro envio
     // que retornar token inválido.

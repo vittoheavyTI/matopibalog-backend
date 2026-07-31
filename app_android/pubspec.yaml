@@ -37,6 +37,7 @@ dependencies:
   # NÃO usamos WebView (nenhum pagamento dentro do app).
   url_launcher: ^6.3.1
   connectivity_plus: ^5.0.2
+  geolocator: ^13.0.2
   workmanager: ^0.9.0
   sqflite: ^2.3.0
   path_provider: ^2.1.2
