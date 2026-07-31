@@ -36,7 +36,6 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
   String? _abrindoEvidId;
   bool _loading = true;
   bool _finalizando = false;
-  bool _rastreamentoAtivo = false;
   bool _alterandoRastreamento = false;
   String _rastreamentoMensagem = '';
   String _error = '';
@@ -148,19 +147,6 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
     if (_alterandoRastreamento) {
       return;
     }
-    if (_rastreamentoAtivo) {
-      setState(() => _alterandoRastreamento = true);
-      await LocationTrackingService.stop();
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _rastreamentoAtivo = false;
-        _alterandoRastreamento = false;
-        _rastreamentoMensagem = 'Compartilhamento pausado neste aparelho.';
-      });
-      return;
-    }
 
     if (!_podeRastrearViagem) {
       setState(() => _rastreamentoMensagem = 'Compartilhamento disponivel somente durante uma viagem ativa.');
@@ -186,13 +172,12 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
       _alterandoRastreamento = true;
       _rastreamentoMensagem = '';
     });
-    final result = await LocationTrackingService.startForTrip(_frete['id']?.toString() ?? '');
+    final result = await LocationTrackingService.startForActiveTrips(requestPermission: true);
     if (!mounted) {
       return;
     }
     setState(() {
       _alterandoRastreamento = false;
-      _rastreamentoAtivo = result == LocationTrackingStartResult.started;
       _rastreamentoMensagem = _mensagemRastreamento(result);
     });
   }
@@ -221,37 +206,44 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.location_on_outlined, color: ativoParaViagem ? const Color(0xFF1B5E20) : Colors.grey.shade500),
-                const SizedBox(width: 8),
-                const Expanded(child: Text('Ultima localizacao enviada', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold))),
-                Switch(
-                  value: _rastreamentoAtivo,
-                  onChanged: ativoParaViagem && !_alterandoRastreamento ? (_) => _alternarRastreamento() : null,
+        child: ValueListenableBuilder<LocationTrackingSnapshot>(
+          valueListenable: LocationTrackingService.snapshot,
+          builder: (context, tracking, _) => Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    Icons.location_on_outlined,
+                    color: tracking.isActive && ativoParaViagem ? const Color(0xFF1B5E20) : Colors.grey.shade500,
+                  ),
+                  const SizedBox(width: 8),
+                  const Expanded(child: Text('Ultima localizacao enviada', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold))),
+                  if (ativoParaViagem && !tracking.isActive)
+                    TextButton(
+                      onPressed: _alterandoRastreamento ? null : _alternarRastreamento,
+                      child: const Text('Ativar'),
+                    ),
+                ],
+              ),
+              Text(
+                ativoParaViagem
+                    ? tracking.message
+                    : 'Compartilhamento pausado porque a viagem nao esta ativa.',
+                style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+              ),
+              if (_rastreamentoMensagem.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(_rastreamentoMensagem, style: const TextStyle(fontSize: 12)),
                 ),
-              ],
-            ),
-            Text(
-              ativoParaViagem
-                  ? 'Compartilhamento somente durante esta viagem, com notificacao persistente.'
-                  : 'Compartilhamento pausado porque a viagem nao esta ativa.',
-              style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
-            ),
-            if (_rastreamentoMensagem.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Text(_rastreamentoMensagem, style: const TextStyle(fontSize: 12)),
-              ),
-            if (_alterandoRastreamento)
-              const Padding(
-                padding: EdgeInsets.only(top: 8),
-                child: LinearProgressIndicator(minHeight: 2),
-              ),
-          ],
+              if (_alterandoRastreamento)
+                const Padding(
+                  padding: EdgeInsets.only(top: 8),
+                  child: LinearProgressIndicator(minHeight: 2),
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -418,7 +410,12 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
       if (!mounted) return;
       if (result != null && result['_error'] != true) {
         AppLogger.action('finalizar_frete_ok', params: {'frete_id': freteId});
-        await LocationTrackingService.stop();
+        try {
+          final fretesAtualizados = await ApiService.getFretes();
+          await LocationTrackingService.reconcileWithFretes(fretesAtualizados);
+        } catch (_) {
+          // Se a reconciliacao falhar, a Home fara nova tentativa no refresh.
+        }
         if (!mounted) return;
         // Atualiza o status local para 'finalizado' para que o botão não
         // reapareça caso a tela permaneça/seja reaberta com este snapshot.

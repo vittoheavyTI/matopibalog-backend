@@ -14,6 +14,7 @@ import 'historico_screen.dart';
 import 'detalhe_viagem_screen.dart';
 import 'minhas_faturas_screen.dart';
 import '../services/api_service.dart';
+import '../services/location_tracking_service.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -24,6 +25,8 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  bool _autoPromptedLocation = false;
+
   @override
   void initState() {
     super.initState();
@@ -35,6 +38,106 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _refresh() async {
     await context.read<FinanceProvider>().loadData();
+  }
+
+  int _fretesEmAndamentoParaRastreamento(FinanceProvider finance) {
+    const statusAtivos = {'ativo', 'em_viagem', 'em_andamento'};
+    return finance.fretes
+        .where((f) => f is Map && statusAtivos.contains((f['status'] ?? '').toString()))
+        .map((f) => (f as Map)['id']?.toString())
+        .where((id) => id != null && id.isNotEmpty)
+        .toSet()
+        .length
+        .clamp(0, 4);
+  }
+
+  Future<void> _solicitarAtivacaoLocalizacao(FinanceProvider finance) async {
+    final activeTrips = _fretesEmAndamentoParaRastreamento(finance);
+    if (activeTrips == 0) {
+      await LocationTrackingService.stop();
+      return;
+    }
+    final continuar = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Compartilhar localizacao da viagem?'),
+        content: const Text('O app enviara a ultima localizacao aproximadamente a cada 5 minutos somente enquanto houver viagem em andamento. Uma notificacao persistente sera exibida. Se voce negar a permissao, o app continua funcionando sem compartilhamento.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Agora nao')),
+          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Continuar')),
+        ],
+      ),
+    );
+    if (continuar != true || !mounted) return;
+    final result = await LocationTrackingService.startForActiveTrips(
+      activeTrips: activeTrips,
+      requestPermission: true,
+    );
+    if (!mounted) return;
+    final msg = _mensagemRastreamento(result);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  String _mensagemRastreamento(LocationTrackingStartResult result) {
+    switch (result) {
+      case LocationTrackingStartResult.started:
+        return 'Compartilhamento ativo. Ultima localizacao enviada sera atualizada durante a viagem.';
+      case LocationTrackingStartResult.serviceDisabled:
+        return 'Ative a localizacao do aparelho para compartilhar a viagem.';
+      case LocationTrackingStartResult.denied:
+        return 'Permissao negada. O app segue utilizavel, mas o compartilhamento nao esta ativo.';
+      case LocationTrackingStartResult.deniedForever:
+        return 'Permissao bloqueada nas configuracoes do Android.';
+      case LocationTrackingStartResult.missingSession:
+        return 'Sessao nao encontrada para iniciar o compartilhamento.';
+      case LocationTrackingStartResult.unsupported:
+        return 'Compartilhamento disponivel apenas no app Android.';
+      case LocationTrackingStartResult.failed:
+        return 'Nao foi possivel iniciar o compartilhamento agora.';
+    }
+  }
+
+  Widget _cardLocalizacao(FinanceProvider finance) {
+    final activeTrips = _fretesEmAndamentoParaRastreamento(finance);
+    return ValueListenableBuilder<LocationTrackingSnapshot>(
+      valueListenable: LocationTrackingService.snapshot,
+      builder: (context, tracking, _) {
+        final precisaAcao = activeTrips > 0 && !tracking.isActive;
+        final cor = tracking.isActive
+            ? Colors.green.shade700
+            : (activeTrips > 0 ? Colors.amber.shade800 : Colors.grey.shade600);
+        return Card(
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.location_on_outlined, color: cor),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Ultima localizacao enviada', style: TextStyle(fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 4),
+                      Text(
+                        activeTrips == 0 ? 'Nao ha viagem em andamento.' : tracking.message,
+                        style: TextStyle(color: Colors.grey.shade700, fontSize: 13),
+                      ),
+                    ],
+                  ),
+                ),
+                if (precisaAcao)
+                  TextButton(
+                    onPressed: () => _solicitarAtivacaoLocalizacao(finance),
+                    child: const Text('Ativar'),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   bool _gerandoRegularizacao = false;
@@ -205,6 +308,18 @@ class _HomeScreenState extends State<HomeScreen> {
     // Ativos/pendentes no topo, finalizados depois; dentro do grupo, data desc.
     // Apenas reordena a lista de exibição — não altera nenhum cálculo.
     _ordenarFretesPorPrioridade(fretesHome);
+    final activeTrackingTrips = _fretesEmAndamentoParaRastreamento(finance);
+    if (activeTrackingTrips == 0) {
+      _autoPromptedLocation = false;
+    } else if (!_autoPromptedLocation &&
+        finance.hasLoadedOnce &&
+        !finance.loading &&
+        !LocationTrackingService.snapshot.value.isActive) {
+      _autoPromptedLocation = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _solicitarAtivacaoLocalizacao(finance);
+      });
+    }
 
     return RefreshIndicator(
       onRefresh: _refresh,
@@ -278,6 +393,8 @@ class _HomeScreenState extends State<HomeScreen> {
                         ]),
                       ),
                     ),
+                  _cardLocalizacao(finance),
+                  const SizedBox(height: 8),
                   if (finance.planoBloqueado) const SizedBox(height: 16),
                   if (finance.error.isNotEmpty)
                     Container(

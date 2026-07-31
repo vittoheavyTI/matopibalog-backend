@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 import '../services/app_logger.dart';
 import '../services/document_scanner_service.dart';
+import '../services/location_tracking_service.dart';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
@@ -130,6 +131,13 @@ class _AddFreteScreenState extends State<AddFreteScreen> {
         }
       }
 
+      final rastreamentoOk = await _prepararRastreamentoAntesDoInicio();
+      if (!mounted) return;
+      if (!rastreamentoOk) {
+        _fretePendenteId = freteId;
+        return;
+      }
+
       final upload = await ApiService.uploadFotoOdometro(
           freteId, 'inicial', _fotoOdometroInicial!.path);
       if (!mounted) {
@@ -149,6 +157,7 @@ class _AddFreteScreenState extends State<AddFreteScreen> {
         return;
       }
 
+      await LocationTrackingService.startForActiveTrips(requestPermission: false);
       final documentosComFalha = await _enviarDocumentosPendentes(freteId);
       if (!mounted) {
         return;
@@ -179,6 +188,46 @@ class _AddFreteScreenState extends State<AddFreteScreen> {
       }
     } finally {
       if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<bool> _prepararRastreamentoAntesDoInicio() async {
+    final continuar = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Compartilhar localizacao da viagem?'),
+        content: const Text('Para iniciar o frete em andamento, o app precisa enviar a ultima localizacao aproximadamente a cada 5 minutos enquanto a viagem estiver ativa. Uma notificacao persistente sera exibida.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Agora nao')),
+          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Continuar')),
+        ],
+      ),
+    );
+    if (continuar != true || !mounted) return false;
+    final result = await LocationTrackingService.prepareForTripStart();
+    if (result == LocationTrackingStartResult.started) return true;
+    if (!mounted) return false;
+    final msg = _mensagemRastreamento(result);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    return false;
+  }
+
+  String _mensagemRastreamento(LocationTrackingStartResult result) {
+    switch (result) {
+      case LocationTrackingStartResult.started:
+        return 'Compartilhamento pronto para iniciar.';
+      case LocationTrackingStartResult.serviceDisabled:
+        return 'Ative a localizacao do aparelho para iniciar o frete.';
+      case LocationTrackingStartResult.denied:
+        return 'Permissao negada. O frete permanece pendente ate a permissao ser concedida.';
+      case LocationTrackingStartResult.deniedForever:
+        return 'Permissao bloqueada nas configuracoes do Android. O frete permanece pendente.';
+      case LocationTrackingStartResult.missingSession:
+        return 'Sessao nao encontrada para iniciar o compartilhamento.';
+      case LocationTrackingStartResult.unsupported:
+        return 'Compartilhamento disponivel apenas no app Android.';
+      case LocationTrackingStartResult.failed:
+        return 'Nao foi possivel preparar o compartilhamento agora.';
     }
   }
 
@@ -477,7 +526,7 @@ class _AddFreteScreenState extends State<AddFreteScreen> {
                     const TextInputType.numberWithOptions(decimal: true)),
             const SizedBox(height: 16),
             DropdownButtonFormField<String>(
-              value: _quemRecebeu,
+              initialValue: _quemRecebeu,
               decoration:
                   const InputDecoration(labelText: 'Quem Recebeu o Frete?'),
               items: const [

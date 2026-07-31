@@ -160,13 +160,7 @@ class FinanceProvider extends ChangeNotifier {
       _abastecimentos = abastecimentos;
       _vales = vales;
       _planoStatus = planoStatus ?? {};
-      final possuiViagemAtivaParaRastreamento = fretes.any((f) {
-        final status = (f['status'] ?? '').toString();
-        return _statusAtivoPrioritario.contains(status);
-      });
-      if (!possuiViagemAtivaParaRastreamento) {
-        await LocationTrackingService.stop();
-      }
+      await LocationTrackingService.reconcileWithFretes(fretes);
 
       // Fretes cancelados continuam VISÍVEIS nas listas (_fretes, Home, Histórico,
       // Detalhe), mas ficam FORA de todas as agregações financeiras: não entram no

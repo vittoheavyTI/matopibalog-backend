@@ -8,6 +8,12 @@ type Localizacao = {
   accuracy_m: number | null;
 };
 
+type EstadoLocalizacao = {
+  estado: string | null;
+  detalhe?: string | null;
+  atualizado_em?: string | null;
+};
+
 const fmtDataHora = (valor: string | null) => {
   if (!valor) return '-';
   const data = new Date(valor);
@@ -20,6 +26,7 @@ export const FreteLocalizacao: React.FC<{ freteId: string }> = ({ freteId }) => 
   const [erro, setErro] = useState('');
   const [ativa, setAtiva] = useState(false);
   const [ultima, setUltima] = useState<Localizacao | null>(null);
+  const [estado, setEstado] = useState<EstadoLocalizacao | null>(null);
   const [historicoQtd, setHistoricoQtd] = useState(0);
 
   const carregar = async () => {
@@ -29,6 +36,7 @@ export const FreteLocalizacao: React.FC<{ freteId: string }> = ({ freteId }) => 
       const res = await api.get(`/fretes/${freteId}/localizacao`);
       setAtiva(res.data?.ativa === true);
       setUltima(res.data?.ultima || null);
+      setEstado(res.data?.estado || null);
       setHistoricoQtd(Array.isArray(res.data?.historico) ? res.data.historico.length : 0);
     } catch {
       setErro('Nao foi possivel carregar a ultima localizacao enviada.');
@@ -37,7 +45,9 @@ export const FreteLocalizacao: React.FC<{ freteId: string }> = ({ freteId }) => 
     }
   };
 
-  useEffect(() => { void carregar(); }, [freteId]);
+  useEffect(() => {
+    queueMicrotask(() => { void carregar(); });
+  }, [freteId]);
 
   return (
     <div className="mt-3 rounded border border-gray-100 bg-gray-50 p-3 text-xs text-gray-600">
@@ -60,10 +70,23 @@ export const FreteLocalizacao: React.FC<{ freteId: string }> = ({ freteId }) => 
           <p><span className="font-semibold">Enviada:</span> {fmtDataHora(ultima.captured_at)}</p>
           <p><span className="font-semibold">Recebida:</span> {fmtDataHora(ultima.received_at)}</p>
           <p><span className="font-semibold">Precisao:</span> {ultima.accuracy_m == null ? '-' : `${Math.round(ultima.accuracy_m)} m`}</p>
+          {estado?.estado && (
+            <p className="sm:col-span-3"><span className="font-semibold">Estado:</span> {estado.detalhe || rotuloEstado(estado.estado)}</p>
+          )}
         </div>
       ) : (
-        <p className="mt-2">{historicoQtd > 0 ? `${historicoQtd} pontos no historico da viagem.` : 'Sem localizacao enviada para esta viagem.'}</p>
+        <p className="mt-2">{estado?.estado ? rotuloEstado(estado.estado) : (historicoQtd > 0 ? `${historicoQtd} pontos no historico da viagem.` : 'Sem localizacao enviada para esta viagem.')}</p>
       )}
     </div>
   );
 };
+
+const rotuloEstado = (estado: string | null) => ({
+  atualizada: 'Localizacao atualizada',
+  aguardando_primeira: 'Aguardando primeira localizacao',
+  interrompida: 'Localizacao interrompida',
+  gps_desativado: 'GPS desativado',
+  permissao_nao_concedida: 'Permissao nao concedida',
+  sem_conexao: 'Sem conexao',
+  rastreamento_encerrado: 'Rastreamento encerrado',
+}[estado || ''] || 'Sem localizacao enviada para esta viagem.');

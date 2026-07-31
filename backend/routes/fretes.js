@@ -14,12 +14,15 @@ const uploadDocumento = require('../middlewares/uploadDocumento');
 const { createFreteSchema, updateFreteSchema } = require('../schemas/fretes');
 const { registrarEpodSchema, atualizarEpodSchema, validarEvidenciaSchema, rejeitarComprovacaoSchema } = require('../schemas/freteEpod');
 const { criarOcorrenciaSchema, atualizarOcorrenciaSchema } = require('../schemas/freteOcorrencias');
-const { localizacaoSchema } = require('../schemas/freteLocalizacao');
+const { localizacaoSchema, localizacaoEstadoSchema } = require('../schemas/freteLocalizacao');
 
 router.use(verifyToken, verificarEmpresa, verificarPlano);
 
 router.get('/', fretesController.getAll);
 router.post('/', validate(createFreteSchema), fretesController.create);
+router.get('/localizacao/sessao', freteLocalizacaoController.obterSessao);
+router.post('/localizacao/sessao', validate(localizacaoSchema), freteLocalizacaoController.registrarSessao);
+router.post('/localizacao/sessao/estado', validate(localizacaoEstadoSchema), freteLocalizacaoController.registrarEstadoSessao);
 router.get('/:id', fretesController.getById);
 router.post('/:id/odometro/inicial', upload.single('foto'), fretesController.uploadOdometroInicial);
 router.post('/:id/odometro/final', upload.single('foto'), fretesController.uploadOdometroFinal);

@@ -11,6 +11,7 @@ import 'screens/trocar_senha_screen.dart';
 import 'screens/termos_pendentes_screen.dart';
 import 'services/offline_sync.dart';
 import 'services/push_service.dart';
+import 'services/location_tracking_service.dart';
 
 /// Navigator global — permite ao PushService abrir a tela de Notificações ao
 /// tocar num push, mesmo fora da árvore de widgets.
@@ -39,6 +40,7 @@ void main() async {
 
   final themeProvider = ThemeProvider();
   await themeProvider.init();
+  await LocationTrackingService.restoreSnapshot();
 
   // Inicializa push (FCM). Tolerante: sem google-services.json apenas desabilita
   // o push e o app segue com as notificações internas.

@@ -26,7 +26,6 @@ import kotlin.math.roundToInt
 
 class LocationTrackingService : Service() {
     private val handler = Handler(Looper.getMainLooper())
-    private var freteId: String? = null
     private var token: String? = null
     private var baseUrl: String? = null
     private var lastSent: Location? = null
@@ -52,7 +51,6 @@ class LocationTrackingService : Service() {
             return START_NOT_STICKY
         }
 
-        freteId = intent?.getStringExtra(EXTRA_FRETE_ID)
         token = intent?.getStringExtra(EXTRA_TOKEN)
         baseUrl = intent?.getStringExtra(EXTRA_BASE_URL)?.trimEnd('/')
 
@@ -70,19 +68,19 @@ class LocationTrackingService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun captureAndSend() {
-        val currentFrete = freteId ?: return
         val currentToken = token ?: return
         val currentBaseUrl = baseUrl ?: return
         if (!hasLocationPermission()) {
+            Thread { reportState(currentToken, currentBaseUrl, "permissao_nao_concedida") }.start()
             stopSelf()
             return
         }
 
         Thread {
-            flushQueue(currentFrete, currentToken, currentBaseUrl)
+            flushQueue(currentToken, currentBaseUrl)
             val location = bestKnownLocation()
             if (location != null && shouldSend(location)) {
-                val sent = sendPoint(currentFrete, currentToken, currentBaseUrl, locationToJson(location))
+                val sent = sendPoint(currentToken, currentBaseUrl, locationToJson(location))
                 if (sent) {
                     lastSent = location
                     lastSentAt = System.currentTimeMillis()
@@ -98,16 +96,20 @@ class LocationTrackingService : Service() {
         val provider = when {
             locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) -> LocationManager.GPS_PROVIDER
             locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER) -> LocationManager.NETWORK_PROVIDER
-            else -> return
+            else -> {
+                val currentToken = token ?: return
+                val currentBaseUrl = baseUrl ?: return
+                Thread { reportState(currentToken, currentBaseUrl, "gps_desativado") }.start()
+                return
+            }
         }
         locationManager.requestSingleUpdate(provider, object : LocationListener {
             override fun onLocationChanged(location: Location) {
-                val currentFrete = freteId ?: return
                 val currentToken = token ?: return
                 val currentBaseUrl = baseUrl ?: return
                 if (!shouldSend(location)) return
                 Thread {
-                    val sent = sendPoint(currentFrete, currentToken, currentBaseUrl, locationToJson(location))
+                    val sent = sendPoint(currentToken, currentBaseUrl, locationToJson(location))
                     if (sent) {
                         lastSent = location
                         lastSentAt = System.currentTimeMillis()
@@ -139,26 +141,28 @@ class LocationTrackingService : Service() {
         return previous.distanceTo(location) >= MIN_DISTANCE_METERS
     }
 
-    private fun sendPoint(frete: String, bearer: String, apiBase: String, payload: JSONObject): Boolean {
+    private fun sendPoint(bearer: String, apiBase: String, payload: JSONObject): Boolean {
         return try {
-            val ok = postJson("$apiBase/fretes/$frete/localizacao", bearer, payload)
+            val ok = postJson("$apiBase/fretes/localizacao/sessao", bearer, payload)
             if (!ok) enqueue(payload)
             ok
         } catch (_: Exception) {
             enqueue(payload)
+            reportState(bearer, apiBase, "sem_conexao")
             false
         }
     }
 
-    private fun flushQueue(frete: String, bearer: String, apiBase: String) {
+    private fun flushQueue(bearer: String, apiBase: String) {
         val queue = readQueue()
         if (queue.length() == 0) return
         val remaining = JSONArray()
         for (i in 0 until queue.length()) {
             val payload = queue.optJSONObject(i) ?: continue
             val ok = try {
-                postJson("$apiBase/fretes/$frete/localizacao", bearer, payload)
+                postJson("$apiBase/fretes/localizacao/sessao", bearer, payload)
             } catch (_: Exception) {
+                reportState(bearer, apiBase, "sem_conexao")
                 false
             }
             if (!ok) remaining.put(payload)
@@ -183,6 +187,18 @@ class LocationTrackingService : Service() {
             return true
         }
         return code in 200..299 || (code in 400..499 && code != 408 && code != 429)
+    }
+
+    private fun reportState(bearer: String, apiBase: String, state: String) {
+        try {
+            postJson(
+                "$apiBase/fretes/localizacao/sessao/estado",
+                bearer,
+                JSONObject().put("estado", state),
+            )
+        } catch (_: Exception) {
+            // Best-effort: estado operacional nao pode deslogar nem expor coordenadas.
+        }
     }
 
     private fun locationToJson(location: Location): JSONObject {
@@ -248,7 +264,6 @@ class LocationTrackingService : Service() {
 
     companion object {
         private const val ACTION_STOP = "br.com.matopibalog.location.STOP"
-        private const val EXTRA_FRETE_ID = "freteId"
         private const val EXTRA_TOKEN = "token"
         private const val EXTRA_BASE_URL = "baseUrl"
         private const val CHANNEL_ID = "matopibalog_localizacao_viagem"
@@ -260,9 +275,8 @@ class LocationTrackingService : Service() {
         private const val PREFS = "matopibalog_location_tracking"
         private const val KEY_QUEUE = "queue"
 
-        fun start(context: Context, freteId: String, token: String, baseUrl: String) {
+        fun start(context: Context, token: String, baseUrl: String) {
             val intent = Intent(context, LocationTrackingService::class.java).apply {
-                putExtra(EXTRA_FRETE_ID, freteId)
                 putExtra(EXTRA_TOKEN, token)
                 putExtra(EXTRA_BASE_URL, baseUrl)
             }
