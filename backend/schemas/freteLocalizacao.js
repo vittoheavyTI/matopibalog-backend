@@ -15,4 +15,15 @@ const localizacaoSchema = z.object({
   source: z.enum(['app_foreground_service', 'app_foreground']).optional(),
 });
 
-module.exports = { localizacaoSchema };
+const localizacaoEstadoSchema = z.object({
+  estado: z.enum([
+    'aguardando_primeira',
+    'interrompida',
+    'gps_desativado',
+    'permissao_nao_concedida',
+    'sem_conexao',
+  ], { message: 'Estado de localizacao invalido.' }),
+  detalhe: z.string().trim().max(160, 'Detalhe muito longo.').optional(),
+});
+
+module.exports = { localizacaoSchema, localizacaoEstadoSchema };

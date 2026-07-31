@@ -12,14 +12,13 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName).setMethodCallHandler { call, result ->
             when (call.method) {
                 "start" -> {
-                    val freteId = call.argument<String>("freteId")
                     val token = call.argument<String>("token")
                     val baseUrl = call.argument<String>("baseUrl")
-                    if (freteId.isNullOrBlank() || token.isNullOrBlank() || baseUrl.isNullOrBlank()) {
+                    if (token.isNullOrBlank() || baseUrl.isNullOrBlank()) {
                         result.error("invalid_args", "Dados insuficientes para iniciar.", null)
                         return@setMethodCallHandler
                     }
-                    LocationTrackingService.start(this, freteId, token, baseUrl)
+                    LocationTrackingService.start(this, token, baseUrl)
                     result.success(true)
                 }
                 "stop" -> {

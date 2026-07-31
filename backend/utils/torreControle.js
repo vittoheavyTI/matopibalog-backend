@@ -1,6 +1,7 @@
 const statusTexto = (valor) => String(valor || '').trim().toLowerCase();
 
 const STATUS_ATIVOS = new Set(['ativo', 'pendente']);
+const STATUS_RASTREAMENTO_ATIVO = new Set(['ativo', 'em_viagem', 'em_andamento']);
 const STATUS_FINAIS = new Set(['finalizado']);
 const STATUS_CANCELADOS = new Set(['cancelado']);
 const STATUS_OCORRENCIA_ABERTA = new Set(['aberta', 'em_analise']);
@@ -21,6 +22,11 @@ const contarPorFrete = (linhas) => {
 const numero = (valor) => {
   const n = Number(valor);
   return Number.isFinite(n) ? n : null;
+};
+
+const dataValida = (valor) => {
+  const d = new Date(valor || '');
+  return Number.isNaN(d.getTime()) ? null : d;
 };
 
 const nomeMotorista = (frete) => {
@@ -163,11 +169,72 @@ const ordenarItens = (a, b) => {
   return String(b.data || '').localeCompare(String(a.data || ''));
 };
 
-function montarTorreControle({ fretes, ocorrencias, epods, evidencias, localizacoes }) {
+const rotulosLocalizacao = {
+  atualizada: 'Localizacao atualizada',
+  desatualizada: 'Localizacao desatualizada',
+  aguardando_primeira: 'Aguardando primeira localizacao',
+  interrompida: 'Localizacao interrompida',
+  gps_desativado: 'GPS desativado',
+  permissao_nao_concedida: 'Permissao nao concedida',
+  sem_conexao: 'Sem conexao',
+  rastreamento_encerrado: 'Rastreamento encerrado',
+};
+
+const montarLocalizacao = ({ frete, loc, estado }) => {
+  const status = statusTexto(frete.status);
+  const rastreamentoAtivo = STATUS_RASTREAMENTO_ATIVO.has(status);
+  const capturedAt = loc?.captured_at || null;
+  const receivedAt = loc?.received_at || null;
+  const estadoValor = statusTexto(estado?.estado);
+  const estadoAtualizadoEm = dataValida(estado?.atualizado_em);
+  const recebidaEm = dataValida(receivedAt || capturedAt);
+  const estadoFoiSuperado = estadoAtualizadoEm && recebidaEm && recebidaEm > estadoAtualizadoEm;
+
+  let chave = estadoValor || null;
+  if (!rastreamentoAtivo) {
+    chave = STATUS_FINAIS.has(status) || STATUS_CANCELADOS.has(status) ? 'rastreamento_encerrado' : null;
+  } else if (estadoFoiSuperado || chave === 'atualizada') {
+    chave = capturedAt ? 'atualizada' : 'aguardando_primeira';
+  } else if (!chave && capturedAt) {
+    chave = 'atualizada';
+  } else if (!chave) {
+    chave = 'aguardando_primeira';
+  }
+
+  if (rastreamentoAtivo && capturedAt && chave === 'atualizada') {
+    const base = recebidaEm || dataValida(capturedAt);
+    if (base && Date.now() - base.getTime() > 16 * 60 * 1000) {
+      chave = 'desatualizada';
+    }
+  }
+
+  const atencao = rastreamentoAtivo && [
+    'desatualizada',
+    'interrompida',
+    'gps_desativado',
+    'permissao_nao_concedida',
+    'sem_conexao',
+  ].includes(chave);
+
+  return {
+    ultima_enviada_em: capturedAt,
+    recebida_em: receivedAt,
+    accuracy_m: numero(loc?.accuracy_m),
+    ativa: rastreamentoAtivo && Boolean(capturedAt) && chave === 'atualizada',
+    estado: chave,
+    rotulo: chave ? rotulosLocalizacao[chave] || chave : null,
+    detalhe: estado?.detalhe || null,
+    atualizado_em: estado?.atualizado_em || null,
+    nivel_alerta: atencao ? 'atencao' : 'informativo',
+  };
+};
+
+function montarTorreControle({ fretes, ocorrencias, epods, evidencias, localizacoes, localizacaoEstados }) {
   const ocorrPorFrete = contarPorFrete(ocorrencias);
   const epodPorFrete = new Map((epods || []).map((e) => [e.frete_id, e]));
   const evidPorFrete = contarPorFrete(evidencias);
   const locPorFrete = new Map((localizacoes || []).map((l) => [l.frete_id, l]));
+  const estadoLocPorFrete = new Map((localizacaoEstados || []).map((l) => [l.frete_id, l]));
 
   const itens = (fretes || []).map((frete) => {
     const todasOcorrencias = ocorrPorFrete.get(frete.id) || [];
@@ -177,6 +244,18 @@ function montarTorreControle({ fretes, ocorrencias, epods, evidencias, localizac
     const status = statusTexto(frete.status);
     epod.sem_comprovacao = STATUS_FINAIS.has(status) && epod.status === 'sem_epod' && !STATUS_CANCELADOS.has(status);
     const decisao = decidirSituacao({ frete, ocorrenciasAbertas, epodResumo: epod, faltantes });
+    const localizacao = montarLocalizacao({
+      frete,
+      loc: locPorFrete.get(frete.id),
+      estado: estadoLocPorFrete.get(frete.id),
+    });
+    const decisaoComLocalizacao = localizacao.nivel_alerta === 'atencao' && decisao.nivel === 'ok'
+      ? {
+          nivel: 'atencao',
+          situacao: localizacao.rotulo,
+          motivo: localizacao.detalhe || 'A viagem esta em andamento, mas o compartilhamento de localizacao precisa de atencao.',
+        }
+      : decisao;
 
     return {
       frete_id: frete.id,
@@ -189,9 +268,9 @@ function montarTorreControle({ fretes, ocorrencias, epods, evidencias, localizac
       placa: frete.placa || null,
       status: frete.status || null,
       valor_frete: numero(frete.valor_frete),
-      nivel: decisao.nivel,
-      situacao: decisao.situacao,
-      motivo: decisao.motivo,
+      nivel: decisaoComLocalizacao.nivel,
+      situacao: decisaoComLocalizacao.situacao,
+      motivo: decisaoComLocalizacao.motivo,
       dados_incompletos: faltantes,
       ocorrencias: {
         total: todasOcorrencias.length,
@@ -200,15 +279,7 @@ function montarTorreControle({ fretes, ocorrencias, epods, evidencias, localizac
         tipos_abertos: ocorrenciasAbertas.map((o) => o.tipo).filter(Boolean),
       },
       epod,
-      localizacao: (() => {
-        const loc = locPorFrete.get(frete.id);
-        return {
-          ultima_enviada_em: loc?.captured_at || null,
-          recebida_em: loc?.received_at || null,
-          accuracy_m: numero(loc?.accuracy_m),
-          ativa: STATUS_ATIVOS.has(status) && Boolean(loc?.captured_at),
-        };
-      })(),
+      localizacao,
     };
   }).sort(ordenarItens);
 

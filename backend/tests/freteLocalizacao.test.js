@@ -13,6 +13,7 @@ function carregarController(cenario = {}) {
     const b = {
       select(_cols, opts) { if (opts?.count) state.count = true; return b; },
       eq() { return b; },
+      in() { return b; },
       gte() { return b; },
       lte() { return b; },
       order() { return b; },
@@ -26,6 +27,9 @@ function carregarController(cenario = {}) {
         if (state.count) return resolve({ count: cenario.count ?? 0, error: null });
         if (state.delete) return resolve({ data: null, error: null });
         if (tabela === 'frete_localizacoes') return resolve({ data: cenario.historico ?? [], error: null });
+        if (tabela === 'fretes') return resolve({ data: cenario.fretesAtivos ?? [], error: null });
+        if (tabela === 'frete_localizacao_estado') return resolve({ data: cenario.estados ?? [], error: null });
+        if (tabela === 'frete_ultima_localizacao') return resolve({ data: cenario.ultimas ?? [], error: null });
         return resolve({ data: [], error: null });
       },
     };
@@ -42,6 +46,13 @@ function carregarController(cenario = {}) {
         return { data: { ...p, received_at: '2026-07-31T12:05:00Z' }, error: null };
       }
       return { data: cenario.ultima ?? null, error: null };
+    }
+    if (tabela === 'frete_localizacao_estado') {
+      if (state.upsert) {
+        const p = chamadas.upserts.at(-1).payload;
+        return { data: { ...p, atualizado_em: p.atualizado_em || '2026-07-31T12:05:00Z' }, error: null };
+      }
+      return { data: cenario.estado ?? null, error: null };
     }
     return { data: null, error: null };
   }
@@ -123,4 +134,44 @@ test('obter: viagem encerrada nao retorna ultima ativa e preserva historico limi
   assert.equal(res.body.ultima, null);
   assert.equal(res.body.historico.length, 1);
   assert.equal(chamadas.deletes[0].tabela, 'frete_ultima_localizacao');
+});
+
+test('registrarSessao: uma captura atualiza todos os fretes em andamento do motorista no tenant', async () => {
+  const { controller, chamadas } = carregarController({
+    fretesAtivos: [
+      FRETE_ATIVO,
+      { ...FRETE_ATIVO, id: 'frete-2' },
+    ],
+  });
+  const res = resMock();
+  await controller.registrarSessao(req({ params: {} }), res);
+  assert.equal(res.statusCode, 201);
+  assert.equal(res.body.fretes_atualizados, 2);
+  assert.equal(chamadas.inserts.filter((c) => c.tabela === 'frete_localizacoes').length, 2);
+  assert.equal(chamadas.upserts.filter((c) => c.tabela === 'frete_ultima_localizacao').length, 2);
+  assert.equal(chamadas.upserts.filter((c) => c.tabela === 'frete_localizacao_estado').length, 2);
+  assert.deepEqual(chamadas.inserts.map((c) => c.payload.frete_id), ['frete-1', 'frete-2']);
+});
+
+test('registrarSessao: sem frete em andamento retorna 409 sem gravar ponto', async () => {
+  const { controller, chamadas } = carregarController({ fretesAtivos: [] });
+  const res = resMock();
+  await controller.registrarSessao(req({ params: {} }), res);
+  assert.equal(res.statusCode, 409);
+  assert.equal(chamadas.inserts.length, 0);
+  assert.equal(chamadas.upserts.length, 0);
+});
+
+test('registrarEstadoSessao: registra estado operacional sem coordenadas', async () => {
+  const { controller, chamadas } = carregarController({ fretesAtivos: [FRETE_ATIVO] });
+  const res = resMock();
+  await controller.registrarEstadoSessao(req({
+    params: {},
+    body: { estado: 'gps_desativado', detalhe: 'GPS desativado no aparelho.' },
+  }), res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(chamadas.inserts.length, 0);
+  assert.equal(chamadas.upserts[0].tabela, 'frete_localizacao_estado');
+  assert.equal(chamadas.upserts[0].payload.estado, 'gps_desativado');
+  assert.equal(chamadas.upserts[0].payload.latitude, undefined);
 });

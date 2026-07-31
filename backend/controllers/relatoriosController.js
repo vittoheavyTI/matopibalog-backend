@@ -376,9 +376,10 @@ exports.getTorreControle = async (req, res) => {
     let epods = [];
     let evidencias = [];
     let localizacoes = [];
+    let localizacaoEstados = [];
 
     if (ids.length) {
-      const [ocRes, epodRes, evidRes, locRes] = await Promise.all([
+      const [ocRes, epodRes, evidRes, locRes, locEstadoRes] = await Promise.all([
         supabase
           .from('frete_ocorrencias')
           .select('id, frete_id, empresa_id, tipo, status, impacto, ocorrido_em, created_at')
@@ -399,18 +400,25 @@ exports.getTorreControle = async (req, res) => {
           .select('frete_id, empresa_id, motorista_id, accuracy_m, captured_at, received_at')
           .eq('empresa_id', empresaAlvo)
           .in('frete_id', ids),
+        supabase
+          .from('frete_localizacao_estado')
+          .select('frete_id, empresa_id, motorista_id, estado, detalhe, atualizado_em, ultima_localizacao_em')
+          .eq('empresa_id', empresaAlvo)
+          .in('frete_id', ids),
       ]);
       if (ocRes.error) throw ocRes.error;
       if (epodRes.error) throw epodRes.error;
       if (evidRes.error) throw evidRes.error;
       if (locRes.error) throw locRes.error;
+      if (locEstadoRes.error) throw locEstadoRes.error;
       ocorrencias = ocRes.data || [];
       epods = epodRes.data || [];
       evidencias = evidRes.data || [];
       localizacoes = locRes.data || [];
+      localizacaoEstados = locEstadoRes.data || [];
     }
 
-    let torre = montarTorreControle({ fretes, ocorrencias, epods, evidencias, localizacoes });
+    let torre = montarTorreControle({ fretes, ocorrencias, epods, evidencias, localizacoes, localizacaoEstados });
     if (nivel) {
       const itensFiltrados = torre.itens.filter((item) => item.nivel === nivel);
       torre = {

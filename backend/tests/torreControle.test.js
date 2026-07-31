@@ -150,6 +150,37 @@ test('torre: ativo sem exigencia explicita de ePOD nao falha automaticamente', (
   assert.equal(resumo.sem_comprovacao, 0);
 });
 
+test('torre: localizacao interrompida em frete ativo vira atencao observacional', () => {
+  const item = itemUnico({
+    fretes: [frete({ status: 'ativo' })],
+    ocorrencias: [],
+    epods: [],
+    evidencias: [],
+    localizacaoEstados: [{
+      frete_id: 'f-1',
+      estado: 'interrompida',
+      detalhe: 'Permissao ou GPS interrompeu o compartilhamento.',
+      atualizado_em: new Date().toISOString(),
+    }],
+  });
+
+  assert.equal(item.nivel, 'atencao');
+  assert.equal(item.situacao, 'Localizacao interrompida');
+  assert.equal(item.localizacao.estado, 'interrompida');
+});
+
+test('torre: frete pendente nao exige rastreamento ativo', () => {
+  const item = itemUnico({
+    fretes: [frete({ status: 'pendente' })],
+    ocorrencias: [],
+    epods: [],
+    evidencias: [],
+  });
+
+  assert.equal(item.nivel, 'ok');
+  assert.equal(item.localizacao.estado, null);
+});
+
 test('torre: resumo consolida prioridades e pendencias', () => {
   const { resumo, itens } = montarTorreControle({
     fretes: [

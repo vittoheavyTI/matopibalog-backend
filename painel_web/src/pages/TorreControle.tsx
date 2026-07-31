@@ -50,6 +50,11 @@ type Item = {
     recebida_em: string | null;
     accuracy_m: number | null;
     ativa: boolean;
+    estado?: string | null;
+    rotulo?: string | null;
+    detalhe?: string | null;
+    atualizado_em?: string | null;
+    nivel_alerta?: 'atencao' | 'informativo';
   };
 };
 type EmpresaApi = { id: string; nome?: string | null; tipo?: string | null };
@@ -150,6 +155,23 @@ const fmtDataHora = (iso: string | null | undefined) => {
   if (!iso) return '-';
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? '-' : d.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+};
+
+const localizacaoClasse = (item: Item) => (
+  item.localizacao?.nivel_alerta === 'atencao' ? 'text-amber-700' : 'text-green-700'
+);
+
+const localizacaoDetalhe = (item: Item) => {
+  const loc = item.localizacao;
+  if (!loc?.rotulo) return '';
+  const partes = [loc.rotulo];
+  if (loc.ultima_enviada_em) {
+    partes.push(`ultima localizacao enviada: ${fmtDataHora(loc.ultima_enviada_em)}`);
+  }
+  if (loc.accuracy_m != null) {
+    partes.push(`precisao ${Math.round(loc.accuracy_m)} m`);
+  }
+  return partes.join(' - ');
 };
 
 const EmpresaCombobox: React.FC<{
@@ -282,10 +304,9 @@ const LinhaItem: React.FC<{ item: Item }> = ({ item }) => (
       <p className="mt-1 text-[11px] text-gray-400">
         Ocorrências abertas: {item.ocorrencias.abertas} - {comprovanteDetalhe(item)}
       </p>
-      {item.localizacao?.ultima_enviada_em && (
-        <p className="mt-1 text-[11px] text-green-700">
-          Última localização enviada: {fmtDataHora(item.localizacao.ultima_enviada_em)}
-          {item.localizacao.accuracy_m != null ? ` - precisão ${Math.round(item.localizacao.accuracy_m)} m` : ''}
+      {item.localizacao?.rotulo && (
+        <p className={`mt-1 text-[11px] ${localizacaoClasse(item)}`}>
+          {localizacaoDetalhe(item)}
         </p>
       )}
       {item.dados_incompletos.length > 0 && (
@@ -314,7 +335,7 @@ const LinhaItem: React.FC<{ item: Item }> = ({ item }) => (
             <ExternalLink size={11} aria-hidden="true" /> Analisar comprovante
           </Link>
         )}
-        {item.localizacao?.ultima_enviada_em && (
+        {item.localizacao?.rotulo && (
           <Link
             to={linkOperacional(item, 'localizacao')}
             className="inline-flex items-center gap-1 rounded border border-green-200 px-2 py-1 text-[11px] font-semibold text-green-700 hover:bg-green-50"

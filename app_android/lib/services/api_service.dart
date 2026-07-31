@@ -25,7 +25,7 @@ class ApiException implements Exception {
 }
 
 class ApiService {
-  static final String _baseUrl = Config.apiBaseUrl;
+  static const String _baseUrl = Config.apiBaseUrl;
 
   /// Detecta o Content-Type da imagem pela extensão do arquivo. O backend só
   /// aceita JPEG, PNG e WebP; retorna null para qualquer outra extensão (ou
@@ -633,6 +633,27 @@ class ApiService {
     } catch (e) {
       AppLogger.error('ApiService', 'GET /fretes exception', e);
       throw const ApiException('Não foi possível carregar seus dados agora. Tente novamente em instantes.');
+    }
+  }
+
+  static Future<bool> reportLocationTrackingState(String estado, {String? detalhe}) async {
+    try {
+      final payload = <String, dynamic>{'estado': estado};
+      if (detalhe != null && detalhe.trim().isNotEmpty) {
+        payload['detalhe'] = detalhe.trim();
+      }
+      final response = await http
+          .post(
+            Uri.parse('$_baseUrl/fretes/localizacao/sessao/estado'),
+            headers: await _getHeaders(),
+            body: jsonEncode(payload),
+          )
+          .timeout(_timeoutPostJson);
+      AppLogger.api('ApiService', 'POST /fretes/localizacao/sessao/estado', response.statusCode);
+      return response.statusCode >= 200 && response.statusCode < 300;
+    } catch (e) {
+      AppLogger.warning('ApiService', 'estado de localizacao nao enviado');
+      return false;
     }
   }
 
