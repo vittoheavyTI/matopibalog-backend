@@ -13,4 +13,7 @@ router.get('/rentabilidade', verifyToken, isAdmin, verificarEmpresa, verificarPl
 // Acerto financeiro consolidado de motoristas (read-only, tenant-safe).
 router.get('/acerto-motoristas', verifyToken, isAdmin, verificarEmpresa, verificarPlano, relatoriosController.getAcertoMotoristas);
 
+// Torre de controle operacional simples (read-only, tenant-safe).
+router.get('/torre-controle', verifyToken, isAdmin, verificarEmpresa, verificarPlano, relatoriosController.getTorreControle);
+
 module.exports = router;

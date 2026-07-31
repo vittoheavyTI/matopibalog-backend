@@ -3,6 +3,7 @@ const { calcularComissao } = require('../utils/comissao');
 const { freteEstaCancelado } = require('../utils/agregacaoFinanceiraFretes');
 const { calcularRentabilidadeFrete, resumirRentabilidade } = require('../utils/rentabilidadeFrete');
 const { calcularAcertoMotoristas } = require('../utils/acertoMotorista');
+const { montarTorreControle } = require('../utils/torreControle');
 
 exports.getFichaViagem = async (req, res) => {
   const { motorista_id, fretes_ids } = req.query;
@@ -311,5 +312,82 @@ exports.getAcertoMotoristas = async (req, res) => {
   } catch (error) {
     console.error('Erro ao calcular acerto de motoristas:', error?.message || error);
     res.status(500).json({ message: 'Erro ao calcular o acerto de motoristas.' });
+  }
+};
+
+// GET /relatorios/torre-controle - visao operacional read-only por empresa.
+// Backend e a autoridade das prioridades; o painel apenas apresenta.
+exports.getTorreControle = async (req, res) => {
+  const LIMITE_FRETES = 1000;
+  try {
+    const isSuperAdmin = req.user.is_super_admin === true;
+    const empresaAlvo = isSuperAdmin ? (req.query.empresa_id || null) : req.empresa_id;
+    if (!empresaAlvo) {
+      return res.status(400).json({ message: 'Empresa nao identificada.' });
+    }
+
+    const { inicio, fim, motorista_id, status, nivel } = req.query;
+
+    let fretesQuery = supabase
+      .from('fretes')
+      .select('id, empresa_id, motorista_id, data, origem, destino, placa, status, valor_frete, motoristas(usuarios(nome))')
+      .eq('empresa_id', empresaAlvo);
+    if (inicio) fretesQuery = fretesQuery.gte('data', inicio);
+    if (fim) fretesQuery = fretesQuery.lte('data', fim);
+    if (motorista_id) fretesQuery = fretesQuery.eq('motorista_id', motorista_id);
+    if (status) fretesQuery = fretesQuery.eq('status', status);
+    fretesQuery = fretesQuery.order('data', { ascending: false }).limit(LIMITE_FRETES);
+
+    const { data: fretesRaw, error: fretesErr } = await fretesQuery;
+    if (fretesErr) throw fretesErr;
+
+    const fretes = fretesRaw || [];
+    const ids = fretes.map((f) => f.id).filter(Boolean);
+    let ocorrencias = [];
+    let epods = [];
+    let evidencias = [];
+
+    if (ids.length) {
+      const [ocRes, epodRes, evidRes] = await Promise.all([
+        supabase
+          .from('frete_ocorrencias')
+          .select('id, frete_id, empresa_id, tipo, status, impacto, ocorrido_em, created_at')
+          .eq('empresa_id', empresaAlvo)
+          .in('frete_id', ids),
+        supabase
+          .from('frete_epod')
+          .select('id, frete_id, empresa_id, status, comprovado_em, validado_em')
+          .eq('empresa_id', empresaAlvo)
+          .in('frete_id', ids),
+        supabase
+          .from('frete_epod_evidencias')
+          .select('id, frete_id, empresa_id, status, created_at')
+          .eq('empresa_id', empresaAlvo)
+          .in('frete_id', ids),
+      ]);
+      if (ocRes.error) throw ocRes.error;
+      if (epodRes.error) throw epodRes.error;
+      if (evidRes.error) throw evidRes.error;
+      ocorrencias = ocRes.data || [];
+      epods = epodRes.data || [];
+      evidencias = evidRes.data || [];
+    }
+
+    let torre = montarTorreControle({ fretes, ocorrencias, epods, evidencias });
+    if (nivel) {
+      torre = {
+        ...torre,
+        itens: torre.itens.filter((item) => item.nivel === nivel),
+      };
+    }
+
+    res.status(200).json({
+      ...torre,
+      periodo: { inicio: inicio || null, fim: fim || null },
+      limite_aplicado: fretes.length >= LIMITE_FRETES,
+    });
+  } catch (error) {
+    console.error('Erro ao carregar torre de controle:', error?.message || error);
+    res.status(500).json({ message: 'Erro ao carregar a torre de controle.' });
   }
 };
