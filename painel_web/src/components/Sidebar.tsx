@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Users, FileText, Truck, ChevronLeft, ChevronRight, Upload, X, Check, Trash2, Settings, UserCircle, Receipt, History, Building2, DollarSign, Bell, Plug, ClipboardList, Ticket, TrendingUp } from 'lucide-react';
+import { LayoutDashboard, Users, FileText, Truck, ChevronLeft, ChevronRight, Upload, X, Check, Trash2, Settings, UserCircle, Receipt, History, Building2, DollarSign, Bell, Plug, ClipboardList, Ticket, TrendingUp, TowerControl } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../api';
 
@@ -151,6 +151,7 @@ export const Sidebar: React.FC = () => {
   const commonMainNav = [
     { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
     { to: '/relatorios/viagens', icon: Truck, label: 'Gerenciamento de Fretes' },
+    { to: '/relatorios/torre-controle', icon: TowerControl, label: 'Torre de Controle' },
     { to: '/relatorios/resumo', icon: History, label: 'Histórico de Fretes' },
     { to: '/relatorios', icon: FileText, label: 'Relatórios' },
     { to: '/relatorios/rentabilidade', icon: TrendingUp, label: 'Rentabilidade' },
@@ -171,6 +172,7 @@ export const Sidebar: React.FC = () => {
         { to: '/painel-administrativo/planos', icon: ClipboardList, label: 'Planos' },
         { to: '/painel-administrativo/promocoes', icon: Ticket, label: 'Promoções' },
         { to: '/painel-administrativo/financeiro', icon: DollarSign, label: 'Financeiro' },
+        { to: '/relatorios/torre-controle', icon: TowerControl, label: 'Torre de Controle' },
         { to: '/relatorios/resumo', icon: History, label: 'Histórico de Fretes' },
         { to: '/relatorios/acerto-motoristas', icon: Receipt, label: 'Acerto de Motoristas' },
         { to: '/painel-administrativo/usuarios', icon: UserCircle, label: 'Usuários' },
