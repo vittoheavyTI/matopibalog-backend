@@ -297,7 +297,7 @@ class _AddAbastecimentoScreenState extends State<AddAbastecimentoScreen> {
             if (!isAutonomo) ...[
               const SizedBox(height: 16),
               DropdownButtonFormField<String>(
-                value: _quemPagou,
+                initialValue: _quemPagou,
                 items: const [
                   DropdownMenuItem(value: 'proprietario', child: Text('Proprietário')),
                   DropdownMenuItem(value: 'motorista', child: Text('Motorista')),

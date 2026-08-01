@@ -106,5 +106,8 @@ test('mensagem de erro informa campo, valor atual e orientacao', () => {
   assert.equal(r.valorAtual, 150);
   assert.match(r.message, /valor por tonelada\/km/i);
   assert.match(r.message, /150/i);
-  assert.match(r.message, /Revise o campo Valor por tonelada\/km/i);
+  assert.match(r.message, /Campo invalido: Valor por tonelada\/km/i);
+  assert.match(r.message, /Valor atual: R\$ 150/i);
+  assert.match(r.message, /Limite aceitavel: ate R\$ 10/i);
+  assert.match(r.message, /Corrija este campo pelo painel/i);
 });

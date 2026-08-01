@@ -69,7 +69,7 @@ const fmtData = (iso: string | null) => {
 
 const nivelRotulo: Record<Nivel, string> = {
   critico: 'Crítico',
-  atencao: 'Atenção',
+  atencao: 'Precisa de atenção',
   ok: 'Sem alertas',
   informativo: 'Somente consulta',
 };
@@ -515,7 +515,7 @@ export const TorreControle: React.FC = () => {
             <select value={nivel} onChange={(e) => setNivel(e.target.value)} className="mt-0.5 w-full rounded border border-gray-200 bg-white px-2 py-1.5 text-xs">
               <option value="">Todas</option>
               <option value="critico">Crítico</option>
-              <option value="atencao">Atenção</option>
+              <option value="atencao">Precisa de atenção</option>
               <option value="ok">Sem alertas</option>
               <option value="informativo">Somente consulta</option>
             </select>

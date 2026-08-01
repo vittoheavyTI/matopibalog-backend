@@ -91,7 +91,7 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
                 Expanded(
                   flex: 3,
                   child: DropdownButtonFormField<int>(
-                    value: _mesSelecionado,
+                    initialValue: _mesSelecionado,
                     isExpanded: true,
                     decoration: const InputDecoration(
                       labelText: 'Mês',
@@ -109,7 +109,7 @@ class _HistoricoScreenState extends State<HistoricoScreen> {
                 Expanded(
                   flex: 2,
                   child: DropdownButtonFormField<int>(
-                    value: _anoSelecionado,
+                    initialValue: _anoSelecionado,
                     isExpanded: true,
                     decoration: const InputDecoration(
                       labelText: 'Ano',
