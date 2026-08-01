@@ -7,11 +7,16 @@ const { verifyToken, isAdmin } = require('../middlewares/auth');
 const { verificarEmpresa } = require('../middlewares/tenant');
 const { resolveAsaasApiKey } = require('../utils/asaasConfig');
 const {
-  BUCKET_CONTRATOS,
   aceitarContrato,
   carregarPlanoComercial,
   listarContratacaoEmpresa,
 } = require('../services/contratacaoComercialService');
+const {
+  BUCKET_CONTRATOS,
+  caminhoContratoAssinado,
+  criarUrlAssinadaContrato,
+  validarPdfAssinado,
+} = require('../services/contratacaoStorageService');
 const {
   montarSnapshotProposta,
 } = require('../services/contratacaoComercialDomainService');
@@ -124,7 +129,8 @@ router.post('/contratos/:id/aceitar', verifyToken, isAdmin, verificarEmpresa, as
 
 router.post('/contratos/:id/upload-assinado', verifyToken, isAdmin, verificarEmpresa, upload.single('arquivo'), async (req, res) => {
   if (!req.empresa_id) return res.status(400).json({ message: 'Empresa nao identificada.' });
-  if (!req.file) return res.status(400).json({ message: 'Envie o contrato assinado em PDF.' });
+  const arquivo = validarPdfAssinado(req.file);
+  if (!arquivo.ok) return res.status(arquivo.status).json({ message: arquivo.message });
   try {
     const { data: contrato, error } = await supabase
       .from('contratos_comerciais')
@@ -137,7 +143,7 @@ router.post('/contratos/:id/upload-assinado', verifyToken, isAdmin, verificarEmp
     }
 
     const hash = crypto.createHash('sha256').update(req.file.buffer).digest('hex');
-    const path = `${req.empresa_id}/contratos/${contrato.id}/assinado.pdf`;
+    const path = caminhoContratoAssinado({ empresaId: req.empresa_id, contratoId: contrato.id });
     const { error: uploadError } = await supabase.storage
       .from(BUCKET_CONTRATOS)
       .upload(path, req.file.buffer, { contentType: req.file.mimetype, upsert: true });
@@ -160,6 +166,24 @@ router.post('/contratos/:id/upload-assinado', verifyToken, isAdmin, verificarEmp
   } catch (err) {
     console.error('[contratacao/upload-assinado] Falha', { status: 500 });
     return res.status(500).json({ message: 'Erro ao salvar contrato assinado.' });
+  }
+});
+
+router.get('/contratos/:id/assinado-url', verifyToken, isAdmin, verificarEmpresa, async (req, res) => {
+  if (!req.empresa_id) return res.status(400).json({ message: 'Empresa nao identificada.' });
+  try {
+    const { data: contrato, error } = await supabase
+      .from('contratos_comerciais')
+      .select('id, empresa_id, signed_storage_path')
+      .eq('id', req.params.id)
+      .maybeSingle();
+    if (error) throw error;
+
+    const r = await criarUrlAssinadaContrato({ supabase, contrato, empresaId: req.empresa_id });
+    return res.status(r.status).json(r.body);
+  } catch (err) {
+    console.error('[contratacao/assinado-url] Falha', { status: 500 });
+    return res.status(500).json({ message: 'Erro ao abrir contrato assinado.' });
   }
 });
 

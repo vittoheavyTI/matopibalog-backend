@@ -7,7 +7,7 @@ const {
   montarSnapshotProposta,
 } = require('./contratacaoComercialDomainService');
 
-const BUCKET_CONTRATOS = 'contratos-comerciais';
+const { BUCKET_CONTRATOS } = require('./contratacaoStorageService');
 
 function emailHash(email) {
   if (!email) return null;
@@ -160,6 +160,9 @@ async function aceitarContrato({ supabase, contratoId, empresaId, usuarioId, cob
     .maybeSingle();
   if (error) throw error;
   if (!contrato || contrato.empresa_id !== empresaId) return { status: 404, body: { message: 'Contrato nao encontrado.' } };
+  if (contrato.status === STATUS_CONTRATO.CANCELADO) {
+    return { status: 409, body: { message: 'Contrato cancelado nao pode ser aceito.' } };
+  }
 
   const proposta = propostaDoContrato(contrato);
   const deveCobrarImplantacao = deveCriarFaturaImplantacao(proposta?.snapshot).criar;
