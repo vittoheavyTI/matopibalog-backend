@@ -15,12 +15,13 @@ export interface PlanoPublico {
   limite_motoristas: number | null;
   dias_trial: number | null;
   recursos: string[];
+  valor_implantacao?: number | null;
   // Plano "sob negociação" (41+): sem preço de tabela, fora do self-service.
   requer_negociacao?: boolean;
 }
 
 // Defesa extra: o backend já normaliza `recursos` para array de strings.
-export function normalizarRecursos(recursos: any): string[] {
+export function normalizarRecursos(recursos: unknown): string[] {
   if (Array.isArray(recursos)) return recursos.map((r) => String(r).trim()).filter(Boolean);
   if (typeof recursos === 'string' && recursos.trim()) {
     const s = recursos.trim();

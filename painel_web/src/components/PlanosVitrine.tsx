@@ -91,6 +91,13 @@ export const PlanosVitrine: React.FC<PlanosVitrineProps> = ({
             {plano.dias_trial ? (
               <p className="text-sm text-green-600 font-medium mb-6">{plano.dias_trial} dias de teste grátis</p>
             ) : <div className="mb-6" />}
+            {!plano.requer_negociacao && (
+              <p className="text-sm text-emerald-700 font-medium mb-4">
+                {(plano.valor_implantacao || 0) <= 0
+                  ? 'Implantação grátis'
+                  : `Implantação R$ ${Number(plano.valor_implantacao).toFixed(2)}`}
+              </p>
+            )}
             <ul className="space-y-3 mb-8 flex-1">
               <li className="flex items-center gap-2 text-gray-800 font-semibold">
                 <Check size={18} className="text-green-500 shrink-0" />
