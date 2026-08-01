@@ -15,6 +15,8 @@ export interface PlanoPublico {
   limite_motoristas: number | null;
   dias_trial: number | null;
   recursos: string[];
+  capacidade_inclusa?: number | null;
+  preco_motorista_extra?: number | null;
   valor_implantacao?: number | null;
   // Plano "sob negociação" (41+): sem preço de tabela, fora do self-service.
   requer_negociacao?: boolean;

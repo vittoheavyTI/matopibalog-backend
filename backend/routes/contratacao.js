@@ -9,6 +9,7 @@ const { resolveAsaasApiKey } = require('../utils/asaasConfig');
 const {
   aceitarContrato,
   carregarPlanoComercial,
+  criarCobrancaImplantacaoContrato,
   listarContratacaoEmpresa,
 } = require('../services/contratacaoComercialService');
 const {
@@ -92,6 +93,22 @@ router.get('/minha', verifyToken, isAdmin, verificarEmpresa, async (req, res) =>
 router.post('/contratos/:id/aceitar', verifyToken, isAdmin, verificarEmpresa, async (req, res) => {
   if (!req.empresa_id) return res.status(400).json({ message: 'Empresa nao identificada.' });
   try {
+    const r = await aceitarContrato({
+      supabase,
+      contratoId: req.params.id,
+      empresaId: req.empresa_id,
+      usuarioId: req.user.uid,
+    });
+    return res.status(r.status).json(r.body);
+  } catch (err) {
+    console.error('[contratacao/contratos/aceitar] Falha', { status: 500 });
+    return res.status(500).json({ message: 'Erro ao aceitar contrato.' });
+  }
+});
+
+router.post('/contratos/:id/cobranca-implantacao', verifyToken, isAdmin, verificarEmpresa, async (req, res) => {
+  if (!req.empresa_id) return res.status(400).json({ message: 'Empresa nao identificada.' });
+  try {
     let integracoesAsaas = null;
     const cobrancaImplantacao = {
       validar: async () => {
@@ -110,7 +127,7 @@ router.post('/contratos/:id/aceitar', verifyToken, isAdmin, verificarEmpresa, as
         });
       },
     };
-    const r = await aceitarContrato({
+    const r = await criarCobrancaImplantacaoContrato({
       supabase,
       contratoId: req.params.id,
       empresaId: req.empresa_id,
@@ -122,8 +139,8 @@ router.post('/contratos/:id/aceitar', verifyToken, isAdmin, verificarEmpresa, as
     if (err.status === 403 && err.motivo === 'sandbox_obrigatorio') {
       return res.status(403).json({ message: MSG_SANDBOX_OBRIGATORIO });
     }
-    console.error('[contratacao/contratos/aceitar] Falha', { status: 500 });
-    return res.status(500).json({ message: 'Erro ao aceitar contrato.' });
+    console.error('[contratacao/contratos/cobranca-implantacao] Falha', { status: 500 });
+    return res.status(500).json({ message: 'Erro ao gerar cobranca de implantacao.' });
   }
 });
 

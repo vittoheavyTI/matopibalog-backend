@@ -55,7 +55,7 @@ function normalizarImplantacao({ plano, overrideValor, overrideMotivo, overrideP
     valor: deCentavos(parsed.centavos),
     centavos: parsed.centavos,
     gratis: parsed.centavos === 0,
-    rotulo: parsed.centavos === 0 ? 'Implantacao gratis' : `Implantacao R$ ${deCentavos(parsed.centavos).toFixed(2)}`,
+    rotulo: parsed.centavos === 0 ? 'Implantação grátis' : `Implantação R$ ${deCentavos(parsed.centavos).toFixed(2)}`,
     override: houveOverride,
     override_motivo: houveOverride ? String(overrideMotivo).trim() : null,
     override_por: houveOverride ? (overridePor || null) : null,
@@ -125,20 +125,20 @@ function hashConteudo(conteudo) {
 function montarTextoContratoTecnico({ empresa = {}, responsavel = {}, proposta }) {
   const p = proposta || {};
   return [
-    `Contrato tecnico Matopiba Log - ${TEMPLATE_VERSION}`,
+    `Contrato técnico Matopiba Log - ${TEMPLATE_VERSION}`,
     '',
-    'Este arquivo registra os dados comerciais aceitos. O texto juridico definitivo deve ser fornecido ou revisado pelo proprietario e advogado.',
+    'Este arquivo registra os dados comerciais aceitos. O texto jurídico definitivo deve ser fornecido ou revisado pelo proprietário e advogado.',
     '',
-    `Empresa: ${empresa.nome || 'Nao informado'}`,
-    `Responsavel: ${responsavel.nome || 'Nao informado'}`,
-    `Plano: ${p.plano_nome || 'Nao informado'}`,
+    `Empresa: ${empresa.nome || 'Não informado'}`,
+    `Responsável: ${responsavel.nome || 'Não informado'}`,
+    `Plano: ${p.plano_nome || 'Não informado'}`,
     `Quantidade contratada: ${p.quantidade_contratada || 0}`,
     `Mensalidade: R$ ${Number(p.valor_mensal || 0).toFixed(2)}`,
-    `Implantacao: ${p.implantacao_gratis ? 'Implantacao gratis' : `R$ ${Number(p.valor_implantacao || 0).toFixed(2)}`}`,
+    `Implantação: ${p.implantacao_gratis ? 'Implantação grátis' : `R$ ${Number(p.valor_implantacao || 0).toFixed(2)}`}`,
     `Total inicial: R$ ${Number(p.total_inicial || 0).toFixed(2)}`,
     `Trial: ${Number(p.trial_dias || 0)} dias`,
     '',
-    'A cobranca de implantacao, quando positiva e autorizada, e avulsa e separada da mensalidade.',
+    'A cobrança de implantação, quando positiva e autorizada, é avulsa e separada da mensalidade.',
   ].join('\n');
 }
 

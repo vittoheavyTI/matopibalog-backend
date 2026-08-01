@@ -60,7 +60,7 @@ async function criarPropostaEContrato({
   const propostaPayload = {
     empresa_id: empresa.id,
     plano_id: plano.id,
-    status: STATUS_PROPOSTA.ACEITA,
+    status: STATUS_PROPOSTA.ENVIADA,
     origem,
     snapshot: snapshot.proposta,
     valor_mensal: snapshot.proposta.valor_mensal,
@@ -69,8 +69,8 @@ async function criarPropostaEContrato({
     trial_dias: snapshot.proposta.trial_dias,
     implantacao_override_motivo: snapshot.proposta.implantacao_override_motivo,
     criado_por: criadoPor,
-    aceito_por: criadoPor,
-    aceito_em: new Date().toISOString(),
+    aceito_por: null,
+    aceito_em: null,
   };
 
   const { data: proposta, error: propostaError } = await supabase
@@ -89,7 +89,7 @@ async function criarPropostaEContrato({
     .insert({
       proposta_id: proposta.id,
       empresa_id: empresa.id,
-      status: STATUS_CONTRATO.ACEITO_MANUALMENTE,
+      status: STATUS_CONTRATO.AGUARDANDO_ASSINATURA,
       template_version: contrato.template_version,
       provider: contrato.provider,
       content_hash: contrato.content_hash,
@@ -97,8 +97,8 @@ async function criarPropostaEContrato({
         aviso_juridico: 'conteudo_tecnico_pendente_revisao_juridica',
         implantacao_gratis: snapshot.proposta.implantacao_gratis,
       },
-      aceito_por: criadoPor,
-      aceito_em: propostaPayload.aceito_em,
+      aceito_por: null,
+      aceito_em: null,
     })
     .select()
     .single();
@@ -110,8 +110,8 @@ async function criarPropostaEContrato({
     nome: responsavel?.nome || 'Responsavel',
     papel: 'cliente',
     email_hash: emailHash(responsavel?.email),
-    status: 'assinado',
-    assinado_em: propostaPayload.aceito_em,
+    status: 'pendente',
+    assinado_em: null,
   });
 
   await supabase.from('contrato_eventos').insert({
@@ -121,7 +121,7 @@ async function criarPropostaEContrato({
     detalhe: {
       origem,
       implantacao: snapshot.proposta.implantacao_gratis ? 'gratis' : 'positiva',
-      fatura_implantacao: snapshot.proposta.implantacao_gratis ? 'nao_criada' : 'pendente_fluxo_autorizado',
+      fatura_implantacao: snapshot.proposta.implantacao_gratis ? 'nao_criada' : 'aguarda_acao_financeira',
     },
     criado_por: criadoPor,
   });
@@ -136,7 +136,7 @@ async function criarPropostaEContrato({
 async function listarContratacaoEmpresa({ supabase, empresaId }) {
   const { data, error } = await supabase
     .from('propostas_comerciais')
-    .select('id, status, snapshot, valor_mensal, valor_implantacao, total_inicial, trial_dias, aceito_em, contratos_comerciais(id, status, template_version, provider, content_hash, signed_storage_path, aceito_em)')
+    .select('id, status, snapshot, valor_mensal, valor_implantacao, total_inicial, trial_dias, aceito_em, contratos_comerciais(id, status, template_version, signed_storage_path, aceito_em)')
     .eq('empresa_id', empresaId)
     .order('criado_em', { ascending: false })
     .limit(10);
@@ -144,7 +144,30 @@ async function listarContratacaoEmpresa({ supabase, empresaId }) {
     if (tabelaAusente(error)) return { propostas: [], migration_pendente: true };
     throw error;
   }
-  return { propostas: data || [], migration_pendente: false };
+  const propostas = (data || []).map((proposta) => {
+    const contratos = Array.isArray(proposta.contratos_comerciais)
+      ? proposta.contratos_comerciais
+      : (proposta.contratos_comerciais ? [proposta.contratos_comerciais] : []);
+    const resumo = proposta.snapshot || {};
+    return {
+      id: proposta.id,
+      status: proposta.status,
+      resumo,
+      valor_mensal: proposta.valor_mensal,
+      valor_implantacao: proposta.valor_implantacao,
+      total_inicial: proposta.total_inicial,
+      trial_dias: proposta.trial_dias,
+      aceito_em: proposta.aceito_em,
+      contratos_comerciais: contratos.map((contrato) => ({
+        id: contrato.id,
+        status: contrato.status,
+        versao: contrato.template_version,
+        signed_storage_path: contrato.signed_storage_path,
+        aceito_em: contrato.aceito_em,
+      })),
+    };
+  });
+  return { propostas, migration_pendente: false };
 }
 
 function propostaDoContrato(contrato) {
@@ -155,7 +178,7 @@ function propostaDoContrato(contrato) {
 async function aceitarContrato({ supabase, contratoId, empresaId, usuarioId, cobrancaImplantacao = null }) {
   const { data: contrato, error } = await supabase
     .from('contratos_comerciais')
-    .select('id, proposta_id, empresa_id, status, propostas_comerciais(id, snapshot)')
+    .select('id, proposta_id, empresa_id, status, propostas_comerciais(id, status, snapshot)')
     .eq('id', contratoId)
     .maybeSingle();
   if (error) throw error;
@@ -165,18 +188,12 @@ async function aceitarContrato({ supabase, contratoId, empresaId, usuarioId, cob
   }
 
   const proposta = propostaDoContrato(contrato);
-  const deveCobrarImplantacao = deveCriarFaturaImplantacao(proposta?.snapshot).criar;
-
-  if ([STATUS_CONTRATO.ASSINADO, STATUS_CONTRATO.ACEITO_MANUALMENTE].includes(contrato.status)) {
-    let faturaImplantacao = null;
-    if (deveCobrarImplantacao && cobrancaImplantacao?.executar) {
-      faturaImplantacao = await cobrancaImplantacao.executar({ contrato, proposta });
-    }
-    return { status: 200, body: { id: contrato.id, status: contrato.status, idempotente: true, fatura_implantacao: faturaImplantacao } };
+  if ([STATUS_PROPOSTA.CANCELADA, STATUS_PROPOSTA.EXPIRADA].includes(proposta?.status)) {
+    return { status: 409, body: { message: 'Proposta cancelada ou expirada nao pode ser aceita.' } };
   }
 
-  if (deveCobrarImplantacao && cobrancaImplantacao?.validar) {
-    await cobrancaImplantacao.validar({ contrato, proposta });
+  if (contrato.status === STATUS_CONTRATO.ACEITO_MANUALMENTE) {
+    return { status: 200, body: { id: contrato.id, status: contrato.status, idempotente: true, fatura_implantacao: null } };
   }
 
   const agora = new Date().toISOString();
@@ -196,20 +213,50 @@ async function aceitarContrato({ supabase, contratoId, empresaId, usuarioId, cob
     criado_por: usuarioId,
   });
 
-  let faturaImplantacao = null;
-  if (deveCobrarImplantacao && cobrancaImplantacao?.executar) {
-    faturaImplantacao = await cobrancaImplantacao.executar({ contrato, proposta });
-  }
-
   return {
     status: 200,
     body: {
       id: contrato.id,
       status: STATUS_CONTRATO.ACEITO_MANUALMENTE,
       idempotente: false,
-      fatura_implantacao: faturaImplantacao,
+      fatura_implantacao: null,
     },
   };
+}
+
+async function criarCobrancaImplantacaoContrato({ supabase, contratoId, empresaId, usuarioId, cobrancaImplantacao }) {
+  const { data: contrato, error } = await supabase
+    .from('contratos_comerciais')
+    .select('id, proposta_id, empresa_id, status, propostas_comerciais(id, status, snapshot)')
+    .eq('id', contratoId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!contrato || contrato.empresa_id !== empresaId) return { status: 404, body: { message: 'Contrato nao encontrado.' } };
+  if (contrato.status === STATUS_CONTRATO.CANCELADO) return { status: 409, body: { message: 'Contrato cancelado nao pode gerar cobranca.' } };
+
+  const proposta = propostaDoContrato(contrato);
+  if (proposta?.status !== STATUS_PROPOSTA.ACEITA) {
+    return { status: 409, body: { message: 'Aceite o contrato antes de gerar a cobranca de implantacao.' } };
+  }
+
+  const decisao = deveCriarFaturaImplantacao(proposta?.snapshot);
+  if (!decisao.criar) {
+    return { status: 200, body: { resultado: 'pulada', motivo: decisao.motivo, fatura_implantacao: null } };
+  }
+  if (!cobrancaImplantacao?.validar || !cobrancaImplantacao?.executar) {
+    return { status: 503, body: { message: 'Cobranca de implantacao ainda nao configurada.' } };
+  }
+
+  await cobrancaImplantacao.validar({ contrato, proposta });
+  const faturaImplantacao = await cobrancaImplantacao.executar({ contrato, proposta });
+  await supabase.from('contrato_eventos').insert({
+    contrato_id: contrato.id,
+    empresa_id: empresaId,
+    tipo: 'cobranca_implantacao_solicitada',
+    detalhe: { origem: 'acao_financeira_explicita' },
+    criado_por: usuarioId,
+  });
+  return { status: 200, body: { resultado: 'ok', fatura_implantacao: faturaImplantacao } };
 }
 
 module.exports = {
@@ -221,4 +268,5 @@ module.exports = {
   listarContratacaoEmpresa,
   propostaDoContrato,
   aceitarContrato,
+  criarCobrancaImplantacaoContrato,
 };

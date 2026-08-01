@@ -66,7 +66,7 @@ test('contrato tecnico gera hash estavel sem criar texto juridico definitivo', (
   });
 
   assert.equal(contrato.content_hash, hashConteudo(contrato.conteudo));
-  assert.match(contrato.conteudo, /pendente_revisao_juridica|revisado pelo proprietario e advogado/);
+  assert.match(contrato.conteudo, /pendente_revisao_juridica|revisado pelo proprietário e advogado/);
 });
 
 test('provider mock registra envelope sem acoplar Clicksign ao dominio', async () => {
