@@ -62,3 +62,11 @@ test('torre: itens encaminham para telas operacionais sem alterar status diretam
   assert.match(viagens, /scrollIntoView/);
   assert.doesNotMatch(torre, /api\.(post|patch|put|delete)\(/);
 });
+
+test('gerenciamento: localizacao usa estados calculados compartilhados', () => {
+  const localizacao = ler('painel_web/src/components/FreteLocalizacao.tsx');
+
+  assert.match(localizacao, /res\.data\?\.localizacao/);
+  assert.match(localizacao, /Aguardando atualizacao/);
+  assert.match(localizacao, /Localizacao desatualizada/);
+});

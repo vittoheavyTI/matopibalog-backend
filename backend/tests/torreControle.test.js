@@ -1,6 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { montarTorreControle } = require('../utils/torreControle');
+const {
+  LOCALIZACAO_DESATUALIZADA_MS,
+  LOCALIZACAO_HEARTBEAT_MS,
+  montarTorreControle,
+} = require('../utils/torreControle');
 
 const frete = (extra = {}) => ({
   id: extra.id || 'f-1',
@@ -183,6 +187,55 @@ test('torre: localizacao interrompida em frete ativo vira atencao observacional'
   assert.equal(item.nivel, 'atencao');
   assert.equal(item.situacao, 'Localizacao interrompida');
   assert.equal(item.localizacao.estado, 'interrompida');
+});
+
+test('torre: pequeno atraso vira aguardando atualizacao antes de desatualizada', () => {
+  const originalNow = Date.now;
+  Date.now = () => new Date('2026-07-31T12:00:00Z').getTime() + LOCALIZACAO_HEARTBEAT_MS + 60 * 1000;
+  try {
+    const item = itemUnico({
+      fretes: [frete({ status: 'ativo' })],
+      ocorrencias: [],
+      epods: [],
+      evidencias: [],
+      localizacoes: [{
+        frete_id: 'f-1',
+        captured_at: '2026-07-31T12:00:00Z',
+        received_at: '2026-07-31T12:00:00Z',
+      }],
+      localizacaoEstados: [{ frete_id: 'f-1', estado: 'atualizada', atualizado_em: '2026-07-31T12:00:00Z' }],
+    });
+
+    assert.equal(item.nivel, 'ok');
+    assert.equal(item.localizacao.estado, 'aguardando_atualizacao');
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
+test('torre: dois ciclos de tolerancia vencidos viram localizacao desatualizada', () => {
+  const originalNow = Date.now;
+  Date.now = () => new Date('2026-07-31T12:00:00Z').getTime() + LOCALIZACAO_DESATUALIZADA_MS + 60 * 1000;
+  try {
+    const item = itemUnico({
+      fretes: [frete({ status: 'ativo' })],
+      ocorrencias: [],
+      epods: [],
+      evidencias: [],
+      localizacoes: [{
+        frete_id: 'f-1',
+        captured_at: '2026-07-31T12:00:00Z',
+        received_at: '2026-07-31T12:00:00Z',
+      }],
+      localizacaoEstados: [{ frete_id: 'f-1', estado: 'atualizada', atualizado_em: '2026-07-31T12:00:00Z' }],
+    });
+
+    assert.equal(item.nivel, 'atencao');
+    assert.equal(item.situacao, 'Localizacao desatualizada');
+    assert.equal(item.localizacao.estado, 'desatualizada');
+  } finally {
+    Date.now = originalNow;
+  }
 });
 
 test('torre: frete pendente nao exige rastreamento ativo', () => {
