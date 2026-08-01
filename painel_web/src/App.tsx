@@ -30,6 +30,7 @@ import { PlanosPublicos } from './pages/PlanosPublicos';
 import { CadastroPublico } from './pages/CadastroPublico';
 import { EmailConfirmado } from './pages/EmailConfirmado';
 import { MinhasFaturas } from './pages/MinhasFaturas';
+import { Contratacao } from './pages/Contratacao';
 import { RedefinirSenha } from './pages/RedefinirSenha';
 import { TrocarSenhaObrigatoria } from './pages/TrocarSenhaObrigatoria';
 import { TermosPendentes } from './pages/TermosPendentes';
@@ -102,6 +103,7 @@ const AppRoutes = () => {
           <Route path="faturas" element={<Navigate to="../financeiro?aba=faturas" replace />} />
         </Route>
         <Route path="integracoes" element={<SuperAdminRoute><Integracoes /></SuperAdminRoute>} />
+        <Route path="contratacao" element={<Contratacao />} />
         <Route path="minhas-faturas" element={<MinhasFaturas />} />
         <Route path="configuracoes" element={<Configuracoes />} />
       </Route>

@@ -158,6 +158,7 @@ export const Sidebar: React.FC = () => {
     { to: '/relatorios/acerto-motoristas', icon: Receipt, label: 'Acerto de Motoristas' },
     { to: '/motoristas', icon: Users, label: 'Motoristas' },
     { to: '/admins', icon: UserCircle, label: 'Usuários' },
+    { to: '/contratacao', icon: ClipboardList, label: 'Contratação' },
   ];
 
   // O super-admin administra a plataforma. Antes as páginas administrativas viviam

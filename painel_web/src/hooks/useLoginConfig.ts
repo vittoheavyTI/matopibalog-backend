@@ -28,6 +28,7 @@ export interface LoginConfig {
 
 // Prefixo padronizado — matopibalog_
 const PREFIX = 'matopibalog_';
+const WHATSAPP_COMERCIAL_PADRAO = '5577998539572';
 
 // Migração automática: move chaves choferlog_ para matopibalog_ (roda uma vez)
 function migrateKeys() {
@@ -79,7 +80,7 @@ export function readFromLS(): LoginConfig {
     footerText: localStorage.getItem(`${PREFIX}login_footer`) || '',
     contactPhone: localStorage.getItem(`${PREFIX}contact_phone`) || '',
     contactEmail: localStorage.getItem(`${PREFIX}contact_email`) || '',
-    whatsappSuporte: localStorage.getItem(`${PREFIX}whatsapp_suporte`) || '',
+    whatsappSuporte: localStorage.getItem(`${PREFIX}whatsapp_suporte`) || WHATSAPP_COMERCIAL_PADRAO,
     footerColor: localStorage.getItem(`${PREFIX}footer_color`) || '#ffffff',
     footerOpacity: Number(localStorage.getItem(`${PREFIX}footer_opacity`)) || 70,
     footerFontSize: Number(localStorage.getItem(`${PREFIX}footer_font_size`)) || 14,
@@ -93,7 +94,7 @@ export function readFromLS(): LoginConfig {
   };
 }
 
-export function writeToLS(data: Record<string, any>) {
+export function writeToLS(data: Record<string, unknown>) {
   const map: Record<string, string> = {
     loginLogo: `${PREFIX}login_logo`,
     loginLogoScale: `${PREFIX}login_logo_scale`,

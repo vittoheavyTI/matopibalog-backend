@@ -1,5 +1,7 @@
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
+const crypto = require('crypto');
 const supabase = require('../config/supabase');
 const { verifyToken, isAdmin, isSuperAdmin } = require('../middlewares/auth');
 const { criarEmpresaCompleta } = require('../services/empresaService');
@@ -18,6 +20,16 @@ const { categoriaCompativelComTipo, mensagemIncompatibilidade } = require('../ut
 const { resumirBillingHealth } = require('../services/billingHealthService');
 const { recomendarPlano, valorEfetivoEmpresa } = require('../services/calculadoraComercialService');
 const asaasSync = require('../services/asaasSyncDomainService');
+const {
+  aceitarContrato,
+  listarContratacaoEmpresa,
+} = require('../services/contratacaoComercialService');
+const {
+  BUCKET_CONTRATOS,
+  caminhoContratoAssinado,
+  criarUrlAssinadaContrato,
+  validarPdfAssinado,
+} = require('../services/contratacaoStorageService');
 const { criarPromocaoSchema, editarPromocaoSchema, gerarCodigoSchema, validar: validarPromo } = require('../schemas/promocao');
 const {
   TIPOS: PROMO_TIPOS,
@@ -28,6 +40,19 @@ const {
 } = require('../services/promocaoDomainService');
 
 router.use(verifyToken, isAdmin, isSuperAdmin);
+
+const uploadContrato = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype !== 'application/pdf') {
+      const err = new Error('Formato de arquivo nao permitido. Use PDF.');
+      err.code = 'INVALID_FILE_TYPE';
+      return cb(err);
+    }
+    return cb(null, true);
+  },
+});
 
 // Valida/resolve o plano_id recebido do cliente ANTES de tocar o banco.
 // Retorna { plano_id: string|null } em caso de sucesso, ou { status, message }
@@ -142,6 +167,127 @@ router.get('/empresas', async (req, res) => {
   if (error) return res.status(500).json({ message: 'Erro ao listar empresas.' });
   const includeArchived = req.query.includeArchived === 'true';
   res.json(aplicarFiltroArquivamento(data || [], { includeArchived }));
+});
+
+router.get('/empresas/:id/contratacao', async (req, res) => {
+  try {
+    const resultado = await listarContratacaoEmpresa({ supabase, empresaId: req.params.id });
+    const contratoIds = [];
+    for (const proposta of resultado.propostas || []) {
+      const contratos = Array.isArray(proposta.contratos_comerciais)
+        ? proposta.contratos_comerciais
+        : (proposta.contratos_comerciais ? [proposta.contratos_comerciais] : []);
+      for (const contrato of contratos) {
+        if (contrato && contrato.id) contratoIds.push(contrato.id);
+      }
+    }
+
+    let signatarios = [];
+    let eventos = [];
+    if (contratoIds.length > 0) {
+      const [signR, eventosR] = await Promise.all([
+        supabase.from('contrato_signatarios')
+          .select('id, contrato_id, papel, status, assinado_em, criado_em')
+          .eq('empresa_id', req.params.id)
+          .in('contrato_id', contratoIds),
+        supabase.from('contrato_eventos')
+          .select('id, contrato_id, tipo, detalhe, criado_em')
+          .eq('empresa_id', req.params.id)
+          .in('contrato_id', contratoIds)
+          .order('criado_em', { ascending: false }),
+      ]);
+      if (signR.error) return res.status(500).json({ message: 'Erro ao carregar signatarios.' });
+      if (eventosR.error) return res.status(500).json({ message: 'Erro ao carregar eventos.' });
+      signatarios = signR.data || [];
+      eventos = eventosR.data || [];
+    }
+
+    return res.json({ ...resultado, signatarios, eventos });
+  } catch (err) {
+    console.error('[painel-admin/contratacao] Falha', { status: 500 });
+    return res.status(500).json({ message: 'Erro ao carregar contratacao.' });
+  }
+});
+
+router.post('/empresas/:empresaId/contratos/:contratoId/aceitar-manual', async (req, res) => {
+  try {
+    const r = await aceitarContrato({
+      supabase,
+      contratoId: req.params.contratoId,
+      empresaId: req.params.empresaId,
+      usuarioId: req.user.uid,
+    });
+    return res.status(r.status).json(r.body);
+  } catch (err) {
+    console.error('[painel-admin/contratos/aceitar-manual] Falha', { status: 500 });
+    return res.status(500).json({ message: 'Erro ao registrar aceite manual.' });
+  }
+});
+
+router.post('/empresas/:empresaId/contratos/:contratoId/upload-assinado', uploadContrato.single('arquivo'), async (req, res) => {
+  const arquivo = validarPdfAssinado(req.file);
+  if (!arquivo.ok) return res.status(arquivo.status).json({ message: arquivo.message });
+  try {
+    const { data: contrato, error } = await supabase
+      .from('contratos_comerciais')
+      .select('id, empresa_id, status')
+      .eq('id', req.params.contratoId)
+      .maybeSingle();
+    if (error) throw error;
+    if (!contrato || contrato.empresa_id !== req.params.empresaId) {
+      return res.status(404).json({ message: 'Contrato nao encontrado.' });
+    }
+    if (contrato.status === 'cancelado') {
+      return res.status(409).json({ message: 'Contrato cancelado nao pode receber arquivo.' });
+    }
+
+    const hash = crypto.createHash('sha256').update(req.file.buffer).digest('hex');
+    const path = caminhoContratoAssinado({ empresaId: req.params.empresaId, contratoId: contrato.id });
+    const { error: uploadError } = await supabase.storage
+      .from(BUCKET_CONTRATOS)
+      .upload(path, req.file.buffer, { contentType: req.file.mimetype, upsert: true });
+    if (uploadError) throw uploadError;
+
+    const agora = new Date().toISOString();
+    const { error: updateError } = await supabase.from('contratos_comerciais')
+      .update({ signed_storage_path: path, signed_file_hash: hash, status: 'assinado', atualizado_em: agora })
+      .eq('id', contrato.id)
+      .eq('empresa_id', req.params.empresaId);
+    if (updateError) throw updateError;
+    await supabase.from('contrato_signatarios')
+      .update({ status: 'assinado', assinado_em: agora })
+      .eq('contrato_id', contrato.id)
+      .eq('empresa_id', req.params.empresaId)
+      .eq('papel', 'cliente');
+    await supabase.from('contrato_eventos').insert({
+      contrato_id: contrato.id,
+      empresa_id: req.params.empresaId,
+      tipo: 'upload_manual_assinado',
+      detalhe: { arquivo: 'pdf', hash },
+      criado_por: req.user.uid,
+    });
+
+    return res.status(201).json({ id: contrato.id, status: 'assinado', arquivo: 'contrato assinado recebido' });
+  } catch (err) {
+    console.error('[painel-admin/contratos/upload-assinado] Falha', { status: 500 });
+    return res.status(500).json({ message: 'Erro ao salvar contrato assinado.' });
+  }
+});
+
+router.get('/empresas/:empresaId/contratos/:contratoId/assinado-url', async (req, res) => {
+  try {
+    const { data: contrato, error } = await supabase
+      .from('contratos_comerciais')
+      .select('id, empresa_id, signed_storage_path')
+      .eq('id', req.params.contratoId)
+      .maybeSingle();
+    if (error) throw error;
+    const r = await criarUrlAssinadaContrato({ supabase, contrato, empresaId: req.params.empresaId });
+    return res.status(r.status).json(r.body);
+  } catch (err) {
+    console.error('[painel-admin/contratos/assinado-url] Falha', { status: 500 });
+    return res.status(500).json({ message: 'Erro ao abrir contrato assinado.' });
+  }
 });
 
 router.post('/empresas', async (req, res) => {

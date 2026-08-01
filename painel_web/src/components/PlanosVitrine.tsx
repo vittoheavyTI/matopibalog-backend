@@ -80,7 +80,7 @@ export const PlanosVitrine: React.FC<PlanosVitrineProps> = ({
                 <span className="text-3xl font-bold text-gray-900">Sob negociação</span>
               ) : (
                 <>
-                  <span className="text-4xl font-bold text-gray-900">R$ {plano.preco_mensal.toFixed(2)}</span>
+                  <span className="text-4xl font-bold text-gray-900">{plano.preco_mensal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
                   <span className="text-gray-500">/mês</span>
                 </>
               )}
@@ -95,7 +95,7 @@ export const PlanosVitrine: React.FC<PlanosVitrineProps> = ({
               <p className="text-sm text-emerald-700 font-medium mb-4">
                 {(plano.valor_implantacao || 0) <= 0
                   ? 'Implantação grátis'
-                  : `Implantação R$ ${Number(plano.valor_implantacao).toFixed(2)}`}
+                  : `Implantação ${Number(plano.valor_implantacao).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`}
               </p>
             )}
             <ul className="space-y-3 mb-8 flex-1">

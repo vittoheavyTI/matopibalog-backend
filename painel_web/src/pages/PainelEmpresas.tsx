@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Shield, Search, Plus, X, Check, AlertTriangle, Eye, Ban, Unlock, Trash2, KeyRound, CalendarClock, ShieldAlert, UserPlus, CreditCard, Archive, ArchiveRestore } from 'lucide-react';
+import { Shield, Search, Plus, X, Check, AlertTriangle, Eye, Ban, Unlock, Trash2, KeyRound, CalendarClock, ShieldAlert, UserPlus, CreditCard, Archive, ArchiveRestore, FileText } from 'lucide-react';
 import api from '../api';
 import { maskCNPJ, maskCPF, maskPhone } from '../utils/masks';
 
@@ -26,6 +26,50 @@ function trialVencido(iso?: string) {
   if (!iso) return false;
   const d = new Date(iso);
   return !isNaN(d.getTime()) && d < new Date();
+}
+
+type EmpresaContratacao = { id: string; nome?: string };
+type ResumoContratacao = {
+  plano_nome?: string | null;
+  quantidade_contratada?: number | string | null;
+  capacidade_inclusa?: number | string | null;
+  valor_mensal?: number | string | null;
+  valor_implantacao?: number | string | null;
+  total_inicial?: number | string | null;
+  trial_dias?: number | string | null;
+  implantacao_gratis?: boolean | null;
+};
+type ContratoComercial = {
+  id: string;
+  status: string;
+  signed_storage_path?: string | null;
+};
+type PropostaContratacao = {
+  id: string;
+  status: string;
+  resumo?: ResumoContratacao;
+  contratos_comerciais?: ContratoComercial[] | ContratoComercial | null;
+};
+type SignatarioContratacao = { id: string; papel: string; status: string };
+type EventoContratacao = { id: string; tipo: string };
+type DadosContratacao = {
+  propostas?: PropostaContratacao[];
+  signatarios?: SignatarioContratacao[];
+  eventos?: EventoContratacao[];
+};
+
+function contratoPrincipal(proposta?: PropostaContratacao | null) {
+  const c = proposta?.contratos_comerciais;
+  if (!c) return null;
+  return Array.isArray(c) ? (c[0] || null) : c;
+}
+
+function mensagemApi(err: unknown, fallback: string) {
+  if (typeof err === 'object' && err && 'response' in err) {
+    const response = (err as { response?: { data?: { message?: string } } }).response;
+    return response?.data?.message || fallback;
+  }
+  return fallback;
 }
 
 // Estado de assinatura da conta (discreto). Define o rótulo e se a ação
@@ -72,6 +116,10 @@ export const PainelEmpresas: React.FC = () => {
   // posteriormente. Não é o fluxo comercial final.
   const [assinaturaTarget, setAssinaturaTarget] = useState<any | null>(null);
   const [assinaturaEnviando, setAssinaturaEnviando] = useState(false);
+  const [contratacaoTarget, setContratacaoTarget] = useState<EmpresaContratacao | null>(null);
+  const [contratacaoDados, setContratacaoDados] = useState<DadosContratacao | null>(null);
+  const [contratacaoLoading, setContratacaoLoading] = useState(false);
+  const [contratacaoEnviando, setContratacaoEnviando] = useState(false);
   const [planosLoading, setPlanosLoading] = useState(false);
   const [planosErro, setPlanosErro] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -310,6 +358,68 @@ export const PainelEmpresas: React.FC = () => {
     }
   }
 
+  async function abrirContratacao(e: EmpresaContratacao) {
+    setContratacaoTarget(e);
+    setContratacaoDados(null);
+    setContratacaoLoading(true);
+    try {
+      const { data } = await api.get('/painel-admin/empresas/' + e.id + '/contratacao');
+      setContratacaoDados(data);
+    } catch (err: unknown) {
+      setToast({ message: mensagemApi(err, 'Erro ao carregar contratação.'), tipo: 'erro' });
+    } finally {
+      setContratacaoLoading(false);
+    }
+  }
+
+  async function uploadContratoAssinado(file: File) {
+    const contrato = contratoPrincipal(contratacaoDados?.propostas?.[0]);
+    if (!contratacaoTarget || !contrato) return;
+    const form = new FormData();
+    form.append('arquivo', file);
+    setContratacaoEnviando(true);
+    try {
+      await api.post(`/painel-admin/empresas/${contratacaoTarget.id}/contratos/${contrato.id}/upload-assinado`, form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setToast({ message: 'Contrato assinado recebido.', tipo: 'sucesso' });
+      await abrirContratacao(contratacaoTarget);
+    } catch (err: unknown) {
+      setToast({ message: mensagemApi(err, 'Erro ao enviar contrato.'), tipo: 'erro' });
+    } finally {
+      setContratacaoEnviando(false);
+    }
+  }
+
+  async function aceitarContratoManual() {
+    const contrato = contratoPrincipal(contratacaoDados?.propostas?.[0]);
+    if (!contratacaoTarget || !contrato) return;
+    setContratacaoEnviando(true);
+    try {
+      await api.post(`/painel-admin/empresas/${contratacaoTarget.id}/contratos/${contrato.id}/aceitar-manual`);
+      setToast({ message: 'Aceite manual registrado.', tipo: 'sucesso' });
+      await abrirContratacao(contratacaoTarget);
+    } catch (err: unknown) {
+      setToast({ message: mensagemApi(err, 'Erro ao registrar aceite.'), tipo: 'erro' });
+    } finally {
+      setContratacaoEnviando(false);
+    }
+  }
+
+  async function abrirContratoAssinadoAdmin() {
+    const contrato = contratoPrincipal(contratacaoDados?.propostas?.[0]);
+    if (!contratacaoTarget || !contrato) return;
+    setContratacaoEnviando(true);
+    try {
+      const { data } = await api.get(`/painel-admin/empresas/${contratacaoTarget.id}/contratos/${contrato.id}/assinado-url`);
+      if (data?.url) window.open(data.url, '_blank', 'noopener,noreferrer');
+    } catch (err: unknown) {
+      setToast({ message: mensagemApi(err, 'Contrato assinado ainda não disponível.'), tipo: 'erro' });
+    } finally {
+      setContratacaoEnviando(false);
+    }
+  }
+
   const filtered = empresas.filter(e => {
     const porBusca = (e.nome || '').toLowerCase().includes(searchTerm.toLowerCase()) || (e.cnpj || '').includes(searchTerm);
     // 'autonomos' → só tipo autonomo; 'empresas' → todo o resto (transportadora, fazenda etc).
@@ -442,6 +552,7 @@ export const PainelEmpresas: React.FC = () => {
                     <button onClick={() => { setTrialTarget(e); setCustomDate(''); setConfirmAtivo(false); }} title="Gerenciar trial" aria-label="Gerenciar trial da empresa" className="p-1.5 text-amber-600 hover:bg-amber-50 rounded-lg"><CalendarClock size={16} /></button>
                     <button onClick={() => abrirPrazo(e)} title="Prazo de suspensão (inadimplência)" aria-label="Conceder prazo de suspensão por inadimplência" className={`p-1.5 rounded-lg ${e.suspensao_prazo_ate ? 'text-indigo-600 hover:bg-indigo-50' : 'text-slate-500 hover:bg-slate-100'}`}><ShieldAlert size={16} /></button>
                     <button onClick={() => resetSenhaAdmin(e.id, e.nome)} className="p-1.5 text-gray-500 hover:bg-gray-100 rounded-lg" title="Resetar senha do admin" aria-label="Resetar senha do admin"><KeyRound size={16} /></button>
+                    <button onClick={() => abrirContratacao(e)} className="p-1.5 text-blue-700 hover:bg-blue-50 rounded-lg" title="Contratação comercial" aria-label="Abrir contratação comercial"><FileText size={16} /></button>
                     <button onClick={() => { setArchiveTarget(e); setArchiveMotivo(''); }} title={e.arquivada_em ? 'Restaurar conta' : 'Arquivar conta (tira da operação, mantém histórico)'} aria-label={e.arquivada_em ? 'Restaurar conta' : 'Arquivar conta'} className="p-1.5 text-slate-500 hover:bg-slate-100 rounded-lg">{e.arquivada_em ? <ArchiveRestore size={16} /> : <Archive size={16} />}</button>
                     <button onClick={() => setDeleteTarget(e)} title="Excluir empresa" aria-label="Excluir empresa" className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg"><Trash2 size={16} /></button>
                     {(() => {
@@ -623,6 +734,103 @@ export const PainelEmpresas: React.FC = () => {
           </div>
         </div>
       )}
+
+      {contratacaoTarget && (() => {
+        const proposta = contratacaoDados?.propostas?.[0] || null;
+        const contrato = contratoPrincipal(proposta);
+        const resumo = proposta?.resumo || {};
+        const signatarios = contratacaoDados?.signatarios || [];
+        const eventos = contratacaoDados?.eventos || [];
+        return (
+          <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-fade-in">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden max-h-[90vh] flex flex-col">
+              <div className="px-6 py-4 border-b flex justify-between items-center bg-gray-50">
+                <div>
+                  <h3 className="text-xl font-bold text-gray-800">Contratação comercial</h3>
+                  <p className="text-sm text-gray-500">{contratacaoTarget.nome}</p>
+                </div>
+                <button onClick={() => { setContratacaoTarget(null); setContratacaoDados(null); }} className="p-2 hover:bg-gray-200 rounded-full" title="Fechar" aria-label="Fechar"><X size={22} /></button>
+              </div>
+
+              <div className="p-6 overflow-y-auto space-y-4">
+                {contratacaoLoading ? (
+                  <p className="text-sm text-gray-500">Carregando contratação...</p>
+                ) : !proposta ? (
+                  <p className="text-sm text-gray-600 bg-amber-50 border border-amber-100 rounded-xl p-3">Nenhuma proposta comercial encontrada para esta conta.</p>
+                ) : (
+                  <>
+                    <div className="grid sm:grid-cols-3 gap-3">
+                      <div className="rounded-xl border border-gray-100 bg-gray-50 p-3">
+                        <p className="text-xs uppercase font-bold text-gray-400">Proposta</p>
+                        <p className="font-semibold text-gray-800">{proposta.status}</p>
+                      </div>
+                      <div className="rounded-xl border border-gray-100 bg-gray-50 p-3">
+                        <p className="text-xs uppercase font-bold text-gray-400">Contrato</p>
+                        <p className="font-semibold text-gray-800">{contrato?.status || 'em preparação'}</p>
+                      </div>
+                      <div className="rounded-xl border border-gray-100 bg-gray-50 p-3">
+                        <p className="text-xs uppercase font-bold text-gray-400">Implantação</p>
+                        <p className="font-semibold text-gray-800">{resumo.implantacao_gratis ? 'Grátis' : `R$ ${Number(resumo.valor_implantacao || 0).toFixed(2).replace('.', ',')}`}</p>
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-gray-100 p-4">
+                      <h4 className="font-bold text-gray-800 mb-2">Resumo comercial</h4>
+                      <div className="grid sm:grid-cols-2 gap-2 text-sm text-gray-600">
+                        <p><strong>Plano:</strong> {resumo.plano_nome || '-'}</p>
+                        <p><strong>Quantidade:</strong> {resumo.quantidade_contratada || '-'} motorista(s)</p>
+                        <p><strong>Capacidade incluída:</strong> {resumo.capacidade_inclusa || '-'} motorista(s)</p>
+                        <p><strong>Mensalidade:</strong> R$ {Number(resumo.valor_mensal || 0).toFixed(2).replace('.', ',')}</p>
+                        <p><strong>Total inicial:</strong> R$ {Number(resumo.total_inicial || 0).toFixed(2).replace('.', ',')}</p>
+                        <p><strong>Teste grátis:</strong> {resumo.trial_dias || 0} dias</p>
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-gray-100 p-4">
+                      <h4 className="font-bold text-gray-800 mb-2">Signatários e eventos</h4>
+                      <div className="grid sm:grid-cols-2 gap-4 text-sm">
+                        <div>
+                          <p className="text-xs uppercase font-bold text-gray-400 mb-1">Signatários</p>
+                          {signatarios.length === 0 ? <p className="text-gray-400">Nenhum registro.</p> : signatarios.map((s: SignatarioContratacao) => (
+                            <p key={s.id} className="text-gray-700">{s.papel}: <strong>{s.status}</strong></p>
+                          ))}
+                        </div>
+                        <div>
+                          <p className="text-xs uppercase font-bold text-gray-400 mb-1">Eventos</p>
+                          {eventos.length === 0 ? <p className="text-gray-400">Nenhum evento.</p> : eventos.slice(0, 5).map((ev: EventoContratacao) => (
+                            <p key={ev.id} className="text-gray-700">{ev.tipo}</p>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <div className="p-4 bg-gray-50 border-t flex flex-wrap justify-end gap-2">
+                <label className={`px-4 py-2 rounded-lg text-sm font-medium bg-white border border-gray-200 text-gray-700 hover:bg-gray-100 ${(!contrato || contratacaoEnviando) ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
+                  Enviar PDF assinado
+                  <input
+                    type="file"
+                    accept="application/pdf"
+                    className="hidden"
+                    disabled={!contrato || contratacaoEnviando}
+                    onChange={(ev) => {
+                      const file = ev.target.files?.[0];
+                      ev.currentTarget.value = '';
+                      if (file) uploadContratoAssinado(file);
+                    }}
+                  />
+                </label>
+                <button disabled={!contrato?.signed_storage_path || contratacaoEnviando} onClick={abrirContratoAssinadoAdmin} className="px-4 py-2 rounded-lg text-sm font-medium bg-white border border-gray-200 text-gray-700 hover:bg-gray-100 disabled:opacity-50">Baixar PDF</button>
+                <button disabled={!contrato || contratacaoEnviando || contrato.status === 'aceito_manualmente'} onClick={aceitarContratoManual} className="px-4 py-2 rounded-lg text-sm font-medium bg-green-700 text-white hover:bg-green-800 disabled:opacity-50">
+                  Registrar aceite manual
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {successConta && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-fade-in">
