@@ -1,5 +1,6 @@
 const supabase = require('../config/supabase');
 const { buscarFreteComAcesso } = require('./freteAcesso');
+const { montarLocalizacao } = require('../utils/torreControle');
 
 const STATUS_ATIVOS = new Set(['ativo', 'em_viagem', 'em_andamento']);
 const STATUS_ENCERRADOS = new Set(['finalizado', 'cancelado']);
@@ -130,6 +131,7 @@ async function registrarEstadoFrete(frete, estado, opcoes = {}) {
 }
 
 const gravarPontoNoFrete = async (frete, body) => {
+  const receivedAt = new Date().toISOString();
   const payload = {
     empresa_id: frete.empresa_id,
     frete_id: frete.id,
@@ -138,6 +140,7 @@ const gravarPontoNoFrete = async (frete, body) => {
     longitude: body.longitude,
     accuracy_m: body.accuracy_m ?? null,
     captured_at: body.captured_at,
+    received_at: receivedAt,
     source: body.source || 'app_foreground_service',
   };
 
@@ -333,11 +336,22 @@ exports.obter = async (req, res) => {
     ]);
     if (ultimaError) throw ultimaError;
     if (estadoError) throw estadoError;
+    const localizacao = montarLocalizacao({ frete, loc: ultima, estado });
+    const estadoCalculado = localizacao.estado
+      ? {
+          ...sanitizarEstado(estado),
+          estado: localizacao.estado,
+          detalhe: localizacao.rotulo,
+          atualizado_em: localizacao.atualizado_em,
+          ultima_localizacao_em: localizacao.ultima_enviada_em,
+        }
+      : sanitizarEstado(estado);
 
     return res.status(200).json({
-      ativa: STATUS_ATIVOS.has(status),
+      ativa: localizacao.ativa,
       ultima: sanitizarLocalizacao(ultima),
-      estado: sanitizarEstado(estado),
+      estado: estadoCalculado,
+      localizacao,
       historico: [],
     });
   } catch (error) {

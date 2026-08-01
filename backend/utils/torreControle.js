@@ -7,6 +7,10 @@ const STATUS_CANCELADOS = new Set(['cancelado']);
 const STATUS_OCORRENCIA_ABERTA = new Set(['aberta', 'em_analise']);
 const STATUS_EPOD_OK = new Set(['validado']);
 const STATUS_EPOD_ATENCAO = new Set(['registrado', 'parcial', 'rejeitado']);
+const LOCALIZACAO_INTERVALO_CAPTURA_MS = 5 * 60 * 1000;
+const LOCALIZACAO_HEARTBEAT_MS = 15 * 60 * 1000;
+const LOCALIZACAO_TOLERANCIA_MS = 2 * LOCALIZACAO_INTERVALO_CAPTURA_MS;
+const LOCALIZACAO_DESATUALIZADA_MS = LOCALIZACAO_HEARTBEAT_MS + LOCALIZACAO_TOLERANCIA_MS;
 
 const contarPorFrete = (linhas) => {
   const mapa = new Map();
@@ -171,6 +175,7 @@ const ordenarItens = (a, b) => {
 
 const rotulosLocalizacao = {
   atualizada: 'Localizacao atualizada',
+  aguardando_atualizacao: 'Aguardando atualizacao',
   desatualizada: 'Localizacao desatualizada',
   aguardando_primeira: 'Aguardando primeira localizacao',
   interrompida: 'Localizacao interrompida',
@@ -203,8 +208,10 @@ const montarLocalizacao = ({ frete, loc, estado }) => {
 
   if (rastreamentoAtivo && capturedAt && chave === 'atualizada') {
     const base = recebidaEm || dataValida(capturedAt);
-    if (base && Date.now() - base.getTime() > 16 * 60 * 1000) {
+    if (base && Date.now() - base.getTime() > LOCALIZACAO_DESATUALIZADA_MS) {
       chave = 'desatualizada';
+    } else if (base && Date.now() - base.getTime() > LOCALIZACAO_HEARTBEAT_MS) {
+      chave = 'aguardando_atualizacao';
     }
   }
 
@@ -219,6 +226,8 @@ const montarLocalizacao = ({ frete, loc, estado }) => {
   return {
     ultima_enviada_em: capturedAt,
     recebida_em: receivedAt,
+    captured_at: capturedAt,
+    received_at: receivedAt,
     accuracy_m: numero(loc?.accuracy_m),
     ativa: rastreamentoAtivo && Boolean(capturedAt) && chave === 'atualizada',
     estado: chave,
@@ -307,6 +316,11 @@ function resumirItensTorre(itens = []) {
 
 module.exports = {
   montarTorreControle,
+  montarLocalizacao,
   resumirItensTorre,
   statusTexto,
+  LOCALIZACAO_INTERVALO_CAPTURA_MS,
+  LOCALIZACAO_HEARTBEAT_MS,
+  LOCALIZACAO_TOLERANCIA_MS,
+  LOCALIZACAO_DESATUALIZADA_MS,
 };

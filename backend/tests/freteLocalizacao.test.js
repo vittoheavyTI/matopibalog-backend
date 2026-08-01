@@ -102,6 +102,7 @@ test('registrar: motorista dono em viagem ativa grava historico e ultima localiz
   assert.equal(chamadas.upserts[0].tabela, 'frete_ultima_localizacao');
   assert.equal(chamadas.inserts[0].payload.empresa_id, 'emp-1');
   assert.equal(chamadas.inserts[0].payload.motorista_id, 'mot-1');
+  assert.match(chamadas.upserts[0].payload.received_at, /^\d{4}-\d{2}-\d{2}T/);
 });
 
 test('registrar: admin nao envia localizacao pelo motorista', async () => {
@@ -136,6 +137,42 @@ test('obter: viagem encerrada nao retorna ultima ativa e preserva historico limi
   assert.equal(chamadas.deletes[0].tabela, 'frete_ultima_localizacao');
 });
 
+test('obter: detalhe usa o mesmo estado calculado da Torre para localizacao desatualizada', async () => {
+  const originalNow = Date.now;
+  Date.now = () => new Date('2026-07-31T12:31:00Z').getTime();
+  try {
+    const { controller } = carregarController({
+      frete: FRETE_ATIVO,
+      ultima: {
+        frete_id: 'frete-1',
+        motorista_id: 'mot-1',
+        accuracy_m: 49,
+        captured_at: '2026-07-31T12:00:00Z',
+        received_at: '2026-07-31T12:00:30Z',
+        source: 'app_foreground_service',
+      },
+      estado: {
+        frete_id: 'frete-1',
+        motorista_id: 'mot-1',
+        estado: 'atualizada',
+        atualizado_em: '2026-07-31T12:00:31Z',
+        ultima_localizacao_em: '2026-07-31T12:00:00Z',
+      },
+    });
+    const res = resMock();
+    await controller.obter(req(), res);
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.localizacao.estado, 'desatualizada');
+    assert.equal(res.body.localizacao.captured_at, '2026-07-31T12:00:00Z');
+    assert.equal(res.body.localizacao.received_at, '2026-07-31T12:00:30Z');
+    assert.equal(res.body.estado.estado, 'desatualizada');
+    assert.equal(res.body.ativa, false);
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
 test('registrarSessao: uma captura atualiza todos os fretes em andamento do motorista no tenant', async () => {
   const { controller, chamadas } = carregarController({
     fretesAtivos: [
@@ -151,6 +188,9 @@ test('registrarSessao: uma captura atualiza todos os fretes em andamento do moto
   assert.equal(chamadas.upserts.filter((c) => c.tabela === 'frete_ultima_localizacao').length, 2);
   assert.equal(chamadas.upserts.filter((c) => c.tabela === 'frete_localizacao_estado').length, 2);
   assert.deepEqual(chamadas.inserts.map((c) => c.payload.frete_id), ['frete-1', 'frete-2']);
+  assert.ok(chamadas.upserts
+    .filter((c) => c.tabela === 'frete_ultima_localizacao')
+    .every((c) => typeof c.payload.received_at === 'string' && c.payload.received_at.includes('T')));
 });
 
 test('registrarSessao: sem frete em andamento retorna 409 sem gravar ponto', async () => {

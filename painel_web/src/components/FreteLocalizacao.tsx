@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { MapPin, RefreshCw } from 'lucide-react';
 import api from '../api';
 
@@ -6,6 +6,8 @@ type Localizacao = {
   captured_at: string | null;
   received_at: string | null;
   accuracy_m: number | null;
+  estado?: string | null;
+  rotulo?: string | null;
 };
 
 type EstadoLocalizacao = {
@@ -29,25 +31,29 @@ export const FreteLocalizacao: React.FC<{ freteId: string }> = ({ freteId }) => 
   const [estado, setEstado] = useState<EstadoLocalizacao | null>(null);
   const [historicoQtd, setHistoricoQtd] = useState(0);
 
-  const carregar = async () => {
+  const carregar = useCallback(async () => {
     setLoading(true);
     setErro('');
     try {
       const res = await api.get(`/fretes/${freteId}/localizacao`);
       setAtiva(res.data?.ativa === true);
-      setUltima(res.data?.ultima || null);
-      setEstado(res.data?.estado || null);
+      setUltima(res.data?.localizacao || res.data?.ultima || null);
+      setEstado(res.data?.estado || (res.data?.localizacao ? {
+        estado: res.data.localizacao.estado,
+        detalhe: res.data.localizacao.rotulo,
+        atualizado_em: res.data.localizacao.atualizado_em,
+      } : null));
       setHistoricoQtd(Array.isArray(res.data?.historico) ? res.data.historico.length : 0);
     } catch {
       setErro('Nao foi possivel carregar a ultima localizacao enviada.');
     } finally {
       setLoading(false);
     }
-  };
+  }, [freteId]);
 
   useEffect(() => {
     queueMicrotask(() => { void carregar(); });
-  }, [freteId]);
+  }, [carregar]);
 
   return (
     <div className="mt-3 rounded border border-gray-100 bg-gray-50 p-3 text-xs text-gray-600">
@@ -83,6 +89,8 @@ export const FreteLocalizacao: React.FC<{ freteId: string }> = ({ freteId }) => 
 
 const rotuloEstado = (estado: string | null) => ({
   atualizada: 'Localizacao atualizada',
+  aguardando_atualizacao: 'Aguardando atualizacao',
+  desatualizada: 'Localizacao desatualizada',
   aguardando_primeira: 'Aguardando primeira localizacao',
   interrompida: 'Localizacao interrompida',
   gps_desativado: 'GPS desativado',
