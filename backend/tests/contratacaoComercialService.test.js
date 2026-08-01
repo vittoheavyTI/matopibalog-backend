@@ -114,3 +114,55 @@ test('aceitarContrato bloqueia implantacao positiva antes de gravar quando valid
   assert.equal(updates.length, 0);
   assert.equal(inserts.length, 0);
 });
+
+test('aceitarContrato nao reativa contrato cancelado nem cria cobranca', async () => {
+  const updates = [];
+  const inserts = [];
+  let validouCobranca = false;
+  let executouCobranca = false;
+  const contrato = {
+    id: 'contrato-1',
+    proposta_id: 'proposta-1',
+    empresa_id: 'emp-1',
+    status: 'cancelado',
+    propostas_comerciais: {
+      id: 'proposta-1',
+      snapshot: {
+        plano_id: 'plano-1',
+        plano_nome: 'Empresa Start',
+        valor_implantacao: 299,
+        implantacao_gratis: false,
+      },
+    },
+  };
+  const supabase = {
+    from(tabela) {
+      const api = {
+        select() { return api; },
+        eq() { return api; },
+        maybeSingle: async () => ({ data: tabela === 'contratos_comerciais' ? contrato : null, error: null }),
+        update(payload) { updates.push({ tabela, payload }); return api; },
+        insert(payload) { inserts.push({ tabela, payload }); return api; },
+      };
+      return api;
+    },
+  };
+
+  const r = await aceitarContrato({
+    supabase,
+    contratoId: 'contrato-1',
+    empresaId: 'emp-1',
+    usuarioId: 'user-1',
+    cobrancaImplantacao: {
+      validar: async () => { validouCobranca = true; },
+      executar: async () => { executouCobranca = true; },
+    },
+  });
+
+  assert.equal(r.status, 409);
+  assert.match(r.body.message, /cancelado/i);
+  assert.equal(validouCobranca, false);
+  assert.equal(executouCobranca, false);
+  assert.equal(updates.length, 0);
+  assert.equal(inserts.length, 0);
+});
