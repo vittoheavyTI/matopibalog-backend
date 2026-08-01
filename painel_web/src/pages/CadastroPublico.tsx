@@ -33,6 +33,11 @@ interface PromoPreview {
   implantacao_promocional: number | null;
 }
 
+type PlanoPublicoApi = Partial<PlanoPublico> & {
+  id: string;
+  nome: string;
+};
+
 // Fallback usado APENAS se /planos/publicos falhar — mantém o cadastro funcionando
 // e a vitrine com o mesmo visual. ids são aliases legados (não-UUID).
 const PLANOS_FALLBACK: PlanoPublico[] = [
@@ -95,11 +100,15 @@ export const CadastroPublico: React.FC = () => {
     const qpAlias = searchParams.get('plano');
     api.get('/planos/publicos?categoria=empresa')
       .then((res) => {
-        const lista: PlanoPublico[] = (res.data?.planos || []).map((p: any) => ({
+        const lista: PlanoPublico[] = ((res.data?.planos || []) as PlanoPublicoApi[]).map((p) => ({
           ...p,
+          descricao: p.descricao || '',
           preco_mensal: Number(p.preco_mensal) || 0,
           modelo_cobranca: p.modelo_cobranca === 'por_motorista' ? 'por_motorista' : 'fixo',
           preco_por_motorista: p.preco_por_motorista != null ? Number(p.preco_por_motorista) : null,
+          limite_motoristas: p.limite_motoristas != null ? Number(p.limite_motoristas) : null,
+          dias_trial: p.dias_trial != null ? Number(p.dias_trial) : null,
+          valor_implantacao: p.valor_implantacao != null ? Number(p.valor_implantacao) : null,
           recursos: normalizarRecursos(p.recursos),
         }));
         const catalogo = lista.length ? lista : PLANOS_FALLBACK;
@@ -211,8 +220,9 @@ export const CadastroPublico: React.FC = () => {
       await api.post('/auth/register-empresa', payload);
       setSuccess('Sua conta foi criada.');
       setConcluido(true);
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Erro ao cadastrar. Tente novamente.');
+    } catch (err: unknown) {
+      const resp = (err as { response?: { data?: { message?: string } } })?.response;
+      setError(resp?.data?.message || 'Erro ao cadastrar. Tente novamente.');
     } finally {
       setLoading(false);
     }
@@ -236,6 +246,8 @@ export const CadastroPublico: React.FC = () => {
 
   // Preço/mensalidade a exibir no resumo, considerando promoção aplicada.
   const precoMensalidade = planoSelecionado ? planoSelecionado.preco_mensal : 0;
+  const valorImplantacao = planoSelecionado ? Number(planoSelecionado.valor_implantacao || 0) : 0;
+  const implantacaoResumo = Math.max(0, promoPreview?.implantacao_promocional ?? valorImplantacao);
   const temPromo = !!(promoPreview && promoPreview.valido && promoPreview.preco_promocional != null);
 
   return (
@@ -436,6 +448,12 @@ export const CadastroPublico: React.FC = () => {
                   {planoSelecionado.dias_trial ? (
                     <div className="mt-1 text-sm text-green-600 font-medium">{planoSelecionado.dias_trial} dias de teste grátis</div>
                   ) : null}
+                  <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+                    {implantacaoResumo <= 0 ? 'Implantação grátis' : `Implantação: ${precoBRL(implantacaoResumo)}`}
+                  </div>
+                  <div className="mt-2 text-sm text-gray-600">
+                    Total inicial: <span className="font-semibold text-gray-900">{precoBRL(implantacaoResumo)}</span>
+                  </div>
                 </div>
               ) : (
                 <div className="mb-4 text-sm text-gray-500">Nenhum plano selecionado.</div>

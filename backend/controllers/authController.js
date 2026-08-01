@@ -2,6 +2,7 @@ const supabase = require('../config/supabase');
 const { createClient } = require('@supabase/supabase-js');
 const jwt = require('jsonwebtoken');
 const { criarEmpresaCompleta } = require('../services/empresaService');
+const { criarPropostaEContrato } = require('../services/contratacaoComercialService');
 const notificacaoService = require('../services/notificacaoService');
 const planoLimiteService = require('../services/planoLimiteService');
 const { getTermosPendentes } = require('./termosController');
@@ -761,6 +762,31 @@ exports.registerEmpresa = async (req, res) => {
     }
 
     // Dispara o e-mail de confirmação (não-fatal) e sinaliza pendência ao cliente.
+    let contratacao = null;
+    if (empresaData.plano_id) {
+      try {
+        const { data: planoContrato } = await supabase
+          .from('planos')
+          .select('id, nome, preco_mensal, dias_trial, limite_motoristas, capacidade_inclusa, preco_motorista_extra, valor_implantacao, requer_negociacao')
+          .eq('id', empresaData.plano_id)
+          .maybeSingle();
+        if (planoContrato) {
+          contratacao = await criarPropostaEContrato({
+            supabase,
+            empresa: empresaData,
+            responsavel: { nome, email },
+            plano: planoContrato,
+            origem: 'cadastro_publico',
+            criadoPor: authData.user.id,
+          });
+        }
+      } catch (contratoErr) {
+        console.error('[registerEmpresa] contratacao (nao-fatal)', {
+          motivo: contratoErr.motivo || contratoErr.code || 'erro',
+        });
+      }
+    }
+
     await enviarConfirmacaoEmail(email);
 
     res.status(201).json({
@@ -768,6 +794,12 @@ exports.registerEmpresa = async (req, res) => {
       empresa_id: empresaData.id,
       email_confirmacao_pendente: true,
       promocao_aplicada,
+      contratacao: contratacao && !contratacao.skipped ? {
+        proposta_id: contratacao.proposta_id,
+        contrato_id: contratacao.contrato_id,
+        implantacao: contratacao.snapshot?.implantacao_gratis ? 'gratis' : 'positiva',
+        fatura_implantacao: contratacao.snapshot?.implantacao_gratis ? 'nao_criada' : 'pendente_autorizacao',
+      } : null,
     });
   } catch (err) {
     console.error('Erro no register-empresa:', err);
