@@ -13,6 +13,7 @@ enum LocationTrackingStartResult {
   serviceDisabled,
   denied,
   deniedForever,
+  approximateOnly,
   missingSession,
   failed,
 }
@@ -23,6 +24,7 @@ enum LocationTrackingStatus {
   awaitingPermission,
   permissionDenied,
   deniedForever,
+  approximateOnly,
   gpsDisabled,
   missingSession,
   unsupported,
@@ -48,6 +50,7 @@ class LocationTrackingService {
       MethodChannel('br.com.matopibalog/location_tracking');
   static const _statusKey = 'location_tracking_status';
   static const _activeTripsKey = 'location_tracking_active_trips';
+  static const _onboardingShownKey = 'location_tracking_onboarding_shown';
   static const _activeStatuses = {'ativo', 'em_viagem', 'em_andamento'};
 
   static final ValueNotifier<LocationTrackingSnapshot> snapshot =
@@ -89,7 +92,7 @@ class LocationTrackingService {
 
   static Future<LocationTrackingStartResult> startForActiveTrips({
     int activeTrips = 1,
-    bool requestPermission = true,
+    bool requestPermission = false,
   }) async {
     return _startSession(
       activeTrips: activeTrips.clamp(1, 4),
@@ -98,7 +101,7 @@ class LocationTrackingService {
   }
 
   static Future<LocationTrackingStartResult> prepareForTripStart({
-    bool requestPermission = true,
+    bool requestPermission = false,
   }) async {
     const activeTrips = 1;
     if (!Platform.isAndroid) {
@@ -122,6 +125,10 @@ class LocationTrackingService {
       await _persist(LocationTrackingStatus.deniedForever, activeTrips);
       return LocationTrackingStartResult.deniedForever;
     }
+    if (await _hasApproximateOnly()) {
+      await _persist(LocationTrackingStatus.approximateOnly, activeTrips);
+      return LocationTrackingStartResult.approximateOnly;
+    }
     final token = await ApiService.currentSessionToken();
     if (token == null || token.isEmpty) {
       await _persist(LocationTrackingStatus.missingSession, activeTrips);
@@ -134,7 +141,57 @@ class LocationTrackingService {
     if (freteId.isEmpty) {
       return Future.value(LocationTrackingStartResult.failed);
     }
-    return startForActiveTrips(requestPermission: true);
+    return startForActiveTrips(requestPermission: false);
+  }
+
+  static Future<bool> shouldShowPermissionOnboarding() async {
+    if (!Platform.isAndroid) return false;
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool(_onboardingShownKey) == true) return false;
+    final permission = await Geolocator.checkPermission();
+    return permission == LocationPermission.denied ||
+        permission == LocationPermission.unableToDetermine;
+  }
+
+  static Future<void> markPermissionOnboardingShown() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_onboardingShownKey, true);
+  }
+
+  static Future<LocationTrackingStartResult> requestPermissionFromOnboarding() async {
+    await markPermissionOnboardingShown();
+    if (!Platform.isAndroid) return LocationTrackingStartResult.unsupported;
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied ||
+        permission == LocationPermission.unableToDetermine) {
+      permission = await Geolocator.requestPermission();
+    }
+    if (permission == LocationPermission.denied) {
+      await _persist(LocationTrackingStatus.permissionDenied, 0);
+      return LocationTrackingStartResult.denied;
+    }
+    if (permission == LocationPermission.deniedForever) {
+      await _persist(LocationTrackingStatus.deniedForever, 0);
+      return LocationTrackingStartResult.deniedForever;
+    }
+    if (await _hasApproximateOnly()) {
+      await _persist(LocationTrackingStatus.approximateOnly, 0);
+      return LocationTrackingStartResult.approximateOnly;
+    }
+    await _persist(LocationTrackingStatus.inactive, 0);
+    return LocationTrackingStartResult.started;
+  }
+
+  static Future<void> openOperationalSettings(LocationTrackingStartResult result) async {
+    if (!Platform.isAndroid) return;
+    if (result == LocationTrackingStartResult.serviceDisabled) {
+      await Geolocator.openLocationSettings();
+      return;
+    }
+    if (result == LocationTrackingStartResult.deniedForever ||
+        result == LocationTrackingStartResult.approximateOnly) {
+      await Geolocator.openAppSettings();
+    }
   }
 
   static Future<LocationTrackingStartResult> _startSession({
@@ -171,6 +228,11 @@ class LocationTrackingService {
       await _persist(LocationTrackingStatus.awaitingPermission, activeTrips);
       return LocationTrackingStartResult.denied;
     }
+    if (await _hasApproximateOnly()) {
+      await ApiService.reportLocationTrackingState('permissao_nao_concedida');
+      await _persist(LocationTrackingStatus.approximateOnly, activeTrips);
+      return LocationTrackingStartResult.approximateOnly;
+    }
 
     final token = await ApiService.currentSessionToken();
     if (token == null || token.isEmpty) {
@@ -201,6 +263,16 @@ class LocationTrackingService {
       }
     }
     await _persist(LocationTrackingStatus.inactive, 0);
+  }
+
+  static Future<bool> _hasApproximateOnly() async {
+    if (!Platform.isAndroid) return false;
+    try {
+      final accuracy = await Geolocator.getLocationAccuracy();
+      return accuracy == LocationAccuracyStatus.reduced;
+    } catch (_) {
+      return false;
+    }
   }
 
   static int _countActiveTrips(List<dynamic> fretes) {
@@ -243,6 +315,8 @@ class LocationTrackingService {
         return 'Permissao negada. O app segue utilizavel, mas o compartilhamento nao esta ativo.';
       case LocationTrackingStatus.deniedForever:
         return 'Permissao bloqueada nas configuracoes do Android.';
+      case LocationTrackingStatus.approximateOnly:
+        return 'A operacao exige localizacao precisa. Ajuste a permissao nas configuracoes do Android.';
       case LocationTrackingStatus.gpsDisabled:
         return 'Ative a localizacao do aparelho para compartilhar a viagem.';
       case LocationTrackingStatus.missingSession:

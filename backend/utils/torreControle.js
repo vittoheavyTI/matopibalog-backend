@@ -1,6 +1,6 @@
 const statusTexto = (valor) => String(valor || '').trim().toLowerCase();
 
-const STATUS_ATIVOS = new Set(['ativo', 'pendente']);
+const STATUS_ATIVOS = new Set(['ativo', 'pendente', 'em_viagem', 'em_andamento']);
 const STATUS_RASTREAMENTO_ATIVO = new Set(['ativo', 'em_viagem', 'em_andamento']);
 const STATUS_FINAIS = new Set(['finalizado']);
 const STATUS_CANCELADOS = new Set(['cancelado']);

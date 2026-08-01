@@ -25,8 +25,6 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  bool _autoPromptedLocation = false;
-
   @override
   void initState() {
     super.initState();
@@ -57,18 +55,6 @@ class _HomeScreenState extends State<HomeScreen> {
       await LocationTrackingService.stop();
       return;
     }
-    final continuar = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Compartilhar localizacao da viagem?'),
-        content: const Text('O app enviara a ultima localizacao aproximadamente a cada 5 minutos somente enquanto houver viagem em andamento. Uma notificacao persistente sera exibida. Se voce negar a permissao, o app continua funcionando sem compartilhamento.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Agora nao')),
-          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Continuar')),
-        ],
-      ),
-    );
-    if (continuar != true || !mounted) return;
     final result = await LocationTrackingService.startForActiveTrips(
       activeTrips: activeTrips,
       requestPermission: true,
@@ -76,6 +62,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!mounted) return;
     final msg = _mensagemRastreamento(result);
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    await LocationTrackingService.openOperationalSettings(result);
   }
 
   String _mensagemRastreamento(LocationTrackingStartResult result) {
@@ -88,6 +75,8 @@ class _HomeScreenState extends State<HomeScreen> {
         return 'Permissao negada. O app segue utilizavel, mas o compartilhamento nao esta ativo.';
       case LocationTrackingStartResult.deniedForever:
         return 'Permissao bloqueada nas configuracoes do Android.';
+      case LocationTrackingStartResult.approximateOnly:
+        return 'A operacao exige localizacao precisa. Ajuste a permissao nas configuracoes do Android.';
       case LocationTrackingStartResult.missingSession:
         return 'Sessao nao encontrada para iniciar o compartilhamento.';
       case LocationTrackingStartResult.unsupported:
@@ -102,11 +91,11 @@ class _HomeScreenState extends State<HomeScreen> {
     return ValueListenableBuilder<LocationTrackingSnapshot>(
       valueListenable: LocationTrackingService.snapshot,
       builder: (context, tracking, _) {
-        final precisaAcao = activeTrips > 0 && !tracking.isActive;
-        final cor = tracking.isActive
-            ? Colors.green.shade700
-            : (activeTrips > 0 ? Colors.amber.shade800 : Colors.grey.shade600);
+        final precisaAcao = _precisaMostrarAlertaLocalizacao(activeTrips, tracking);
+        if (!precisaAcao) return const SizedBox.shrink();
+        final cor = Colors.amber.shade800;
         return Card(
+          color: Colors.amber.shade50,
           child: Padding(
             padding: const EdgeInsets.all(14),
             child: Row(
@@ -118,26 +107,38 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('Ultima localizacao enviada', style: TextStyle(fontWeight: FontWeight.bold)),
+                      const Text('Localizacao precisa de atencao', style: TextStyle(fontWeight: FontWeight.bold)),
                       const SizedBox(height: 4),
                       Text(
-                        activeTrips == 0 ? 'Nao ha viagem em andamento.' : tracking.message,
+                        tracking.message,
                         style: TextStyle(color: Colors.grey.shade700, fontSize: 13),
                       ),
                     ],
                   ),
                 ),
-                if (precisaAcao)
-                  TextButton(
-                    onPressed: () => _solicitarAtivacaoLocalizacao(finance),
-                    child: const Text('Ativar'),
-                  ),
+                TextButton(
+                  onPressed: () => _solicitarAtivacaoLocalizacao(finance),
+                  child: const Text('Ativar'),
+                ),
               ],
             ),
           ),
         );
       },
     );
+  }
+
+  bool _precisaMostrarAlertaLocalizacao(int activeTrips, LocationTrackingSnapshot tracking) {
+    if (activeTrips == 0 || tracking.isActive) return false;
+    return const {
+      LocationTrackingStatus.awaitingPermission,
+      LocationTrackingStatus.permissionDenied,
+      LocationTrackingStatus.deniedForever,
+      LocationTrackingStatus.approximateOnly,
+      LocationTrackingStatus.gpsDisabled,
+      LocationTrackingStatus.failed,
+      LocationTrackingStatus.missingSession,
+    }.contains(tracking.status);
   }
 
   bool _gerandoRegularizacao = false;
@@ -308,19 +309,6 @@ class _HomeScreenState extends State<HomeScreen> {
     // Ativos/pendentes no topo, finalizados depois; dentro do grupo, data desc.
     // Apenas reordena a lista de exibição — não altera nenhum cálculo.
     _ordenarFretesPorPrioridade(fretesHome);
-    final activeTrackingTrips = _fretesEmAndamentoParaRastreamento(finance);
-    if (activeTrackingTrips == 0) {
-      _autoPromptedLocation = false;
-    } else if (!_autoPromptedLocation &&
-        finance.hasLoadedOnce &&
-        !finance.loading &&
-        !LocationTrackingService.snapshot.value.isActive) {
-      _autoPromptedLocation = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _solicitarAtivacaoLocalizacao(finance);
-      });
-    }
-
     return RefreshIndicator(
       onRefresh: _refresh,
       // Spinner central só na PRIMEIRA carga (sem dados ainda). Nos refreshes

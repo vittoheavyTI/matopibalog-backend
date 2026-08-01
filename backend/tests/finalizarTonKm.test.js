@@ -137,7 +137,8 @@ test('finalizar tonelada_km com valor_tonelada_km > 10 (legado absurdo) → 422,
     { km_final: 1500 },
   );
   assert.equal(resposta.status, 422);
-  assert.match(resposta.body.message, /limites operacionais/i);
+  assert.match(resposta.body.message, /Não foi possível finalizar a viagem/i);
+  assert.match(resposta.body.message, /valor por tonelada\/km/i);
   assert.equal(capt.updatePayload, undefined, 'não deve finalizar / não grava valor absurdo');
 });
 
@@ -148,7 +149,8 @@ test('finalizar tonelada_km cujo valor derivado passaria de R$1.000.000 → 422,
     { km_final: 4000 },
   );
   assert.equal(resposta.status, 422);
-  assert.match(resposta.body.message, /limites operacionais/i);
+  assert.match(resposta.body.message, /Não foi possível finalizar a viagem/i);
+  assert.match(resposta.body.message, /valor do frete calculado/i);
   assert.equal(capt.updatePayload, undefined);
 });
 

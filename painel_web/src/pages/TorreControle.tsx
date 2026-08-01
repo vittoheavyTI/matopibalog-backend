@@ -83,6 +83,8 @@ const nivelClasse: Record<Nivel, string> = {
 
 const statusRotulo = (status: string | null) => ({
   ativo: 'Em andamento',
+  em_viagem: 'Em andamento',
+  em_andamento: 'Em andamento',
   pendente: 'Pendente',
   finalizado: 'Finalizado',
   cancelado: 'Cancelado',
@@ -112,7 +114,7 @@ const situacaoAmigavel = (item: Item) => ({
 
 const motivoAmigavel = (item: Item) => {
   if (item.status === 'cancelado') return 'Viagem cancelada: exibida somente para consulta.';
-  if (item.status === 'ativo' && item.nivel === 'ok') return 'Viagem em andamento, sem alertas.';
+  if (['ativo', 'em_viagem', 'em_andamento'].includes(item.status || '') && item.nivel === 'ok') return 'Viagem em andamento, sem alertas.';
   if (item.status === 'finalizado' && item.epod.status === 'sem_epod') return 'Viagem finalizada sem comprovante de entrega registrado.';
   if (item.status === 'finalizado' && item.epod.status === 'validado') return 'Viagem finalizada com comprovante de entrega aprovado.';
   return item.motivo
@@ -503,7 +505,7 @@ export const TorreControle: React.FC = () => {
           <label className="text-xs text-gray-600">Status
             <select value={status} onChange={(e) => setStatus(e.target.value)} className="mt-0.5 w-full rounded border border-gray-200 bg-white px-2 py-1.5 text-xs">
               <option value="">Todos</option>
-              <option value="ativo">Em andamento</option>
+              <option value="em_andamento">Em andamento</option>
               <option value="pendente">Pendente</option>
               <option value="finalizado">Finalizado</option>
               <option value="cancelado">Cancelado</option>

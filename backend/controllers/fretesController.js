@@ -116,6 +116,10 @@ const checkMotoristaStatus = async (uid) => {
 // Mensagem única da trava de pendências (reuso nas duas travas)
 const MSG_PENDENCIAS = 'Não é possível finalizar: há lançamentos pendentes desta viagem. Aprove ou rejeite todos antes de finalizar.';
 
+const mensagemFinalizacaoLimite = (limite) => (
+  `Não foi possível finalizar a viagem. ${limite?.message || 'Revise os dados do frete antes de continuar.'}`
+);
+
 // Datas simples representam o último dia incluído pelo cliente. Converte esse
 // dia no limite exclusivo seguinte; datetimes já expressam o limite desejado.
 const normalizarDataFimExclusiva = (dataFim) => {
@@ -686,7 +690,7 @@ exports.finalizar = async (req, res) => {
         kmInicial: kmInicialEfetivo,
         kmFinal: kmFinalEfetivo,
       });
-      if (!limite.ok) return res.status(422).json({ message: limite.message });
+      if (!limite.ok) return res.status(422).json({ message: mensagemFinalizacaoLimite(limite) });
       updatePayload.valor_frete = calc;
     }
 

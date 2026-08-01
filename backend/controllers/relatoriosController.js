@@ -348,7 +348,11 @@ exports.getTorreControle = async (req, res) => {
     if (inicio) fretesQuery = fretesQuery.gte('data', inicio);
     if (fim) fretesQuery = fretesQuery.lte('data', fim);
     if (motorista_id) fretesQuery = fretesQuery.eq('motorista_id', motorista_id);
-    if (status) fretesQuery = fretesQuery.eq('status', status);
+    if (status === 'em_andamento') {
+      fretesQuery = fretesQuery.in('status', ['ativo', 'pendente', 'em_viagem', 'em_andamento']);
+    } else if (status) {
+      fretesQuery = fretesQuery.eq('status', status);
+    }
     fretesQuery = fretesQuery.order('data', { ascending: false }).limit(LIMITE_FRETES);
 
     const { data: fretesRaw, error: fretesErr } = await fretesQuery;

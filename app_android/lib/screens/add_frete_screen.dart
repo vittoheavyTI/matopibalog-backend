@@ -192,23 +192,12 @@ class _AddFreteScreenState extends State<AddFreteScreen> {
   }
 
   Future<bool> _prepararRastreamentoAntesDoInicio() async {
-    final continuar = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Compartilhar localizacao da viagem?'),
-        content: const Text('Para iniciar o frete em andamento, o app precisa enviar a ultima localizacao aproximadamente a cada 5 minutos enquanto a viagem estiver ativa. Uma notificacao persistente sera exibida.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Agora nao')),
-          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Continuar')),
-        ],
-      ),
-    );
-    if (continuar != true || !mounted) return false;
-    final result = await LocationTrackingService.prepareForTripStart();
+    final result = await LocationTrackingService.prepareForTripStart(requestPermission: false);
     if (result == LocationTrackingStartResult.started) return true;
     if (!mounted) return false;
     final msg = _mensagemRastreamento(result);
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    await LocationTrackingService.openOperationalSettings(result);
     return false;
   }
 
@@ -222,6 +211,8 @@ class _AddFreteScreenState extends State<AddFreteScreen> {
         return 'Permissao negada. O frete permanece pendente ate a permissao ser concedida.';
       case LocationTrackingStartResult.deniedForever:
         return 'Permissao bloqueada nas configuracoes do Android. O frete permanece pendente.';
+      case LocationTrackingStartResult.approximateOnly:
+        return 'A operacao exige localizacao precisa. Ajuste a permissao nas configuracoes do Android.';
       case LocationTrackingStartResult.missingSession:
         return 'Sessao nao encontrada para iniciar o compartilhamento.';
       case LocationTrackingStartResult.unsupported:
