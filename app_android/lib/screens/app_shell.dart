@@ -5,6 +5,7 @@ import '../providers/finance_provider.dart';
 import '../providers/theme_provider.dart';
 import '../services/api_service.dart';
 import '../services/app_logger.dart';
+import '../services/location_tracking_service.dart';
 import '../services/push_service.dart';
 import '../widgets/seletor_frete.dart';
 import 'home_screen.dart';
@@ -26,12 +27,16 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   int _naoLidas = 0;
+  bool _verificouOnboardingLocalizacao = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _carregarContador();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _onboardLocationPermissionIfNeeded();
+    });
     // Ao receber um push em primeiro plano, atualiza o badge do sino E os dados
     // da tela (Últimos Fretes/Lançamentos) sem o usuário precisar recarregar.
     PushService.onPushRecebido = _onEventoNotificacao;
@@ -71,6 +76,47 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Future<void> _carregarContador() async {
     final count = await ApiService.contarNotificacoesNaoLidas();
     if (mounted) setState(() => _naoLidas = count);
+  }
+
+  Future<void> _onboardLocationPermissionIfNeeded() async {
+    if (_verificouOnboardingLocalizacao || !mounted) return;
+    _verificouOnboardingLocalizacao = true;
+    final deveMostrar = await LocationTrackingService.shouldShowPermissionOnboarding();
+    if (!mounted || !deveMostrar) return;
+    final continuar = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text('Permitir localizacao da viagem'),
+        content: const Text(
+          'O Matopiba Log usa localizacao precisa somente durante viagens em andamento. '
+          'Depois de conceder, nao sera necessario autorizar de novo para cada frete.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Agora nao'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Continuar'),
+          ),
+        ],
+      ),
+    );
+    if (continuar != true || !mounted) {
+      await LocationTrackingService.markPermissionOnboardingShown();
+      return;
+    }
+    final result = await LocationTrackingService.requestPermissionFromOnboarding();
+    if (!mounted) return;
+    if (result == LocationTrackingStartResult.deniedForever ||
+        result == LocationTrackingStartResult.approximateOnly) {
+      final msg = result == LocationTrackingStartResult.approximateOnly
+          ? 'A operacao exige localizacao precisa. Ajuste a permissao nas configuracoes.'
+          : 'Permissao bloqueada. Abra as configuracoes para permitir a localizacao.';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    }
   }
 
   /// Abre a tela de notificações e, ao voltar, recarrega o contador

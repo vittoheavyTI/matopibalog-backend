@@ -150,6 +150,22 @@ test('torre: ativo sem exigencia explicita de ePOD nao falha automaticamente', (
   assert.equal(resumo.sem_comprovacao, 0);
 });
 
+test('torre: em_viagem e em_andamento contam no resumo de viagens em andamento', () => {
+  const { resumo, itens } = montarTorreControle({
+    fretes: [
+      frete({ id: 'f-1', status: 'em_viagem' }),
+      frete({ id: 'f-2', status: 'em_andamento' }),
+      frete({ id: 'f-3', status: 'finalizado' }),
+    ],
+    ocorrencias: [],
+    epods: [],
+    evidencias: [],
+  });
+
+  assert.equal(resumo.em_andamento, 2);
+  assert.equal(itens.filter((i) => i.status === 'em_viagem' || i.status === 'em_andamento').length, 2);
+});
+
 test('torre: localizacao interrompida em frete ativo vira atencao observacional', () => {
   const item = itemUnico({
     fretes: [frete({ status: 'ativo' })],

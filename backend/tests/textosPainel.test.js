@@ -19,6 +19,7 @@ test('painel: textos principais usam portugues claro nas tres paginas recentes',
   assert.match(acerto, /O valor apresentado é uma apuração/);
   assert.match(torre, /Torre de Controle/);
   assert.match(torre, /Acompanhe suas viagens e veja rapidamente quais precisam de atenção/);
+  assert.match(torre, /Precisa de atenção/);
   assert.match(torre, /Comprovações pendentes/);
 });
 

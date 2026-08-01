@@ -104,7 +104,8 @@ test('create tonelada_km 50 × 799 × 150 (caso real R$5.992.500) → 422, sem i
     modalidade_calculo: 'tonelada_km', toneladas: 50, valor_tonelada_km: 150, km_inicial: 1, km_final: 800,
   });
   assert.equal(resposta.status, 422);
-  assert.match(resposta.body.message, /limites operacionais/i);
+  assert.match(resposta.body.message, /valor por tonelada\/km/i);
+  assert.match(resposta.body.message, /150/i);
   assert.equal(insertPayload, null, 'não deve inserir quando reprova');
 });
 
@@ -115,7 +116,8 @@ test('create tonelada_km 48 × 1750 × 450 (caso real R$37.800.000) → 422, sem
     modalidade_calculo: 'tonelada_km', toneladas: 48, valor_tonelada_km: 450, km_inicial: 1, km_final: 1751,
   });
   assert.equal(resposta.status, 422);
-  assert.match(resposta.body.message, /limites operacionais/i);
+  assert.match(resposta.body.message, /valor por tonelada\/km/i);
+  assert.match(resposta.body.message, /450/i);
   assert.equal(insertPayload, null);
 });
 
@@ -153,7 +155,8 @@ test('create valor_fixo acima de R$1.000.000 → 422, sem insert', async () => {
     valor_frete: 2000000,
   });
   assert.equal(resposta.status, 422);
-  assert.match(resposta.body.message, /limites operacionais/i);
+  assert.match(resposta.body.message, /valor do frete calculado/i);
+  assert.match(resposta.body.message, /2.000.000/i);
   assert.equal(insertPayload, null);
 });
 

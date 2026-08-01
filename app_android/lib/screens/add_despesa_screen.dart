@@ -274,7 +274,7 @@ class _AddDespesaScreenState extends State<AddDespesaScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             DropdownButtonFormField<String>(
-              value: _tipo,
+              initialValue: _tipo,
               items: ['Alimentação', 'Pedágio', 'Manutenção', 'Outros']
                   .map((t) => DropdownMenuItem(value: t, child: Text(t)))
                   .toList(),
@@ -304,21 +304,19 @@ class _AddDespesaScreenState extends State<AddDespesaScreen> {
             if (!isAutonomo) ...[
               const SizedBox(height: 16),
               const Text('Quem pagou?'),
-              Row(
-                children: [
-                  Radio(
-                    value: 'proprietario',
-                    groupValue: _quemPagou,
-                    onChanged: (val) => setState(() => _quemPagou = val.toString()),
-                  ),
-                  const Text('Proprietário'),
-                  Radio(
-                    value: 'motorista',
-                    groupValue: _quemPagou,
-                    onChanged: (val) => setState(() => _quemPagou = val.toString()),
-                  ),
-                  const Text('Motorista'),
-                ],
+              RadioGroup<String>(
+                groupValue: _quemPagou,
+                onChanged: (val) {
+                  if (val != null) setState(() => _quemPagou = val);
+                },
+                child: const Row(
+                  children: [
+                    Radio(value: 'proprietario'),
+                    Text('Proprietário'),
+                    Radio(value: 'motorista'),
+                    Text('Motorista'),
+                  ],
+                ),
               ),
             ],
             const SizedBox(height: 16),

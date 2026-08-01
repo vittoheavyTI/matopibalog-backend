@@ -35,7 +35,7 @@ void main() async {
   ]);
 
   try {
-    await Workmanager().initialize(callbackDispatcher, isInDebugMode: false);
+    await Workmanager().initialize(callbackDispatcher);
   } catch (_) {}
 
   final themeProvider = ThemeProvider();
@@ -101,8 +101,6 @@ class MatopibaLogApp extends StatelessWidget {
           onSecondary: Colors.white,
           error: Color(0xFFB00020),
           onError: Colors.white,
-          background: Color(0xFFF3F4F6),
-          onBackground: Colors.black,
           surface: Colors.white,
           onSurface: Colors.black,
         ),
@@ -149,8 +147,6 @@ class MatopibaLogApp extends StatelessWidget {
           onSecondary: Colors.white,
           error: Color(0xFFCF6679),
           onError: Colors.black,
-          background: Color(0xFF121212),
-          onBackground: Colors.white,
           surface: Color(0xFF1E1E1E),
           onSurface: Colors.white,
         ),

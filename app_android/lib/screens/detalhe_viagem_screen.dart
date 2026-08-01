@@ -153,21 +153,6 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
       return;
     }
 
-    final continuar = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Compartilhar localizacao da viagem?'),
-        content: const Text('O app enviara a ultima localizacao aproximadamente a cada 5 minutos somente enquanto esta viagem estiver ativa. Uma notificacao persistente sera exibida. Se voce negar a permissao, o app continuara funcionando sem compartilhamento.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Agora nao')),
-          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('Continuar')),
-        ],
-      ),
-    );
-    if (continuar != true || !mounted) {
-      return;
-    }
-
     setState(() {
       _alterandoRastreamento = true;
       _rastreamentoMensagem = '';
@@ -180,6 +165,7 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
       _alterandoRastreamento = false;
       _rastreamentoMensagem = _mensagemRastreamento(result);
     });
+    await LocationTrackingService.openOperationalSettings(result);
   }
 
   String _mensagemRastreamento(LocationTrackingStartResult result) {
@@ -192,6 +178,8 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
         return 'Permissao negada. O app segue utilizavel, mas o compartilhamento nao esta ativo.';
       case LocationTrackingStartResult.deniedForever:
         return 'Permissao bloqueada nas configuracoes do Android. O compartilhamento nao esta ativo.';
+      case LocationTrackingStartResult.approximateOnly:
+        return 'A operacao exige localizacao precisa. Ajuste a permissao nas configuracoes do Android.';
       case LocationTrackingStartResult.missingSession:
         return 'Sessao nao encontrada para iniciar o compartilhamento.';
       case LocationTrackingStartResult.unsupported:
@@ -202,51 +190,63 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
   }
 
   Widget _secaoRastreamento() {
-    final ativoParaViagem = _podeRastrearViagem;
     return Card(
+      color: Colors.amber.shade50,
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: ValueListenableBuilder<LocationTrackingSnapshot>(
           valueListenable: LocationTrackingService.snapshot,
-          builder: (context, tracking, _) => Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(
-                    Icons.location_on_outlined,
-                    color: tracking.isActive && ativoParaViagem ? const Color(0xFF1B5E20) : Colors.grey.shade500,
-                  ),
-                  const SizedBox(width: 8),
-                  const Expanded(child: Text('Ultima localizacao enviada', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold))),
-                  if (ativoParaViagem && !tracking.isActive)
+          builder: (context, tracking, _) {
+            if (!_deveMostrarSecaoRastreamento(tracking)) {
+              return const SizedBox.shrink();
+            }
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.location_on_outlined, color: Colors.amber.shade800),
+                    const SizedBox(width: 8),
+                    const Expanded(child: Text('Localizacao precisa de atencao', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold))),
                     TextButton(
                       onPressed: _alterandoRastreamento ? null : _alternarRastreamento,
                       child: const Text('Ativar'),
                     ),
-                ],
-              ),
-              Text(
-                ativoParaViagem
-                    ? tracking.message
-                    : 'Compartilhamento pausado porque a viagem nao esta ativa.',
-                style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
-              ),
-              if (_rastreamentoMensagem.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text(_rastreamentoMensagem, style: const TextStyle(fontSize: 12)),
+                  ],
                 ),
-              if (_alterandoRastreamento)
-                const Padding(
-                  padding: EdgeInsets.only(top: 8),
-                  child: LinearProgressIndicator(minHeight: 2),
+                Text(
+                  tracking.message,
+                  style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
                 ),
-            ],
-          ),
+                if (_rastreamentoMensagem.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(_rastreamentoMensagem, style: const TextStyle(fontSize: 12)),
+                  ),
+                if (_alterandoRastreamento)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 8),
+                    child: LinearProgressIndicator(minHeight: 2),
+                  ),
+              ],
+            );
+          },
         ),
       ),
     );
+  }
+
+  bool _deveMostrarSecaoRastreamento(LocationTrackingSnapshot tracking) {
+    if (!_podeRastrearViagem || tracking.isActive) return false;
+    return const {
+      LocationTrackingStatus.awaitingPermission,
+      LocationTrackingStatus.permissionDenied,
+      LocationTrackingStatus.deniedForever,
+      LocationTrackingStatus.approximateOnly,
+      LocationTrackingStatus.gpsDisabled,
+      LocationTrackingStatus.failed,
+      LocationTrackingStatus.missingSession,
+    }.contains(tracking.status);
   }
 
   bool get _isAutonomo {
@@ -835,8 +835,8 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
     setState(() => _enviandoEpod = false);
     if (enviadas > 0) {
       _snack(jaExistia
-          ? 'Este frete já possui comprovação. Sua evidência foi anexada à comprovação existente.'
-          : 'Evidência enviada. Aguardando validação.');
+          ? 'Este frete já possui comprovação. O arquivo foi anexado ao comprovante existente.'
+          : 'Comprovante enviado. Aguardando validação.');
     } else {
       _snack(erro ?? 'Erro ao enviar o comprovante. Tente novamente.');
     }
@@ -854,7 +854,7 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
       final url = await ApiService.getEvidenciaEpodUrl(freteId, evidId);
       if (!mounted) return;
       if (url == null || url.isEmpty) {
-        _snack('Não foi possível gerar o link da evidência.');
+        _snack('Não foi possível gerar o link do comprovante.');
         return;
       }
       final nome = ev['nome_arquivo']?.toString();
@@ -862,7 +862,7 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
       final caminho = await ApiService.baixarDocumentoParaTemp(url, nomeArquivo);
       if (!mounted) return;
       if (caminho == null) {
-        _snack('Não foi possível baixar a evidência.');
+        _snack('Não foi possível baixar o comprovante.');
         return;
       }
       await Share.shareXFiles(
@@ -871,7 +871,7 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
       );
     } catch (e) {
       AppLogger.error('DetalheFrete', 'abrir evidencia epod', e);
-      if (mounted) _snack('Não foi possível abrir a evidência.');
+      if (mounted) _snack('Não foi possível abrir o comprovante.');
     } finally {
       if (mounted) setState(() => _abrindoEvidId = null);
     }
@@ -881,6 +881,7 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
     final epod = _epod;
     final temComprovacao = epod != null;
     final status = epod?['status']?.toString();
+    final limiteArquivosAtingido = _evidenciasEpod.length >= 10;
 
     String statusTexto;
     Color statusCor;
@@ -947,7 +948,7 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
                       style: TextStyle(fontSize: 13, color: Colors.red.shade700)),
                 ),
               const SizedBox(height: 6),
-              Text('Evidências (${_evidenciasEpod.length})',
+              Text('Arquivos enviados (${_evidenciasEpod.length})',
                   style: TextStyle(fontSize: 12, color: Colors.grey.shade600, fontWeight: FontWeight.w600)),
               ..._evidenciasEpod.map((e) {
                 final m = e as Map<String, dynamic>;
@@ -963,7 +964,7 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
                   contentPadding: EdgeInsets.zero,
                   dense: true,
                   leading: const Icon(Icons.image_outlined),
-                  title: Text(m['nome_arquivo']?.toString() ?? 'Evidência'),
+                  title: Text(m['nome_arquivo']?.toString() ?? 'Comprovante'),
                   subtitle: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -988,24 +989,24 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
                     : Icon(temComprovacao ? Icons.add_a_photo_outlined : Icons.assignment_turned_in_outlined),
                 label: Text(_enviandoEpod
                     ? 'Enviando…'
-                    : temComprovacao
-                        ? 'Adicionar evidência'
-                        : 'Comprovar entrega'),
+                    : 'Adicionar comprovante'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF1B5E20),
                   foregroundColor: Colors.white,
                 ),
-                onPressed: _enviandoEpod ? null : _comprovarEntrega,
+                onPressed: _enviandoEpod || limiteArquivosAtingido ? null : _comprovarEntrega,
               ),
             ),
             Padding(
               padding: const EdgeInsets.only(top: 6),
               child: Text(
-                !temComprovacao
+                limiteArquivosAtingido
+                    ? 'Limite de 10 arquivos atingido para este comprovante.'
+                    : !temComprovacao
                     ? 'Registre a entrega com foto/canhoto. O administrador valida no painel.'
                     : status == 'rejeitado'
-                        ? 'Comprovação rejeitada. Envie uma nova evidência.'
-                        : 'Novas evidências são anexadas a esta comprovação. O administrador valida cada uma no painel.',
+                        ? 'Comprovação rejeitada. Envie um novo arquivo.'
+                        : 'Novos arquivos são anexados a esta comprovação. O administrador valida cada um no painel.',
                 style: TextStyle(color: Colors.grey.shade500, fontSize: 11),
               ),
             ),
@@ -1145,8 +1146,10 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
                         const SizedBox(height: 12),
                         _secaoComprovacao(),
                         const SizedBox(height: 12),
-                        _secaoRastreamento(),
-                        const SizedBox(height: 12),
+                        if (_deveMostrarSecaoRastreamento(LocationTrackingService.snapshot.value)) ...[
+                          _secaoRastreamento(),
+                          const SizedBox(height: 12),
+                        ],
                         _cardResumo(f),
                         const SizedBox(height: 16),
                         if (_podeFinalizar())
