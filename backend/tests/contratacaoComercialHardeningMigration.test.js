@@ -24,6 +24,8 @@ test('migration 054 revoga acesso direto comercial de anon/auth e preserva servi
 test('migration 054 endurece helpers RLS sem remover uso autenticado', () => {
   for (const fn of ['rls_is_super_admin', 'rls_is_company_admin', 'rls_empresa_id']) {
     assert.match(migration, new RegExp(`REVOKE EXECUTE ON FUNCTION public\\.${fn}\\(\\) FROM PUBLIC`, 'i'));
+    assert.match(migration, new RegExp(`REVOKE EXECUTE ON FUNCTION public\\.${fn}\\(\\) FROM anon`, 'i'));
+    assert.match(migration, new RegExp(`REVOKE EXECUTE ON FUNCTION public\\.${fn}\\(\\) FROM authenticated`, 'i'));
     assert.match(migration, new RegExp(`GRANT EXECUTE ON FUNCTION public\\.${fn}\\(\\) TO authenticated, service_role`, 'i'));
   }
 });
