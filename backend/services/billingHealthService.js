@@ -42,6 +42,9 @@ const SUSPENSION_REASONS_CONHECIDOS = new Set([
 
 function soData(v) {
   if (!v) return null;
+  if (v instanceof Date) {
+    return Number.isNaN(v.getTime()) ? null : v.toISOString().slice(0, 10);
+  }
   const s = String(v);
   return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : null;
 }

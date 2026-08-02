@@ -22,6 +22,11 @@ const {
   montarSnapshotProposta,
 } = require('../services/contratacaoComercialDomainService');
 const {
+  confirmarAssinatura,
+  solicitarDesafioAssinatura,
+  verificarContratoPublico,
+} = require('../services/assinaturaEletronicaInternaService');
+const {
   MSG_SANDBOX_OBRIGATORIO,
   criarCobrancaImplantacaoPositiva,
   validarSandboxImplantacao,
@@ -77,6 +82,16 @@ router.post('/propostas/preview', async (req, res) => {
     return res.status(422).json({ message: 'Nao foi possivel montar a proposta.', motivo: snapshot.motivo });
   }
   return res.json({ proposta: snapshot.proposta });
+});
+
+router.get('/verificar/:token', async (req, res) => {
+  try {
+    const r = await verificarContratoPublico({ supabase, token: req.params.token });
+    return res.status(r.status).json(r.body);
+  } catch (err) {
+    console.error('[contratacao/verificar] Falha', { status: 500 });
+    return res.status(500).json({ message: 'Erro ao verificar contrato.' });
+  }
 });
 
 router.get('/minha', verifyToken, isAdmin, verificarEmpresa, async (req, res) => {
@@ -141,6 +156,48 @@ router.post('/contratos/:id/cobranca-implantacao', verifyToken, isAdmin, verific
     }
     console.error('[contratacao/contratos/cobranca-implantacao] Falha', { status: 500 });
     return res.status(500).json({ message: 'Erro ao gerar cobranca de implantacao.' });
+  }
+});
+
+router.post('/contratos/:id/assinatura/desafio', verifyToken, isAdmin, verificarEmpresa, async (req, res) => {
+  if (!req.empresa_id) return res.status(400).json({ message: 'Empresa nao identificada.' });
+  try {
+    const r = await solicitarDesafioAssinatura({
+      supabase,
+      contratoId: req.params.id,
+      empresaId: req.empresa_id,
+      usuarioId: req.user.uid,
+      papel: 'cliente',
+      senha: req.body?.senha,
+      ip: req.ip,
+      userAgent: req.get('user-agent'),
+    });
+    return res.status(r.status).json(r.body);
+  } catch (err) {
+    console.error('[contratacao/assinatura/desafio] Falha', { status: 500 });
+    return res.status(500).json({ message: 'Erro ao solicitar codigo de assinatura.' });
+  }
+});
+
+router.post('/contratos/:id/assinatura/confirmar', verifyToken, isAdmin, verificarEmpresa, async (req, res) => {
+  if (!req.empresa_id) return res.status(400).json({ message: 'Empresa nao identificada.' });
+  try {
+    const r = await confirmarAssinatura({
+      supabase,
+      contratoId: req.params.id,
+      empresaId: req.empresa_id,
+      usuarioId: req.user.uid,
+      papel: 'cliente',
+      codigo: req.body?.codigo,
+      consentimentoAceito: req.body?.consentimento_aceito === true,
+      declaracaoPoderes: req.body?.declaracao_poderes === true,
+      ip: req.ip,
+      userAgent: req.get('user-agent'),
+    });
+    return res.status(r.status).json(r.body);
+  } catch (err) {
+    console.error('[contratacao/assinatura/confirmar] Falha', { status: 500 });
+    return res.status(500).json({ message: 'Erro ao confirmar assinatura.' });
   }
 });
 

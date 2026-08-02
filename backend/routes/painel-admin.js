@@ -25,6 +25,10 @@ const {
   listarContratacaoEmpresa,
 } = require('../services/contratacaoComercialService');
 const {
+  confirmarAssinatura,
+  solicitarDesafioAssinatura,
+} = require('../services/assinaturaEletronicaInternaService');
+const {
   BUCKET_CONTRATOS,
   caminhoContratoAssinado,
   criarUrlAssinadaContrato,
@@ -224,6 +228,46 @@ router.post('/empresas/:empresaId/contratos/:contratoId/aceitar-manual', async (
   }
 });
 
+router.post('/empresas/:empresaId/contratos/:contratoId/assinatura-matopiba/desafio', async (req, res) => {
+  try {
+    const r = await solicitarDesafioAssinatura({
+      supabase,
+      contratoId: req.params.contratoId,
+      empresaId: req.params.empresaId,
+      usuarioId: req.user.uid,
+      papel: 'matopiba',
+      senha: req.body?.senha,
+      ip: req.ip,
+      userAgent: req.get('user-agent'),
+    });
+    return res.status(r.status).json(r.body);
+  } catch (err) {
+    console.error('[painel-admin/assinatura-matopiba/desafio] Falha', { status: 500 });
+    return res.status(500).json({ message: 'Erro ao solicitar codigo de assinatura.' });
+  }
+});
+
+router.post('/empresas/:empresaId/contratos/:contratoId/assinatura-matopiba/confirmar', async (req, res) => {
+  try {
+    const r = await confirmarAssinatura({
+      supabase,
+      contratoId: req.params.contratoId,
+      empresaId: req.params.empresaId,
+      usuarioId: req.user.uid,
+      papel: 'matopiba',
+      codigo: req.body?.codigo,
+      consentimentoAceito: req.body?.consentimento_aceito === true,
+      declaracaoPoderes: req.body?.declaracao_poderes === true,
+      ip: req.ip,
+      userAgent: req.get('user-agent'),
+    });
+    return res.status(r.status).json(r.body);
+  } catch (err) {
+    console.error('[painel-admin/assinatura-matopiba/confirmar] Falha', { status: 500 });
+    return res.status(500).json({ message: 'Erro ao confirmar assinatura.' });
+  }
+});
+
 router.post('/empresas/:empresaId/contratos/:contratoId/upload-assinado', uploadContrato.single('arquivo'), async (req, res) => {
   const arquivo = validarPdfAssinado(req.file);
   if (!arquivo.ok) return res.status(arquivo.status).json({ message: arquivo.message });
@@ -369,6 +413,16 @@ router.put('/empresas/:id', async (req, res) => {
 });
 
 router.delete('/empresas/:id', async (req, res) => {
+  const contratosR = await supabase
+    .from('contratos_comerciais')
+    .select('id', { count: 'exact', head: true })
+    .eq('empresa_id', req.params.id);
+  if (contratosR.error && !tabelaAusente(contratosR.error)) {
+    return res.status(500).json({ message: 'Erro ao verificar contratos comerciais.' });
+  }
+  if ((contratosR.count || 0) > 0) {
+    return res.status(409).json({ message: 'Esta conta possui contrato comercial. Arquive a conta para preservar a trilha probatoria.' });
+  }
   const { error } = await supabase.from('empresas').delete().eq('id', req.params.id);
   if (error) return res.status(500).json({ message: 'Erro ao excluir empresa.' });
   res.json({ message: 'Empresa excluída.' });
