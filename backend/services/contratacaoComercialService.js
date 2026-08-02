@@ -136,7 +136,7 @@ async function criarPropostaEContrato({
 async function listarContratacaoEmpresa({ supabase, empresaId }) {
   const { data, error } = await supabase
     .from('propostas_comerciais')
-    .select('id, status, snapshot, valor_mensal, valor_implantacao, total_inicial, trial_dias, aceito_em, contratos_comerciais(id, status, template_version, provider, signature_method, storage_path, signed_storage_path, certificate_storage_path, signed_file_hash, certificate_file_hash, aceito_em)')
+    .select('id, status, snapshot, valor_mensal, valor_implantacao, total_inicial, trial_dias, aceito_em, contratos_comerciais(id, status, obrigatorio, template_version, provider, signature_method, storage_path, signed_storage_path, certificate_storage_path, signed_file_hash, certificate_file_hash, aceito_em, contrato_signatarios(papel, status, assinado_em))')
     .eq('empresa_id', empresaId)
     .order('criado_em', { ascending: false })
     .limit(10);
@@ -158,21 +158,58 @@ async function listarContratacaoEmpresa({ supabase, empresaId }) {
       total_inicial: proposta.total_inicial,
       trial_dias: proposta.trial_dias,
       aceito_em: proposta.aceito_em,
-      contratos_comerciais: contratos.map((contrato) => ({
-        id: contrato.id,
-        status: contrato.status,
-        versao: contrato.template_version,
-        metodo_assinatura: contrato.signature_method || contrato.provider || 'manual',
-        documento_pronto: Boolean(contrato.storage_path),
-        signed_storage_path: contrato.signed_storage_path,
-        certificate_storage_path: contrato.certificate_storage_path,
-        signed_file_hash: contrato.signed_file_hash,
-        certificate_file_hash: contrato.certificate_file_hash,
-        aceito_em: contrato.aceito_em,
-      })),
+      contratos_comerciais: contratos.map((contrato) => {
+        const signatarios = Array.isArray(contrato.contrato_signatarios) ? contrato.contrato_signatarios : [];
+        const dataAssinatura = (papel) => {
+          const s = signatarios.find((x) => x && x.papel === papel && x.status === 'assinado');
+          return s ? s.assinado_em : null;
+        };
+        return {
+          id: contrato.id,
+          status: contrato.status,
+          obrigatorio: contrato.obrigatorio === true,
+          versao: contrato.template_version,
+          metodo_assinatura: contrato.signature_method || contrato.provider || 'manual',
+          documento_pronto: Boolean(contrato.storage_path),
+          contrato_assinado_disponivel: Boolean(contrato.signed_storage_path),
+          certificado_disponivel: Boolean(contrato.certificate_storage_path),
+          signed_storage_path: contrato.signed_storage_path,
+          certificate_storage_path: contrato.certificate_storage_path,
+          signed_file_hash: contrato.signed_file_hash,
+          certificate_file_hash: contrato.certificate_file_hash,
+          assinatura_cliente_em: dataAssinatura('cliente'),
+          assinatura_matopiba_em: dataAssinatura('matopiba'),
+          aceito_em: contrato.aceito_em,
+        };
+      }),
     };
   });
   return { propostas, migration_pendente: false };
+}
+
+// Resumo enxuto para a navegação do cliente (sidebar) e redirecionamentos:
+// existe pendência OBRIGATÓRIA? existe contrato? algum concluído? Fail-open.
+async function resumoContratacaoEmpresa({ supabase, empresaId }) {
+  try {
+    const { data, error } = await supabase
+      .from('contratos_comerciais')
+      .select('status, obrigatorio')
+      .eq('empresa_id', empresaId);
+    if (error) {
+      if (tabelaAusente(error)) return { pendencia_obrigatoria: false, tem_contrato: false, concluido: false, migration_pendente: true };
+      return { pendencia_obrigatoria: false, tem_contrato: false, concluido: false, migration_pendente: false };
+    }
+    const { pendenciaObrigatoria, STATUS_CONCLUIDOS } = require('./contratoGateService');
+    const contratos = data || [];
+    return {
+      pendencia_obrigatoria: pendenciaObrigatoria(contratos),
+      tem_contrato: contratos.length > 0,
+      concluido: contratos.some((c) => c && STATUS_CONCLUIDOS.has(c.status)),
+      migration_pendente: false,
+    };
+  } catch {
+    return { pendencia_obrigatoria: false, tem_contrato: false, concluido: false, migration_pendente: false };
+  }
 }
 
 function propostaDoContrato(contrato) {
@@ -271,6 +308,7 @@ module.exports = {
   carregarPlanoComercial,
   criarPropostaEContrato,
   listarContratacaoEmpresa,
+  resumoContratacaoEmpresa,
   propostaDoContrato,
   aceitarContrato,
   criarCobrancaImplantacaoContrato,

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Navigate } from 'react-router-dom';
 import { Receipt, AlertCircle, ExternalLink, RefreshCw, Copy, QrCode, X, Download } from 'lucide-react';
 import api from '../api';
+import { PlanoContratos } from '../components/PlanoContratos';
 import { useAuth } from '../contexts/AuthContext';
 import { civilDateToDayNumber, compareCivilDates, formatCivilDate, formatTechnicalDate } from '../utils';
 
@@ -346,6 +347,9 @@ export const MinhasFaturas: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Plano e contratos (contrato assinado, certificado, datas de assinatura) */}
+      {!loading && <PlanoContratos />}
 
       {/* Próxima mensalidade */}
       {!loading && atual && (

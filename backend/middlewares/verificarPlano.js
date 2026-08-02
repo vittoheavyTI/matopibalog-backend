@@ -1,6 +1,7 @@
 const supabase = require('../config/supabase');
 const { avaliarElegibilidadeSuspensao, lerDiasCarenciaSuspensao } = require('../services/paymentDomainService');
 const { patchSuspensaoFinanceiraAutomatica } = require('../utils/suspensao');
+const { empresaTemContratoObrigatorioPendente } = require('../services/contratoGateService');
 
 // Proteção: uma conta não pode ser suspensa automaticamente se não houver
 // fatura pendente/vencida com link de pagamento e vencimento já passado.
@@ -50,6 +51,18 @@ const verificarPlano = async (req, res, next) => {
 
   // Admin não tem empresa, pula verificação
   if (!req.empresa_id) return next();
+
+  // Gate de contrato obrigatório: se o tenant tem contrato/aditivo OBRIGATÓRIO
+  // pendente de assinatura, bloqueia as escritas operacionais (vale inclusive
+  // para empresa 'ativo'/'trial'). Assinatura (/contratacao), regularização
+  // (/pagamentos) e suporte NÃO passam por este middleware, então seguem
+  // liberados. GET e super-admin já foram liberados acima. Fail-open em erro.
+  if (await empresaTemContratoObrigatorioPendente(supabase, req.empresa_id)) {
+    return res.status(403).json({
+      message: 'Para continuar usando o sistema, finalize a assinatura do contrato.',
+      motivo: 'contrato_obrigatorio_pendente',
+    });
+  }
 
   try {
     const { data, error } = await supabase
