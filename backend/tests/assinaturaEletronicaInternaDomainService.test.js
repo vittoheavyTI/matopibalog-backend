@@ -11,6 +11,7 @@ const {
   montarEventoHash,
   montarPdfSimples,
   sha256,
+  verificarSenhaAtual,
 } = require('../services/assinaturaEletronicaInternaService');
 
 const serviceSource = fs.readFileSync(
@@ -35,6 +36,30 @@ test('otp: algoritmo gravado e validado e hmac-sha256-v1', () => {
   assert.equal(HASH_VERSION, 'hmac-sha256-v1');
   assert.match(serviceSource, /codigo_alg: HASH_VERSION/);
   assert.match(serviceSource, /desafio\.codigo_alg !== HASH_VERSION/);
+});
+
+test('reauth: senha atual invalida e erro de formulario, nao de sessao', async () => {
+  const authClient = {
+    auth: {
+      signInWithPassword: async () => ({ data: null, error: { message: 'Invalid login credentials' } }),
+    },
+  };
+
+  const r = await verificarSenhaAtual({
+    email: 'admin@example.com',
+    senha: 'senha-invalida',
+    authClient,
+  });
+
+  assert.equal(r.ok, false);
+  assert.equal(r.status, 400);
+  assert.equal(r.message, 'Senha atual invalida.');
+});
+
+test('email: falha de envio cancela desafio e nao deixa codigo ativo', () => {
+  assert.match(serviceSource, /update\(\{ status: 'cancelado', invalidated_at: new Date\(\)\.toISOString\(\) \}\)/);
+  assert.match(serviceSource, /eq\('id', desafio\.id\)/);
+  assert.match(serviceSource, /Nao foi possivel enviar o codigo por e-mail agora/);
 });
 
 test('email mascarado nao expoe endereco completo', () => {
