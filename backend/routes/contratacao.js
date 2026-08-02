@@ -11,6 +11,7 @@ const {
   carregarPlanoComercial,
   criarCobrancaImplantacaoContrato,
   listarContratacaoEmpresa,
+  resumoContratacaoEmpresa,
 } = require('../services/contratacaoComercialService');
 const {
   BUCKET_CONTRATOS,
@@ -103,6 +104,19 @@ router.get('/minha', verifyToken, isAdmin, verificarEmpresa, async (req, res) =>
   } catch (err) {
     console.error('[contratacao/minha] Falha', { status: 500 });
     return res.status(500).json({ message: 'Erro ao carregar contratacao.' });
+  }
+});
+
+// Resumo enxuto para a navegação do cliente (sidebar): há pendência obrigatória?
+// contrato concluído? Sempre 200 (fail-open) para nunca quebrar o menu.
+router.get('/status', verifyToken, isAdmin, verificarEmpresa, async (req, res) => {
+  if (!req.empresa_id) return res.json({ pendencia_obrigatoria: false, tem_contrato: false, concluido: false });
+  try {
+    const resumo = await resumoContratacaoEmpresa({ supabase, empresaId: req.empresa_id });
+    return res.json(resumo);
+  } catch (err) {
+    console.error('[contratacao/status] Falha', { status: 500 });
+    return res.json({ pendencia_obrigatoria: false, tem_contrato: false, concluido: false });
   }
 });
 

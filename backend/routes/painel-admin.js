@@ -269,6 +269,41 @@ router.post('/empresas/:empresaId/contratos/:contratoId/assinatura-matopiba/conf
   }
 });
 
+// Marca/desmarca um contrato como OBRIGATÓRIO (gate de contrato). Só super-admin
+// (router.use(isSuperAdmin) no topo). Validação de tenant/contrato. Não toca em
+// faturas/Asaas/planos. Registra evento de auditoria (best-effort).
+router.patch('/empresas/:empresaId/contratos/:contratoId/obrigatorio', async (req, res) => {
+  const obrigatorio = req.body?.obrigatorio === true;
+  try {
+    const { data: contrato, error } = await supabase
+      .from('contratos_comerciais')
+      .select('id, empresa_id')
+      .eq('id', req.params.contratoId)
+      .maybeSingle();
+    if (error) throw error;
+    if (!contrato || contrato.empresa_id !== req.params.empresaId) {
+      return res.status(404).json({ message: 'Contrato nao encontrado.' });
+    }
+    const { error: updateError } = await supabase
+      .from('contratos_comerciais')
+      .update({ obrigatorio, atualizado_em: new Date().toISOString() })
+      .eq('id', contrato.id)
+      .eq('empresa_id', req.params.empresaId);
+    if (updateError) throw updateError;
+    await supabase.from('contrato_eventos').insert({
+      contrato_id: contrato.id,
+      empresa_id: req.params.empresaId,
+      tipo: obrigatorio ? 'contrato_marcado_obrigatorio' : 'contrato_desmarcado_obrigatorio',
+      detalhe: { obrigatorio },
+      criado_por: req.user?.uid || null,
+    }).then(() => {}, () => {}); // best-effort: auditoria não bloqueia a ação
+    return res.status(200).json({ id: contrato.id, obrigatorio });
+  } catch (err) {
+    console.error('[painel-admin/contratos/obrigatorio] Falha', { status: 500 });
+    return res.status(500).json({ message: 'Erro ao atualizar obrigatoriedade do contrato.' });
+  }
+});
+
 router.post('/empresas/:empresaId/contratos/:contratoId/upload-assinado', uploadContrato.single('arquivo'), async (req, res) => {
   const arquivo = validarPdfAssinado(req.file);
   if (!arquivo.ok) return res.status(arquivo.status).json({ message: arquivo.message });

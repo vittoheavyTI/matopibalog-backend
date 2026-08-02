@@ -13,6 +13,7 @@
 // lançam — retornam { resultado, motivo } para log/telemetria.
 
 const { decidirAplicacaoUpgrade } = require('./upgradeDomainService');
+const { empresaTemContratoObrigatorioPendente } = require('./contratoGateService');
 
 function erroDb(mensagem) {
   const e = new Error(mensagem);
@@ -85,6 +86,15 @@ async function aplicarUpgradePago({ supabase, faturaId, empresaId, asaasPaymentI
       .eq('status', 'pendente');
     if (error) throw erroDb('erro_marcar_falhou');
     return { resultado: 'falhou', motivo: decisao.motivo };
+  }
+
+  // Proteção mínima (macrofrente do aditivo completo fica separada): se o tenant
+  // tem contrato/aditivo OBRIGATÓRIO pendente de assinatura, NÃO efetiva o plano
+  // novo — mantém o plano atual e deixa a solicitação pendente (idempotente:
+  // reaplica quando a assinatura for concluída). Não cria fatura, não chama
+  // Asaas, não altera fatura. Fail-open (empresaTem...): erro → não bloqueia.
+  if (await empresaTemContratoObrigatorioPendente(supabase, empresaId)) {
+    return { resultado: 'bloqueado', motivo: 'contrato_obrigatorio_pendente', empresaId };
   }
 
   // acao === 'aplicar'. ORDEM SEGURA: plano_id ANTES de marcar a solicitação
