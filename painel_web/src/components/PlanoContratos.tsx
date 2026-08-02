@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { FileText, Download, ShieldCheck, CheckCircle2, Clock } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { FileText, Download, ShieldCheck, CheckCircle2, Clock, FileSignature, AlertTriangle } from 'lucide-react';
 import api from '../api';
 import { formatTechnicalDate } from '../utils';
 
@@ -115,6 +116,24 @@ export const PlanoContratos: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Pendência: card NÃO pode ser só informativo — CTA claro para assinar. */}
+      {!concluido && (
+        <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 p-4">
+          <div className="flex items-start gap-2 text-amber-800">
+            <AlertTriangle size={18} className="shrink-0 mt-0.5" />
+            <p className="text-sm font-medium">
+              Seu contrato precisa ser assinado para liberar o uso completo do sistema.
+            </p>
+          </div>
+          <Link
+            to="/contratacao"
+            className="mt-3 inline-flex items-center gap-2 rounded-lg bg-amber-600 hover:bg-amber-700 px-4 py-2 text-sm font-semibold text-white"
+          >
+            <FileSignature size={16} /> Assinar contrato
+          </Link>
+        </div>
+      )}
 
       {erro && <p className="mt-3 text-sm text-amber-700">{erro}</p>}
 

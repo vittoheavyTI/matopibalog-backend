@@ -64,9 +64,23 @@ test('criarPropostaEContrato persiste snapshot, contrato, signatario hash e even
   const contrato = supabase.inserts.find((i) => i.tabela === 'contratos_comerciais').payload;
   assert.equal(proposta.status, 'enviada');
   assert.equal(contrato.status, 'aguardando_assinatura');
+  // Contratação inicial nasce OBRIGATÓRIA (aciona o gate até a assinatura).
+  assert.equal(contrato.obrigatorio, true);
   assert.equal(signatario.status, 'pendente');
   assert.equal(signatario.email_hash, emailHash('ana@example.com'));
   assert.doesNotMatch(JSON.stringify(supabase.inserts), /ana@example\.com/);
+});
+
+test('criarPropostaEContrato: contrato inicial nasce obrigatorio=true por padrão; opcional pode nascer false', async () => {
+  // padrão (onboarding) → obrigatório
+  const s1 = supabaseMock();
+  await criarPropostaEContrato({ supabase: s1, empresa: { id: 'e', nome: 'E' }, responsavel: { nome: 'R', email: 'r@x.com' }, plano });
+  assert.equal(s1.inserts.find((i) => i.tabela === 'contratos_comerciais').payload.obrigatorio, true);
+
+  // explícito opcional → NÃO obrigatório
+  const s2 = supabaseMock();
+  await criarPropostaEContrato({ supabase: s2, empresa: { id: 'e', nome: 'E' }, responsavel: { nome: 'R', email: 'r@x.com' }, plano, obrigatorio: false });
+  assert.equal(s2.inserts.find((i) => i.tabela === 'contratos_comerciais').payload.obrigatorio, false);
 });
 
 test('listarContratacaoEmpresa devolve resumo comercial sem provider, hash ou snapshot bruto', async () => {

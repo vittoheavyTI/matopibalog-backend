@@ -4,11 +4,13 @@ import { Sidebar } from './Sidebar';
 import { SessionTimeoutWatcher } from './SessionTimeoutWatcher';
 import { NotificacoesDropdown } from './NotificacoesDropdown';
 import { useAuth } from '../contexts/AuthContext';
-import { LogOut, User as UserIcon, ChevronDown, UserCog } from 'lucide-react';
+import { useContratacaoStatus } from '../hooks/useContratacaoStatus';
+import { LogOut, User as UserIcon, ChevronDown, UserCog, AlertTriangle, FileSignature } from 'lucide-react';
 
 export const Layout: React.FC = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const { pendenciaObrigatoria } = useContratacaoStatus();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -110,6 +112,27 @@ export const Layout: React.FC = () => {
             </div>
           </div>
         </header>
+
+        {/* Banner forte: contrato obrigatório pendente. Conduz para /contratacao.
+            As escritas operacionais já são bloqueadas no backend (gate). */}
+        {pendenciaObrigatoria && (
+          <div className="bg-amber-50 border-b border-amber-300 px-4 md:px-8 py-3">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
+              <div className="flex items-start gap-2 text-amber-800 flex-1">
+                <AlertTriangle size={18} className="shrink-0 mt-0.5" />
+                <p className="text-sm font-medium">
+                  Seu contrato precisa ser assinado para liberar o uso completo do sistema.
+                </p>
+              </div>
+              <button
+                onClick={() => navigate('/contratacao')}
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold px-4 py-2 shrink-0"
+              >
+                <FileSignature size={16} /> Assinar contrato
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Área Principal de Conteúdo */}
         <main className="flex-1 overflow-auto p-4 md:p-8">
