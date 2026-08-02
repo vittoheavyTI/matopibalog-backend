@@ -2,26 +2,20 @@
 <html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
+    <!-- Content-Security-Policy do FRONTEND (GitHub Pages não permite headers HTTP
+         próprios, então a CSP vem por meta). script-src 'self' (sem unsafe-inline):
+         o antigo script inline de redirect virou /spa-redirect.js. connect-src
+         restrito a self + API Railway + Supabase → trava exfiltração de token.
+         Nota: frame-ancestors em <meta> é ignorado pelo browser (só vale como
+         header HTTP); mantido para documentar a intenção. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://matopibalog-backend-production.up.railway.app https://*.supabase.co; object-src 'none'; base-uri 'self'; frame-ancestors 'none'" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Matopiba Log</title>
-    <script>
-      (function() {
-        var redirect = sessionStorage.redirect;
-        delete sessionStorage.redirect;
-        if (redirect) {
-          try {
-            var url = new URL(redirect);
-            var target = url.pathname + url.search + url.hash;
-            if (target !== '/' && target !== location.pathname + location.search + location.hash) {
-              history.replaceState(null, null, target);
-            }
-          } catch(e) {}
-        }
-      })();
-    </script>
-    <script type="module" crossorigin src="/assets/index-zgDpYEnh.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-DuxAHBes.css">
+    <!-- Redirect de SPA (GitHub Pages) — externo para satisfazer script-src 'self'. -->
+    <script src="/spa-redirect.js"></script>
+    <script type="module" crossorigin src="/assets/index-bcUVBaMf.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-5MfMb4-U.css">
   </head>
   <body class="bg-gray-50 text-gray-900">
     <div id="root"></div>

@@ -42,7 +42,11 @@ type ResumoContratacao = {
 type ContratoComercial = {
   id: string;
   status: string;
+  metodo_assinatura?: string | null;
   signed_storage_path?: string | null;
+  certificate_storage_path?: string | null;
+  signed_file_hash?: string | null;
+  certificate_file_hash?: string | null;
 };
 type PropostaContratacao = {
   id: string;
@@ -50,7 +54,7 @@ type PropostaContratacao = {
   resumo?: ResumoContratacao;
   contratos_comerciais?: ContratoComercial[] | ContratoComercial | null;
 };
-type SignatarioContratacao = { id: string; papel: string; status: string };
+type SignatarioContratacao = { id: string; papel: string; status: string; assinado_em?: string | null };
 type EventoContratacao = { id: string; tipo: string };
 type DadosContratacao = {
   propostas?: PropostaContratacao[];
@@ -120,6 +124,11 @@ export const PainelEmpresas: React.FC = () => {
   const [contratacaoDados, setContratacaoDados] = useState<DadosContratacao | null>(null);
   const [contratacaoLoading, setContratacaoLoading] = useState(false);
   const [contratacaoEnviando, setContratacaoEnviando] = useState(false);
+  const [matopibaSenha, setMatopibaSenha] = useState('');
+  const [matopibaCodigo, setMatopibaCodigo] = useState('');
+  const [matopibaConsentimento, setMatopibaConsentimento] = useState(false);
+  const [matopibaPoderes, setMatopibaPoderes] = useState(false);
+  const [matopibaDesafio, setMatopibaDesafio] = useState<{ email_mascarado?: string } | null>(null);
   const [planosLoading, setPlanosLoading] = useState(false);
   const [planosErro, setPlanosErro] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -362,6 +371,11 @@ export const PainelEmpresas: React.FC = () => {
     setContratacaoTarget(e);
     setContratacaoDados(null);
     setContratacaoLoading(true);
+    setMatopibaSenha('');
+    setMatopibaCodigo('');
+    setMatopibaConsentimento(false);
+    setMatopibaPoderes(false);
+    setMatopibaDesafio(null);
     try {
       const { data } = await api.get('/painel-admin/empresas/' + e.id + '/contratacao');
       setContratacaoDados(data);
@@ -415,6 +429,46 @@ export const PainelEmpresas: React.FC = () => {
       if (data?.url) window.open(data.url, '_blank', 'noopener,noreferrer');
     } catch (err: unknown) {
       setToast({ message: mensagemApi(err, 'Contrato assinado ainda não disponível.'), tipo: 'erro' });
+    } finally {
+      setContratacaoEnviando(false);
+    }
+  }
+
+  async function solicitarCodigoMatopiba() {
+    const contrato = contratoPrincipal(contratacaoDados?.propostas?.[0]);
+    if (!contratacaoTarget || !contrato || !matopibaSenha.trim()) return;
+    setContratacaoEnviando(true);
+    try {
+      const { data } = await api.post(`/painel-admin/empresas/${contratacaoTarget.id}/contratos/${contrato.id}/assinatura-matopiba/desafio`, { senha: matopibaSenha });
+      setMatopibaDesafio({ email_mascarado: data?.email_mascarado });
+      setToast({ message: 'Codigo enviado para assinatura Matopiba.', tipo: 'sucesso' });
+      await abrirContratacao(contratacaoTarget);
+    } catch (err: unknown) {
+      setToast({ message: mensagemApi(err, 'Erro ao enviar codigo.'), tipo: 'erro' });
+    } finally {
+      setContratacaoEnviando(false);
+    }
+  }
+
+  async function confirmarAssinaturaMatopiba() {
+    const contrato = contratoPrincipal(contratacaoDados?.propostas?.[0]);
+    if (!contratacaoTarget || !contrato) return;
+    setContratacaoEnviando(true);
+    try {
+      await api.post(`/painel-admin/empresas/${contratacaoTarget.id}/contratos/${contrato.id}/assinatura-matopiba/confirmar`, {
+        codigo: matopibaCodigo,
+        consentimento_aceito: matopibaConsentimento,
+        declaracao_poderes: matopibaPoderes,
+      });
+      setMatopibaSenha('');
+      setMatopibaCodigo('');
+      setMatopibaConsentimento(false);
+      setMatopibaPoderes(false);
+      setMatopibaDesafio(null);
+      setToast({ message: 'Assinatura Matopiba registrada.', tipo: 'sucesso' });
+      await abrirContratacao(contratacaoTarget);
+    } catch (err: unknown) {
+      setToast({ message: mensagemApi(err, 'Erro ao confirmar assinatura.'), tipo: 'erro' });
     } finally {
       setContratacaoEnviando(false);
     }
@@ -741,6 +795,9 @@ export const PainelEmpresas: React.FC = () => {
         const resumo = proposta?.resumo || {};
         const signatarios = contratacaoDados?.signatarios || [];
         const eventos = contratacaoDados?.eventos || [];
+        const clienteAssinado = signatarios.some((s: SignatarioContratacao) => s.papel === 'cliente' && s.status === 'assinado');
+        const matopibaAssinado = signatarios.some((s: SignatarioContratacao) => s.papel === 'matopiba' && s.status === 'assinado');
+        const podeAssinarMatopiba = !!contrato && clienteAssinado && !matopibaAssinado && !['plenamente_assinado', 'assinado', 'aceito_manualmente', 'cancelado'].includes(contrato.status);
         return (
           <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-fade-in">
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden max-h-[90vh] flex flex-col">
@@ -803,13 +860,47 @@ export const PainelEmpresas: React.FC = () => {
                         </div>
                       </div>
                     </div>
+                    <div className="rounded-xl border border-gray-100 p-4">
+                      <div className="flex items-center justify-between gap-3 mb-3">
+                        <div>
+                          <h4 className="font-bold text-gray-800">Assinatura Matopiba</h4>
+                          <p className="text-xs text-gray-500">{matopibaAssinado ? 'Assinatura registrada.' : clienteAssinado ? 'Cliente assinou. Matopiba pode concluir.' : 'Aguardando assinatura do cliente.'}</p>
+                        </div>
+                        <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest ${matopibaAssinado ? 'bg-green-50 text-green-700' : podeAssinarMatopiba ? 'bg-blue-50 text-blue-700' : 'bg-gray-50 text-gray-500'}`}>
+                          {matopibaAssinado ? 'Assinado' : podeAssinarMatopiba ? 'Disponivel' : 'Pendente'}
+                        </span>
+                      </div>
+                      {podeAssinarMatopiba && (
+                        <div className="space-y-3">
+                          <div className="grid sm:grid-cols-[1fr_auto] gap-2">
+                            <input type="password" value={matopibaSenha} onChange={ev => setMatopibaSenha(ev.target.value)} placeholder="Senha atual" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" />
+                            <button type="button" onClick={solicitarCodigoMatopiba} disabled={contratacaoEnviando || !matopibaSenha.trim()} className="px-4 py-2 rounded-lg text-sm font-medium bg-blue-700 text-white hover:bg-blue-800 disabled:opacity-50">Enviar codigo</button>
+                          </div>
+                          {matopibaDesafio && (
+                            <div className="space-y-2">
+                              <p className="text-xs text-gray-500">Codigo enviado para {matopibaDesafio.email_mascarado || 'seu e-mail'}.</p>
+                              <input type="text" inputMode="numeric" maxLength={6} value={matopibaCodigo} onChange={ev => setMatopibaCodigo(ev.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="Codigo de 6 digitos" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" />
+                              <label className="flex items-start gap-2 text-sm text-gray-700">
+                                <input type="checkbox" checked={matopibaConsentimento} onChange={ev => setMatopibaConsentimento(ev.target.checked)} className="mt-1" />
+                                <span>Li o contrato e aceito assinar eletronicamente pela Matopiba.</span>
+                              </label>
+                              <label className="flex items-start gap-2 text-sm text-gray-700">
+                                <input type="checkbox" checked={matopibaPoderes} onChange={ev => setMatopibaPoderes(ev.target.checked)} className="mt-1" />
+                                <span>Declaro poderes para representar a Matopiba nesta contratacao.</span>
+                              </label>
+                              <button type="button" onClick={confirmarAssinaturaMatopiba} disabled={contratacaoEnviando || matopibaCodigo.length !== 6 || !matopibaConsentimento || !matopibaPoderes} className="px-4 py-2 rounded-lg text-sm font-medium bg-green-700 text-white hover:bg-green-800 disabled:opacity-50">Confirmar assinatura</button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </>
                 )}
               </div>
 
               <div className="p-4 bg-gray-50 border-t flex flex-wrap justify-end gap-2">
                 <label className={`px-4 py-2 rounded-lg text-sm font-medium bg-white border border-gray-200 text-gray-700 hover:bg-gray-100 ${(!contrato || contratacaoEnviando) ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
-                  Enviar PDF assinado
+                  Contingencia: PDF
                   <input
                     type="file"
                     accept="application/pdf"
@@ -823,8 +914,8 @@ export const PainelEmpresas: React.FC = () => {
                   />
                 </label>
                 <button disabled={!contrato?.signed_storage_path || contratacaoEnviando} onClick={abrirContratoAssinadoAdmin} className="px-4 py-2 rounded-lg text-sm font-medium bg-white border border-gray-200 text-gray-700 hover:bg-gray-100 disabled:opacity-50">Baixar PDF</button>
-                <button disabled={!contrato || contratacaoEnviando || contrato.status === 'aceito_manualmente'} onClick={aceitarContratoManual} className="px-4 py-2 rounded-lg text-sm font-medium bg-green-700 text-white hover:bg-green-800 disabled:opacity-50">
-                  Registrar aceite manual
+                <button disabled={!contrato || contratacaoEnviando || ['aceito_manualmente', 'plenamente_assinado'].includes(contrato.status)} onClick={aceitarContratoManual} className="px-4 py-2 rounded-lg text-sm font-medium bg-white border border-gray-200 text-gray-700 hover:bg-gray-100 disabled:opacity-50">
+                  Contingencia: aceite manual
                 </button>
               </div>
             </div>

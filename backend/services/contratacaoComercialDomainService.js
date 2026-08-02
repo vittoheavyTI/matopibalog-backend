@@ -13,8 +13,15 @@ const STATUS_PROPOSTA = Object.freeze({
 const STATUS_CONTRATO = Object.freeze({
   RASCUNHO: 'rascunho',
   AGUARDANDO_ASSINATURA: 'aguardando_assinatura',
+  PRONTO_ASSINATURA: 'pronto_assinatura',
+  AGUARDANDO_ASSINATURA_CLIENTE: 'aguardando_assinatura_cliente',
+  AGUARDANDO_ASSINATURA_MATOPIBA: 'aguardando_assinatura_matopiba',
+  PLENAMENTE_ASSINADO: 'plenamente_assinado',
   ASSINADO: 'assinado',
   ACEITO_MANUALMENTE: 'aceito_manualmente',
+  RECUSADO: 'recusado',
+  EXPIRADO: 'expirado',
+  SUBSTITUIDO: 'substituido',
   CANCELADO: 'cancelado',
 });
 

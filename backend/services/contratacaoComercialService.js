@@ -136,7 +136,7 @@ async function criarPropostaEContrato({
 async function listarContratacaoEmpresa({ supabase, empresaId }) {
   const { data, error } = await supabase
     .from('propostas_comerciais')
-    .select('id, status, snapshot, valor_mensal, valor_implantacao, total_inicial, trial_dias, aceito_em, contratos_comerciais(id, status, template_version, signed_storage_path, aceito_em)')
+    .select('id, status, snapshot, valor_mensal, valor_implantacao, total_inicial, trial_dias, aceito_em, contratos_comerciais(id, status, template_version, provider, signature_method, storage_path, signed_storage_path, certificate_storage_path, signed_file_hash, certificate_file_hash, aceito_em)')
     .eq('empresa_id', empresaId)
     .order('criado_em', { ascending: false })
     .limit(10);
@@ -162,7 +162,12 @@ async function listarContratacaoEmpresa({ supabase, empresaId }) {
         id: contrato.id,
         status: contrato.status,
         versao: contrato.template_version,
+        metodo_assinatura: contrato.signature_method || contrato.provider || 'manual',
+        documento_pronto: Boolean(contrato.storage_path),
         signed_storage_path: contrato.signed_storage_path,
+        certificate_storage_path: contrato.certificate_storage_path,
+        signed_file_hash: contrato.signed_file_hash,
+        certificate_file_hash: contrato.certificate_file_hash,
         aceito_em: contrato.aceito_em,
       })),
     };
