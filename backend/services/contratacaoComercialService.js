@@ -41,6 +41,10 @@ async function criarPropostaEContrato({
   criadoPor = null,
   overrideImplantacaoValor,
   overrideImplantacaoMotivo,
+  // Contratação inicial nasce OBRIGATÓRIA: o contrato precisa ser assinado para
+  // liberar o uso operacional (gate). Aditivos/contratos opcionais podem passar
+  // obrigatorio=false explicitamente.
+  obrigatorio = true,
 } = {}) {
   const snapshot = montarSnapshotProposta({
     plano,
@@ -90,6 +94,7 @@ async function criarPropostaEContrato({
       proposta_id: proposta.id,
       empresa_id: empresa.id,
       status: STATUS_CONTRATO.AGUARDANDO_ASSINATURA,
+      obrigatorio: obrigatorio === true,
       template_version: contrato.template_version,
       provider: contrato.provider,
       content_hash: contrato.content_hash,

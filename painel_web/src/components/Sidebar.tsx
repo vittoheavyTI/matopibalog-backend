@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { NavLink } from 'react-router-dom';
 import { LayoutDashboard, Users, FileText, Truck, ChevronLeft, ChevronRight, Upload, X, Check, Trash2, Settings, UserCircle, Receipt, History, Building2, DollarSign, Bell, Plug, ClipboardList, Ticket, TrendingUp, TowerControl } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { useContratacaoStatus } from '../hooks/useContratacaoStatus';
 import api from '../api';
 
 const readLocalStorage = (key: string) => (typeof window !== 'undefined' ? localStorage.getItem(key) : null);
@@ -17,7 +18,7 @@ export const Sidebar: React.FC = () => {
   // Contratação vira etapa CONDICIONAL: só aparece no menu do cliente quando há
   // contrato obrigatório pendente de assinatura (ação necessária). Concluída,
   // some da sidebar. Super-admin não usa este item.
-  const [contratacaoPendente, setContratacaoPendente] = useState(false);
+  const { pendenciaObrigatoria: contratacaoPendente } = useContratacaoStatus();
   const [isEditingLogo, setIsEditingLogo] = useState(false);
   const [tempLogo, setTempLogo] = useState<string | null>(null);
   const [tempScale, setTempScale] = useState<number>(100);
@@ -83,15 +84,6 @@ export const Sidebar: React.FC = () => {
       })
       .catch(() => {}); // offline / erro → mantém o cache local
   }, []);
-
-  // Só o cliente (admin de empresa, não super-admin) tem etapa de contratação.
-  // Estado inicial já é false; só buscamos (assíncrono) para o cliente.
-  useEffect(() => {
-    if (user?.is_super_admin || user?.role !== 'admin') return;
-    api.get('/contratacao/status')
-      .then(({ data }) => setContratacaoPendente(data?.pendencia_obrigatoria === true))
-      .catch(() => {}); // fail-open: erro não deve poluir o menu
-  }, [user?.is_super_admin, user?.role]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
