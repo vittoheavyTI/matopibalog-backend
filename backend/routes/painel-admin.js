@@ -32,6 +32,7 @@ const {
   BUCKET_CONTRATOS,
   caminhoContratoAssinado,
   criarUrlAssinadaContrato,
+  criarUrlAssinadaCertificado,
   validarPdfAssinado,
 } = require('../services/contratacaoStorageService');
 const { criarPromocaoSchema, editarPromocaoSchema, gerarCodigoSchema, validar: validarPromo } = require('../schemas/promocao');
@@ -331,6 +332,22 @@ router.get('/empresas/:empresaId/contratos/:contratoId/assinado-url', async (req
   } catch (err) {
     console.error('[painel-admin/contratos/assinado-url] Falha', { status: 500 });
     return res.status(500).json({ message: 'Erro ao abrir contrato assinado.' });
+  }
+});
+
+router.get('/empresas/:empresaId/contratos/:contratoId/certificado-url', async (req, res) => {
+  try {
+    const { data: contrato, error } = await supabase
+      .from('contratos_comerciais')
+      .select('id, empresa_id, certificate_storage_path')
+      .eq('id', req.params.contratoId)
+      .maybeSingle();
+    if (error) throw error;
+    const r = await criarUrlAssinadaCertificado({ supabase, contrato, empresaId: req.params.empresaId });
+    return res.status(r.status).json(r.body);
+  } catch (err) {
+    console.error('[painel-admin/contratos/certificado-url] Falha', { status: 500 });
+    return res.status(500).json({ message: 'Erro ao abrir certificado do contrato.' });
   }
 });
 
