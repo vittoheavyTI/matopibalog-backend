@@ -226,7 +226,7 @@ async function verificarSenhaAtual({ email, senha, authClient = null, env = proc
   const client = authClient || criarAuthClient(env);
   if (!client) return { ok: false, status: 503, message: 'Reautenticacao indisponivel.' };
   const { data, error } = await client.auth.signInWithPassword({ email, password: senha });
-  if (error || !data?.user) return { ok: false, status: 401, message: 'Senha atual invalida.' };
+  if (error || !data?.user) return { ok: false, status: 400, message: 'Senha atual invalida.' };
   return { ok: true };
 }
 
@@ -458,7 +458,13 @@ async function solicitarDesafioAssinatura({
       .from('contrato_assinatura_desafios')
       .update({ status: 'cancelado', invalidated_at: new Date().toISOString() })
       .eq('id', desafio.id);
-    return { status: 503, body: { message: 'Nao foi possivel enviar o codigo de confirmacao por e-mail.', motivo: envio.motivo } };
+    return {
+      status: 503,
+      body: {
+        message: 'Nao foi possivel enviar o codigo por e-mail agora. Tente novamente ou fale com o suporte.',
+        motivo: envio.motivo,
+      },
+    };
   }
 
   await supabase
