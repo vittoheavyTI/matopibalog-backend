@@ -56,18 +56,32 @@ test('criarPropostaEContrato persiste snapshot, contrato, signatario hash e even
   assert.equal(r.snapshot.implantacao_gratis, true);
   assert.equal(supabase.inserts.filter((i) => i.tabela === 'propostas_comerciais').length, 1);
   assert.equal(supabase.inserts.filter((i) => i.tabela === 'contratos_comerciais').length, 1);
-  assert.equal(supabase.inserts.filter((i) => i.tabela === 'contrato_signatarios').length, 1);
-  assert.equal(supabase.inserts.filter((i) => i.tabela === 'contrato_eventos').length, 1);
+  // Cliente (pendente) + Matopiba pré-assinada institucionalmente.
+  assert.equal(supabase.inserts.filter((i) => i.tabela === 'contrato_signatarios').length, 2);
+  // cadastro_aceito + assinatura_matopiba_institucional.
+  assert.equal(supabase.inserts.filter((i) => i.tabela === 'contrato_eventos').length, 2);
 
-  const signatario = supabase.inserts.find((i) => i.tabela === 'contrato_signatarios').payload;
+  const signatarios = supabase.inserts.filter((i) => i.tabela === 'contrato_signatarios').map((i) => i.payload);
+  const cliente = signatarios.find((s) => s.papel === 'cliente');
+  const matopiba = signatarios.find((s) => s.papel === 'matopiba');
   const proposta = supabase.inserts.find((i) => i.tabela === 'propostas_comerciais').payload;
   const contrato = supabase.inserts.find((i) => i.tabela === 'contratos_comerciais').payload;
   assert.equal(proposta.status, 'enviada');
   assert.equal(contrato.status, 'aguardando_assinatura');
   // Contratação inicial nasce OBRIGATÓRIA (aciona o gate até a assinatura).
   assert.equal(contrato.obrigatorio, true);
-  assert.equal(signatario.status, 'pendente');
-  assert.equal(signatario.email_hash, emailHash('ana@example.com'));
+  assert.equal(cliente.status, 'pendente');
+  assert.equal(cliente.email_hash, emailHash('ana@example.com'));
+  // Matopiba nasce já assinada institucionalmente (método manual, não OTP).
+  assert.equal(matopiba.status, 'assinado');
+  assert.equal(matopiba.metodo_assinatura, 'manual');
+  assert.ok(matopiba.assinado_em);
+  assert.match(matopiba.assinatura_hash, /^[0-9a-f]{64}$/);
+  assert.match(matopiba.document_hash_assinado, /^[0-9a-f]{64}$/);
+  assert.equal(matopiba.email_hash, null);
+  // Evento técnico da emissão institucional presente.
+  const eventos = supabase.inserts.filter((i) => i.tabela === 'contrato_eventos').map((i) => i.payload.tipo);
+  assert.ok(eventos.includes('assinatura_matopiba_institucional'));
   assert.doesNotMatch(JSON.stringify(supabase.inserts), /ana@example\.com/);
 });
 

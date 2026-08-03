@@ -299,6 +299,19 @@ async function upsertSignatario({ supabase, contrato, usuario, papel }) {
   return data;
 }
 
+// Decisão pura de transição de status após uma assinatura. Extraída para ser
+// testável sem I/O. Regra: cliente + matopiba assinados => plenamente_assinado
+// (finaliza automaticamente). No lançamento inicial a Matopiba nasce
+// pré-assinada institucionalmente, então a assinatura do CLIENTE já finaliza o
+// contrato sem exigir ação manual do super-admin. O ramo
+// aguardando_assinatura_matopiba permanece como contingência (ex.: contrato
+// antigo/manual em que a Matopiba ainda não assinou).
+function proximoStatusContrato({ clienteAssinado, matopibaAssinado, statusAtual }) {
+  if (clienteAssinado && matopibaAssinado) return STATUS_CONTRATO.PLENAMENTE_ASSINADO;
+  if (clienteAssinado && !matopibaAssinado) return STATUS_CONTRATO.AGUARDANDO_ASSINATURA_MATOPIBA;
+  return statusAtual;
+}
+
 function motivoContratoNaoAssinavel(contrato) {
   if (!contrato) return { status: 404, body: { message: 'Contrato nao encontrado.' } };
   if (STATUS_FINAIS.has(contrato.status)) return { status: 409, body: { message: 'Contrato nao pode receber nova assinatura neste estado.' } };
@@ -595,14 +608,10 @@ async function confirmarAssinatura({
   const atualizados = await listarSignatarios({ supabase, contratoId, empresaId });
   const clienteAssinado = atualizados.some((s) => s.papel === 'cliente' && s.status === 'assinado');
   const matopibaAssinado = atualizados.some((s) => s.papel === 'matopiba' && s.status === 'assinado');
-  let novoStatus = contrato.status;
+  const novoStatus = proximoStatusContrato({ clienteAssinado, matopibaAssinado, statusAtual: contrato.status });
   const patchContrato = { atualizado_em: agora, provider: METODO_ASSINATURA, signature_method: METODO_ASSINATURA };
-  if (clienteAssinado && !matopibaAssinado) {
-    novoStatus = STATUS_CONTRATO.AGUARDANDO_ASSINATURA_MATOPIBA;
-    patchContrato.status = novoStatus;
-  }
-  if (clienteAssinado && matopibaAssinado) {
-    novoStatus = STATUS_CONTRATO.PLENAMENTE_ASSINADO;
+  if (novoStatus !== contrato.status) patchContrato.status = novoStatus;
+  if (novoStatus === STATUS_CONTRATO.PLENAMENTE_ASSINADO) {
     const linhasFinal = [
       'Contrato assinado eletronicamente',
       `Contrato: ${contrato.id}`,
@@ -615,7 +624,6 @@ async function confirmarAssinatura({
     const certificadoPdf = montarCertificado({ contrato, signatarios: atualizados, eventos, finalHash: finalUpload.hash });
     const certUpload = await uploadPdfImutavel({ supabase, empresaId, contratoId: contrato.id, tipo: 'certificado', buffer: certificadoPdf });
     const verificationToken = crypto.randomBytes(24).toString('base64url');
-    patchContrato.status = novoStatus;
     patchContrato.signed_storage_path = finalUpload.path;
     patchContrato.signed_file_hash = finalUpload.hash;
     patchContrato.certificate_storage_path = certUpload.path;
@@ -705,6 +713,7 @@ module.exports = {
   montarCertificado,
   montarEventoHash,
   montarPdfSimples,
+  proximoStatusContrato,
   sha256,
   solicitarDesafioAssinatura,
   confirmarAssinatura,
