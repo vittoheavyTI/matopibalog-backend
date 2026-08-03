@@ -90,6 +90,14 @@ CREATE TRIGGER trg_contrato_modelos_protege_publicado
   FOR EACH ROW
   EXECUTE FUNCTION public.contrato_modelos_protege_publicado();
 
+-- A função existe apenas para o trigger. Não é SECURITY DEFINER e o cliente não
+-- precisa executá-la diretamente: remove EXECUTE de PUBLIC/anon/authenticated e
+-- concede só ao service_role (backend).
+REVOKE ALL ON FUNCTION public.contrato_modelos_protege_publicado() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.contrato_modelos_protege_publicado() FROM anon;
+REVOKE ALL ON FUNCTION public.contrato_modelos_protege_publicado() FROM authenticated;
+GRANT EXECUTE ON FUNCTION public.contrato_modelos_protege_publicado() TO service_role;
+
 -- RLS: leitura só super-admin (o backend usa service_role). Espelha a filosofia
 -- das políticas de `termos`/`contratos_comerciais`.
 ALTER TABLE public.contrato_modelos ENABLE ROW LEVEL SECURITY;
