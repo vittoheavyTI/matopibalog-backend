@@ -8,6 +8,7 @@ const {
   hmacHex,
   inserirEvento,
   mascararEmail,
+  montarConteudoContrato,
   montarEventoHash,
   montarPdfSimples,
   proximoStatusContrato,
@@ -24,6 +25,30 @@ test('otp: gera codigo numerico de seis digitos', () => {
   const codigo = gerarCodigoOtp(() => Buffer.from([0, 0, 0, 42]));
   assert.equal(codigo, '000042');
   assert.match(codigo, /^\d{6}$/);
+});
+
+test('documento: usa a versao CONGELADA do modelo quando presente (imutavel a edicoes futuras)', () => {
+  const contrato = {
+    id: 'c1',
+    template_version: 'comercial-v1-tecnico',
+    modelo_versao: 4,
+    modelo_conteudo_snapshot: 'CLAUSULA UNICA: corpo congelado do modelo do plano.',
+  };
+  const proposta = { snapshot: { plano_nome: 'Empresa Start', valor_mensal: 299.9, trial_dias: 14 } };
+  const doc = montarConteudoContrato({ contrato, proposta, empresa: { nome: 'Emp' }, cliente: { nome: 'Ana' } });
+  assert.match(doc, /corpo congelado do modelo do plano/);
+  assert.match(doc, /modelo do plano \(versao 4\)/);
+  assert.match(doc, /Dados comerciais/);
+  // NAO cai no texto tecnico padrao quando ha modelo.
+  assert.doesNotMatch(doc, /pendente de revisao juridica/);
+});
+
+test('documento: fallback para texto tecnico quando nao ha modelo congelado', () => {
+  const contrato = { id: 'c1', template_version: 'comercial-v1-tecnico' };
+  const proposta = { snapshot: { plano_nome: 'Empresa Start', valor_mensal: 299.9, trial_dias: 14 } };
+  const doc = montarConteudoContrato({ contrato, proposta, empresa: { nome: 'Emp' }, cliente: { nome: 'Ana' } });
+  assert.match(doc, /Contrato tecnico Matopiba Log/);
+  assert.match(doc, /pendente de revisao juridica/);
 });
 
 test('finalizacao: cliente assina com Matopiba pre-assinada => plenamente_assinado (sem acao manual)', () => {

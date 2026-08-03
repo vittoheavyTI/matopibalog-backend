@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { FileText, Plus, Pencil, Send, Users, X, Check, AlertTriangle } from 'lucide-react';
 import api from '../api';
+import { ModelosContrato } from '../components/ModelosContrato';
 
 // Tela super-admin para gerenciar termos LGPD (catálogo versionado).
 // Apenas leitura/criação/edição de rascunho e publicação confirmada — sem gate,
@@ -72,6 +73,7 @@ const formatarData = (d?: string | null) =>
   d ? new Date(d).toLocaleDateString('pt-BR') : '—';
 
 export const PainelTermosLGPD: React.FC = () => {
+  const [aba, setAba] = useState<'termos' | 'modelos'>('termos');
   const [termos, setTermos] = useState<Termo[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [toast, setToast] = useState<{ message: string; tipo: 'sucesso' | 'erro' } | null>(null);
@@ -282,6 +284,26 @@ export const PainelTermosLGPD: React.FC = () => {
         </div>
       )}
 
+      {/* Abas: Termos LGPD | Modelos de contrato */}
+      <div className="flex gap-1 bg-white p-1 rounded-xl border border-gray-100 w-fit">
+        <button
+          onClick={() => setAba('termos')}
+          className={`px-4 py-2 rounded-lg text-sm font-semibold ${aba === 'termos' ? 'bg-gray-800 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
+        >
+          Termos LGPD
+        </button>
+        <button
+          onClick={() => setAba('modelos')}
+          className={`px-4 py-2 rounded-lg text-sm font-semibold ${aba === 'modelos' ? 'bg-gray-800 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
+        >
+          Modelos de contrato
+        </button>
+      </div>
+
+      {aba === 'modelos' ? (
+        <ModelosContrato notificar={notificar} />
+      ) : (
+      <>
       {/* Cabeçalho */}
       <div className="flex items-center justify-between bg-white p-4 rounded-xl shadow-sm border border-gray-100">
         <div className="flex items-center space-x-3">
@@ -583,6 +605,8 @@ export const PainelTermosLGPD: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+      </>
       )}
     </div>
   );
