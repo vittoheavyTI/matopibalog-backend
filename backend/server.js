@@ -136,8 +136,10 @@ app.get('/health', (req, res) => {
 app.use(apiLimiter);
 app.use('/auth/login', loginLimiter);
 app.use('/auth', authRoutes);
-// /admin/termos ANTES de /admin para o router genérico não capturar o prefixo.
+// /admin/termos e /admin/contrato-modelos ANTES de /admin para o router genérico
+// não capturar o prefixo.
 app.use('/admin/termos', adminTermosRoutes);
+app.use('/admin/contrato-modelos', require('./routes/adminContratoModelos'));
 app.use('/admin', adminRoutes);
 app.use('/fretes', fretesRoutes);
 app.use('/despesas', despesasRoutes);

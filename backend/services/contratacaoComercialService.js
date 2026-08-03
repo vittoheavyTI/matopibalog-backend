@@ -8,6 +8,7 @@ const {
 } = require('./contratacaoComercialDomainService');
 
 const { BUCKET_CONTRATOS } = require('./contratacaoStorageService');
+const { snapshotVigenteParaContrato } = require('./contratoModeloService');
 
 function emailHash(email) {
   if (!email) return null;
@@ -88,6 +89,12 @@ async function criarPropostaEContrato({
   }
 
   const contrato = montarContratoTecnico({ empresa, responsavel, proposta: snapshot.proposta });
+
+  // Congela o modelo vigente do plano no contrato emitido (se houver). Fail-open:
+  // sem modelo publicado (ou migration 057 pendente), o snapshot é null e o
+  // contrato usa o texto técnico padrão — o cadastro nunca é bloqueado.
+  const { snapshot: modeloSnapshot } = await snapshotVigenteParaContrato({ supabase, planoId: plano.id });
+
   const { data: contratoRow, error: contratoError } = await supabase
     .from('contratos_comerciais')
     .insert({
@@ -98,9 +105,11 @@ async function criarPropostaEContrato({
       template_version: contrato.template_version,
       provider: contrato.provider,
       content_hash: contrato.content_hash,
+      ...(modeloSnapshot || {}),
       metadata: {
         aviso_juridico: 'conteudo_tecnico_pendente_revisao_juridica',
         implantacao_gratis: snapshot.proposta.implantacao_gratis,
+        modelo_vigente: modeloSnapshot ? 'congelado' : 'ausente_fallback_texto_tecnico',
       },
       aceito_por: null,
       aceito_em: null,

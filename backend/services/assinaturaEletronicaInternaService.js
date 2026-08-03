@@ -66,19 +66,37 @@ function textoConsentimento({ papel }) {
 
 function montarConteudoContrato({ contrato, proposta, empresa, cliente, matopiba }) {
   const snapshot = proposta?.snapshot || {};
-  return [
-    'Contrato tecnico Matopiba Log',
-    `Versao: ${contrato.template_version || 'comercial-v1-tecnico'}`,
+  const dadosComerciais = [
+    'Dados comerciais',
     `Contrato: ${contrato.id}`,
     `Empresa: ${empresa?.nome || 'Nao informado'}`,
     `Documento da empresa: ${empresa?.cnpj ? 'informado' : 'nao informado'}`,
     `Responsavel cliente: ${cliente?.nome || 'Nao informado'}`,
-    `Representante Matopiba: ${matopiba?.nome || 'pendente'}`,
+    `Representante Matopiba: ${matopiba?.nome || 'Matopiba Log'}`,
     `Plano: ${snapshot.plano_nome || 'Nao informado'}`,
     `Quantidade contratada: ${snapshot.quantidade_contratada || 0}`,
     `Mensalidade: R$ ${Number(snapshot.valor_mensal || 0).toFixed(2)}`,
     `Implantacao: R$ ${Number(snapshot.valor_implantacao || 0).toFixed(2)}`,
     `Trial: ${Number(snapshot.trial_dias || 0)} dias`,
+  ];
+
+  // Se o contrato congelou um modelo vigente do plano na emissao, o CORPO do
+  // documento e a versao congelada (imutavel a edicoes futuras do modelo).
+  // Sem modelo congelado, mantem o texto tecnico padrao (fallback).
+  if (contrato.modelo_conteudo_snapshot) {
+    return [
+      `Contrato Matopiba Log - modelo do plano (versao ${contrato.modelo_versao || 1})`,
+      '',
+      String(contrato.modelo_conteudo_snapshot),
+      '',
+      ...dadosComerciais,
+    ].join('\n');
+  }
+
+  return [
+    'Contrato tecnico Matopiba Log',
+    `Versao: ${contrato.template_version || 'comercial-v1-tecnico'}`,
+    ...dadosComerciais,
     '',
     'Aviso: texto tecnico pendente de revisao juridica antes do primeiro cliente real.',
   ].join('\n');
@@ -711,6 +729,7 @@ module.exports = {
   inserirEvento,
   mascararEmail,
   montarCertificado,
+  montarConteudoContrato,
   montarEventoHash,
   montarPdfSimples,
   proximoStatusContrato,
