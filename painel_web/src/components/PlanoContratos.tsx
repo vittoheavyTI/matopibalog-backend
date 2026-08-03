@@ -91,6 +91,24 @@ export const PlanoContratos: React.FC = () => {
         <h3 className="text-base font-semibold text-gray-800">Plano e contratos</h3>
       </div>
 
+      {/* Pendência obrigatória no TOPO do card: ação obrigatória, não passiva. */}
+      {!concluido && (
+        <div className="mb-4 rounded-lg border-2 border-amber-300 bg-amber-50 p-4">
+          <div className="flex items-start gap-2 text-amber-800">
+            <AlertTriangle size={18} className="shrink-0 mt-0.5" />
+            <p className="text-sm font-semibold">
+              Seu contrato precisa ser assinado para liberar o uso completo do sistema.
+            </p>
+          </div>
+          <Link
+            to="/contratacao"
+            className="mt-3 inline-flex items-center gap-2 rounded-lg bg-amber-600 hover:bg-amber-700 px-4 py-2 text-sm font-semibold text-white"
+          >
+            <FileSignature size={16} /> Assinar contrato
+          </Link>
+        </div>
+      )}
+
       <div className="grid sm:grid-cols-2 gap-3 text-sm">
         <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
           <div className="text-xs font-semibold uppercase text-gray-400">Plano</div>
@@ -116,24 +134,6 @@ export const PlanoContratos: React.FC = () => {
           </div>
         )}
       </div>
-
-      {/* Pendência: card NÃO pode ser só informativo — CTA claro para assinar. */}
-      {!concluido && (
-        <div className="mt-4 rounded-lg border border-amber-300 bg-amber-50 p-4">
-          <div className="flex items-start gap-2 text-amber-800">
-            <AlertTriangle size={18} className="shrink-0 mt-0.5" />
-            <p className="text-sm font-medium">
-              Seu contrato precisa ser assinado para liberar o uso completo do sistema.
-            </p>
-          </div>
-          <Link
-            to="/contratacao"
-            className="mt-3 inline-flex items-center gap-2 rounded-lg bg-amber-600 hover:bg-amber-700 px-4 py-2 text-sm font-semibold text-white"
-          >
-            <FileSignature size={16} /> Assinar contrato
-          </Link>
-        </div>
-      )}
 
       {erro && <p className="mt-3 text-sm text-amber-700">{erro}</p>}
 

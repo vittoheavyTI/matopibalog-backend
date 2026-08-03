@@ -10,6 +10,7 @@ const {
   mascararEmail,
   montarEventoHash,
   montarPdfSimples,
+  proximoStatusContrato,
   sha256,
   verificarSenhaAtual,
 } = require('../services/assinaturaEletronicaInternaService');
@@ -23,6 +24,29 @@ test('otp: gera codigo numerico de seis digitos', () => {
   const codigo = gerarCodigoOtp(() => Buffer.from([0, 0, 0, 42]));
   assert.equal(codigo, '000042');
   assert.match(codigo, /^\d{6}$/);
+});
+
+test('finalizacao: cliente assina com Matopiba pre-assinada => plenamente_assinado (sem acao manual)', () => {
+  // Fluxo inicial: Matopiba nasce pre-assinada institucionalmente. Quando o
+  // cliente assina, o contrato finaliza automaticamente.
+  assert.equal(
+    proximoStatusContrato({ clienteAssinado: true, matopibaAssinado: true, statusAtual: 'aguardando_assinatura_cliente' }),
+    'plenamente_assinado',
+  );
+});
+
+test('finalizacao: contingencia — cliente assina sem Matopiba => aguardando_assinatura_matopiba', () => {
+  assert.equal(
+    proximoStatusContrato({ clienteAssinado: true, matopibaAssinado: false, statusAtual: 'aguardando_assinatura_cliente' }),
+    'aguardando_assinatura_matopiba',
+  );
+});
+
+test('finalizacao: so Matopiba assinada (cliente ainda nao) => mantem status atual', () => {
+  assert.equal(
+    proximoStatusContrato({ clienteAssinado: false, matopibaAssinado: true, statusAtual: 'aguardando_assinatura' }),
+    'aguardando_assinatura',
+  );
 });
 
 test('otp: hmac depende do contrato, signatario e segredo', () => {

@@ -119,6 +119,38 @@ async function criarPropostaEContrato({
     assinado_em: null,
   });
 
+  // Lançamento inicial (sem provedor pago de assinatura): o contrato nasce
+  // EMITIDO e PRÉ-ASSINADO institucionalmente pela Matopiba Log. Assim a única
+  // parte que precisa executar assinatura manual é o CLIENTE (senha + código por
+  // e-mail). Quando o cliente confirma, `confirmarAssinatura` vê cliente+matopiba
+  // assinados e finaliza o contrato automaticamente (plenamente_assinado),
+  // liberando o gate — sem exigir ação manual do super-admin. O fluxo manual da
+  // Matopiba (painel-admin) fica só como contingência (retorna idempotente sobre
+  // uma parte já assinada). NÃO é assinatura ICP-Brasil/qualificada.
+  const matopibaAssinadoEm = new Date().toISOString();
+  const matopibaAssinaturaHash = crypto.createHash('sha256').update(JSON.stringify({
+    contrato_id: contratoRow.id,
+    empresa_id: empresa.id,
+    papel: 'matopiba',
+    emissao: 'institucional',
+    content_hash: contrato.content_hash,
+    assinado_em: matopibaAssinadoEm,
+  }), 'utf8').digest('hex');
+  await supabase.from('contrato_signatarios').insert({
+    contrato_id: contratoRow.id,
+    empresa_id: empresa.id,
+    nome: 'Matopiba Log',
+    papel: 'matopiba',
+    email_hash: null,
+    status: 'assinado',
+    assinado_em: matopibaAssinadoEm,
+    metodo_assinatura: 'manual',
+    assinatura_hash: matopibaAssinaturaHash,
+    document_hash_assinado: contrato.content_hash,
+    consent_text_version: 'emissao-institucional-v1',
+    consent_text: 'Contrato emitido e pré-assinado institucionalmente pela Matopiba Log no lançamento inicial, sem provedor pago de assinatura. A parte cliente assina eletronicamente com confirmação por e-mail e registro técnico.',
+  });
+
   await supabase.from('contrato_eventos').insert({
     contrato_id: contratoRow.id,
     empresa_id: empresa.id,
@@ -127,6 +159,21 @@ async function criarPropostaEContrato({
       origem,
       implantacao: snapshot.proposta.implantacao_gratis ? 'gratis' : 'positiva',
       fatura_implantacao: snapshot.proposta.implantacao_gratis ? 'nao_criada' : 'aguarda_acao_financeira',
+    },
+    criado_por: criadoPor,
+  });
+
+  // Evento técnico da emissão/pré-assinatura institucional da Matopiba (trilha).
+  await supabase.from('contrato_eventos').insert({
+    contrato_id: contratoRow.id,
+    empresa_id: empresa.id,
+    tipo: 'assinatura_matopiba_institucional',
+    detalhe: {
+      emissao: 'institucional',
+      metodo: 'manual',
+      representante: 'Matopiba Log',
+      observacao: 'pre_assinatura_institucional_sem_otp',
+      assinado_em: matopibaAssinadoEm,
     },
     criado_por: criadoPor,
   });
