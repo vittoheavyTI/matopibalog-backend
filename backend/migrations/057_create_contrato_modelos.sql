@@ -10,7 +10,10 @@
 
 CREATE TABLE IF NOT EXISTS public.contrato_modelos (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  plano_id uuid NOT NULL REFERENCES public.planos(id) ON DELETE CASCADE,
+  -- RESTRICT: modelo é documento jurídico/comercial versionado; não deve sumir
+  -- automaticamente se um plano for apagado por engano. Apagar um plano com
+  -- modelos passa a ser barrado pelo banco (protege o histórico contratual).
+  plano_id uuid NOT NULL REFERENCES public.planos(id) ON DELETE RESTRICT,
   versao integer NOT NULL CHECK (versao >= 1),
   titulo text NOT NULL,
   conteudo text NOT NULL,
@@ -57,6 +60,35 @@ BEGIN
       CHECK (modelo_conteudo_hash IS NULL OR modelo_conteudo_hash ~ '^[0-9a-f]{64}$');
   END IF;
 END $$;
+
+-- Proteção no banco (defesa em profundidade, além do bloqueio no backend):
+-- SÓ rascunho pode ter conteúdo/título/hash editados. Publicado/arquivado só
+-- aceitam transição de status e carimbos de tempo (ex.: publicar arquiva o
+-- anterior; arquivar muda o status) — nunca reescrita silenciosa do conteúdo.
+-- Trigger simples e escopada (sem lógica complexa). "Editar conteúdo" de um
+-- modelo publicado/arquivado exige NOVA versão/rascunho.
+CREATE OR REPLACE FUNCTION public.contrato_modelos_protege_publicado()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF OLD.status <> 'rascunho' AND (
+       NEW.conteudo      IS DISTINCT FROM OLD.conteudo
+    OR NEW.titulo        IS DISTINCT FROM OLD.titulo
+    OR NEW.conteudo_hash IS DISTINCT FROM OLD.conteudo_hash
+  ) THEN
+    RAISE EXCEPTION 'Modelo de contrato % (status %) nao pode ter conteudo/titulo editado. Crie uma nova versao.', OLD.id, OLD.status
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_contrato_modelos_protege_publicado ON public.contrato_modelos;
+CREATE TRIGGER trg_contrato_modelos_protege_publicado
+  BEFORE UPDATE ON public.contrato_modelos
+  FOR EACH ROW
+  EXECUTE FUNCTION public.contrato_modelos_protege_publicado();
 
 -- RLS: leitura só super-admin (o backend usa service_role). Espelha a filosofia
 -- das políticas de `termos`/`contratos_comerciais`.
