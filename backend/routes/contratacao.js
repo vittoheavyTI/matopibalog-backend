@@ -33,6 +33,7 @@ const {
   criarCobrancaImplantacaoPositiva,
   validarSandboxImplantacao,
 } = require('../services/implantacaoCobrancaService');
+const { carregarSituacaoComercial } = require('../services/situacaoComercialService');
 
 const router = express.Router();
 const upload = multer({
@@ -136,6 +137,19 @@ router.get('/status', verifyToken, verificarEmpresa, permitirAssinaturaCliente, 
   } catch (err) {
     console.error('[contratacao/status] Falha', { status: 500 });
     return res.json({ pendencia_obrigatoria: false, tem_contrato: false, concluido: false });
+  }
+});
+
+// Situação comercial canônica do tenant (fonte única para painel e app):
+// trial gratuito, dias restantes, decisão pós-trial, pagamentos iniciais, ações
+// permitidas. Backend é a autoridade — NUNCA cria cobrança (efeito colateral de GET).
+router.get('/situacao', verifyToken, verificarEmpresa, permitirAssinaturaCliente, async (req, res) => {
+  try {
+    const situ = await carregarSituacaoComercial(supabase, req.empresa_id);
+    return res.json(situ);
+  } catch (err) {
+    console.error('[contratacao/situacao] Falha', { status: 500 });
+    return res.status(500).json({ message: 'Erro ao carregar situacao comercial.' });
   }
 });
 
