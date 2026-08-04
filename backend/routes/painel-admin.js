@@ -23,36 +23,7 @@ const {
 // valor por motorista extra, valor inicial/implantação e "sob negociação".
 // Editar estes campos NÃO reescreve contratos já emitidos (o contrato congela o
 // snapshot do modelo). Money: >=0 e <=2 casas; capacidade: inteiro >=0.
-function montarPatchComercial(body) {
-  const patch = {};
-  if (body.capacidade_inclusa !== undefined && body.capacidade_inclusa !== null && body.capacidade_inclusa !== '') {
-    const n = Number(body.capacidade_inclusa);
-    if (!Number.isInteger(n) || n < 0) {
-      return { ok: false, status: 422, body: { message: 'Capacidade inclusa deve ser um inteiro maior ou igual a zero.' } };
-    }
-    patch.capacidade_inclusa = n;
-  }
-  for (const campo of ['preco_motorista_extra', 'valor_implantacao']) {
-    if (body[campo] !== undefined) {
-      if (body[campo] === null || body[campo] === '') {
-        patch[campo] = null;
-      } else {
-        const c = paraCentavos(body[campo]);
-        if (!c.ok) {
-          return { ok: false, status: 422, body: { message: `Valor inválido em ${campo} (use no máximo 2 casas decimais).` } };
-        }
-        if (c.centavos < 0) {
-          return { ok: false, status: 422, body: { message: `${campo} não pode ser negativo.` } };
-        }
-        patch[campo] = c.centavos / 100;
-      }
-    }
-  }
-  if (body.requer_negociacao !== undefined) {
-    patch.requer_negociacao = body.requer_negociacao === true;
-  }
-  return { ok: true, patch };
-}
+const { montarPatchComercial } = require('../services/planoComercialPatchService');
 const { categoriaCompativelComTipo, mensagemIncompatibilidade } = require('../utils/planoCategoria');
 const { resumirBillingHealth } = require('../services/billingHealthService');
 const { recomendarPlano, valorEfetivoEmpresa } = require('../services/calculadoraComercialService');
