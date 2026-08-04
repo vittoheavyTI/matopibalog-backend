@@ -368,6 +368,47 @@ exports.register = async (req, res) => {
     if (!comConvite) {
       await enviarConfirmacaoEmail(email);
       resposta.email_confirmacao_pendente = true;
+
+      // Autônomo self-service gera contrato comercial OBRIGATÓRIO (mesmo fluxo do
+      // cadastro de empresa): usa o modelo vigente do plano, Matopiba nasce
+      // pré-assinada institucionalmente e o cliente assina depois. Não-fatal: uma
+      // falha aqui NÃO desfaz o cadastro já concluído. NÃO se aplica ao motorista
+      // vinculado por convite (esse entra numa empresa existente, sem novo contrato).
+      if (empresa_id) {
+        try {
+          // plano_id vem da empresa recém-criada (scope-safe: não depende de
+          // variáveis do bloco de criação). Sem plano → não gera contrato.
+          const { data: empRow } = await supabase
+            .from('empresas')
+            .select('plano_id, nome')
+            .eq('id', empresa_id)
+            .maybeSingle();
+          if (empRow?.plano_id) {
+            const { data: planoAutonomo } = await supabase
+              .from('planos')
+              .select('id, nome, preco_mensal, dias_trial, limite_motoristas, capacidade_inclusa, preco_motorista_extra, valor_implantacao, requer_negociacao')
+              .eq('id', empRow.plano_id)
+              .maybeSingle();
+            if (planoAutonomo) {
+              const contratacao = await criarPropostaEContrato({
+                supabase,
+                empresa: { id: empresa_id, nome: empRow.nome || `${nome} (Autonomo)` },
+                responsavel: { nome, email },
+                plano: planoAutonomo,
+                origem: 'cadastro_publico',
+                criadoPor: authData.user.id,
+              });
+              if (contratacao && !contratacao.skipped) {
+                resposta.contratacao = { contrato_id: contratacao.contrato_id };
+              }
+            }
+          }
+        } catch (contratoErr) {
+          console.error('[register] contratacao autônomo (nao-fatal)', {
+            motivo: contratoErr.motivo || contratoErr.code || 'erro',
+          });
+        }
+      }
     }
 
     if (!comConvite && administrador && administrador.email) {

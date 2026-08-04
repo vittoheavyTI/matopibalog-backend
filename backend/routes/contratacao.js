@@ -49,6 +49,25 @@ const upload = multer({
   },
 });
 
+// Quem pode agir sobre o CONTRATO do próprio tenant: admin/super-admin OU o DONO
+// de uma empresa AUTÔNOMA (cadastro autônomo self-service cria o usuário como
+// tipo 'motorista', que não é admin — mas é o dono e precisa assinar o próprio
+// contrato). Roda após verificarEmpresa (usa req.empresa_id). Motorista vinculado
+// a uma transportadora NÃO passa (empresa tipo != autonomo). Fail-closed.
+async function permitirAssinaturaCliente(req, res, next) {
+  if (req.user && (req.user.role === 'admin' || req.user.is_super_admin === true)) return next();
+  try {
+    if (!req.empresa_id) return res.status(403).json({ message: 'Acesso restrito.' });
+    const { data: emp, error } = await supabase
+      .from('empresas')
+      .select('tipo')
+      .eq('id', req.empresa_id)
+      .maybeSingle();
+    if (!error && emp && emp.tipo === 'autonomo') return next();
+  } catch { /* fail-closed */ }
+  return res.status(403).json({ message: 'Acesso restrito para administradores.' });
+}
+
 async function carregarIntegracaoAsaas() {
   const { data } = await supabase
     .from('configuracoes')
@@ -96,7 +115,7 @@ router.get('/verificar/:token', async (req, res) => {
   }
 });
 
-router.get('/minha', verifyToken, isAdmin, verificarEmpresa, async (req, res) => {
+router.get('/minha', verifyToken, verificarEmpresa, permitirAssinaturaCliente, async (req, res) => {
   if (!req.empresa_id) return res.status(400).json({ message: 'Empresa nao identificada.' });
   try {
     const resultado = await listarContratacaoEmpresa({ supabase, empresaId: req.empresa_id });
@@ -109,7 +128,7 @@ router.get('/minha', verifyToken, isAdmin, verificarEmpresa, async (req, res) =>
 
 // Resumo enxuto para a navegação do cliente (sidebar): há pendência obrigatória?
 // contrato concluído? Sempre 200 (fail-open) para nunca quebrar o menu.
-router.get('/status', verifyToken, isAdmin, verificarEmpresa, async (req, res) => {
+router.get('/status', verifyToken, verificarEmpresa, permitirAssinaturaCliente, async (req, res) => {
   if (!req.empresa_id) return res.json({ pendencia_obrigatoria: false, tem_contrato: false, concluido: false });
   try {
     const resumo = await resumoContratacaoEmpresa({ supabase, empresaId: req.empresa_id });
@@ -120,7 +139,7 @@ router.get('/status', verifyToken, isAdmin, verificarEmpresa, async (req, res) =
   }
 });
 
-router.post('/contratos/:id/aceitar', verifyToken, isAdmin, verificarEmpresa, async (req, res) => {
+router.post('/contratos/:id/aceitar', verifyToken, verificarEmpresa, permitirAssinaturaCliente, async (req, res) => {
   if (!req.empresa_id) return res.status(400).json({ message: 'Empresa nao identificada.' });
   try {
     const r = await aceitarContrato({
@@ -136,7 +155,7 @@ router.post('/contratos/:id/aceitar', verifyToken, isAdmin, verificarEmpresa, as
   }
 });
 
-router.post('/contratos/:id/cobranca-implantacao', verifyToken, isAdmin, verificarEmpresa, async (req, res) => {
+router.post('/contratos/:id/cobranca-implantacao', verifyToken, verificarEmpresa, permitirAssinaturaCliente, async (req, res) => {
   if (!req.empresa_id) return res.status(400).json({ message: 'Empresa nao identificada.' });
   try {
     let integracoesAsaas = null;
@@ -174,7 +193,7 @@ router.post('/contratos/:id/cobranca-implantacao', verifyToken, isAdmin, verific
   }
 });
 
-router.post('/contratos/:id/assinatura/desafio', verifyToken, isAdmin, verificarEmpresa, async (req, res) => {
+router.post('/contratos/:id/assinatura/desafio', verifyToken, verificarEmpresa, permitirAssinaturaCliente, async (req, res) => {
   if (!req.empresa_id) return res.status(400).json({ message: 'Empresa nao identificada.' });
   try {
     const r = await solicitarDesafioAssinatura({
@@ -194,7 +213,7 @@ router.post('/contratos/:id/assinatura/desafio', verifyToken, isAdmin, verificar
   }
 });
 
-router.post('/contratos/:id/assinatura/confirmar', verifyToken, isAdmin, verificarEmpresa, async (req, res) => {
+router.post('/contratos/:id/assinatura/confirmar', verifyToken, verificarEmpresa, permitirAssinaturaCliente, async (req, res) => {
   if (!req.empresa_id) return res.status(400).json({ message: 'Empresa nao identificada.' });
   try {
     const r = await confirmarAssinatura({
@@ -216,7 +235,7 @@ router.post('/contratos/:id/assinatura/confirmar', verifyToken, isAdmin, verific
   }
 });
 
-router.post('/contratos/:id/upload-assinado', verifyToken, isAdmin, verificarEmpresa, upload.single('arquivo'), async (req, res) => {
+router.post('/contratos/:id/upload-assinado', verifyToken, verificarEmpresa, permitirAssinaturaCliente, upload.single('arquivo'), async (req, res) => {
   if (!req.empresa_id) return res.status(400).json({ message: 'Empresa nao identificada.' });
   const arquivo = validarPdfAssinado(req.file);
   if (!arquivo.ok) return res.status(arquivo.status).json({ message: arquivo.message });
@@ -258,7 +277,7 @@ router.post('/contratos/:id/upload-assinado', verifyToken, isAdmin, verificarEmp
   }
 });
 
-router.get('/contratos/:id/assinado-url', verifyToken, isAdmin, verificarEmpresa, async (req, res) => {
+router.get('/contratos/:id/assinado-url', verifyToken, verificarEmpresa, permitirAssinaturaCliente, async (req, res) => {
   if (!req.empresa_id) return res.status(400).json({ message: 'Empresa nao identificada.' });
   try {
     const { data: contrato, error } = await supabase
@@ -276,7 +295,7 @@ router.get('/contratos/:id/assinado-url', verifyToken, isAdmin, verificarEmpresa
   }
 });
 
-router.get('/contratos/:id/certificado-url', verifyToken, isAdmin, verificarEmpresa, async (req, res) => {
+router.get('/contratos/:id/certificado-url', verifyToken, verificarEmpresa, permitirAssinaturaCliente, async (req, res) => {
   if (!req.empresa_id) return res.status(400).json({ message: 'Empresa nao identificada.' });
   try {
     const { data: contrato, error } = await supabase
