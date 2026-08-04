@@ -2,6 +2,21 @@ const supabase = require('../config/supabase');
 const { avaliarElegibilidadeSuspensao, lerDiasCarenciaSuspensao } = require('../services/paymentDomainService');
 const { patchSuspensaoFinanceiraAutomatica } = require('../utils/suspensao');
 const { empresaTemContratoObrigatorioPendente } = require('../services/contratoGateService');
+const { carregarSituacaoComercial } = require('../services/situacaoComercialService');
+
+// Mensagem de negócio (não só 403 genérico) por situação canônica do fluxo v2.
+function mensagemGate(situacao) {
+  switch (situacao) {
+    case 'aguardando_assinatura': return 'Para continuar usando o sistema, finalize a assinatura do contrato.';
+    case 'trial_expirado_aguardando_decisao': return 'Seu período de teste terminou. Escolha continuar com o Matopiba Log para seguir usando o sistema.';
+    case 'trial_encerrado_sem_contratacao': return 'Você optou por não continuar após o teste. Reabra a contratação quando quiser voltar a usar o sistema.';
+    case 'conversao_aguardando_pagamento': return 'Contratação confirmada. Conclua os pagamentos iniciais para liberar o uso completo.';
+    case 'suspensa_financeiramente': return 'Plano suspenso. Regularize seu plano para continuar.';
+    case 'bloqueada_administrativamente': return 'Conta bloqueada. Entre em contato com o suporte.';
+    case 'cancelada': return 'Conta cancelada. Entre em contato com o suporte.';
+    default: return 'Ação não permitida no estado atual da sua conta.';
+  }
+}
 
 // Proteção: uma conta não pode ser suspensa automaticamente se não houver
 // fatura pendente/vencida com link de pagamento e vencimento já passado.
@@ -67,12 +82,30 @@ const verificarPlano = async (req, res, next) => {
   try {
     const { data, error } = await supabase
       .from('empresas')
-      .select('status, trial_ends_at')
+      .select('*')
       .eq('id', req.empresa_id)
       .single();
 
     if (error || !data) {
       return res.status(500).json({ message: 'Erro ao verificar plano.' });
+    }
+
+    // Fluxo comercial v2: o domínio canônico de situação comercial decide a
+    // liberação de escrita (trial gratuito, decisão pós-trial, conversão,
+    // suspensão). Contas legadas (commercial_flow_version != 'v2') NÃO entram
+    // aqui e seguem exatamente pelo caminho abaixo, inalterado. O gate de
+    // contrato obrigatório (acima) já é comum aos dois fluxos.
+    if (data.commercial_flow_version === 'v2') {
+      const situ = await carregarSituacaoComercial(supabase, req.empresa_id, { empresa: data });
+      if (situ && situ.pode_operar === false) {
+        return res.status(403).json({
+          message: mensagemGate(situ.situacao),
+          motivo: situ.motivo || 'bloqueio_comercial',
+          situacao: situ.situacao,
+          acoes: situ.acoes,
+        });
+      }
+      return next();
     }
 
     const hoje = new Date();
