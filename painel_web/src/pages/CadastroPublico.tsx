@@ -456,6 +456,15 @@ export const CadastroPublico: React.FC = () => {
                   <div className="mt-2 text-sm text-gray-600">
                     Total inicial: <span className="font-semibold text-gray-900">{precoBRL(implantacaoResumo)}</span>
                   </div>
+                  <div className="mt-1 text-sm text-gray-600">
+                    Recorrência: <span className="font-semibold text-gray-900">mensal</span>
+                  </div>
+                  {!planoSelecionado.requer_negociacao && (
+                    <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800">
+                      <span className="font-semibold">Contrato obrigatório.</span> Para liberar o uso do sistema, será
+                      necessário assinar eletronicamente o contrato, com código enviado por e-mail.
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="mb-4 text-sm text-gray-500">Nenhum plano selecionado.</div>

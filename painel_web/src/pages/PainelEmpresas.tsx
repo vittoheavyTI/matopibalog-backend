@@ -124,6 +124,7 @@ export const PainelEmpresas: React.FC = () => {
   const [contratacaoDados, setContratacaoDados] = useState<DadosContratacao | null>(null);
   const [contratacaoLoading, setContratacaoLoading] = useState(false);
   const [contratacaoEnviando, setContratacaoEnviando] = useState(false);
+  const [reenvioResultado, setReenvioResultado] = useState<{ enviado: boolean; link?: string; email_mascarado?: string | null; ja_concluido?: boolean } | null>(null);
   const [matopibaSenha, setMatopibaSenha] = useState('');
   const [matopibaCodigo, setMatopibaCodigo] = useState('');
   const [matopibaConsentimento, setMatopibaConsentimento] = useState(false);
@@ -415,6 +416,26 @@ export const PainelEmpresas: React.FC = () => {
       await abrirContratacao(contratacaoTarget);
     } catch (err: unknown) {
       setToast({ message: mensagemApi(err, 'Erro ao registrar aceite.'), tipo: 'erro' });
+    } finally {
+      setContratacaoEnviando(false);
+    }
+  }
+
+  // Reenvia ao CLIENTE o e-mail lembrete de assinatura (link /contratacao). Não
+  // assina pelo cliente nem libera manualmente; fluxo normal segue automático.
+  async function reenviarAssinaturaCliente() {
+    const contrato = contratoPrincipal(contratacaoDados?.propostas?.[0]);
+    if (!contratacaoTarget || !contrato) return;
+    setContratacaoEnviando(true);
+    setReenvioResultado(null);
+    try {
+      const { data } = await api.post(`/painel-admin/empresas/${contratacaoTarget.id}/contratos/${contrato.id}/reenviar-assinatura`);
+      setReenvioResultado(data);
+      if (data?.ja_concluido) setToast({ message: 'Contrato já concluído; não há assinatura pendente.', tipo: 'sucesso' });
+      else if (data?.enviado) setToast({ message: `Lembrete enviado ao cliente (${data.email_mascarado || 'e-mail'}).`, tipo: 'sucesso' });
+      else setToast({ message: 'E-mail indisponível agora. Copie o link e envie ao cliente.', tipo: 'erro' });
+    } catch (err: unknown) {
+      setToast({ message: mensagemApi(err, 'Erro ao reenviar assinatura.'), tipo: 'erro' });
     } finally {
       setContratacaoEnviando(false);
     }
@@ -898,7 +919,26 @@ export const PainelEmpresas: React.FC = () => {
                 )}
               </div>
 
+              {/* Link copiável do lembrete quando o e-mail não pôde ser enviado. */}
+              {reenvioResultado && !reenvioResultado.enviado && !reenvioResultado.ja_concluido && reenvioResultado.link && (
+                <div className="px-4 pt-3 text-sm text-amber-800 bg-amber-50 border-t border-amber-200">
+                  E-mail indisponível agora. Envie este link ao cliente para ele assinar:
+                  <div className="mt-1 flex items-center gap-2">
+                    <input readOnly value={reenvioResultado.link} className="flex-1 border border-amber-300 rounded-lg px-2 py-1 text-xs bg-white" onFocus={(e) => e.currentTarget.select()} />
+                    <button type="button" onClick={() => navigator.clipboard?.writeText(reenvioResultado.link || '')} className="px-3 py-1 rounded-lg text-xs font-medium bg-amber-600 text-white hover:bg-amber-700">Copiar</button>
+                  </div>
+                </div>
+              )}
+
               <div className="p-4 bg-gray-50 border-t flex flex-wrap justify-end gap-2">
+                <button
+                  type="button"
+                  disabled={!contrato || contratacaoEnviando || ['plenamente_assinado', 'assinado', 'aceito_manualmente'].includes(contrato?.status)}
+                  onClick={reenviarAssinaturaCliente}
+                  className="px-4 py-2 rounded-lg text-sm font-semibold bg-blue-700 text-white hover:bg-blue-800 disabled:opacity-50 mr-auto"
+                >
+                  Reenviar assinatura ao cliente
+                </button>
                 <label className={`px-4 py-2 rounded-lg text-sm font-medium bg-white border border-gray-200 text-gray-700 hover:bg-gray-100 ${(!contrato || contratacaoEnviando) ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
                   Contingencia: PDF
                   <input
