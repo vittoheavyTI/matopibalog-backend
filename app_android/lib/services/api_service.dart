@@ -420,6 +420,21 @@ class ApiService {
     }
   }
 
+  /// Estado da contratação obrigatória (read-only) para o gate do app. Consome
+  /// GET /contratacao/status (o dono autônomo tem acesso). Fail-open: em falha
+  /// retorna null → o app trata como "sem pendência" e não bloqueia por engano.
+  static Future<Map<String, dynamic>?> getContratacaoStatus() async {
+    try {
+      final response = await http
+          .get(Uri.parse('$_baseUrl/contratacao/status'), headers: await _getHeaders())
+          .timeout(_timeoutGet);
+      if (response.statusCode == 200) return jsonDecode(response.body);
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Faturas da PRÓPRIA empresa (read-only), para o app do autônomo. Consome
   /// GET /pagamentos/me/faturas (tenant-scoped no backend; liberado só a
   /// empresa.tipo='autonomo' — vinculado recebe 403 com mensagem clara). NÃO

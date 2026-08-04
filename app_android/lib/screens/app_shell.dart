@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../providers/auth_provider.dart';
 import '../providers/finance_provider.dart';
 import '../providers/theme_provider.dart';
@@ -129,6 +130,49 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (mounted) _carregarContador();
   }
 
+  /// Conduz o dono à assinatura do contrato obrigatório abrindo a web /contratacao
+  /// (fluxo já validado no painel). Fecha o drawer se estiver aberto.
+  Future<void> _abrirAssinaturaContrato() async {
+    if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+    AppLogger.action('abrir_assinatura_contrato');
+    final uri = Uri.parse('https://matopibalog.com.br/contratacao');
+    bool ok = false;
+    try {
+      ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      ok = false;
+    }
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Não foi possível abrir a assinatura. Acesse matopibalog.com.br/contratacao no navegador e entre com seu e-mail e senha.'),
+      ));
+    }
+  }
+
+  /// Banner de contrato obrigatório pendente (topo da Home). Não some sozinho: o
+  /// gate do backend segue bloqueando escritas até a assinatura ser concluída.
+  Widget _bannerContrato() {
+    return Material(
+      color: const Color(0xFFFFF3CD),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+        child: Row(
+          children: [
+            const Icon(Icons.description_outlined, color: Color(0xFF8A6D3B)),
+            const SizedBox(width: 8),
+            const Expanded(
+              child: Text(
+                'Assine o contrato para liberar o uso do sistema.',
+                style: TextStyle(color: Color(0xFF8A6D3B), fontWeight: FontWeight.w600),
+              ),
+            ),
+            TextButton(onPressed: _abrirAssinaturaContrato, child: const Text('Assinar')),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _navegarPara(BuildContext context, Widget tela) async {
     Navigator.of(context).pop();
     final alterou = await Navigator.of(context).push(MaterialPageRoute(builder: (_) => tela));
@@ -223,11 +267,19 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                 Navigator.of(context).pop();
               },
             ),
+            // Contrato obrigatório pendente: ação em destaque para assinar (libera o uso).
+            if (finance.contratoObrigatorioPendente)
+              ListTile(
+                leading: const Icon(Icons.description_outlined, color: Color(0xFFB8860B)),
+                title: const Text('Assinar contrato', style: TextStyle(color: Color(0xFFB8860B), fontWeight: FontWeight.bold)),
+                subtitle: const Text('Obrigatório para liberar o uso'),
+                onTap: _abrirAssinaturaContrato,
+              ),
             ListTile(
               leading: const Icon(Icons.local_shipping_outlined),
               title: const Text('Novo Frete'),
-              enabled: !finance.planoBloqueado,
-              onTap: finance.planoBloqueado ? null : () {
+              enabled: !finance.operacaoBloqueada,
+              onTap: finance.operacaoBloqueada ? null : () {
                 AppLogger.action('menu_nav', params: {'destino': 'add_frete'});
                 _navegarPara(context, const AddFreteScreen());
               },
@@ -235,8 +287,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             ListTile(
               leading: const Icon(Icons.receipt_outlined),
               title: const Text('Nova Despesa'),
-              enabled: !finance.planoBloqueado,
-              onTap: finance.planoBloqueado ? null : () {
+              enabled: !finance.operacaoBloqueada,
+              onTap: finance.operacaoBloqueada ? null : () {
                 AppLogger.action('menu_nav', params: {'destino': 'add_despesa'});
                 _novoLancamentoComFrete(context, (freteId) => AddDespesaScreen(freteId: freteId));
               },
@@ -244,8 +296,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             ListTile(
               leading: const Icon(Icons.local_gas_station_outlined),
               title: const Text('Novo Abastecimento'),
-              enabled: !finance.planoBloqueado,
-              onTap: finance.planoBloqueado ? null : () {
+              enabled: !finance.operacaoBloqueada,
+              onTap: finance.operacaoBloqueada ? null : () {
                 AppLogger.action('menu_nav', params: {'destino': 'add_abastecimento'});
                 _novoLancamentoComFrete(context, (freteId) => AddAbastecimentoScreen(freteId: freteId));
               },
@@ -255,8 +307,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               ListTile(
                 leading: const Icon(Icons.payments_outlined),
                 title: const Text('Novo Vale'),
-                enabled: !finance.planoBloqueado,
-                onTap: finance.planoBloqueado ? null : () {
+                enabled: !finance.operacaoBloqueada,
+                onTap: finance.operacaoBloqueada ? null : () {
                   AppLogger.action('menu_nav', params: {'destino': 'add_vale'});
                   _novoLancamentoComFrete(context, (freteId) => AddValeScreen(freteId: freteId));
                 },
@@ -323,7 +375,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           ],
         ),
       ),
-      body: const HomeScreen(),
+      body: Column(
+        children: [
+          if (finance.contratoObrigatorioPendente) _bannerContrato(),
+          const Expanded(child: HomeScreen()),
+        ],
+      ),
     );
   }
 }

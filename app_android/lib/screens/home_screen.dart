@@ -442,7 +442,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: ElevatedButton.icon(
                       icon: const Icon(Icons.add, size: 22),
                       label: const Text('NOVO LANÇAMENTO', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                      onPressed: finance.planoBloqueado ? null : _abrirNovoLancamento,
+                      onPressed: finance.operacaoBloqueada ? null : _abrirNovoLancamento,
                     ),
                   ),
                   const SizedBox(height: 20),
