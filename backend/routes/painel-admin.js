@@ -27,7 +27,10 @@ const {
 const {
   confirmarAssinatura,
   solicitarDesafioAssinatura,
+  mascararEmail,
 } = require('../services/assinaturaEletronicaInternaService');
+const { enviarEmail } = require('../services/emailService');
+const { STATUS_CONCLUIDOS } = require('../services/contratoGateService');
 const {
   BUCKET_CONTRATOS,
   caminhoContratoAssinado,
@@ -266,6 +269,77 @@ router.post('/empresas/:empresaId/contratos/:contratoId/assinatura-matopiba/conf
   } catch (err) {
     console.error('[painel-admin/assinatura-matopiba/confirmar] Falha', { status: 500 });
     return res.status(500).json({ message: 'Erro ao confirmar assinatura.' });
+  }
+});
+
+// Reenvia ao CLIENTE um e-mail lembrete para assinar o contrato (link /contratacao).
+// NÃO assina pelo cliente, NÃO libera manualmente, NÃO toca contrato/plano/Asaas/faturas.
+// Idempotente (só envia e registra evento de auditoria). Se o contrato já está
+// concluído, não envia. Se o e-mail estiver desligado/falhar, devolve o link para o
+// super-admin copiar e enviar manualmente. Fluxo normal continua automático.
+router.post('/empresas/:empresaId/contratos/:contratoId/reenviar-assinatura', async (req, res) => {
+  const { empresaId, contratoId } = req.params;
+  const link = `${process.env.FRONTEND_URL || 'https://matopibalog.com.br'}/contratacao`;
+  try {
+    const { data: contrato, error } = await supabase
+      .from('contratos_comerciais')
+      .select('id, empresa_id, status')
+      .eq('id', contratoId)
+      .maybeSingle();
+    if (error) throw error;
+    if (!contrato || contrato.empresa_id !== empresaId) {
+      return res.status(404).json({ message: 'Contrato nao encontrado.' });
+    }
+    if (STATUS_CONCLUIDOS.has(contrato.status)) {
+      return res.status(200).json({ ja_concluido: true, enviado: false, status: contrato.status, link, message: 'Contrato ja concluido; nao ha assinatura pendente.' });
+    }
+
+    // Destinatário = admin da empresa (quem assina como cliente).
+    const { data: adminUser } = await supabase
+      .from('usuarios')
+      .select('email, nome')
+      .eq('empresa_id', empresaId)
+      .eq('tipo', 'admin')
+      .limit(1)
+      .maybeSingle();
+    const email = adminUser?.email || null;
+
+    let envio = { enviado: false, motivo: 'sem_destinatario' };
+    if (email) {
+      envio = await enviarEmail({
+        para: email,
+        assunto: 'Assine seu contrato — Matopiba Log',
+        html: [
+          `<p>Olá ${adminUser?.nome || ''},</p>`,
+          '<p>Para liberar o uso completo do sistema, é necessário assinar eletronicamente o contrato, com confirmação por código enviado ao seu e-mail.</p>',
+          `<p><a href="${link}">Assinar contrato agora</a></p>`,
+          '<p>Ao acessar, confirme sua senha, receba o código por e-mail e conclua a assinatura.</p>',
+        ].join(''),
+        texto: `Para liberar o uso do sistema, assine o contrato em ${link} (confirmação por código no seu e-mail).`,
+      });
+    }
+
+    // Evento de auditoria (best-effort; não bifurca a trilha — sem event_hash).
+    try {
+      await supabase.from('contrato_eventos').insert({
+        contrato_id: contrato.id,
+        empresa_id: empresaId,
+        tipo: 'lembrete_assinatura_enviado',
+        detalhe: { enviado: envio.enviado === true, motivo: envio.motivo || null, canal: 'email' },
+        criado_por: req.user.uid,
+      });
+    } catch { /* auditoria é best-effort */ }
+
+    return res.status(200).json({
+      enviado: envio.enviado === true,
+      motivo: envio.enviado === true ? null : (envio.motivo || 'falha_envio'),
+      email_mascarado: email ? mascararEmail(email) : null,
+      status: contrato.status,
+      link, // sempre devolvido: o painel mostra o link copiável se o e-mail não saiu.
+    });
+  } catch (err) {
+    console.error('[painel-admin/reenviar-assinatura] Falha', { status: 500 });
+    return res.status(500).json({ message: 'Erro ao reenviar assinatura.' });
   }
 });
 
