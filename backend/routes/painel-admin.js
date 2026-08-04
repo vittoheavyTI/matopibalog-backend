@@ -15,7 +15,44 @@ const {
   montarErroReprecificacao,
   resolverCriacaoPreco,
   montarImpactoPreco,
+  paraCentavos,
 } = require('../services/planoPrecoService');
+
+// Campos comerciais que NÃO entram na fórmula de preço (planoPrecoService cuida de
+// preco_mensal/modelo/limite). São passthrough validado: capacidade inclusa,
+// valor por motorista extra, valor inicial/implantação e "sob negociação".
+// Editar estes campos NÃO reescreve contratos já emitidos (o contrato congela o
+// snapshot do modelo). Money: >=0 e <=2 casas; capacidade: inteiro >=0.
+function montarPatchComercial(body) {
+  const patch = {};
+  if (body.capacidade_inclusa !== undefined && body.capacidade_inclusa !== null && body.capacidade_inclusa !== '') {
+    const n = Number(body.capacidade_inclusa);
+    if (!Number.isInteger(n) || n < 0) {
+      return { ok: false, status: 422, body: { message: 'Capacidade inclusa deve ser um inteiro maior ou igual a zero.' } };
+    }
+    patch.capacidade_inclusa = n;
+  }
+  for (const campo of ['preco_motorista_extra', 'valor_implantacao']) {
+    if (body[campo] !== undefined) {
+      if (body[campo] === null || body[campo] === '') {
+        patch[campo] = null;
+      } else {
+        const c = paraCentavos(body[campo]);
+        if (!c.ok) {
+          return { ok: false, status: 422, body: { message: `Valor inválido em ${campo} (use no máximo 2 casas decimais).` } };
+        }
+        if (c.centavos < 0) {
+          return { ok: false, status: 422, body: { message: `${campo} não pode ser negativo.` } };
+        }
+        patch[campo] = c.centavos / 100;
+      }
+    }
+  }
+  if (body.requer_negociacao !== undefined) {
+    patch.requer_negociacao = body.requer_negociacao === true;
+  }
+  return { ok: true, patch };
+}
 const { categoriaCompativelComTipo, mensagemIncompatibilidade } = require('../utils/planoCategoria');
 const { resumirBillingHealth } = require('../services/billingHealthService');
 const { recomendarPlano, valorEfetivoEmpresa } = require('../services/calculadoraComercialService');
@@ -851,6 +888,9 @@ router.post('/planos', async (req, res) => {
   const preco = resolverCriacaoPreco(req.body);
   if (!preco.ok) return res.status(preco.status).json(preco.body);
 
+  const comercial = montarPatchComercial(req.body);
+  if (!comercial.ok) return res.status(comercial.status).json(comercial.body);
+
   const { data, error } = await supabase.from('planos').insert({
     nome: req.body.nome,
     descricao: req.body.descricao || '',
@@ -858,7 +898,8 @@ router.post('/planos', async (req, res) => {
     dias_trial: req.body.dias_trial !== undefined ? Number(req.body.dias_trial) : 7,
     ativo: req.body.ativo !== undefined ? req.body.ativo === true : true,
     categoria,
-    ...preco.patch
+    ...preco.patch,
+    ...comercial.patch
   }).select().single();
   if (error) return res.status(500).json({ message: 'Erro ao criar plano.' });
   res.status(201).json(data);
@@ -880,6 +921,11 @@ router.put('/planos/:id', async (req, res) => {
     }
     upd.categoria = categoria;
   }
+
+  // Campos comerciais (passthrough validado; fora da fórmula de preço).
+  const comercial = montarPatchComercial(req.body);
+  if (!comercial.ok) return res.status(comercial.status).json(comercial.body);
+  Object.assign(upd, comercial.patch);
 
   // ─── Precificação ──────────────────────────────────────────────────────────
   // O PUT é PARCIAL, mas a fórmula precisa do quadro completo: `PUT

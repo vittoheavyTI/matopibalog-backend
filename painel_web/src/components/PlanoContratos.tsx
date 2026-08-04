@@ -23,9 +23,19 @@ type Contrato = {
 type Proposta = {
   id: string;
   status: string;
-  resumo?: { plano_nome?: string | null } | null;
+  resumo?: {
+    plano_nome?: string | null;
+    valor_mensal?: number | string | null;
+    valor_implantacao?: number | string | null;
+    implantacao_gratis?: boolean | null;
+  } | null;
+  valor_mensal?: number | string | null;
+  valor_implantacao?: number | string | null;
   contratos_comerciais?: Contrato[] | Contrato | null;
 };
+
+const brl = (v: number | string | null | undefined) =>
+  new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(v || 0));
 
 const statusLabel: Record<string, string> = {
   enviada: 'Proposta emitida',
@@ -119,6 +129,18 @@ export const PlanoContratos: React.FC = () => {
           <div className="mt-1 flex items-center gap-2 font-semibold text-gray-900">
             {concluido ? <CheckCircle2 size={16} className="text-green-600" /> : <Clock size={16} className="text-amber-500" />}
             {statusLabel[contrato.status] || contrato.status}
+          </div>
+        </div>
+        <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+          <div className="text-xs font-semibold uppercase text-gray-400">Mensalidade</div>
+          <div className="mt-1 font-semibold text-gray-900">{brl(proposta.resumo?.valor_mensal ?? proposta.valor_mensal)} <span className="text-xs font-normal text-gray-500">/mês</span></div>
+        </div>
+        <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+          <div className="text-xs font-semibold uppercase text-gray-400">Implantação / valor inicial</div>
+          <div className="mt-1 font-semibold text-gray-900">
+            {(Number(proposta.resumo?.valor_implantacao ?? proposta.valor_implantacao ?? 0) <= 0)
+              ? 'Implantação grátis no lançamento'
+              : brl(proposta.resumo?.valor_implantacao ?? proposta.valor_implantacao)}
           </div>
         </div>
         {contrato.assinatura_cliente_em && (

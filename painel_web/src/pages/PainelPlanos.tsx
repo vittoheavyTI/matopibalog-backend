@@ -16,6 +16,10 @@ type FormPlano = {
   ativo: boolean;
   categoria: string;
   recursos: string;
+  capacidade_inclusa: string;
+  preco_motorista_extra: string;
+  valor_implantacao: string;
+  requer_negociacao: boolean;
 };
 
 const FORM_VAZIO: FormPlano = {
@@ -29,6 +33,10 @@ const FORM_VAZIO: FormPlano = {
   ativo: true,
   categoria: 'ambos',
   recursos: '',
+  capacidade_inclusa: '',
+  preco_motorista_extra: '',
+  valor_implantacao: '0',
+  requer_negociacao: false,
 };
 
 const MODELOS_COBRANCA: { chave: ModeloCobranca; titulo: string; ajuda: string }[] = [
@@ -221,6 +229,7 @@ export const PainelPlanos: React.FC = () => {
   } | null>(null);
   const [aceiteAsaas, setAceiteAsaas] = useState(false);
   const [salvando, setSalvando] = useState(false);
+  const [modelosPorPlano, setModelosPorPlano] = useState<Record<string, { versao?: number; sem: boolean }>>({});
 
   useEffect(() => { carregar(); }, []);
 
@@ -237,6 +246,15 @@ export const PainelPlanos: React.FC = () => {
     } catch {
       setToast({ message: 'Erro ao carregar planos', tipo: 'erro' });
     }
+    // Modelo de contrato vigente por plano (só leitura; fail-open: some se indisponível).
+    try {
+      const { data } = await api.get('/admin/contrato-modelos/overview');
+      const mapa: Record<string, { versao?: number; sem: boolean }> = {};
+      for (const l of (data?.planos || [])) {
+        mapa[l.plano_id] = { versao: l.vigente?.versao, sem: l.sem_modelo_vigente === true };
+      }
+      setModelosPorPlano(mapa);
+    } catch { /* indicador de modelo é best-effort */ }
   }
 
   function abrirNovoPlano() {
@@ -260,6 +278,10 @@ export const PainelPlanos: React.FC = () => {
       ativo: plano.ativo !== false,
       categoria: plano.categoria || 'ambos',
       recursos: recursosParaTexto(plano.recursos),
+      capacidade_inclusa: plano.capacidade_inclusa != null ? String(plano.capacidade_inclusa) : '',
+      preco_motorista_extra: plano.preco_motorista_extra != null ? String(plano.preco_motorista_extra) : '',
+      valor_implantacao: plano.valor_implantacao != null ? String(plano.valor_implantacao) : '0',
+      requer_negociacao: plano.requer_negociacao === true,
     });
     setShowModal(true);
   }
@@ -272,6 +294,17 @@ export const PainelPlanos: React.FC = () => {
     if (!Number.isInteger(limite) || limite < 0) { setToast({ message: 'Limite de motoristas deve ser um inteiro igual ou maior que zero', tipo: 'erro' }); return; }
     if (!Number.isInteger(diasTrial) || diasTrial < 0) { setToast({ message: 'Dias de trial deve ser um inteiro igual ou maior que zero', tipo: 'erro' }); return; }
 
+    // Campos comerciais (passthrough validado no backend). Vazio = não envia.
+    const capacidade = form.capacidade_inclusa.trim();
+    const extra = form.preco_motorista_extra.trim();
+    const implantacao = form.valor_implantacao.trim();
+    if (implantacao !== '' && (!Number.isFinite(Number(implantacao)) || Number(implantacao) < 0)) {
+      setToast({ message: 'Valor de implantação deve ser igual ou maior que zero', tipo: 'erro' }); return;
+    }
+    if (extra !== '' && (!Number.isFinite(Number(extra)) || Number(extra) < 0)) {
+      setToast({ message: 'Valor por motorista extra deve ser igual ou maior que zero', tipo: 'erro' }); return;
+    }
+
     const base = {
       nome: form.nome.trim(),
       descricao: form.descricao.trim(),
@@ -281,6 +314,10 @@ export const PainelPlanos: React.FC = () => {
       categoria: form.categoria,
       recursos: textoParaRecursos(form.recursos),
       modelo_cobranca: form.modelo_cobranca,
+      requer_negociacao: form.requer_negociacao,
+      valor_implantacao: implantacao === '' ? 0 : Number(implantacao),
+      ...(capacidade !== '' ? { capacidade_inclusa: Number(capacidade) } : {}),
+      ...(extra !== '' ? { preco_motorista_extra: Number(extra) } : {}),
     };
 
     let payload: Record<string, unknown>;
@@ -421,6 +458,13 @@ export const PainelPlanos: React.FC = () => {
           <span className="px-2.5 py-1 rounded-lg bg-amber-50 text-amber-700">Trial: {Number(plano.dias_trial ?? 0)} dias</span>
           <span className={`px-2.5 py-1 rounded-lg ${!inativo ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>{!inativo ? 'Ativo' : 'Inativo'}</span>
           {arquivado && <span className="px-2.5 py-1 rounded-lg bg-gray-200 text-gray-600">Arquivado</span>}
+          {(() => {
+            const m = modelosPorPlano[plano.id];
+            if (!m) return null;
+            return m.sem
+              ? <span className="px-2.5 py-1 rounded-lg bg-amber-100 text-amber-800 font-semibold" title="Sem modelo de contrato publicado — contratação usa o texto técnico padrão"><AlertTriangle size={12} className="inline mr-1" />Sem modelo</span>
+              : <span className="px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700" title="Modelo de contrato vigente">Contrato v{m.versao}</span>;
+          })()}
         </div>
         <div className="flex flex-wrap gap-1.5 min-h-7">
           {recursos.length > 0 ? recursos.map((recurso) => (
@@ -582,6 +626,33 @@ export const PainelPlanos: React.FC = () => {
                   <input id="plano-trial" type="number" min="0" step="1" className="w-full border-2 border-gray-100 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" value={form.dias_trial} onChange={(e) => setForm({ ...form, dias_trial: e.target.value })} />
                 </div>
               </div>
+
+              {/* Campos comerciais (fora da fórmula de preço). Congelados no contrato na emissão. */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label htmlFor="plano-capacidade" className="block text-xs font-bold text-gray-500 uppercase mb-1.5 ml-1">Capacidade inclusa</label>
+                  <input id="plano-capacidade" type="number" min="0" step="1" className="w-full border-2 border-gray-100 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" value={form.capacidade_inclusa} onChange={(e) => setForm({ ...form, capacidade_inclusa: e.target.value })} placeholder="Ex: 5" />
+                  <p className="text-xs text-gray-400 mt-1 ml-1">Motoristas inclusos (≠ limite self-service).</p>
+                </div>
+                <div>
+                  <label htmlFor="plano-extra" className="block text-xs font-bold text-gray-500 uppercase mb-1.5 ml-1">Motorista extra (R$)</label>
+                  <input id="plano-extra" type="number" min="0" step="0.01" className="w-full border-2 border-gray-100 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" value={form.preco_motorista_extra} onChange={(e) => setForm({ ...form, preco_motorista_extra: e.target.value })} placeholder="Ex: 100,00" />
+                  <p className="text-xs text-gray-400 mt-1 ml-1">Vazio = não aplicável.</p>
+                </div>
+                <div>
+                  <label htmlFor="plano-implantacao" className="block text-xs font-bold text-gray-500 uppercase mb-1.5 ml-1">Implantação / valor inicial (R$)</label>
+                  <input id="plano-implantacao" type="number" min="0" step="0.01" className="w-full border-2 border-gray-100 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" value={form.valor_implantacao} onChange={(e) => setForm({ ...form, valor_implantacao: e.target.value })} placeholder="0,00" />
+                  <p className="text-xs text-gray-400 mt-1 ml-1">0 = "Implantação grátis no lançamento".</p>
+                </div>
+              </div>
+
+              <label className="flex items-center justify-between gap-4 rounded-xl border border-gray-100 bg-gray-50/50 p-3 cursor-pointer">
+                <span>
+                  <span className="block text-sm font-semibold text-gray-700">Sob negociação (não self-service)</span>
+                  <span className="block text-xs text-gray-400">Marque para planos Enterprise/41+; não aparecem como self-service no cadastro.</span>
+                </span>
+                <input type="checkbox" className="w-5 h-5" checked={form.requer_negociacao} onChange={(e) => setForm({ ...form, requer_negociacao: e.target.checked })} />
+              </label>
 
               {/* Prévia do valor final — SOMENTE LEITURA, nunca input. É o que
                   impede o erro que originou esta frente: o valor que será cobrado
