@@ -47,7 +47,7 @@ describe('PainelPlanos (página real, API mockada)', () => {
   });
 
   test('4/5. falha mostra erro e NÃO mostra "Nenhum plano cadastrado"', async () => {
-    setGet(() => Promise.reject({ response: { status: 500 } }));
+    setGet(() => Promise.reject({ response: { status: 403 } }));
     render(<PainelPlanos />);
     await waitFor(() => expect(screen.getByRole('button', { name: /tentar novamente/i })).toBeInTheDocument());
     expect(screen.queryByText(/nenhum plano cadastrado/i)).toBeNull();
@@ -55,7 +55,7 @@ describe('PainelPlanos (página real, API mockada)', () => {
 
   test('6/7. "Tentar novamente" após falha renderiza os planos', async () => {
     let n = 0;
-    setGet(() => { n += 1; return n === 1 ? Promise.reject({ response: { status: 500 } }) : Promise.resolve({ data: [plano] }); });
+    setGet(() => { n += 1; return n === 1 ? Promise.reject({ response: { status: 403 } }) : Promise.resolve({ data: [plano] }); });
     render(<PainelPlanos />);
     await waitFor(() => expect(screen.getByRole('button', { name: /tentar novamente/i })).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: /tentar novamente/i }));

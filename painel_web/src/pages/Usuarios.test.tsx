@@ -43,7 +43,7 @@ describe('Usuarios (página real, API mockada)', () => {
   });
 
   test('3/4/5. falha encerra loading, mostra erro e NÃO lista vazia silenciosa', async () => {
-    setGet(() => Promise.reject({ response: { status: 500 } }));
+    setGet(() => Promise.reject({ response: { status: 403 } }));
     renderPage();
     await waitFor(() => expect(screen.getByRole('button', { name: /tentar novamente/i })).toBeInTheDocument());
     expect(screen.queryByText(/carregando usuários/i)).toBeNull();
@@ -52,7 +52,7 @@ describe('Usuarios (página real, API mockada)', () => {
 
   test('6. "Tentar novamente" dispara nova carga', async () => {
     let n = 0;
-    setGet(() => { n += 1; return n === 1 ? Promise.reject({ response: { status: 500 } }) : Promise.resolve({ data: [usuario] }); });
+    setGet(() => { n += 1; return n === 1 ? Promise.reject({ response: { status: 403 } }) : Promise.resolve({ data: [usuario] }); });
     renderPage();
     await waitFor(() => expect(screen.getByRole('button', { name: /tentar novamente/i })).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: /tentar novamente/i }));
@@ -64,5 +64,21 @@ describe('Usuarios (página real, API mockada)', () => {
     const { unmount } = renderPage();
     expect(screen.getByText(/carregando usuários/i)).toBeInTheDocument();
     expect(() => unmount()).not.toThrow();
+  });
+
+  test('8. contadores mostram "—" na falha (nunca 0 falso)', async () => {
+    setGet(() => Promise.reject({ response: { status: 403 } }));
+    renderPage();
+    await waitFor(() => expect(screen.getByRole('button', { name: /tentar novamente/i })).toBeInTheDocument());
+    const todos = screen.getByRole('button', { name: /Todos/ });
+    expect(todos.textContent).toContain('—');
+    expect(todos.textContent).not.toContain('(0)');
+  });
+
+  test('9. contadores mostram número após resposta válida', async () => {
+    setGet(() => Promise.resolve({ data: [usuario] }));
+    renderPage();
+    await waitFor(() => expect(screen.getByText('Fulano de Teste')).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: /Todos/ }).textContent).toContain('(1)');
   });
 });

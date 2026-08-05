@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { estadoInicial, reduzir, derivarView, classificarErro } from './estadoCarregamento';
+import { estadoInicial, reduzir, derivarView, classificarErro, ehErroRetriavel } from './estadoCarregamento';
 
 const erroHttp = (status: number) => ({ response: { status } });
 
@@ -87,6 +87,39 @@ describe('estadoCarregamento — estados distintos', () => {
     expect(e.status).toBe('erro');
     expect(e.desatualizado).toBe(true);
     expect(e.dados).toEqual([1, 2]);
+  });
+
+  test('ehErroRetriavel: só rede/timeout/5xx/429 (nunca 4xx de negócio nem cancelamento)', () => {
+    expect(ehErroRetriavel({ tipo: 'timeout', mensagem: '' })).toBe(true);
+    expect(ehErroRetriavel({ tipo: 'rede', mensagem: '' })).toBe(true);
+    expect(ehErroRetriavel({ tipo: 'servidor', mensagem: '' })).toBe(true);
+    expect(ehErroRetriavel({ tipo: 'rate_limited', mensagem: '' })).toBe(true);
+    expect(ehErroRetriavel({ tipo: 'nao_autorizado', mensagem: '' })).toBe(false);
+    expect(ehErroRetriavel({ tipo: 'proibido', mensagem: '' })).toBe(false);
+    expect(ehErroRetriavel({ tipo: 'generico', mensagem: '' })).toBe(false);
+    expect(ehErroRetriavel({ cancelado: true })).toBe(false);
+  });
+
+  test('stale-while-revalidate: loading COM dados = atualizando (não some a tabela)', () => {
+    let e = reduzir(reduzir(estadoInicial<number[]>(), { tipo: 'iniciar', reqId: 1 }), { tipo: 'sucesso', reqId: 1, dados: [1] });
+    e = reduzir(e, { tipo: 'iniciar', reqId: 2 }); // revalidação em segundo plano
+    const v = derivarView(e);
+    expect(v.atualizando).toBe(true);
+    expect(v.mostrarLoading).toBe(false);
+    expect(v.mostrarDados).toBe(true);
+    expect(v.temDados).toBe(true);
+  });
+
+  test('temDados=false em loading inicial e em erro sem dados (contador não é 0 falso)', () => {
+    const inicial = derivarView(reduzir(estadoInicial<number[]>(), { tipo: 'iniciar', reqId: 1 }));
+    expect(inicial.temDados).toBe(false);
+    const erro = derivarView(reduzir(reduzir(estadoInicial<number[]>(), { tipo: 'iniciar', reqId: 1 }), { tipo: 'falha', reqId: 1, erro: erroHttp(500) }));
+    expect(erro.temDados).toBe(false);
+  });
+
+  test('ultimaAtualizacao é registrada no sucesso', () => {
+    const e = reduzir(reduzir(estadoInicial<number[]>(), { tipo: 'iniciar', reqId: 1 }), { tipo: 'sucesso', reqId: 1, dados: [1] });
+    expect(typeof e.ultimaAtualizacao).toBe('number');
   });
 
   // Nota sobre 304: NÃO há teste de "304 = sucesso" porque este reducer opera
