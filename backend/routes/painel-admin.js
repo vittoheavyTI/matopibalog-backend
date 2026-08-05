@@ -24,6 +24,8 @@ const {
 // Editar estes campos NÃO reescreve contratos já emitidos (o contrato congela o
 // snapshot do modelo). Money: >=0 e <=2 casas; capacidade: inteiro >=0.
 const { montarPatchComercial } = require('../services/planoComercialPatchService');
+const funcAdmin = require('../services/funcionalidadeAdminService');
+const { resolverEntitlement } = require('../services/entitlementDomainService');
 const { categoriaCompativelComTipo, mensagemIncompatibilidade } = require('../utils/planoCategoria');
 const { resumirBillingHealth } = require('../services/billingHealthService');
 const { recomendarPlano, valorEfetivoEmpresa } = require('../services/calculadoraComercialService');
@@ -1295,6 +1297,69 @@ router.post('/promocoes/:id/aplicar', async (req, res) => {
   await supabase.from('promocoes').update({ usos_total: (Number(promocao.usos_total) || 0) + 1 }).eq('id', promocao.id);
 
   res.status(201).json({ ok: true, resgate: inserido, efeito });
+});
+
+// ═══ Catálogo de Funcionalidades e Add-ons (super-admin) ════════════════════
+// Guard já aplicado no topo (verifyToken, isAdmin, isSuperAdmin).
+
+router.get('/funcionalidades', async (req, res) => {
+  try {
+    const lista = await funcAdmin.listarFuncionalidades(supabase, req.query || {});
+    res.json({ funcionalidades: lista });
+  } catch (_) { res.status(500).json({ message: 'Erro ao listar funcionalidades.' }); }
+});
+
+router.post('/funcionalidades', async (req, res) => {
+  const r = await funcAdmin.criarFuncionalidade(supabase, req.body || {}, req.user.uid);
+  res.status(r.status).json(r.body);
+});
+
+router.put('/funcionalidades/:id', async (req, res) => {
+  const r = await funcAdmin.editarFuncionalidade(supabase, req.params.id, req.body || {}, req.user.uid);
+  res.status(r.status).json(r.body);
+});
+
+router.post('/funcionalidades/:id/arquivar', async (req, res) => {
+  const arquivar = req.body?.arquivar !== false;
+  const r = await funcAdmin.arquivarFuncionalidade(supabase, req.params.id, req.user.uid, arquivar);
+  res.status(r.status).json(r.body);
+});
+
+router.get('/funcionalidades-matriz', async (req, res) => {
+  try { res.json({ matriz: await funcAdmin.listarMatriz(supabase) }); }
+  catch (_) { res.status(500).json({ message: 'Erro ao carregar matriz.' }); }
+});
+
+router.put('/funcionalidades-matriz', async (req, res) => {
+  const r = await funcAdmin.salvarMatrizLote(supabase, req.body?.itens || [], req.user.uid);
+  res.status(r.status).json(r.body);
+});
+
+router.get('/funcionalidades-auditoria', async (req, res) => {
+  try { res.json({ auditoria: await funcAdmin.listarAuditoria(supabase, { limite: Number(req.query.limite) || 100 }) }); }
+  catch (_) { res.status(500).json({ message: 'Erro ao carregar auditoria.' }); }
+});
+
+router.get('/empresas/:id/entitlements', async (req, res) => {
+  const r = await funcAdmin.entitlementsDaEmpresa(supabase, req.params.id);
+  res.status(r.status).json(r.body);
+});
+
+// Simulação de resolução de entitlement (super-admin) para uma empresa+código.
+router.get('/entitlements/simular', async (req, res) => {
+  const { empresa_id, codigo } = req.query || {};
+  if (!empresa_id || !codigo) return res.status(400).json({ message: 'empresa_id e codigo obrigatórios.' });
+  try {
+    const { data: func } = await supabase.from('funcionalidades').select('*').eq('codigo', codigo).maybeSingle();
+    if (!func) return res.status(404).json({ message: 'Funcionalidade não encontrada.' });
+    const { data: emp } = await supabase.from('empresas').select('plano_id').eq('id', empresa_id).maybeSingle();
+    const [{ data: pf }, { data: ef }] = await Promise.all([
+      emp?.plano_id ? supabase.from('plano_funcionalidades').select('*').eq('plano_id', emp.plano_id).eq('funcionalidade_id', func.id).maybeSingle() : Promise.resolve({ data: null }),
+      supabase.from('empresa_funcionalidades').select('*').eq('empresa_id', empresa_id).eq('funcionalidade_id', func.id).maybeSingle(),
+    ]);
+    const resultado = resolverEntitlement({ codigo, funcionalidade: func, planoFunc: pf, empresaFunc: ef });
+    res.json(resultado);
+  } catch (_) { res.status(500).json({ message: 'Erro na simulação.' }); }
 });
 
 module.exports = router;
