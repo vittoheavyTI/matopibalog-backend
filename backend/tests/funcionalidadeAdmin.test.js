@@ -94,3 +94,41 @@ test('salvarMatrizLote: erro desconhecido → 500 sem vazar SQL', async () => {
   assert.equal(r.body.message, 'Erro ao salvar matriz.');
   assert.ok(!/boom/.test(JSON.stringify(r.body)));
 });
+
+// buscarClientes — delega à RPC buscar_empresas; termo mínimo/paginação no serviço.
+test('buscarClientes: termo curto (<2) → 200 vazio, sem chamar a RPC', async () => {
+  const sb = mockRpc({ data: [], error: null });
+  const r = await svc.buscarClientes(sb, { termo: 'a' });
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.body.empresas, []);
+  assert.equal(r.body.total, 0);
+  assert.equal(sb._calls.length, 0);
+});
+
+test('buscarClientes: sucesso → mapeia linhas, extrai total, sanitiza (sem total por item)', async () => {
+  const rows = [
+    { id: 'e1', nome: 'Alfa', documento: '123', email: 'a@x.com', status: 'ativa', arquivada: false, plano_id: 'p1', plano_nome: 'Plano', total: '2' },
+    { id: 'e2', nome: 'Alfândega', documento: null, email: null, status: 'ativa', arquivada: true, plano_id: null, plano_nome: null, total: '2' },
+  ];
+  const sb = mockRpc({ data: rows, error: null });
+  const r = await svc.buscarClientes(sb, { termo: 'alf', page: 2, limite: 10 });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.total, 2);
+  assert.equal(r.body.page, 2);
+  assert.equal(r.body.empresas.length, 2);
+  assert.equal('total' in r.body.empresas[0], false);   // total não vaza por item
+  assert.equal(r.body.empresas[0].plano_nome, 'Plano');
+  const c = sb._calls[0];
+  assert.equal(c.fn, 'buscar_empresas');
+  assert.equal(c.params.p_limite, 10);
+  assert.equal(c.params.p_offset, 10);                   // (page 2 - 1) * 10
+});
+
+test('buscarClientes: teto de limite 50 e erro da RPC → 500', async () => {
+  const sb1 = mockRpc({ data: [], error: null });
+  await svc.buscarClientes(sb1, { termo: 'alfa', limite: 999 });
+  assert.equal(sb1._calls[0].params.p_limite, 50);       // teto aplicado
+  const r = await svc.buscarClientes(mockRpc({ data: null, error: { code: 'XX000', message: 'boom' } }), { termo: 'alfa' });
+  assert.equal(r.status, 500);
+  assert.ok(!/boom/.test(JSON.stringify(r.body)));
+});

@@ -77,6 +77,7 @@ const ENDPOINTS = [
   ['GET', '/painel-admin/funcionalidades-auditoria'],
   ['GET', '/painel-admin/empresas/abc/entitlements'],
   ['GET', '/painel-admin/entitlements/simular?empresa_id=abc&codigo=x'],
+  ['GET', '/painel-admin/empresas/buscar?q=teste'],
 ];
 
 async function req(port, method, path, { auth } = {}) {

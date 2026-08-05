@@ -178,6 +178,26 @@ async function listarAuditoria(supabase, { limite = 100 } = {}) {
   return data || [];
 }
 
+// Busca operacional de clientes (super-admin) por nome/razão social/CNPJ/e-mail/ID
+// via RPC buscar_empresas (migration 061). Termo mínimo 2 (senão vazio — nunca
+// "todas"); limite com teto 50; paginação por page. Resposta sanitizada (sem
+// billing/segredos); entitlements só depois, via endpoint próprio.
+async function buscarClientes(supabase, { termo, page = 1, limite = 20 } = {}) {
+  const t = String(termo || '').trim();
+  const pg = Math.max(Number(page) || 1, 1);
+  const lim = Math.min(Math.max(Number(limite) || 20, 1), 50);
+  if (t.length < 2) return { status: 200, body: { empresas: [], total: 0, page: 1, limite: lim } };
+  const { data, error } = await supabase.rpc('buscar_empresas', { p_termo: t, p_limite: lim, p_offset: (pg - 1) * lim });
+  if (error) return { status: 500, body: { message: 'Erro na busca de clientes.' } };
+  const rows = Array.isArray(data) ? data : [];
+  const total = rows.length ? Number(rows[0].total) : 0;
+  const empresas = rows.map((r) => ({
+    id: r.id, nome: r.nome, documento: r.documento, email: r.email,
+    status: r.status, arquivada: r.arquivada, plano_id: r.plano_id, plano_nome: r.plano_nome,
+  }));
+  return { status: 200, body: { empresas, total, page: pg, limite: lim } };
+}
+
 // Direitos atuais de uma empresa (read-only) — plano + overrides.
 async function entitlementsDaEmpresa(supabase, empresaId) {
   const [{ data: emp }, { data: overrides }] = await Promise.all([
@@ -197,6 +217,7 @@ module.exports = {
   CICLOS, COBRANCAS, DISPONIBILIDADES, CODIGO_RE,
   validarFuncionalidade, montarPatchFuncionalidade,
   listarFuncionalidades, criarFuncionalidade, editarFuncionalidade, arquivarFuncionalidade,
-  funcionalidadeUtilizada, listarMatriz, salvarMatrizLote, traduzirErroMatriz, listarAuditoria, entitlementsDaEmpresa,
+  funcionalidadeUtilizada, listarMatriz, salvarMatrizLote, traduzirErroMatriz, listarAuditoria,
+  buscarClientes, entitlementsDaEmpresa,
   registrarAuditoria,
 };

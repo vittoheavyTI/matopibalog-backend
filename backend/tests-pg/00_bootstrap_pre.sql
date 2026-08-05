@@ -8,6 +8,11 @@
 -- funcionalidade_auditoria) e a coluna planos.matriz_funcionalidades_versao vêm da
 -- migration 060 real (fidelidade máxima). Fixtures são 100% sintéticas.
 
+-- Schema `extensions` do Supabase — onde pg_trgm é instalado (a migration 061 faz
+-- CREATE EXTENSION ... WITH SCHEMA extensions e usa extensions.gin_trgm_ops).
+-- Reproduz a organização real do Supabase no Postgres efêmero.
+CREATE SCHEMA IF NOT EXISTS extensions;
+
 -- Papéis do Supabase (NOLOGIN) — para os REVOKE/GRANT da RPC funcionarem igual à prod.
 DO $$ BEGIN CREATE ROLE anon NOLOGIN;          EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN CREATE ROLE authenticated NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $$;

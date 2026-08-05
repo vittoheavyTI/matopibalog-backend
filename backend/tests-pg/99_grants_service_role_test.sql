@@ -7,7 +7,8 @@
 -- no schema (como na prod) — o EXECUTE da RPC permanece revogado (migration 061),
 -- provando a negação pela via correta (42501 no EXECUTE, não por falta de schema).
 
-GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
+GRANT USAGE ON SCHEMA public     TO anon, authenticated, service_role;
+GRANT USAGE ON SCHEMA extensions TO anon, authenticated, service_role;
 ALTER ROLE service_role BYPASSRLS;
 GRANT ALL ON ALL TABLES    IN SCHEMA public TO service_role;
 GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO service_role;

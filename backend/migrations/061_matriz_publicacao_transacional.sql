@@ -29,11 +29,17 @@ ALTER TABLE public.funcionalidade_auditoria
 -- ─────────────────────────────────────────────────────────────────────────────
 -- (C) Busca de clientes (empresas) — índices aditivos
 --   pg_trgm para busca parcial por nome; btree normalizado para e-mail/CNPJ.
+--   COMPATIBILIDADE SUPABASE: extensões vivem no schema `extensions` (não em
+--   public — o advisor alerta extension_in_public). O opclass é qualificado como
+--   extensions.gin_trgm_ops para não depender do search_path. O harness de teste
+--   cria o schema `extensions` antes, reproduzindo a mesma organização.
 -- ─────────────────────────────────────────────────────────────────────────────
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
-CREATE INDEX IF NOT EXISTS idx_empresas_nome_trgm       ON public.empresas USING gin (lower(nome) gin_trgm_ops);
-CREATE INDEX IF NOT EXISTS idx_empresas_email_lower      ON public.empresas (lower(email_contato));
-CREATE INDEX IF NOT EXISTS idx_empresas_cnpj_digits      ON public.empresas (regexp_replace(coalesce(cnpj_cpf, cnpj), '\D', '', 'g'));
+CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA extensions;
+-- Índices trigram (GIN) p/ busca por substring (LIKE '%termo%') em nome, e-mail e
+-- CNPJ normalizado (só dígitos). Opclass qualificado (extensions.gin_trgm_ops).
+CREATE INDEX IF NOT EXISTS idx_empresas_nome_trgm  ON public.empresas USING gin (lower(nome) extensions.gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_empresas_email_trgm ON public.empresas USING gin (lower(email_contato) extensions.gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_empresas_cnpj_trgm  ON public.empresas USING gin (regexp_replace(coalesce(cnpj_cpf, cnpj), '\D', '', 'g') extensions.gin_trgm_ops);
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- (B) Função transacional de publicação da matriz
@@ -252,12 +258,66 @@ REVOKE ALL ON FUNCTION public.publicar_matriz_funcionalidades(jsonb, jsonb, uuid
 GRANT EXECUTE ON FUNCTION public.publicar_matriz_funcionalidades(jsonb, jsonb, uuid, text, text, text) TO service_role;
 
 -- ─────────────────────────────────────────────────────────────────────────────
+-- (D) Busca operacional de clientes (super-admin) — RPC parametrizada e paginada.
+-- Justificativa da RPC (vs. query PostgREST): o casamento por CNPJ normalizado usa
+-- o índice funcional regexp_replace(coalesce(cnpj_cpf,cnpj),'\D',''), que o
+-- supabase-js/PostgREST NÃO consegue expressar como filtro. A RPC normaliza o
+-- termo e casa nome/e-mail/CNPJ via os índices trigram, em uma ida ao banco.
+-- Resposta sanitizada (id, nome, documento, e-mail, status, arquivada, plano).
+-- Termo mínimo 2; busca vazia/curta → 0 linhas (nunca "todas"). LIMIT teto 50.
+-- SECURITY INVOKER; EXECUTE só p/ service_role (autorização HTTP é a autoridade).
+CREATE OR REPLACE FUNCTION public.buscar_empresas(
+  p_termo  text,
+  p_limite int DEFAULT 20,
+  p_offset int DEFAULT 0
+) RETURNS TABLE (
+  id uuid, nome varchar, documento varchar, email text, status varchar,
+  arquivada boolean, plano_id uuid, plano_nome varchar, total bigint
+)
+LANGUAGE sql
+SECURITY INVOKER
+STABLE
+SET search_path = public, extensions, pg_temp
+AS $$
+  WITH termo AS (
+    SELECT btrim(coalesce(p_termo, '')) AS t,
+           lower(btrim(coalesce(p_termo, ''))) AS tl,
+           regexp_replace(coalesce(p_termo, ''), '\D', '', 'g') AS dig
+  ),
+  filtro AS (
+    SELECT e.*
+    FROM public.empresas e, termo
+    WHERE length(termo.t) >= 2   -- termo mínimo: senão nenhum resultado (não "todas")
+      AND (
+        lower(e.nome) LIKE '%' || termo.tl || '%'
+        OR lower(coalesce(e.email_contato, '')) LIKE '%' || termo.tl || '%'
+        OR (length(termo.dig) >= 2
+            AND regexp_replace(coalesce(e.cnpj_cpf, e.cnpj, ''), '\D', '', 'g') LIKE '%' || termo.dig || '%')
+        OR e.id::text = termo.t
+      )
+  )
+  SELECT f.id, f.nome, coalesce(f.cnpj_cpf, f.cnpj) AS documento, f.email_contato AS email,
+         f.status, (f.arquivada_em IS NOT NULL) AS arquivada, f.plano_id,
+         p.nome AS plano_nome, count(*) OVER() AS total
+  FROM filtro f
+  LEFT JOIN public.planos p ON p.id = f.plano_id
+  ORDER BY (f.arquivada_em IS NOT NULL), f.nome
+  LIMIT least(greatest(coalesce(p_limite, 20), 1), 50)
+  OFFSET greatest(coalesce(p_offset, 0), 0);
+$$;
+REVOKE ALL ON FUNCTION public.buscar_empresas(text, int, int) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.buscar_empresas(text, int, int) FROM anon;
+REVOKE ALL ON FUNCTION public.buscar_empresas(text, int, int) FROM authenticated;
+GRANT EXECUTE ON FUNCTION public.buscar_empresas(text, int, int) TO service_role;
+
+-- ─────────────────────────────────────────────────────────────────────────────
 -- ROLLBACK (manual, documentado):
 --   DROP FUNCTION IF EXISTS public.publicar_matriz_funcionalidades(jsonb, jsonb, uuid, text, text, text);
+--   DROP FUNCTION IF EXISTS public.buscar_empresas(text, int, int);
 --   DROP INDEX IF EXISTS public.idx_empresas_nome_trgm;
---   DROP INDEX IF EXISTS public.idx_empresas_email_lower;
---   DROP INDEX IF EXISTS public.idx_empresas_cnpj_digits;
+--   DROP INDEX IF EXISTS public.idx_empresas_email_trgm;
+--   DROP INDEX IF EXISTS public.idx_empresas_cnpj_trgm;
 --   ALTER TABLE public.funcionalidade_auditoria DROP COLUMN IF EXISTS origem;
 --   ALTER TABLE public.funcionalidade_auditoria DROP COLUMN IF EXISTS request_id;
---   -- (extensão pg_trgm pode permanecer; é inócua)
+--   -- (extensão pg_trgm em `extensions` pode permanecer; é inócua)
 -- ─────────────────────────────────────────────────────────────────────────────

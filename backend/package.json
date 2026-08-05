@@ -13,7 +13,7 @@
     "reliability": "node scripts/reliability/reliability_report.mjs",
     "smoke:idempotencia:dry": "node scripts/reliability/smoke_idempotencia_lancamentos.mjs --dry-run",
     "test:pg:apply": "node tests-pg/apply_schema.mjs",
-    "test:pg": "node --test tests-pg/matriz_rpc.pgtest.mjs"
+    "test:pg": "node --test tests-pg/*.pgtest.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",

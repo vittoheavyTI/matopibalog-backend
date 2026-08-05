@@ -187,6 +187,13 @@ router.get('/empresas', async (req, res) => {
   res.json(aplicarFiltroArquivamento(data || [], { includeArchived }));
 });
 
+// Busca operacional de clientes (nome/razão social/CNPJ/e-mail/ID). Guard super-admin
+// já aplicado no topo. Declarada ANTES de /empresas/:id/* para não ser capturada.
+router.get('/empresas/buscar', async (req, res) => {
+  const r = await funcAdmin.buscarClientes(supabase, { termo: req.query.q, page: req.query.page, limite: req.query.limite });
+  res.status(r.status).json(r.body);
+});
+
 router.get('/empresas/:id/contratacao', async (req, res) => {
   try {
     const resultado = await listarContratacaoEmpresa({ supabase, empresaId: req.params.id });
