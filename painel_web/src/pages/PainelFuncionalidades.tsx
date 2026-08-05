@@ -335,14 +335,14 @@ const AbaClientes: React.FC = () => {
     <div className="space-y-3">
       <div className="relative">
         <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-        <input value={termo} onChange={(e) => setTermo(e.target.value)} placeholder="Buscar por nome, CNPJ ou e-mail…" className={`${inp} pl-9`} aria-label="Buscar cliente" />
+        <input value={termo} onChange={(e) => setTermo(e.target.value)} placeholder="Buscar por nome, CNPJ, e-mail, ID ou código de convite" className={`${inp} pl-9`} aria-label="Buscar cliente" />
       </div>
       <p className="text-xs text-gray-400">Digite ao menos 2 caracteres. Ações de concessão/adicional chegam no PR 3A (esta aba é somente leitura).</p>
       {erroBusca && <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{erroBusca}</div>}
       {termo.trim().length >= 2 && (
         <div className="rounded-2xl border border-gray-100 divide-y divide-gray-100">
           {buscando && <div className="p-3 text-sm text-gray-400">Buscando…</div>}
-          {!buscando && resultados.length === 0 && <div className="p-4 text-sm text-gray-400">Nenhuma empresa encontrada.</div>}
+          {!buscando && !erroBusca && resultados.length === 0 && <div className="p-4 text-sm text-gray-400">Nenhuma empresa encontrada.</div>}
           {resultados.map((e) => (
             <button key={e.id} onClick={() => selecionar(e)} className={`w-full text-left p-3 hover:bg-gray-50 flex items-center justify-between ${sel?.id === e.id ? 'bg-blue-50' : ''}`}>
               <span>

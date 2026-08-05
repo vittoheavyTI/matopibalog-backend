@@ -282,6 +282,7 @@ AS $$
   WITH termo AS (
     SELECT btrim(coalesce(p_termo, '')) AS t,
            lower(btrim(coalesce(p_termo, ''))) AS tl,
+           upper(btrim(coalesce(p_termo, ''))) AS conv,   -- código de convite: normalizado p/ MAIÚSCULO
            regexp_replace(coalesce(p_termo, ''), '\D', '', 'g') AS dig
   ),
   filtro AS (
@@ -294,6 +295,9 @@ AS $$
         OR (length(termo.dig) >= 2
             AND regexp_replace(coalesce(e.cnpj_cpf, e.cnpj, ''), '\D', '', 'g') LIKE '%' || termo.dig || '%')
         OR e.id::text = termo.t
+        -- Código de convite: match EXATO (credencial de vínculo) via índice único.
+        -- NUNCA parcial; o código NÃO é retornado na resposta (só resolve → empresa).
+        OR e.codigo_convite = termo.conv
       )
   )
   SELECT f.id, f.nome, coalesce(f.cnpj_cpf, f.cnpj) AS documento, f.email_contato AS email,

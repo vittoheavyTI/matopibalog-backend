@@ -7,6 +7,7 @@ import { maskPhone, maskCNPJ, maskCEP } from '../utils/masks';
 import api from '../api';
 import { writeToLS } from '../hooks/useLoginConfig';
 import { useAuth } from '../contexts/AuthContext';
+import { BotaoCopiarCodigo } from '../components/BotaoCopiarCodigo';
 
 const PREFIX = 'matopibalog_';
 
@@ -622,13 +623,7 @@ export const Configuracoes: React.FC = () => {
               <div className="flex-1 bg-gray-50 border-2 border-gray-100 rounded-xl px-4 py-3 font-mono text-lg font-bold tracking-widest text-gray-800 select-all">
                 {codigoConvite ?? '—'}
               </div>
-              <button
-                onClick={() => codigoConvite && navigator.clipboard.writeText(codigoConvite)}
-                disabled={!codigoConvite}
-                className="px-4 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-medium text-sm transition-colors disabled:opacity-40"
-              >
-                Copiar
-              </button>
+              <BotaoCopiarCodigo codigo={codigoConvite} />
               <button
                 onClick={handleRegenarCodigo}
                 disabled={regenerandoCodigo}

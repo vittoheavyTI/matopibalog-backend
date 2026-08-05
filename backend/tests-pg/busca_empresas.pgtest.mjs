@@ -30,10 +30,10 @@ before(async () => {
   await pool.query('INSERT INTO public.planos(id,nome) VALUES ($1,$2) ON CONFLICT (id) DO NOTHING', [PLANO, 'ZZBUSCA Plano']);
   // A: nome + CNPJ FORMATADO + email + plano; B: CNPJ SEM máscara, sem plano; C: arquivada.
   await pool.query(
-    `INSERT INTO public.empresas (id,nome,cnpj_cpf,email_contato,status,plano_id,arquivada_em) VALUES
-       ($1,'ZZBUSCA Transportadora Alfa Ltda','12.345.678/0001-90','contato@zzbuscaalfa.com','ativa',$4,NULL),
-       ($2,'ZZBUSCA Beta Logistica SA','98765432000155','financeiro@zzbuscabeta.com.br','ativa',NULL,NULL),
-       ($3,'ZZBUSCA Gamma Transportes','11222333000181','gamma@zzbuscagamma.com','ativa',NULL,now())
+    `INSERT INTO public.empresas (id,nome,cnpj_cpf,email_contato,status,plano_id,arquivada_em,codigo_convite) VALUES
+       ($1,'ZZBUSCA Transportadora Alfa Ltda','12.345.678/0001-90','contato@zzbuscaalfa.com','ativa',$4,NULL,'MATO-AAA111'),
+       ($2,'ZZBUSCA Beta Logistica SA','98765432000155','financeiro@zzbuscabeta.com.br','ativa',NULL,NULL,'MATO-BBB222'),
+       ($3,'ZZBUSCA Gamma Transportes','11222333000181','gamma@zzbuscagamma.com','ativa',NULL,now(),'MATO-CCC333')
      ON CONFLICT (id) DO NOTHING`,
     [A, B, C, PLANO]);
 });
@@ -62,6 +62,25 @@ test('CNPJ formatado e SEM máscara casam a mesma empresa', async () => {
 test('e-mail e ID exato encontram', async () => {
   assert.equal((await buscar(pool, 'zzbuscabeta.com.br'))[0]?.id, B);
   assert.equal((await buscar(pool, A))[0]?.id, A);
+});
+
+test('código de convite: exato acha a empresa certa; NÃO retorna o código', async () => {
+  const r = await buscar(pool, 'MATO-AAA111');
+  assert.equal(r.length, 1);
+  assert.equal(r[0].id, A);
+  assert.equal('codigo_convite' in r[0], false);   // credencial não vaza na resposta
+  // outra empresa por seu próprio código
+  assert.equal((await buscar(pool, 'MATO-BBB222'))[0]?.id, B);
+});
+
+test('código de convite: trim de espaços e case-insensitive (normaliza p/ maiúsculo)', async () => {
+  assert.equal((await buscar(pool, '  MATO-AAA111  '))[0]?.id, A);
+  assert.equal((await buscar(pool, 'mato-aaa111'))[0]?.id, A);
+});
+
+test('código de convite: parcial NÃO casa (exato apenas — é credencial)', async () => {
+  assert.equal((await buscar(pool, 'MATO-AAA')).length, 0);   // prefixo do código não casa
+  assert.equal((await buscar(pool, 'AAA111')).length, 0);
 });
 
 test('termo curto (<2) → 0 linhas (nunca todas)', async () => {
