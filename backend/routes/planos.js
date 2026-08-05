@@ -58,7 +58,12 @@ router.get('/publicos', async (req, res) => {
     return res.status(500).json({ message: 'Erro ao carregar planos.' });
   }
 
-  const planos = (data || []).map((p) => ({
+  const planos = (data || [])
+    // Visibilidade explícita no cadastro: plano marcado visivel_cadastro=false NÃO
+    // aparece na vitrine/cadastro. NULL (nunca setado) e true seguem a regra legada
+    // (aparece se ativo) — deploy-safe: antes da migration 059 o campo vem undefined.
+    .filter((p) => p.visivel_cadastro !== false)
+    .map((p) => ({
     id: p.id,
     nome: p.nome,
     descricao: p.descricao || '',

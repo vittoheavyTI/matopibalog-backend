@@ -101,6 +101,21 @@ test('planos/publicos expoe o campo categoria', async () => {
   assert.ok(res.body.planos.every((p) => ['autonomo', 'ambos'].includes(p.categoria)));
 });
 
+test('planos/publicos oculta visivel_cadastro=false; mantem null (legado) e true', async () => {
+  const rows = [
+    { id: 'a', nome: 'Visivel Explicito', preco_mensal: 100, ativo: true, categoria: 'ambos', recursos: [], modelo_cobranca: 'fixo', preco_por_motorista: null, limite_motoristas: 5, visivel_cadastro: true },
+    { id: 'b', nome: 'Oculto Explicito', preco_mensal: 200, ativo: true, categoria: 'ambos', recursos: [], modelo_cobranca: 'fixo', preco_por_motorista: null, limite_motoristas: 5, visivel_cadastro: false },
+    { id: 'c', nome: 'Legado Null', preco_mensal: 300, ativo: true, categoria: 'ambos', recursos: [], modelo_cobranca: 'fixo', preco_por_motorista: null, limite_motoristas: 5 },
+  ];
+  const router = carregarRouter(rows);
+  const handler = getHandler(router, 'get', '/publicos');
+  const res = fakeRes();
+  await handler({ query: {} }, res);
+  const nomes = res.body.planos.map((p) => p.nome).sort();
+  assert.deepEqual(nomes, ['Legado Null', 'Visivel Explicito'].sort());
+  assert.ok(!nomes.includes('Oculto Explicito'));
+});
+
 // ─── Frente #4 (PR 5): composicao do preco na vitrine ────────────────────────
 
 test('planos/publicos expoe modelo_cobranca e preco_por_motorista', async () => {
