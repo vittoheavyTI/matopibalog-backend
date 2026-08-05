@@ -34,5 +34,8 @@ CREATE TABLE IF NOT EXISTS public.empresas (
   nome          varchar NULL,
   cnpj          varchar NULL,
   cnpj_cpf      varchar NULL,
-  email_contato text    NULL
+  email_contato text    NULL,
+  status        varchar NULL,               -- referenciado por buscar_empresas
+  plano_id      uuid    NULL,               -- idem (JOIN com planos)
+  arquivada_em  timestamptz NULL            -- idem (flag arquivada + ordenação)
 );
