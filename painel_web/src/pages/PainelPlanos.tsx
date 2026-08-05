@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { AlertTriangle, Archive, ArchiveRestore, Check, Eye, Plus, Shield, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Archive, ArchiveRestore, Check, Eye, EyeOff, Pencil, Plus, Shield, Trash2, X } from 'lucide-react';
 import api from '../api';
 import { formatCurrency } from '../utils';
 
@@ -19,7 +19,9 @@ type FormPlano = {
   capacidade_inclusa: string;
   preco_motorista_extra: string;
   valor_implantacao: string;
+  limite_negociacao: string;
   requer_negociacao: boolean;
+  visivel_cadastro: boolean;
 };
 
 const FORM_VAZIO: FormPlano = {
@@ -36,7 +38,9 @@ const FORM_VAZIO: FormPlano = {
   capacidade_inclusa: '',
   preco_motorista_extra: '',
   valor_implantacao: '0',
+  limite_negociacao: '',
   requer_negociacao: false,
+  visivel_cadastro: true,
 };
 
 const MODELOS_COBRANCA: { chave: ModeloCobranca; titulo: string; ajuda: string }[] = [
@@ -281,7 +285,13 @@ export const PainelPlanos: React.FC = () => {
       capacidade_inclusa: plano.capacidade_inclusa != null ? String(plano.capacidade_inclusa) : '',
       preco_motorista_extra: plano.preco_motorista_extra != null ? String(plano.preco_motorista_extra) : '',
       valor_implantacao: plano.valor_implantacao != null ? String(plano.valor_implantacao) : '0',
+      limite_negociacao: plano.limite_negociacao != null ? String(plano.limite_negociacao) : '',
       requer_negociacao: plano.requer_negociacao === true,
+      // visivel_cadastro: quando o plano nunca setou (null), reflete a regra
+      // legada (ativo && !sob negociação) como valor inicial do toggle.
+      visivel_cadastro: plano.visivel_cadastro != null
+        ? plano.visivel_cadastro === true
+        : (plano.ativo !== false && plano.requer_negociacao !== true),
     });
     setShowModal(true);
   }
@@ -304,6 +314,10 @@ export const PainelPlanos: React.FC = () => {
     if (extra !== '' && (!Number.isFinite(Number(extra)) || Number(extra) < 0)) {
       setToast({ message: 'Valor por motorista extra deve ser igual ou maior que zero', tipo: 'erro' }); return;
     }
+    const selfService = form.limite_negociacao.trim();
+    if (selfService !== '' && (!Number.isInteger(Number(selfService)) || Number(selfService) < 0)) {
+      setToast({ message: 'Limite self-service deve ser um inteiro igual ou maior que zero', tipo: 'erro' }); return;
+    }
 
     const base = {
       nome: form.nome.trim(),
@@ -316,6 +330,9 @@ export const PainelPlanos: React.FC = () => {
       modelo_cobranca: form.modelo_cobranca,
       requer_negociacao: form.requer_negociacao,
       valor_implantacao: implantacao === '' ? 0 : Number(implantacao),
+      // Visibilidade explícita no cadastro e teto self-service (backend valida).
+      visivel_cadastro: form.visivel_cadastro,
+      limite_negociacao: selfService === '' ? null : Number(selfService),
       ...(capacidade !== '' ? { capacidade_inclusa: Number(capacidade) } : {}),
       ...(extra !== '' ? { preco_motorista_extra: Number(extra) } : {}),
     };
@@ -466,13 +483,33 @@ export const PainelPlanos: React.FC = () => {
               : <span className="px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700" title="Modelo de contrato vigente">Contrato v{m.versao}</span>;
           })()}
         </div>
+        {/* Bloco comercial visível no próprio card — não fica mais só escondido no modal. */}
+        {(() => {
+          const impl = Number(plano.valor_implantacao || 0);
+          const visivel = plano.visivel_cadastro != null
+            ? plano.visivel_cadastro === true
+            : (plano.ativo !== false && plano.requer_negociacao !== true);
+          return (
+            <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 mb-4 text-xs">
+              <div className="flex items-center gap-1.5"><span className="text-gray-400">Implantação:</span><span className="font-semibold text-gray-800">{impl <= 0 ? 'Grátis' : `R$ ${impl.toFixed(2)}`}</span></div>
+              <div className="flex items-center gap-1.5"><span className="text-gray-400">Capacidade:</span><span className="font-semibold text-gray-800">{plano.capacidade_inclusa != null ? `${plano.capacidade_inclusa} incl.` : '—'}</span></div>
+              <div className="flex items-center gap-1.5"><span className="text-gray-400">Motorista extra:</span><span className="font-semibold text-gray-800">{plano.preco_motorista_extra != null ? `R$ ${Number(plano.preco_motorista_extra).toFixed(2)}` : '—'}</span></div>
+              <div className="flex items-center gap-1.5"><span className="text-gray-400">Self-service:</span><span className="font-semibold text-gray-800">{plano.limite_negociacao != null ? `até ${plano.limite_negociacao}` : '—'}</span></div>
+              <div className="col-span-2 mt-0.5">
+                {visivel
+                  ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-green-50 text-green-700 font-semibold"><Eye size={12} />Visível no cadastro</span>
+                  : <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-gray-100 text-gray-500 font-semibold"><EyeOff size={12} />Oculto no cadastro</span>}
+              </div>
+            </div>
+          );
+        })()}
         <div className="flex flex-wrap gap-1.5 min-h-7">
           {recursos.length > 0 ? recursos.map((recurso) => (
             <span key={recurso} className="px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-medium">{recurso}</span>
           )) : <span className="text-xs text-gray-400">Nenhum recurso informado</span>}
         </div>
         <div className="flex flex-wrap gap-2 mt-4 pt-3 border-t">
-          <button onClick={() => abrirEdicao(plano)} title={`Editar plano ${plano.nome}`} aria-label={`Editar plano ${plano.nome}`} className="flex-1 min-w-24 py-2 text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-xl"><Eye size={14} className="inline mr-1" />Editar</button>
+          <button onClick={() => abrirEdicao(plano)} title={`Editar plano ${plano.nome}`} aria-label={`Editar plano ${plano.nome}`} className="flex-1 min-w-24 py-2 text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-xl"><Pencil size={14} className="inline mr-1" />Editar</button>
           {!arquivado ? (
             <>
               <button onClick={() => alternarAtivo(plano)} title={inativo ? `Reativar plano ${plano.nome}` : `Inativar plano ${plano.nome}`} aria-label={inativo ? `Reativar plano ${plano.nome}` : `Inativar plano ${plano.nome}`} className={`flex-1 min-w-24 py-2 text-xs font-bold rounded-xl ${inativo ? 'text-green-700 bg-green-50 hover:bg-green-100' : 'text-amber-700 bg-amber-50 hover:bg-amber-100'}`}>{inativo ? 'Reativar' : 'Inativar'}</button>
@@ -644,6 +681,11 @@ export const PainelPlanos: React.FC = () => {
                   <input id="plano-implantacao" type="number" min="0" step="0.01" className="w-full border-2 border-gray-100 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" value={form.valor_implantacao} onChange={(e) => setForm({ ...form, valor_implantacao: e.target.value })} placeholder="0,00" />
                   <p className="text-xs text-gray-400 mt-1 ml-1">0 = "Implantação grátis no lançamento".</p>
                 </div>
+                <div>
+                  <label htmlFor="plano-self-service" className="block text-xs font-bold text-gray-500 uppercase mb-1.5 ml-1">Limite self-service</label>
+                  <input id="plano-self-service" type="number" min="0" step="1" className="w-full border-2 border-gray-100 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" value={form.limite_negociacao} onChange={(e) => setForm({ ...form, limite_negociacao: e.target.value })} placeholder="Ex: 40" />
+                  <p className="text-xs text-gray-400 mt-1 ml-1">Teto contratável sozinho; acima vira negociação. Vazio = sem teto.</p>
+                </div>
               </div>
 
               <label className="flex items-center justify-between gap-4 rounded-xl border border-gray-100 bg-gray-50/50 p-3 cursor-pointer">
@@ -652,6 +694,14 @@ export const PainelPlanos: React.FC = () => {
                   <span className="block text-xs text-gray-400">Marque para planos Enterprise/41+; não aparecem como self-service no cadastro.</span>
                 </span>
                 <input type="checkbox" className="w-5 h-5" checked={form.requer_negociacao} onChange={(e) => setForm({ ...form, requer_negociacao: e.target.checked })} />
+              </label>
+
+              <label className="flex items-center justify-between gap-4 rounded-xl border border-gray-100 bg-gray-50/50 p-3 cursor-pointer">
+                <span>
+                  <span className="block text-sm font-semibold text-gray-700">Visível no cadastro</span>
+                  <span className="block text-xs text-gray-400">Controle explícito: aparece na vitrine/cadastro público quando marcado.</span>
+                </span>
+                <input type="checkbox" className="w-5 h-5 accent-green-700" checked={form.visivel_cadastro} onChange={(e) => setForm({ ...form, visivel_cadastro: e.target.checked })} aria-label="Plano visível no cadastro público" />
               </label>
 
               {/* Prévia do valor final — SOMENTE LEITURA, nunca input. É o que
