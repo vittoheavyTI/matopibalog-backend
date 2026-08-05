@@ -465,6 +465,11 @@ export const CadastroPublico: React.FC = () => {
                       necessário assinar eletronicamente o contrato, com código enviado por e-mail.
                     </div>
                   )}
+                  <div className="mt-3 rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800">
+                    <span className="font-semibold">Seu período de teste é gratuito.</span> Nenhuma cobrança é feita
+                    durante o trial e a contratação <span className="font-semibold">não é automática</span>. O teste
+                    começa quando você assina o contrato e, ao final, você decide se deseja continuar.
+                  </div>
                 </div>
               ) : (
                 <div className="mb-4 text-sm text-gray-500">Nenhum plano selecionado.</div>

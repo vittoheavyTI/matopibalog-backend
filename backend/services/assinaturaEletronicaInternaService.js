@@ -524,6 +524,44 @@ async function solicitarDesafioAssinatura({
   };
 }
 
+// Inicia o trial de uma conta v2 UMA ÚNICA VEZ, quando o contrato fica
+// plenamente assinado. Idempotente: se trial_started_at já existe, não faz nada
+// (retry/assinatura duplicada não reinicia nem estende). Contas legadas (sem
+// commercial_flow_version='v2') são ignoradas — o trial delas já começou na
+// criação. Best-effort/fail-safe: erro aqui não derruba a assinatura (o próprio
+// gate recalcula a situação a cada request).
+async function iniciarTrialV2SeAplicavel({ supabase, empresaId, proposta }) {
+  try {
+    const { data: emp, error } = await supabase
+      .from('empresas')
+      .select('id, commercial_flow_version, trial_started_at')
+      .eq('id', empresaId)
+      .maybeSingle();
+    if (error || !emp) return { iniciado: false, motivo: 'empresa_indisponivel' };
+    if (emp.commercial_flow_version !== 'v2') return { iniciado: false, motivo: 'nao_v2' };
+    if (emp.trial_started_at) return { iniciado: false, motivo: 'ja_iniciado' }; // idempotente
+
+    const snapshot = proposta && (proposta.snapshot || proposta);
+    const diasTrial = Number(snapshot?.trial_dias);
+    const dias = Number.isFinite(diasTrial) && diasTrial >= 0 ? diasTrial : 0;
+    const agora = new Date();
+    const fim = new Date(agora.getTime() + dias * 24 * 60 * 60 * 1000);
+
+    // Guarda de concorrência: só grava se ainda estiver null (retry paralelo não duplica).
+    const { data: upd, error: updErr } = await supabase
+      .from('empresas')
+      .update({ status: 'trial', trial_started_at: agora.toISOString(), trial_ends_at: fim.toISOString() })
+      .eq('id', empresaId)
+      .is('trial_started_at', null)
+      .select('id')
+      .maybeSingle();
+    if (updErr) return { iniciado: false, motivo: 'erro_update' };
+    return { iniciado: Boolean(upd), motivo: upd ? 'ok' : 'corrida_ja_iniciado', trial_ends_at: fim.toISOString() };
+  } catch (_) {
+    return { iniciado: false, motivo: 'excecao' };
+  }
+}
+
 async function confirmarAssinatura({
   supabase,
   contratoId,
@@ -672,6 +710,24 @@ async function confirmarAssinatura({
       criadoPor: usuario.id,
       actorPapel: papel,
     });
+
+    // Fluxo v2: a assinatura completa INICIA o trial (uma única vez). Idempotente
+    // e fail-safe — não reinicia em retry nem derruba a assinatura em caso de erro.
+    const propostaContrato = Array.isArray(contrato.propostas_comerciais)
+      ? contrato.propostas_comerciais[0]
+      : contrato.propostas_comerciais;
+    const trial = await iniciarTrialV2SeAplicavel({ supabase, empresaId, proposta: propostaContrato });
+    if (trial.iniciado) {
+      await inserirEvento({
+        supabase,
+        contratoId: contrato.id,
+        empresaId,
+        tipo: 'trial_iniciado',
+        detalhe: { origem: 'assinatura_completa', trial_ends_at: trial.trial_ends_at },
+        criadoPor: usuario.id,
+        actorPapel: papel,
+      });
+    }
   }
 
   return {
@@ -736,6 +792,7 @@ module.exports = {
   sha256,
   solicitarDesafioAssinatura,
   confirmarAssinatura,
+  iniciarTrialV2SeAplicavel,
   verificarContratoPublico,
   verificarSenhaAtual,
 };
