@@ -220,6 +220,7 @@ export const PainelPlanos: React.FC = () => {
   const { estado: estadoPlanos, view: viewPlanos, recarregar: recarregarPlanos } = useCarregamento<any>(
     (signal) => api.get('/painel-admin/planos', { signal }).then((r) => r.data || []),
     [],
+    { pollingMs: 30000 }, // atualização automática a cada 30s (pausa oculto/offline/em-voo)
   );
   const planos = estadoPlanos.dados || [];
   const [showModal, setShowModal] = useState(false);
@@ -557,7 +558,7 @@ export const PainelPlanos: React.FC = () => {
         <div className="flex items-center gap-2.5">
           <div className="bg-gray-800 p-1.5 rounded-lg text-white"><Shield size={18} /></div>
           <div>
-            <h1 className="text-2xl font-bold text-gray-800 leading-tight">Planos</h1>
+            <h1 className="text-2xl font-bold text-gray-800 leading-tight">Planos {viewPlanos.atualizando && <span className="ml-1 align-middle text-xs font-medium text-gray-400">Atualizando…</span>}</h1>
             <p className="text-sm text-gray-500">Gerenciar planos de assinatura</p>
           </div>
         </div>

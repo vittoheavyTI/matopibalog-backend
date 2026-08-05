@@ -25,12 +25,20 @@ export interface EstadoCarregamento<T> {
   status: Status;
   dados: T | null;
   erro: ErroCarregamento | null;
-  desatualizado: boolean; // dados anteriores mantidos após falha
-  reqId: number;          // id da última requisição aplicada (stale-guard)
+  desatualizado: boolean;          // dados anteriores mantidos após falha
+  reqId: number;                   // id da última requisição aplicada (stale-guard)
+  ultimaAtualizacao: number | null; // timestamp da última resposta bem-sucedida
 }
 
 export function estadoInicial<T>(): EstadoCarregamento<T> {
-  return { status: 'idle', dados: null, erro: null, desatualizado: false, reqId: 0 };
+  return { status: 'idle', dados: null, erro: null, desatualizado: false, reqId: 0, ultimaAtualizacao: null };
+}
+
+// Erros que valem retry automático em GET idempotente: rede, timeout, 5xx e 429.
+// NUNCA 4xx de negócio (400/401/403/404) nem cancelamento.
+export function ehErroRetriavel(cls: ErroCarregamento | { cancelado: true }): boolean {
+  if ('cancelado' in cls) return false;
+  return cls.tipo === 'timeout' || cls.tipo === 'rede' || cls.tipo === 'servidor' || cls.tipo === 'rate_limited';
 }
 
 // Classifica um erro (axios-like) em tipo + mensagem amigável. 'cancelado' é
@@ -77,6 +85,7 @@ export function reduzir<T>(estado: EstadoCarregamento<T[]>, ev: Evento<T>): Esta
         erro: null,
         desatualizado: false,
         reqId: ev.reqId,
+        ultimaAtualizacao: Date.now(),
       };
     }
 
@@ -98,6 +107,7 @@ export function reduzir<T>(estado: EstadoCarregamento<T[]>, ev: Evento<T>): Esta
         erro: cls,
         desatualizado: estado.dados != null,
         reqId: ev.reqId,
+        ultimaAtualizacao: estado.ultimaAtualizacao,
       };
     }
 
@@ -113,9 +123,15 @@ export function derivarView<T>(e: EstadoCarregamento<T[]>) {
     mostrarErro: e.status === 'erro',
     mostrarVazio: e.status === 'vazio',
     mostrarDados: (e.status === 'sucesso') || (e.dados != null && e.status !== 'vazio'),
+    // Revalidando COM dados já na tela (stale-while-revalidate): não some a tabela,
+    // só mostra um indicador discreto "Atualizando…".
+    atualizando: e.status === 'loading' && e.dados != null,
+    // "tem dados confiáveis" = houve ao menos uma resposta válida (não é erro/loading inicial).
+    temDados: e.dados != null && e.status !== 'erro',
     desatualizado: e.desatualizado,
     podeTentarNovamente: e.status === 'erro',
     mensagemErro: e.erro?.mensagem || null,
     tipoErro: e.erro?.tipo || null,
+    ultimaAtualizacao: e.ultimaAtualizacao,
   };
 }

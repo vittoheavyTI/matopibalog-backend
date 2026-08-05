@@ -166,6 +166,7 @@ export const PainelEmpresas: React.FC = () => {
   const { estado: estEmpresas, view: viewEmpresas, recarregar: carregar } = useCarregamento<any>(
     (signal) => api.get('/painel-admin/empresas' + (showArchived ? '?includeArchived=true' : ''), { signal }).then((r) => r.data || []),
     [showArchived],
+    { pollingMs: 30000 }, // atualização automática a cada 30s (pausa oculto/offline/em-voo)
   );
   const empresas = estEmpresas.dados || [];
   const carregandoEmpresas = viewEmpresas.mostrarLoading;
@@ -545,7 +546,7 @@ export const PainelEmpresas: React.FC = () => {
       <div className="flex items-center space-x-3 bg-white p-4 rounded-xl shadow-sm border border-gray-100">
         <div className="bg-gray-800 p-2 rounded-lg text-white"><Shield size={24} /></div>
         <div>
-          <h1 className="text-2xl font-bold text-gray-800">Empresas e Autônomos</h1>
+          <h1 className="text-2xl font-bold text-gray-800">Empresas e Autônomos {viewEmpresas.atualizando && <span className="ml-1 align-middle text-xs font-medium text-gray-400">Atualizando…</span>}</h1>
           <p className="text-sm text-gray-500">Contas da plataforma. Pessoas com acesso são geridas separadamente em Usuários.</p>
         </div>
       </div>

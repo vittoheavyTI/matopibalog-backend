@@ -26,10 +26,14 @@ export const Usuarios: React.FC = () => {
       status: u.status,
     }))),
     [],
+    { pollingMs: 30000 }, // atualização automática a cada 30s (pausa oculto/offline/em-voo)
   );
   const usuarios = estUsuarios.dados || [];
   const loading = viewUsuarios.mostrarLoading;
   const erroCarga = viewUsuarios.mostrarErro ? viewUsuarios.mensagemErro : null;
+  // Contadores só são "resultado" quando há dados confiáveis (resposta válida).
+  // Durante loading inicial / erro sem dados anteriores, mostram "—" (nunca 0 falso).
+  const contadoresConfiaveis = viewUsuarios.temDados;
   const [showModal, setShowModal] = useState(false);
   const [somenteLeitura, setSomenteLeitura] = useState(false);
   const [editingUser, setEditingUser] = useState<any | null>(null);
@@ -424,7 +428,7 @@ export const Usuarios: React.FC = () => {
     <div className="space-y-6 pb-20">
       <div className="flex flex-wrap justify-between items-center gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-gray-800">Usuários</h2>
+          <h2 className="text-2xl font-bold text-gray-800">Usuários {viewUsuarios.atualizando && <span className="ml-1 align-middle text-xs font-medium text-gray-400">Atualizando…</span>}</h2>
           <p className="text-sm text-gray-500">Pessoas que acessam o sistema, vinculadas às contas da plataforma</p>
         </div>
         <button
@@ -477,7 +481,7 @@ export const Usuarios: React.FC = () => {
                 : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
             }`}
           >
-            {label} <span className="opacity-70">({contagem[key]})</span>
+            {label} <span className="opacity-70">({contadoresConfiaveis ? contagem[key] : '—'})</span>
           </button>
         ))}
       </div>
