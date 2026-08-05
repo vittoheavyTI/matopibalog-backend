@@ -124,14 +124,14 @@ export const GerenciamentoViagens: React.FC = () => {
   const enviarFotoOdometro = async (freteId: string, tipo: 'inicial' | 'final', file: File) => {
     const form = new FormData();
     form.append('foto', file);
-    return api.post(`/fretes/${freteId}/odometro/${tipo}`, form);
+    return api.post(`/fretes/${freteId}/odometro/${tipo}`, form, { timeout: 120000 }); // upload (ate ~10MB/conexao lenta): 120s, override do default de 30s
   };
 
   const enviarDocumentoFrete = async (freteId: string, doc: DocumentoFretePendente) => {
     const form = new FormData();
     form.append('tipo', doc.tipo);
     form.append('documento', doc.file);
-    return api.post(`/fretes/${freteId}/documentos`, form);
+    return api.post(`/fretes/${freteId}/documentos`, form, { timeout: 120000 }); // upload (ate ~10MB/conexao lenta): 120s, override do default de 30s
   };
 
   const [formData, setFormData] = useState({
