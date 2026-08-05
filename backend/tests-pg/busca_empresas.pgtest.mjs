@@ -95,11 +95,11 @@ test('paginação e limite (teto 50)', async () => {
 test('usa o índice trigram do nome (plano de consulta)', async () => {
   const c = await pool.connect();
   try {
-    await c.query('SET LOCAL enable_seqscan = off');
+    await c.query('SET enable_seqscan = off');   // sessão (não LOCAL): força uso de índice se houver
     const r = await c.query(`EXPLAIN SELECT id FROM public.empresas WHERE lower(nome) LIKE '%zzbusca alfa%'`);
     const plano = r.rows.map((x) => x['QUERY PLAN']).join('\n');
     assert.match(plano, /idx_empresas_nome_trgm/);
-  } finally { c.release(); }
+  } finally { await c.query('RESET enable_seqscan'); c.release(); }
 });
 
 test('privilégios: anon/authenticated negados; service_role permitido', async () => {
