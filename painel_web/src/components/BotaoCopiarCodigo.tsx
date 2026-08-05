@@ -64,10 +64,17 @@ export const BotaoCopiarCodigo: React.FC<{ codigo: string | null; className?: st
         {estado === 'copiado' ? <Check size={15} /> : <Copy size={15} />}
         {rotulo}
       </button>
-      {/* toast/status acessível: anunciado por leitores de tela (aria-live) e visível */}
-      <span role="status" aria-live="polite" className={statusMsg ? (estado === 'erro' ? 'text-xs text-red-600' : 'text-xs text-green-600') : 'sr-only'}>
-        {statusMsg}
-      </span>
+      {/* Toast visual no MESMO padrão do projeto (fixed top-right), com role=status +
+          aria-live para leitores de tela. Verde = sucesso; vermelho = erro. */}
+      {statusMsg && (
+        <div
+          role="status"
+          aria-live="polite"
+          className={`fixed top-6 right-6 z-[100] px-5 py-3 rounded-xl shadow-2xl text-sm font-bold text-white ${estado === 'erro' ? 'bg-red-600' : 'bg-green-600'}`}
+        >
+          {statusMsg}
+        </div>
+      )}
     </>
   );
 };
