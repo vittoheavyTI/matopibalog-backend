@@ -1,0 +1,81 @@
+name: PG RPC Tests (matriz transacional)
+
+# Testa a migration 061 (RPC transacional publicar_matriz_funcionalidades) contra
+# um PostgreSQL EFÊMERO real (service container), com transações e múltiplas
+# conexões. Sem custo, sem dados de produção, isolado e destruído ao fim do job.
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "backend/migrations/**"
+      - "backend/tests-pg/**"
+      - ".github/workflows/pg-rpc-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "backend/migrations/**"
+      - "backend/tests-pg/**"
+      - ".github/workflows/pg-rpc-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pg-rpc-ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pg-rpc:
+    name: Postgres 16 - RPC transacional da matriz
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: matriz_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    defaults:
+      run:
+        working-directory: backend
+
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/matriz_test
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: backend/.nvmrc
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Show runtime versions
+        run: node --version && npm --version
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Apply isolated schema (pre-bootstrap + 060 + 061 + test grants)
+        run: npm run test:pg:apply
+
+      - name: Run transactional RPC tests (real Postgres, multi-connection)
+        run: npm run test:pg

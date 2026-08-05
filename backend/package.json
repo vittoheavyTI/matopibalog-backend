@@ -11,7 +11,9 @@
     "dev": "nodemon server.js",
     "smoke:health": "node scripts/reliability/smoke_health.mjs",
     "reliability": "node scripts/reliability/reliability_report.mjs",
-    "smoke:idempotencia:dry": "node scripts/reliability/smoke_idempotencia_lancamentos.mjs --dry-run"
+    "smoke:idempotencia:dry": "node scripts/reliability/smoke_idempotencia_lancamentos.mjs --dry-run",
+    "test:pg:apply": "node tests-pg/apply_schema.mjs",
+    "test:pg": "node --test tests-pg/matriz_rpc.pgtest.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",
@@ -30,6 +32,7 @@
   },
   "devDependencies": {
     "@types/cookie-parser": "^1.4.10",
-    "nodemon": "^3.0.2"
+    "nodemon": "^3.0.2",
+    "pg": "^8.22.0"
   }
 }
