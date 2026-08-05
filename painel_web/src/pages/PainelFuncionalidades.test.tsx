@@ -99,9 +99,9 @@ describe('PainelFuncionalidades — busca de clientes', () => {
     mockGet({ buscar: () => Promise.resolve({ data: { empresas: [{ id: 'e1', nome: 'Empresa do Convite', status: 'ativa' }], total: 1 } }) });
     render(<PainelFuncionalidades />);
     fireEvent.click(screen.getByRole('button', { name: /clientes/i }));
-    fireEvent.change(screen.getByLabelText(/buscar cliente/i), { target: { value: 'MATO-7Q2KS1' } });
+    fireEvent.change(screen.getByLabelText(/buscar cliente/i), { target: { value: 'MATO-ZZZ999' } });
     await waitFor(() => expect(screen.getByText('Empresa do Convite')).toBeInTheDocument());
-    expect(mockApi.get).toHaveBeenCalledWith('/painel-admin/empresas/buscar', expect.objectContaining({ params: expect.objectContaining({ q: 'MATO-7Q2KS1' }) }));
+    expect(mockApi.get).toHaveBeenCalledWith('/painel-admin/empresas/buscar', expect.objectContaining({ params: expect.objectContaining({ q: 'MATO-ZZZ999' }) }));
   });
 
   test('erro de rede mostra erro (NÃO "nenhuma empresa"); vazio válido mostra "nenhuma"', async () => {
