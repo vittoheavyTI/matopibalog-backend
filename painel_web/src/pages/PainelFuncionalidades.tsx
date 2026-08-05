@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Boxes, Check, Grid3x3, History, Users, X, Plus, Pencil, Archive, Search } from 'lucide-react';
+import { Boxes, Check, Grid3x3, History, Users, X, Plus, Pencil, Archive, Search, AlertTriangle, RefreshCw } from 'lucide-react';
 import api from '../api';
 
 type Func = {
@@ -7,7 +7,7 @@ type Func = {
   status_ciclo_vida: string; modelo_cobranca: string; preco_padrao_centavos?: number | null;
   ativo: boolean; visivel_publicamente: boolean; ordem_exibicao: number;
 };
-type Plano = { id: string; nome: string };
+type Plano = { id: string; nome: string; matriz_funcionalidades_versao?: number };
 type MatrizItem = { plano_id: string; funcionalidade_id: string; disponibilidade: string; exibir_no_card: boolean; texto_publico?: string | null; ordem_exibicao?: number };
 
 const CICLOS = ['disponivel', 'em_breve', 'em_desenvolvimento', 'planejada', 'descontinuada'];
@@ -179,48 +179,81 @@ const AbaCatalogo: React.FC<{ notificar: (m: string, t: 'ok' | 'erro') => void }
 };
 
 // ── Matriz por plano ─────────────────────────────────────────────────────────
+type Conflito = { plano_id?: string | null; plano_nome?: string; versao_esperada?: number | null; versao_atual?: number | null };
 const AbaMatriz: React.FC<{ notificar: (m: string, t: 'ok' | 'erro') => void }> = ({ notificar }) => {
   const [funcs, setFuncs] = useState<Func[]>([]);
   const [planos, setPlanos] = useState<Plano[]>([]);
   const [matriz, setMatriz] = useState<Record<string, string>>({}); // `${plano}:${func}` -> disponibilidade
   const [sujo, setSujo] = useState(false);
   const [salvando, setSalvando] = useState(false);
+  const [carregando, setCarregando] = useState(true);
+  const [conflito, setConflito] = useState<Conflito | null>(null);
 
-  useEffect(() => { (async () => {
-    const [f, p, m] = await Promise.all([
-      api.get('/painel-admin/funcionalidades', { params: { ativo: 'true' } }),
-      api.get('/painel-admin/planos'),
-      api.get('/painel-admin/funcionalidades-matriz'),
-    ]);
-    setFuncs(f.data.funcionalidades || []);
-    setPlanos((p.data.planos || p.data || []).map((x: any) => ({ id: x.id, nome: x.nome })));
-    const mm: Record<string, string> = {};
-    for (const it of (m.data.matriz || []) as MatrizItem[]) mm[`${it.plano_id}:${it.funcionalidade_id}`] = it.disponibilidade;
-    setMatriz(mm);
-  })().catch(() => notificar('Erro ao carregar matriz', 'erro')); }, [notificar]);
+  const carregar = useCallback(async () => {
+    setCarregando(true);
+    try {
+      const [f, p, m] = await Promise.all([
+        api.get('/painel-admin/funcionalidades', { params: { ativo: 'true' } }),
+        api.get('/painel-admin/planos'),
+        api.get('/painel-admin/funcionalidades-matriz'),
+      ]);
+      setFuncs(f.data.funcionalidades || []);
+      setPlanos((p.data.planos || p.data || []).map((x: any) => ({ id: x.id, nome: x.nome, matriz_funcionalidades_versao: x.matriz_funcionalidades_versao })));
+      const mm: Record<string, string> = {};
+      for (const it of (m.data.matriz || []) as MatrizItem[]) mm[`${it.plano_id}:${it.funcionalidade_id}`] = it.disponibilidade;
+      setMatriz(mm);
+      setConflito(null); setSujo(false);
+    } catch { notificar('Erro ao carregar matriz', 'erro'); } finally { setCarregando(false); }
+  }, [notificar]);
+
+  useEffect(() => { carregar(); }, [carregar]);
 
   function setCelula(planoId: string, funcId: string, val: string) {
     setMatriz((m) => ({ ...m, [`${planoId}:${funcId}`]: val })); setSujo(true);
+    if (conflito) setConflito(null); // usuário editou após conflito; libera nova tentativa (após recarregar)
   }
   async function salvar() {
     setSalvando(true);
     try {
       const itens = Object.entries(matriz).map(([k, disponibilidade]) => { const [plano_id, funcionalidade_id] = k.split(':'); return { plano_id, funcionalidade_id, disponibilidade, exibir_no_card: true }; });
-      await api.put('/painel-admin/funcionalidades-matriz', { itens });
-      notificar('Matriz publicada (nova versão)!', 'ok'); setSujo(false);
-    } catch { notificar('Erro ao salvar matriz', 'erro'); } finally { setSalvando(false); }
+      // versão esperada por plano (concorrência otimista): backend exige de todos.
+      const versoes_esperadas: Record<string, number> = {};
+      for (const p of planos) versoes_esperadas[p.id] = p.matriz_funcionalidades_versao ?? 1;
+      await api.put('/painel-admin/funcionalidades-matriz', { itens, versoes_esperadas });
+      notificar('Matriz publicada!', 'ok');
+      await carregar(); // traz as versões novas; nada de merge silencioso
+    } catch (e: any) {
+      if (e?.response?.status === 409) {
+        const d = e.response.data || {};
+        const plano_nome = planos.find((p) => p.id === d.plano_id)?.nome;
+        setConflito({ plano_id: d.plano_id, plano_nome, versao_esperada: d.versao_esperada, versao_atual: d.versao_atual });
+      } else { notificar('Erro ao salvar matriz', 'erro'); }
+    } finally { setSalvando(false); }
   }
 
+  const bloqueado = salvando || !!conflito; // 409 impede novo envio com versão obsoleta até recarregar
   return (
     <div className="space-y-3">
-      {sujo && <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 flex items-center justify-between"><span>Há alterações não salvas na matriz.</span><button onClick={salvar} disabled={salvando} className="px-3 py-1.5 bg-amber-600 text-white rounded-lg text-xs font-bold disabled:opacity-40">Publicar nova versão</button></div>}
+      {conflito && (
+        <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-800">
+          <div className="flex items-start gap-2">
+            <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+            <div className="flex-1">
+              <p className="font-semibold">A matriz foi alterada por outro administrador{conflito.plano_nome ? ` (plano ${conflito.plano_nome})` : ''}.</p>
+              <p className="text-xs mt-0.5">Versão esperada <strong>{conflito.versao_esperada ?? '—'}</strong> · versão atual <strong>{conflito.versao_atual ?? '—'}</strong>. Suas alterações locais foram <strong>preservadas</strong> — nada foi sobrescrito. Recarregar traz a versão atual (descarta o rascunho).</p>
+              <button onClick={carregar} className="mt-2 inline-flex items-center gap-1 px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs font-bold"><RefreshCw size={13} />Recarregar matriz atual</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {sujo && !conflito && <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 flex items-center justify-between"><span>Há alterações não salvas na matriz.</span><button onClick={salvar} disabled={bloqueado} className="px-3 py-1.5 bg-amber-600 text-white rounded-lg text-xs font-bold disabled:opacity-40">Publicar nova versão</button></div>}
       <div className="overflow-x-auto rounded-2xl border border-gray-100">
         <table className="text-xs">
-          <thead className="bg-gray-50 text-gray-500 uppercase"><tr><th className="text-left p-2 sticky left-0 bg-gray-50 min-w-40">Funcionalidade</th>{planos.map((p) => <th key={p.id} className="p-2 whitespace-nowrap">{p.nome}</th>)}</tr></thead>
+          <thead className="bg-gray-50 text-gray-500 uppercase"><tr><th className="text-left p-2 sticky left-0 bg-gray-50 min-w-40 z-10">Funcionalidade</th>{planos.map((p) => <th key={p.id} className="p-2 whitespace-nowrap">{p.nome}<span className="block normal-case font-normal text-[10px] text-gray-400">v{p.matriz_funcionalidades_versao ?? 1}</span></th>)}</tr></thead>
           <tbody>
             {funcs.map((f) => (
               <tr key={f.id} className="border-t border-gray-100">
-                <td className="p-2 sticky left-0 bg-white font-semibold text-gray-700">{f.nome}<span className="block font-mono text-[10px] text-gray-400">{f.codigo}</span></td>
+                <td className="p-2 sticky left-0 bg-white font-semibold text-gray-700 z-10" title={f.nome}>{f.nome}<span className="block font-mono text-[10px] text-gray-400">{f.codigo}</span></td>
                 {planos.map((p) => (
                   <td key={p.id} className="p-1">
                     <select value={matriz[`${p.id}:${f.id}`] || 'indisponivel'} onChange={(e) => setCelula(p.id, f.id, e.target.value)} className="border border-gray-200 rounded-lg p-1 text-xs bg-white">
@@ -230,31 +263,86 @@ const AbaMatriz: React.FC<{ notificar: (m: string, t: 'ok' | 'erro') => void }> 
                 ))}
               </tr>
             ))}
+            {!carregando && funcs.length === 0 && <tr><td colSpan={planos.length + 1} className="p-8 text-center text-gray-400">Nenhuma funcionalidade ativa</td></tr>}
           </tbody>
         </table>
       </div>
-      <button onClick={salvar} disabled={!sujo || salvando} className="px-5 py-2 bg-green-700 text-white rounded-lg text-sm font-medium disabled:opacity-40"><Check size={15} className="inline mr-1" />Publicar matriz</button>
+      <button onClick={salvar} disabled={!sujo || bloqueado} className="px-5 py-2 bg-green-700 text-white rounded-lg text-sm font-medium disabled:opacity-40"><Check size={15} className="inline mr-1" />Publicar matriz</button>
     </div>
   );
 };
 
-// ── Clientes (leitura) ───────────────────────────────────────────────────────
+// ── Clientes (busca + leitura) ───────────────────────────────────────────────
+type EmpresaBusca = { id: string; nome: string; documento?: string | null; email?: string | null; status?: string | null; arquivada?: boolean; plano_nome?: string | null };
 const AbaClientes: React.FC = () => {
-  const [empresaId, setEmpresaId] = useState('');
+  const [termo, setTermo] = useState('');
+  const [resultados, setResultados] = useState<EmpresaBusca[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [buscando, setBuscando] = useState(false);
+  const [erroBusca, setErroBusca] = useState('');
+  const [sel, setSel] = useState<EmpresaBusca | null>(null);
   const [dados, setDados] = useState<any>(null);
   const [erro, setErro] = useState('');
-  async function consultar() {
-    setErro(''); setDados(null);
-    try { const { data } = await api.get(`/painel-admin/empresas/${empresaId.trim()}/entitlements`); setDados(data); }
-    catch (e: any) { setErro(e?.response?.data?.message || 'Erro ao consultar'); }
+  const LIMITE = 10;
+
+  // Busca com debounce (350ms); termo mínimo 2 → não consulta e limpa resultados.
+  useEffect(() => {
+    const t = termo.trim();
+    if (t.length < 2) { setResultados([]); setTotal(0); setErroBusca(''); return; }
+    let vivo = true;
+    const timer = setTimeout(async () => {
+      setBuscando(true); setErroBusca('');
+      try {
+        const { data } = await api.get('/painel-admin/empresas/buscar', { params: { q: t, page, limite: LIMITE } });
+        if (!vivo) return;
+        setResultados(data.empresas || []); setTotal(data.total || 0);
+      } catch { if (vivo) setErroBusca('Erro na busca de clientes.'); }
+      finally { if (vivo) setBuscando(false); }
+    }, 350);
+    return () => { vivo = false; clearTimeout(timer); };
+  }, [termo, page]);
+
+  useEffect(() => { setPage(1); }, [termo]);
+
+  async function selecionar(e: EmpresaBusca) {
+    setSel(e); setErro(''); setDados(null);
+    try { const { data } = await api.get(`/painel-admin/empresas/${e.id}/entitlements`); setDados(data); }
+    catch (err: any) { setErro(err?.response?.data?.message || 'Erro ao consultar direitos'); }
   }
+
+  const totalPaginas = Math.max(1, Math.ceil(total / LIMITE));
   return (
     <div className="space-y-3">
-      <div className="flex gap-2">
-        <input value={empresaId} onChange={(e) => setEmpresaId(e.target.value)} placeholder="ID da empresa" className={`${inp} flex-1 font-mono`} />
-        <button onClick={consultar} className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-medium">Consultar direitos</button>
+      <div className="relative">
+        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+        <input value={termo} onChange={(e) => setTermo(e.target.value)} placeholder="Buscar por nome, CNPJ ou e-mail…" className={`${inp} pl-9`} aria-label="Buscar cliente" />
       </div>
-      <p className="text-xs text-gray-400">Consulta os direitos atuais (plano + concessões). Ações de concessão/adicional chegam no PR 3A.</p>
+      <p className="text-xs text-gray-400">Digite ao menos 2 caracteres. Ações de concessão/adicional chegam no PR 3A (esta aba é somente leitura).</p>
+      {erroBusca && <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{erroBusca}</div>}
+      {termo.trim().length >= 2 && (
+        <div className="rounded-2xl border border-gray-100 divide-y divide-gray-100">
+          {buscando && <div className="p-3 text-sm text-gray-400">Buscando…</div>}
+          {!buscando && resultados.length === 0 && <div className="p-4 text-sm text-gray-400">Nenhuma empresa encontrada.</div>}
+          {resultados.map((e) => (
+            <button key={e.id} onClick={() => selecionar(e)} className={`w-full text-left p-3 hover:bg-gray-50 flex items-center justify-between ${sel?.id === e.id ? 'bg-blue-50' : ''}`}>
+              <span>
+                <span className="font-semibold text-gray-800">{e.nome}</span>
+                {e.arquivada && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 uppercase">arquivada</span>}
+                <span className="block text-xs text-gray-400">{e.documento || 's/ documento'} · {e.email || 's/ e-mail'}</span>
+              </span>
+              <span className="text-xs text-gray-500 text-right shrink-0">{e.plano_nome || '—'}<span className="block text-gray-400">{e.status || ''}</span></span>
+            </button>
+          ))}
+          {total > LIMITE && (
+            <div className="p-2 flex items-center justify-between text-xs text-gray-500">
+              <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1} className="px-2 py-1 rounded disabled:opacity-30">‹ Anterior</button>
+              <span>Página {page} de {totalPaginas} · {total} resultado(s)</span>
+              <button onClick={() => setPage((p) => Math.min(totalPaginas, p + 1))} disabled={page >= totalPaginas} className="px-2 py-1 rounded disabled:opacity-30">Próxima ›</button>
+            </div>
+          )}
+        </div>
+      )}
       {erro && <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{erro}</div>}
       {dados && (
         <div className="space-y-3">
