@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const supabase = require('../config/supabase');
+const { carregarMatrizPublicaPorPlano } = require('../services/funcionalidadeService');
 
 // Normaliza o campo `recursos` para um array simples de strings.
 // Defesa: pode vir como array (jsonb/text[]), string JSON, string separada
@@ -85,6 +86,14 @@ router.get('/publicos', async (req, res) => {
     valor_implantacao: p.valor_implantacao != null ? Number(p.valor_implantacao) : null,
     requer_negociacao: p.requer_negociacao === true,
   }));
+
+  // Catálogo estruturado de funcionalidades por plano (rotulado: Incluído/
+  // Adicional/Em breve/Sob consulta). Best-effort: se vazio (antes da migration
+  // 060 ou sem matriz), os cards usam `recursos` como antes.
+  const matriz = await carregarMatrizPublicaPorPlano(supabase);
+  for (const plano of planos) {
+    plano.funcionalidades = matriz[plano.id] || [];
+  }
 
   res.json({ planos });
 });
