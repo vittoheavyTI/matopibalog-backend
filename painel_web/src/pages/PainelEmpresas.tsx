@@ -573,8 +573,10 @@ export const PainelEmpresas: React.FC = () => {
         <button onClick={() => { setEditing(null); setFormDados({ nome: '', cnpj: '', email: '', telefone: '', plano_id: '', tipo: 'transportadora' }); setShowModal(true); }} className="flex items-center px-4 py-2.5 bg-green-700 text-white rounded-xl font-medium text-sm hover:bg-green-800 active:scale-95"><Plus size={18} className="mr-1.5" /> Nova Conta</button>
       </div>
 
-      <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
-        <table className="w-full text-left">
+      {/* overflow-x-auto: em telas estreitas a tabela ROLA horizontalmente em vez de
+          clipar a coluna de Ações (evita ação escondida). min-w garante colunas legíveis. */}
+      <div className="bg-white rounded-2xl border border-gray-100 overflow-x-auto">
+        <table className="w-full text-left min-w-[720px]">
           <thead>
             <tr className="bg-gray-50 text-gray-600 text-xs font-bold uppercase tracking-wider">
               <th className="px-4 py-2.5 border-b">Conta</th><th className="px-4 py-2.5 border-b">Documento</th><th className="px-4 py-2.5 border-b">Plano</th><th className="px-4 py-2.5 border-b">Assinatura</th><th className="px-4 py-2.5 border-b">Status</th><th className="px-4 py-2.5 border-b text-center">Ações</th>
