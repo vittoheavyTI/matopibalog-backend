@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { AlertTriangle, Archive, ArchiveRestore, Check, Eye, EyeOff, Pencil, Plus, Shield, Trash2, X } from 'lucide-react';
 import api from '../api';
 import { formatCurrency } from '../utils';
+import { useCarregamento } from '../hooks/useCarregamento';
+import { ErroCarregamento } from '../components/ErroCarregamento';
 
 type ModeloCobranca = 'fixo' | 'por_motorista';
 
@@ -212,7 +214,14 @@ function calcularPrevia(form: FormPlano): Previa {
 }
 
 export const PainelPlanos: React.FC = () => {
-  const [planos, setPlanos] = useState<any[]>([]);
+  // Carga da lista de planos com estados distintos (loading/vazio/erro) + retry +
+  // AbortController + stale-guard. Substitui o antigo catch→toast que deixava a
+  // lista vazia (falso "Nenhum plano cadastrado" após erro).
+  const { estado: estadoPlanos, view: viewPlanos, recarregar: recarregarPlanos } = useCarregamento<any>(
+    (signal) => api.get('/painel-admin/planos', { signal }).then((r) => r.data || []),
+    [],
+  );
+  const planos = estadoPlanos.dados || [];
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<any>(null);
   const [form, setForm] = useState<FormPlano>(FORM_VAZIO);
@@ -235,7 +244,7 @@ export const PainelPlanos: React.FC = () => {
   const [salvando, setSalvando] = useState(false);
   const [modelosPorPlano, setModelosPorPlano] = useState<Record<string, { versao?: number; sem: boolean }>>({});
 
-  useEffect(() => { carregar(); }, []);
+  useEffect(() => { carregarModelos(); }, []);
 
   useEffect(() => {
     if (!toast) return;
@@ -243,14 +252,11 @@ export const PainelPlanos: React.FC = () => {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
-  async function carregar() {
-    try {
-      const response = await api.get('/painel-admin/planos');
-      setPlanos(response.data || []);
-    } catch {
-      setToast({ message: 'Erro ao carregar planos', tipo: 'erro' });
-    }
-    // Modelo de contrato vigente por plano (só leitura; fail-open: some se indisponível).
+  // Recarrega tudo após mutações (planos via hook + indicador de modelos).
+  function recarregar() { recarregarPlanos(); carregarModelos(); }
+
+  // Modelo de contrato vigente por plano (só leitura; fail-open: some se indisponível).
+  async function carregarModelos() {
     try {
       const { data } = await api.get('/admin/contrato-modelos/overview');
       const mapa: Record<string, { versao?: number; sem: boolean }> = {};
@@ -370,7 +376,7 @@ export const PainelPlanos: React.FC = () => {
       }
       setShowModal(false);
       setEditing(null);
-      carregar();
+      recarregar();
     } catch (err: any) {
       const dados = err?.response?.data;
       if (err?.response?.status === 409 && dados?.reprecificacaoRequerConfirmacao && editing) {
@@ -403,7 +409,7 @@ export const PainelPlanos: React.FC = () => {
       setAceiteAsaas(false);
       setShowModal(false);
       setEditing(null);
-      carregar();
+      recarregar();
     } catch (err: any) {
       setToast({ message: err?.response?.data?.message || 'Erro ao atualizar', tipo: 'erro' });
     } finally {
@@ -418,7 +424,7 @@ export const PainelPlanos: React.FC = () => {
     try {
       await api.put('/painel-admin/planos/' + plano.id, { ativo: reativar });
       setToast({ message: reativar ? 'Plano reativado!' : 'Plano inativado!', tipo: 'sucesso' });
-      carregar();
+      recarregar();
     } catch {
       setToast({ message: 'Erro ao alterar status do plano', tipo: 'erro' });
     }
@@ -430,7 +436,7 @@ export const PainelPlanos: React.FC = () => {
     try {
       await api.put('/painel-admin/planos/' + plano.id, { arquivar: arquivarFlag });
       setToast({ message: arquivarFlag ? 'Plano arquivado!' : 'Plano desarquivado!', tipo: 'sucesso' });
-      carregar();
+      recarregar();
     } catch {
       setToast({ message: 'Erro ao arquivar o plano', tipo: 'erro' });
     }
@@ -444,7 +450,7 @@ export const PainelPlanos: React.FC = () => {
       setToast({ message: 'Plano excluído!', tipo: 'sucesso' });
       setConfirmarExcluir(null);
       setExcluirTexto('');
-      carregar();
+      recarregar();
     } catch (err: any) {
       setToast({ message: err.response?.data?.message || 'Não foi possível excluir o plano.', tipo: 'erro' });
     }
@@ -558,7 +564,11 @@ export const PainelPlanos: React.FC = () => {
         <button onClick={abrirNovoPlano} title="Criar novo plano" aria-label="Criar novo plano" className="flex items-center shrink-0 px-4 py-2.5 bg-green-700 text-white rounded-xl font-medium text-sm hover:bg-green-800 active:scale-95"><Plus size={18} className="mr-1.5" /> Novo Plano</button>
       </div>
 
-      {planos.length === 0 && <div className="p-8 text-center text-gray-400 bg-white rounded-2xl border border-gray-100">Nenhum plano cadastrado</div>}
+      {/* Estados distintos: loading / erro (recuperável) / vazio real. O "Nenhum
+          plano cadastrado" só aparece em resposta VÁLIDA e vazia — nunca após erro. */}
+      {viewPlanos.mostrarLoading && <div className="p-8 text-center text-gray-400 bg-white rounded-2xl border border-gray-100">Carregando planos…</div>}
+      {viewPlanos.mostrarErro && <ErroCarregamento mensagem={viewPlanos.mensagemErro} onTentar={recarregarPlanos} />}
+      {viewPlanos.mostrarVazio && <div className="p-8 text-center text-gray-400 bg-white rounded-2xl border border-gray-100">Nenhum plano cadastrado</div>}
 
       {CATEGORIAS_PLANO.map(({ chave, titulo }) => {
         const doGrupo = ativos.filter((p) => (p.categoria || 'ambos') === chave);

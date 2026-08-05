@@ -2,6 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { UserPlus, Search, Shield, Phone, MapPin, Camera, X, Check, Trash2, AlertTriangle, Loader2, Key, Copy, KeyRound, Eye, EyeOff, Edit3 } from 'lucide-react';
 import api from '../api';
+import { ErroCarregamento } from '../components/ErroCarregamento';
+import { classificarErro } from '../utils/estadoCarregamento';
 import { mensagemErro } from '../utils/mensagemErro';
 import { maskPhone, maskCEP } from '../utils/masks';
 import axios from 'axios';
@@ -13,6 +15,9 @@ export const Usuarios: React.FC = () => {
 
   const [usuarios, setUsuarios] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  // Erro de carga (distinto de "lista vazia"): impede o falso "Nenhum usuário"
+  // após falha e habilita "Tentar novamente".
+  const [erroCarga, setErroCarga] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [somenteLeitura, setSomenteLeitura] = useState(false);
   const [editingUser, setEditingUser] = useState<any | null>(null);
@@ -108,6 +113,7 @@ export const Usuarios: React.FC = () => {
   const loadUsuarios = async () => {
     try {
       setLoading(true);
+      setErroCarga(null);
       const response = await api.get('/admin/usuarios');
       setUsuarios((response.data || []).map((u: any) => ({
         uid: u.id,
@@ -128,6 +134,8 @@ export const Usuarios: React.FC = () => {
       })));
     } catch (err: any) {
       if (import.meta.env.DEV) console.error('[Usuarios] carregar falhou', { status: err?.response?.status });
+      const cls = classificarErro(err);
+      if (!('cancelado' in cls)) setErroCarga(cls.mensagem);
     } finally {
       setLoading(false);
     }
@@ -496,6 +504,8 @@ export const Usuarios: React.FC = () => {
         <div className="overflow-x-auto">
           {loading ? (
             <p className="p-8 text-center text-gray-500">Carregando usuários...</p>
+          ) : erroCarga ? (
+            <div className="p-4"><ErroCarregamento mensagem={erroCarga} onTentar={loadUsuarios} compacto /></div>
           ) : (
             <table className="w-full table-auto text-left border-collapse">
               <thead>

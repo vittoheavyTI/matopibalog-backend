@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import { ErroCarregamento } from '../components/ErroCarregamento';
+import { classificarErro } from '../utils/estadoCarregamento';
 import { useNavigate } from 'react-router-dom';
 import { Shield, Search, Plus, X, Check, AlertTriangle, Eye, Ban, Unlock, Trash2, KeyRound, CalendarClock, ShieldAlert, UserPlus, CreditCard, Archive, ArchiveRestore, FileText } from 'lucide-react';
 import api from '../api';
@@ -106,6 +108,8 @@ const TONE_CLASSES: Record<string, string> = {
 export const PainelEmpresas: React.FC = () => {
   const navigate = useNavigate();
   const [empresas, setEmpresas] = useState<any[]>([]);
+  const [carregandoEmpresas, setCarregandoEmpresas] = useState(true);
+  const [erroEmpresas, setErroEmpresas] = useState<string | null>(null);
   const [planos, setPlanos] = useState<any[]>([]);
   // Contagem de administradores por conta, derivada de UMA chamada a /admin/usuarios
   // (agrupada em memória). null = ainda não carregada / falhou → NÃO classificar como
@@ -172,8 +176,17 @@ export const PainelEmpresas: React.FC = () => {
   }, [toast]);
 
   async function carregar() {
-    const response = await api.get('/painel-admin/empresas' + (showArchived ? '?includeArchived=true' : ''));
-    setEmpresas(response.data || []);
+    try {
+      setCarregandoEmpresas(true);
+      setErroEmpresas(null);
+      const response = await api.get('/painel-admin/empresas' + (showArchived ? '?includeArchived=true' : ''));
+      setEmpresas(response.data || []);
+    } catch (err: any) {
+      const cls = classificarErro(err);
+      if (!('cancelado' in cls)) setErroEmpresas(cls.mensagem); // erro distinto de lista vazia
+    } finally {
+      setCarregandoEmpresas(false);
+    }
   }
 
   // Arquivar/restaurar conta. Arquivar tira da operação SEM apagar nada (faturas e
@@ -649,7 +662,13 @@ export const PainelEmpresas: React.FC = () => {
                 </td>
               </tr>
             ))}
-            {filtered.length === 0 && <tr><td colSpan={6} className="p-8 text-center text-gray-400">Nenhuma empresa</td></tr>}
+            {carregandoEmpresas ? (
+              <tr><td colSpan={6} className="p-8 text-center text-gray-400">Carregando…</td></tr>
+            ) : erroEmpresas ? (
+              <tr><td colSpan={6} className="p-4"><ErroCarregamento mensagem={erroEmpresas} onTentar={carregar} compacto /></td></tr>
+            ) : filtered.length === 0 ? (
+              <tr><td colSpan={6} className="p-8 text-center text-gray-400">Nenhuma empresa</td></tr>
+            ) : null}
           </tbody>
         </table>
       </div>

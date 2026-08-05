@@ -5,6 +5,12 @@ const api = axios.create({
   // Tente adicionar o /api no final do baseURL se suas rotas do backend usam /api
   baseURL: import.meta.env.VITE_API_URL || 'https://matopibalog-backend-production.up.railway.app',
   withCredentials: false, // Não depender de cookie; usaremos Bearer token em Authorization
+  // Timeout de rede: sem ele, uma requisição travada (rede/backend lento) nunca
+  // rejeita e o `finally` da página nunca roda → loader infinito. 30s é folgado
+  // para as consultas do painel; só rejeita o que de fato travou (vira estado de
+  // erro recuperável, não logout). NÃO altera validateStatus (304 é convertido
+  // pelo navegador em 200 — o axios nunca vê 304).
+  timeout: 30000,
 });
 
 // Envia Authorization: Bearer <token> em todas as requisições quando presente
