@@ -252,6 +252,8 @@ exports.register = async (req, res) => {
         email_contato: email,
         plano_id: planoData?.id || null,
         tipo: 'autonomo',
+        // Fluxo v2: trial NÃO inicia na criação; só após o contrato assinado.
+        commercialFlowV2: true,
       });
       if (empresaError || !novaEmpresa) {
         return res.status(empresaStatus || 500).json({ message: empresaError || 'Erro ao criar perfil autônomo. Tente novamente.' });
@@ -730,6 +732,8 @@ exports.registerEmpresa = async (req, res) => {
       plano_id,
       planoAlias: plano,
       tipo: 'transportadora',
+      // Fluxo v2: trial NÃO inicia na criação; só após o contrato assinado.
+      commercialFlowV2: true,
     });
 
     if (empresaError || !empresaData) {

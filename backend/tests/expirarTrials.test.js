@@ -64,6 +64,17 @@ const rodarDry = (supabase, regMock) => carregarCore(regMock)({ supabase, http: 
 
 const empresaTrialVencido = { id: 'empresa-1', nome: 'E1', status: 'trial', trial_ends_at: '2000-01-01T00:00:00.000Z' };
 const faturaVencidaComLink = { id: 'f1', empresa_id: 'empresa-1', status: 'pendente', due_date: '2000-01-01', invoice_url: 'https://ex/pay', bank_slip_url: null };
+const empresaV2TrialVencido = { id: 'e-v2', nome: 'V2', status: 'trial', trial_ends_at: '2000-01-01T00:00:00.000Z', commercial_flow_version: 'v2' };
+
+test('v2 em trial vencido → pulado (fluxo_v2_trial): sem fatura, sem suspensão, não avaliado', async () => {
+  const supabase = criarSupabaseMock({ empresas: [empresaV2TrialVencido], fatura: null, ambiente: 'sandbox' });
+  const { relatorio } = await rodar(supabase);
+  assert.equal(relatorio.fluxo_v2_trial, 1);
+  assert.equal(relatorio.suspensas, 0);
+  assert.equal(relatorio.regularizacoes_geradas, 0);
+  assert.equal(relatorio.total_avaliadas, 0);
+  assert.equal(supabase.chamadas.updates.length, 0);
+});
 
 test('trial vencido SEM fatura → sem_fatura, não suspende', async () => {
   const supabase = criarSupabaseMock({ empresas: [empresaTrialVencido], fatura: null });

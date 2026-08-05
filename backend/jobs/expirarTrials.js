@@ -81,7 +81,7 @@ async function executarVerificacaoSuspensao({ supabase, http, agora = new Date()
   const rel = {
     total_avaliadas: 0, suspensas: 0, dentro_carencia: 0, prazo_estendido: 0,
     sem_fatura: 0, sem_caminho_regularizacao: 0, trial_ativa: 0, ja_suspensa: 0,
-    arquivadas: 0, regularizacoes_geradas: 0, erros: 0, outras: [],
+    arquivadas: 0, regularizacoes_geradas: 0, erros: 0, fluxo_v2_trial: 0, outras: [],
   };
 
   // Universo: contas não-terminais. `*` traz suspensao_prazo_ate/arquivada_em só
@@ -106,6 +106,14 @@ async function executarVerificacaoSuspensao({ supabase, http, agora = new Date()
   for (const empresa of linhas || []) {
     // Arquivadas: fora da operação (não geram fatura nem suspensão).
     if (isArquivada(empresa)) { rel.arquivadas += 1; continue; }
+
+    // Fluxo comercial v2 em trial: o ciclo pós-trial é DECISÃO EXPLÍCITA do
+    // cliente (conversão), não inadimplência. Não gera fatura de regularização
+    // nem suspende. Após a conversão a conta vira 'ativo' e volta ao fluxo normal.
+    if (empresa.commercial_flow_version === 'v2' && empresa.status === 'trial') {
+      rel.fluxo_v2_trial += 1;
+      continue;
+    }
     rel.total_avaliadas += 1;
 
     // Já suspensa: idempotente — não faz nada (não regride, não reativa).

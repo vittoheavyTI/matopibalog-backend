@@ -41,6 +41,11 @@ async function criarEmpresaCompleta(opts) {
     plano_id,
     planoAlias,
     tipo = 'transportadora',
+    // Fluxo comercial v2 (macrofrente fechamento comercial): quando true, a conta
+    // NÃO inicia o trial na criação. O trial só começa quando o contrato estiver
+    // plenamente assinado (assinaturaEletronicaInternaService). Contas legadas
+    // (default false) mantêm o comportamento atual: trial inicia aqui.
+    commercialFlowV2 = false,
   } = opts;
 
   if (!nome || !nome.trim()) {
@@ -94,10 +99,16 @@ async function criarEmpresaCompleta(opts) {
     return { empresa: null, error: 'Falha ao gerar código de convite.' };
   }
 
-  // 3. Calcular trial
+  // 3. Calcular trial (só para o fluxo LEGADO — v2 não inicia trial na criação).
   const diasTrial = plano?.dias_trial || 7;
   const agora = new Date();
   const trialEnd = new Date(agora.getTime() + diasTrial * 24 * 60 * 60 * 1000);
+
+  // No v2 o trial NÃO começa aqui: nasce sem datas de trial e marcado como v2.
+  // O trial só é iniciado quando o contrato ficar plenamente assinado.
+  const camposTrial = commercialFlowV2
+    ? { status: 'trial', trial_started_at: null, trial_ends_at: null, commercial_flow_version: 'v2' }
+    : { status: 'trial', trial_started_at: agora.toISOString(), trial_ends_at: trialEnd.toISOString() };
 
   // 4. Inserir empresa
   const { data: empresa, error: insertError } = await supabase
@@ -108,11 +119,9 @@ async function criarEmpresaCompleta(opts) {
       email_contato: email_contato && email_contato.trim() ? email_contato.trim() : null,
       telefone_contato: telefone && telefone.trim() ? telefone.trim() : null,
       plano_id: plano?.id || null,
-      status: 'trial',
-      trial_started_at: agora.toISOString(),
-      trial_ends_at: trialEnd.toISOString(),
       codigo_convite: codigoUnico,
       tipo,
+      ...camposTrial,
     })
     .select()
     .single();
