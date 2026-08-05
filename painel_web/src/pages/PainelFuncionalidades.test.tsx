@@ -1,5 +1,5 @@
 import { describe, test, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 
 vi.mock('../api', () => ({
   default: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
@@ -104,5 +104,44 @@ describe('PainelFuncionalidades — busca de clientes', () => {
     expect(mockApi.get).not.toHaveBeenCalledWith(expect.stringContaining('/entitlements'));
     fireEvent.click(screen.getByText('Alfa Transportes'));
     await waitFor(() => expect(mockApi.get).toHaveBeenCalledWith('/painel-admin/empresas/e1/entitlements'));
+  });
+});
+
+describe('PainelFuncionalidades — catálogo (confirmação de arquivamento)', () => {
+  const mockApiPost = api as unknown as { post: ReturnType<typeof vi.fn> };
+  test('arquivar exige confirmação; só posta após confirmar', async () => {
+    mockGet();
+    mockApiPost.post.mockResolvedValue({ data: {} });
+    render(<PainelFuncionalidades />);              // aba catálogo é a default
+    await waitFor(() => expect(screen.getByText('Feat Um')).toBeInTheDocument());
+    fireEvent.click(screen.getByTitle('Arquivar'));
+    const dialog = screen.getByRole('dialog');                // confirmação aberta
+    expect(mockApiPost.post).not.toHaveBeenCalled();          // ainda não postou
+    fireEvent.click(within(dialog).getByRole('button', { name: /^arquivar$/i }));
+    await waitFor(() => expect(mockApiPost.post).toHaveBeenCalledWith('/painel-admin/funcionalidades/f1/arquivar', { arquivar: true }));
+  });
+});
+
+describe('PainelFuncionalidades — auditoria (modal before/after/diff)', () => {
+  test('abre modal com diff e versões formatados', async () => {
+    const evento = {
+      id: 'a1', entidade: 'plano_funcionalidade', acao: 'publicar', origem: 'painel_admin', request_id: 'req-9',
+      ator_id: 'u-super', criado_em: new Date().toISOString(),
+      detalhe: { celulas_alteradas: 1, versao_anterior: { p1: 1 }, versao_nova: { p1: 2 }, motivo: 'ajuste',
+        diff: [{ plano_id: 'p1', funcionalidade_id: 'f1', antes: null, depois: { disponibilidade: 'incluida' } }] },
+    };
+    mockApi.get.mockImplementation((url: string) => {
+      if (url === '/painel-admin/funcionalidades-auditoria') return Promise.resolve({ data: { auditoria: [evento] } });
+      return Promise.resolve({ data: {} });
+    });
+    render(<PainelFuncionalidades />);
+    fireEvent.click(screen.getByRole('button', { name: /auditoria/i }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /ver detalhe/i })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /ver detalhe/i }));
+    const modal = await screen.findByRole('dialog');
+    expect(modal).toHaveTextContent(/before → after|Alterações/i);
+    expect(modal).toHaveTextContent(/req-9/);
+    expect(modal).toHaveTextContent(/incluida/);
+    expect(modal).toHaveTextContent(/ajuste/);
   });
 });

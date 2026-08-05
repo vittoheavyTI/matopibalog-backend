@@ -71,6 +71,7 @@ const AbaCatalogo: React.FC<{ notificar: (m: string, t: 'ok' | 'erro') => void }
   const [editando, setEditando] = useState<Func | null>(null);
   const [form, setForm] = useState<any>(FORM_VAZIO);
   const [salvando, setSalvando] = useState(false);
+  const [arquivarAlvo, setArquivarAlvo] = useState<Func | null>(null);
 
   const carregar = useCallback(async () => {
     const params: any = {};
@@ -98,9 +99,14 @@ const AbaCatalogo: React.FC<{ notificar: (m: string, t: 'ok' | 'erro') => void }
       notificar(e?.response?.data?.erros?.join('; ') || e?.response?.data?.message || 'Erro ao salvar', 'erro');
     } finally { setSalvando(false); }
   }
-  async function arquivar(f: Func) {
+  async function executarArquivar(f: Func) {
+    setArquivarAlvo(null);
     try { await api.post(`/painel-admin/funcionalidades/${f.id}/arquivar`, { arquivar: f.ativo }); notificar(f.ativo ? 'Arquivada' : 'Reativada', 'ok'); carregar(); }
     catch { notificar('Erro ao arquivar', 'erro'); }
+  }
+  function arquivar(f: Func) {
+    if (f.ativo) setArquivarAlvo(f);  // arquivar EXIGE confirmação
+    else executarArquivar(f);         // reativar é direto
   }
 
   return (
@@ -140,6 +146,19 @@ const AbaCatalogo: React.FC<{ notificar: (m: string, t: 'ok' | 'erro') => void }
           </tbody>
         </table>
       </div>
+
+      {arquivarAlvo && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5">
+            <h3 className="font-bold text-gray-800 flex items-center gap-2"><Archive size={18} />Arquivar funcionalidade?</h3>
+            <p className="text-sm text-gray-600 mt-2">Arquivar <strong>{arquivarAlvo.nome}</strong> (<span className="font-mono text-xs">{arquivarAlvo.codigo}</span>). Ela sai do catálogo ativo, mas o histórico e a auditoria permanecem. É reversível (reativar).</p>
+            <div className="flex justify-end gap-2 mt-4">
+              <button onClick={() => setArquivarAlvo(null)} className="px-4 py-2 text-sm rounded-lg border border-gray-200">Cancelar</button>
+              <button onClick={() => executarArquivar(arquivarAlvo)} className="px-4 py-2 text-sm rounded-lg bg-gray-800 text-white font-semibold">Arquivar</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {modal && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
@@ -364,23 +383,68 @@ const AbaClientes: React.FC = () => {
 // ── Auditoria ────────────────────────────────────────────────────────────────
 const AbaAuditoria: React.FC = () => {
   const [itens, setItens] = useState<any[]>([]);
+  const [detalhe, setDetalhe] = useState<any | null>(null); // evento selecionado (painel)
   useEffect(() => { api.get('/painel-admin/funcionalidades-auditoria').then((r) => setItens(r.data.auditoria || [])).catch(() => {}); }, []);
+  const d = detalhe?.detalhe || {};
   return (
     <div className="overflow-x-auto rounded-2xl border border-gray-100">
       <table className="w-full text-sm">
-        <thead className="bg-gray-50 text-gray-500 text-xs uppercase"><tr><th className="text-left p-3">Quando</th><th className="text-left p-3">Entidade</th><th className="text-left p-3">Ação</th><th className="text-left p-3">Detalhe</th></tr></thead>
+        <thead className="bg-gray-50 text-gray-500 text-xs uppercase"><tr><th className="text-left p-3">Quando</th><th className="text-left p-3">Entidade</th><th className="text-left p-3">Ação</th><th className="text-left p-3">Origem</th><th className="p-3"></th></tr></thead>
         <tbody>
           {itens.map((a) => (
             <tr key={a.id} className="border-t border-gray-100">
               <td className="p-3 text-gray-500 whitespace-nowrap">{new Date(a.criado_em).toLocaleString('pt-BR')}</td>
               <td className="p-3">{a.entidade}</td>
               <td className="p-3 font-semibold">{a.acao}</td>
-              <td className="p-3 text-xs text-gray-500 font-mono truncate max-w-xs">{JSON.stringify(a.detalhe)}</td>
+              <td className="p-3 text-xs text-gray-500">{a.origem || <span className="italic text-gray-400">legado</span>}</td>
+              <td className="p-3 text-right"><button onClick={() => setDetalhe(a)} className="text-blue-600 hover:bg-blue-50 px-2 py-1 rounded-lg text-xs font-semibold">Ver detalhe</button></td>
             </tr>
           ))}
-          {itens.length === 0 && <tr><td colSpan={4} className="p-8 text-center text-gray-400">Sem eventos ainda</td></tr>}
+          {itens.length === 0 && <tr><td colSpan={5} className="p-8 text-center text-gray-400">Sem eventos ainda</td></tr>}
         </tbody>
       </table>
+
+      {detalhe && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <div className="p-5 border-b flex justify-between items-center sticky top-0 bg-gray-50">
+              <h3 className="font-bold text-gray-800">Auditoria — {detalhe.acao} / {detalhe.entidade}</h3>
+              <button onClick={() => setDetalhe(null)} className="p-1.5 hover:bg-gray-200 rounded-lg"><X size={18} /></button>
+            </div>
+            <div className="p-5 space-y-3 text-sm">
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div><span className="text-gray-400">Quando:</span> {new Date(detalhe.criado_em).toLocaleString('pt-BR')}</div>
+                <div><span className="text-gray-400">Ator:</span> <span className="font-mono">{detalhe.ator_id || '—'}</span></div>
+                <div><span className="text-gray-400">Origem:</span> {detalhe.origem || 'legado'}</div>
+                <div><span className="text-gray-400">Request ID:</span> <span className="font-mono">{detalhe.request_id || '—'}</span></div>
+                {d.versao_anterior && <div><span className="text-gray-400">Versão anterior:</span> <span className="font-mono">{JSON.stringify(d.versao_anterior)}</span></div>}
+                {d.versao_nova && <div><span className="text-gray-400">Versão nova:</span> <span className="font-mono">{JSON.stringify(d.versao_nova)}</span></div>}
+                {d.motivo && <div className="col-span-2"><span className="text-gray-400">Motivo:</span> {d.motivo}</div>}
+              </div>
+              {Array.isArray(d.diff) && d.diff.length > 0 && (
+                <div>
+                  <h4 className="text-xs font-bold uppercase text-gray-500 mb-1">Alterações (before → after)</h4>
+                  <div className="space-y-2">
+                    {d.diff.map((c: any, i: number) => (
+                      <div key={i} className="rounded-lg border border-gray-100 p-2 text-xs">
+                        <div className="font-mono text-gray-400 mb-1">plano {c.plano_id} · func {c.funcionalidade_id}</div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <pre className="bg-red-50 text-red-800 rounded p-2 overflow-x-auto whitespace-pre-wrap break-all">{JSON.stringify(c.antes, null, 2)}</pre>
+                          <pre className="bg-green-50 text-green-800 rounded p-2 overflow-x-auto whitespace-pre-wrap break-all">{JSON.stringify(c.depois, null, 2)}</pre>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div>
+                <h4 className="text-xs font-bold uppercase text-gray-500 mb-1">JSON completo</h4>
+                <pre className="bg-gray-50 rounded-lg p-3 text-xs overflow-x-auto whitespace-pre-wrap break-all">{JSON.stringify(detalhe.detalhe, null, 2)}</pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
