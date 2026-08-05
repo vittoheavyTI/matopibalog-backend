@@ -106,12 +106,34 @@ export const PlanosVitrine: React.FC<PlanosVitrineProps> = ({
                     vez de "Até 999 motoristas". NÃO altera o dado, só o rótulo. */}
                 <span>{plano.requer_negociacao ? 'Motoristas sob medida' : limiteLabel(plano.limite_motoristas)}</span>
               </li>
-              {plano.recursos.map((f) => (
-                <li key={f} className="flex items-center gap-2 text-gray-700">
-                  <Check size={18} className="text-green-500 shrink-0" />
-                  <span>{f}</span>
-                </li>
-              ))}
+              {plano.funcionalidades && plano.funcionalidades.length > 0 ? (
+                // Catálogo estruturado (PR 2C): cada item traz o rótulo comercial.
+                plano.funcionalidades.map((f) => {
+                  const estilo = f.rotulo === 'Incluído'
+                    ? { cls: 'text-gray-700', badge: 'bg-green-100 text-green-700', icon: <Check size={18} className="text-green-500 shrink-0" /> }
+                    : f.rotulo === 'Adicional'
+                      ? { cls: 'text-gray-700', badge: 'bg-blue-100 text-blue-700', icon: <Check size={18} className="text-blue-500 shrink-0" /> }
+                      : f.rotulo === 'Em breve'
+                        ? { cls: 'text-gray-400', badge: 'bg-gray-100 text-gray-500', icon: <Check size={18} className="text-gray-300 shrink-0" /> }
+                        : { cls: 'text-gray-600', badge: 'bg-amber-100 text-amber-700', icon: <Check size={18} className="text-amber-500 shrink-0" /> };
+                  return (
+                    <li key={f.codigo} className={`flex items-center gap-2 ${estilo.cls}`}>
+                      {estilo.icon}
+                      <span className={f.destaque ? 'font-semibold' : ''}>{f.texto}</span>
+                      {f.rotulo !== 'Incluído' && (
+                        <span className={`ml-auto text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${estilo.badge}`}>{f.rotulo}</span>
+                      )}
+                    </li>
+                  );
+                })
+              ) : (
+                plano.recursos.map((f) => (
+                  <li key={f} className="flex items-center gap-2 text-gray-700">
+                    <Check size={18} className="text-green-500 shrink-0" />
+                    <span>{f}</span>
+                  </li>
+                ))
+              )}
             </ul>
             {plano.requer_negociacao ? (
               <div className="w-full">

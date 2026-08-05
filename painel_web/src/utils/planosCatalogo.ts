@@ -4,6 +4,13 @@
 // não quebrar o fast-refresh (um .tsx de componente só deve exportar componentes)
 // e para centralizar ordem/rótulos, evitando divergência entre as telas.
 
+export interface FuncionalidadeCard {
+  codigo: string;
+  texto: string;
+  rotulo: 'Incluído' | 'Adicional' | 'Em breve' | 'Sob consulta';
+  destaque?: boolean;
+}
+
 export interface PlanoPublico {
   id: string;
   nome: string;
@@ -15,6 +22,9 @@ export interface PlanoPublico {
   limite_motoristas: number | null;
   dias_trial: number | null;
   recursos: string[];
+  // Catálogo estruturado (PR 2C): quando presente, os cards usam isto em vez de
+  // `recursos` (texto livre). Rótulo: Incluído | Adicional | Em breve | Sob consulta.
+  funcionalidades?: FuncionalidadeCard[];
   capacidade_inclusa?: number | null;
   preco_motorista_extra?: number | null;
   valor_implantacao?: number | null;

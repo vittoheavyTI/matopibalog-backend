@@ -157,6 +157,8 @@ test('a whitelist nao vaza campo alem do previsto', async () => {
     'ativo', 'categoria',
     // Campos comerciais (mega-frente) — expostos de propósito à vitrine/cadastro.
     'capacidade_inclusa', 'preco_motorista_extra', 'valor_implantacao', 'requer_negociacao',
+    // Catálogo estruturado de funcionalidades (PR 2C) — rotulado por plano.
+    'funcionalidades',
   ].sort();
   const res = await chamar({});
   for (const plano of res.body.planos) {
