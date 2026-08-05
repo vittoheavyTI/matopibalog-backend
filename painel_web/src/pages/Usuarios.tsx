@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { UserPlus, Search, Shield, Phone, MapPin, Camera, X, Check, Trash2, AlertTriangle, Loader2, Key, Copy, KeyRound, Eye, EyeOff, Edit3 } from 'lucide-react';
 import api from '../api';
 import { ErroCarregamento } from '../components/ErroCarregamento';
-import { classificarErro } from '../utils/estadoCarregamento';
+import { useCarregamento } from '../hooks/useCarregamento';
 import { mensagemErro } from '../utils/mensagemErro';
 import { maskPhone, maskCEP } from '../utils/masks';
 import axios from 'axios';
@@ -13,11 +13,23 @@ export const Usuarios: React.FC = () => {
   const { user: currentUser } = useAuth();
   const currentUserId = currentUser?.uid || 'admin';
 
-  const [usuarios, setUsuarios] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  // Erro de carga (distinto de "lista vazia"): impede o falso "Nenhum usuário"
-  // após falha e habilita "Tentar novamente".
-  const [erroCarga, setErroCarga] = useState<string | null>(null);
+  // Carga da lista com estados distintos + AbortController + stale-guard + retry
+  // (mesmo hook usado no Planos — cancelamento não vira erro; erro ≠ lista vazia).
+  const { estado: estUsuarios, view: viewUsuarios, recarregar: loadUsuarios } = useCarregamento<any>(
+    (signal) => api.get('/admin/usuarios', { signal }).then((r) => (r.data || []).map((u: any) => ({
+      uid: u.id, nome: u.nome, email: u.email, celular: u.telefone || '', cep: u.cep || '',
+      endereco: u.endereco || '', bairro: u.bairro || '', cidade: u.cidade || '', fotoUrl: u.foto_url || '',
+      nivel: u.tipo || 'admin', empresaId: u.empresa_id || null,
+      empresaTipo: Array.isArray(u.empresas) ? u.empresas[0]?.tipo || null : u.empresas?.tipo || null,
+      is_super_admin: !!u.is_super_admin,
+      permissoes: u.permissoes || { dashboard: true, motoristas: true, relatorios: true, usuarios: false, configuracoes: false },
+      status: u.status,
+    }))),
+    [],
+  );
+  const usuarios = estUsuarios.dados || [];
+  const loading = viewUsuarios.mostrarLoading;
+  const erroCarga = viewUsuarios.mostrarErro ? viewUsuarios.mensagemErro : null;
   const [showModal, setShowModal] = useState(false);
   const [somenteLeitura, setSomenteLeitura] = useState(false);
   const [editingUser, setEditingUser] = useState<any | null>(null);
@@ -110,39 +122,9 @@ export const Usuarios: React.FC = () => {
     }
   });
 
-  const loadUsuarios = async () => {
-    try {
-      setLoading(true);
-      setErroCarga(null);
-      const response = await api.get('/admin/usuarios');
-      setUsuarios((response.data || []).map((u: any) => ({
-        uid: u.id,
-        nome: u.nome,
-        email: u.email,
-        celular: u.telefone || '',
-        cep: u.cep || '',
-        endereco: u.endereco || '',
-        bairro: u.bairro || '',
-        cidade: u.cidade || '',
-        fotoUrl: u.foto_url || '',
-        nivel: u.tipo || 'admin',
-        empresaId: u.empresa_id || null,
-        empresaTipo: Array.isArray(u.empresas) ? u.empresas[0]?.tipo || null : u.empresas?.tipo || null,
-        is_super_admin: !!u.is_super_admin,
-        permissoes: u.permissoes || { dashboard: true, motoristas: true, relatorios: true, usuarios: false, configuracoes: false },
-        status: u.status
-      })));
-    } catch (err: any) {
-      if (import.meta.env.DEV) console.error('[Usuarios] carregar falhou', { status: err?.response?.status });
-      const cls = classificarErro(err);
-      if (!('cancelado' in cls)) setErroCarga(cls.mensagem);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    loadUsuarios();
+    // A lista de usuários é carregada pelo hook (auto-run). Aqui só a lista de
+    // empresas para o seletor (best-effort).
     if (currentUser?.is_super_admin) {
       api.get('/painel-admin/empresas').then(res => {
         setEmpresas((res.data || []).map((e: any) => ({ id: e.id, nome: e.nome, tipo: e.tipo, plano: e.planos?.nome || null, status: e.status || null })));

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ErroCarregamento } from '../components/ErroCarregamento';
-import { classificarErro } from '../utils/estadoCarregamento';
+import { useCarregamento } from '../hooks/useCarregamento';
 import { useNavigate } from 'react-router-dom';
 import { Shield, Search, Plus, X, Check, AlertTriangle, Eye, Ban, Unlock, Trash2, KeyRound, CalendarClock, ShieldAlert, UserPlus, CreditCard, Archive, ArchiveRestore, FileText } from 'lucide-react';
 import api from '../api';
@@ -107,9 +107,6 @@ const TONE_CLASSES: Record<string, string> = {
 
 export const PainelEmpresas: React.FC = () => {
   const navigate = useNavigate();
-  const [empresas, setEmpresas] = useState<any[]>([]);
-  const [carregandoEmpresas, setCarregandoEmpresas] = useState(true);
-  const [erroEmpresas, setErroEmpresas] = useState<string | null>(null);
   const [planos, setPlanos] = useState<any[]>([]);
   // Contagem de administradores por conta, derivada de UMA chamada a /admin/usuarios
   // (agrupada em memória). null = ainda não carregada / falhou → NÃO classificar como
@@ -164,7 +161,15 @@ export const PainelEmpresas: React.FC = () => {
 
   useEffect(() => { carregarPlanos(); carregarAdmins(); }, []);
   // Recarrega a lista quando alterna "mostrar arquivadas" (roda também na montagem).
-  useEffect(() => { carregar(); }, [showArchived]);
+  // Lista de empresas via hook (AbortController + stale-guard + retry). Recarrega
+  // quando `showArchived` muda. `carregar` é o retry/recarregar usado nos handlers.
+  const { estado: estEmpresas, view: viewEmpresas, recarregar: carregar } = useCarregamento<any>(
+    (signal) => api.get('/painel-admin/empresas' + (showArchived ? '?includeArchived=true' : ''), { signal }).then((r) => r.data || []),
+    [showArchived],
+  );
+  const empresas = estEmpresas.dados || [];
+  const carregandoEmpresas = viewEmpresas.mostrarLoading;
+  const erroEmpresas = viewEmpresas.mostrarErro ? viewEmpresas.mensagemErro : null;
 
   // Auto-dismiss do toast: some sozinho após 3,5s. Cada novo toast reinicia o
   // timer (o cleanup limpa o anterior) e o unmount também limpa — evita a
@@ -175,19 +180,6 @@ export const PainelEmpresas: React.FC = () => {
     return () => clearTimeout(timer);
   }, [toast]);
 
-  async function carregar() {
-    try {
-      setCarregandoEmpresas(true);
-      setErroEmpresas(null);
-      const response = await api.get('/painel-admin/empresas' + (showArchived ? '?includeArchived=true' : ''));
-      setEmpresas(response.data || []);
-    } catch (err: any) {
-      const cls = classificarErro(err);
-      if (!('cancelado' in cls)) setErroEmpresas(cls.mensagem); // erro distinto de lista vazia
-    } finally {
-      setCarregandoEmpresas(false);
-    }
-  }
 
   // Arquivar/restaurar conta. Arquivar tira da operação SEM apagar nada (faturas e
   // histórico permanecem); restaurar traz de volta. Ortogonal a suspensão.
@@ -409,6 +401,7 @@ export const PainelEmpresas: React.FC = () => {
     try {
       await api.post(`/painel-admin/empresas/${contratacaoTarget.id}/contratos/${contrato.id}/upload-assinado`, form, {
         headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 0, // upload de arquivo: sem timeout (override do default global de 30s)
       });
       setToast({ message: 'Contrato assinado recebido.', tipo: 'sucesso' });
       await abrirContratacao(contratacaoTarget);

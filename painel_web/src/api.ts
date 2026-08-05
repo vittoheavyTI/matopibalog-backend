@@ -77,28 +77,47 @@ let ultimoAviso429 = 0;
 // Antes de disparar o evento, registra o motivo (expired/invalid) em sessionStorage
 // para o Login exibir a mensagem correta. Registro é "soft": não sobrescreve um
 // motivo já definido por um fluxo explícito (idle/manual).
+// Decisão PURA e testável do tratamento de um erro de RESPOSTA (com status HTTP).
+// Isolada para poder ser testada sem simular todo o axios. Regras:
+//   - 401, ou 403 com token expirado/inválido → sessão expirada (logout), EXCETO
+//     nas rotas de auth e na própria tela de login;
+//   - 429 → rate limited (NÃO é logout);
+//   - demais 403 (permissão/negócio) e outros status → nenhuma ação especial.
+// Erros SEM resposta (timeout/cancelamento/rede) NÃO passam por aqui → nunca
+// disparam logout nem retry.
+export function avaliarErroResposta(
+  { status, tokenExpiradoInvalido = false, url = '', pathname = '' }:
+  { status: number; tokenExpiradoInvalido?: boolean; url?: string; pathname?: string },
+): { sessaoExpirada: boolean; rateLimited: boolean } {
+  const isAuthRoute = url.includes('/auth/me') || url.includes('/auth/login');
+  const naTelaLogin = pathname === '/login';
+  const sessaoExpirada = (status === 401 || (status === 403 && tokenExpiradoInvalido)) && !isAuthRoute && !naTelaLogin;
+  return { sessaoExpirada, rateLimited: status === 429 };
+}
+
 api.interceptors.response.use((response) => {
   encerrando = false;
   return response;
 }, (error) => {
   const response = error.response;
+  // Sem resposta = timeout (ECONNABORTED) / cancelamento (ERR_CANCELED) / rede.
+  // NÃO desloga, NÃO faz retry — apenas rejeita para a página tratar como erro
+  // recuperável (ou, no caso de cancelamento, ser ignorado pelo hook/reducer).
   if (response) {
-    const url: string = error.config?.url ?? '';
     const data: any = response.data;
-    const isAuthRoute = url.includes('/auth/me') || url.includes('/auth/login');
-    const sessaoExpirada =
-      response.status === 401 ||
-      (response.status === 403 && data?.error === 'Token inválido ou expirado.');
-    const naTelaLogin =
-      typeof window !== 'undefined' && window.location?.pathname === '/login';
-    if (sessaoExpirada && !isAuthRoute && !naTelaLogin && !encerrando) {
+    const { sessaoExpirada, rateLimited } = avaliarErroResposta({
+      status: response.status,
+      tokenExpiradoInvalido: data?.error === 'Token inválido ou expirado.',
+      url: error.config?.url ?? '',
+      pathname: (typeof window !== 'undefined' && window.location?.pathname) || '',
+    });
+    if (sessaoExpirada && !encerrando) {
       encerrando = true;
       registrarMotivoSessao(motivoPorToken());
       window.dispatchEvent(new Event('auth:unauthorized'));
     }
-    // 429 (rate limit) NÃO é sessão expirada: NÃO desloga, NÃO apaga token.
-    // Só avisa (debounced) para a UI mostrar a mensagem certa. A sessão segue viva.
-    if (response.status === 429) {
+    // 429 (rate limit): NÃO desloga, NÃO apaga token. Só avisa (debounced).
+    if (rateLimited) {
       const agora = Date.now();
       if (agora - ultimoAviso429 > 10000) {
         ultimoAviso429 = agora;

@@ -89,9 +89,9 @@ describe('estadoCarregamento — estados distintos', () => {
     expect(e.dados).toEqual([1, 2]);
   });
 
-  test('19. 304 não é modelado como erro aqui (browser converte em 200) — sucesso normal', () => {
-    // Documenta a decisão: o navegador entrega 304 como 200 ao axios; o front vê sucesso.
-    let e = reduzir(reduzir(estadoInicial<number[]>(), { tipo: 'iniciar', reqId: 1 }), { tipo: 'sucesso', reqId: 1, dados: [1] });
-    expect(e.status).toBe('sucesso');
-  });
+  // Nota sobre 304: NÃO há teste de "304 = sucesso" porque este reducer opera
+  // sobre EVENTOS (iniciar/sucesso/falha), nunca sobre status HTTP. O status 304
+  // é resolvido pelo navegador (entrega o corpo em cache como resposta utilizável
+  // ao axios); o JS não recebe 304. Por isso validateStatus NÃO foi alterado — a
+  // hipótese de "304 vira erro no axios" não foi comprovada.
 });
