@@ -187,6 +187,13 @@ router.get('/empresas', async (req, res) => {
   res.json(aplicarFiltroArquivamento(data || [], { includeArchived }));
 });
 
+// Busca operacional de clientes (nome/razão social/CNPJ/e-mail/ID). Guard super-admin
+// já aplicado no topo. Declarada ANTES de /empresas/:id/* para não ser capturada.
+router.get('/empresas/buscar', async (req, res) => {
+  const r = await funcAdmin.buscarClientes(supabase, { termo: req.query.q, page: req.query.page, limite: req.query.limite });
+  res.status(r.status).json(r.body);
+});
+
 router.get('/empresas/:id/contratacao', async (req, res) => {
   try {
     const resultado = await listarContratacaoEmpresa({ supabase, empresaId: req.params.id });
@@ -1331,7 +1338,14 @@ router.get('/funcionalidades-matriz', async (req, res) => {
 });
 
 router.put('/funcionalidades-matriz', async (req, res) => {
-  const r = await funcAdmin.salvarMatrizLote(supabase, req.body?.itens || [], req.user.uid);
+  // Contrato: ator vem do token; origem/request_id do backend; versões esperadas e
+  // motivo do corpo (validados/sanitizados). Conflito de versão → 409 (UI recarrega).
+  const r = await funcAdmin.salvarMatrizLote(supabase, {
+    itens: Array.isArray(req.body?.itens) ? req.body.itens : [],
+    versoesEsperadas: (req.body && typeof req.body.versoes_esperadas === 'object' && req.body.versoes_esperadas) || {},
+    motivo: typeof req.body?.motivo === 'string' ? req.body.motivo.slice(0, 500) : null,
+    requestId: (typeof req.headers['x-request-id'] === 'string' && req.headers['x-request-id'].slice(0, 100)) || crypto.randomUUID(),
+  }, req.user.uid);
   res.status(r.status).json(r.body);
 });
 

@@ -122,44 +122,80 @@ async function listarMatriz(supabase) {
   return data || [];
 }
 
-// Salva vínculos plano-funcionalidade em LOTE (upsert) e incrementa a versão da
-// matriz dos planos afetados. Cada alteração vira auditoria.
-async function salvarMatrizLote(supabase, itens, atorId) {
+// Traduz o erro da RPC transacional (SQLSTATE de domínio) para HTTP, SEM vazar SQL
+// bruto. P0001→422 (payload), P0002→404 (inexistente), P0003→409 (conflito de
+// versão, com dados p/ a UI recarregar). Ver migration 061.
+function traduzirErroMatriz(error) {
+  const code = error?.code || '';
+  const msg = String(error?.message || '');
+  if (code === 'P0003' || /conflito_versao/.test(msg)) {
+    const m = msg.match(/conflito_versao:([^:]+):(\d+):(\d+)/i);
+    return { status: 409, body: {
+      message: 'A matriz foi alterada por outra pessoa. Recarregue os dados e tente novamente.',
+      erro: 'conflito_versao',
+      plano_id: m ? m[1] : null,
+      versao_esperada: m ? Number(m[2]) : null,
+      versao_atual: m ? Number(m[3]) : null,
+    } };
+  }
+  if (code === 'P0002' || /inexistente/.test(msg)) {
+    return { status: 404, body: { message: 'Plano ou funcionalidade não encontrado.' } };
+  }
+  if (code === 'P0001') {
+    let detalhe = 'Dados inválidos.';
+    if (/versao_esperada_ausente/.test(msg)) detalhe = 'Versão esperada ausente para um ou mais planos (recarregue a matriz).';
+    else if (/celula_duplicada/.test(msg)) detalhe = 'Item (plano + funcionalidade) enviado em duplicidade.';
+    else if (/disponibilidade_invalida/.test(msg)) detalhe = 'Disponibilidade inválida.';
+    else if (/matriz_vazia/.test(msg)) detalhe = 'Nenhum item enviado.';
+    return { status: 422, body: { message: detalhe } };
+  }
+  return { status: 500, body: { message: 'Erro ao salvar matriz.' } };
+}
+
+// Publica a matriz plano×funcionalidade via RPC TRANSACIONAL (migration 061):
+// atômica, versão esperada OBRIGATÓRIA por plano (conflito → 409), aplica só
+// células alteradas, bump único por plano, auditoria na MESMA transação e
+// idempotente (republicação idêntica não escreve/versiona/audita). O backend é a
+// autoridade: ator vem de req.user, origem/request_id/motivo do controlador —
+// NUNCA do payload do cliente.
+async function salvarMatrizLote(supabase, { itens, versoesEsperadas = {}, motivo = null, requestId = null } = {}, atorId = null) {
   if (!Array.isArray(itens) || itens.length === 0) return { status: 400, body: { message: 'Nenhum item enviado.' } };
-  const planosAfetados = new Set();
-  for (const it of itens) {
-    if (!it.plano_id || !it.funcionalidade_id) return { status: 422, body: { message: 'plano_id e funcionalidade_id são obrigatórios.' } };
-    if (it.disponibilidade && !DISPONIBILIDADES.includes(it.disponibilidade)) return { status: 422, body: { message: `disponibilidade inválida: ${it.disponibilidade}` } };
-    planosAfetados.add(it.plano_id);
-  }
-  const linhas = itens.map((it) => ({
-    plano_id: it.plano_id,
-    funcionalidade_id: it.funcionalidade_id,
-    disponibilidade: it.disponibilidade || 'indisponivel',
-    limite_incluso: it.limite_incluso != null ? Number(it.limite_incluso) : null,
-    preco_especifico_centavos: it.preco_especifico_centavos != null ? Number(it.preco_especifico_centavos) : null,
-    exibir_no_card: it.exibir_no_card !== false,
-    destaque: it.destaque === true,
-    texto_publico: it.texto_publico || null,
-    ordem_exibicao: it.ordem_exibicao != null ? Number(it.ordem_exibicao) : 0,
-    atualizado_em: new Date().toISOString(),
-  }));
-  const { error } = await supabase.from('plano_funcionalidades').upsert(linhas, { onConflict: 'plano_id,funcionalidade_id' });
-  if (error) return { status: 500, body: { message: 'Erro ao salvar matriz.' } };
-  // Incrementa a versão da matriz dos planos afetados (para snapshot/contrato).
-  for (const planoId of planosAfetados) {
-    const { data: p } = await supabase.from('planos').select('matriz_funcionalidades_versao').eq('id', planoId).maybeSingle();
-    const nova = (p?.matriz_funcionalidades_versao || 1) + 1;
-    await supabase.from('planos').update({ matriz_funcionalidades_versao: nova }).eq('id', planoId);
-  }
-  await registrarAuditoria(supabase, { entidade: 'plano_funcionalidade', acao: 'publicar', detalhe: { itens: linhas.length, planos: [...planosAfetados] }, atorId });
-  return { status: 200, body: { salvos: linhas.length, planos_afetados: [...planosAfetados] } };
+  const { data, error } = await supabase.rpc('publicar_matriz_funcionalidades', {
+    p_itens: itens,
+    p_versoes_esperadas: versoesEsperadas || {},
+    p_ator: atorId || null,
+    p_origem: 'painel_admin',
+    p_request_id: requestId || null,
+    p_motivo: motivo || null,
+  });
+  if (error) return traduzirErroMatriz(error);
+  return { status: 200, body: data };
 }
 
 async function listarAuditoria(supabase, { limite = 100 } = {}) {
   const { data, error } = await supabase.from('funcionalidade_auditoria').select('*').order('criado_em', { ascending: false }).limit(limite);
   if (error) throw error;
   return data || [];
+}
+
+// Busca operacional de clientes (super-admin) por nome/razão social/CNPJ/e-mail/ID
+// via RPC buscar_empresas (migration 061). Termo mínimo 2 (senão vazio — nunca
+// "todas"); limite com teto 50; paginação por page. Resposta sanitizada (sem
+// billing/segredos); entitlements só depois, via endpoint próprio.
+async function buscarClientes(supabase, { termo, page = 1, limite = 20 } = {}) {
+  const t = String(termo || '').trim();
+  const pg = Math.max(Number(page) || 1, 1);
+  const lim = Math.min(Math.max(Number(limite) || 20, 1), 50);
+  if (t.length < 2) return { status: 200, body: { empresas: [], total: 0, page: 1, limite: lim } };
+  const { data, error } = await supabase.rpc('buscar_empresas', { p_termo: t, p_limite: lim, p_offset: (pg - 1) * lim });
+  if (error) return { status: 500, body: { message: 'Erro na busca de clientes.' } };
+  const rows = Array.isArray(data) ? data : [];
+  const total = rows.length ? Number(rows[0].total) : 0;
+  const empresas = rows.map((r) => ({
+    id: r.id, nome: r.nome, documento: r.documento, email: r.email,
+    status: r.status, arquivada: r.arquivada, plano_id: r.plano_id, plano_nome: r.plano_nome,
+  }));
+  return { status: 200, body: { empresas, total, page: pg, limite: lim } };
 }
 
 // Direitos atuais de uma empresa (read-only) — plano + overrides.
@@ -181,6 +217,7 @@ module.exports = {
   CICLOS, COBRANCAS, DISPONIBILIDADES, CODIGO_RE,
   validarFuncionalidade, montarPatchFuncionalidade,
   listarFuncionalidades, criarFuncionalidade, editarFuncionalidade, arquivarFuncionalidade,
-  funcionalidadeUtilizada, listarMatriz, salvarMatrizLote, listarAuditoria, entitlementsDaEmpresa,
+  funcionalidadeUtilizada, listarMatriz, salvarMatrizLote, traduzirErroMatriz, listarAuditoria,
+  buscarClientes, entitlementsDaEmpresa,
   registrarAuditoria,
 };

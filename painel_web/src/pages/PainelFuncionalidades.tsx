@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Boxes, Check, Grid3x3, History, Users, X, Plus, Pencil, Archive, Search } from 'lucide-react';
+import { Boxes, Check, Grid3x3, History, Users, X, Plus, Pencil, Archive, Search, AlertTriangle, RefreshCw } from 'lucide-react';
 import api from '../api';
 
 type Func = {
@@ -7,7 +7,7 @@ type Func = {
   status_ciclo_vida: string; modelo_cobranca: string; preco_padrao_centavos?: number | null;
   ativo: boolean; visivel_publicamente: boolean; ordem_exibicao: number;
 };
-type Plano = { id: string; nome: string };
+type Plano = { id: string; nome: string; matriz_funcionalidades_versao?: number };
 type MatrizItem = { plano_id: string; funcionalidade_id: string; disponibilidade: string; exibir_no_card: boolean; texto_publico?: string | null; ordem_exibicao?: number };
 
 const CICLOS = ['disponivel', 'em_breve', 'em_desenvolvimento', 'planejada', 'descontinuada'];
@@ -71,6 +71,7 @@ const AbaCatalogo: React.FC<{ notificar: (m: string, t: 'ok' | 'erro') => void }
   const [editando, setEditando] = useState<Func | null>(null);
   const [form, setForm] = useState<any>(FORM_VAZIO);
   const [salvando, setSalvando] = useState(false);
+  const [arquivarAlvo, setArquivarAlvo] = useState<Func | null>(null);
 
   const carregar = useCallback(async () => {
     const params: any = {};
@@ -98,9 +99,14 @@ const AbaCatalogo: React.FC<{ notificar: (m: string, t: 'ok' | 'erro') => void }
       notificar(e?.response?.data?.erros?.join('; ') || e?.response?.data?.message || 'Erro ao salvar', 'erro');
     } finally { setSalvando(false); }
   }
-  async function arquivar(f: Func) {
+  async function executarArquivar(f: Func) {
+    setArquivarAlvo(null);
     try { await api.post(`/painel-admin/funcionalidades/${f.id}/arquivar`, { arquivar: f.ativo }); notificar(f.ativo ? 'Arquivada' : 'Reativada', 'ok'); carregar(); }
     catch { notificar('Erro ao arquivar', 'erro'); }
+  }
+  function arquivar(f: Func) {
+    if (f.ativo) setArquivarAlvo(f);  // arquivar EXIGE confirmação
+    else executarArquivar(f);         // reativar é direto
   }
 
   return (
@@ -141,6 +147,19 @@ const AbaCatalogo: React.FC<{ notificar: (m: string, t: 'ok' | 'erro') => void }
         </table>
       </div>
 
+      {arquivarAlvo && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5">
+            <h3 className="font-bold text-gray-800 flex items-center gap-2"><Archive size={18} />Arquivar funcionalidade?</h3>
+            <p className="text-sm text-gray-600 mt-2">Arquivar <strong>{arquivarAlvo.nome}</strong> (<span className="font-mono text-xs">{arquivarAlvo.codigo}</span>). Ela sai do catálogo ativo, mas o histórico e a auditoria permanecem. É reversível (reativar).</p>
+            <div className="flex justify-end gap-2 mt-4">
+              <button onClick={() => setArquivarAlvo(null)} className="px-4 py-2 text-sm rounded-lg border border-gray-200">Cancelar</button>
+              <button onClick={() => executarArquivar(arquivarAlvo)} className="px-4 py-2 text-sm rounded-lg bg-gray-800 text-white font-semibold">Arquivar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {modal && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
@@ -179,48 +198,81 @@ const AbaCatalogo: React.FC<{ notificar: (m: string, t: 'ok' | 'erro') => void }
 };
 
 // ── Matriz por plano ─────────────────────────────────────────────────────────
+type Conflito = { plano_id?: string | null; plano_nome?: string; versao_esperada?: number | null; versao_atual?: number | null };
 const AbaMatriz: React.FC<{ notificar: (m: string, t: 'ok' | 'erro') => void }> = ({ notificar }) => {
   const [funcs, setFuncs] = useState<Func[]>([]);
   const [planos, setPlanos] = useState<Plano[]>([]);
   const [matriz, setMatriz] = useState<Record<string, string>>({}); // `${plano}:${func}` -> disponibilidade
   const [sujo, setSujo] = useState(false);
   const [salvando, setSalvando] = useState(false);
+  const [carregando, setCarregando] = useState(true);
+  const [conflito, setConflito] = useState<Conflito | null>(null);
 
-  useEffect(() => { (async () => {
-    const [f, p, m] = await Promise.all([
-      api.get('/painel-admin/funcionalidades', { params: { ativo: 'true' } }),
-      api.get('/painel-admin/planos'),
-      api.get('/painel-admin/funcionalidades-matriz'),
-    ]);
-    setFuncs(f.data.funcionalidades || []);
-    setPlanos((p.data.planos || p.data || []).map((x: any) => ({ id: x.id, nome: x.nome })));
-    const mm: Record<string, string> = {};
-    for (const it of (m.data.matriz || []) as MatrizItem[]) mm[`${it.plano_id}:${it.funcionalidade_id}`] = it.disponibilidade;
-    setMatriz(mm);
-  })().catch(() => notificar('Erro ao carregar matriz', 'erro')); }, [notificar]);
+  const carregar = useCallback(async () => {
+    setCarregando(true);
+    try {
+      const [f, p, m] = await Promise.all([
+        api.get('/painel-admin/funcionalidades', { params: { ativo: 'true' } }),
+        api.get('/painel-admin/planos'),
+        api.get('/painel-admin/funcionalidades-matriz'),
+      ]);
+      setFuncs(f.data.funcionalidades || []);
+      setPlanos((p.data.planos || p.data || []).map((x: any) => ({ id: x.id, nome: x.nome, matriz_funcionalidades_versao: x.matriz_funcionalidades_versao })));
+      const mm: Record<string, string> = {};
+      for (const it of (m.data.matriz || []) as MatrizItem[]) mm[`${it.plano_id}:${it.funcionalidade_id}`] = it.disponibilidade;
+      setMatriz(mm);
+      setConflito(null); setSujo(false);
+    } catch { notificar('Erro ao carregar matriz', 'erro'); } finally { setCarregando(false); }
+  }, [notificar]);
+
+  useEffect(() => { carregar(); }, [carregar]);
 
   function setCelula(planoId: string, funcId: string, val: string) {
     setMatriz((m) => ({ ...m, [`${planoId}:${funcId}`]: val })); setSujo(true);
+    if (conflito) setConflito(null); // usuário editou após conflito; libera nova tentativa (após recarregar)
   }
   async function salvar() {
     setSalvando(true);
     try {
       const itens = Object.entries(matriz).map(([k, disponibilidade]) => { const [plano_id, funcionalidade_id] = k.split(':'); return { plano_id, funcionalidade_id, disponibilidade, exibir_no_card: true }; });
-      await api.put('/painel-admin/funcionalidades-matriz', { itens });
-      notificar('Matriz publicada (nova versão)!', 'ok'); setSujo(false);
-    } catch { notificar('Erro ao salvar matriz', 'erro'); } finally { setSalvando(false); }
+      // versão esperada por plano (concorrência otimista): backend exige de todos.
+      const versoes_esperadas: Record<string, number> = {};
+      for (const p of planos) versoes_esperadas[p.id] = p.matriz_funcionalidades_versao ?? 1;
+      await api.put('/painel-admin/funcionalidades-matriz', { itens, versoes_esperadas });
+      notificar('Matriz publicada!', 'ok');
+      await carregar(); // traz as versões novas; nada de merge silencioso
+    } catch (e: any) {
+      if (e?.response?.status === 409) {
+        const d = e.response.data || {};
+        const plano_nome = planos.find((p) => p.id === d.plano_id)?.nome;
+        setConflito({ plano_id: d.plano_id, plano_nome, versao_esperada: d.versao_esperada, versao_atual: d.versao_atual });
+      } else { notificar('Erro ao salvar matriz', 'erro'); }
+    } finally { setSalvando(false); }
   }
 
+  const bloqueado = salvando || !!conflito; // 409 impede novo envio com versão obsoleta até recarregar
   return (
     <div className="space-y-3">
-      {sujo && <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 flex items-center justify-between"><span>Há alterações não salvas na matriz.</span><button onClick={salvar} disabled={salvando} className="px-3 py-1.5 bg-amber-600 text-white rounded-lg text-xs font-bold disabled:opacity-40">Publicar nova versão</button></div>}
+      {conflito && (
+        <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-800">
+          <div className="flex items-start gap-2">
+            <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+            <div className="flex-1">
+              <p className="font-semibold">A matriz foi alterada por outro administrador{conflito.plano_nome ? ` (plano ${conflito.plano_nome})` : ''}.</p>
+              <p className="text-xs mt-0.5">Versão esperada <strong>{conflito.versao_esperada ?? '—'}</strong> · versão atual <strong>{conflito.versao_atual ?? '—'}</strong>. Suas alterações locais foram <strong>preservadas</strong> — nada foi sobrescrito. Recarregar traz a versão atual (descarta o rascunho).</p>
+              <button onClick={carregar} className="mt-2 inline-flex items-center gap-1 px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs font-bold"><RefreshCw size={13} />Recarregar matriz atual</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {sujo && !conflito && <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 flex items-center justify-between"><span>Há alterações não salvas na matriz.</span><button onClick={salvar} disabled={bloqueado} className="px-3 py-1.5 bg-amber-600 text-white rounded-lg text-xs font-bold disabled:opacity-40">Publicar nova versão</button></div>}
       <div className="overflow-x-auto rounded-2xl border border-gray-100">
         <table className="text-xs">
-          <thead className="bg-gray-50 text-gray-500 uppercase"><tr><th className="text-left p-2 sticky left-0 bg-gray-50 min-w-40">Funcionalidade</th>{planos.map((p) => <th key={p.id} className="p-2 whitespace-nowrap">{p.nome}</th>)}</tr></thead>
+          <thead className="bg-gray-50 text-gray-500 uppercase"><tr><th className="text-left p-2 sticky left-0 bg-gray-50 min-w-40 z-10">Funcionalidade</th>{planos.map((p) => <th key={p.id} className="p-2 whitespace-nowrap">{p.nome}<span className="block normal-case font-normal text-[10px] text-gray-400">v{p.matriz_funcionalidades_versao ?? 1}</span></th>)}</tr></thead>
           <tbody>
             {funcs.map((f) => (
               <tr key={f.id} className="border-t border-gray-100">
-                <td className="p-2 sticky left-0 bg-white font-semibold text-gray-700">{f.nome}<span className="block font-mono text-[10px] text-gray-400">{f.codigo}</span></td>
+                <td className="p-2 sticky left-0 bg-white font-semibold text-gray-700 z-10" title={f.nome}>{f.nome}<span className="block font-mono text-[10px] text-gray-400">{f.codigo}</span></td>
                 {planos.map((p) => (
                   <td key={p.id} className="p-1">
                     <select value={matriz[`${p.id}:${f.id}`] || 'indisponivel'} onChange={(e) => setCelula(p.id, f.id, e.target.value)} className="border border-gray-200 rounded-lg p-1 text-xs bg-white">
@@ -230,31 +282,86 @@ const AbaMatriz: React.FC<{ notificar: (m: string, t: 'ok' | 'erro') => void }> 
                 ))}
               </tr>
             ))}
+            {!carregando && funcs.length === 0 && <tr><td colSpan={planos.length + 1} className="p-8 text-center text-gray-400">Nenhuma funcionalidade ativa</td></tr>}
           </tbody>
         </table>
       </div>
-      <button onClick={salvar} disabled={!sujo || salvando} className="px-5 py-2 bg-green-700 text-white rounded-lg text-sm font-medium disabled:opacity-40"><Check size={15} className="inline mr-1" />Publicar matriz</button>
+      <button onClick={salvar} disabled={!sujo || bloqueado} className="px-5 py-2 bg-green-700 text-white rounded-lg text-sm font-medium disabled:opacity-40"><Check size={15} className="inline mr-1" />Publicar matriz</button>
     </div>
   );
 };
 
-// ── Clientes (leitura) ───────────────────────────────────────────────────────
+// ── Clientes (busca + leitura) ───────────────────────────────────────────────
+type EmpresaBusca = { id: string; nome: string; documento?: string | null; email?: string | null; status?: string | null; arquivada?: boolean; plano_nome?: string | null };
 const AbaClientes: React.FC = () => {
-  const [empresaId, setEmpresaId] = useState('');
+  const [termo, setTermo] = useState('');
+  const [resultados, setResultados] = useState<EmpresaBusca[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [buscando, setBuscando] = useState(false);
+  const [erroBusca, setErroBusca] = useState('');
+  const [sel, setSel] = useState<EmpresaBusca | null>(null);
   const [dados, setDados] = useState<any>(null);
   const [erro, setErro] = useState('');
-  async function consultar() {
-    setErro(''); setDados(null);
-    try { const { data } = await api.get(`/painel-admin/empresas/${empresaId.trim()}/entitlements`); setDados(data); }
-    catch (e: any) { setErro(e?.response?.data?.message || 'Erro ao consultar'); }
+  const LIMITE = 10;
+
+  // Busca com debounce (350ms); termo mínimo 2 → não consulta e limpa resultados.
+  useEffect(() => {
+    const t = termo.trim();
+    if (t.length < 2) { setResultados([]); setTotal(0); setErroBusca(''); return; }
+    let vivo = true;
+    const timer = setTimeout(async () => {
+      setBuscando(true); setErroBusca('');
+      try {
+        const { data } = await api.get('/painel-admin/empresas/buscar', { params: { q: t, page, limite: LIMITE } });
+        if (!vivo) return;
+        setResultados(data.empresas || []); setTotal(data.total || 0);
+      } catch { if (vivo) setErroBusca('Erro na busca de clientes.'); }
+      finally { if (vivo) setBuscando(false); }
+    }, 350);
+    return () => { vivo = false; clearTimeout(timer); };
+  }, [termo, page]);
+
+  useEffect(() => { setPage(1); }, [termo]);
+
+  async function selecionar(e: EmpresaBusca) {
+    setSel(e); setErro(''); setDados(null);
+    try { const { data } = await api.get(`/painel-admin/empresas/${e.id}/entitlements`); setDados(data); }
+    catch (err: any) { setErro(err?.response?.data?.message || 'Erro ao consultar direitos'); }
   }
+
+  const totalPaginas = Math.max(1, Math.ceil(total / LIMITE));
   return (
     <div className="space-y-3">
-      <div className="flex gap-2">
-        <input value={empresaId} onChange={(e) => setEmpresaId(e.target.value)} placeholder="ID da empresa" className={`${inp} flex-1 font-mono`} />
-        <button onClick={consultar} className="px-4 py-2 bg-blue-600 text-white rounded-xl text-sm font-medium">Consultar direitos</button>
+      <div className="relative">
+        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+        <input value={termo} onChange={(e) => setTermo(e.target.value)} placeholder="Buscar por nome, CNPJ, e-mail, ID ou código de convite" className={`${inp} pl-9`} aria-label="Buscar cliente" />
       </div>
-      <p className="text-xs text-gray-400">Consulta os direitos atuais (plano + concessões). Ações de concessão/adicional chegam no PR 3A.</p>
+      <p className="text-xs text-gray-400">Digite ao menos 2 caracteres. Ações de concessão/adicional chegam no PR 3A (esta aba é somente leitura).</p>
+      {erroBusca && <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{erroBusca}</div>}
+      {termo.trim().length >= 2 && (
+        <div className="rounded-2xl border border-gray-100 divide-y divide-gray-100">
+          {buscando && <div className="p-3 text-sm text-gray-400">Buscando…</div>}
+          {!buscando && !erroBusca && resultados.length === 0 && <div className="p-4 text-sm text-gray-400">Nenhuma empresa encontrada.</div>}
+          {resultados.map((e) => (
+            <button key={e.id} onClick={() => selecionar(e)} className={`w-full text-left p-3 hover:bg-gray-50 flex items-center justify-between ${sel?.id === e.id ? 'bg-blue-50' : ''}`}>
+              <span>
+                <span className="font-semibold text-gray-800">{e.nome}</span>
+                {e.arquivada && <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 uppercase">arquivada</span>}
+                <span className="block text-xs text-gray-400">{e.documento || 's/ documento'} · {e.email || 's/ e-mail'}</span>
+              </span>
+              <span className="text-xs text-gray-500 text-right shrink-0">{e.plano_nome || '—'}<span className="block text-gray-400">{e.status || ''}</span></span>
+            </button>
+          ))}
+          {total > LIMITE && (
+            <div className="p-2 flex items-center justify-between text-xs text-gray-500">
+              <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1} className="px-2 py-1 rounded disabled:opacity-30">‹ Anterior</button>
+              <span>Página {page} de {totalPaginas} · {total} resultado(s)</span>
+              <button onClick={() => setPage((p) => Math.min(totalPaginas, p + 1))} disabled={page >= totalPaginas} className="px-2 py-1 rounded disabled:opacity-30">Próxima ›</button>
+            </div>
+          )}
+        </div>
+      )}
       {erro && <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{erro}</div>}
       {dados && (
         <div className="space-y-3">
@@ -276,23 +383,68 @@ const AbaClientes: React.FC = () => {
 // ── Auditoria ────────────────────────────────────────────────────────────────
 const AbaAuditoria: React.FC = () => {
   const [itens, setItens] = useState<any[]>([]);
+  const [detalhe, setDetalhe] = useState<any | null>(null); // evento selecionado (painel)
   useEffect(() => { api.get('/painel-admin/funcionalidades-auditoria').then((r) => setItens(r.data.auditoria || [])).catch(() => {}); }, []);
+  const d = detalhe?.detalhe || {};
   return (
     <div className="overflow-x-auto rounded-2xl border border-gray-100">
       <table className="w-full text-sm">
-        <thead className="bg-gray-50 text-gray-500 text-xs uppercase"><tr><th className="text-left p-3">Quando</th><th className="text-left p-3">Entidade</th><th className="text-left p-3">Ação</th><th className="text-left p-3">Detalhe</th></tr></thead>
+        <thead className="bg-gray-50 text-gray-500 text-xs uppercase"><tr><th className="text-left p-3">Quando</th><th className="text-left p-3">Entidade</th><th className="text-left p-3">Ação</th><th className="text-left p-3">Origem</th><th className="p-3"></th></tr></thead>
         <tbody>
           {itens.map((a) => (
             <tr key={a.id} className="border-t border-gray-100">
               <td className="p-3 text-gray-500 whitespace-nowrap">{new Date(a.criado_em).toLocaleString('pt-BR')}</td>
               <td className="p-3">{a.entidade}</td>
               <td className="p-3 font-semibold">{a.acao}</td>
-              <td className="p-3 text-xs text-gray-500 font-mono truncate max-w-xs">{JSON.stringify(a.detalhe)}</td>
+              <td className="p-3 text-xs text-gray-500">{a.origem || <span className="italic text-gray-400">legado</span>}</td>
+              <td className="p-3 text-right"><button onClick={() => setDetalhe(a)} className="text-blue-600 hover:bg-blue-50 px-2 py-1 rounded-lg text-xs font-semibold">Ver detalhe</button></td>
             </tr>
           ))}
-          {itens.length === 0 && <tr><td colSpan={4} className="p-8 text-center text-gray-400">Sem eventos ainda</td></tr>}
+          {itens.length === 0 && <tr><td colSpan={5} className="p-8 text-center text-gray-400">Sem eventos ainda</td></tr>}
         </tbody>
       </table>
+
+      {detalhe && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <div className="p-5 border-b flex justify-between items-center sticky top-0 bg-gray-50">
+              <h3 className="font-bold text-gray-800">Auditoria — {detalhe.acao} / {detalhe.entidade}</h3>
+              <button onClick={() => setDetalhe(null)} className="p-1.5 hover:bg-gray-200 rounded-lg"><X size={18} /></button>
+            </div>
+            <div className="p-5 space-y-3 text-sm">
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div><span className="text-gray-400">Quando:</span> {new Date(detalhe.criado_em).toLocaleString('pt-BR')}</div>
+                <div><span className="text-gray-400">Ator:</span> <span className="font-mono">{detalhe.ator_id || '—'}</span></div>
+                <div><span className="text-gray-400">Origem:</span> {detalhe.origem || 'legado'}</div>
+                <div><span className="text-gray-400">Request ID:</span> <span className="font-mono">{detalhe.request_id || '—'}</span></div>
+                {d.versao_anterior && <div><span className="text-gray-400">Versão anterior:</span> <span className="font-mono">{JSON.stringify(d.versao_anterior)}</span></div>}
+                {d.versao_nova && <div><span className="text-gray-400">Versão nova:</span> <span className="font-mono">{JSON.stringify(d.versao_nova)}</span></div>}
+                {d.motivo && <div className="col-span-2"><span className="text-gray-400">Motivo:</span> {d.motivo}</div>}
+              </div>
+              {Array.isArray(d.diff) && d.diff.length > 0 && (
+                <div>
+                  <h4 className="text-xs font-bold uppercase text-gray-500 mb-1">Alterações (before → after)</h4>
+                  <div className="space-y-2">
+                    {d.diff.map((c: any, i: number) => (
+                      <div key={i} className="rounded-lg border border-gray-100 p-2 text-xs">
+                        <div className="font-mono text-gray-400 mb-1">plano {c.plano_id} · func {c.funcionalidade_id}</div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <pre className="bg-red-50 text-red-800 rounded p-2 overflow-x-auto whitespace-pre-wrap break-all">{JSON.stringify(c.antes, null, 2)}</pre>
+                          <pre className="bg-green-50 text-green-800 rounded p-2 overflow-x-auto whitespace-pre-wrap break-all">{JSON.stringify(c.depois, null, 2)}</pre>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div>
+                <h4 className="text-xs font-bold uppercase text-gray-500 mb-1">JSON completo</h4>
+                <pre className="bg-gray-50 rounded-lg p-3 text-xs overflow-x-auto whitespace-pre-wrap break-all">{JSON.stringify(detalhe.detalhe, null, 2)}</pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
