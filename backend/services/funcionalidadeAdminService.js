@@ -129,7 +129,7 @@ function traduzirErroMatriz(error) {
   const code = error?.code || '';
   const msg = String(error?.message || '');
   if (code === 'P0003' || /conflito_versao/.test(msg)) {
-    const m = msg.match(/conflito_versao:([0-9a-f-]+):(\d+):(\d+)/i);
+    const m = msg.match(/conflito_versao:([^:]+):(\d+):(\d+)/i);
     return { status: 409, body: {
       message: 'A matriz foi alterada por outra pessoa. Recarregue os dados e tente novamente.',
       erro: 'conflito_versao',
