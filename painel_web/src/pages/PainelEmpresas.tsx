@@ -401,7 +401,7 @@ export const PainelEmpresas: React.FC = () => {
     try {
       await api.post(`/painel-admin/empresas/${contratacaoTarget.id}/contratos/${contrato.id}/upload-assinado`, form, {
         headers: { 'Content-Type': 'multipart/form-data' },
-        timeout: 0, // upload de arquivo: sem timeout (override do default global de 30s)
+        timeout: 120000, // upload de contrato (PDF): 120s finito (override do default de 30s); em falha, o usuário reenvia
       });
       setToast({ message: 'Contrato assinado recebido.', tipo: 'sucesso' });
       await abrirContratacao(contratacaoTarget);

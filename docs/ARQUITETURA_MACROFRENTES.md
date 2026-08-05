@@ -39,3 +39,19 @@
 | Incluída/adicional no plano? | `plano_funcionalidades.disponibilidade` | Comercial (super-admin) |
 | Aparece no card? | `funcionalidades.visivel_publicamente` + `plano_funcionalidades.exibir_no_card` | Comercial |
 | Acesso em runtime | `entitlementDomainService.resolverEntitlement` (+ `requireFeature` futuro) | Backend |
+
+## PR SEC-1 — Sessões revogáveis e endurecimento da autenticação (roadmap, NÃO implementar aqui)
+
+Achado (auditoria de 2026-08-05): o JWT de sessão tem TTL de 7 dias e o logout
+**não** o invalida no servidor (stateless, sem denylist/`jti`) — o token anterior
+permanece utilizável até expirar. Não bloqueia o PR #411; deve ocorrer **antes do
+PR 3A ou da liberação comercial definitiva**, a critério do proprietário.
+
+Escopo futuro:
+- access token de curta duração; refresh token rotativo;
+- revogação por sessão/`jti`; logout com invalidação server-side;
+- encerramento por inatividade validado no servidor;
+- invalidação após alteração de senha ou papel;
+- avaliação de armazenamento HttpOnly/Secure/SameSite; proteção CSRF se adotar cookies;
+- auditoria de criação/renovação/revogação de sessão;
+- migração aditiva se necessária; rollout e rollback seguros.
