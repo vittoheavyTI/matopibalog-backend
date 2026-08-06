@@ -15,8 +15,12 @@ const arquivos = [
   join(here, '00_bootstrap_pre.sql'),
   join(migrations, '060_catalogo_funcionalidades.sql'),
   join(migrations, '061_matriz_publicacao_transacional.sql'),
-  join(migrations, '062_auth_sessions_revogaveis.sql'),   // SEC-1: sessões revogáveis
   join(here, '99_grants_service_role_test.sql'),   // test-only: grants padrão do Supabase p/ service_role
+  // 062 por ÚLTIMO: assim a matriz de privilégios da migration (INSERT/SELECT na
+  // auditoria; REVOKE UPDATE/DELETE/TRUNCATE) é a autoridade final sobre as tabelas
+  // de auth — o `GRANT ALL ON ALL TABLES` do 99_grants (test-only) roda ANTES e não
+  // as alcança (fiel à produção, onde a 062 revoga logo após o create).
+  join(migrations, '062_auth_sessions_revogaveis.sql'),   // SEC-1: sessões revogáveis
 ];
 
 const client = new pg.Client({ connectionString: CONN });
