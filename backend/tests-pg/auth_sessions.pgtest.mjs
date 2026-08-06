@@ -120,11 +120,14 @@ function registrar() {
         await assert.rejects(() => c.query('SELECT public.limpar_sessoes_expiradas(90)'), (e) => e.code === '42501');
         await c.query('ROLLBACK');
       }
-      // service_role: pode ler; auditoria é append-only → sem DELETE.
+      // service_role: pode ler/inserir; auditoria é append-only via TRIGGER (P0001),
+      // bloqueando UPDATE/DELETE mesmo com GRANT ALL/BYPASSRLS. Insere 1 linha para o
+      // trigger FOR EACH ROW disparar (DELETE em tabela vazia afeta 0 linhas).
       await c.query('BEGIN'); await c.query('SET LOCAL ROLE service_role');
       await c.query('SELECT 1 FROM public.auth_sessions LIMIT 1');
-      await c.query('SELECT 1 FROM public.auth_event_audit LIMIT 1');
-      await assert.rejects(() => c.query('DELETE FROM public.auth_event_audit'), (e) => e.code === '42501', 'auditoria deve ser append-only p/ service_role');
+      await c.query(`INSERT INTO public.auth_event_audit(event, resultado) VALUES ('teste_append_only','ok')`);
+      await assert.rejects(() => c.query('DELETE FROM public.auth_event_audit'), (e) => e.code === 'P0001', 'DELETE bloqueado por trigger append-only');
+      await assert.rejects(() => c.query(`UPDATE public.auth_event_audit SET event='x'`), (e) => e.code === 'P0001', 'UPDATE bloqueado por trigger append-only');
       await c.query('ROLLBACK');
     } finally { c.release(); }
   });

@@ -115,6 +115,21 @@ CREATE INDEX IF NOT EXISTS idx_auth_event_session ON public.auth_event_audit (se
 CREATE INDEX IF NOT EXISTS idx_auth_event_created ON public.auth_event_audit (created_at);
 CREATE INDEX IF NOT EXISTS idx_auth_event_event   ON public.auth_event_audit (event);
 
+-- APPEND-ONLY no nível do banco: bloqueia UPDATE/DELETE para QUALQUER papel
+-- (inclusive service_role/BYPASSRLS — triggers não são contornados por bypassrls).
+-- Não depende de GRANT (o Supabase concede amplamente ao service_role). Retenção
+-- futura, se necessária, exige desabilitar o trigger sob controle explícito.
+CREATE OR REPLACE FUNCTION public.auth_event_audit_append_only()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE EXCEPTION 'auth_event_audit e append-only (UPDATE/DELETE bloqueado)' USING ERRCODE = 'P0001';
+END;
+$$;
+DROP TRIGGER IF EXISTS trg_auth_event_audit_append_only ON public.auth_event_audit;
+CREATE TRIGGER trg_auth_event_audit_append_only
+  BEFORE UPDATE OR DELETE ON public.auth_event_audit
+  FOR EACH ROW EXECUTE FUNCTION public.auth_event_audit_append_only();
+
 -- ─────────────────────────────────────────────────────────────────────────────
 -- RLS: habilita e força; sem policy → nega anon/authenticated. service_role bypassa.
 -- ─────────────────────────────────────────────────────────────────────────────
