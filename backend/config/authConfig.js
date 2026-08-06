@@ -88,9 +88,18 @@ function loadAuthConfig(env = process.env) {
   const pepper    = parseStr(env.AUTH_REFRESH_TOKEN_PEPPER, null);
   const jwtSecret = parseStr(env.JWT_SECRET, null);
 
-  // ── validações cruzadas ──────────────────────────────────────────────────
+  // ── validações cruzadas (matriz formal de modos) ─────────────────────────
+  // JWT_SECRET é obrigatório SEMPRE: o login legado assina JWT e o verifyToken o
+  // valida; o access token de sessão também é assinado. Enquanto o legado existir
+  // (todos os modos suportados hoje), o segredo é exigido no startup.
+  if (!jwtSecret) {
+    throw new AuthConfigurationError('JWT_SECRET ausente (obrigatório enquanto o legado existir e para assinar o access token).');
+  }
   if (idleTtl > absoluteTtl) {
     throw new AuthConfigurationError(`AUTH_REFRESH_IDLE_TTL_SECONDS (${idleTtl}) não pode exceder AUTH_REFRESH_ABSOLUTE_TTL_SECONDS (${absoluteTtl}).`);
+  }
+  if (throttleSecs > idleTtl) {
+    throw new AuthConfigurationError(`AUTH_SESSION_ACTIVITY_THROTTLE_SECONDS (${throttleSecs}) não pode exceder o idle TTL (${idleTtl}).`);
   }
   if (requireSession && !sessionsEnabled) {
     throw new AuthConfigurationError('AUTH_REQUIRE_SESSION=true exige AUTH_SESSIONS_ENABLED=true.');
@@ -98,15 +107,27 @@ function loadAuthConfig(env = process.env) {
   if (rotationEnabled && !sessionsEnabled) {
     throw new AuthConfigurationError('AUTH_REFRESH_ROTATION_ENABLED=true exige AUTH_SESSIONS_ENABLED=true.');
   }
-  // Segredo ausente só é tolerado enquanto a função correspondente está desligada.
+  // Modo estrito (requireSession) NÃO pode aceitar legado.
+  if (requireSession && allowLegacy) {
+    throw new AuthConfigurationError('AUTH_REQUIRE_SESSION=true (modo estrito) exige AUTH_ALLOW_LEGACY_TOKENS=false.');
+  }
+  // Se o legado é proibido, a sessão precisa ser obrigatória (senão nada autentica).
+  if (!allowLegacy && !requireSession) {
+    throw new AuthConfigurationError('AUTH_ALLOW_LEGACY_TOKENS=false exige AUTH_REQUIRE_SESSION=true.');
+  }
+  // Segredo do refresh só é exigido quando sessões/rotação estão habilitadas.
   if (sessionsEnabled && !pepper) {
     throw new AuthConfigurationError('AUTH_SESSIONS_ENABLED=true exige AUTH_REFRESH_TOKEN_PEPPER (ausente).');
   }
-  if (sessionsEnabled && !jwtSecret) {
-    throw new AuthConfigurationError('AUTH_SESSIONS_ENABLED=true exige JWT_SECRET (ausente).');
+  if (sessionsEnabled && (!issuer || !audience)) {
+    throw new AuthConfigurationError('AUTH_SESSIONS_ENABLED=true exige issuer e audience.');
   }
 
+  // authMode derivado — controllers/middlewares consomem isto (não recalculam flags).
+  const authMode = !sessionsEnabled ? 'legacy' : (requireSession ? 'strict' : 'compatible');
+
   const cfg = {
+    authMode,
     sessionsEnabled, rotationEnabled, requireSession, allowLegacy, legacyCutoff,
     accessTtlSeconds: accessTtl,
     refreshIdleTtlSeconds: idleTtl,
@@ -120,12 +141,10 @@ function loadAuthConfig(env = process.env) {
     // valores dos segredos — acesso controlado; NÃO enumerar em logs.
     getPepper: () => pepper,
     getJwtSecret: () => jwtSecret,
-    // modo derivado para observabilidade
-    modo: requireSession ? 'estrito' : (sessionsEnabled ? 'compativel' : 'legado'),
     // summary seguro (sem segredos) para log de boot.
     summary() {
       return {
-        modo: this.modo, sessionsEnabled, rotationEnabled, requireSession, allowLegacy,
+        authMode, sessionsEnabled, rotationEnabled, requireSession, allowLegacy,
         legacyCutoff, accessTtlSeconds: accessTtl, refreshIdleTtlSeconds: idleTtl,
         refreshAbsoluteTtlSeconds: absoluteTtl, refreshReuseGraceSeconds: graceSecs,
         sessionActivityThrottleSeconds: throttleSecs, issuer, audience,
@@ -136,8 +155,16 @@ function loadAuthConfig(env = process.env) {
   return Object.freeze(cfg);
 }
 
-// Singleton carregado no require (falha no startup em produção se inválido).
-// Em teste, process.env não tem AUTH_* → defaults válidos (sessões OFF, sem pepper).
-const authConfig = loadAuthConfig(process.env);
+// Config carregada UMA vez, sob demanda (memoizada). O server chama getAuthConfig()
+// no boot → falha rápido se inválida (ex.: JWT_SECRET ausente). NÃO é eager no
+// require para não acoplar a ordem de import dos testes (que setam process.env
+// localmente) — os testes usam loadAuthConfig(env) puro com env explícito.
+let _cache = null;
+function getAuthConfig() {
+  if (!_cache) _cache = loadAuthConfig(process.env);
+  return _cache;
+}
+// Somente para testes: limpa o cache do singleton.
+function _resetAuthConfigCache() { _cache = null; }
 
-module.exports = { loadAuthConfig, authConfig, AuthConfigurationError, FAIXAS };
+module.exports = { loadAuthConfig, getAuthConfig, _resetAuthConfigCache, AuthConfigurationError, FAIXAS };
