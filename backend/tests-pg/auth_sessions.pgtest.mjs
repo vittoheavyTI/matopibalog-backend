@@ -108,28 +108,39 @@ function registrar() {
     }
   });
 
-  test('3. grants: anon/authenticated negados (42501); service_role ok; auditoria append-only (sem DELETE)', async () => {
+  test('3. grants: anon/authenticated negados (42501); service_role ok; auditoria append-only via trigger (P0001)', async () => {
     const c = await pool.connect();
+    // Cada verificação em tx ISOLADA com ROLLBACK garantido: um erro aborta a tx,
+    // então nunca encadeamos duas checagens na mesma transação. setupSql pode ter
+    // múltiplos statements (ex.: SET ROLE + INSERT) — simple query protocol aceita.
+    const checarRejeicao = async (setupSql, badSql, code, msg) => {
+      await c.query('BEGIN');
+      try {
+        if (setupSql) await c.query(setupSql);
+        let err = null;
+        try { await c.query(badSql); } catch (e) { err = e; }
+        assert.ok(err, `${msg}: esperava rejeição`);
+        if (code) assert.equal(err.code, code, `${msg}: code=${err.code}`);
+      } finally { await c.query('ROLLBACK').catch(() => {}); }
+    };
     try {
       for (const role of ['anon', 'authenticated']) {
-        for (const tbl of ['auth_sessions','auth_event_audit']) {
-          await c.query('BEGIN'); await c.query(`SET LOCAL ROLE ${role}`);
-          await assert.rejects(() => c.query(`SELECT 1 FROM public.${tbl} LIMIT 1`), (e) => e.code === '42501', `${role}/${tbl}`);
-          await c.query('ROLLBACK');
+        for (const tbl of ['auth_sessions', 'auth_event_audit']) {
+          await checarRejeicao(`SET LOCAL ROLE ${role}`, `SELECT 1 FROM public.${tbl} LIMIT 1`, '42501', `${role}/${tbl} negado`);
         }
-        await c.query('BEGIN'); await c.query(`SET LOCAL ROLE ${role}`);
-        await assert.rejects(() => c.query('SELECT public.limpar_sessoes_expiradas(90)'), (e) => e.code === '42501');
-        await c.query('ROLLBACK');
+        await checarRejeicao(`SET LOCAL ROLE ${role}`, 'SELECT public.limpar_sessoes_expiradas(90)', '42501', `${role} EXECUTE negado`);
       }
-      // service_role: pode ler/inserir; auditoria é append-only via TRIGGER (P0001),
-      // bloqueando UPDATE/DELETE mesmo com GRANT ALL/BYPASSRLS. Insere 1 linha para o
-      // trigger FOR EACH ROW disparar (DELETE em tabela vazia afeta 0 linhas).
-      await c.query('BEGIN'); await c.query('SET LOCAL ROLE service_role');
-      await c.query('SELECT 1 FROM public.auth_sessions LIMIT 1');
-      await c.query(`INSERT INTO public.auth_event_audit(event, resultado) VALUES ('teste_append_only','ok')`);
-      await assert.rejects(() => c.query('DELETE FROM public.auth_event_audit'), (e) => e.code === 'P0001', 'DELETE bloqueado por trigger append-only');
-      await assert.rejects(() => c.query(`UPDATE public.auth_event_audit SET event='x'`), (e) => e.code === 'P0001', 'UPDATE bloqueado por trigger append-only');
-      await c.query('ROLLBACK');
+      // service_role: pode ler e inserir.
+      await c.query('BEGIN');
+      try {
+        await c.query('SET LOCAL ROLE service_role');
+        await c.query('SELECT 1 FROM public.auth_sessions LIMIT 1');
+        await c.query(`INSERT INTO public.auth_event_audit(event, resultado) VALUES ('teste_append_only','ok')`);
+      } finally { await c.query('ROLLBACK').catch(() => {}); }
+      // append-only via TRIGGER (P0001), mesmo com GRANT ALL/BYPASSRLS. Insere 1 linha
+      // no setup (trigger FOR EACH ROW não dispara em tabela vazia).
+      await checarRejeicao(`SET LOCAL ROLE service_role; INSERT INTO public.auth_event_audit(event) VALUES ('t')`, 'DELETE FROM public.auth_event_audit', 'P0001', 'DELETE bloqueado (append-only)');
+      await checarRejeicao(`SET LOCAL ROLE service_role; INSERT INTO public.auth_event_audit(event) VALUES ('t')`, `UPDATE public.auth_event_audit SET event='x'`, 'P0001', 'UPDATE bloqueado (append-only)');
     } finally { c.release(); }
   });
 
