@@ -26,7 +26,7 @@
 - ✅ Um **único modelo de sessão** no servidor; ✅ access idêntico nos dois clientes; ✅ refresh protegido conforme o melhor mecanismo de cada plataforma; ✅ compatível com o cross-site atual.
 
 ## Decisão
-Adotar **O3**. Sessão server-side com `auth_sessions` (+ rotação de refresh com família e detecção de reuse). Access token JWT curto com `sid`; middleware valida a sessão (revogação efetiva). Refresh opaco rotativo por família.
+Adotar **O3** para o **modelo de sessão** (server-side `auth_sessions` + rotação de refresh com família e detecção de reuse; access JWT curto com `sid`; middleware valida a sessão). **Ressalva:** o **transporte web do refresh** (cookie cross-site na Railway × cookie same-site `api.matopibalog.com.br` × híbrido) fica **PENDENTE de prova empírica controlada** (ver adendo) — o backend é implementado **transport-agnostic** (adapters), sem fixar o transporte web e **sem** devolver refresh no body para o navegador.
 
 ## Parâmetros como **configuração por ambiente** (valores finais no Gate A)
 Não fixar silenciosamente. Propostas iniciais fundamentadas (a ratificar no Gate A):
@@ -67,9 +67,13 @@ Assinatura+`iss`+`aud`+`algorithms:['HS256']`+`exp`+`token_use`+`sid` → carreg
 **Fatos medidos no ambiente real:**
 - Frontend `https://matopibalog.com.br` (eTLD+1 `com.br`) e API `https://matopibalog-backend-production.up.railway.app` (eTLD+1 `railway.app`) são **cross-site**.
 - `server.js` já usa CORS com **origem específica** (`allowedOrigins` inclui `https://matopibalog.com.br`, nunca `*`) e **`credentials: true`**; `cookie-parser` ativo; o login já emite cookie `token` `{ httpOnly, secure, sameSite:'none', maxAge 7d }`. Ou seja, a infraestrutura de cookie credenciado cross-site **já existe** — o SPA só não a usa (`api.ts withCredentials:false`).
-- **Teste empírico (Chrome autenticado):** `fetch(API + '/auth/me', { credentials:'include' })` **sem** header `Authorization` → **HTTP 401** ("token não fornecido") e `document.cookie` vazio. O cookie httpOnly cross-site **não foi entregue** — comportamento consistente com a restrição/bloqueio de cookies de terceiros do navegador.
+- **Teste exploratório (NÃO conclusivo):** `fetch(API + '/auth/me', { credentials:'include' })` **sem** `Authorization` → HTTP 401 e `document.cookie` vazio. ⚠️ **Este teste NÃO prova bloqueio de cookie cross-site**, porque: `document.cookie` não exibe cookies HttpOnly; o login atual do SPA usa `withCredentials:false` (o cookie pode nunca ter sido armazenado); a sessão do navegador estava degradada; e um 401 isolado **não distingue** cookie bloqueado × ausente × expirado. Serve apenas como sinal a investigar, não como conclusão.
 
-**Decisão:** o transporte web **definitivo do refresh token via cookie cross-site (Opção A) NÃO é comprovadamente confiável** e por isso **fica em HARD STOP para implementação web definitiva** até o Gate A. Não usar `localStorage` para o refresh como contorno (proibido).
+**Classificação:** o transporte web definitivo está **PENDENTE DE PROVA EMPÍRICA CONTROLADA** (ver §"Teste controlado do cookie" abaixo). **Não implementar o transporte web definitivo antes do teste correto.** `api.matopibalog.com.br` (same-site) permanece a **opção recomendada, não a decisão final**. Em nenhuma hipótese o refresh token web será guardado em `localStorage`/`sessionStorage`/`IndexedDB` ou qualquer estado acessível a JavaScript.
+
+### Teste controlado do cookie (requisito PRÉ-Gate A — a executar em homologação)
+Roteiro (o agente NÃO insere senha; login feito pelo usuário/conta de homologação):
+1. login com `credentials:'include'`; 2. confirmar resposta do login; 3. inspecionar **Set-Cookie no Network**; 4. confirmar armazenamento na aba **Application**; 5. conferir atributos (**HttpOnly/Secure/SameSite/Path/Domain/Max-Age**); 6. `/auth/me` sem `Authorization`; 7. `refresh` sem `Authorization`; 8. logout; 9. comprovar remoção do cookie; 10. repetir com **cookies de terceiros permitidos**; 11. repetir com **terceiros bloqueados**; 12. verificar **Chrome Issues**; 13. verificar **CORS/preflight**; 14. **não** usar `document.cookie` como prova. Se não houver conta/sessão de homologação disponível agora, o teste fica **registrado como requisito pré-Gate A** e a arquitetura de transporte **não** é declarada decidida.
 
 **Opções para o Gate A (a decidir com o usuário):**
 - **B (recomendada): API em subdomínio do próprio site** — `api.matopibalog.com.br` (custom domain no Railway, apontando o DNS na Hostinger). Front + API passam a ser **same-site** → cookie `Secure; SameSite=Lax|None` é **first-party** e confiável; CSRF mitigado por SameSite + verificação de origem. **Requer DNS/custom domain/cert = Gate A** (não alterar antes).
