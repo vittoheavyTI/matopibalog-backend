@@ -57,7 +57,9 @@ CREATE TABLE IF NOT EXISTS public.auth_sessions (
   user_agent          text NULL,   -- truncado pelo backend
   created_by          uuid NULL,
   updated_at          timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT auth_sessions_expiracao_chk CHECK (absolute_expires_at >= created_at)
+  CONSTRAINT auth_sessions_expiracao_chk CHECK (absolute_expires_at >= created_at),
+  -- Inatividade nunca pode ultrapassar o teto absoluto (a rotação também aplica LEAST()).
+  CONSTRAINT auth_sessions_idle_le_absolute_chk CHECK (idle_expires_at <= absolute_expires_at)
 );
 
 COMMENT ON TABLE public.auth_sessions IS 'SEC-1: sessões server-side revogáveis. Backend-only (service_role). Nunca guarda token aberto.';

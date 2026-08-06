@@ -15,6 +15,7 @@ const arquivos = [
   join(here, '00_bootstrap_pre.sql'),
   join(migrations, '060_catalogo_funcionalidades.sql'),
   join(migrations, '061_matriz_publicacao_transacional.sql'),
+  join(migrations, '062_auth_sessions_revogaveis.sql'),   // SEC-1: sessões revogáveis
   join(here, '99_grants_service_role_test.sql'),   // test-only: grants padrão do Supabase p/ service_role
 ];
 
