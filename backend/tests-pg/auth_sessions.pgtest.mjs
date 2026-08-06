@@ -105,7 +105,9 @@ function registrar() {
   test('2. auditoria NÃO tem coluna de token/hash/cookie/authorization/senha/otp', async () => {
     const r = await pool.query(`SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='auth_event_audit'`);
     const cols = r.rows.map(x => x.column_name.toLowerCase());
-    for (const p of ['token','hash','cookie','authorization','senha','password','otp','payload']) {
+    // Proibidos = segredos. ip_hash (IP mascarado) e refresh_family_id (id, não token)
+    // são metadados legítimos e NÃO devem ser confundidos com token/hash de token.
+    for (const p of ['token','cookie','authorization','senha','password','otp','payload']) {
       assert.ok(!cols.some(c => c.includes(p)), `auditoria não pode ter coluna ~${p} (${cols})`);
     }
   });
@@ -136,13 +138,19 @@ function registrar() {
         await c.query('SELECT 1 FROM public.auth_sessions LIMIT 1');
         await c.query(`INSERT INTO public.auth_event_audit(event,resultado) VALUES ('t','ok')`);
       } finally { await c.query('ROLLBACK').catch(() => {}); }
-      // service_role: UPDATE/DELETE bloqueados por trigger (P0001); TRUNCATE idem;
-      // ALTER TABLE e DISABLE TRIGGER negados por NÃO ser owner (42501).
-      await rej(`SET LOCAL ROLE service_role; INSERT INTO public.auth_event_audit(event) VALUES ('t')`, `UPDATE public.auth_event_audit SET event='x'`, 'P0001', 'UPDATE');
-      await rej(`SET LOCAL ROLE service_role; INSERT INTO public.auth_event_audit(event) VALUES ('t')`, `DELETE FROM public.auth_event_audit`, 'P0001', 'DELETE');
-      await rej(`SET LOCAL ROLE service_role`, `TRUNCATE public.auth_event_audit`, 'P0001', 'TRUNCATE');
+      // service_role: UPDATE/DELETE/TRUNCATE negados pelo GRANT (42501 — a checagem de
+      // privilégio ocorre ANTES do trigger); ALTER TABLE e DISABLE TRIGGER negados por
+      // NÃO ser owner (42501).
+      await rej(`SET LOCAL ROLE service_role`, `UPDATE public.auth_event_audit SET event='x'`, '42501', 'service_role UPDATE');
+      await rej(`SET LOCAL ROLE service_role`, `DELETE FROM public.auth_event_audit`, '42501', 'service_role DELETE');
+      await rej(`SET LOCAL ROLE service_role`, `TRUNCATE public.auth_event_audit`, '42501', 'service_role TRUNCATE');
       await rej(`SET LOCAL ROLE service_role`, `ALTER TABLE public.auth_event_audit ADD COLUMN x int`, '42501', 'ALTER TABLE');
       await rej(`SET LOCAL ROLE service_role`, `ALTER TABLE public.auth_event_audit DISABLE TRIGGER USER`, '42501', 'DISABLE TRIGGER');
+      // TRIGGER (defesa em profundidade): bloqueia mesmo COM privilégio. Como OWNER
+      // (sem SET ROLE), UPDATE/DELETE (com 1 linha) e TRUNCATE disparam o trigger → P0001.
+      await rej(`INSERT INTO public.auth_event_audit(event) VALUES ('t')`, `UPDATE public.auth_event_audit SET event='x'`, 'P0001', 'owner UPDATE (trigger)');
+      await rej(`INSERT INTO public.auth_event_audit(event) VALUES ('t')`, `DELETE FROM public.auth_event_audit`, 'P0001', 'owner DELETE (trigger)');
+      await rej(null, `TRUNCATE public.auth_event_audit`, 'P0001', 'owner TRUNCATE (trigger)');
     } finally { c.release(); }
   });
 
