@@ -81,3 +81,13 @@ Roteiro (o agente NÃO insere senha; login feito pelo usuário/conta de homologa
 - **C: híbrido** — refresh no corpo também no web, guardado em memória volátil + re-login ao recarregar (sem persistência); pior UX, mas evita cookie e localStorage. Fallback se B não for viável.
 
 **Impacto no andamento:** a **camada de sessão backend permanece transport-agnostic** (emite access curto + refresh; para o app o refresh vai no corpo → secure storage; para o web o transporte fica pendente do Gate A). **Task G (cliente web) fica limitada** à lógica de single-flight/interceptor/abstração de storage, sem fixar o transporte, até a decisão B/A/C no Gate A. Backend, Postgres, flags e app seguem normalmente.
+
+---
+
+## Adendo 2 (2026-08-06) — Hardening da migration 062 (complemento vinculante)
+- **Sem relógio injetável**: `rotacionar_refresh_token` removeu `p_agora`; usa `now()` (transaction_timestamp). Nenhum timestamp/`used_at`/deadline/classificação vem do HTTP/frontend. Testes de limite são determinísticos ajustando `used_at` na MESMA transação (now() constante), sem sleep.
+- **Janela de graça server-side + validada** em [0,300]s (NULL/inválida → `grace_invalido`); default de código 10s; valor final no Gate A. Ver `02-auditoria-retencao-e-graca.md`.
+- **Auditoria append-only REAL** (`auth_event_audit`): triggers UPDATE/DELETE + TRUNCATE; service_role só INSERT+SELECT (42501 no resto) e não-owner; sem token/hash/cookie/Authorization/OTP/senha; limites de tamanho; campos nullable p/ eventos sem sessão. **Auditoria sobrevive ao resultado** (retorno estruturado; sem RAISE de domínio) e rola back junto em erro inesperado (sem auditoria enganosa).
+- **Retenção**: sem purge automático nesta etapa; backend normal não limpa auditoria; proposta de purge controlado (papel de manutenção separado) no Gate A.
+- **Mapeamento HTTP** (backend): ok→200, refresh_already_rotated→409, reuse_detected→401, expirado/revogado/sessao_invalida/invalido→401, erro SQL→500 sanitizado.
+- Validado em Postgres real: **CI 45/45** (24 matriz + 21 auth).
