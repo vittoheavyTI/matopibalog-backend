@@ -115,3 +115,27 @@ Login web/app · cadastro público (register/register-empresa) · confirmação 
 - **Flutter fora do PATH** neste ambiente → app: escrever/analisar código sim; build/test dependem de ambiente com SDK (ou CI mobile).
 - Hardware limitado (CLAUDE.md) → evitar builds longos desnecessários.
 - Gates de produção (A e B) exigem autorização humana antes de migration compartilhada, secrets, merge, deploy e modo estrito.
+
+---
+
+## 6. Complemento vinculante — baseline EXECUTADO e verificações obrigatórias (2026-08-06)
+
+### 6.1 Baseline executado (não inventário)
+**Backend** (`npm ci` exit 0; `node --test tests/*.test.js`): **103 arquivos**, **tests 1119 / pass 1119 / fail 0 / skipped 0 / todo 0 / cancelled 0**, duração ~126s, Node **v24.18.0**. Warning benigno: `protobufjs postinstall` fora do allowScripts.
+**Frontend** (`npm ci` exit 0): **vitest 9 arquivos / 67 pass (67)** (~125s); **`tsc -b` exit 0**; **`vite build` OK** (30.7s). Warning pré-existente: chunk `index` > 500 kB (não bloqueia). Node local v24.18 (CI usa Node 20 via `.nvmrc`).
+**App:** `pubspec.yaml` → Dart `>=3.0.0 <4.0.0`, `flutter_secure_storage ^9.2.2`, `shared_preferences ^2.2.2`, `http ^1.1.0`. **Flutter/Dart NÃO no PATH** (sem SDK local, sem FVM/Choco, sem zip em Downloads). CI mobile existente = **Codemagic** (`codemagic.yaml`, flutter stable/java21). Não há workflow Flutter no GitHub Actions.
+
+### 6.2 Flutter é bloqueio do Gate A → plano
+Sem SDK local, `flutter test/analyze/build` não rodam aqui. **Plano:** adicionar um **workflow GitHub Actions de Flutter** (`subosito/flutter-action`: `pub get` + `analyze` + `test` + `build apk` **debug**) — CI mobile isolado, **observável via `gh`**, sem publicar em loja, sem assinatura real, com fixtures/contas de homologação. Isso dá a evidência de app exigida no Gate A (tests/analyzer/build) sem depender do Codemagic do usuário. Login compatível/token legado/nova sessão/refresh/logout do app entram nos testes desse workflow + E2E isolado.
+
+### 6.3 Identidade autoritativa do usuário (read-only, sem PII)
+Agregados de produção: **37 usuários** (17 admin, 20 motorista, **1 superadmin**), **0 sem empresa**, **0 usuários sem `auth.users`**, **0 `auth.users` sem `usuarios`**, **0 e-mails duplicados**, 33 empresas. Tipos: `usuarios.id`=**uuid NOT NULL**, `empresas.id`=**uuid NOT NULL**, `usuarios.empresa_id`=uuid (nullable), FK `usuarios_empresa_id_fkey → empresas.id`. **Conclusão:** `uid`(JWT) = `usuarios.id` = `auth.users.id` — mapeamento **1:1 limpo, sem órfãos nem ambiguidade**. A migration 062 referencia `usuarios(id)` (tipo-correto) — entidade autoritativa correta para todos os perfis. Não há dois identificadores concorrentes.
+
+### 6.4 Sobreposição com PRs abertos do app (read-only)
+- **#405** (`agent/app-contrato-autonomo`, "NÃO MERGEAR sem validar Flutter"): altera **`app_android/lib/services/api_service.dart`** → **overlap real** com SEC-1 (SEC-1 também editará `api_service.dart` para o refresh). Demais arquivos (selecao_plano/home/app_shell/finance_provider/plano_publico) não são auth. Risco: reabertura/merge futuro de #405 pode conflitar no `api_service.dart`. **Estratégia:** não tocar em #405; ao editar `api_service.dart` no SEC-1, isolar a lógica de auth/refresh em métodos próprios para minimizar conflito; documentar para rebase manual futuro.
+- **#272** (scanner): sem overlap de auth (screens de lançamento + `document_scanner_service` + `pubspec`); overlap só se SEC-1 adicionar dependência (evitar — `flutter_secure_storage` já existe).
+- **#217** (sidebar): só `Sidebar.tsx` — **sem overlap**.
+Nenhum PR será fechado/alterado sem autorização.
+
+### 6.5 Transporte web do refresh — ver ADR (adendo)
+Evidência real medida → cookie cross-site **não comprovadamente confiável**; **HARD STOP da implementação web definitiva** até o Gate A; recomendação **Opção B (`api.matopibalog.com.br` same-site)**. Backend/Postgres/flags/app seguem. Detalhes em `01-adr-sessoes-revogaveis.md` (adendo).

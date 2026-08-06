@@ -59,3 +59,21 @@ Assinatura+`iss`+`aud`+`algorithms:['HS256']`+`exp`+`token_use`+`sid` → carreg
 
 ## Secrets adicionais (criar só no Gate A, no Railway; nunca no frontend)
 `AUTH_REFRESH_PEPPER` (pepper do hash do refresh) · possivelmente `AUTH_COOKIE_SECRET`/`AUTH_CSRF_SECRET`. `JWT_SECRET` reutilizado para o access (ou novo `AUTH_ACCESS_SECRET` — decidir no Gate A).
+
+---
+
+## Adendo (2026-08-06) — Evidência real do transporte web (item 5 do complemento vinculante)
+
+**Fatos medidos no ambiente real:**
+- Frontend `https://matopibalog.com.br` (eTLD+1 `com.br`) e API `https://matopibalog-backend-production.up.railway.app` (eTLD+1 `railway.app`) são **cross-site**.
+- `server.js` já usa CORS com **origem específica** (`allowedOrigins` inclui `https://matopibalog.com.br`, nunca `*`) e **`credentials: true`**; `cookie-parser` ativo; o login já emite cookie `token` `{ httpOnly, secure, sameSite:'none', maxAge 7d }`. Ou seja, a infraestrutura de cookie credenciado cross-site **já existe** — o SPA só não a usa (`api.ts withCredentials:false`).
+- **Teste empírico (Chrome autenticado):** `fetch(API + '/auth/me', { credentials:'include' })` **sem** header `Authorization` → **HTTP 401** ("token não fornecido") e `document.cookie` vazio. O cookie httpOnly cross-site **não foi entregue** — comportamento consistente com a restrição/bloqueio de cookies de terceiros do navegador.
+
+**Decisão:** o transporte web **definitivo do refresh token via cookie cross-site (Opção A) NÃO é comprovadamente confiável** e por isso **fica em HARD STOP para implementação web definitiva** até o Gate A. Não usar `localStorage` para o refresh como contorno (proibido).
+
+**Opções para o Gate A (a decidir com o usuário):**
+- **B (recomendada): API em subdomínio do próprio site** — `api.matopibalog.com.br` (custom domain no Railway, apontando o DNS na Hostinger). Front + API passam a ser **same-site** → cookie `Secure; SameSite=Lax|None` é **first-party** e confiável; CSRF mitigado por SameSite + verificação de origem. **Requer DNS/custom domain/cert = Gate A** (não alterar antes).
+- **A: manter Railway + cookie cross-site** — só se comprovado confiável em teste controlado (login que seta o cookie + reenvio credenciado). Risco alto de bloqueio de terceiros; **não adotar sem prova**.
+- **C: híbrido** — refresh no corpo também no web, guardado em memória volátil + re-login ao recarregar (sem persistência); pior UX, mas evita cookie e localStorage. Fallback se B não for viável.
+
+**Impacto no andamento:** a **camada de sessão backend permanece transport-agnostic** (emite access curto + refresh; para o app o refresh vai no corpo → secure storage; para o web o transporte fica pendente do Gate A). **Task G (cliente web) fica limitada** à lógica de single-flight/interceptor/abstração de storage, sem fixar o transporte, até a decisão B/A/C no Gate A. Backend, Postgres, flags e app seguem normalmente.
