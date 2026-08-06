@@ -28,7 +28,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  FLUTTER_VERSION: "3.24.5"   # Dart 3.5.x — casa com sdk >=3.0.0 <4.0.0 do pubspec
+  FLUTTER_VERSION: "3.44.0"   # bate com pubspec.lock (sdks: flutter >=3.44.0, dart >=3.12.0)
   JAVA_VERSION: "21"          # mesmo do Codemagic
 
 jobs:
