@@ -80,7 +80,8 @@ function registrar() {
   });
 
   beforeEach(async () => {
-    await pool.query('DELETE FROM public.auth_event_audit');
+    // TRUNCATE não dispara o trigger append-only (que bloqueia UPDATE/DELETE de linha).
+    await pool.query('TRUNCATE public.auth_event_audit');
     await pool.query('DELETE FROM public.auth_sessions'); // cascade limpa refresh tokens
   });
 
