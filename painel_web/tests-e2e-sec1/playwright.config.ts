@@ -16,8 +16,8 @@ export default defineConfig({
     navigationTimeout: 20_000,
     launchOptions: {
       args: [
-        '--host-resolver-rules=MAP app.sec1.test 127.0.0.1,MAP api.sec1.invalid 127.0.0.1,MAP evil.sec1.test 127.0.0.1',
-        '--disable-features=BlockThirdPartyCookies,ThirdPartyStoragePartitioning,ThirdPartyCookiePhaseout,TrackingProtection3pcd',
+        '--host-resolver-rules=MAP app.matopibalog.test 127.0.0.1,MAP api.matopibalog.test 127.0.0.1,MAP evil.matopibalog.test 127.0.0.1',
+        '--ignore-certificate-errors',
       ],
     },
   },

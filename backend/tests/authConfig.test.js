@@ -26,6 +26,7 @@ test('defaults (só JWT_SECRET) → modo legado, sessões OFF, legado ON', () =>
   assert.equal(c.allowLegacy, true);
   assert.equal(c.accessTtlSeconds, 600);
   assert.equal(c.refreshReuseGraceSeconds, 10);
+  assert.equal(c.refreshCookieSameSite, 'none');
 });
 
 // ── booleanos estritos ───────────────────────────────────────────────────────
@@ -136,4 +137,10 @@ test('getAuthConfig memoiza (mesma instância) e reflete process.env do boot', (
   // restore
   if (orig === undefined) delete process.env.JWT_SECRET; else process.env.JWT_SECRET = orig;
   _resetAuthConfigCache();
+});
+
+test('refresh cookie SameSite aceita somente none/lax e default preserva cross-site', () => {
+  assert.equal(carregar(BASE).refreshCookieSameSite, 'none');
+  assert.equal(carregar({ ...BASE, AUTH_REFRESH_COOKIE_SAMESITE: '  LAX ' }).refreshCookieSameSite, 'lax');
+  assert.throws(() => carregar({ ...BASE, AUTH_REFRESH_COOKIE_SAMESITE: 'strict' }), AuthConfigurationError);
 });

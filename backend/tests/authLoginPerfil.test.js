@@ -183,7 +183,25 @@ test('SEC-1 compatible web: login cria sessão, entrega refresh só em cookie e 
   assert.equal(res.body.refresh_token, undefined);
   assert.equal(chamadas[0].client_type, 'web');
   assert.equal(res.cookies.find((c) => c.nome === 'refresh_token')?.opts.httpOnly, true);
+  assert.equal(res.cookies.find((c) => c.nome === 'refresh_token')?.opts.sameSite, 'none');
   assert.equal(res.headers['cache-control'], 'no-store');
+});
+
+test('SEC-1 compatible web: login respeita SameSite=Lax quando configurado para same-site', async () => {
+  const authRuntime = {
+    cfg: { sessionsEnabled: true, refreshCookieSameSite: 'lax' },
+    sessionService: {
+      async criarSessao() {
+        return {
+          accessToken: 'access-sec1',
+          refreshDelivery: { reveal: () => 'refresh-web', expiresAt: '2026-09-01T00:00:00.000Z' },
+        };
+      },
+    },
+  };
+  const { res } = await executarLogin({ userData: perfilComEmpresa, authRuntime });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.cookies.find((c) => c.nome === 'refresh_token')?.opts.sameSite, 'lax');
 });
 
 test('SEC-1 compatible mobile: login cria sessão android e entrega refresh no body', async () => {

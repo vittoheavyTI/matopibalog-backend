@@ -30,6 +30,9 @@ const EMAIL = 'sec1-e2e@matopibalog.test';
 const SENHA = 'senha-e2e';
 const JWT_SECRET = 'jwt-secret-sec1-e2e-nao-producao';
 const PEPPER = 'pepper-sec1-e2e-nao-producao';
+const APP_HOST = 'app.matopibalog.test';
+const API_HOST = 'api.matopibalog.test';
+const EVIL_HOST = 'evil.matopibalog.test';
 
 type Pool = InstanceType<typeof pg.Pool>;
 
@@ -96,9 +99,9 @@ CN=SEC1 E2E Local
 subjectAltName=@alt_names
 
 [alt_names]
-DNS.1=app.sec1.test
-DNS.2=api.sec1.invalid
-DNS.3=evil.sec1.test
+DNS.1=${APP_HOST}
+DNS.2=${API_HOST}
+DNS.3=${EVIL_HOST}
 IP.1=127.0.0.1
 `, 'utf8');
   execFileSync(findOpenSsl(), [
@@ -276,6 +279,7 @@ async function startApiServer(tls: { key: string; cert: string }, db: Pool) {
     AUTH_REFRESH_ABSOLUTE_TTL_SECONDS: '3600',
     AUTH_REFRESH_REUSE_GRACE_SECONDS: '10',
     AUTH_SESSION_ACTIVITY_THROTTLE_SECONDS: '0',
+    AUTH_REFRESH_COOKIE_SAMESITE: 'lax',
     AUTH_WEB_ALLOWED_ORIGINS: appOrigin,
     AUTH_TOKEN_ISSUER: 'matopibalog-sec1-e2e',
     AUTH_TOKEN_AUDIENCE: 'matopibalog-sec1-e2e-browser',
@@ -292,7 +296,7 @@ async function startApiServer(tls: { key: string; cert: string }, db: Pool) {
   app.use(cors({
     origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean | string) => void) => {
       if (!origin) return callback(null, true);
-      if ([appOrigin, evilOrigin].includes(origin)) return callback(null, origin);
+      if (origin === appOrigin) return callback(null, origin);
       return callback(null, false);
     },
     methods: ['GET', 'POST', 'OPTIONS'],
@@ -324,7 +328,7 @@ async function startApiServer(tls: { key: string; cert: string }, db: Pool) {
     res.cookie('refresh_token', sessao.refreshDelivery.reveal(), {
       httpOnly: true,
       secure: true,
-      sameSite: 'none',
+      sameSite: cfg.refreshCookieSameSite,
       path: '/auth',
       expires: new Date(sessao.refreshDelivery.expiresAt),
     });
@@ -341,7 +345,10 @@ async function startApiServer(tls: { key: string; cert: string }, db: Pool) {
       },
     });
   });
-  app.post('/auth/refresh', (req: any, res: any) => authSessionController.refreshWeb(req, res));
+  app.post('/auth/refresh', (req: any, res: any) => {
+    res.set('X-SEC1-E2E-Cookie-Present', String(String(req.headers.cookie || '').includes('refresh_token=')));
+    return authSessionController.refreshWeb(req, res);
+  });
   app.post('/auth/logout', verify, (req: any, res: any) => authSessionController.logout(req, res));
   app.get('/auth/me', verify, async (req: any, res: any) => {
     res.set('Cache-Control', 'no-store');
@@ -427,7 +434,7 @@ async function setFirstRefreshUsedOutsideGrace(sessionId: string) {
 
 async function loginViaApi(request: APIRequestContext) {
   const response = await request.post(`${apiDirectOrigin}/auth/login`, {
-    headers: { Origin: appOrigin, Host: `api.sec1.invalid:${apiPort}` },
+    headers: { Origin: appOrigin, Host: `${API_HOST}:${apiPort}` },
     data: { email: EMAIL, senha: SENHA, client_type: 'web' },
     ignoreHTTPSErrors: true,
   });
@@ -438,7 +445,7 @@ async function loginViaApi(request: APIRequestContext) {
 async function postRefreshWithCookie(request: APIRequestContext, cookie: string, origin?: string, referer?: string) {
   const headers: Record<string, string> = {
     Cookie: cookie,
-    Host: `api.sec1.invalid:${apiPort}`,
+    Host: `${API_HOST}:${apiPort}`,
   };
   if (origin) headers.Origin = origin;
   if (referer) headers.Referer = referer;
@@ -462,8 +469,22 @@ async function loginInPage(page: Page) {
 }
 
 async function refreshCookieFromContext(context: BrowserContext) {
-  const cookies = await context.cookies(apiOrigin);
+  const cookies = await context.cookies(`${apiOrigin}/auth/refresh`);
   return cookies.find((cookie) => cookie.name === 'refresh_token') || null;
+}
+
+async function waitRefreshCookie(context: BrowserContext) {
+  return expect.poll(async () => {
+    const cookie = await refreshCookieFromContext(context);
+    return cookie ? {
+      value: cookie.value,
+      httpOnly: cookie.httpOnly,
+      secure: cookie.secure,
+      sameSite: cookie.sameSite,
+      path: cookie.path,
+      domain: cookie.domain,
+    } : null;
+  }, { timeout: 5_000 }).not.toBeNull();
 }
 
 test.beforeAll(async () => {
@@ -471,10 +492,10 @@ test.beforeAll(async () => {
   process.env.SEC1_E2E_AUTH_FAKE = '1';
   appPort = await freePort();
   apiPort = await freePort();
-  appOrigin = `https://app.sec1.test:${appPort}`;
-  apiOrigin = `https://api.sec1.invalid:${apiPort}`;
+  appOrigin = `https://${APP_HOST}:${appPort}`;
+  apiOrigin = `https://${API_HOST}:${apiPort}`;
   apiDirectOrigin = `https://127.0.0.1:${apiPort}`;
-  evilOrigin = `https://evil.sec1.test:${appPort}`;
+  evilOrigin = `https://${EVIL_HOST}:${appPort}`;
 
   await applySchema();
   pool = new pg.Pool({ connectionString: process.env.DATABASE_URL, max: 8 });
@@ -491,8 +512,8 @@ test.afterAll(async () => {
   await pool?.end();
 });
 
-test('SEC-1 browser isolado: cookie web, refresh, duas abas, logout, CSRF, CORS, cache e reuse', async ({ page, context, request }) => {
-  await test.step('login web cria refresh cookie HttpOnly/Secure/SameSite=None sem vazar refresh', async () => {
+test('SEC-1 browser same-site: cookie web, refresh, duas abas, logout, CSRF, CORS, cache e reuse', async ({ page, context, request }) => {
+  await test.step('login web cria refresh cookie HttpOnly/Secure/SameSite=Lax host-only sem vazar refresh', async () => {
     await gotoHarness(page);
     const { result, loginResponse } = await loginInPage(page);
     expect(result.data.refresh_token).toBeUndefined();
@@ -500,12 +521,14 @@ test('SEC-1 browser isolado: cookie web, refresh, duas abas, logout, CSRF, CORS,
     expect(result.data.token).toBeTruthy();
     expect(await page.evaluate(() => (window as any).sec1.authToken())).toBe(result.data.token);
 
+    await waitRefreshCookie(context);
     const refreshCookie = await refreshCookieFromContext(context);
     expect(refreshCookie?.value).toBeTruthy();
     expect(refreshCookie?.httpOnly).toBe(true);
     expect(refreshCookie?.secure).toBe(true);
-    expect(refreshCookie?.sameSite).toBe('None');
+    expect(refreshCookie?.sameSite).toBe('Lax');
     expect(refreshCookie?.path).toBe('/auth');
+    expect(refreshCookie?.domain).toBe(API_HOST);
     expect(loginResponse.headers()['cache-control']).toContain('no-store');
     expect(loginResponse.headers()['access-control-allow-origin']).toBe(appOrigin);
     expect(loginResponse.headers()['access-control-allow-credentials']).toBe('true');
@@ -521,7 +544,7 @@ test('SEC-1 browser isolado: cookie web, refresh, duas abas, logout, CSRF, CORS,
     expect(result.ok).toBe(true);
     expect(refreshResponse.status()).toBe(200);
     expect(refreshResponse.request().headers()['authorization']).toBeUndefined();
-    expect(refreshResponse.request().headers()['cookie']).toContain('refresh_token=');
+    expect(refreshResponse.headers()['x-sec1-e2e-cookie-present']).toBe('true');
     const body = await refreshResponse.json();
     expect(body.token).toBeTruthy();
     expect(body.refresh_token).toBeUndefined();
@@ -630,7 +653,7 @@ test('SEC-1 browser isolado: cookie web, refresh, duas abas, logout, CSRF, CORS,
     expect([401, 403]).toContain(again.status());
   });
 
-  await test.step('third-party cookies permitidos: fluxo cross-site completo funciona', async () => {
+  await test.step('same-site baseline: fluxo completo funciona sem depender de third-party', async () => {
     const allowedContext = context;
     const allowedPage = await allowedContext.newPage();
     await gotoHarness(allowedPage);
@@ -642,13 +665,14 @@ test('SEC-1 browser isolado: cookie web, refresh, duas abas, logout, CSRF, CORS,
     await allowedPage.close();
   });
 
-  await test.step('third-party cookies bloqueados: registrar comportamento real do Chromium disponivel', async () => {
+  await test.step('third-party cookies bloqueados: fluxo same-site continua funcionando', async () => {
     const userDataDir = mkdtempSync(join(tmpdir(), 'sec1-e2e-blocked-'));
     const blockedContext = await chromium.launchPersistentContext(userDataDir, {
       headless: true,
       ignoreHTTPSErrors: true,
       args: [
-        `--host-resolver-rules=MAP app.sec1.test 127.0.0.1,MAP api.sec1.invalid 127.0.0.1`,
+        `--host-resolver-rules=MAP ${APP_HOST} 127.0.0.1,MAP ${API_HOST} 127.0.0.1,MAP ${EVIL_HOST} 127.0.0.1`,
+        '--ignore-certificate-errors',
         '--block-third-party-cookies',
       ],
     });
@@ -658,11 +682,12 @@ test('SEC-1 browser isolado: cookie web, refresh, duas abas, logout, CSRF, CORS,
       const { result } = await loginInPage(blockedPage);
       await blockedPage.evaluate(() => (window as any).sec1.poisonAccess());
       const refreshed = await blockedPage.evaluate(() => (window as any).sec1.me());
-      const classification = result.ok && refreshed.ok
-        ? 'THIRD_PARTY_BLOCK_FLAG_NOT_EFFECTIVE_OR_COOKIE_ALLOWED'
+      const storedCookie = await refreshCookieFromContext(blockedContext);
+      const classification = result.ok && refreshed.ok && storedCookie?.sameSite === 'Lax'
+        ? 'SAME_SITE_COOKIE_OK_WITH_THIRD_PARTY_BLOCKED'
         : 'ARCH-BLOCKER-WEB-COOKIE';
-      console.log(`SEC1_THIRD_PARTY_BLOCKED_RESULT=${classification}; login=${result.status}; refreshFlow=${refreshed.status}`);
-      expect(['THIRD_PARTY_BLOCK_FLAG_NOT_EFFECTIVE_OR_COOKIE_ALLOWED', 'ARCH-BLOCKER-WEB-COOKIE']).toContain(classification);
+      console.log(`SEC1_SAME_SITE_THIRD_PARTY_BLOCKED_RESULT=${classification}; login=${result.status}; refreshFlow=${refreshed.status}`);
+      expect(classification).toBe('SAME_SITE_COOKIE_OK_WITH_THIRD_PARTY_BLOCKED');
     } finally {
       await blockedContext.close();
     }

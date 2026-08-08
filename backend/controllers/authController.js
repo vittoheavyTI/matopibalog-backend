@@ -29,11 +29,11 @@ function clientTypeAuth(req) {
   return CLIENT_TYPES.has(tipo) ? tipo : 'web';
 }
 
-function setRefreshCookie(res, delivery) {
+function setRefreshCookie(res, delivery, cfg = {}) {
   res.cookie(REFRESH_COOKIE, delivery.reveal(), {
     httpOnly: true,
     secure: true,
-    sameSite: 'none',
+    sameSite: cfg.refreshCookieSameSite || 'none',
     path: '/auth',
     expires: new Date(delivery.expiresAt),
   });
@@ -546,7 +546,7 @@ exports.login = async (req, res) => {
       });
 
       if (client_type === 'web') {
-        setRefreshCookie(res, sessao.refreshDelivery);
+        setRefreshCookie(res, sessao.refreshDelivery, cfg);
         return res.status(200).json({ token: sessao.accessToken, user: userResponse });
       }
 

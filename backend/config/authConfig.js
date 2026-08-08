@@ -45,6 +45,15 @@ function parseStr(raw, def) {
   return String(raw).trim();
 }
 
+function parseEnumEstrito(raw, chave, permitidos, def) {
+  const valor = parseStr(raw, def);
+  const normalizado = String(valor).trim().toLowerCase();
+  if (!permitidos.includes(normalizado)) {
+    throw new AuthConfigurationError(`${chave}: valor invalido ("${raw}"). Use: ${permitidos.join(', ')}.`);
+  }
+  return normalizado;
+}
+
 function parseListaOrigens(raw, def) {
   const texto = parseStr(raw, null);
   const valores = texto ? texto.split(',').map((x) => x.trim()).filter(Boolean) : def;
@@ -101,6 +110,12 @@ function loadAuthConfig(env = process.env) {
 
   const issuer   = parseStr(env.AUTH_TOKEN_ISSUER, 'matopibalog');
   const audience = parseStr(env.AUTH_TOKEN_AUDIENCE, 'matopibalog-clients');
+  const refreshCookieSameSite = parseEnumEstrito(
+    env.AUTH_REFRESH_COOKIE_SAMESITE,
+    'AUTH_REFRESH_COOKIE_SAMESITE',
+    ['none', 'lax'],
+    'none',
+  );
   const webOrigins = parseListaOrigens(env.AUTH_WEB_ALLOWED_ORIGINS, [
     parseStr(env.FRONTEND_URL, 'https://matopibalog.com.br'),
     'http://localhost:5173',
@@ -164,7 +179,7 @@ function loadAuthConfig(env = process.env) {
     refreshAbsoluteTtlSeconds: absoluteTtl,
     refreshReuseGraceSeconds: graceSecs,
     sessionActivityThrottleSeconds: throttleSecs,
-    issuer, audience, webOrigins,
+    issuer, audience, webOrigins, refreshCookieSameSite,
     // presença de segredos (nunca o valor no summary)
     hasPepper: !!pepper,
     hasJwtSecret: !!jwtSecret,
@@ -178,6 +193,7 @@ function loadAuthConfig(env = process.env) {
         legacyCutoff, accessTtlSeconds: accessTtl, refreshIdleTtlSeconds: idleTtl,
         refreshAbsoluteTtlSeconds: absoluteTtl, refreshReuseGraceSeconds: graceSecs,
         sessionActivityThrottleSeconds: throttleSecs, issuer, audience, webOrigins,
+        refreshCookieSameSite,
         hasPepper: !!pepper, hasJwtSecret: !!jwtSecret,
       };
     },

@@ -25,7 +25,7 @@ concurrency:
 
 jobs:
   sec1-e2e-browser:
-    name: Playwright SEC-1 HTTPS cross-site
+    name: Playwright SEC-1 HTTPS same-site
     runs-on: ubuntu-latest
     timeout-minutes: 25
 

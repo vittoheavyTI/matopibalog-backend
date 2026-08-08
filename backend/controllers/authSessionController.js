@@ -53,12 +53,12 @@ function criarAuthSessionController({ sessionService, cfg }) {
 
   function setRefreshCookie(res, delivery) {
     res.cookie(REFRESH_COOKIE, delivery.reveal(), {
-      httpOnly: true, secure: true, sameSite: 'none', path: '/auth',
+      httpOnly: true, secure: true, sameSite: cfg.refreshCookieSameSite || 'none', path: '/auth',
       expires: new Date(delivery.expiresAt),
     });
   }
   function clearRefreshCookie(res) {
-    res.clearCookie(REFRESH_COOKIE, { httpOnly: true, secure: true, sameSite: 'none', path: '/auth' });
+    res.clearCookie(REFRESH_COOKIE, { httpOnly: true, secure: true, sameSite: cfg.refreshCookieSameSite || 'none', path: '/auth' });
     res.clearCookie('token', { httpOnly: true, secure: true, sameSite: 'none' });
   }
 
