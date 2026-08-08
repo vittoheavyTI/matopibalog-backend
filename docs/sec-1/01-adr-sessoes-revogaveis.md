@@ -90,4 +90,12 @@ Roteiro (o agente NÃO insere senha; login feito pelo usuário/conta de homologa
 - **Auditoria append-only REAL** (`auth_event_audit`): triggers UPDATE/DELETE + TRUNCATE; service_role só INSERT+SELECT (42501 no resto) e não-owner; sem token/hash/cookie/Authorization/OTP/senha; limites de tamanho; campos nullable p/ eventos sem sessão. **Auditoria sobrevive ao resultado** (retorno estruturado; sem RAISE de domínio) e rola back junto em erro inesperado (sem auditoria enganosa).
 - **Retenção**: sem purge automático nesta etapa; backend normal não limpa auditoria; proposta de purge controlado (papel de manutenção separado) no Gate A.
 - **Mapeamento HTTP** (backend): ok→200, refresh_already_rotated→409, reuse_detected→401, expirado/revogado/sessao_invalida/invalido→401, erro SQL→500 sanitizado.
+
+## Adendo 3 (2026-08-08) — Revogação transacional e eventos sensíveis
+
+- `criar_sessao_auth` passa a inserir `sessao_criada` dentro da mesma transação da criação de sessão e refresh inicial.
+- `revogar_sessao_auth` revoga sessão + refreshes da sessão e insere `sessao_revogada` na mesma transação.
+- `revogar_sessoes_usuario` revoga todas as sessões/refreshes do usuário e insere `sessoes_usuario_revogadas` na mesma transação.
+- Troca/reset de senha, desabilitação/bloqueio de usuário, mudança de papel e mudança de permissões chamam a revogação SEC-1 quando o modo de sessões está habilitado. Em falha de infraestrutura, a resposta é fail-closed e não retorna sucesso falso.
+- `/auth/refresh` e `/auth/mobile/refresh` têm rate limit específico além do limiter global e do login limiter.
 - Validado em Postgres real: **CI 45/45** (24 matriz + 21 auth).
