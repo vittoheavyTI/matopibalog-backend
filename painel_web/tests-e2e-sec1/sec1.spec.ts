@@ -1,4 +1,4 @@
-import { test, expect, chromium, type APIRequestContext, type Page } from '@playwright/test';
+import { test, expect, chromium, type APIRequestContext, type BrowserContext, type Page } from '@playwright/test';
 import { createRequire } from 'node:module';
 import { createServer as createHttpsServer, type Server as HttpsServer } from 'node:https';
 import { execFileSync } from 'node:child_process';
@@ -461,6 +461,11 @@ async function loginInPage(page: Page) {
   return { result, loginResponse };
 }
 
+async function refreshCookieFromContext(context: BrowserContext) {
+  const cookies = await context.cookies(apiOrigin);
+  return cookies.find((cookie) => cookie.name === 'refresh_token') || null;
+}
+
 test.beforeAll(async () => {
   process.env.NODE_ENV = 'test';
   process.env.SEC1_E2E_AUTH_FAKE = '1';
@@ -495,12 +500,12 @@ test('SEC-1 browser isolado: cookie web, refresh, duas abas, logout, CSRF, CORS,
     expect(result.data.token).toBeTruthy();
     expect(await page.evaluate(() => (window as any).sec1.authToken())).toBe(result.data.token);
 
-    const setCookie = loginResponse.headers()['set-cookie'] || '';
-    expect(setCookie).toContain('refresh_token=');
-    expect(setCookie).toMatch(/HttpOnly/i);
-    expect(setCookie).toMatch(/Secure/i);
-    expect(setCookie).toMatch(/SameSite=None/i);
-    expect(setCookie).toMatch(/Path=\/auth/i);
+    const refreshCookie = await refreshCookieFromContext(context);
+    expect(refreshCookie?.value).toBeTruthy();
+    expect(refreshCookie?.httpOnly).toBe(true);
+    expect(refreshCookie?.secure).toBe(true);
+    expect(refreshCookie?.sameSite).toBe('None');
+    expect(refreshCookie?.path).toBe('/auth');
     expect(loginResponse.headers()['cache-control']).toContain('no-store');
     expect(loginResponse.headers()['access-control-allow-origin']).toBe(appOrigin);
     expect(loginResponse.headers()['access-control-allow-credentials']).toBe('true');
@@ -508,6 +513,7 @@ test('SEC-1 browser isolado: cookie web, refresh, duas abas, logout, CSRF, CORS,
   });
 
   await test.step('refresh web usa cookie, nao Bearer, rotaciona cookie e preserva JSON sem refresh aberto', async () => {
+    const refreshAntes = await refreshCookieFromContext(context);
     await page.evaluate(() => (window as any).sec1.poisonAccess());
     const refreshResponsePromise = page.waitForResponse((r) => r.url().includes('/auth/refresh'));
     const result = await page.evaluate(() => (window as any).sec1.me());
@@ -519,7 +525,9 @@ test('SEC-1 browser isolado: cookie web, refresh, duas abas, logout, CSRF, CORS,
     const body = await refreshResponse.json();
     expect(body.token).toBeTruthy();
     expect(body.refresh_token).toBeUndefined();
-    expect(refreshResponse.headers()['set-cookie'] || '').toContain('refresh_token=');
+    const refreshDepois = await refreshCookieFromContext(context);
+    expect(refreshDepois?.value).toBeTruthy();
+    expect(refreshDepois?.value).not.toBe(refreshAntes?.value);
     expect(refreshResponse.headers()['cache-control']).toContain('no-store');
     expect(decodeJwtPayload(result.token).sid).toBeTruthy();
   });
@@ -572,7 +580,7 @@ test('SEC-1 browser isolado: cookie web, refresh, duas abas, logout, CSRF, CORS,
     const result = await page.evaluate(() => (window as any).sec1.logout());
     const logoutResponse = await logoutResponsePromise;
     expect(result.ok).toBe(true);
-    expect(logoutResponse.headers()['set-cookie'] || '').toContain('refresh_token=');
+    expect(await refreshCookieFromContext(context)).toBeNull();
     expect(logoutResponse.headers()['cache-control']).toContain('no-store');
     const session = await latestSession();
     expect(session.revoked_at).not.toBeNull();
