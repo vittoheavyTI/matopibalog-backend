@@ -55,10 +55,12 @@ test('criarSessao: erro de RPC → SessionDependencyUnavailable (503)', async ()
 });
 
 test('rotacionarRefresh ok → access novo + delivery; erros mapeados', async () => {
-  const okSupa = fakeSupabase({ rpc: { rotacionar_refresh_token: { data: [{ resultado: 'ok', session_id: 'sess-1', usuario_id: 'u-1', empresa_id: 'e-1', client_type: 'web', novo_token_id: 't2', nova_version: 2 }], error: null } } });
+  const expEfetiva = new Date(Date.now() + 3600e3).toISOString();
+  const okSupa = fakeSupabase({ rpc: { rotacionar_refresh_token: { data: [{ resultado: 'ok', session_id: 'sess-1', usuario_id: 'u-1', empresa_id: 'e-1', client_type: 'web', novo_token_id: 't2', nova_version: 2, novo_expires_at: expEfetiva }], error: null } } });
   const svc = criarSessionService({ supabase: okSupa, cfg });
   const r = await svc.rotacionarRefresh({ refreshToken: 'r1.abc' });
   assert.equal(verificarAccessTokenAssinatura(r.accessToken, cfg).sid, 'sess-1');
+  assert.equal(r.refreshDelivery.expiresAt, expEfetiva);
 
   for (const [resultado, Klass, http] of [['reuse_detected', E.RefreshReuseDetected, 401], ['refresh_already_rotated', E.RefreshAlreadyRotated, 409], ['expirado', E.RefreshExpired, 401], ['invalido', E.RefreshInvalid, 401], ['sessao_invalida', E.SessionInvalid, 401]]) {
     const supa = fakeSupabase({ rpc: { rotacionar_refresh_token: { data: [{ resultado, session_id: 's', usuario_id: 'u', empresa_id: null, client_type: 'web' }], error: null } } });
@@ -76,7 +78,7 @@ test('validarSessaoParaAcesso: feliz → req.user do BANCO (não do token)', asy
   assert.equal(rq.uid, 'u-1'); assert.equal(rq.role, 'admin'); assert.equal(rq.empresa_id, 'e-1'); assert.equal(rq.is_super_admin, false);
 });
 
-test('validarSessaoParaAcesso: revogada / idle / not-found / bloqueado', async () => {
+test('validarSessaoParaAcesso: revogada / idle / not-found / usuário não autenticável', async () => {
   const base = (over) => ({ data: { id: 's', usuario_id: 'u', empresa_id: null, client_type: 'web', revoked_at: null, idle_expires_at: new Date(Date.now() + 3600e3).toISOString(), absolute_expires_at: new Date(Date.now() + 3600e3).toISOString(), last_activity_at: new Date().toISOString(), ...over }, error: null });
   const userOk = { data: { id: 'u', tipo: 'admin', status: 'ativo', is_super_admin: false, empresa_id: null }, error: null };
 
@@ -89,8 +91,10 @@ test('validarSessaoParaAcesso: revogada / idle / not-found / bloqueado', async (
   svc = criarSessionService({ supabase: fakeSupabase({ tables: { auth_sessions: [{ data: null, error: null }] } }), cfg });
   await assert.rejects(() => svc.validarSessaoParaAcesso({ sid: 's', uid: 'u' }), (e) => e instanceof E.SessionNotFound);
 
-  svc = criarSessionService({ supabase: fakeSupabase({ tables: { auth_sessions: [base({})], usuarios: [{ data: { id: 'u', tipo: 'admin', status: 'bloqueado', is_super_admin: false, empresa_id: null }, error: null }] } }), cfg });
-  await assert.rejects(() => svc.validarSessaoParaAcesso({ sid: 's', uid: 'u' }), (e) => e instanceof E.SessionRevoked);
+  for (const status of ['bloqueado', 'inativo', 'desativado', 'cancelado', null]) {
+    svc = criarSessionService({ supabase: fakeSupabase({ tables: { auth_sessions: [base({})], usuarios: [{ data: { id: 'u', tipo: 'admin', status, is_super_admin: false, empresa_id: null }, error: null }] } }), cfg });
+    await assert.rejects(() => svc.validarSessaoParaAcesso({ sid: 's', uid: 'u' }), (e) => e instanceof E.SessionRevoked, `status=${status}`);
+  }
 });
 
 test('validarSessaoParaAcesso: falha de infra → 503 fail-closed (nunca "válido")', async () => {
@@ -104,4 +108,21 @@ test('atualizarAtividadeThrottled: dentro do throttle NÃO escreve', async () =>
   const svc = criarSessionService({ supabase, cfg });
   const r = await svc.atualizarAtividadeThrottled({ id: 's', last_activity_at: new Date().toISOString() });
   assert.equal(r.atualizado, false, 'atividade recente não deve reescrever');
+});
+
+test('atualizarAtividadeThrottled clampa idle no teto absoluto', async () => {
+  let updatePayload = null;
+  const supabase = {
+    from() {
+      const b = {
+        update(payload) { updatePayload = payload; return b; },
+        eq() { return b; }, is() { return b; }, lt() { return b; }, select() { return Promise.resolve({ data: [{ id: 's' }], error: null }); },
+      };
+      return b;
+    },
+  };
+  const svc = criarSessionService({ supabase, cfg });
+  const absolute = new Date(Date.now() + 120000).toISOString();
+  await svc.atualizarAtividadeThrottled({ id: 's', last_activity_at: new Date(Date.now() - 120000).toISOString(), absolute_expires_at: absolute });
+  assert.equal(updatePayload.idle_expires_at, absolute);
 });

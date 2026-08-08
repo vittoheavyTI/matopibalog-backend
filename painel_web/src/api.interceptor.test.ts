@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { avaliarErroResposta } from './api';
+import { avaliarErroResposta, podeTentarRefresh } from './api';
 
 // Decisão pura do interceptor de resposta (comportamento de sessão/rate-limit).
 // Erros SEM resposta (timeout/cancelamento) não passam por esta função — o
@@ -36,5 +36,23 @@ describe('avaliarErroResposta (interceptor)', () => {
     const r = avaliarErroResposta({ status: 500 });
     expect(r.sessaoExpirada).toBe(false);
     expect(r.rateLimited).toBe(false);
+  });
+});
+
+describe('podeTentarRefresh (SEC-1)', () => {
+  test('tenta refresh para GET 401 uma única vez', () => {
+    expect(podeTentarRefresh({ status: 401, url: '/auth/me', method: 'get' })).toBe(true);
+    expect(podeTentarRefresh({ status: 401, url: '/auth/me', method: 'get', jaTentou: true })).toBe(false);
+  });
+
+  test('não tenta refresh em POST arbitrário nem nas rotas de refresh/login', () => {
+    expect(podeTentarRefresh({ status: 401, url: '/fretes', method: 'post' })).toBe(false);
+    expect(podeTentarRefresh({ status: 401, url: '/auth/refresh', method: 'post' })).toBe(false);
+    expect(podeTentarRefresh({ status: 401, url: '/auth/login', method: 'post' })).toBe(false);
+  });
+
+  test('403 só tenta refresh quando representa sessão/token inválido', () => {
+    expect(podeTentarRefresh({ status: 403, tokenExpiradoInvalido: true, url: '/dashboard', method: 'get' })).toBe(true);
+    expect(podeTentarRefresh({ status: 403, tokenExpiradoInvalido: false, url: '/dashboard', method: 'get' })).toBe(false);
   });
 });

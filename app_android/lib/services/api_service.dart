@@ -56,12 +56,14 @@ class ApiService {
 
   /// Chave do token no secure storage — deve casar com AuthProvider._tokenKey.
   static const _tokenKey = 'token';
+  static const _refreshTokenKey = 'refresh_token';
   static const FlutterSecureStorage _secureStorage = FlutterSecureStorage();
 
   /// Token JWT da sessão atual, mantido em memória.
   /// A persistência segura (quando o usuário marca "Manter conectado neste
   /// aparelho") é responsabilidade do AuthProvider, via flutter_secure_storage.
   static String? _sessionToken;
+  static String? _refreshToken;
 
   // Timeouts de rede. Sem eles, requisições em conexões lentas (4G/5G fraco) ou
   // com o backend "frio" (cold start do Railway) ficavam penduradas
@@ -105,6 +107,7 @@ class ApiService {
 
   /// Define o token usado nas requisições autenticadas da sessão atual.
   static void setSessionToken(String token) => _sessionToken = token;
+  static void setRefreshToken(String token) => _refreshToken = token;
 
   static String get baseUrl => _baseUrl;
 
@@ -120,7 +123,21 @@ class ApiService {
   }
 
   /// Limpa o token em memória (logout ou falha de auto-login).
-  static void clearSessionToken() => _sessionToken = null;
+  static void clearSessionToken() {
+    _sessionToken = null;
+    _refreshToken = null;
+  }
+
+  static Future<String?> currentRefreshToken() async {
+    var token = _refreshToken;
+    if (token == null || token.isEmpty) {
+      token = await _secureStorage.read(key: _refreshTokenKey);
+      if (token != null && token.isNotEmpty) {
+        _refreshToken = token;
+      }
+    }
+    return token;
+  }
 
   // Mantido como Future para não alterar os ~15 call sites que fazem
   // `await _getHeaders()`.
@@ -161,7 +178,11 @@ class ApiService {
           .post(
             Uri.parse('$_baseUrl/auth/login'),
             headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({'email': email, 'senha': senha}),
+            body: jsonEncode({
+              'email': email,
+              'senha': senha,
+              'client_type': Platform.isIOS ? 'ios' : 'android',
+            }),
           )
           .timeout(const Duration(seconds: 20));
 
@@ -355,6 +376,37 @@ class ApiService {
     }
   }
 
+  static Future<Map<String, dynamic>?> refreshAccessToken() async {
+    final refresh = await currentRefreshToken();
+    if (refresh == null || refresh.isEmpty) return null;
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$_baseUrl/auth/mobile/refresh'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'refresh_token': refresh}),
+          )
+          .timeout(_timeoutPostJson);
+      AppLogger.api('ApiService', 'POST /auth/mobile/refresh', response.statusCode);
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+        final token = decoded['token'] as String?;
+        final novoRefresh = decoded['refresh_token'] as String?;
+        if (token != null && token.isNotEmpty && novoRefresh != null && novoRefresh.isNotEmpty) {
+          _sessionToken = token;
+          _refreshToken = novoRefresh;
+          await _secureStorage.write(key: _tokenKey, value: token);
+          await _secureStorage.write(key: _refreshTokenKey, value: novoRefresh);
+          return decoded;
+        }
+      }
+      return null;
+    } catch (e) {
+      AppLogger.error('ApiService', 'POST /auth/mobile/refresh exception', e);
+      return null;
+    }
+  }
+
   static Future<Map<String, dynamic>> trocarSenha(String novaSenha) async {
     try {
       final response = await http
@@ -392,6 +444,22 @@ class ApiService {
       AppLogger.api('ApiService', 'GET /auth/me', response.statusCode);
       if (response.statusCode == 200) {
         return (profile: jsonDecode(response.body) as Map<String, dynamic>, status: 200);
+      }
+      if (response.statusCode == 401 || response.statusCode == 403) {
+        final renovado = await refreshAccessToken();
+        if (renovado != null) {
+          final retry = await http
+              .get(
+                Uri.parse('$_baseUrl/auth/me'),
+                headers: await _getHeaders(),
+              )
+              .timeout(_timeoutGet);
+          AppLogger.api('ApiService', 'GET /auth/me retry', retry.statusCode);
+          if (retry.statusCode == 200) {
+            return (profile: jsonDecode(retry.body) as Map<String, dynamic>, status: 200);
+          }
+          return (profile: null, status: retry.statusCode);
+        }
       }
       return (profile: null, status: response.statusCode);
     } catch (e) {

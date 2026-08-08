@@ -33,7 +33,7 @@ test('boolean "true"/"false" exatos', () => {
   assert.equal(carregar({ ...BASE, AUTH_SESSIONS_ENABLED: 'false' }).sessionsEnabled, false);
 });
 test('boolean tolera MAIÚSCULAS e espaços', () => {
-  assert.equal(carregar({ ...BASE, AUTH_ALLOW_LEGACY_TOKENS: '  FALSE ', AUTH_REQUIRE_SESSION: 'true', AUTH_SESSIONS_ENABLED: 'true', ...SEG }).allowLegacy, false);
+  assert.equal(carregar({ ...BASE, AUTH_ALLOW_LEGACY_TOKENS: '  FALSE ', AUTH_REQUIRE_SESSION: 'true', AUTH_SESSIONS_ENABLED: 'true', AUTH_REFRESH_ROTATION_ENABLED: 'true', ...SEG }).allowLegacy, false);
   assert.equal(carregar({ ...BASE, AUTH_ALLOW_LEGACY_TOKENS: 'True' }).allowLegacy, true);
 });
 test('boolean inválido ("1"/"yes"/"sim") → erro (sem coerção ingênua)', () => {
@@ -88,6 +88,8 @@ test('MODO ESTRITO', () => {
 test('rejeições da matriz', () => {
   // rotation sem sessions
   assert.throws(() => carregar({ ...BASE, AUTH_REFRESH_ROTATION_ENABLED: 'true' }), AuthConfigurationError);
+  // sessions sem rotation
+  assert.throws(() => carregar({ ...SEG, AUTH_SESSIONS_ENABLED: 'true', AUTH_REFRESH_ROTATION_ENABLED: 'false' }), AuthConfigurationError);
   // require sem sessions
   assert.throws(() => carregar({ ...BASE, AUTH_REQUIRE_SESSION: 'true' }), AuthConfigurationError);
   // require (estrito) com legado permitido
@@ -105,7 +107,7 @@ test('cutoff ISO válido/inválido', () => {
 
 // ── segredos nunca expostos ──────────────────────────────────────────────────
 test('segredos NUNCA aparecem no summary (só presença)', () => {
-  const c = carregar({ ...SEG, AUTH_SESSIONS_ENABLED: 'true' });
+  const c = carregar({ ...SEG, AUTH_SESSIONS_ENABLED: 'true', AUTH_REFRESH_ROTATION_ENABLED: 'true' });
   const json = JSON.stringify(c.summary());
   assert.ok(!json.includes('pepper-teste'), 'summary sem pepper');
   assert.ok(!json.includes('jwt-teste'), 'summary sem jwt');

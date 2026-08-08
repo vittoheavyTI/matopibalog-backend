@@ -45,6 +45,24 @@ function parseStr(raw, def) {
   return String(raw).trim();
 }
 
+function parseListaOrigens(raw, def) {
+  const texto = parseStr(raw, null);
+  const valores = texto ? texto.split(',').map((x) => x.trim()).filter(Boolean) : def;
+  const unicos = [];
+  for (const origem of valores) {
+    let url;
+    try { url = new URL(origem); } catch {
+      throw new AuthConfigurationError(`AUTH_WEB_ALLOWED_ORIGINS: origem invalida ("${origem}").`);
+    }
+    if (!['https:', 'http:'].includes(url.protocol)) {
+      throw new AuthConfigurationError(`AUTH_WEB_ALLOWED_ORIGINS: protocolo invalido ("${origem}").`);
+    }
+    const normalizada = url.origin;
+    if (!unicos.includes(normalizada)) unicos.push(normalizada);
+  }
+  return Object.freeze(unicos);
+}
+
 // Faixas seguras (mín/máx). grace casa com a RPC 062 (0..300).
 const DIA = 86400;
 const FAIXAS = {
@@ -83,6 +101,12 @@ function loadAuthConfig(env = process.env) {
 
   const issuer   = parseStr(env.AUTH_TOKEN_ISSUER, 'matopibalog');
   const audience = parseStr(env.AUTH_TOKEN_AUDIENCE, 'matopibalog-clients');
+  const webOrigins = parseListaOrigens(env.AUTH_WEB_ALLOWED_ORIGINS, [
+    parseStr(env.FRONTEND_URL, 'https://matopibalog.com.br'),
+    'http://localhost:5173',
+    'http://localhost:4173',
+    'http://localhost:3000',
+  ]);
 
   // Segredos: só referenciados. Nunca logados.
   const pepper    = parseStr(env.AUTH_REFRESH_TOKEN_PEPPER, null);
@@ -106,6 +130,12 @@ function loadAuthConfig(env = process.env) {
   }
   if (rotationEnabled && !sessionsEnabled) {
     throw new AuthConfigurationError('AUTH_REFRESH_ROTATION_ENABLED=true exige AUTH_SESSIONS_ENABLED=true.');
+  }
+  if (sessionsEnabled && !rotationEnabled) {
+    throw new AuthConfigurationError('AUTH_SESSIONS_ENABLED=true exige AUTH_REFRESH_ROTATION_ENABLED=true.');
+  }
+  if (requireSession && !rotationEnabled) {
+    throw new AuthConfigurationError('AUTH_REQUIRE_SESSION=true exige AUTH_REFRESH_ROTATION_ENABLED=true.');
   }
   // Modo estrito (requireSession) NÃO pode aceitar legado.
   if (requireSession && allowLegacy) {
@@ -134,7 +164,7 @@ function loadAuthConfig(env = process.env) {
     refreshAbsoluteTtlSeconds: absoluteTtl,
     refreshReuseGraceSeconds: graceSecs,
     sessionActivityThrottleSeconds: throttleSecs,
-    issuer, audience,
+    issuer, audience, webOrigins,
     // presença de segredos (nunca o valor no summary)
     hasPepper: !!pepper,
     hasJwtSecret: !!jwtSecret,
@@ -147,7 +177,7 @@ function loadAuthConfig(env = process.env) {
         authMode, sessionsEnabled, rotationEnabled, requireSession, allowLegacy,
         legacyCutoff, accessTtlSeconds: accessTtl, refreshIdleTtlSeconds: idleTtl,
         refreshAbsoluteTtlSeconds: absoluteTtl, refreshReuseGraceSeconds: graceSecs,
-        sessionActivityThrottleSeconds: throttleSecs, issuer, audience,
+        sessionActivityThrottleSeconds: throttleSecs, issuer, audience, webOrigins,
         hasPepper: !!pepper, hasJwtSecret: !!jwtSecret,
       };
     },

@@ -178,6 +178,16 @@ function registrar() {
     const aud = await auditos(s.session_id);
     assert.ok(aud.some(a => a.event === 'refresh_sucesso' && a.resultado === 'ok' && a.refresh_family_id === s.familyId), 'audit refresh_sucesso persistido');
   });
+  test('9b. rotação clampa expires_at do novo refresh no absoluto da sessão e retorna o valor efetivo', async () => {
+    const abs = min(5);
+    const s = await criarSessao(pool, { refreshExp: abs, idle: min(2), abs });
+    const rot = await rotacionar(pool, s.token, { novoExp: dias(30), novoIdle: min(10) });
+    assert.equal(rot.resultado, 'ok');
+    const v2 = (await tokRows(s.session_id)).find(t => t.version === 2);
+    assert.equal(new Date(v2.expires_at).toISOString(), new Date(abs).toISOString());
+    assert.equal(new Date(rot.novo_expires_at).toISOString(), new Date(abs).toISOString());
+    assert.equal(new Date((await sessRow(s.session_id)).idle_expires_at).toISOString(), new Date(abs).toISOString());
+  });
   test('10. hash inexistente → invalido', async () => { assert.equal((await rotacionar(pool, novoToken())).resultado, 'invalido'); });
   test('11. refresh expirado → expirado', async () => { const s = await criarSessao(pool, { refreshExp: min(-5) }); assert.equal((await rotacionar(pool, s.token)).resultado, 'expirado'); });
   test('12. sessão revogada → sessao_invalida', async () => {

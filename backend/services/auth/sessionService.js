@@ -22,6 +22,13 @@ class RefreshDelivery {
 }
 
 function segundosDepois(n) { return new Date(Date.now() + n * 1000); }
+function menorDataIso(a, b) {
+  const ta = new Date(a).getTime();
+  const tb = new Date(b).getTime();
+  return new Date(Math.min(ta, tb)).toISOString();
+}
+
+const STATUS_USUARIO_AUTENTICAVEL = new Set(['ativo']);
 
 /**
  * Factory. deps: { supabase (service_role), cfg (authConfig validada), auditar(evento) }.
@@ -48,7 +55,7 @@ function criarSessionService({ supabase, cfg, auditar = async () => {} }) {
     const refreshHash = crypto.hashRefreshToken(refreshToken, pepper);
     const familyId = crypto.gerarJti();
     const absoluteExpires = segundosDepois(cfg.refreshAbsoluteTtlSeconds);
-    const idleExpires = segundosDepois(cfg.refreshIdleTtlSeconds);
+    const idleExpiresIso = menorDataIso(segundosDepois(cfg.refreshIdleTtlSeconds), absoluteExpires);
     // O refresh expira junto com o teto absoluto; o idle é aplicado na sessão.
     const refreshExpires = absoluteExpires;
 
@@ -56,7 +63,7 @@ function criarSessionService({ supabase, cfg, auditar = async () => {} }) {
       p_usuario_id: usuario_id, p_empresa_id: empresa_id, p_client_type: client_type,
       p_device_id: device_id, p_device_label: device_label, p_refresh_family_id: familyId,
       p_refresh_token_hash: refreshHash, p_refresh_expires_at: refreshExpires.toISOString(),
-      p_idle_expires_at: idleExpires.toISOString(), p_absolute_expires_at: absoluteExpires.toISOString(),
+      p_idle_expires_at: idleExpiresIso, p_absolute_expires_at: absoluteExpires.toISOString(),
       p_ip_hash: ip_hash, p_user_agent: user_agent, p_created_by: created_by,
     });
     if (error) throw new E.SessionDependencyUnavailable(error.message || 'erro ao criar sessão');
@@ -103,10 +110,11 @@ function criarSessionService({ supabase, cfg, auditar = async () => {} }) {
     const erro = E.erroDeResultadoRotacao(row.resultado, `rotacao ${row.resultado}`);
     if (erro) throw erro;
 
+    const expiresAtEfetivo = row.novo_expires_at || absoluteExpires.toISOString();
     const accessToken = assinarAccessDaSessao({ session_id: row.session_id, usuario_id: row.usuario_id, role: row.role, is_super_admin: row.is_super_admin });
     return {
       accessToken,
-      refreshDelivery: new RefreshDelivery(novoToken, absoluteExpires.toISOString()),
+      refreshDelivery: new RefreshDelivery(novoToken, expiresAtEfetivo),
       session: { id: row.session_id },
     };
   }
@@ -148,7 +156,9 @@ function criarSessionService({ supabase, cfg, auditar = async () => {} }) {
     }
     if (erroUser) throw new E.SessionDependencyUnavailable(erroUser.message);
     if (!user) throw new E.SessionInvalid('usuário da sessão inexistente');
-    if (user.status === 'bloqueado') throw new E.SessionRevoked('usuário bloqueado');
+    if (!STATUS_USUARIO_AUTENTICAVEL.has(String(user.status || '').toLowerCase())) {
+      throw new E.SessionRevoked(`usuario_status_${user.status || 'ausente'}`);
+    }
 
     await atualizarAtividadeThrottled(sess).catch(() => {}); // best-effort; não bloqueia
 
@@ -168,7 +178,7 @@ function criarSessionService({ supabase, cfg, auditar = async () => {} }) {
     const ultima = new Date(sess.last_activity_at).getTime();
     if (Date.now() - ultima < throttle * 1000) return { atualizado: false };
     const agoraIso = new Date().toISOString();
-    const novoIdleIso = segundosDepois(cfg.refreshIdleTtlSeconds).toISOString();
+    const novoIdleIso = menorDataIso(segundosDepois(cfg.refreshIdleTtlSeconds), sess.absolute_expires_at);
     // Update condicional atômico: só vence uma escrita concorrente; não reativa
     // sessão revogada/expirada (WHERE revoked_at IS NULL e last_activity antiga).
     const corteIso = new Date(Date.now() - throttle * 1000).toISOString();
@@ -181,12 +191,12 @@ function criarSessionService({ supabase, cfg, auditar = async () => {} }) {
   }
 
   async function revogarSessao(sid, motivo = 'logout') {
-    const { error } = await supabase.from('auth_sessions')
+    const { data, error } = await supabase.from('auth_sessions')
       .update({ revoked_at: new Date().toISOString(), revoke_reason: motivo, updated_at: new Date().toISOString() })
-      .eq('id', sid).is('revoked_at', null);
+      .eq('id', sid).is('revoked_at', null).select('id');
     if (error) throw new E.SessionDependencyUnavailable(error.message);
     await auditar({ event: 'sessao_revogada', session_id: sid, resultado: 'ok', motivo }).catch(() => {});
-    return { ok: true };
+    return { ok: true, revogou: Array.isArray(data) && data.length > 0 };
   }
 
   async function revogarTodasDoUsuario(uid, motivo = 'logout_global') {
@@ -200,11 +210,17 @@ function criarSessionService({ supabase, cfg, auditar = async () => {} }) {
 
   /** Revoga UMA sessão do PRÓPRIO usuário (impede tenant/usuário alheio). */
   async function revogarUmaDoUsuario(uid, sid, motivo = 'revogacao_usuario') {
+    const { data: existente, error: erroBusca } = await supabase.from('auth_sessions')
+      .select('id, usuario_id, revoked_at').eq('id', sid).maybeSingle();
+    if (erroBusca) throw new E.SessionDependencyUnavailable(erroBusca.message);
+    if (!existente) return { ok: false, revogou: false, motivo: 'not_found' };
+    if (String(existente.usuario_id) !== String(uid)) throw new E.SessionForbidden('sessao de outro usuario');
+    if (existente.revoked_at) return { ok: true, revogou: false, motivo: 'already_revoked' };
+
     const { data, error } = await supabase.from('auth_sessions')
       .update({ revoked_at: new Date().toISOString(), revoke_reason: motivo, updated_at: new Date().toISOString() })
       .eq('id', sid).eq('usuario_id', uid).is('revoked_at', null).select('id');
     if (error) throw new E.SessionDependencyUnavailable(error.message);
-    // Idempotente: se não afetou linha (já revogada/inexistente/alheia) → ok sem erro.
     return { ok: true, revogou: Array.isArray(data) && data.length > 0 };
   }
 

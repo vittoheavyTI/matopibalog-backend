@@ -4,7 +4,7 @@ import { registrarMotivoSessao } from './utils/sessionReason';
 const api = axios.create({
   // Tente adicionar o /api no final do baseURL se suas rotas do backend usam /api
   baseURL: import.meta.env.VITE_API_URL || 'https://matopibalog-backend-production.up.railway.app',
-  withCredentials: false, // Não depender de cookie; usaremos Bearer token em Authorization
+  withCredentials: true,
   // Timeout de rede: sem ele, uma requisição travada (rede/backend lento) nunca
   // rejeita e o `finally` da página nunca roda → loader infinito. 30s é folgado
   // para as consultas do painel; só rejeita o que de fato travou (vira estado de
@@ -16,6 +16,11 @@ const api = axios.create({
 // Envia Authorization: Bearer <token> em todas as requisições quando presente
 api.interceptors.request.use((config) => {
   try {
+    const url = String(config.url || '');
+    if (url.includes('/auth/refresh')) {
+      if (config.headers) delete (config.headers as any).Authorization;
+      return config;
+    }
     const token = localStorage.getItem('auth_token');
     if (token) {
       config.headers = config.headers || {};
@@ -63,6 +68,7 @@ function motivoPorToken(): 'expired' | 'invalid' {
 // várias requisições falham ao mesmo tempo. Uma resposta 2xx (ex.: novo login)
 // rearma naturalmente o disparo.
 let encerrando = false;
+let refreshEmAndamento: Promise<string | null> | null = null;
 // Debounce do aviso de 429 (rate limit) para não floodar a UI quando várias
 // requisições/polling batem no limite ao mesmo tempo.
 let ultimoAviso429 = 0;
@@ -95,19 +101,68 @@ export function avaliarErroResposta(
   return { sessaoExpirada, rateLimited: status === 429 };
 }
 
+export function podeTentarRefresh({ status, tokenExpiradoInvalido = false, url = '', method = 'get', jaTentou = false }:
+  { status: number; tokenExpiradoInvalido?: boolean; url?: string; method?: string; jaTentou?: boolean },
+): boolean {
+  if (jaTentou) return false;
+  if (url.includes('/auth/login') || url.includes('/auth/refresh') || url.includes('/auth/mobile/refresh')) return false;
+  const metodoSeguro = ['get', 'head', 'options'].includes(method.toLowerCase());
+  if (!metodoSeguro) return false;
+  return status === 401 || (status === 403 && tokenExpiradoInvalido);
+}
+
+async function renovarAccessToken(): Promise<string | null> {
+  if (!refreshEmAndamento) {
+    refreshEmAndamento = api.post('/auth/refresh', undefined, { headers: {}, _sec1Refresh: true } as any)
+      .then((res) => {
+        const token = res.data?.token;
+        if (typeof token === 'string' && token.length > 0) {
+          localStorage.setItem('auth_token', token);
+          return token;
+        }
+        return null;
+      })
+      .catch(() => null)
+      .finally(() => { refreshEmAndamento = null; });
+  }
+  return refreshEmAndamento;
+}
+
 api.interceptors.response.use((response) => {
   encerrando = false;
   return response;
-}, (error) => {
+}, async (error) => {
   const response = error.response;
   // Sem resposta = timeout (ECONNABORTED) / cancelamento (ERR_CANCELED) / rede.
   // NÃO desloga, NÃO faz retry — apenas rejeita para a página tratar como erro
   // recuperável (ou, no caso de cancelamento, ser ignorado pelo hook/reducer).
   if (response) {
     const data: any = response.data;
+    const config: any = error.config || {};
+    const tokenExpiradoInvalido = data?.error === 'Token inválido ou expirado.'
+      || data?.error === 'SessionNotFound'
+      || data?.error === 'SessionRevoked'
+      || data?.error === 'SessionIdleExpired'
+      || data?.error === 'SessionAbsoluteExpired'
+      || data?.error === 'SessionInvalid';
+    if (!config._sec1Refresh && podeTentarRefresh({
+      status: response.status,
+      tokenExpiradoInvalido,
+      url: config.url ?? '',
+      method: config.method ?? 'get',
+      jaTentou: config._sec1Retry === true,
+    })) {
+      const novoToken = await renovarAccessToken();
+      if (novoToken) {
+        config._sec1Retry = true;
+        config.headers = config.headers || {};
+        config.headers.Authorization = `Bearer ${novoToken}`;
+        return api.request(config);
+      }
+    }
     const { sessaoExpirada, rateLimited } = avaliarErroResposta({
       status: response.status,
-      tokenExpiradoInvalido: data?.error === 'Token inválido ou expirado.',
+      tokenExpiradoInvalido,
       url: error.config?.url ?? '',
       pathname: (typeof window !== 'undefined' && window.location?.pathname) || '',
     });

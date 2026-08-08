@@ -41,6 +41,7 @@ const SessionIdleExpired     = definir('SessionIdleExpired', 401, 'Sessão expir
 const SessionAbsoluteExpired = definir('SessionAbsoluteExpired', 401, 'Sessão expirada. Faça login novamente.');
 const SessionInvalid         = definir('SessionInvalid', 401, 'Sessão inválida. Faça login novamente.');
 const SessionConflict        = definir('SessionConflict', 409, 'Conflito de sessão. Tente novamente.');
+const SessionForbidden       = definir('SessionForbidden', 403, 'Você não tem permissão para encerrar esta sessão.');
 // Infra
 const SessionDependencyUnavailable = definir('SessionDependencyUnavailable', 503, 'Serviço de autenticação temporariamente indisponível. Tente novamente em instantes.');
 
@@ -67,7 +68,7 @@ function erroDeResultadoRotacao(resultado, internalCause) {
 module.exports = {
   AuthError,
   RefreshInvalid, RefreshExpired, RefreshRevoked, RefreshAlreadyRotated, RefreshReuseDetected,
-  SessionNotFound, SessionRevoked, SessionIdleExpired, SessionAbsoluteExpired, SessionInvalid, SessionConflict,
+  SessionNotFound, SessionRevoked, SessionIdleExpired, SessionAbsoluteExpired, SessionInvalid, SessionConflict, SessionForbidden,
   SessionDependencyUnavailable,
   erroDeResultadoRotacao,
 };

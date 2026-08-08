@@ -5,6 +5,7 @@ const helmet = require('helmet');
 const multer = require('multer');
 const cookieParser = require('cookie-parser');
 const rateLimit = require('express-rate-limit');
+const { getAuthConfig } = require('./config/authConfig');
 
 const upload = require('./middlewares/upload');
 const authRoutes = require('./routes/auth');
@@ -21,6 +22,7 @@ const termosRoutes = require('./routes/termos');
 const adminTermosRoutes = require('./routes/adminTermos');
 
 const app = express();
+const authConfig = getAuthConfig();
 
 // Necessário para o Railway (proxy reverso) — corrige o express-rate-limit
 app.set('trust proxy', 1);
@@ -186,5 +188,6 @@ app.get('*', (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
+  console.log('[auth] config', authConfig.summary());
   console.log(`🚀 Servidor Matopiba Log rodando na porta ${PORT}`);
 });

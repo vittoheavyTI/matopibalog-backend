@@ -23,6 +23,7 @@ class AuthProvider extends ChangeNotifier {
   // não mais em SharedPreferences (texto claro). Só é persistido quando o
   // usuário marca "Manter conectado neste aparelho".
   static const _tokenKey = 'token';
+  static const _refreshTokenKey = 'refresh_token';
   final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
 
   // Chaves não sensíveis (nome/role/uid/tipo) seguem em SharedPreferences,
@@ -139,6 +140,7 @@ class AuthProvider extends ChangeNotifier {
   Future<void> _limparSessao(SharedPreferences prefs) async {
     ApiService.clearSessionToken();
     await _secureStorage.delete(key: _tokenKey);
+    await _secureStorage.delete(key: _refreshTokenKey);
     await prefs.remove('token'); // legado em texto claro
     for (final k in _prefKeysSessao) {
       await prefs.remove(k);
@@ -205,6 +207,7 @@ class AuthProvider extends ChangeNotifier {
 
     final prefs = await SharedPreferences.getInstance();
     _token = res['token'];
+    final refreshToken = res['refresh_token'] as String?;
     _nome = res['user']['nome'];
     _role = userRole!; // garantido 'motorista' pela allowlist acima
     _uid = res['user']['uid'];
@@ -215,11 +218,17 @@ class AuthProvider extends ChangeNotifier {
     // Token disponível em memória para a sessão atual, independentemente de
     // persistir ou não. A senha NUNCA é armazenada.
     ApiService.setSessionToken(_token);
+    if (refreshToken != null && refreshToken.isNotEmpty) {
+      ApiService.setRefreshToken(refreshToken);
+    }
 
     if (manterConectado) {
       // Persiste a sessão de forma segura: token no secure storage,
       // dados não sensíveis em SharedPreferences (para restaurar a UI).
       await _secureStorage.write(key: _tokenKey, value: _token);
+      if (refreshToken != null && refreshToken.isNotEmpty) {
+        await _secureStorage.write(key: _refreshTokenKey, value: refreshToken);
+      }
       await prefs.setString('user_role', _role);
       await prefs.setString('user_nome', _nome);
       await prefs.setString('user_uid', _uid);
@@ -230,6 +239,9 @@ class AuthProvider extends ChangeNotifier {
       await _limparSessao(prefs);
       // Mantém o token em memória só para esta sessão (limpo por _limparSessao acima).
       ApiService.setSessionToken(_token);
+      if (refreshToken != null && refreshToken.isNotEmpty) {
+        ApiService.setRefreshToken(refreshToken);
+      }
     }
 
     // O /auth/login NÃO retorna termos_pendentes (só /auth/me calcula). Busca o
