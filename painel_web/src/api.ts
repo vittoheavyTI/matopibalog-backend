@@ -68,7 +68,14 @@ function motivoPorToken(): 'expired' | 'invalid' {
 // várias requisições falham ao mesmo tempo. Uma resposta 2xx (ex.: novo login)
 // rearma naturalmente o disparo.
 let encerrando = false;
-let refreshEmAndamento: Promise<string | null> | null = null;
+type ResultadoRefresh =
+  | { kind: 'success'; token: string }
+  | { kind: 'collision'; token: string | null }
+  | { kind: 'definitive' }
+  | { kind: 'transient' }
+  | { kind: 'invalid_response' };
+
+let refreshEmAndamento: Promise<ResultadoRefresh> | null = null;
 // Debounce do aviso de 429 (rate limit) para não floodar a UI quando várias
 // requisições/polling batem no limite ao mesmo tempo.
 let ultimoAviso429 = 0;
@@ -111,18 +118,62 @@ export function podeTentarRefresh({ status, tokenExpiradoInvalido = false, url =
   return status === 401 || (status === 403 && tokenExpiradoInvalido);
 }
 
-async function renovarAccessToken(): Promise<string | null> {
+const refreshDefinitivo = new Set([
+  'RefreshReuseDetected',
+  'RefreshInvalid',
+  'RefreshExpired',
+  'RefreshRevoked',
+  'SessionInvalid',
+  'SessionNotFound',
+  'SessionRevoked',
+  'SessionIdleExpired',
+  'SessionAbsoluteExpired',
+]);
+
+export function classificarFalhaRefreshWeb(status: number, error?: string): ResultadoRefresh['kind'] {
+  if (error === 'RefreshAlreadyRotated') return 'collision';
+  if (refreshDefinitivo.has(String(error || ''))) return 'definitive';
+  if (error === 'SessionConflict') return 'transient';
+  if (status === 408 || status === 429 || status >= 500) return 'transient';
+  if (status === 401 || status === 403) return 'definitive';
+  return 'invalid_response';
+}
+
+export async function aguardarTokenPublicadoAposColisao(
+  tokenAntes: string | null,
+  lerToken: () => string | null = () => localStorage.getItem('auth_token'),
+  esperar: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+): Promise<string | null> {
+  for (let tentativa = 0; tentativa < 3; tentativa++) {
+    const tokenAtual = lerToken();
+    if (tokenAtual && tokenAtual !== tokenAntes) return tokenAtual;
+    if (tentativa < 2) await esperar(40);
+  }
+  return null;
+}
+
+async function renovarAccessToken(): Promise<ResultadoRefresh> {
   if (!refreshEmAndamento) {
+    const tokenAntes = localStorage.getItem('auth_token');
     refreshEmAndamento = api.post('/auth/refresh', undefined, { headers: {}, _sec1Refresh: true } as any)
       .then((res) => {
         const token = res.data?.token;
         if (typeof token === 'string' && token.length > 0) {
           localStorage.setItem('auth_token', token);
-          return token;
+          return { kind: 'success', token } as ResultadoRefresh;
         }
-        return null;
+        return { kind: 'invalid_response' } as ResultadoRefresh;
       })
-      .catch(() => null)
+      .catch(async (err) => {
+        const status = err?.response?.status ?? 0;
+        const error = err?.response?.data?.error;
+        const kind = classificarFalhaRefreshWeb(status, error);
+        if (kind === 'collision') {
+          const token = await aguardarTokenPublicadoAposColisao(tokenAntes);
+          return { kind: 'collision', token } as ResultadoRefresh;
+        }
+        return { kind } as ResultadoRefresh;
+      })
       .finally(() => { refreshEmAndamento = null; });
   }
   return refreshEmAndamento;
@@ -152,12 +203,16 @@ api.interceptors.response.use((response) => {
       method: config.method ?? 'get',
       jaTentou: config._sec1Retry === true,
     })) {
-      const novoToken = await renovarAccessToken();
-      if (novoToken) {
+      const refresh = await renovarAccessToken();
+      if (refresh.kind === 'success' || (refresh.kind === 'collision' && refresh.token)) {
+        const novoToken = refresh.token;
         config._sec1Retry = true;
         config.headers = config.headers || {};
         config.headers.Authorization = `Bearer ${novoToken}`;
         return api.request(config);
+      }
+      if (refresh.kind === 'collision' || refresh.kind === 'transient') {
+        config._sec1RefreshRecoverable = true;
       }
     }
     const { sessaoExpirada, rateLimited } = avaliarErroResposta({
@@ -166,7 +221,7 @@ api.interceptors.response.use((response) => {
       url: error.config?.url ?? '',
       pathname: (typeof window !== 'undefined' && window.location?.pathname) || '',
     });
-    if (sessaoExpirada && !encerrando) {
+    if (sessaoExpirada && !encerrando && !config._sec1RefreshRecoverable) {
       encerrando = true;
       registrarMotivoSessao(motivoPorToken());
       window.dispatchEvent(new Event('auth:unauthorized'));

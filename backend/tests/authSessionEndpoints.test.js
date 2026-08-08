@@ -99,12 +99,31 @@ test('web refresh sem cookie → 401; sem origem/referer → 403', async () => {
   assert.equal((await post('/auth/refresh', { cookie: `refresh_token=${RT_ANTIGO}` })).status, 403);
 });
 
-test('web refresh reuse → 401 e limpa cookie', async () => {
+test('web refresh reuse -> 401 e limpa cookie', async () => {
   rotacaoResultado = 'reuse_detected';
   const r = await post('/auth/refresh', { cookie: `refresh_token=${RT_ANTIGO}`, headers: { origin: 'https://matopibalog.com.br' } });
   assert.equal(r.status, 401);
   const setCookie = r.headers.get('set-cookie') || '';
   assert.ok(/refresh_token=/.test(setCookie), 'deve limpar o cookie de refresh');
+});
+
+test('web refresh RefreshAlreadyRotated -> 409 recuperavel e NAO limpa cookie', async () => {
+  rotacaoResultado = 'refresh_already_rotated';
+  const r = await post('/auth/refresh', { cookie: `refresh_token=${RT_ANTIGO}`, headers: { origin: 'https://matopibalog.com.br' } });
+  assert.equal(r.status, 409);
+  const j = await r.json();
+  assert.equal(j.error, 'RefreshAlreadyRotated');
+  const setCookie = r.headers.get('set-cookie') || '';
+  assert.equal(setCookie, '', 'colisao dentro da grace nao deve limpar cookie');
+});
+
+test('mobile refresh RefreshAlreadyRotated -> 409 recuperavel com codigo de dominio', async () => {
+  rotacaoResultado = 'refresh_already_rotated';
+  const r = await post('/auth/mobile/refresh', { body: { refresh_token: RT_ANTIGO } });
+  assert.equal(r.status, 409);
+  const j = await r.json();
+  assert.equal(j.error, 'RefreshAlreadyRotated');
+  assert.equal(r.headers.get('cache-control'), 'no-store');
 });
 
 test('logout → 200, revoga sessão atual e limpa cookie (idempotente)', async () => {

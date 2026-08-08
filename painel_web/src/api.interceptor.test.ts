@@ -1,5 +1,10 @@
 import { describe, test, expect } from 'vitest';
-import { avaliarErroResposta, podeTentarRefresh } from './api';
+import {
+  aguardarTokenPublicadoAposColisao,
+  avaliarErroResposta,
+  classificarFalhaRefreshWeb,
+  podeTentarRefresh,
+} from './api';
 
 // Decisão pura do interceptor de resposta (comportamento de sessão/rate-limit).
 // Erros SEM resposta (timeout/cancelamento) não passam por esta função — o
@@ -36,6 +41,43 @@ describe('avaliarErroResposta (interceptor)', () => {
     const r = avaliarErroResposta({ status: 500 });
     expect(r.sessaoExpirada).toBe(false);
     expect(r.rateLimited).toBe(false);
+  });
+});
+
+describe('refresh web SEC-1 — colisao entre abas', () => {
+  test('RefreshAlreadyRotated e recuperavel, nao definitivo', () => {
+    expect(classificarFalhaRefreshWeb(409, 'RefreshAlreadyRotated')).toBe('collision');
+    expect(classificarFalhaRefreshWeb(401, 'RefreshReuseDetected')).toBe('definitive');
+    expect(classificarFalhaRefreshWeb(409, 'SessionConflict')).toBe('transient');
+    expect(classificarFalhaRefreshWeb(409, 'Outro409')).toBe('invalid_response');
+  });
+
+  test('duas abas: perdedora relê o novo access publicado pela vencedora', async () => {
+    const leituras = ['access-antigo', 'access-novo'];
+    let chamadas = 0;
+    const token = await aguardarTokenPublicadoAposColisao(
+      'access-antigo',
+      () => leituras[Math.min(chamadas++, leituras.length - 1)],
+      async () => {},
+    );
+
+    expect(token).toBe('access-novo');
+    expect(chamadas).toBe(2);
+  });
+
+  test('RefreshAlreadyRotated sem token novo tem releituras limitadas e nao limpa sessao', async () => {
+    let chamadas = 0;
+    const token = await aguardarTokenPublicadoAposColisao(
+      'access-antigo',
+      () => {
+        chamadas++;
+        return 'access-antigo';
+      },
+      async () => {},
+    );
+
+    expect(token).toBeNull();
+    expect(chamadas).toBe(3);
   });
 });
 

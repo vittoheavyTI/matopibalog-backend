@@ -29,6 +29,7 @@ enum SessionPersistence { persistent, memoryOnly }
 enum RefreshFailureKind {
   none,
   noRefreshToken,
+  collisionRecoverable,
   definitive,
   transient,
   invalidResponse,
@@ -48,25 +49,27 @@ class AuthRefreshResult {
   });
 
   const AuthRefreshResult.refreshed(Map<String, dynamic> data)
-    : this._(
-        refreshed: true,
-        data: data,
-        status: 200,
-        failureKind: RefreshFailureKind.none,
-      );
+      : this._(
+          refreshed: true,
+          data: data,
+          status: 200,
+          failureKind: RefreshFailureKind.none,
+        );
 
   const AuthRefreshResult.failed({
     required int status,
     required RefreshFailureKind failureKind,
   }) : this._(
-         refreshed: false,
-         data: null,
-         status: status,
-         failureKind: failureKind,
-       );
+          refreshed: false,
+          data: null,
+          status: status,
+          failureKind: failureKind,
+        );
 
   bool get shouldEndSession => failureKind == RefreshFailureKind.definitive;
   bool get isTransient => failureKind == RefreshFailureKind.transient;
+  bool get isCollisionRecoverable =>
+      failureKind == RefreshFailureKind.collisionRecoverable;
 }
 
 class LogoutRemotoResult {
@@ -274,10 +277,94 @@ class ApiService {
   }
 
   static bool _isAuthResponse(int status) => status == 401 || status == 403;
-  static bool _isDefinitiveRefreshFailure(int status) =>
-      status == 400 || status == 401 || status == 403 || status == 409;
   static bool _isTransientRefreshFailure(int status) =>
       status == 0 || status == 408 || status == 429 || status >= 500;
+
+  static const Set<String> _refreshDefinitiveErrors = {
+    'RefreshReuseDetected',
+    'RefreshInvalid',
+    'RefreshExpired',
+    'RefreshRevoked',
+    'SessionInvalid',
+    'SessionNotFound',
+    'SessionRevoked',
+    'SessionIdleExpired',
+    'SessionAbsoluteExpired',
+  };
+
+  static Map<String, dynamic> _decodeJsonMap(String body) {
+    if (body.isEmpty) return <String, dynamic>{};
+    try {
+      final decoded = jsonDecode(body);
+      return decoded is Map
+          ? Map<String, dynamic>.from(decoded)
+          : <String, dynamic>{};
+    } catch (_) {
+      return <String, dynamic>{};
+    }
+  }
+
+  static RefreshFailureKind _classificarRefreshFalho(
+    int status,
+    Map<String, dynamic> body,
+  ) {
+    final error = body['error']?.toString();
+    if (error == 'RefreshAlreadyRotated') {
+      return RefreshFailureKind.collisionRecoverable;
+    }
+    if (_refreshDefinitiveErrors.contains(error)) {
+      return RefreshFailureKind.definitive;
+    }
+    if (error == 'SessionConflict') {
+      return RefreshFailureKind.transient;
+    }
+    if (_isTransientRefreshFailure(status)) {
+      return RefreshFailureKind.transient;
+    }
+    if (status == 401 || status == 403) {
+      return RefreshFailureKind.definitive;
+    }
+    return RefreshFailureKind.invalidResponse;
+  }
+
+  static Future<AuthRefreshResult> _recuperarColisaoRefresh({
+    required String refreshApresentado,
+    required int status,
+  }) async {
+    if (_sessionPersistence != SessionPersistence.persistent) {
+      return AuthRefreshResult.failed(
+        status: status,
+        failureKind: RefreshFailureKind.collisionRecoverable,
+      );
+    }
+
+    for (var tentativa = 0; tentativa < 3; tentativa++) {
+      final accessPersistido = await _secureStorage.read(key: _tokenKey);
+      final refreshPersistido =
+          await _secureStorage.read(key: _refreshTokenKey);
+      if (accessPersistido != null &&
+          accessPersistido.isNotEmpty &&
+          refreshPersistido != null &&
+          refreshPersistido.isNotEmpty &&
+          refreshPersistido != refreshApresentado) {
+        _sessionToken = accessPersistido;
+        _refreshToken = refreshPersistido;
+        return AuthRefreshResult.refreshed({
+          'token': accessPersistido,
+          'refresh_token': refreshPersistido,
+          '_collision_recovered': true,
+        });
+      }
+      if (tentativa < 2) {
+        await Future<void>.delayed(const Duration(milliseconds: 40));
+      }
+    }
+
+    return AuthRefreshResult.failed(
+      status: status,
+      failureKind: RefreshFailureKind.collisionRecoverable,
+    );
+  }
 
   static Future<http.Response> _sendJsonRequest(
     String method,
@@ -318,8 +405,7 @@ class ApiService {
     bool retryAfterAuthResponse = false,
   }) async {
     final upperMethod = method.toUpperCase();
-    final safeReadRetry =
-        upperMethod == 'GET' ||
+    final safeReadRetry = upperMethod == 'GET' ||
         upperMethod == 'HEAD' ||
         upperMethod == 'OPTIONS';
     final canRetryAfterAuthResponse = safeReadRetry || retryAfterAuthResponse;
@@ -350,46 +436,50 @@ class ApiService {
   static Future<http.Response> _getAutenticado(
     Uri uri, {
     Duration timeout = _timeoutGet,
-  }) => _authenticatedJsonRequest('GET', uri, timeout: timeout);
+  }) =>
+      _authenticatedJsonRequest('GET', uri, timeout: timeout);
 
   static Future<http.Response> _postJsonAutenticado(
     Uri uri, {
     Object? body,
     Duration timeout = _timeoutPostJson,
     bool retryAfterAuthResponse = false,
-  }) => _authenticatedJsonRequest(
-    'POST',
-    uri,
-    body: body,
-    timeout: timeout,
-    retryAfterAuthResponse: retryAfterAuthResponse,
-  );
+  }) =>
+      _authenticatedJsonRequest(
+        'POST',
+        uri,
+        body: body,
+        timeout: timeout,
+        retryAfterAuthResponse: retryAfterAuthResponse,
+      );
 
   static Future<http.Response> _patchJsonAutenticado(
     Uri uri, {
     Object? body,
     Duration timeout = _timeoutPostJson,
     bool retryAfterAuthResponse = false,
-  }) => _authenticatedJsonRequest(
-    'PATCH',
-    uri,
-    body: body,
-    timeout: timeout,
-    retryAfterAuthResponse: retryAfterAuthResponse,
-  );
+  }) =>
+      _authenticatedJsonRequest(
+        'PATCH',
+        uri,
+        body: body,
+        timeout: timeout,
+        retryAfterAuthResponse: retryAfterAuthResponse,
+      );
 
   static Future<http.Response> _deleteJsonAutenticado(
     Uri uri, {
     Object? body,
     Duration timeout = _timeoutPostJson,
     bool retryAfterAuthResponse = false,
-  }) => _authenticatedJsonRequest(
-    'DELETE',
-    uri,
-    body: body,
-    timeout: timeout,
-    retryAfterAuthResponse: retryAfterAuthResponse,
-  );
+  }) =>
+      _authenticatedJsonRequest(
+        'DELETE',
+        uri,
+        body: body,
+        timeout: timeout,
+        retryAfterAuthResponse: retryAfterAuthResponse,
+      );
 
   // AUTH
   static Future<Map<String, dynamic>?> login(String email, String senha) async {
@@ -453,12 +543,10 @@ class ApiService {
         ? categoria.trim()
         : '';
     // Cache segmentado por categoria: o catálogo do autônomo difere do geral.
-    final cacheKey = filtro.isEmpty
-        ? _planosCacheKey
-        : '${_planosCacheKey}_$filtro';
-    final cacheAtKey = filtro.isEmpty
-        ? _planosCacheAtKey
-        : '${_planosCacheAtKey}_$filtro';
+    final cacheKey =
+        filtro.isEmpty ? _planosCacheKey : '${_planosCacheKey}_$filtro';
+    final cacheAtKey =
+        filtro.isEmpty ? _planosCacheAtKey : '${_planosCacheAtKey}_$filtro';
     final prefs = await SharedPreferences.getInstance();
     final agora = DateTime.now();
     final cacheRaw = prefs.getString(cacheKey);
@@ -496,23 +584,20 @@ class ApiService {
     }
 
     try {
-      final response = await http
-          .get(
-            Uri.parse(
-              '$_baseUrl/planos/publicos${filtro.isEmpty ? '' : '?categoria=$filtro'}',
-            ),
-            headers: {'Content-Type': 'application/json'},
-          )
-          .timeout(_timeoutGet);
+      final response = await http.get(
+        Uri.parse(
+          '$_baseUrl/planos/publicos${filtro.isEmpty ? '' : '?categoria=$filtro'}',
+        ),
+        headers: {'Content-Type': 'application/json'},
+      ).timeout(_timeoutGet);
 
       if (response.statusCode != 200) {
         throw Exception('Catálogo indisponível (${response.statusCode}).');
       }
 
       final decoded = jsonDecode(response.body);
-      final planosRaw = decoded is Map<String, dynamic>
-          ? decoded['planos']
-          : null;
+      final planosRaw =
+          decoded is Map<String, dynamic> ? decoded['planos'] : null;
       if (planosRaw is! List) {
         throw Exception('Resposta inválida do catálogo de planos.');
       }
@@ -685,9 +770,7 @@ class ApiService {
       );
 
       if (response.statusCode == 200) {
-        final decoded = Map<String, dynamic>.from(
-          jsonDecode(response.body) as Map,
-        );
+        final decoded = _decodeJsonMap(response.body);
         final token = decoded['token'] as String?;
         final novoRefresh = decoded['refresh_token'] as String?;
         if (token != null &&
@@ -707,19 +790,27 @@ class ApiService {
         );
       }
 
-      if (_isDefinitiveRefreshFailure(response.statusCode)) {
+      final body = _decodeJsonMap(response.body);
+      final failureKind = _classificarRefreshFalho(response.statusCode, body);
+
+      if (failureKind == RefreshFailureKind.collisionRecoverable) {
+        return _recuperarColisaoRefresh(
+          refreshApresentado: refresh,
+          status: response.statusCode,
+        );
+      }
+
+      if (failureKind == RefreshFailureKind.definitive) {
         await clearPersistedSession();
         return AuthRefreshResult.failed(
           status: response.statusCode,
-          failureKind: RefreshFailureKind.definitive,
+          failureKind: failureKind,
         );
       }
 
       return AuthRefreshResult.failed(
         status: response.statusCode,
-        failureKind: _isTransientRefreshFailure(response.statusCode)
-            ? RefreshFailureKind.transient
-            : RefreshFailureKind.invalidResponse,
+        failureKind: failureKind,
       );
     } catch (e) {
       AppLogger.error('ApiService', 'POST /auth/mobile/refresh exception', e);
@@ -746,21 +837,18 @@ class ApiService {
     }
 
     try {
-      final response = await _httpClient
-          .post(
-            Uri.parse('$_baseUrl/auth/logout'),
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': 'Bearer $token',
-            },
-          )
-          .timeout(_timeoutPostJson);
+      final response = await _httpClient.post(
+        Uri.parse('$_baseUrl/auth/logout'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      ).timeout(_timeoutPostJson);
       AppLogger.api('ApiService', 'POST /auth/logout', response.statusCode);
       return LogoutRemotoResult(
         confirmado: response.statusCode == 200,
         status: response.statusCode,
-        transitorio:
-            response.statusCode == 408 ||
+        transitorio: response.statusCode == 408 ||
             response.statusCode == 429 ||
             response.statusCode >= 500,
       );
@@ -807,7 +895,7 @@ class ApiService {
   /// descartada — ou definitiva (401/403 = token inválido/expirado).
   /// `status`: 200 sucesso · 0 exceção de rede/timeout · demais = HTTP recebido.
   static Future<({Map<String, dynamic>? profile, int status})>
-  getMeDetalhado() async {
+      getMeDetalhado() async {
     try {
       final response = await _getAutenticado(Uri.parse('$_baseUrl/auth/me'));
       AppLogger.api('ApiService', 'GET /auth/me', response.statusCode);
@@ -910,8 +998,7 @@ class ApiService {
       }
       return {
         'ok': false,
-        'message':
-            body['message'] ??
+        'message': body['message'] ??
             'Não foi possível gerar a fatura agora. Tente novamente em instantes.',
       };
     } catch (e) {
