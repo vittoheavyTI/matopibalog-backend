@@ -492,7 +492,8 @@ test('SEC-1 browser isolado: cookie web, refresh, duas abas, logout, CSRF, CORS,
     const { result, loginResponse } = await loginInPage(page);
     expect(result.data.refresh_token).toBeUndefined();
     expect(result.refreshTokenInLocalStorage).toBeNull();
-    expect(result.token).toBeTruthy();
+    expect(result.data.token).toBeTruthy();
+    expect(await page.evaluate(() => (window as any).sec1.authToken())).toBe(result.data.token);
 
     const setCookie = loginResponse.headers()['set-cookie'] || '';
     expect(setCookie).toContain('refresh_token=');
