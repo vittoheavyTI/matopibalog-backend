@@ -22,26 +22,29 @@ O modo strict fica fora do Gate A.
 - Conta/sess√£o de homologa√ß√£o dispon√≠vel para prova web e mobile.
 - Janela de observa√ß√£o definida antes de qualquer merge/deploy.
 
-## Vari√°veis de ambiente
+## Vari·veis de ambiente
 
-Valores propostos no Gate A, sem segredos no reposit√≥rio:
+Valores propostos no Gate A, sem segredos no repositÛrio. Valores atuais devem ser confirmados no Railway antes da execuÁ„o do Gate A; o PR n„o consulta nem altera secrets compartilhados.
 
-- `JWT_SECRET`: j√° existente, obrigat√≥rio.
-- `AUTH_SESSIONS_ENABLED=true`
-- `AUTH_REFRESH_ROTATION_ENABLED=true`
-- `AUTH_REQUIRE_SESSION=false`
-- `AUTH_ALLOW_LEGACY_TOKENS=true`
-- `AUTH_REFRESH_TOKEN_PEPPER`: novo segredo forte, backend-only.
-- `AUTH_WEB_ALLOWED_ORIGINS`: origens oficiais do painel web, separadas por v√≠rgula.
-- `AUTH_ISSUER`: valor oficial do backend.
-- `AUTH_AUDIENCE`: valor oficial dos clientes Matopiba.
-- `AUTH_ACCESS_TOKEN_TTL_SECONDS`
-- `AUTH_REFRESH_IDLE_TTL_SECONDS`
-- `AUTH_REFRESH_ABSOLUTE_TTL_SECONDS`
-- `AUTH_REFRESH_REUSE_GRACE_SECONDS`
-- `AUTH_SESSION_ACTIVITY_THROTTLE_SECONDS`
+| VAR | Valor atual esperado prÈ-Gate A | Valor compatible proposto | SensÌvel? | Onde configurar | Rollback |
+| --- | --- | --- | --- | --- | --- |
+| `JWT_SECRET` | Existente no Railway | Manter valor atual | Sim | Railway backend env | Manter valor atual; n„o rotacionar no Gate A |
+| `AUTH_SESSIONS_ENABLED` | ausente ou `false` | `true` | N„o | Railway backend env | `false` |
+| `AUTH_REFRESH_ROTATION_ENABLED` | ausente ou `false` | `true` | N„o | Railway backend env | `false` |
+| `AUTH_REQUIRE_SESSION` | ausente ou `false` | `false` | N„o | Railway backend env | `false` |
+| `AUTH_ALLOW_LEGACY_TOKENS` | ausente ou `true` | `true` | N„o | Railway backend env | `true` |
+| `AUTH_REFRESH_TOKEN_PEPPER` | ausente | novo segredo forte backend-only | Sim | Railway backend env | Remover/desabilitar junto com `AUTH_SESSIONS_ENABLED=false` |
+| `AUTH_WEB_ALLOWED_ORIGINS` | default do cÛdigo se ausente | `https://matopibalog.com.br` e origens de preview/homologaÁ„o aprovadas | N„o, mas operacionalmente sensÌvel | Railway backend env | Voltar ao valor anterior/default aprovado |
+| `AUTH_TOKEN_ISSUER` | default `matopibalog` se ausente | `matopibalog` ou valor oficial aprovado | N„o | Railway backend env | Voltar ao valor anterior |
+| `AUTH_TOKEN_AUDIENCE` | default `matopibalog-clients` se ausente | `matopibalog-clients` ou valor oficial aprovado | N„o | Railway backend env | Voltar ao valor anterior |
+| `AUTH_ACCESS_TOKEN_TTL_SECONDS` | default `600` se ausente | `600` | N„o | Railway backend env | Voltar ao valor anterior/default |
+| `AUTH_REFRESH_IDLE_TTL_SECONDS` | default `1800` se ausente | valor aprovado, respeitando `<= AUTH_REFRESH_ABSOLUTE_TTL_SECONDS` | N„o | Railway backend env | Voltar ao valor anterior/default |
+| `AUTH_REFRESH_ABSOLUTE_TTL_SECONDS` | default `2592000` se ausente | valor aprovado para validade absoluta | N„o | Railway backend env | Voltar ao valor anterior/default |
+| `AUTH_REFRESH_REUSE_GRACE_SECONDS` | default `10` se ausente | `10` ou ajuste aprovado entre `0` e `300` | N„o | Railway backend env | Voltar ao valor anterior/default |
+| `AUTH_SESSION_ACTIVITY_THROTTLE_SECONDS` | default `60` se ausente | `60` | N„o | Railway backend env | Voltar ao valor anterior/default |
+| `VITE_API_URL` | Secret usado pelo Pages build | Manter apontando para backend aprovado do Gate A/ambiente isolado | N„o secreto, mas configura deploy web | GitHub Actions secret Pages | Voltar ao endpoint anterior |
 
-## Ordem de execu√ß√£o
+## Ordem de execuÁ„o
 
 1. Confirmar SHA do PR, SHA de `origin/main` e diff final.
 2. Executar todas as su√≠tes locais poss√≠veis.
