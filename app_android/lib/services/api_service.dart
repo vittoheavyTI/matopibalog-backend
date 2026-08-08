@@ -24,6 +24,63 @@ class ApiException implements Exception {
   String toString() => message;
 }
 
+enum SessionPersistence { persistent, memoryOnly }
+
+enum RefreshFailureKind {
+  none,
+  noRefreshToken,
+  definitive,
+  transient,
+  invalidResponse,
+}
+
+class AuthRefreshResult {
+  final bool refreshed;
+  final Map<String, dynamic>? data;
+  final int status;
+  final RefreshFailureKind failureKind;
+
+  const AuthRefreshResult._({
+    required this.refreshed,
+    required this.data,
+    required this.status,
+    required this.failureKind,
+  });
+
+  const AuthRefreshResult.refreshed(Map<String, dynamic> data)
+    : this._(
+        refreshed: true,
+        data: data,
+        status: 200,
+        failureKind: RefreshFailureKind.none,
+      );
+
+  const AuthRefreshResult.failed({
+    required int status,
+    required RefreshFailureKind failureKind,
+  }) : this._(
+         refreshed: false,
+         data: null,
+         status: status,
+         failureKind: failureKind,
+       );
+
+  bool get shouldEndSession => failureKind == RefreshFailureKind.definitive;
+  bool get isTransient => failureKind == RefreshFailureKind.transient;
+}
+
+class LogoutRemotoResult {
+  final bool confirmado;
+  final int status;
+  final bool transitorio;
+
+  const LogoutRemotoResult({
+    required this.confirmado,
+    required this.status,
+    required this.transitorio,
+  });
+}
+
 class ApiService {
   static const String _baseUrl = Config.apiBaseUrl;
 
@@ -64,6 +121,9 @@ class ApiService {
   /// aparelho") é responsabilidade do AuthProvider, via flutter_secure_storage.
   static String? _sessionToken;
   static String? _refreshToken;
+  static SessionPersistence _sessionPersistence = SessionPersistence.memoryOnly;
+  static Future<AuthRefreshResult>? _refreshInFlight;
+  static http.Client _httpClient = http.Client();
 
   // Timeouts de rede. Sem eles, requisições em conexões lentas (4G/5G fraco) ou
   // com o backend "frio" (cold start do Railway) ficavam penduradas
@@ -101,13 +161,59 @@ class ApiService {
         final msg = decoded['message'] ?? decoded['error'];
         if (msg is String && msg.trim().isNotEmpty) return msg.trim();
       }
-    } catch (_) {/* body não-JSON: usa mensagem genérica */}
+    } catch (_) {
+      /* body não-JSON: usa mensagem genérica */
+    }
     return 'Não foi possível carregar seus dados agora. Tente novamente em instantes.';
   }
 
   /// Define o token usado nas requisições autenticadas da sessão atual.
   static void setSessionToken(String token) => _sessionToken = token;
   static void setRefreshToken(String token) => _refreshToken = token;
+
+  static void setSessionPersistence(SessionPersistence persistence) {
+    _sessionPersistence = persistence;
+  }
+
+  static Future<void> setSessionTokens({
+    required String accessToken,
+    String? refreshToken,
+    required SessionPersistence persistence,
+  }) async {
+    _sessionToken = accessToken;
+    _refreshToken = refreshToken;
+    _sessionPersistence = persistence;
+
+    if (persistence == SessionPersistence.persistent) {
+      await _secureStorage.write(key: _tokenKey, value: accessToken);
+      if (refreshToken != null && refreshToken.isNotEmpty) {
+        await _secureStorage.write(key: _refreshTokenKey, value: refreshToken);
+      }
+    } else {
+      await _secureStorage.delete(key: _tokenKey);
+      await _secureStorage.delete(key: _refreshTokenKey);
+    }
+  }
+
+  static Future<void> clearPersistedSession() async {
+    clearSessionToken();
+    await _secureStorage.delete(key: _tokenKey);
+    await _secureStorage.delete(key: _refreshTokenKey);
+  }
+
+  @visibleForTesting
+  static void setHttpClientForTesting(http.Client client) {
+    _httpClient = client;
+  }
+
+  @visibleForTesting
+  static void resetForTesting() {
+    _sessionToken = null;
+    _refreshToken = null;
+    _refreshInFlight = null;
+    _sessionPersistence = SessionPersistence.memoryOnly;
+    _httpClient = http.Client();
+  }
 
   static String get baseUrl => _baseUrl;
 
@@ -117,6 +223,7 @@ class ApiService {
       token = await _secureStorage.read(key: _tokenKey);
       if (token != null && token.isNotEmpty) {
         _sessionToken = token;
+        _sessionPersistence = SessionPersistence.persistent;
       }
     }
     return token;
@@ -126,6 +233,8 @@ class ApiService {
   static void clearSessionToken() {
     _sessionToken = null;
     _refreshToken = null;
+    _refreshInFlight = null;
+    _sessionPersistence = SessionPersistence.memoryOnly;
   }
 
   static Future<String?> currentRefreshToken() async {
@@ -134,6 +243,7 @@ class ApiService {
       token = await _secureStorage.read(key: _refreshTokenKey);
       if (token != null && token.isNotEmpty) {
         _refreshToken = token;
+        _sessionPersistence = SessionPersistence.persistent;
       }
     }
     return token;
@@ -153,28 +263,139 @@ class ApiService {
   // isolates (backed por Keystore/EncryptedSharedPreferences no Android),
   // então recuperamos o token persistido quando "Manter conectado" está
   // marcado. Se o usuário não persistiu a sessão, não há token e a
-  // requisição segue sem Authorization (comportamento aceitável).
+  // requisição segue sem Authorization (comportamento aceitável). Sessões
+  // memoryOnly não viram persistentes para sustentar tarefas em background.
   static Future<Map<String, String>> _getHeaders() async {
-    var token = _sessionToken;
-    if (token == null || token.isEmpty) {
-      token = await _secureStorage.read(key: _tokenKey);
-      // Aproveita para popular a memória deste isolate, evitando reler o
-      // secure storage a cada requisição subsequente.
-      if (token != null && token.isNotEmpty) {
-        _sessionToken = token;
-      }
-    }
+    final token = await currentSessionToken();
     return {
       'Content-Type': 'application/json',
       if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
     };
   }
 
+  static bool _isAuthResponse(int status) => status == 401 || status == 403;
+  static bool _isDefinitiveRefreshFailure(int status) =>
+      status == 400 || status == 401 || status == 403 || status == 409;
+  static bool _isTransientRefreshFailure(int status) =>
+      status == 0 || status == 408 || status == 429 || status >= 500;
+
+  static Future<http.Response> _sendJsonRequest(
+    String method,
+    Uri uri,
+    Map<String, String> headers, {
+    Object? body,
+    Duration timeout = _timeoutGet,
+  }) {
+    final upperMethod = method.toUpperCase();
+    final encodedBody = body == null ? null : jsonEncode(body);
+    Future<http.Response> request;
+    switch (upperMethod) {
+      case 'GET':
+        request = _httpClient.get(uri, headers: headers);
+        break;
+      case 'POST':
+        request = _httpClient.post(uri, headers: headers, body: encodedBody);
+        break;
+      case 'PATCH':
+        request = _httpClient.patch(uri, headers: headers, body: encodedBody);
+        break;
+      case 'DELETE':
+        request = _httpClient.delete(uri, headers: headers, body: encodedBody);
+        break;
+      default:
+        final fallback = http.Request(upperMethod, uri)
+          ..headers.addAll(headers);
+        request = _httpClient.send(fallback).then(http.Response.fromStream);
+    }
+    return request.timeout(timeout);
+  }
+
+  static Future<http.Response> _authenticatedJsonRequest(
+    String method,
+    Uri uri, {
+    Object? body,
+    Duration timeout = _timeoutGet,
+    bool retryAfterAuthResponse = false,
+  }) async {
+    final upperMethod = method.toUpperCase();
+    final safeReadRetry =
+        upperMethod == 'GET' ||
+        upperMethod == 'HEAD' ||
+        upperMethod == 'OPTIONS';
+    final canRetryAfterAuthResponse = safeReadRetry || retryAfterAuthResponse;
+
+    final response = await _sendJsonRequest(
+      upperMethod,
+      uri,
+      await _getHeaders(),
+      body: body,
+      timeout: timeout,
+    );
+    if (!_isAuthResponse(response.statusCode) || !canRetryAfterAuthResponse) {
+      return response;
+    }
+
+    final refresh = await refreshAccessTokenResult();
+    if (!refresh.refreshed) return response;
+
+    return _sendJsonRequest(
+      upperMethod,
+      uri,
+      await _getHeaders(),
+      body: body,
+      timeout: timeout,
+    );
+  }
+
+  static Future<http.Response> _getAutenticado(
+    Uri uri, {
+    Duration timeout = _timeoutGet,
+  }) => _authenticatedJsonRequest('GET', uri, timeout: timeout);
+
+  static Future<http.Response> _postJsonAutenticado(
+    Uri uri, {
+    Object? body,
+    Duration timeout = _timeoutPostJson,
+    bool retryAfterAuthResponse = false,
+  }) => _authenticatedJsonRequest(
+    'POST',
+    uri,
+    body: body,
+    timeout: timeout,
+    retryAfterAuthResponse: retryAfterAuthResponse,
+  );
+
+  static Future<http.Response> _patchJsonAutenticado(
+    Uri uri, {
+    Object? body,
+    Duration timeout = _timeoutPostJson,
+    bool retryAfterAuthResponse = false,
+  }) => _authenticatedJsonRequest(
+    'PATCH',
+    uri,
+    body: body,
+    timeout: timeout,
+    retryAfterAuthResponse: retryAfterAuthResponse,
+  );
+
+  static Future<http.Response> _deleteJsonAutenticado(
+    Uri uri, {
+    Object? body,
+    Duration timeout = _timeoutPostJson,
+    bool retryAfterAuthResponse = false,
+  }) => _authenticatedJsonRequest(
+    'DELETE',
+    uri,
+    body: body,
+    timeout: timeout,
+    retryAfterAuthResponse: retryAfterAuthResponse,
+  );
+
   // AUTH
   static Future<Map<String, dynamic>?> login(String email, String senha) async {
     AppLogger.action('login_attempt', params: {'email': email});
     try {
-      final response = await http
+      final response = await _httpClient
           .post(
             Uri.parse('$_baseUrl/auth/login'),
             headers: {'Content-Type': 'application/json'},
@@ -189,7 +410,9 @@ class ApiService {
       // NÃO logar response.body: em sucesso ele contém o token JWT.
       // Só o body de erro (statusCode != 200) é logado, para diagnóstico.
       if (response.statusCode != 200) {
-        debugPrint('[ApiService.login] status=${response.statusCode} body=${response.body}');
+        debugPrint(
+          '[ApiService.login] status=${response.statusCode} body=${response.body}',
+        );
       } else {
         debugPrint('[ApiService.login] status=${response.statusCode} (ok)');
       }
@@ -198,22 +421,44 @@ class ApiService {
         AppLogger.action('login_success', params: {'email': email});
         return jsonDecode(response.body);
       }
-      AppLogger.action('login_error', params: {'email': email, 'status': response.statusCode});
+      AppLogger.action(
+        'login_error',
+        params: {'email': email, 'status': response.statusCode},
+      );
       // Retorna o body para o provider poder extrair a mensagem de erro
-      return {'_error': true, '_status': response.statusCode, '_body': response.body};
+      return {
+        '_error': true,
+        '_status': response.statusCode,
+        '_body': response.body,
+      };
     } catch (e) {
       debugPrint('[ApiService.login] exception type: ${e.runtimeType}');
       debugPrint('[ApiService.login] exception: $e');
-      AppLogger.action('login_error', params: {'email': email, 'tipo': e.runtimeType.toString(), 'error': e.toString()});
+      AppLogger.action(
+        'login_error',
+        params: {
+          'email': email,
+          'tipo': e.runtimeType.toString(),
+          'error': e.toString(),
+        },
+      );
       return {'_error': true, '_status': 0, '_body': e.toString()};
     }
   }
 
-  static Future<List<PlanoPublico>> getPlanosPublicos({String? categoria}) async {
-    final filtro = (categoria != null && categoria.trim().isNotEmpty) ? categoria.trim() : '';
+  static Future<List<PlanoPublico>> getPlanosPublicos({
+    String? categoria,
+  }) async {
+    final filtro = (categoria != null && categoria.trim().isNotEmpty)
+        ? categoria.trim()
+        : '';
     // Cache segmentado por categoria: o catálogo do autônomo difere do geral.
-    final cacheKey = filtro.isEmpty ? _planosCacheKey : '${_planosCacheKey}_$filtro';
-    final cacheAtKey = filtro.isEmpty ? _planosCacheAtKey : '${_planosCacheAtKey}_$filtro';
+    final cacheKey = filtro.isEmpty
+        ? _planosCacheKey
+        : '${_planosCacheKey}_$filtro';
+    final cacheAtKey = filtro.isEmpty
+        ? _planosCacheAtKey
+        : '${_planosCacheAtKey}_$filtro';
     final prefs = await SharedPreferences.getInstance();
     final agora = DateTime.now();
     final cacheRaw = prefs.getString(cacheKey);
@@ -227,10 +472,15 @@ class ApiService {
         if (decoded is List) {
           cache = decoded
               .whereType<Map>()
-              .map((item) => PlanoPublico.fromJson(Map<String, dynamic>.from(item)))
+              .map(
+                (item) =>
+                    PlanoPublico.fromJson(Map<String, dynamic>.from(item)),
+              )
               .where((plano) => plano.id.isNotEmpty)
               .toList();
-          cacheAge = agora.difference(DateTime.fromMillisecondsSinceEpoch(cacheAtRaw));
+          cacheAge = agora.difference(
+            DateTime.fromMillisecondsSinceEpoch(cacheAtRaw),
+          );
         }
       } catch (_) {
         cache = null;
@@ -238,14 +488,19 @@ class ApiService {
       }
     }
 
-    if (cache != null && cacheAge != null && !cacheAge.isNegative && cacheAge <= _planosCacheTtl) {
+    if (cache != null &&
+        cacheAge != null &&
+        !cacheAge.isNegative &&
+        cacheAge <= _planosCacheTtl) {
       return cache;
     }
 
     try {
       final response = await http
           .get(
-            Uri.parse('$_baseUrl/planos/publicos${filtro.isEmpty ? '' : '?categoria=$filtro'}'),
+            Uri.parse(
+              '$_baseUrl/planos/publicos${filtro.isEmpty ? '' : '?categoria=$filtro'}',
+            ),
             headers: {'Content-Type': 'application/json'},
           )
           .timeout(_timeoutGet);
@@ -255,7 +510,9 @@ class ApiService {
       }
 
       final decoded = jsonDecode(response.body);
-      final planosRaw = decoded is Map<String, dynamic> ? decoded['planos'] : null;
+      final planosRaw = decoded is Map<String, dynamic>
+          ? decoded['planos']
+          : null;
       if (planosRaw is! List) {
         throw Exception('Resposta inválida do catálogo de planos.');
       }
@@ -273,10 +530,15 @@ class ApiService {
       await prefs.setInt(cacheAtKey, agora.millisecondsSinceEpoch);
       return planos;
     } catch (_) {
-      if (cache != null && cacheAge != null && !cacheAge.isNegative && cacheAge <= _planosCacheMaxAge) {
+      if (cache != null &&
+          cacheAge != null &&
+          !cacheAge.isNegative &&
+          cacheAge <= _planosCacheMaxAge) {
         return cache;
       }
-      throw Exception('Não foi possível carregar os planos. Verifique sua internet.');
+      throw Exception(
+        'Não foi possível carregar os planos. Verifique sua internet.',
+      );
     }
   }
 
@@ -316,10 +578,17 @@ class ApiService {
         try {
           final decoded = jsonDecode(response.body);
           if (decoded is Map && decoded['administrador'] is Map) {
-            administrador = Map<String, dynamic>.from(decoded['administrador'] as Map);
+            administrador = Map<String, dynamic>.from(
+              decoded['administrador'] as Map,
+            );
           }
-        } catch (_) {/* body não-JSON ou sem admin */}
-        return {'ok': true, if (administrador != null) 'administrador': administrador};
+        } catch (_) {
+          /* body não-JSON ou sem admin */
+        }
+        return {
+          'ok': true,
+          if (administrador != null) 'administrador': administrador,
+        };
       }
 
       String? mensagem;
@@ -328,7 +597,9 @@ class ApiService {
         if (decoded is Map && decoded['message'] is String) {
           mensagem = (decoded['message'] as String).trim();
         }
-      } catch (_) {/* body não-JSON */}
+      } catch (_) {
+        /* body não-JSON */
+      }
       return {
         'ok': false,
         'message': (mensagem != null && mensagem.isNotEmpty)
@@ -338,7 +609,8 @@ class ApiService {
     } catch (e) {
       return {
         'ok': false,
-        'message': 'Não foi possível concluir o cadastro. Tente novamente em instantes.',
+        'message':
+            'Não foi possível concluir o cadastro. Tente novamente em instantes.',
       };
     }
   }
@@ -376,53 +648,154 @@ class ApiService {
     }
   }
 
-  static Future<Map<String, dynamic>?> refreshAccessToken() async {
+  static Future<AuthRefreshResult> refreshAccessTokenResult() {
+    final inFlight = _refreshInFlight;
+    if (inFlight != null) return inFlight;
+
+    final future = _refreshAccessTokenOnce();
+    _refreshInFlight = future;
+    return future.whenComplete(() {
+      if (identical(_refreshInFlight, future)) {
+        _refreshInFlight = null;
+      }
+    });
+  }
+
+  static Future<AuthRefreshResult> _refreshAccessTokenOnce() async {
     final refresh = await currentRefreshToken();
-    if (refresh == null || refresh.isEmpty) return null;
+    if (refresh == null || refresh.isEmpty) {
+      return const AuthRefreshResult.failed(
+        status: 0,
+        failureKind: RefreshFailureKind.noRefreshToken,
+      );
+    }
+
     try {
-      final response = await http
+      final response = await _httpClient
           .post(
             Uri.parse('$_baseUrl/auth/mobile/refresh'),
             headers: {'Content-Type': 'application/json'},
             body: jsonEncode({'refresh_token': refresh}),
           )
           .timeout(_timeoutPostJson);
-      AppLogger.api('ApiService', 'POST /auth/mobile/refresh', response.statusCode);
+      AppLogger.api(
+        'ApiService',
+        'POST /auth/mobile/refresh',
+        response.statusCode,
+      );
+
       if (response.statusCode == 200) {
-        final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+        final decoded = Map<String, dynamic>.from(
+          jsonDecode(response.body) as Map,
+        );
         final token = decoded['token'] as String?;
         final novoRefresh = decoded['refresh_token'] as String?;
-        if (token != null && token.isNotEmpty && novoRefresh != null && novoRefresh.isNotEmpty) {
-          _sessionToken = token;
-          _refreshToken = novoRefresh;
-          await _secureStorage.write(key: _tokenKey, value: token);
-          await _secureStorage.write(key: _refreshTokenKey, value: novoRefresh);
-          return decoded;
+        if (token != null &&
+            token.isNotEmpty &&
+            novoRefresh != null &&
+            novoRefresh.isNotEmpty) {
+          await setSessionTokens(
+            accessToken: token,
+            refreshToken: novoRefresh,
+            persistence: _sessionPersistence,
+          );
+          return AuthRefreshResult.refreshed(decoded);
         }
+        return const AuthRefreshResult.failed(
+          status: 200,
+          failureKind: RefreshFailureKind.invalidResponse,
+        );
       }
-      return null;
+
+      if (_isDefinitiveRefreshFailure(response.statusCode)) {
+        await clearPersistedSession();
+        return AuthRefreshResult.failed(
+          status: response.statusCode,
+          failureKind: RefreshFailureKind.definitive,
+        );
+      }
+
+      return AuthRefreshResult.failed(
+        status: response.statusCode,
+        failureKind: _isTransientRefreshFailure(response.statusCode)
+            ? RefreshFailureKind.transient
+            : RefreshFailureKind.invalidResponse,
+      );
     } catch (e) {
       AppLogger.error('ApiService', 'POST /auth/mobile/refresh exception', e);
-      return null;
+      return const AuthRefreshResult.failed(
+        status: 0,
+        failureKind: RefreshFailureKind.transient,
+      );
+    }
+  }
+
+  static Future<Map<String, dynamic>?> refreshAccessToken() async {
+    final result = await refreshAccessTokenResult();
+    return result.refreshed ? result.data : null;
+  }
+
+  static Future<LogoutRemotoResult> logoutRemoto() async {
+    final token = await currentSessionToken();
+    if (token == null || token.isEmpty) {
+      return const LogoutRemotoResult(
+        confirmado: false,
+        status: 0,
+        transitorio: false,
+      );
+    }
+
+    try {
+      final response = await _httpClient
+          .post(
+            Uri.parse('$_baseUrl/auth/logout'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+          )
+          .timeout(_timeoutPostJson);
+      AppLogger.api('ApiService', 'POST /auth/logout', response.statusCode);
+      return LogoutRemotoResult(
+        confirmado: response.statusCode == 200,
+        status: response.statusCode,
+        transitorio:
+            response.statusCode == 408 ||
+            response.statusCode == 429 ||
+            response.statusCode >= 500,
+      );
+    } catch (e) {
+      AppLogger.error('ApiService', 'POST /auth/logout exception', e);
+      return const LogoutRemotoResult(
+        confirmado: false,
+        status: 0,
+        transitorio: true,
+      );
     }
   }
 
   static Future<Map<String, dynamic>> trocarSenha(String novaSenha) async {
     try {
-      final response = await http
-          .post(
-            Uri.parse('$_baseUrl/auth/trocar-senha'),
-            headers: await _getHeaders(),
-            body: jsonEncode({'nova_senha': novaSenha}),
-          )
-          .timeout(const Duration(seconds: 20));
+      final response = await _postJsonAutenticado(
+        Uri.parse('$_baseUrl/auth/trocar-senha'),
+        body: {'nova_senha': novaSenha},
+        timeout: const Duration(seconds: 20),
+        retryAfterAuthResponse: true,
+      );
 
-      AppLogger.api('ApiService', 'POST /auth/trocar-senha', response.statusCode);
+      AppLogger.api(
+        'ApiService',
+        'POST /auth/trocar-senha',
+        response.statusCode,
+      );
       if (response.statusCode == 200) {
         return {'ok': true};
       }
       final body = jsonDecode(response.body);
-      return {'ok': false, 'message': body['message'] ?? 'Erro ao trocar senha.'};
+      return {
+        'ok': false,
+        'message': body['message'] ?? 'Erro ao trocar senha.',
+      };
     } catch (e) {
       AppLogger.error('ApiService', 'POST /auth/trocar-senha exception', e);
       return {'ok': false, 'message': 'Erro de conexão.'};
@@ -433,33 +806,16 @@ class ApiService {
   /// falha é TRANSITÓRIA (429/5xx/rede) — caso em que a sessão NÃO deve ser
   /// descartada — ou definitiva (401/403 = token inválido/expirado).
   /// `status`: 200 sucesso · 0 exceção de rede/timeout · demais = HTTP recebido.
-  static Future<({Map<String, dynamic>? profile, int status})> getMeDetalhado() async {
+  static Future<({Map<String, dynamic>? profile, int status})>
+  getMeDetalhado() async {
     try {
-      final response = await http
-          .get(
-            Uri.parse('$_baseUrl/auth/me'),
-            headers: await _getHeaders(),
-          )
-          .timeout(_timeoutGet);
+      final response = await _getAutenticado(Uri.parse('$_baseUrl/auth/me'));
       AppLogger.api('ApiService', 'GET /auth/me', response.statusCode);
       if (response.statusCode == 200) {
-        return (profile: jsonDecode(response.body) as Map<String, dynamic>, status: 200);
-      }
-      if (response.statusCode == 401 || response.statusCode == 403) {
-        final renovado = await refreshAccessToken();
-        if (renovado != null) {
-          final retry = await http
-              .get(
-                Uri.parse('$_baseUrl/auth/me'),
-                headers: await _getHeaders(),
-              )
-              .timeout(_timeoutGet);
-          AppLogger.api('ApiService', 'GET /auth/me retry', retry.statusCode);
-          if (retry.statusCode == 200) {
-            return (profile: jsonDecode(retry.body) as Map<String, dynamic>, status: 200);
-          }
-          return (profile: null, status: retry.statusCode);
-        }
+        return (
+          profile: jsonDecode(response.body) as Map<String, dynamic>,
+          status: 200,
+        );
       }
       return (profile: null, status: response.statusCode);
     } catch (e) {
@@ -478,9 +834,9 @@ class ApiService {
   /// dados Asaas ou credenciais; somente status e responsável.
   static Future<Map<String, dynamic>?> getPlanoStatus() async {
     try {
-      final response = await http
-          .get(Uri.parse('$_baseUrl/pagamentos/me/plano-status'), headers: await _getHeaders())
-          .timeout(_timeoutGet);
+      final response = await _getAutenticado(
+        Uri.parse('$_baseUrl/pagamentos/me/plano-status'),
+      );
       if (response.statusCode == 200) return jsonDecode(response.body);
       return null;
     } catch (_) {
@@ -495,13 +851,14 @@ class ApiService {
   /// para a tela distinguir erro de lista vazia; 200 com [] retorna [].
   static Future<List<Fatura>> getMinhasFaturas() async {
     try {
-      final response = await http
-          .get(
-            Uri.parse('$_baseUrl/pagamentos/me/faturas'),
-            headers: await _getHeaders(),
-          )
-          .timeout(_timeoutGet);
-      AppLogger.api('ApiService', 'GET /pagamentos/me/faturas', response.statusCode);
+      final response = await _getAutenticado(
+        Uri.parse('$_baseUrl/pagamentos/me/faturas'),
+      );
+      AppLogger.api(
+        'ApiService',
+        'GET /pagamentos/me/faturas',
+        response.statusCode,
+      );
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body);
         if (decoded is List) {
@@ -512,12 +869,17 @@ class ApiService {
         }
         return [];
       }
-      throw ApiException(_mensagemErroHttpGet(response), statusCode: response.statusCode);
+      throw ApiException(
+        _mensagemErroHttpGet(response),
+        statusCode: response.statusCode,
+      );
     } on ApiException {
       rethrow;
     } catch (e) {
       AppLogger.error('ApiService', 'GET /pagamentos/me/faturas exception', e);
-      throw const ApiException('Não foi possível carregar suas faturas agora. Tente novamente em instantes.');
+      throw const ApiException(
+        'Não foi possível carregar suas faturas agora. Tente novamente em instantes.',
+      );
     }
   }
 
@@ -528,25 +890,41 @@ class ApiService {
   /// {'ok': false, 'message': ...} nas recusas de negócio (422/403/...).
   static Future<Map<String, dynamic>> gerarFaturaRegularizacao() async {
     try {
-      final response = await http
-          .post(
-            Uri.parse('$_baseUrl/pagamentos/me/regularizacao'),
-            headers: await _getHeaders(),
-          )
-          .timeout(_timeoutPostJson);
-      AppLogger.api('ApiService', 'POST /pagamentos/me/regularizacao', response.statusCode);
-      final decoded = response.body.isNotEmpty ? jsonDecode(response.body) : <String, dynamic>{};
-      final body = decoded is Map ? Map<String, dynamic>.from(decoded) : <String, dynamic>{};
+      final response = await _postJsonAutenticado(
+        Uri.parse('$_baseUrl/pagamentos/me/regularizacao'),
+        retryAfterAuthResponse: true,
+      );
+      AppLogger.api(
+        'ApiService',
+        'POST /pagamentos/me/regularizacao',
+        response.statusCode,
+      );
+      final decoded = response.body.isNotEmpty
+          ? jsonDecode(response.body)
+          : <String, dynamic>{};
+      final body = decoded is Map
+          ? Map<String, dynamic>.from(decoded)
+          : <String, dynamic>{};
       if (response.statusCode == 200 || response.statusCode == 201) {
         return {'ok': true, 'resultado': body['resultado'] ?? 'gerada'};
       }
       return {
         'ok': false,
-        'message': body['message'] ?? 'Não foi possível gerar a fatura agora. Tente novamente em instantes.',
+        'message':
+            body['message'] ??
+            'Não foi possível gerar a fatura agora. Tente novamente em instantes.',
       };
     } catch (e) {
-      AppLogger.error('ApiService', 'POST /pagamentos/me/regularizacao exception', e);
-      return {'ok': false, 'message': 'Não foi possível gerar a fatura agora. Verifique sua conexão.'};
+      AppLogger.error(
+        'ApiService',
+        'POST /pagamentos/me/regularizacao exception',
+        e,
+      );
+      return {
+        'ok': false,
+        'message':
+            'Não foi possível gerar a fatura agora. Verifique sua conexão.',
+      };
     }
   }
 
@@ -556,37 +934,50 @@ class ApiService {
   /// persiste nada, NÃO cria cobrança.
   static Future<String> getFaturaPix(String faturaId) async {
     try {
-      final response = await http
-          .get(
-            Uri.parse('$_baseUrl/pagamentos/faturas/$faturaId/pix'),
-            headers: await _getHeaders(),
-          )
-          .timeout(_timeoutGet);
-      AppLogger.api('ApiService', 'GET /pagamentos/faturas/:id/pix', response.statusCode);
+      final response = await _getAutenticado(
+        Uri.parse('$_baseUrl/pagamentos/faturas/$faturaId/pix'),
+      );
+      AppLogger.api(
+        'ApiService',
+        'GET /pagamentos/faturas/:id/pix',
+        response.statusCode,
+      );
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body);
         final payload = decoded is Map ? decoded['payload'] : null;
-        if (payload is String && payload.trim().isNotEmpty) return payload.trim();
-        throw const ApiException('Pix indisponível para esta fatura no momento.');
+        if (payload is String && payload.trim().isNotEmpty)
+          return payload.trim();
+        throw const ApiException(
+          'Pix indisponível para esta fatura no momento.',
+        );
       }
-      throw ApiException(_mensagemErroHttpGet(response), statusCode: response.statusCode);
+      throw ApiException(
+        _mensagemErroHttpGet(response),
+        statusCode: response.statusCode,
+      );
     } on ApiException {
       rethrow;
     } catch (e) {
-      AppLogger.error('ApiService', 'GET /pagamentos/faturas/:id/pix exception', e);
-      throw const ApiException('Não foi possível obter o Pix agora. Tente novamente em instantes.');
+      AppLogger.error(
+        'ApiService',
+        'GET /pagamentos/faturas/:id/pix exception',
+        e,
+      );
+      throw const ApiException(
+        'Não foi possível obter o Pix agora. Tente novamente em instantes.',
+      );
     }
   }
 
-  static Future<Map<String, dynamic>?> updateMe(Map<String, dynamic> data) async {
+  static Future<Map<String, dynamic>?> updateMe(
+    Map<String, dynamic> data,
+  ) async {
     try {
-      final response = await http
-          .patch(
-            Uri.parse('$_baseUrl/auth/me'),
-            headers: await _getHeaders(),
-            body: jsonEncode(data),
-          )
-          .timeout(_timeoutPostJson);
+      final response = await _patchJsonAutenticado(
+        Uri.parse('$_baseUrl/auth/me'),
+        body: data,
+        retryAfterAuthResponse: true,
+      );
       AppLogger.api('ApiService', 'PATCH /auth/me', response.statusCode);
       if (response.statusCode == 200) return jsonDecode(response.body);
       return null;
@@ -603,14 +994,29 @@ class ApiService {
       // suportada → aborta sem POST, com mensagem amigável (mesma do backend).
       final contentType = _contentTypeImagem(filePath);
       if (contentType == null) {
-        AppLogger.warning('ApiService', 'upload de foto abortado: extensão não suportada ($filePath)');
-        return {'ok': false, 'message': 'Formato de arquivo não permitido. Use JPEG, PNG ou WebP.'};
+        AppLogger.warning(
+          'ApiService',
+          'upload de foto abortado: extensão não suportada ($filePath)',
+        );
+        return {
+          'ok': false,
+          'message': 'Formato de arquivo não permitido. Use JPEG, PNG ou WebP.',
+        };
       }
       final headers = await _getHeaders();
-      var request = http.MultipartRequest('POST', Uri.parse('$_baseUrl/auth/me/foto'));
+      var request = http.MultipartRequest(
+        'POST',
+        Uri.parse('$_baseUrl/auth/me/foto'),
+      );
       request.headers.addAll(headers);
       request.headers.remove('Content-Type');
-      request.files.add(await http.MultipartFile.fromPath('foto', filePath, contentType: contentType));
+      request.files.add(
+        await http.MultipartFile.fromPath(
+          'foto',
+          filePath,
+          contentType: contentType,
+        ),
+      );
       final response = await request.send().timeout(_timeoutUpload);
       AppLogger.api('ApiService', 'POST /auth/me/foto', response.statusCode);
       if (response.statusCode == 200) {
@@ -638,12 +1044,9 @@ class ApiService {
   /// obrigatorio_para, publicado_em.
   static Future<Map<String, dynamic>?> buscarTermosPendentes() async {
     try {
-      final response = await http
-          .get(
-            Uri.parse('$_baseUrl/termos/pendentes'),
-            headers: await _getHeaders(),
-          )
-          .timeout(_timeoutGet);
+      final response = await _getAutenticado(
+        Uri.parse('$_baseUrl/termos/pendentes'),
+      );
       AppLogger.api('ApiService', 'GET /termos/pendentes', response.statusCode);
       if (response.statusCode == 200) return jsonDecode(response.body);
       return null;
@@ -657,14 +1060,16 @@ class ApiService {
   /// 201 (novo) e 200 (idempotente / já aceito) são tratados como sucesso.
   static Future<Map<String, dynamic>> aceitarTermo(String termoId) async {
     try {
-      final response = await http
-          .post(
-            Uri.parse('$_baseUrl/termos/$termoId/aceitar'),
-            headers: await _getHeaders(),
-            body: jsonEncode({'origem': 'app'}),
-          )
-          .timeout(_timeoutPostJson);
-      AppLogger.api('ApiService', 'POST /termos/$termoId/aceitar', response.statusCode);
+      final response = await _postJsonAutenticado(
+        Uri.parse('$_baseUrl/termos/$termoId/aceitar'),
+        body: {'origem': 'app'},
+        retryAfterAuthResponse: true,
+      );
+      AppLogger.api(
+        'ApiService',
+        'POST /termos/$termoId/aceitar',
+        response.statusCode,
+      );
       if (response.statusCode == 200 || response.statusCode == 201) {
         return {'ok': true, 'status': response.statusCode};
       }
@@ -685,39 +1090,44 @@ class ApiService {
   // (Home/loadData) distinguir erro real de lista vazia. 200 com [] retorna [].
   static Future<List<dynamic>> getFretes() async {
     try {
-      final response = await http
-          .get(
-            Uri.parse('$_baseUrl/fretes'),
-            headers: await _getHeaders(),
-          )
-          .timeout(_timeoutGet);
+      final response = await _getAutenticado(Uri.parse('$_baseUrl/fretes'));
       AppLogger.api('ApiService', 'GET /fretes', response.statusCode);
       if (response.statusCode == 200) {
         return jsonDecode(response.body);
       }
-      throw ApiException(_mensagemErroHttpGet(response), statusCode: response.statusCode);
+      throw ApiException(
+        _mensagemErroHttpGet(response),
+        statusCode: response.statusCode,
+      );
     } on ApiException {
       rethrow;
     } catch (e) {
       AppLogger.error('ApiService', 'GET /fretes exception', e);
-      throw const ApiException('Não foi possível carregar seus dados agora. Tente novamente em instantes.');
+      throw const ApiException(
+        'Não foi possível carregar seus dados agora. Tente novamente em instantes.',
+      );
     }
   }
 
-  static Future<bool> reportLocationTrackingState(String estado, {String? detalhe}) async {
+  static Future<bool> reportLocationTrackingState(
+    String estado, {
+    String? detalhe,
+  }) async {
     try {
       final payload = <String, dynamic>{'estado': estado};
       if (detalhe != null && detalhe.trim().isNotEmpty) {
         payload['detalhe'] = detalhe.trim();
       }
-      final response = await http
-          .post(
-            Uri.parse('$_baseUrl/fretes/localizacao/sessao/estado'),
-            headers: await _getHeaders(),
-            body: jsonEncode(payload),
-          )
-          .timeout(_timeoutPostJson);
-      AppLogger.api('ApiService', 'POST /fretes/localizacao/sessao/estado', response.statusCode);
+      final response = await _postJsonAutenticado(
+        Uri.parse('$_baseUrl/fretes/localizacao/sessao/estado'),
+        body: payload,
+        retryAfterAuthResponse: true,
+      );
+      AppLogger.api(
+        'ApiService',
+        'POST /fretes/localizacao/sessao/estado',
+        response.statusCode,
+      );
       return response.statusCode >= 200 && response.statusCode < 300;
     } catch (e) {
       AppLogger.warning('ApiService', 'estado de localizacao nao enviado');
@@ -725,14 +1135,20 @@ class ApiService {
     }
   }
 
-  static Future<List<dynamic>> getFretesComFiltro(String dataInicio, String dataFim) async {
+  static Future<List<dynamic>> getFretesComFiltro(
+    String dataInicio,
+    String dataFim,
+  ) async {
     try {
-      final uri = Uri.parse('$_baseUrl/fretes').replace(queryParameters: {
-        'data_inicio': dataInicio,
-        'data_fim': dataFim,
-      });
-      final response = await http.get(uri, headers: await _getHeaders()).timeout(_timeoutGet);
-      AppLogger.api('ApiService', 'GET /fretes?data_inicio=$dataInicio&data_fim=$dataFim', response.statusCode);
+      final uri = Uri.parse('$_baseUrl/fretes').replace(
+        queryParameters: {'data_inicio': dataInicio, 'data_fim': dataFim},
+      );
+      final response = await _getAutenticado(uri);
+      AppLogger.api(
+        'ApiService',
+        'GET /fretes?data_inicio=$dataInicio&data_fim=$dataFim',
+        response.statusCode,
+      );
       if (response.statusCode == 200) return jsonDecode(response.body);
       return [];
     } catch (e) {
@@ -744,15 +1160,25 @@ class ApiService {
     }
   }
 
-  static Future<List<dynamic>> getNotificacoes({bool? lida, int limite = 50}) async {
+  static Future<List<dynamic>> getNotificacoes({
+    bool? lida,
+    int limite = 50,
+  }) async {
     try {
-      final params = <String, String>{'limite': limite.clamp(1, 100).toString()};
+      final params = <String, String>{
+        'limite': limite.clamp(1, 100).toString(),
+      };
       if (lida != null) params['lida'] = lida.toString();
-      final uri = Uri.parse('$_baseUrl/notificacoes').replace(queryParameters: params);
-      final response = await http.get(uri, headers: await _getHeaders()).timeout(_timeoutGet);
+      final uri = Uri.parse(
+        '$_baseUrl/notificacoes',
+      ).replace(queryParameters: params);
+      final response = await _getAutenticado(uri);
       AppLogger.api('ApiService', 'GET /notificacoes', response.statusCode);
       if (response.statusCode == 200) return jsonDecode(response.body);
-      throw ApiException(_mensagemErroHttpGet(response), statusCode: response.statusCode);
+      throw ApiException(
+        _mensagemErroHttpGet(response),
+        statusCode: response.statusCode,
+      );
     } catch (e) {
       AppLogger.error('ApiService', 'GET /notificacoes exception', e);
       rethrow;
@@ -761,19 +1187,39 @@ class ApiService {
 
   static Future<bool> marcarNotificacaoLida(String id) async {
     try {
-      final response = await http.patch(Uri.parse('$_baseUrl/notificacoes/$id/lida'), headers: await _getHeaders()).timeout(_timeoutGet);
-      AppLogger.api('ApiService', 'PATCH /notificacoes/$id/lida', response.statusCode);
+      final response = await _patchJsonAutenticado(
+        Uri.parse('$_baseUrl/notificacoes/$id/lida'),
+        timeout: _timeoutGet,
+        retryAfterAuthResponse: true,
+      );
+      AppLogger.api(
+        'ApiService',
+        'PATCH /notificacoes/$id/lida',
+        response.statusCode,
+      );
       return response.statusCode == 200;
     } catch (e) {
-      AppLogger.error('ApiService', 'PATCH /notificacoes/$id/lida exception', e);
+      AppLogger.error(
+        'ApiService',
+        'PATCH /notificacoes/$id/lida exception',
+        e,
+      );
       return false;
     }
   }
 
   static Future<bool> marcarTodasNotificacoesLidas() async {
     try {
-      final response = await http.patch(Uri.parse('$_baseUrl/notificacoes/lidas'), headers: await _getHeaders()).timeout(_timeoutGet);
-      AppLogger.api('ApiService', 'PATCH /notificacoes/lidas', response.statusCode);
+      final response = await _patchJsonAutenticado(
+        Uri.parse('$_baseUrl/notificacoes/lidas'),
+        timeout: _timeoutGet,
+        retryAfterAuthResponse: true,
+      );
+      AppLogger.api(
+        'ApiService',
+        'PATCH /notificacoes/lidas',
+        response.statusCode,
+      );
       return response.statusCode == 200;
     } catch (e) {
       AppLogger.error('ApiService', 'PATCH /notificacoes/lidas exception', e);
@@ -785,10 +1231,14 @@ class ApiService {
   /// para nunca exibir um badge falso quando o backend estiver indisponível.
   static Future<int> contarNotificacoesNaoLidas() async {
     try {
-      final response = await http
-          .get(Uri.parse('$_baseUrl/notificacoes/nao-lidas/count'), headers: await _getHeaders())
-          .timeout(_timeoutGet);
-      AppLogger.api('ApiService', 'GET /notificacoes/nao-lidas/count', response.statusCode);
+      final response = await _getAutenticado(
+        Uri.parse('$_baseUrl/notificacoes/nao-lidas/count'),
+      );
+      AppLogger.api(
+        'ApiService',
+        'GET /notificacoes/nao-lidas/count',
+        response.statusCode,
+      );
       if (response.statusCode == 200) {
         final body = jsonDecode(response.body);
         final valor = body is Map ? body['count'] : null;
@@ -797,7 +1247,11 @@ class ApiService {
       }
       return 0;
     } catch (e) {
-      AppLogger.error('ApiService', 'GET /notificacoes/nao-lidas/count exception', e);
+      AppLogger.error(
+        'ApiService',
+        'GET /notificacoes/nao-lidas/count exception',
+        e,
+      );
       return 0;
     }
   }
@@ -805,15 +1259,16 @@ class ApiService {
   // PUSH (FCM)
   /// Registra/atualiza o token FCM do aparelho no backend (após login / refresh).
   /// Best-effort: retorna false em qualquer falha, sem lançar.
-  static Future<bool> registrarPushToken(String token, {String platform = 'android'}) async {
+  static Future<bool> registrarPushToken(
+    String token, {
+    String platform = 'android',
+  }) async {
     try {
-      final response = await http
-          .post(
-            Uri.parse('$_baseUrl/push/tokens'),
-            headers: await _getHeaders(),
-            body: jsonEncode({'token': token, 'platform': platform}),
-          )
-          .timeout(_timeoutPostJson);
+      final response = await _postJsonAutenticado(
+        Uri.parse('$_baseUrl/push/tokens'),
+        body: {'token': token, 'platform': platform},
+        retryAfterAuthResponse: true,
+      );
       AppLogger.api('ApiService', 'POST /push/tokens', response.statusCode);
       return response.statusCode == 201 || response.statusCode == 200;
     } catch (e) {
@@ -825,13 +1280,11 @@ class ApiService {
   /// Desativa o token FCM no backend (logout). Best-effort.
   static Future<bool> removerPushToken(String token) async {
     try {
-      final response = await http
-          .delete(
-            Uri.parse('$_baseUrl/push/tokens'),
-            headers: await _getHeaders(),
-            body: jsonEncode({'token': token}),
-          )
-          .timeout(_timeoutPostJson);
+      final response = await _deleteJsonAutenticado(
+        Uri.parse('$_baseUrl/push/tokens'),
+        body: {'token': token},
+        retryAfterAuthResponse: true,
+      );
       AppLogger.api('ApiService', 'DELETE /push/tokens', response.statusCode);
       return response.statusCode == 200;
     } catch (e) {
@@ -858,17 +1311,26 @@ class ApiService {
             body: jsonEncode(payload),
           )
           .timeout(_timeoutPostJson);
-      AppLogger.api('ApiService', 'POST /fretes/$freteId/finalizar', response.statusCode);
+      AppLogger.api(
+        'ApiService',
+        'POST /fretes/$freteId/finalizar',
+        response.statusCode,
+      );
       if (response.statusCode == 200) return jsonDecode(response.body);
       final body = jsonDecode(response.body);
-      return {'_error': true, 'message': body['message'] ?? 'Erro ao finalizar.'};
+      return {
+        '_error': true,
+        'message': body['message'] ?? 'Erro ao finalizar.',
+      };
     } catch (e) {
       AppLogger.error('ApiService', 'POST /fretes/finalizar exception', e);
       return {'_error': true, 'message': _mensagemErroRede(e)};
     }
   }
 
-  static Future<Map<String, dynamic>> createFrete(Map<String, dynamic> data) async {
+  static Future<Map<String, dynamic>> createFrete(
+    Map<String, dynamic> data,
+  ) async {
     try {
       final response = await http
           .post(
@@ -903,26 +1365,50 @@ class ApiService {
   /// Envia foto privada de odômetro. O backend valida ownership/tenant e
   /// persiste somente o path no bucket privado.
   static Future<Map<String, dynamic>> uploadFotoOdometro(
-      String freteId, String tipo, String filePath) async {
+    String freteId,
+    String tipo,
+    String filePath,
+  ) async {
     try {
       if (tipo != 'inicial' && tipo != 'final') {
         return {'ok': false, 'message': 'Tipo de foto do odômetro inválido.'};
       }
       final contentType = _contentTypeImagem(filePath);
       if (contentType == null) {
-        return {'ok': false, 'message': 'Formato de arquivo não permitido. Use JPEG, PNG ou WebP.'};
+        return {
+          'ok': false,
+          'message': 'Formato de arquivo não permitido. Use JPEG, PNG ou WebP.',
+        };
       }
-      final request = http.MultipartRequest('POST', Uri.parse('$_baseUrl/fretes/$freteId/odometro/$tipo'));
+      final request = http.MultipartRequest(
+        'POST',
+        Uri.parse('$_baseUrl/fretes/$freteId/odometro/$tipo'),
+      );
       request.headers.addAll(await _getHeaders());
       request.headers.remove('Content-Type');
-      request.files.add(await http.MultipartFile.fromPath('foto', filePath, contentType: contentType));
+      request.files.add(
+        await http.MultipartFile.fromPath(
+          'foto',
+          filePath,
+          contentType: contentType,
+        ),
+      );
       final response = await request.send().timeout(_timeoutUpload);
       final bodyText = await response.stream.bytesToString();
-      AppLogger.api('ApiService', 'POST /fretes/$freteId/odometro/$tipo', response.statusCode);
+      AppLogger.api(
+        'ApiService',
+        'POST /fretes/$freteId/odometro/$tipo',
+        response.statusCode,
+      );
       Map<String, dynamic> body = {};
-      try { body = jsonDecode(bodyText) as Map<String, dynamic>; } catch (_) {}
+      try {
+        body = jsonDecode(bodyText) as Map<String, dynamic>;
+      } catch (_) {}
       if (response.statusCode == 200) return {'ok': true, ...body};
-      return {'ok': false, 'message': body['message'] ?? 'Erro ao enviar foto do odômetro.'};
+      return {
+        'ok': false,
+        'message': body['message'] ?? 'Erro ao enviar foto do odômetro.',
+      };
     } catch (e) {
       AppLogger.error('ApiService', 'upload foto odometro exception', e);
       return {'ok': false, 'message': _mensagemErroRede(e)};
@@ -936,11 +1422,16 @@ class ApiService {
   /// tamanho_bytes, created_at}.
   static Future<List<dynamic>> getDocumentosFrete(String freteId) async {
     try {
-      final response = await http
-          .get(Uri.parse('$_baseUrl/fretes/$freteId/documentos'), headers: await _getHeaders())
-          .timeout(_timeoutGet);
-      AppLogger.api('ApiService', 'GET /fretes/$freteId/documentos', response.statusCode);
-      if (response.statusCode == 200) return jsonDecode(response.body) as List<dynamic>;
+      final response = await _getAutenticado(
+        Uri.parse('$_baseUrl/fretes/$freteId/documentos'),
+      );
+      AppLogger.api(
+        'ApiService',
+        'GET /fretes/$freteId/documentos',
+        response.statusCode,
+      );
+      if (response.statusCode == 200)
+        return jsonDecode(response.body) as List<dynamic>;
       return [];
     } catch (e) {
       AppLogger.error('ApiService', 'GET documentos frete exception', e);
@@ -952,23 +1443,45 @@ class ApiService {
   /// Retorna {ok, message?}. Valida a extensão antes do POST (mesma allowlist do
   /// backend). Bucket privado — o download é feito pelo painel via signed URL.
   static Future<Map<String, dynamic>> uploadDocumentoFrete(
-      String freteId, String tipo, String filePath) async {
+    String freteId,
+    String tipo,
+    String filePath,
+  ) async {
     try {
       final contentType = _contentTypeDocumento(filePath);
       if (contentType == null) {
-        return {'ok': false, 'message': 'Formato não permitido. Use PDF, XML ou imagem (JPEG, PNG, WebP).'};
+        return {
+          'ok': false,
+          'message':
+              'Formato não permitido. Use PDF, XML ou imagem (JPEG, PNG, WebP).',
+        };
       }
-      final request = http.MultipartRequest('POST', Uri.parse('$_baseUrl/fretes/$freteId/documentos'));
+      final request = http.MultipartRequest(
+        'POST',
+        Uri.parse('$_baseUrl/fretes/$freteId/documentos'),
+      );
       request.headers.addAll(await _getHeaders());
       request.headers.remove('Content-Type');
       request.fields['tipo'] = tipo;
-      request.files.add(await http.MultipartFile.fromPath('documento', filePath, contentType: contentType));
+      request.files.add(
+        await http.MultipartFile.fromPath(
+          'documento',
+          filePath,
+          contentType: contentType,
+        ),
+      );
       final response = await request.send().timeout(_timeoutUpload);
       final bodyText = await response.stream.bytesToString();
-      AppLogger.api('ApiService', 'POST /fretes/$freteId/documentos', response.statusCode);
+      AppLogger.api(
+        'ApiService',
+        'POST /fretes/$freteId/documentos',
+        response.statusCode,
+      );
       if (response.statusCode == 201) {
         Map<String, dynamic> body = {};
-        try { body = jsonDecode(bodyText) as Map<String, dynamic>; } catch (_) {}
+        try {
+          body = jsonDecode(bodyText) as Map<String, dynamic>;
+        } catch (_) {}
         return {'ok': true, ...body};
       }
       String msg = 'Erro ao enviar o documento.';
@@ -987,11 +1500,14 @@ class ApiService {
   /// Reaproveita GET /fretes/:id/documentos/:docId/url. Retorna a URL ou null.
   static Future<String?> getDocumentoUrl(String freteId, String docId) async {
     try {
-      final response = await http
-          .get(Uri.parse('$_baseUrl/fretes/$freteId/documentos/$docId/url'),
-              headers: await _getHeaders())
-          .timeout(_timeoutGet);
-      AppLogger.api('ApiService', 'GET /fretes/$freteId/documentos/$docId/url', response.statusCode);
+      final response = await _getAutenticado(
+        Uri.parse('$_baseUrl/fretes/$freteId/documentos/$docId/url'),
+      );
+      AppLogger.api(
+        'ApiService',
+        'GET /fretes/$freteId/documentos/$docId/url',
+        response.statusCode,
+      );
       if (response.statusCode == 200) {
         final body = jsonDecode(response.body) as Map<String, dynamic>;
         return body['url']?.toString();
@@ -1007,16 +1523,25 @@ class ApiService {
   /// caminho local (usado para abrir/compartilhar o documento). A signed URL já
   /// carrega a autenticação no próprio link, então o GET vai SEM headers de auth.
   /// Retorna null em falha.
-  static Future<String?> baixarDocumentoParaTemp(String url, String nomeArquivo) async {
+  static Future<String?> baixarDocumentoParaTemp(
+    String url,
+    String nomeArquivo,
+  ) async {
     try {
       final response = await http.get(Uri.parse(url)).timeout(_timeoutUpload);
       if (response.statusCode != 200) {
-        AppLogger.warning('ApiService', 'download documento status ${response.statusCode}');
+        AppLogger.warning(
+          'ApiService',
+          'download documento status ${response.statusCode}',
+        );
         return null;
       }
       final dir = await getTemporaryDirectory();
       // Sanitiza o nome para não escapar da pasta temp nem quebrar o path.
-      final nomeSeguro = nomeArquivo.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
+      final nomeSeguro = nomeArquivo.replaceAll(
+        RegExp(r'[^A-Za-z0-9._-]'),
+        '_',
+      );
       final file = File('${dir.path}/$nomeSeguro');
       await file.writeAsBytes(response.bodyBytes);
       return file.path;
@@ -1036,10 +1561,14 @@ class ApiService {
   /// comprovado_em, recebido_por, observacao, motivo_rejeicao etc.
   static Future<Map<String, dynamic>> getEpodFrete(String freteId) async {
     try {
-      final response = await http
-          .get(Uri.parse('$_baseUrl/fretes/$freteId/epod'), headers: await _getHeaders())
-          .timeout(_timeoutGet);
-      AppLogger.api('ApiService', 'GET /fretes/$freteId/epod', response.statusCode);
+      final response = await _getAutenticado(
+        Uri.parse('$_baseUrl/fretes/$freteId/epod'),
+      );
+      AppLogger.api(
+        'ApiService',
+        'GET /fretes/$freteId/epod',
+        response.statusCode,
+      );
       if (response.statusCode == 200) {
         final body = jsonDecode(response.body) as Map<String, dynamic>;
         return {'epod': body['epod'], 'evidencias': body['evidencias'] ?? []};
@@ -1055,20 +1584,35 @@ class ApiService {
   /// campos preenchidos. Retorna {ok, message?}. 409 (já existe) vira ok:false
   /// com a mensagem do backend — a tela então parte direto para anexar evidência.
   static Future<Map<String, dynamic>> registrarEpod(
-      String freteId, {String? recebidoPor, String? observacao}) async {
+    String freteId, {
+    String? recebidoPor,
+    String? observacao,
+  }) async {
     try {
       final headers = await _getHeaders();
       headers['Content-Type'] = 'application/json';
       final corpo = <String, dynamic>{};
-      if (recebidoPor != null && recebidoPor.trim().isNotEmpty) corpo['recebido_por'] = recebidoPor.trim();
-      if (observacao != null && observacao.trim().isNotEmpty) corpo['observacao'] = observacao.trim();
+      if (recebidoPor != null && recebidoPor.trim().isNotEmpty)
+        corpo['recebido_por'] = recebidoPor.trim();
+      if (observacao != null && observacao.trim().isNotEmpty)
+        corpo['observacao'] = observacao.trim();
       final response = await http
-          .post(Uri.parse('$_baseUrl/fretes/$freteId/epod'), headers: headers, body: jsonEncode(corpo))
+          .post(
+            Uri.parse('$_baseUrl/fretes/$freteId/epod'),
+            headers: headers,
+            body: jsonEncode(corpo),
+          )
           .timeout(_timeoutPostJson);
-      AppLogger.api('ApiService', 'POST /fretes/$freteId/epod', response.statusCode);
+      AppLogger.api(
+        'ApiService',
+        'POST /fretes/$freteId/epod',
+        response.statusCode,
+      );
       if (response.statusCode == 201) {
         Map<String, dynamic> body = {};
-        try { body = jsonDecode(response.body) as Map<String, dynamic>; } catch (_) {}
+        try {
+          body = jsonDecode(response.body) as Map<String, dynamic>;
+        } catch (_) {}
         return {'ok': true, ...body};
       }
       String msg = 'Erro ao registrar a comprovação.';
@@ -1085,22 +1629,44 @@ class ApiService {
 
   /// POST /fretes/:id/epod/evidencias → anexa foto/canhoto/PDF à comprovação.
   /// Mesmo padrão de multipart dos documentos (campo 'evidencia'). Retorna {ok, message?}.
-  static Future<Map<String, dynamic>> uploadEvidenciaEpod(String freteId, String filePath) async {
+  static Future<Map<String, dynamic>> uploadEvidenciaEpod(
+    String freteId,
+    String filePath,
+  ) async {
     try {
       final contentType = _contentTypeDocumento(filePath);
       if (contentType == null) {
-        return {'ok': false, 'message': 'Formato não permitido. Use PDF, XML ou imagem (JPEG, PNG, WebP).'};
+        return {
+          'ok': false,
+          'message':
+              'Formato não permitido. Use PDF, XML ou imagem (JPEG, PNG, WebP).',
+        };
       }
-      final request = http.MultipartRequest('POST', Uri.parse('$_baseUrl/fretes/$freteId/epod/evidencias'));
+      final request = http.MultipartRequest(
+        'POST',
+        Uri.parse('$_baseUrl/fretes/$freteId/epod/evidencias'),
+      );
       request.headers.addAll(await _getHeaders());
       request.headers.remove('Content-Type');
-      request.files.add(await http.MultipartFile.fromPath('evidencia', filePath, contentType: contentType));
+      request.files.add(
+        await http.MultipartFile.fromPath(
+          'evidencia',
+          filePath,
+          contentType: contentType,
+        ),
+      );
       final response = await request.send().timeout(_timeoutUpload);
       final bodyText = await response.stream.bytesToString();
-      AppLogger.api('ApiService', 'POST /fretes/$freteId/epod/evidencias', response.statusCode);
+      AppLogger.api(
+        'ApiService',
+        'POST /fretes/$freteId/epod/evidencias',
+        response.statusCode,
+      );
       if (response.statusCode == 201) {
         Map<String, dynamic> body = {};
-        try { body = jsonDecode(bodyText) as Map<String, dynamic>; } catch (_) {}
+        try {
+          body = jsonDecode(bodyText) as Map<String, dynamic>;
+        } catch (_) {}
         return {'ok': true, ...body};
       }
       String msg = 'Erro ao enviar a evidência.';
@@ -1117,13 +1683,19 @@ class ApiService {
 
   /// GET /fretes/:id/epod/evidencias/:evidId/url → signed URL (TTL curto) da
   /// evidência no bucket privado. Retorna a URL ou null.
-  static Future<String?> getEvidenciaEpodUrl(String freteId, String evidId) async {
+  static Future<String?> getEvidenciaEpodUrl(
+    String freteId,
+    String evidId,
+  ) async {
     try {
-      final response = await http
-          .get(Uri.parse('$_baseUrl/fretes/$freteId/epod/evidencias/$evidId/url'),
-              headers: await _getHeaders())
-          .timeout(_timeoutGet);
-      AppLogger.api('ApiService', 'GET /fretes/$freteId/epod/evidencias/$evidId/url', response.statusCode);
+      final response = await _getAutenticado(
+        Uri.parse('$_baseUrl/fretes/$freteId/epod/evidencias/$evidId/url'),
+      );
+      AppLogger.api(
+        'ApiService',
+        'GET /fretes/$freteId/epod/evidencias/$evidId/url',
+        response.statusCode,
+      );
       if (response.statusCode == 200) {
         final body = jsonDecode(response.body) as Map<String, dynamic>;
         return body['url']?.toString();
@@ -1139,22 +1711,44 @@ class ApiService {
 
   // Envia com foto (multipart). Retorna {ok, message}.
   static Future<Map<String, dynamic>> createMovementWithPhoto(
-      String endpoint, Map<String, String> fields, String filePath) async {
+    String endpoint,
+    Map<String, String> fields,
+    String filePath,
+  ) async {
     try {
       // Valida e resolve o MIME antes de montar o multipart. Extensão não
       // suportada → aborta sem POST, com mensagem amigável (mesma do backend).
       final contentType = _contentTypeImagem(filePath);
       if (contentType == null) {
-        AppLogger.warning('ApiService', 'upload abortado: extensão não suportada ($filePath)');
-        return {'ok': false, 'message': 'Formato de arquivo não permitido. Use JPEG, PNG ou WebP.'};
+        AppLogger.warning(
+          'ApiService',
+          'upload abortado: extensão não suportada ($filePath)',
+        );
+        return {
+          'ok': false,
+          'message': 'Formato de arquivo não permitido. Use JPEG, PNG ou WebP.',
+        };
       }
-      var request = http.MultipartRequest('POST', Uri.parse('$_baseUrl/$endpoint'));
+      var request = http.MultipartRequest(
+        'POST',
+        Uri.parse('$_baseUrl/$endpoint'),
+      );
       request.headers.addAll(await _getHeaders());
       request.headers.remove('Content-Type');
       fields.forEach((key, value) => request.fields[key] = value);
-      request.files.add(await http.MultipartFile.fromPath('foto', filePath, contentType: contentType));
+      request.files.add(
+        await http.MultipartFile.fromPath(
+          'foto',
+          filePath,
+          contentType: contentType,
+        ),
+      );
       var response = await request.send().timeout(_timeoutUpload);
-      AppLogger.api('ApiService', 'POST /$endpoint (foto)', response.statusCode);
+      AppLogger.api(
+        'ApiService',
+        'POST /$endpoint (foto)',
+        response.statusCode,
+      );
       if (response.statusCode == 201) return {'ok': true};
       String msg = 'Erro ao salvar.';
       try {
@@ -1171,7 +1765,9 @@ class ApiService {
 
   // Envia sem foto (JSON). Retorna {ok, message}.
   static Future<Map<String, dynamic>> createMovementJson(
-      String endpoint, Map<String, dynamic> fields) async {
+    String endpoint,
+    Map<String, dynamic> fields,
+  ) async {
     try {
       final response = await http
           .post(
@@ -1180,7 +1776,11 @@ class ApiService {
             body: jsonEncode(fields),
           )
           .timeout(_timeoutPostJson);
-      AppLogger.api('ApiService', 'POST /$endpoint (json)', response.statusCode);
+      AppLogger.api(
+        'ApiService',
+        'POST /$endpoint (json)',
+        response.statusCode,
+      );
       if (response.statusCode == 201) return {'ok': true};
       String msg = 'Erro ao salvar.';
       try {
@@ -1195,10 +1795,15 @@ class ApiService {
   }
 
   // LISTAGENS GENÉRICAS
-  static Future<List<dynamic>> getListComFiltro(String endpoint, Map<String, String> params) async {
+  static Future<List<dynamic>> getListComFiltro(
+    String endpoint,
+    Map<String, String> params,
+  ) async {
     try {
-      final uri = Uri.parse('$_baseUrl/$endpoint').replace(queryParameters: params);
-      final response = await http.get(uri, headers: await _getHeaders()).timeout(_timeoutGet);
+      final uri = Uri.parse(
+        '$_baseUrl/$endpoint',
+      ).replace(queryParameters: params);
+      final response = await _getAutenticado(uri);
       AppLogger.api('ApiService', 'GET /$endpoint?...', response.statusCode);
       if (response.statusCode == 200) return jsonDecode(response.body);
       return [];
@@ -1213,22 +1818,22 @@ class ApiService {
   // no loadData; telas com filtro usam getListComFiltro. 200 com [] retorna [].
   static Future<List<dynamic>> getList(String endpoint) async {
     try {
-      final response = await http
-          .get(
-            Uri.parse('$_baseUrl/$endpoint'),
-            headers: await _getHeaders(),
-          )
-          .timeout(_timeoutGet);
+      final response = await _getAutenticado(Uri.parse('$_baseUrl/$endpoint'));
       AppLogger.api('ApiService', 'GET /$endpoint', response.statusCode);
       if (response.statusCode == 200) {
         return jsonDecode(response.body);
       }
-      throw ApiException(_mensagemErroHttpGet(response), statusCode: response.statusCode);
+      throw ApiException(
+        _mensagemErroHttpGet(response),
+        statusCode: response.statusCode,
+      );
     } on ApiException {
       rethrow;
     } catch (e) {
       AppLogger.error('ApiService', 'GET /$endpoint exception', e);
-      throw const ApiException('Não foi possível carregar seus dados agora. Tente novamente em instantes.');
+      throw const ApiException(
+        'Não foi possível carregar seus dados agora. Tente novamente em instantes.',
+      );
     }
   }
 }
