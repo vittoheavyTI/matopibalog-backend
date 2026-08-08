@@ -70,8 +70,6 @@ function criarSessionService({ supabase, cfg, auditar = async () => {} }) {
     const row = Array.isArray(data) ? data[0] : data;
     if (!row || !row.session_id) throw new E.SessionDependencyUnavailable('RPC não retornou sessão');
 
-    await auditar({ event: 'sessao_criada', usuario_id, empresa_id, session_id: row.session_id, client_type, resultado: 'ok' }).catch(() => {});
-
     const accessToken = assinarAccessDaSessao({ session_id: row.session_id, usuario_id, role, is_super_admin });
     return {
       accessToken,
@@ -191,21 +189,28 @@ function criarSessionService({ supabase, cfg, auditar = async () => {} }) {
   }
 
   async function revogarSessao(sid, motivo = 'logout') {
-    const { data, error } = await supabase.from('auth_sessions')
-      .update({ revoked_at: new Date().toISOString(), revoke_reason: motivo, updated_at: new Date().toISOString() })
-      .eq('id', sid).is('revoked_at', null).select('id');
+    const { data, error } = await supabase.rpc('revogar_sessao_auth', {
+      p_session_id: sid,
+      p_motivo: motivo,
+      p_actor_usuario_id: null,
+      p_request_id: null,
+      p_origin: null,
+    });
     if (error) throw new E.SessionDependencyUnavailable(error.message);
-    await auditar({ event: 'sessao_revogada', session_id: sid, resultado: 'ok', motivo }).catch(() => {});
-    return { ok: true, revogou: Array.isArray(data) && data.length > 0 };
+    const row = Array.isArray(data) ? data[0] : data;
+    return { ok: true, revogou: !!(row && row.revogada) };
   }
 
   async function revogarTodasDoUsuario(uid, motivo = 'logout_global') {
-    const { error } = await supabase.from('auth_sessions')
-      .update({ revoked_at: new Date().toISOString(), revoke_reason: motivo, updated_at: new Date().toISOString() })
-      .eq('usuario_id', uid).is('revoked_at', null);
+    const { data, error } = await supabase.rpc('revogar_sessoes_usuario', {
+      p_usuario_id: uid,
+      p_motivo: motivo,
+      p_actor_usuario_id: uid,
+      p_request_id: null,
+      p_origin: null,
+    });
     if (error) throw new E.SessionDependencyUnavailable(error.message);
-    await auditar({ event: 'logout_global', usuario_id: uid, resultado: 'ok', motivo }).catch(() => {});
-    return { ok: true };
+    return { ok: true, revogadas: Number(data || 0) };
   }
 
   /** Revoga UMA sessão do PRÓPRIO usuário (impede tenant/usuário alheio). */
@@ -217,11 +222,16 @@ function criarSessionService({ supabase, cfg, auditar = async () => {} }) {
     if (String(existente.usuario_id) !== String(uid)) throw new E.SessionForbidden('sessao de outro usuario');
     if (existente.revoked_at) return { ok: true, revogou: false, motivo: 'already_revoked' };
 
-    const { data, error } = await supabase.from('auth_sessions')
-      .update({ revoked_at: new Date().toISOString(), revoke_reason: motivo, updated_at: new Date().toISOString() })
-      .eq('id', sid).eq('usuario_id', uid).is('revoked_at', null).select('id');
+    const { data, error } = await supabase.rpc('revogar_sessao_auth', {
+      p_session_id: sid,
+      p_motivo: motivo,
+      p_actor_usuario_id: uid,
+      p_request_id: null,
+      p_origin: null,
+    });
     if (error) throw new E.SessionDependencyUnavailable(error.message);
-    return { ok: true, revogou: Array.isArray(data) && data.length > 0 };
+    const row = Array.isArray(data) ? data[0] : data;
+    return { ok: true, revogou: !!(row && row.revogada) };
   }
 
   async function listarSessoesDoUsuario(uid) {

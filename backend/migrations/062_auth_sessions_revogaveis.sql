@@ -21,6 +21,8 @@
 --   * Nenhum token/hash/pepper/cookie/Authorization é gravado ou retornado.
 --
 -- Reversão (não destrutiva por padrão):
+--   DROP FUNCTION IF EXISTS public.revogar_sessao_auth(uuid,text,uuid,text,text);
+--   DROP FUNCTION IF EXISTS public.revogar_sessoes_usuario(uuid,text,uuid,text,text);
 --   DROP FUNCTION IF EXISTS public.rotacionar_refresh_token(text,text,timestamptz,timestamptz,text,text,integer);
 --   DROP FUNCTION IF EXISTS public.criar_sessao_auth(uuid,uuid,text,text,text,uuid,text,timestamptz,timestamptz,timestamptz,text,text,uuid);
 --   DROP FUNCTION IF EXISTS public.limpar_sessoes_expiradas(integer);
@@ -226,6 +228,9 @@ BEGIN
   VALUES (v_session_id, p_refresh_family_id, p_refresh_token_hash, 1, p_refresh_expires_at)
   RETURNING id INTO v_token_id;
 
+  INSERT INTO public.auth_event_audit (event, usuario_id, empresa_id, session_id, refresh_family_id, client_type, resultado, motivo, ip_hash, user_agent)
+    VALUES ('sessao_criada', p_usuario_id, p_empresa_id, v_session_id, p_refresh_family_id, p_client_type, 'ok', 'login', p_ip_hash, p_user_agent);
+
   RETURN QUERY SELECT v_session_id, p_refresh_family_id, v_token_id;
 END;
 $$;
@@ -340,8 +345,96 @@ END;
 $$;
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- (F) limpar_sessoes_expiradas(p_reter_dias) — manutenção de SESSÕES (não mexe na auditoria).
+-- (F) revogacao de sessoes com auditoria transacional.
 -- ─────────────────────────────────────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION public.revogar_sessao_auth(
+  p_session_id uuid,
+  p_motivo text,
+  p_actor_usuario_id uuid DEFAULT NULL,
+  p_request_id text DEFAULT NULL,
+  p_origin text DEFAULT NULL
+)
+RETURNS TABLE (revogada boolean, usuario_id uuid)
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_sess public.auth_sessions%ROWTYPE;
+  v_agora timestamptz := now();
+  v_revogada boolean := false;
+BEGIN
+  SELECT * INTO v_sess FROM public.auth_sessions WHERE id = p_session_id FOR UPDATE;
+  IF NOT FOUND THEN
+    RETURN QUERY SELECT false, NULL::uuid;
+    RETURN;
+  END IF;
+
+  IF v_sess.revoked_at IS NULL THEN
+    UPDATE public.auth_sessions
+       SET revoked_at = v_agora,
+           revoke_reason = COALESCE(NULLIF(p_motivo, ''), 'revogacao'),
+           updated_at = v_agora
+     WHERE id = p_session_id;
+
+    UPDATE public.auth_refresh_tokens
+       SET revoked_at = COALESCE(revoked_at, v_agora)
+     WHERE session_id = p_session_id
+       AND revoked_at IS NULL;
+
+    v_revogada := true;
+  END IF;
+
+  INSERT INTO public.auth_event_audit (event, usuario_id, empresa_id, session_id, refresh_family_id, client_type, origem, request_id, resultado, motivo, ip_hash, user_agent)
+    VALUES ('sessao_revogada', v_sess.usuario_id, v_sess.empresa_id, v_sess.id, v_sess.refresh_family_id, v_sess.client_type, p_origin, p_request_id, CASE WHEN v_revogada THEN 'ok' ELSE 'already_revoked' END, COALESCE(NULLIF(p_motivo, ''), 'revogacao'), v_sess.ip_hash, v_sess.user_agent);
+
+  RETURN QUERY SELECT v_revogada, v_sess.usuario_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.revogar_sessoes_usuario(
+  p_usuario_id uuid,
+  p_motivo text,
+  p_actor_usuario_id uuid DEFAULT NULL,
+  p_request_id text DEFAULT NULL,
+  p_origin text DEFAULT NULL
+)
+RETURNS integer
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_agora timestamptz := now();
+  v_motivo text := COALESCE(NULLIF(p_motivo, ''), 'revogacao_usuario');
+  v_count integer := 0;
+BEGIN
+  WITH atualizadas AS (
+    UPDATE public.auth_sessions
+       SET revoked_at = v_agora,
+           revoke_reason = v_motivo,
+           updated_at = v_agora
+     WHERE usuario_id = p_usuario_id
+       AND revoked_at IS NULL
+    RETURNING id
+  )
+  SELECT count(*)::int INTO v_count FROM atualizadas;
+
+  UPDATE public.auth_refresh_tokens rt
+     SET revoked_at = COALESCE(rt.revoked_at, v_agora)
+    FROM public.auth_sessions s
+   WHERE rt.session_id = s.id
+     AND s.usuario_id = p_usuario_id
+     AND rt.revoked_at IS NULL;
+
+  INSERT INTO public.auth_event_audit (event, usuario_id, origem, request_id, resultado, motivo)
+    VALUES ('sessoes_usuario_revogadas', p_usuario_id, p_origin, p_request_id, 'ok', v_motivo);
+
+  RETURN v_count;
+END;
+$$;
+
+-- (G) limpar_sessoes_expiradas(p_reter_dias): manutencao de sessoes, sem purge de auditoria.
 CREATE OR REPLACE FUNCTION public.limpar_sessoes_expiradas(p_reter_dias integer DEFAULT 90)
 RETURNS integer
 LANGUAGE plpgsql
@@ -365,22 +458,30 @@ $$;
 -- EXECUTE só para o backend (service_role). Nega PUBLIC/anon/authenticated.
 REVOKE ALL ON FUNCTION public.criar_sessao_auth(uuid,uuid,text,text,text,uuid,text,timestamptz,timestamptz,timestamptz,text,text,uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.rotacionar_refresh_token(text,text,timestamptz,timestamptz,text,text,integer) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.revogar_sessao_auth(uuid,text,uuid,text,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.revogar_sessoes_usuario(uuid,text,uuid,text,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.limpar_sessoes_expiradas(integer) FROM PUBLIC;
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
     EXECUTE 'REVOKE ALL ON FUNCTION public.criar_sessao_auth(uuid,uuid,text,text,text,uuid,text,timestamptz,timestamptz,timestamptz,text,text,uuid) FROM anon';
     EXECUTE 'REVOKE ALL ON FUNCTION public.rotacionar_refresh_token(text,text,timestamptz,timestamptz,text,text,integer) FROM anon';
+    EXECUTE 'REVOKE ALL ON FUNCTION public.revogar_sessao_auth(uuid,text,uuid,text,text) FROM anon';
+    EXECUTE 'REVOKE ALL ON FUNCTION public.revogar_sessoes_usuario(uuid,text,uuid,text,text) FROM anon';
     EXECUTE 'REVOKE ALL ON FUNCTION public.limpar_sessoes_expiradas(integer) FROM anon';
   END IF;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
     EXECUTE 'REVOKE ALL ON FUNCTION public.criar_sessao_auth(uuid,uuid,text,text,text,uuid,text,timestamptz,timestamptz,timestamptz,text,text,uuid) FROM authenticated';
     EXECUTE 'REVOKE ALL ON FUNCTION public.rotacionar_refresh_token(text,text,timestamptz,timestamptz,text,text,integer) FROM authenticated';
+    EXECUTE 'REVOKE ALL ON FUNCTION public.revogar_sessao_auth(uuid,text,uuid,text,text) FROM authenticated';
+    EXECUTE 'REVOKE ALL ON FUNCTION public.revogar_sessoes_usuario(uuid,text,uuid,text,text) FROM authenticated';
     EXECUTE 'REVOKE ALL ON FUNCTION public.limpar_sessoes_expiradas(integer) FROM authenticated';
   END IF;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
     EXECUTE 'GRANT EXECUTE ON FUNCTION public.criar_sessao_auth(uuid,uuid,text,text,text,uuid,text,timestamptz,timestamptz,timestamptz,text,text,uuid) TO service_role';
     EXECUTE 'GRANT EXECUTE ON FUNCTION public.rotacionar_refresh_token(text,text,timestamptz,timestamptz,text,text,integer) TO service_role';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION public.revogar_sessao_auth(uuid,text,uuid,text,text) TO service_role';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION public.revogar_sessoes_usuario(uuid,text,uuid,text,text) TO service_role';
     EXECUTE 'GRANT EXECUTE ON FUNCTION public.limpar_sessoes_expiradas(integer) TO service_role';
   END IF;
 END $$;

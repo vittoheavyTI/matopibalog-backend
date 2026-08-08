@@ -95,6 +95,7 @@ const allowedOrigins = [
 // req/min) sem afrouxar o login (limiter próprio por IP) nem virar vetor de abuso
 // (conta autenticada é rastreável/bloqueável). Chave em middlewares/rateLimitKey.
 const { chaveRateLimit } = require('./middlewares/rateLimitKey');
+const { criarRefreshLimiter } = require('./middlewares/authRateLimit');
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 600,
@@ -113,6 +114,7 @@ const loginLimiter = rateLimit({
   skipSuccessfulRequests: true,
   message: { message: 'Muitas tentativas de login. Tente novamente em 15 minutos.' },
 });
+const refreshLimiter = criarRefreshLimiter();
 
 app.use(cors({
   origin: (origin, callback) => {
@@ -137,6 +139,7 @@ app.get('/health', (req, res) => {
 
 app.use(apiLimiter);
 app.use('/auth/login', loginLimiter);
+app.use(['/auth/refresh', '/auth/mobile/refresh'], refreshLimiter);
 app.use('/auth', authRoutes);
 // /admin/termos e /admin/contrato-modelos ANTES de /admin para o router genérico
 // não capturar o prefixo.

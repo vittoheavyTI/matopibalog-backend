@@ -126,3 +126,52 @@ test('atualizarAtividadeThrottled clampa idle no teto absoluto', async () => {
   await svc.atualizarAtividadeThrottled({ id: 's', last_activity_at: new Date(Date.now() - 120000).toISOString(), absolute_expires_at: absolute });
   assert.equal(updatePayload.idle_expires_at, absolute);
 });
+
+test('revogacoes usam RPC transacional com auditoria e preservam ownership', async () => {
+  const chamadasRpc = [];
+  const sessoes = [
+    { data: { id: 's-1', usuario_id: 'u-1', revoked_at: null }, error: null },
+    { data: { id: 's-1', usuario_id: 'u-1', revoked_at: null }, error: null },
+  ];
+  const supabase = {
+    async rpc(name, args) {
+      chamadasRpc.push({ name, args });
+      if (name === 'revogar_sessao_auth') return { data: [{ revogada: true, usuario_id: 'u-1' }], error: null };
+      if (name === 'revogar_sessoes_usuario') return { data: 2, error: null };
+      return { data: null, error: { message: 'rpc nao mockada' } };
+    },
+    from() {
+      const b = {
+        select() { return b; }, eq() { return b; }, maybeSingle() { return Promise.resolve(sessoes.shift() || { data: null, error: null }); },
+      };
+      return b;
+    },
+  };
+  const svc = criarSessionService({ supabase, cfg });
+
+  assert.deepEqual(await svc.revogarSessao('s-1', 'logout'), { ok: true, revogou: true });
+  assert.deepEqual(await svc.revogarTodasDoUsuario('u-1', 'senha_alterada'), { ok: true, revogadas: 2 });
+  assert.deepEqual(await svc.revogarUmaDoUsuario('u-1', 's-1', 'revogacao_usuario'), { ok: true, revogou: true });
+
+  assert.deepEqual(chamadasRpc.map((c) => c.name), [
+    'revogar_sessao_auth',
+    'revogar_sessoes_usuario',
+    'revogar_sessao_auth',
+  ]);
+  assert.equal(chamadasRpc[1].args.p_motivo, 'senha_alterada');
+
+  const chamadasAlheias = [];
+  const alheia = {
+    async rpc(name, args) { chamadasAlheias.push({ name, args }); return { data: null, error: null }; },
+    from() {
+      const b = {
+        select() { return b; }, eq() { return b; },
+        maybeSingle() { return Promise.resolve({ data: { id: 's-2', usuario_id: 'u-2', revoked_at: null }, error: null }); },
+      };
+      return b;
+    },
+  };
+  const svcAlheio = criarSessionService({ supabase: alheia, cfg });
+  await assert.rejects(() => svcAlheio.revogarUmaDoUsuario('u-1', 's-2'), (e) => e instanceof E.SessionForbidden && e.httpStatus === 403);
+  assert.equal(chamadasAlheias.length, 0, 'sessao alheia nao pode chegar na RPC de revogacao');
+});

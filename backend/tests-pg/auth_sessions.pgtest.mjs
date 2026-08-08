@@ -56,6 +56,20 @@ function registrar() {
     return { ...r.rows[0], novoToken: novo };
   }
 
+  async function revogarSessao(client, sessionId, motivo = 'logout') {
+    const r = await client.query(
+      `SELECT * FROM public.revogar_sessao_auth($1,$2,$3,$4,$5)`,
+      [sessionId, motivo, U1, 'req-revogar', 'teste']);
+    return r.rows[0];
+  }
+
+  async function revogarSessoesUsuario(client, usuarioId, motivo = 'senha_alterada') {
+    const r = await client.query(
+      `SELECT public.revogar_sessoes_usuario($1,$2,$3,$4,$5) AS n`,
+      [usuarioId, motivo, U1, 'req-revogar-todas', 'teste']);
+    return r.rows[0].n;
+  }
+
   // Reapresenta o refresh v1 (já usado) com IDADE controlada, SEM relógio injetável:
   // dentro de UMA transação now() é constante; ajustamos used_at = now()-idade e
   // chamamos a RPC na MESMA tx → (now()-used_at) = idade EXATA. Determinístico, sem sleep.
@@ -130,6 +144,8 @@ function registrar() {
           await rej(`SET LOCAL ROLE ${role}`, `SELECT 1 FROM public.${tbl} LIMIT 1`, '42501', `${role}/${tbl}`);
         }
         await rej(`SET LOCAL ROLE ${role}`, 'SELECT public.limpar_sessoes_expiradas(90)', '42501', `${role} EXECUTE`);
+        await rej(`SET LOCAL ROLE ${role}`, `SELECT * FROM public.revogar_sessao_auth('${randomUUID()}'::uuid,'teste',NULL,NULL,NULL)`, '42501', `${role} EXECUTE revogar_sessao_auth`);
+        await rej(`SET LOCAL ROLE ${role}`, `SELECT public.revogar_sessoes_usuario('${randomUUID()}'::uuid,'teste',NULL,NULL,NULL)`, '42501', `${role} EXECUTE revogar_sessoes_usuario`);
       }
       // service_role: INSERT/SELECT ok.
       await c.query('BEGIN');
@@ -161,6 +177,7 @@ function registrar() {
     assert.equal(toks.length, 1); assert.equal(toks[0].version, 1);
     assert.equal(toks[0].token_hash, hash(s.token)); assert.notEqual(toks[0].token_hash, s.token);
     assert.equal((await pool.query('SELECT count(*)::int c FROM public.auth_refresh_tokens WHERE token_hash=$1', [s.token])).rows[0].c, 0);
+    assert.ok((await auditos(s.session_id)).some(a => a.event === 'sessao_criada' && a.resultado === 'ok'), 'audit sessao_criada persistido');
   });
   test('5. FK usuário inexistente → 23503', async () => { await assert.rejects(() => criarSessao(pool, { usuario: randomUUID() }), (e) => e.code === '23503'); });
   test('6. FK empresa inexistente → 23503', async () => { await assert.rejects(() => criarSessao(pool, { empresa: randomUUID() }), (e) => e.code === '23503'); });
@@ -297,5 +314,35 @@ function registrar() {
     assert.ok(await sessRow(ativa.session_id));
     assert.equal(await sessRow(velha.session_id), undefined);
     assert.ok(await sessRow(recem.session_id));
+  });
+
+  test('22. revogar_sessao_auth revoga sessao+refreshes e audita atomicamente', async () => {
+    const s = await criarSessao(pool);
+    const r = await revogarSessao(pool, s.session_id, 'logout');
+    assert.equal(r.revogada, true);
+    const sess = await sessRow(s.session_id);
+    assert.ok(sess.revoked_at !== null);
+    assert.equal(sess.revoke_reason, 'logout');
+    for (const t of await tokRows(s.session_id)) assert.ok(t.revoked_at !== null);
+    const aud = await auditos(s.session_id);
+    assert.ok(aud.some(a => a.event === 'sessao_revogada' && a.resultado === 'ok' && a.motivo === 'logout'));
+
+    const r2 = await revogarSessao(pool, s.session_id, 'logout');
+    assert.equal(r2.revogada, false, 'segunda revogacao e idempotente');
+    assert.ok((await auditos(s.session_id)).some(a => a.event === 'sessao_revogada' && a.resultado === 'already_revoked'));
+  });
+
+  test('23. revogar_sessoes_usuario revoga somente usuario alvo e audita resumo', async () => {
+    const outroUsuario = randomUUID();
+    await pool.query('INSERT INTO public.usuarios(id) VALUES ($1) ON CONFLICT (id) DO NOTHING', [outroUsuario]);
+    const s1 = await criarSessao(pool, { familyId: randomUUID() });
+    const s2 = await criarSessao(pool, { familyId: randomUUID() });
+    const outra = await criarSessao(pool, { usuario: outroUsuario, familyId: randomUUID() });
+
+    assert.equal(await revogarSessoesUsuario(pool, U1, 'role_alterada'), 2);
+    assert.ok((await sessRow(s1.session_id)).revoked_at !== null);
+    assert.ok((await sessRow(s2.session_id)).revoked_at !== null);
+    assert.equal((await sessRow(outra.session_id)).revoked_at, null, 'outro usuario permanece ativo');
+    assert.equal((await pool.query(`SELECT count(*)::int c FROM public.auth_event_audit WHERE event='sessoes_usuario_revogadas' AND usuario_id=$1 AND motivo='role_alterada'`, [U1])).rows[0].c, 1);
   });
 }

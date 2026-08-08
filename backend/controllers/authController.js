@@ -8,6 +8,7 @@ const planoLimiteService = require('../services/planoLimiteService');
 const { getTermosPendentes } = require('./termosController');
 const { gerarSenhaTemporaria } = require('../utils/senhaTemporaria');
 const { getAuthRuntime } = require('../services/auth/authRuntime');
+const { revogarSessoesDoUsuarioSeSec1, responderErroRevogacao } = require('../services/auth/sessionRevocationEvents');
 
 const REFRESH_COOKIE = 'refresh_token';
 const CLIENT_TYPES = new Set(['web', 'android', 'ios', 'api']);
@@ -693,6 +694,7 @@ exports.getMe = async (req, res) => {
 };
 
 exports.trocarSenha = async (req, res) => {
+  noStoreAuth(res);
   const { nova_senha } = req.body;
 
   if (!nova_senha || typeof nova_senha !== 'string' || nova_senha.length < 6) {
@@ -718,8 +720,11 @@ exports.trocarSenha = async (req, res) => {
       console.error('[trocarSenha] Erro ao atualizar usuarios:', dbError.message);
     }
 
+    await revogarSessoesDoUsuarioSeSec1(req.user.uid, 'senha_alterada');
+
     res.status(200).json({ message: 'Senha atualizada com sucesso.' });
   } catch (error) {
+    if (error && typeof error.httpStatus === 'number') return responderErroRevogacao(res, error);
     console.error('[trocarSenha] Erro inesperado:', error.message || error);
     res.status(500).json({ message: 'Erro inesperado ao atualizar senha.' });
   }
