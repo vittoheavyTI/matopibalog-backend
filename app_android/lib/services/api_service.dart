@@ -945,8 +945,9 @@ class ApiService {
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body);
         final payload = decoded is Map ? decoded['payload'] : null;
-        if (payload is String && payload.trim().isNotEmpty)
+        if (payload is String && payload.trim().isNotEmpty) {
           return payload.trim();
+        }
         throw const ApiException(
           'Pix indisponível para esta fatura no momento.',
         );
@@ -1430,8 +1431,9 @@ class ApiService {
         'GET /fretes/$freteId/documentos',
         response.statusCode,
       );
-      if (response.statusCode == 200)
+      if (response.statusCode == 200) {
         return jsonDecode(response.body) as List<dynamic>;
+      }
       return [];
     } catch (e) {
       AppLogger.error('ApiService', 'GET documentos frete exception', e);
@@ -1592,10 +1594,12 @@ class ApiService {
       final headers = await _getHeaders();
       headers['Content-Type'] = 'application/json';
       final corpo = <String, dynamic>{};
-      if (recebidoPor != null && recebidoPor.trim().isNotEmpty)
+      if (recebidoPor != null && recebidoPor.trim().isNotEmpty) {
         corpo['recebido_por'] = recebidoPor.trim();
-      if (observacao != null && observacao.trim().isNotEmpty)
+      }
+      if (observacao != null && observacao.trim().isNotEmpty) {
         corpo['observacao'] = observacao.trim();
+      }
       final response = await http
           .post(
             Uri.parse('$_baseUrl/fretes/$freteId/epod'),
