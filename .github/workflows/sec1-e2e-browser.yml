@@ -1,0 +1,90 @@
+name: SEC-1 Browser E2E
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "backend/**"
+      - "painel_web/**"
+      - ".github/workflows/sec1-e2e-browser.yml"
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "painel_web/**"
+      - ".github/workflows/sec1-e2e-browser.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sec1-e2e-browser-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sec1-e2e-browser:
+    name: Playwright SEC-1 HTTPS cross-site
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sec1_e2e
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/sec1_e2e
+      NODE_ENV: test
+      SEC1_E2E_AUTH_FAKE: "1"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            painel_web/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci --no-audit --no-fund
+
+      - name: Install frontend dependencies
+        working-directory: painel_web
+        run: npm ci --no-audit --no-fund
+
+      - name: Install Playwright Chromium
+        working-directory: painel_web
+        run: npx playwright install --with-deps chromium
+
+      - name: Run SEC-1 browser E2E
+        working-directory: painel_web
+        run: npm run test:e2e:sec1
+
+      - name: Upload Playwright traces on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: sec1-e2e-browser-traces
+          path: painel_web/test-results
+          if-no-files-found: ignore
+          retention-days: 7

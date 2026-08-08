@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <title>SEC-1 E2E Harness</title>
+  </head>
+  <body>
+    <main>SEC-1 E2E Harness</main>
+    <script type="module">
+      import api from '../src/api.ts';
+
+      window.sec1Events = { unauthorized: 0, rateLimited: 0 };
+      window.addEventListener('auth:unauthorized', () => { window.sec1Events.unauthorized += 1; });
+      window.addEventListener('api:rate-limited', () => { window.sec1Events.rateLimited += 1; });
+
+      async function unwrap(promise) {
+        try {
+          const res = await promise;
+          return { ok: true, status: res.status, data: res.data, headers: res.headers, token: localStorage.getItem('auth_token') };
+        } catch (err) {
+          return {
+            ok: false,
+            status: err?.response?.status ?? 0,
+            data: err?.response?.data ?? null,
+            headers: err?.response?.headers ?? null,
+            token: localStorage.getItem('auth_token'),
+            code: err?.code ?? null,
+          };
+        }
+      }
+
+      window.sec1 = {
+        clear() {
+          localStorage.clear();
+          sessionStorage.clear();
+          window.sec1Events.unauthorized = 0;
+          window.sec1Events.rateLimited = 0;
+        },
+        events() {
+          return { ...window.sec1Events };
+        },
+        authToken() {
+          return localStorage.getItem('auth_token');
+        },
+        refreshTokenInLocalStorage() {
+          return localStorage.getItem('refresh_token');
+        },
+        poisonAccess() {
+          localStorage.setItem('auth_token', 'sec1.invalid.access');
+        },
+        async login() {
+          const result = await unwrap(api.post('/auth/login', {
+            email: 'sec1-e2e@matopibalog.test',
+            senha: 'senha-e2e',
+            client_type: 'web',
+          }));
+          if (result.ok && result.data?.token) {
+            localStorage.setItem('auth_token', result.data.token);
+          }
+          return {
+            ...result,
+            refreshTokenInLocalStorage: localStorage.getItem('refresh_token'),
+          };
+        },
+        async me() {
+          return unwrap(api.get('/auth/me'));
+        },
+        async logout() {
+          return unwrap(api.post('/auth/logout'));
+        },
+      };
+    </script>
+  </body>
+</html>

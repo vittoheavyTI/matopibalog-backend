@@ -33,7 +33,7 @@ env:
 
 jobs:
   app:
-    name: Flutter analyze + test + build apk (debug)
+    name: Flutter analyze + test + build apk (debug + release)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:
@@ -77,6 +77,9 @@ jobs:
       - name: flutter build apk --debug (sem signing/keystore)
         run: flutter build apk --debug
 
+      - name: flutter build apk --release (evidencia manual)
+        run: flutter build apk --release
+
       - name: Upload APK debug (artifact — sem signing)
         if: success()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
@@ -84,4 +87,13 @@ jobs:
           name: app-debug-apk
           path: app_android/build/app/outputs/flutter-apk/app-debug.apk
           if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload APK release (artifact - evidencia manual)
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: app-release-apk
+          path: app_android/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
           retention-days: 7
