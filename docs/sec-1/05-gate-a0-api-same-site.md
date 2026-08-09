@@ -1,7 +1,7 @@
 # SEC-1 - Gate A0 - API same-site
 
-Status: Gate A0 em execucao controlada em 2026-08-09; DNS, Railway, HTTPS e
-backend A0 ja validados.
+Status: Gate A0 concluido em 2026-08-09; API same-site publicada e validada em
+producao.
 
 Escopo: preparar a migracao do transporte web de refresh para API same-site em
 `https://api.matopibalog.com.br`, sem alterar Railway compartilhado, DNS,
@@ -320,7 +320,7 @@ Segue exigindo autorizacao posterior fora do A0:
 - Qualquer aplicacao de migration 062 em banco compartilhado.
 - Qualquer merge do PR #414.
 
-GATE A0 - EM EXECUCAO AUTORIZADA.
+GATE A0 - CONCLUIDO.
 
 ## 21. Execucao A0 - evidencias parciais
 
@@ -401,3 +401,129 @@ Pendencias para fechamento A0:
 - CI remoto verde: Backend, Frontend, PG RPC, App CI, SEC-1 Browser E2E.
 - Deploy GitHub Pages via workflow oficial.
 - Smoke de producao em `https://matopibalog.com.br`.
+
+Fechamento: pendencias acima resolvidas na execucao final controlada de
+2026-08-09, conforme evidencias abaixo.
+
+## 22. Execucao A0 final - GitHub Pages e smoke
+
+Executado em 2026-08-09 sem merge, sem alterar `main`, sem alterar raiz
+`matopibalog.com.br`, `www`, CNAME Pages, nameservers, MX, banco compartilhado,
+flags SEC-1 de sessao, Gate B, Asaas ou app mobile.
+
+Baseline do ambiente `github-pages` antes do desbloqueio:
+
+- `protected_branches=false`.
+- `custom_branch_policies=true`.
+- Environment ID: `15931169309`.
+- Branch policies: somente `main`, policy ID `50554370`.
+- `can_admins_bypass=true` observado, mas bypass administrativo nao foi usado.
+
+Bloqueio anterior confirmado:
+
+- Workflow: `Deploy to GitHub Pages`.
+- Run bloqueado: `31330660628`.
+- Branch: `feat/sec-1-sessoes-revogaveis`.
+- SHA: `f3e73f1a8acf36dc9fd7660407e34f73c45b0a4d`.
+- Causa: branch nao permitida no ambiente `github-pages`.
+
+Desbloqueio temporario controlado:
+
+- Policy temporaria exata criada: branch
+  `feat/sec-1-sessoes-revogaveis`, policy ID `56903608`.
+- Estado temporario validado: `total_count=2`, policies `main` e
+  `feat/sec-1-sessoes-revogaveis`.
+- Nao foi usado wildcard, all branches, no restriction, bypass admin ou mudanca
+  de branch protection.
+
+CI remoto no SHA publicado:
+
+- SHA publicado: `f3e73f1a8acf36dc9fd7660407e34f73c45b0a4d`.
+- Backend CI: PASS, run `31330286072`.
+- Frontend CI: PASS, run `31330287819`.
+- PG RPC Tests: PASS, run `31330289759`.
+- App CI Flutter: PASS, run `31330291997`.
+- SEC-1 Browser E2E: PASS, run `31330294242`.
+
+Deploy GitHub Pages:
+
+- Workflow run: `31332227852`.
+- Workflow: `Deploy to GitHub Pages`.
+- Branch: `feat/sec-1-sessoes-revogaveis`.
+- SHA: `f3e73f1a8acf36dc9fd7660407e34f73c45b0a4d`.
+- Job: `build-and-deploy`, PASS.
+- Inicio do job: `2026-08-09T19:39:50Z`.
+- Conclusao do job: `2026-08-09T19:40:19Z`.
+
+Publicacao verificada em producao:
+
+- URL: `https://matopibalog.com.br`.
+- Index: HTTP 200.
+- Asset publicado: `/assets/index-DNoSNl6l.js`.
+- Asset: HTTP 200, `2052711` bytes.
+- Index contem `https://api.matopibalog.com.br`.
+- Bundle contem `https://api.matopibalog.com.br`.
+- Bundle nao contem `matopibalog-backend-production.up.railway.app`.
+- CSP `connect-src` contem `https://api.matopibalog.com.br` e preserva o
+  dominio Railway antigo apenas como rollback permitido.
+
+Backend A0 final:
+
+- Deployment ID apos reaplicar A0: `c8bb452b-acbd-4160-bffc-59d1ca386a1e`.
+- Service status: `SUCCESS`.
+- `AUTH_REFRESH_COOKIE_SAMESITE=lax`.
+- `AUTH_WEB_ALLOWED_ORIGINS=https://matopibalog.com.br`.
+- `FRONTEND_URL=https://matopibalog.com.br`.
+- `https://api.matopibalog.com.br/health`: HTTP 200.
+- `https://matopibalog-backend-production.up.railway.app/health`: HTTP 200.
+
+Endpoints e CORS:
+
+- `GET https://api.matopibalog.com.br/configuracoes/public`: HTTP 200,
+  `100773` bytes.
+- `GET https://api.matopibalog.com.br/planos/publicos`: HTTP 200,
+  `9691` bytes.
+- `OPTIONS https://api.matopibalog.com.br/auth/login` com
+  `Origin: https://matopibalog.com.br`: HTTP 204.
+- `access-control-allow-origin=https://matopibalog.com.br`.
+- `access-control-allow-credentials=true`.
+- Sem wildcard com credenciais.
+
+Smoke browser autenticado:
+
+- Navegacao inicial em `https://matopibalog.com.br` redirecionou para `/login`.
+- Login via fluxo normal do navegador retornou para
+  `https://matopibalog.com.br/`.
+- Dashboard autenticado carregou com usuario `Jordao Vittor`.
+- Pagina `/planos` carregou os planos publicos.
+- Sem erros de console de CSP/CORS/API durante o smoke.
+- Aviso observado: Recharts informou largura/altura zero em grafico; classificado
+  como warning visual preexistente, nao bloqueante para A0.
+
+Logs HTTP Railway durante o smoke:
+
+- `POST /auth/login`: HTTP 200.
+- `GET /auth/me`: HTTP 200.
+- Preflights `OPTIONS`: HTTP 204 para rotas autenticadas e publicas.
+- `GET /dashboard/summary`, `/painel-admin/empresas`,
+  `/notificacoes/nao-lidas/count`, `/configuracoes`,
+  `/configuracoes/empresa`, `/admin/motoristas`,
+  `/admin/motoristas/em-viagem`, `/planos/publicos` e
+  `/configuracoes/public`: HTTP 200 ou 304.
+- Nenhum 5xx observado na janela consultada.
+
+Remocao do desbloqueio temporario:
+
+- Policy temporaria removida: ID `56903608`.
+- Estado final do ambiente `github-pages`: `total_count=1`.
+- Branch policies finais: somente `main`, policy ID `50554370`.
+- Producao revalidada apos a remocao: index HTTP 200, asset
+  `/assets/index-DNoSNl6l.js` HTTP 200, bundle ainda aponta para
+  `https://api.matopibalog.com.br`, API health HTTP 200.
+
+Resultado:
+
+- GATE A0 CONCLUIDO.
+- PR `#414` permanece draft / NAO MERGEAR.
+- Migration 062 nao foi aplicada em banco compartilhado.
+- Gate A compatible preparado no runbook, mas nao executado.
