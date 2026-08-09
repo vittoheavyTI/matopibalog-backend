@@ -1,6 +1,7 @@
 # SEC-1 - Gate A0 - API same-site
 
-Status: preparado, nao executado.
+Status: Gate A0 em execucao controlada em 2026-08-09; DNS, Railway, HTTPS e
+backend A0 ja validados.
 
 Escopo: preparar a migracao do transporte web de refresh para API same-site em
 `https://api.matopibalog.com.br`, sem alterar Railway compartilhado, DNS,
@@ -8,7 +9,7 @@ GitHub Pages, secrets, banco compartilhado ou producao.
 
 ## 1. HEAD
 
-- HEAD de entrada auditado: `d1239f9a8e962acc965369b854cc4ded0e43a840`.
+- HEAD de entrada auditado: `56c18e6dee81b81d9f63b4c3b200f2e0010bb6fc`.
 - Branch: `feat/sec-1-sessoes-revogaveis`.
 - PR: `#414`, aberto, draft, `NAO MERGEAR`.
 
@@ -84,16 +85,23 @@ Executar somente apos autorizacao:
    transicao e rollback.
 5. Esperar Railway emitir o certificado HTTPS.
 
-Registro DNS exigido pelo Railway:
+Registros DNS exigidos pelo Railway:
 
-- `VALOR FORNECIDO PELO RAILWAY NO MOMENTO DA EXECUCAO`.
+- CNAME: `VALOR FORNECIDO PELO RAILWAY NO MOMENTO DA EXECUCAO`.
+- TXT de verificacao: `VALOR FORNECIDO PELO RAILWAY NO MOMENTO DA EXECUCAO`.
+- TTL sugerido: registrar se fornecido pelo Railway.
+- Status de verificacao: registrar durante a execucao.
 
 ## 7. Alteracoes DNS propostas
 
 Executar somente apos o Railway fornecer o alvo/verificacao:
 
-- Criar somente o registro necessario para `api.matopibalog.com.br`.
-- Tipo e valor: `VALOR FORNECIDO PELO RAILWAY NO MOMENTO DA EXECUCAO`.
+- Criar somente os registros solicitados pelo Railway para
+  `api.matopibalog.com.br`.
+- CNAME: usar exatamente o nome/valor fornecido pelo Railway.
+- TXT de verificacao: usar exatamente o nome/valor fornecido pelo Railway.
+- TTL: usar o sugerido pelo Railway/Hostinger, se houver; registrar o valor
+  efetivo aplicado.
 - Nao alterar `matopibalog.com.br`.
 - Nao alterar `www.matopibalog.com.br`.
 - Nao alterar CNAME/Pages.
@@ -187,8 +195,17 @@ AFTER proposto:
 
 - Nenhuma alteracao de base URL mobile no Gate A0.
 - App usa contrato mobile de refresh no body/secure storage.
-- APK release `app-release-apk`, Artifact ID `9027994705`, do HEAD
-  `d1239f9`, permanece valido para checklist manual mobile.
+- Artifact historico `app-release-apk` ID `9027994705`, do HEAD `d1239f9`,
+  foi usado como evidencia anterior e permanece apenas como referencia historica.
+- Artifact release mais recente no HEAD `56c18e6`: `app-release-apk`, ID
+  `9029011799`, digest
+  `sha256:70660ad8a93c6a29edfbb888565edc58f30b8e68c5938d7d58a9f67357e831d2`.
+- O workflow GitHub produz build Flutter com `flutter build apk --release`,
+  mas a configuracao Android atual usa `signingConfigs.getByName("debug")` para
+  release. Nao alterar signing neste Gate; fechamento de signing mobile e assunto
+  separado de SEC-1/mobile.
+- Em 2026-08-09, o usuario reportou build Codemagic baixado, instalado e
+  validado inicialmente como normal.
 
 ## 14. Ordem de execucao futura
 
@@ -288,17 +305,99 @@ Preparado no branch:
 
 ## 20. Tudo que exige autorizacao
 
-Exige autorizacao humana posterior:
+Autorizado para execucao A0 em 2026-08-09:
 
 - Criar custom domain no Railway.
-- Criar registro DNS `api.matopibalog.com.br`.
+- Criar registros DNS `api.matopibalog.com.br` fornecidos pelo Railway.
 - Alterar env vars Railway/shared, incluindo
   `AUTH_REFRESH_COOKIE_SAMESITE=lax` ou CORS oficial.
 - Alterar GitHub secret `VITE_API_URL`.
 - Alterar/deployar frontend Pages.
 - Alterar CSP de producao para o novo dominio.
-- Qualquer deploy de producao.
+
+Segue exigindo autorizacao posterior fora do A0:
+
 - Qualquer aplicacao de migration 062 em banco compartilhado.
 - Qualquer merge do PR #414.
 
-GATE A0 - AGUARDANDO AUTORIZACAO.
+GATE A0 - EM EXECUCAO AUTORIZADA.
+
+## 21. Execucao A0 - evidencias parciais
+
+Executado em 2026-08-09, sem alterar raiz, `www`, MX, SPF, DKIM, DMARC,
+nameservers, banco compartilhado, flags SEC-1 de sessao, Gate B, Asaas ou app
+mobile.
+
+Railway custom domain:
+
+- Dominio: `api.matopibalog.com.br`.
+- Service ID: `f6ffc138-0901-4eae-9e97-69b86d583284`.
+- Domain ID: `63a563a2-f372-4875-9fb8-a44cdb599a9b`.
+- Status Railway: `syncStatus=ACTIVE`.
+- Verificacao Railway: `verified=true`.
+- Certificado: `CERTIFICATE_STATUS_TYPE_VALID`,
+  `CERTIFICATE_STATUS_TYPE_DETAILED_COMPLETE`.
+- Certificado emitido para: `api.matopibalog.com.br`.
+- Certificado SHA-256: `61b82bfc599581b34d55a7a97a23377dea6764eb76f9d6f72595d57ad82684af`.
+- Validade informada: `2026-08-09T17:23:22Z` a `2026-11-07T17:23:21Z`.
+
+DNS aplicado na Hostinger:
+
+- CNAME `api` -> `k45k7l41.up.railway.app`, TTL `14400`.
+- TXT `_railway-verify.api` -> `railway-verify=<mascarado>`, TTL `14400`.
+- Propagacao observada em `artemis.dns-parking.com`,
+  `hermes.dns-parking.com`, `1.1.1.1` e `8.8.8.8`.
+
+HTTPS e endpoints:
+
+- `https://api.matopibalog.com.br/health`: HTTP 200, TLS valido.
+- `https://matopibalog-backend-production.up.railway.app/health`: HTTP 200.
+- `GET /configuracoes/public`: HTTP 200 nos dois dominios, mesmo tamanho
+  observado (`100773` bytes).
+- `GET /planos/publicos`: HTTP 200 nos dois dominios, mesmo tamanho observado
+  (`9691` bytes).
+
+Backend A0 aplicado:
+
+- Deployment ID apos variaveis A0: `83e272ca-73dd-42ee-9679-6046e90e52dd`.
+- Service status: `SUCCESS`.
+- `AUTH_REFRESH_COOKIE_SAMESITE=lax`.
+- `AUTH_WEB_ALLOWED_ORIGINS=https://matopibalog.com.br`.
+- `FRONTEND_URL=https://matopibalog.com.br` preservado.
+- `AUTH_SESSIONS_ENABLED`, `AUTH_REQUIRE_SESSION` e
+  `AUTH_REFRESH_ROTATION_ENABLED` nao foram ativados neste Gate.
+- CORS preflight `OPTIONS /auth/login` com
+  `Origin: https://matopibalog.com.br`: HTTP 204, `credentials=true`,
+  `access-control-allow-origin` exato e sem wildcard.
+
+Source frontend:
+
+- `painel_web/index.html`: `connect-src` passou a permitir
+  `https://api.matopibalog.com.br`, mantendo o dominio Railway antigo para
+  rollback.
+- `painel_web/src/api.ts`: fallback versionado passou a
+  `https://api.matopibalog.com.br`.
+- `painel_web/dist` nao deve ser commitado no PR.
+
+Validacoes locais executadas:
+
+- Backend full: `node --test`, `1200/1200` passou.
+- Frontend tests: `npm.cmd test`, `73/73` passou.
+- Frontend typecheck/build: `npm.cmd run build` com
+  `VITE_API_URL=https://api.matopibalog.com.br`, passou.
+- PG local: `npm.cmd run test:pg`, `3` testes pulados por `DATABASE_URL`
+  ausente; validacao real fica no workflow PG com Postgres efemero.
+- Flutter local: `flutter analyze` passou; `flutter test` passou (`59/59`).
+  Build APK local nao e prova de Gate nesta maquina porque nao ha Android SDK
+  local; o build Android valido fica no workflow `App CI`.
+- SEC-1 E2E local: pulado por `DATABASE_URL` ausente; validacao real fica no
+  workflow `SEC-1 Browser E2E` com Postgres efemero.
+
+Pendencias para fechamento A0:
+
+- Alterar secret GitHub `VITE_API_URL` para
+  `https://api.matopibalog.com.br`.
+- Push do commit A0 no PR `#414`.
+- CI remoto verde: Backend, Frontend, PG RPC, App CI, SEC-1 Browser E2E.
+- Deploy GitHub Pages via workflow oficial.
+- Smoke de producao em `https://matopibalog.com.br`.

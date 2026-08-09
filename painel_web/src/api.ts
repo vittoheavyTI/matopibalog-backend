@@ -3,7 +3,7 @@ import { registrarMotivoSessao } from './utils/sessionReason';
 
 const api = axios.create({
   // Tente adicionar o /api no final do baseURL se suas rotas do backend usam /api
-  baseURL: import.meta.env.VITE_API_URL || 'https://matopibalog-backend-production.up.railway.app',
+  baseURL: import.meta.env.VITE_API_URL || 'https://api.matopibalog.com.br',
   withCredentials: true,
   // Timeout de rede: sem ele, uma requisição travada (rede/backend lento) nunca
   // rejeita e o `finally` da página nunca roda → loader infinito. 30s é folgado
