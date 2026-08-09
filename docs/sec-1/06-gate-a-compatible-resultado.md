@@ -24,7 +24,10 @@ Status da PR durante o gate: aberta, draft, nao mergeada.
 
 - `06e09a5f-e4b2-470f-b44e-b8f57c7a7e33`: upload local da PR com sessoes ainda desligadas; sucesso.
 - `6d966293-effd-4321-bf90-a43b5a25cba9`: redeploy automatico de variaveis a partir de `main`; nao usado como estado final.
-- `74755e4b-e869-4ddb-b950-d74d9a00b0e6`: upload local da PR com Compatible ativo; sucesso e estado final validado.
+- `74755e4b-e869-4ddb-b950-d74d9a00b0e6`: upload local da PR com Compatible ativo; sucesso e validacao funcional do Gate A.
+- `a1bafb7e-fe99-43ab-a962-536078a70e7b`: upload local final do mesmo pacote/codigo para deixar o deployment mais recente em `SUCCESS`; estado final operacional.
+
+Observacao operacional: dois deployments locais intermediarios sem `/backend` no pacote ficaram `FAILED` e nao assumiram trafego.
 
 ## Validacoes
 
