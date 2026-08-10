@@ -71,7 +71,8 @@ function criarGuardTelemetria(deps = {}) {
           req.empresa_id = identidade.empresa_id;
           req.authKind = 'tracking';
           req.trackingCredentialId = identidade.credential_id;
-          req.trackingFreteId = identidade.frete_id;   // telemetria escopada à viagem vinculada
+          // MULTI-VIAGEM: a telemetria cobre TODAS as viagens ativas do motorista
+          // (mesmo modelo da sessão). O escopo é motorista+empresa (não uma viagem).
           // MESMO gate comercial da sessão — não amplia privilégio.
           return _verificarPlano(req, res, next);
         })

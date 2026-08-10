@@ -2,15 +2,16 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { criarTrackingCredentialService } = require('../services/auth/trackingCredentialService');
 
-// ── Fake supabase em memória (fiel às operações do serviço, incl. CAS de rotação) ──
+// ── Fake supabase em memória (fiel às operações do serviço, incl. CAS + in/limit) ──
 function criarFakeSupabase(store) {
   function builder(tabela) {
-    const st = { tabela, op: 'select', payload: null, eqs: [], isNulls: [], gtes: [], select: false };
+    const st = { tabela, op: 'select', payload: null, eqs: [], isNulls: [], gtes: [], ins: [], limit: null, select: false };
     const rows = () => (store[tabela] = store[tabela] || []);
     const casa = (r) =>
       st.eqs.every(([c, v]) => String(r[c]) === String(v)) &&
       st.isNulls.every((c) => r[c] === null || r[c] === undefined) &&
-      st.gtes.every(([c, v]) => new Date(r[c]).getTime() >= new Date(v).getTime());
+      st.gtes.every(([c, v]) => new Date(r[c]).getTime() >= new Date(v).getTime()) &&
+      st.ins.every(([c, arr]) => arr.map(String).includes(String(r[c])));
 
     function exec() {
       const t = rows();
@@ -29,7 +30,9 @@ function criarFakeSupabase(store) {
         for (const r of alvo) Object.assign(r, st.payload);
         return { data: st.select ? alvo.map((r) => ({ id: r.id })) : null, error: null };
       }
-      return { data: t.filter(casa), error: null };
+      let out = t.filter(casa);
+      if (st.limit != null) out = out.slice(0, st.limit);
+      return { data: out, error: null };
     }
 
     const b = {
@@ -39,6 +42,8 @@ function criarFakeSupabase(store) {
       eq(c, v) { st.eqs.push([c, v]); return b; },
       is(c) { st.isNulls.push(c); return b; },
       gte(c, v) { st.gtes.push([c, v]); return b; },
+      in(c, arr) { st.ins.push([c, arr]); return b; },
+      limit(n) { st.limit = n; return b; },
       async maybeSingle() { const r = exec(); return { data: (r.data && r.data[0]) || null, error: r.error }; },
       async single() { const r = exec(); return { data: (r.data && r.data[0]) || null, error: r.error }; },
       then(res, rej) { try { return Promise.resolve(exec()).then(res, rej); } catch (e) { return Promise.reject(e).then(res, rej); } },
@@ -58,26 +63,31 @@ function novoStore() {
     frete_tracking_credenciais: [],
     usuarios: [{ id: 'mot-1', status: 'ativo', empresa_id: 'emp-1' }],
     auth_sessions: [{ id: 'sess-1', revoked_at: null }],
-    fretes: [{ id: 'frete-1', status: 'em_viagem', empresa_id: 'emp-1', motorista_id: 'mot-1' }],
+    // MULTI-VIAGEM: duas viagens ativas do MESMO motorista (estado permitido pelo sistema)
+    fretes: [
+      { id: 'frete-1', status: 'em_viagem', empresa_id: 'emp-1', motorista_id: 'mot-1' },
+      { id: 'frete-2', status: 'ativo', empresa_id: 'emp-1', motorista_id: 'mot-1' },
+    ],
   };
 }
 function criar(store, agoraRef) {
   return criarTrackingCredentialService({ supabase: criarFakeSupabase(store), cfg: cfgFake(), agora: () => agoraRef.v });
 }
-const emitirPadrao = (svc) => svc.emitir({ empresa_id: 'emp-1', motorista_id: 'mot-1', session_id: 'sess-1', frete_id: 'frete-1', device_id: DEV });
+const emitirPadrao = (svc, over = {}) => svc.emitir({ empresa_id: 'emp-1', motorista_id: 'mot-1', session_id: 'sess-1', frete_id: 'frete-1', device_id: DEV, ...over });
 
-test('emitir exige sid, frete e device (binding canônico)', async () => {
+test('emitir exige sid e device; frete é OPCIONAL (contexto)', async () => {
   const store = novoStore(); const agora = { v: Date.now() }; const svc = criar(store, agora);
-  await assert.rejects(() => svc.emitir({ empresa_id: 'emp-1', motorista_id: 'mot-1', frete_id: 'frete-1', device_id: DEV }), (e) => e.code === 'tracking_session_revoked');
-  await assert.rejects(() => svc.emitir({ empresa_id: 'emp-1', motorista_id: 'mot-1', session_id: 'sess-1', device_id: DEV }), (e) => e.code === 'tracking_trip_mismatch');
-  await assert.rejects(() => svc.emitir({ empresa_id: 'emp-1', motorista_id: 'mot-1', session_id: 'sess-1', frete_id: 'frete-1' }), (e) => e.code === 'tracking_device_mismatch');
+  await assert.rejects(() => svc.emitir({ empresa_id: 'emp-1', motorista_id: 'mot-1', device_id: DEV }), (e) => e.code === 'tracking_session_revoked');
+  await assert.rejects(() => svc.emitir({ empresa_id: 'emp-1', motorista_id: 'mot-1', session_id: 'sess-1' }), (e) => e.code === 'tracking_device_mismatch');
+  // sem frete_id → OK (opcional)
+  const { delivery } = await svc.emitir({ empresa_id: 'emp-1', motorista_id: 'mot-1', session_id: 'sess-1', device_id: DEV });
+  assert.ok(delivery.reveal().startsWith('mtk1.'));
 });
 
 test('emitir grava só o HASH + max_expires_at; delivery redige o token', async () => {
   const store = novoStore(); const agora = { v: Date.parse('2026-08-10T12:00:00Z') }; const svc = criar(store, agora);
   const { delivery, expiresAt, maxExpiresAt } = await emitirPadrao(svc);
   const token = delivery.reveal();
-  assert.ok(token.startsWith('mtk1.'));
   const row = store.frete_tracking_credenciais[0];
   assert.ok(row.credential_hash && !row.credential_hash.includes(token));
   assert.ok(!JSON.stringify(store).includes(token));
@@ -86,27 +96,34 @@ test('emitir grava só o HASH + max_expires_at; delivery redige o token', async 
   assert.ok(!JSON.stringify(delivery).includes(token));
 });
 
-test('validar exige device correto e retorna frete_id vinculado', async () => {
+test('validar exige device correto; escopo motorista/empresa (sem frete_id)', async () => {
   const store = novoStore(); const agora = { v: Date.now() }; const svc = criar(store, agora);
   const { delivery } = await emitirPadrao(svc);
   const id = await svc.validar({ token: delivery.reveal(), deviceId: DEV });
-  assert.equal(id.uid, 'mot-1'); assert.equal(id.frete_id, 'frete-1');
+  assert.equal(id.uid, 'mot-1'); assert.equal(id.empresa_id, 'emp-1');
+  assert.equal(id.frete_id, undefined);
   await assert.rejects(() => svc.validar({ token: delivery.reveal(), deviceId: 'outro' }), (e) => e.code === 'tracking_device_mismatch');
+});
+
+test('MULTI-VIAGEM: credencial vale enquanto houver >=1 viagem ativa (cobre todas)', async () => {
+  const store = novoStore(); const agora = { v: Date.now() }; const svc = criar(store, agora);
+  const { delivery } = await emitirPadrao(svc); const token = delivery.reveal();
+  // 2 viagens ativas → ok
+  assert.ok((await svc.validar({ token, deviceId: DEV })).uid);
+  // encerra UMA → ainda há outra ativa → ok
+  store.fretes[0].status = 'finalizado';
+  assert.ok((await svc.validar({ token, deviceId: DEV })).uid);
+  // encerra a última → sem viagem ativa → trip_inactive (canônico, sem hook)
+  store.fretes[1].status = 'cancelado';
+  await assert.rejects(() => svc.validar({ token, deviceId: DEV }), (e) => e.code === 'tracking_trip_inactive');
 });
 
 test('§23: credencial sobrevive à expiração do ACCESS (independe de JWT)', async () => {
   const store = novoStore(); const agora = { v: Date.parse('2026-08-10T12:00:00Z') }; const svc = criar(store, agora);
   const { delivery } = await emitirPadrao(svc); const token = delivery.reveal();
   assert.ok((await svc.validar({ token, deviceId: DEV })).uid);
-  agora.v += 30 * 60 * 1000; // além do access TTL de UI
+  agora.v += 30 * 60 * 1000;
   assert.ok((await svc.validar({ token, deviceId: DEV })).uid);
-});
-
-test('viagem finalizada → validar rejeita canonicamente (trip_inactive), sem depender de hook', async () => {
-  const store = novoStore(); const agora = { v: Date.now() }; const svc = criar(store, agora);
-  const { delivery } = await emitirPadrao(svc);
-  store.fretes[0].status = 'finalizado';
-  await assert.rejects(() => svc.validar({ token: delivery.reveal(), deviceId: DEV }), (e) => e.code === 'tracking_trip_inactive');
 });
 
 test('sessão revogada (logout/admin) → tracking rejeitado', async () => {
@@ -123,17 +140,15 @@ test('motorista bloqueado → driver_blocked', async () => {
   await assert.rejects(() => svc.validar({ token: delivery.reveal(), deviceId: DEV }), (e) => e.code === 'tracking_driver_blocked');
 });
 
-test('renovar ROTACIONA o segredo: token antigo morre, novo vale; telemetria expirada não passa mas renova', async () => {
+test('renovar ROTACIONA o segredo: token antigo morre, novo vale; expirada renova', async () => {
   const store = novoStore(); const agora = { v: Date.parse('2026-08-10T12:00:00Z') }; const svc = criar(store, agora);
   const { delivery } = await emitirPadrao(svc); const tokenA = delivery.reveal();
-
-  agora.v += 2 * 3600 * 1000; // A expirou (TTL 1h), mas dentro do teto (7d)
+  agora.v += 2 * 3600 * 1000; // A expirou (TTL 1h), dentro do teto (7d)
   await assert.rejects(() => svc.validar({ token: tokenA, deviceId: DEV }), (e) => e.code === 'tracking_credential_expired');
   const { delivery: novo, expiresAt } = await svc.renovar({ token: tokenA, deviceId: DEV });
   const tokenB = novo.reveal();
   assert.notEqual(tokenA, tokenB);
   assert.equal(Date.parse(expiresAt), agora.v + 3600 * 1000);
-  // A morreu (hash rotacionado); B vale
   await assert.rejects(() => svc.validar({ token: tokenA, deviceId: DEV }), (e) => e.code === 'tracking_credential_invalid');
   assert.ok((await svc.validar({ token: tokenB, deviceId: DEV })).uid);
 });
@@ -142,12 +157,11 @@ test('renovar NÃO ultrapassa o teto absoluto; após o teto → max_lifetime', a
   const store = novoStore(); const agora = { v: Date.parse('2026-08-10T12:00:00Z') };
   const svc = criarTrackingCredentialService({ supabase: criarFakeSupabase(store), cfg: cfgFake({ trackingCredentialMaxLifetimeSeconds: 2 * 3600 }), agora: () => agora.v });
   const { delivery, maxExpiresAt } = await emitirPadrao(svc); let token = delivery.reveal();
-  agora.v += 90 * 60 * 1000; // 1h30 → expirou nominal, dentro do teto 2h
+  agora.v += 90 * 60 * 1000;
   const r1 = await svc.renovar({ token, deviceId: DEV });
-  // novo expires limitado ao teto (2h do issued)
   assert.ok(Date.parse(r1.expiresAt) <= Date.parse(maxExpiresAt));
   token = r1.delivery.reveal();
-  agora.v += 60 * 60 * 1000; // agora além do teto (2h30 do issued)
+  agora.v += 60 * 60 * 1000; // além do teto
   await assert.rejects(() => svc.renovar({ token, deviceId: DEV }), (e) => e.code === 'tracking_credential_max_lifetime');
 });
 
@@ -157,22 +171,8 @@ test('renovar com device errado → device_mismatch (não rotaciona)', async () 
   await assert.rejects(() => svc.renovar({ token: delivery.reveal(), deviceId: 'outro' }), (e) => e.code === 'tracking_device_mismatch');
 });
 
-test('frete vinculado sumiu (CASCADE não pegou / corrida) → trip_mismatch', async () => {
-  const store = novoStore(); const agora = { v: Date.now() }; const svc = criar(store, agora);
-  const { delivery } = await emitirPadrao(svc);
-  store.fretes = []; // frete não existe mais
-  await assert.rejects(() => svc.validar({ token: delivery.reveal(), deviceId: DEV }), (e) => e.code === 'tracking_trip_mismatch');
-});
-
-test('frete vinculado passou a ser de outro motorista → tenant_mismatch', async () => {
-  const store = novoStore(); const agora = { v: Date.now() }; const svc = criar(store, agora);
-  const { delivery } = await emitirPadrao(svc);
-  store.fretes[0].motorista_id = 'outro-mot';
-  await assert.rejects(() => svc.validar({ token: delivery.reveal(), deviceId: DEV }), (e) => e.code === 'tracking_tenant_mismatch');
-});
-
-test('revogarDoFrete/DaSessao/DoMotorista revogam → uso rejeitado', async () => {
-  for (const [fn, arg] of [['revogarDoFrete', 'frete-1'], ['revogarDaSessao', 'sess-1'], ['revogarDoMotorista', 'mot-1']]) {
+test('revogarDaSessao/DoMotorista revogam → uso rejeitado', async () => {
+  for (const [fn, arg] of [['revogarDaSessao', 'sess-1'], ['revogarDoMotorista', 'mot-1']]) {
     const store = novoStore(); const agora = { v: Date.now() }; const svc = criar(store, agora);
     const { delivery } = await emitirPadrao(svc); const token = delivery.reveal();
     assert.ok((await svc.validar({ token, deviceId: DEV })).uid);

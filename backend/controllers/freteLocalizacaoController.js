@@ -90,33 +90,15 @@ const listarFretesAtivosDoMotorista = async (empresaId, motoristaId, limite = MA
   return data || [];
 };
 
+// MULTI-VIAGEM: telemetria (sessão OU credencial de tracking) cobre TODAS as viagens
+// ATIVAS do motorista. A credencial escopada autoriza o motorista/empresa (device+sessão
+// canônicos no guard); o isolamento entre motoristas/empresas é garantido pelo resolvedor
+// (só as próprias viagens ativas). Não há binding por-viagem (o sistema permite N viagens).
 const buscarFretesEmAndamentoDoMotorista = async (req) => {
   if (req.user?.role !== 'motorista' || !req.user?.uid || !req.empresa_id) {
     return [];
   }
   return listarFretesAtivosDoMotorista(req.empresa_id, req.user.uid);
-};
-
-// Escopo dos fretes que RECEBEM telemetria nesta requisição:
-//  - Ramo TRACKING (credencial escopada): SOMENTE a viagem VINCULADA à credencial
-//    (req.trackingFreteId), e ainda assim reconferindo ownership + status ativo. Isso
-//    garante que uma credencial da viagem X nunca grave na viagem Y (§H-3).
-//  - Ramo SESSÃO (Flutter/legado): comportamento atual (todas as viagens ativas).
-const buscarFretesParaTelemetria = async (req) => {
-  if (req.authKind === 'tracking') {
-    if (!req.trackingFreteId || !req.empresa_id || !req.user?.uid) return [];
-    const { data, error } = await supabase
-      .from('fretes')
-      .select('id, empresa_id, motorista_id, status, data')
-      .eq('id', req.trackingFreteId)
-      .eq('empresa_id', req.empresa_id)
-      .eq('motorista_id', req.user.uid)
-      .in('status', Array.from(STATUS_ATIVOS))
-      .maybeSingle();
-    if (error) throw error;
-    return data ? [data] : [];
-  }
-  return buscarFretesEmAndamentoDoMotorista(req);
 };
 
 const listarUltimasPorFrete = async (ids) => {
@@ -233,7 +215,7 @@ exports.registrarSessao = async (req, res) => {
       return res.status(403).json({ message: 'Apenas o motorista autenticado pode enviar localizacao da viagem.' });
     }
 
-    const fretes = await buscarFretesParaTelemetria(req);
+    const fretes = await buscarFretesEmAndamentoDoMotorista(req);
     if (!fretes.length) {
       return res.status(409).json({ error: 'tracking_trip_inactive', message: 'Compartilhamento pausado: nao ha viagem em andamento.' });
     }
@@ -273,7 +255,7 @@ exports.registrarEstadoSessao = async (req, res) => {
       return res.status(400).json({ message: 'Estado de localizacao invalido.' });
     }
 
-    const fretes = await buscarFretesParaTelemetria(req);
+    const fretes = await buscarFretesEmAndamentoDoMotorista(req);
     if (!fretes.length) {
       return res.status(200).json({ ok: true, fretes_atualizados: 0, ativa: false });
     }

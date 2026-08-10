@@ -13,7 +13,6 @@
 // (existe, é a mesma, pertence ao motorista/empresa e ainda está ATIVA).
 
 const STATUS_MOTORISTA_ATIVO = new Set(['ativo']);
-const STATUS_FRETE_ATIVO = new Set(['ativo', 'em_viagem', 'em_andamento']);
 
 function msDe(x) {
   const t = new Date(x).getTime();
@@ -34,18 +33,20 @@ function calcularMaxExpiracao(issuedMs, maxLifetimeSeconds) {
 
 /**
  * Avalia a credencial. Entradas (todas canônicas do banco):
- *   credencial: { id, motorista_id, empresa_id, frete_id, session_id, device_id,
+ *   credencial: { id, motorista_id, empresa_id, session_id, device_id,
  *                 expires_at, max_expires_at, revoked_at }
  *   usuario:    { id, status, empresa_id }
  *   sessao:     { id, revoked_at }
- *   frete:      { id, status, empresa_id, motorista_id }
+ *   temViagemAtiva: boolean — o motorista tem >=1 viagem ATIVA (contexto operacional).
+ *                   É o que impede a credencial de sobreviver ao fim das viagens (§H-3).
+ *                   MULTI-VIAGEM: a telemetria cobre TODAS as viagens ativas do motorista.
  *   deviceId:   device apresentado na requisição (header)
  *   agoraMs:    epoch atual (injetável)
  *   permitirExpirada: true no fluxo de RENOVAÇÃO (aceita expires_at vencido, mas nunca
  *                     além do teto absoluto). false na telemetria normal.
  * Retorna { ok:true, identidade } ou { ok:false, code } (code = contrato semântico).
  */
-function avaliarCredencial({ credencial, usuario, sessao, frete, deviceId, agoraMs, permitirExpirada = false }) {
+function avaliarCredencial({ credencial, usuario, sessao, temViagemAtiva, deviceId, agoraMs, permitirExpirada = false }) {
   if (!credencial) return neg('tracking_credential_invalid');
   if (credencial.revoked_at) return neg('tracking_credential_revoked');
 
@@ -75,20 +76,15 @@ function avaliarCredencial({ credencial, usuario, sessao, frete, deviceId, agora
   // DEVICE BINDING (§M-1): o device apresentado tem de bater com o da emissão.
   if (!deviceId || String(deviceId) !== String(credencial.device_id)) return neg('tracking_device_mismatch');
 
-  // VIAGEM VINCULADA (§H-3): existe, é a MESMA, pertence ao motorista/empresa e ativa.
-  if (!frete || String(frete.id) !== String(credencial.frete_id)) return neg('tracking_trip_mismatch');
-  if (String(frete.empresa_id) !== String(credencial.empresa_id) ||
-      String(frete.motorista_id) !== String(credencial.motorista_id)) {
-    return neg('tracking_tenant_mismatch');
-  }
-  if (!STATUS_FRETE_ATIVO.has(String(frete.status || '').toLowerCase())) return neg('tracking_trip_inactive');
+  // CONTEXTO OPERACIONAL (§H-3, multi-viagem): a credencial só vale enquanto o motorista
+  // tem >=1 viagem ATIVA. Sem viagem ativa → rejeitada (não sobrevive ao fim da operação).
+  if (!temViagemAtiva) return neg('tracking_trip_inactive');
 
   return {
     ok: true,
     identidade: {
       uid: credencial.motorista_id,
       empresa_id: credencial.empresa_id,
-      frete_id: credencial.frete_id,
       role: 'motorista',
       is_super_admin: false,
     },
@@ -99,5 +95,5 @@ function neg(code) { return { ok: false, code }; }
 
 module.exports = {
   calcularExpiracao, calcularMaxExpiracao, avaliarCredencial,
-  STATUS_MOTORISTA_ATIVO, STATUS_FRETE_ATIVO,
+  STATUS_MOTORISTA_ATIVO,
 };

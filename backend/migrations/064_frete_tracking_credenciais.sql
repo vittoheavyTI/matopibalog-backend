@@ -35,12 +35,20 @@ CREATE TABLE IF NOT EXISTS public.frete_tracking_credenciais (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   empresa_id      uuid NOT NULL REFERENCES public.empresas(id)  ON DELETE CASCADE,
   motorista_id    uuid NOT NULL REFERENCES public.usuarios(id)  ON DELETE CASCADE,
-  -- BINDING CANÔNICO (pós-revisão adversarial): sessão SEC-1, viagem e device são
-  -- OBRIGATÓRIOS. FK ON DELETE CASCADE: se a sessão OU a viagem forem apagadas, a
-  -- credencial some junto (não fica órfã com vínculo nulo). A revogação explícita da
-  -- sessão (revoked_at) é observada em runtime; a viagem inativa também é canônica.
+  -- BINDING CANÔNICO (pós-revisão + suporte a MULTI-VIAGEM): a ÂNCORA operacional é
+  -- SESSÃO SEC-1 + DEVICE (obrigatórios). O sistema PERMITE várias viagens ativas por
+  -- motorista (freteService trata >1; location layer projetada p/ até 4), então a
+  -- credencial autoriza a telemetria das viagens ATIVAS do motorista (não de UMA só).
+  --   session_id: FK ON DELETE CASCADE — âncora; sessão apagada → credencial some junto.
+  --   frete_id:   CONTEXTO DE EMISSÃO/auditoria (qual viagem disparou), NÃO é binding de
+  --               telemetria → NULLABLE + ON DELETE SET NULL (apagar essa viagem não pode
+  --               matar a credencial que cobre as demais viagens ativas do motorista).
+  -- A validação canônica por request exige >=1 VIAGEM ATIVA do motorista (senão
+  -- tracking_trip_inactive) — é isso que impede a credencial de sobreviver ao contexto
+  -- operacional. O isolamento "não postar para outro motorista/empresa" é garantido por
+  -- motorista_id/empresa_id + o resolvedor de viagens ativas do próprio motorista.
   session_id      uuid NOT NULL REFERENCES public.auth_sessions(id) ON DELETE CASCADE,
-  frete_id        uuid NOT NULL REFERENCES public.fretes(id)        ON DELETE CASCADE,
+  frete_id        uuid NULL     REFERENCES public.fretes(id)        ON DELETE SET NULL,
   device_id       text NOT NULL,   -- device binding: comparado em cada requisição
   -- HMAC-SHA-256(pepper, 'tracking:'||token) em hex. NUNCA o token aberto. Rotaciona
   -- (CAS in-place) a cada renovação → o hash antigo deixa de existir (single-use real).

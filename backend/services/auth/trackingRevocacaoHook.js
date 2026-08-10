@@ -11,12 +11,21 @@
 
 const { getTrackingRuntime } = require('./trackingCredentialRuntime');
 
-/** Revoga as credenciais de tracking vinculadas a um frete (fim/cancelamento). */
-async function revogarTrackingDoFrete({ freteId, motivo }) {
+/**
+ * MULTI-VIAGEM: ao fim/cancelamento de uma viagem, se o motorista NÃO tem mais viagem
+ * ativa, revoga suas credenciais de tracking (não faz sentido rastrear sem viagem).
+ * Best-effort: a validação já rejeita canonicamente (tracking_trip_inactive) mesmo que
+ * este hook falhe.
+ */
+async function revogarTrackingSeSemViagemAtiva({ empresaId, motoristaId, motivo }) {
   try {
     const { trackingService } = getTrackingRuntime();
-    if (!trackingService || !freteId) return;
-    await trackingService.revogarDoFrete(freteId, motivo || 'viagem_encerrada');
+    if (!trackingService || !empresaId || !motoristaId) return;
+    const { listarFretesAtivosDoMotorista } = require('../../controllers/freteLocalizacaoController');
+    const ativos = await listarFretesAtivosDoMotorista(empresaId, motoristaId);
+    if (ativos.length === 0) {
+      await trackingService.revogarDoMotorista(motoristaId, motivo || 'viagem_encerrada');
+    }
   } catch {
     /* best-effort: não afeta a operação chamadora */
   }
@@ -33,4 +42,4 @@ async function revogarTrackingDaSessao({ sessionId, motivo }) {
   }
 }
 
-module.exports = { revogarTrackingDoFrete, revogarTrackingDaSessao };
+module.exports = { revogarTrackingSeSemViagemAtiva, revogarTrackingDaSessao };
