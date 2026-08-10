@@ -16,7 +16,10 @@ const { erroDeCode, TrackingError } = require('./trackingCredentialErrors');
 
 const TABELA = 'frete_tracking_credenciais';
 const LAST_USED_THROTTLE_MS = 60 * 1000;
-const STATUS_FRETE_ATIVO = Array.from(domain.STATUS_FRETE_ATIVO);
+// Mesma definição canônica de "viagem apta ao rastreamento" da telemetria/emissão
+// (freteLocalizacaoController.listarFretesAtivosDoMotorista). MULTI-VIAGEM: a
+// credencial vale enquanto houver >=1 destas.
+const STATUS_FRETE_ATIVO = ['ativo', 'em_viagem', 'em_andamento'];
 
 function unavailable(causa) { return new TrackingError('tracking_unavailable', causa); }
 
@@ -47,11 +50,12 @@ function criarTrackingCredentialService({ supabase, cfg, crypto = defaultCrypto,
    * Emite credencial vinculada a (empresa, motorista, sessão SEC-1, device, frete).
    * TODOS obrigatórios (binding canônico). Grava só o HASH. Retorna { delivery, expiresAt, maxExpiresAt }.
    */
-  async function emitir({ empresa_id, motorista_id, session_id, frete_id, device_id }) {
+  async function emitir({ empresa_id, motorista_id, session_id, frete_id = null, device_id }) {
     if (!empresa_id || !motorista_id) throw erroDeCode('tracking_tenant_mismatch', 'empresa/motorista ausentes');
     if (!session_id) throw erroDeCode('tracking_session_revoked', 'sessão (sid) obrigatória para emitir');
-    if (!frete_id) throw erroDeCode('tracking_trip_mismatch', 'frete obrigatório para emitir');
     if (!device_id) throw erroDeCode('tracking_device_mismatch', 'device obrigatório para emitir');
+    // frete_id é CONTEXTO de emissão (qual viagem disparou) — opcional; a telemetria
+    // cobre TODAS as viagens ativas do motorista (multi-viagem).
 
     const pepper = pepperOuFalha();
     const token = crypto.gerarTrackingToken();
@@ -93,11 +97,17 @@ function criarTrackingCredentialService({ supabase, cfg, crypto = defaultCrypto,
     if (error) throw unavailable(error.message);
     return data || null;
   }
-  async function carregarFrete(freteId) {
-    if (!freteId) return null;
-    const { data, error } = await supabase.from('fretes').select('id, status, empresa_id, motorista_id').eq('id', freteId).maybeSingle();
+  // MULTI-VIAGEM: o motorista tem >=1 viagem ATIVA? (contexto operacional canônico).
+  async function carregarTemViagemAtiva(empresaId, motoristaId) {
+    const { data, error } = await supabase
+      .from('fretes')
+      .select('id')
+      .eq('empresa_id', empresaId)
+      .eq('motorista_id', motoristaId)
+      .in('status', STATUS_FRETE_ATIVO)
+      .limit(1);
     if (error) throw unavailable(error.message);
-    return data || null;
+    return Array.isArray(data) && data.length > 0;
   }
 
   /**
@@ -112,13 +122,13 @@ function criarTrackingCredentialService({ supabase, cfg, crypto = defaultCrypto,
     const credencial = await carregarPorHash(hash);
     if (!credencial) throw erroDeCode('tracking_credential_invalid', 'não encontrada');
 
-    const [usuario, sessao, frete] = await Promise.all([
+    const [usuario, sessao, temViagemAtiva] = await Promise.all([
       carregarUsuario(credencial.motorista_id),
       carregarSessao(credencial.session_id),
-      carregarFrete(credencial.frete_id),
+      carregarTemViagemAtiva(credencial.empresa_id, credencial.motorista_id),
     ]);
 
-    const veredito = domain.avaliarCredencial({ credencial, usuario, sessao, frete, deviceId, agoraMs: agora(), permitirExpirada });
+    const veredito = domain.avaliarCredencial({ credencial, usuario, sessao, temViagemAtiva, deviceId, agoraMs: agora(), permitirExpirada });
     if (!veredito.ok) throw erroDeCode(veredito.code);
     return { identidade: { ...veredito.identidade, credential_id: credencial.id }, credencial, hash };
   }

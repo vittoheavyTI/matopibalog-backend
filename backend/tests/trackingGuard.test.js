@@ -39,7 +39,7 @@ function fakeTrackingService() {
         throw erroDeCode('tracking_credential_invalid');
       }
       if (deviceId !== DEV) throw erroDeCode('tracking_device_mismatch');
-      return { uid: 'mot-1', empresa_id: 'emp-1', frete_id: 'frete-1', role: 'motorista', is_super_admin: false, credential_id: 'cred-1' };
+      return { uid: 'mot-1', empresa_id: 'emp-1', role: 'motorista', is_super_admin: false, credential_id: 'cred-1' };
     },
     async renovar() { return { expiresAt: new Date().toISOString() }; },
   };
@@ -51,7 +51,7 @@ function montarApp({ flagOn = true, verificarPlano = passthrough } = {}) {
   const app = express(); app.use(express.json());
   const tele = express.Router();
   tele.use(guard);
-  tele.post('/', (req, res) => res.status(201).json({ ok: true, authKind: req.authKind, uid: req.user.uid, empresa_id: req.empresa_id, frete_id: req.trackingFreteId }));
+  tele.post('/', (req, res) => res.status(201).json({ ok: true, authKind: req.authKind, uid: req.user.uid, empresa_id: req.empresa_id }));
   tele.post('/renovar-credencial', exigirTracking, (_req, res) => res.status(200).json({ ok: true }));
   app.use('/fretes/localizacao/sessao', tele);
   app.post('/auth/me', fakeVerifyToken, (req, res) => res.status(200).json({ uid: req.user.uid }));
@@ -85,7 +85,7 @@ test('§23: access EXPIRADO sem credencial → 401', async () => {
 test('§23: credencial + device + access EXPIRADO → 201; seta authKind e frete vinculado', async () => {
   const r = await req(montarApp(), 'POST', '/fretes/localizacao/sessao', { [H_CRED]: 'valid-cred', [H_DEV]: DEV, 'x-fake-access': 'expired' }, {});
   assert.equal(r.status, 201); assert.equal(r.body.authKind, 'tracking');
-  assert.equal(r.body.uid, 'mot-1'); assert.equal(r.body.frete_id, 'frete-1');
+  assert.equal(r.body.uid, 'mot-1'); assert.equal(r.body.empresa_id, 'emp-1');
 });
 
 test('§M-1 device: credencial sem/errado device → 403 tracking_device_mismatch', async () => {

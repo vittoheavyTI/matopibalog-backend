@@ -190,14 +190,23 @@ A emissão recusa token legado sem `sid` (`tracking_session_revoked`). `session_
 persistido no secure storage; sem fingerprint invasivo) e o envia em **todas** as chamadas via
 `X-Tracking-Device` (emissão, telemetria, estado, renovação). Mismatch ⇒ `tracking_device_mismatch`.
 
-### 15.4 §H-3 — vínculo canônico à VIAGEM (validação por request, sem depender de hook)
-`frete_id` **NOT NULL**. A validação server-side (`trackingCredentialDomain.avaliarCredencial`)
-checa, **a cada request**: credencial não revogada; **teto absoluto**; sessão emissora não
-revogada; motorista ativo; empresa (tenant); **device**; e a **viagem vinculada** (existe, é a
-mesma, pertence ao motorista/empresa e **ainda ATIVA**). A telemetria (ramo tracking) grava
-**somente na viagem vinculada** (`req.trackingFreteId`) — credencial da viagem X **não** grava na
-viagem Y. Fim/cancelamento ⇒ frete inativo ⇒ `tracking_trip_inactive` **canônico** (o hook
-best-effort é só aceleração; se falhar, o próximo request ainda é rejeitado).
+### 15.4 §H-3 — vínculo canônico ao CONTEXTO OPERACIONAL (multi-viagem)
+> **Correção pós-gate de incorporação:** a Verificação 0 provou **`driver_can_have_multiple_active_trips = TRUE`**
+> (`services/freteService.js` trata explicitamente `>1 viagem ativa`; `fretesController.create` não
+> impede; sem constraint de DB; a camada de localização opera com `MAX_FRETES_SESSAO=4`). O binding
+> por-UMA-viagem seria **ambíguo** (rastrearia só a viagem de emissão). Modelo corrigido:
+
+A **âncora** é **sessão SEC-1 + device** (NOT NULL). `frete_id` é **contexto de emissão**
+(qual viagem disparou) — **NULLABLE**, `ON DELETE SET NULL` (apagar essa viagem não pode matar a
+credencial que cobre as demais). A validação server-side checa, **a cada request**: credencial não
+revogada; **teto absoluto**; sessão não revogada; motorista ativo; tenant; **device**; e
+**`temViagemAtiva`** = o motorista tem **≥1 viagem ATIVA** (`{ativo,em_viagem,em_andamento}`). Sem
+viagem ativa ⇒ `tracking_trip_inactive` **canônico** (não depende de hook). A telemetria (ramo
+tracking) **faz fan-out para TODAS as viagens ativas do motorista** — mesmo modelo da sessão
+(`buscarFretesEmAndamentoDoMotorista`). Isolamento: o resolvedor só retorna as **próprias** viagens
+do motorista/empresa ⇒ credencial de A nunca grava em viagem de B (cross-driver/tenant bloqueado).
+Fim/cancelamento da **última** viagem ⇒ sem viagem ativa ⇒ rejeitada; hook best-effort revoga.
+**O app (Flutter/Kotlin) não muda:** já posta no endpoint de sessão; o fan-out é server-side.
 
 ### 15.5 §H-2 — teto absoluto (sem renovação perpétua)
 Duas noções: `expires_at` (nominal) e **`max_expires_at`** (teto absoluto = `issued_at + MAX`).

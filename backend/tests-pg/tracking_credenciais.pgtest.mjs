@@ -57,16 +57,19 @@ function registrar() {
     return r.rows[0].id;
   }
 
-  test('schema: colunas essenciais (incl. max_expires_at, device_id NOT NULL)', async () => {
+  test('schema: colunas essenciais; session_id/device_id/max NOT NULL; frete_id NULLABLE (contexto)', async () => {
     const { rows } = await pool.query(
       `SELECT column_name, is_nullable FROM information_schema.columns WHERE table_schema='public' AND table_name='frete_tracking_credenciais'`);
     const map = Object.fromEntries(rows.map((r) => [r.column_name, r.is_nullable]));
     for (const c of ['id', 'empresa_id', 'motorista_id', 'session_id', 'frete_id', 'device_id', 'credential_hash', 'issued_at', 'expires_at', 'max_expires_at', 'last_used_at', 'revoked_at']) {
       assert.ok(c in map, `coluna ${c} ausente`);
     }
-    for (const c of ['session_id', 'frete_id', 'device_id', 'max_expires_at']) {
+    // Âncoras operacionais NOT NULL:
+    for (const c of ['session_id', 'device_id', 'max_expires_at']) {
       assert.equal(map[c], 'NO', `${c} deveria ser NOT NULL`);
     }
+    // MULTI-VIAGEM: frete_id é contexto de emissão → NULLABLE.
+    assert.equal(map['frete_id'], 'YES', 'frete_id deveria ser NULLABLE (contexto)');
   });
 
   test('RLS habilitada e forçada', async () => {
@@ -97,11 +100,18 @@ function registrar() {
     await assert.rejects(() => inserir({ expires: dias(10), max: dias(1) }), /max_chk|check/i);
   });
 
-  test('FK obrigatórios: empresa/motorista/frete/sessão inexistentes rejeitados', async () => {
+  test('FK: empresa/motorista/sessão inexistentes rejeitados; frete inexistente (não-nulo) rejeitado', async () => {
     await assert.rejects(() => inserir({ empresa: randomUUID() }), /foreign key|violates/i);
     await assert.rejects(() => inserir({ motorista: randomUUID() }), /foreign key|violates/i);
-    await assert.rejects(() => inserir({ frete: randomUUID() }), /foreign key|violates/i);
     await assert.rejects(() => inserir({ session: randomUUID() }), /foreign key|violates/i);
+    await assert.rejects(() => inserir({ frete: randomUUID() }), /foreign key|violates/i);
+  });
+
+  test('frete_id NULL é permitido (credencial sem contexto de emissão)', async () => {
+    const id = await inserir({ frete: null });
+    const { rows } = await pool.query(`SELECT frete_id FROM ${TABELA} WHERE id=$1`, [id]);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].frete_id, null);
   });
 
   test('device_id NOT NULL (binding)', async () => {
@@ -115,16 +125,17 @@ function registrar() {
     assert.equal(rows[0].n, 0);
   });
 
-  test('ON DELETE CASCADE: apagar o FRETE remove a credencial (sem órfã)', async () => {
+  test('ON DELETE SET NULL do FRETE: apagar a viagem de contexto NÃO mata a credencial (frete_id→null)', async () => {
     const fLocal = randomUUID();
     await pool.query(`INSERT INTO public.fretes (id, empresa_id, motorista_id, status, data) VALUES ($1,$2,$3,'em_viagem', now())`, [fLocal, E1, M1]);
     const id = await inserir({ frete: fLocal });
     await pool.query(`DELETE FROM public.fretes WHERE id=$1`, [fLocal]);
-    const { rows } = await pool.query(`SELECT id FROM ${TABELA} WHERE id=$1`, [id]);
-    assert.equal(rows.length, 0);
+    const { rows } = await pool.query(`SELECT frete_id FROM ${TABELA} WHERE id=$1`, [id]);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].frete_id, null);
   });
 
-  test('ON DELETE CASCADE: apagar a SESSÃO remove a credencial', async () => {
+  test('ON DELETE CASCADE: apagar a SESSÃO (âncora) remove a credencial', async () => {
     const r = await pool.query(
       `SELECT * FROM public.criar_sessao_auth($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
       [M1, E1, 'android', null, null, randomUUID(), hash(randomUUID()), dias(30), dias(1), dias(30), null, 'ua', null]);
