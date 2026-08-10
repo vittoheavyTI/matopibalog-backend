@@ -1,17 +1,18 @@
 # SEC-1 Pre-Gate-B - Observacao Compatible
 
 Data: 2026-08-09 20:39 -03:00
+Atualizacao documental: 2026-08-09 pos-CI final do HEAD `ef93af7104bad1db2df719e63f2cd4da648c0c12`
 
 PR: #414 (`feat/sec-1-sessoes-revogaveis`)
-HEAD: `878b64e58a3ecfbba40844cb49bcfceff248c2eb`
+HEAD: `ef93af7104bad1db2df719e63f2cd4da648c0c12`
 Base conhecida: `main` em `567fcc61864a1f4e6f5e469fb8171eb84ac0647d`
 Estado da PR: aberta, draft, nao mergeada.
 
 ## Preflight
 
 - `origin/main` permanece em `567fcc61864a1f4e6f5e469fb8171eb84ac0647d`.
-- `HEAD` local/remoto permanece em `878b64e58a3ecfbba40844cb49bcfceff248c2eb`.
-- Drift de `34cf0b4e25756782a2db9fae17de46f6a1f3e403` ate `878b64e58a3ecfbba40844cb49bcfceff248c2eb`: somente documentacao.
+- `HEAD` local/remoto permanece em `ef93af7104bad1db2df719e63f2cd4da648c0c12`.
+- Drift de `34cf0b4e25756782a2db9fae17de46f6a1f3e403` ate `ef93af7104bad1db2df719e63f2cd4da648c0c12`: somente documentacao apos o codigo funcional SEC-1.
 - Residuos locais conhecidos continuam fora do escopo: `painel_web/dist`, registrants Flutter e `500`.
 
 ## PR body
@@ -34,20 +35,21 @@ Body da PR #414 atualizado para refletir:
 
 ## APK release
 
-Artifact release confirmado no GitHub Actions:
+Artifact release correto confirmado no GitHub Actions para o HEAD atual:
 
-- Workflow run: `31339688594`
-- Job: `93311312629`
+- Workflow run: `31342485778`
 - Artifact: `app-release-apk`
-- Artifact ID: `9045522177`
-- Artifact digest: `sha256:d2bd38bd39480455703362576fa6cf58897b70a842fe832193bc844a7a1a7ece`
-- Source SHA: `878b64e58a3ecfbba40844cb49bcfceff248c2eb`
-- Artifact expira em: `2026-08-16T22:40:55Z`
+- Artifact ID: `9046355612`
+- Artifact digest: `sha256:3e175f5099c6bae7dbf6619157052fac6e7f4d3be122ec7a949a35d4949d8594`
+- Source SHA: `ef93af7104bad1db2df719e63f2cd4da648c0c12`
+- Artifact expira em: `2026-08-16T23:50:26Z`
 - Arquivo interno: `app-release.apk`
 - Bytes do APK: `57312055`
-- SHA-256 do APK: `ED9827AE73A8D1C5F280D39F6B0CD6559285499D01C7EA26BF8BA93128189DFD`
+- SHA-256 do APK: `54D0681EC1E436C49213C26BABAE659343D274496446FDE15A35BA84B50A2205`
 
 Checklist manual real: pendente de retorno do usuario.
+
+Se esta atualizacao documental gerar novo HEAD doc-only, o APK acima permanece a evidencia release correta para o codigo funcional SEC-1 ja validado no HEAD `ef93af7104bad1db2df719e63f2cd4da648c0c12`; novo build nao e necessario apenas por correcao documental.
 
 ## Observacao Compatible
 
@@ -150,13 +152,74 @@ Estado observado:
 
 Conclusao: legado residual ainda nao esta suficientemente inventariado para Gate B.
 
+### Atualizacao read-only - 2026-08-09 21:44 -03
+
+Producao Compatible revalidada sem alteracao de flags:
+
+- `AUTH_SESSIONS_ENABLED=true`
+- `AUTH_REFRESH_ROTATION_ENABLED=true`
+- `AUTH_REQUIRE_SESSION=false`
+- `AUTH_ALLOW_LEGACY_TOKENS=true`
+- `AUTH_REFRESH_COOKIE_SAMESITE=lax`
+- `AUTH_LEGACY_TOKEN_CUTOFF`: ausente
+- pepper/JWT/Supabase: presentes, sem valores impressos neste relatorio
+
+Health/readiness:
+
+- `https://api.matopibalog.com.br/health`: 200
+- `https://matopibalog-backend-production.up.railway.app/health`: 200
+- `https://api.matopibalog.com.br/planos/publicos`: 200
+- Deployment operacional continua `a1bafb7e-fe99-43ab-a962-536078a70e7b`, status `SUCCESS`.
+
+Logs Railway agregados, janela 3h:
+
+- Total HTTP observado: 35
+- 200: 13
+- 201: 7
+- 401: 1
+- 404: 14
+- 5xx: 0
+- 403: 0
+- 409: 0
+- 429: 0
+- Latencia media: 1392.57 ms
+- Latencia maxima: 7396 ms
+- Top paths benignos/esperados: `/health`, `/fretes/localizacao/sessao`, `/planos/publicos`.
+- Linhas app: 35
+- `ENOENT /painel_web/dist/index.html`: 14, fora do escopo auth/session.
+- CORS: 0
+- CSRF: 0
+- Padrões de segredo em logs app: 0
+- Evento `refresh_reuse`: 1 linha informativa, correspondente a prova controlada anterior.
+
+Metricas Supabase agregadas, sem IDs:
+
+- `android_real_session_created=false`
+- Android real nao sintetico: total 0, ativo 0, revogado 0.
+- Android sintetico/fixture: total 1, ativo 0, revogado 1.
+- Web real nao sintetico: total 1, ativo 1, revogado 0.
+- Web sintetico/fixture: total 1, ativo 0, revogado 1.
+- Refresh tokens: total 5, usados 2, revogados 4, reuse detectado 2.
+- Ultimo refresh observado: 2026-08-09T22:05:57Z, ainda proveniente das provas controladas do Gate A.
+
+Inventario estatico legacy/clientes:
+
+- Web real usa `localStorage.auth_token` como access Bearer e `/auth/refresh` por cookie; ja ha uma sessao SEC-1 web real ativa.
+- Admin real compartilha o mesmo cliente web e middleware `verifyToken`; ha inferencia operacional, mas sem contador separado por area admin.
+- Android release usa refresh SEC-1 (`/auth/mobile/refresh`) e armazena refresh em secure storage.
+- Android ainda possui migracao de token legado antigo salvo em preferencias para secure storage; portanto usuario que nao relogar pode continuar operando como legacy ate novo login/refresh no APK correto.
+- `LocationTrackingService` Android envia Bearer do secure storage; a dependencia e do access token atual do app, nao uma integracao externa separada.
+- Rotas de integracoes admin usam `verifyToken`; o Bearer externo observado em teste Clicksign e token de API de terceiro, nao JWT legacy Matopiba.
+- Jobs/workers auditados (`gerarFaturasRecorrentes`, `expirarTrials`, `notificarInadimplencia`) sao execucoes one-shot internas e nao apareceram como clientes HTTP/JWT legacy.
+
+Conclusao desta atualizacao: Gate B permanece **NO-GO temporario** ate retorno manual do APK release correto e aparicao/verificacao de sessao Android real nao sintetica, ou ate inventario legacy residual demonstrar ausencia de dependencia legitima.
+
 ## Strict isolado
 
 Ambiente isolado CI:
 
-- Run Browser E2E: `31339688555`
-- Job: `93311312518`
-- Head SHA: `878b64e58a3ecfbba40844cb49bcfceff248c2eb`
+- Run Browser E2E: `31342485748`
+- Head SHA: `ef93af7104bad1db2df719e63f2cd4da648c0c12`
 - Resultado: PASS
 - O teste sobe API/front isolados com:
   - `AUTH_SESSIONS_ENABLED=true`
@@ -183,8 +246,7 @@ Testes Node locais de auth/SEC-1:
 
 Mobile release/CI:
 
-- Run Flutter: `31339688594`
-- Job: `93311312629`
+- Run Flutter: `31342485778`
 - Resultado: PASS
 - Inclui `flutter pub get`, `flutter analyze`, `flutter test`, `flutter build apk --debug`, `flutter build apk --release` e upload de `app-release-apk`.
 
