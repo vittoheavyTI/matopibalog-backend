@@ -1,0 +1,76 @@
+name: Billing 3A-2 CI (fake + PG outbox)
+
+# CI DEDICADA da macrofrente 3A-2 (billing automático). Roda na PRÓPRIA branch
+# (push + manual) — não depende de retarget para main. Valida SEM segredo Asaas:
+#   - testes de billing (fake provider, orquestrador, outbox, guard produção);
+#   - Postgres 16 efêmero: migrations até 063 + concorrência do billing_outbox.
+# NÃO usa Asaas produção, NÃO usa banco compartilhado, NÃO exige secret.
+
+on:
+  push:
+    branches:
+      - feat/3a-2-billing-asaas
+    paths:
+      - "backend/**"
+      - ".github/workflows/billing-3a2-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: billing-3a2-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  billing:
+    name: Billing 3A-2 - fake tests + Postgres outbox
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: matriz_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    defaults:
+      run:
+        working-directory: backend
+
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/matriz_test
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: backend/.nvmrc
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Billing fake/unit tests (sem DB, sem segredo)
+        run: node --test tests/billing*.test.js
+
+      - name: Apply isolated schema (pre-bootstrap + 060 + 061 + 063 + test grants)
+        run: npm run test:pg:apply
+
+      - name: PG outbox concurrency (billing_outbox.pgtest.mjs)
+        run: npm run test:pg
