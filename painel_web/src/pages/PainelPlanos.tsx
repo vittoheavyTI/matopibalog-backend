@@ -690,7 +690,7 @@ export const PainelPlanos: React.FC = () => {
                 <div>
                   <label htmlFor="plano-implantacao" className="block text-xs font-bold text-gray-500 uppercase mb-1.5 ml-1">Implantação / valor inicial (R$)</label>
                   <input id="plano-implantacao" type="number" min="0" step="0.01" className="w-full border-2 border-gray-100 rounded-xl p-3 outline-none focus:border-blue-500 bg-gray-50/50" value={form.valor_implantacao} onChange={(e) => setForm({ ...form, valor_implantacao: e.target.value })} placeholder="0,00" />
-                  <p className="text-xs text-gray-400 mt-1 ml-1">0 = "Implantação grátis no lançamento".</p>
+                  <p className="text-xs text-gray-400 mt-1 ml-1">0 = sem cobrança de implantação.</p>
                 </div>
                 <div>
                   <label htmlFor="plano-self-service" className="block text-xs font-bold text-gray-500 uppercase mb-1.5 ml-1">Limite self-service</label>

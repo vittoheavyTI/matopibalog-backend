@@ -12,17 +12,6 @@ import { montarLinkComercial } from '../utils/contatoComercial';
 
 const ASSUNTO_ENTERPRISE = 'Interesse no plano Enterprise - Matopiba Log';
 
-// Fallback local mínimo — usado APENAS se a API pública falhar, para a página de
-// planos não ficar em branco. O backend (/planos/publicos) é a fonte principal.
-// Os ids aqui são aliases legados (não-UUID) e navegam via ?plano=<alias>.
-const PLANOS_FALLBACK: PlanoPublico[] = [
-  { id: 'empresa-start', nome: 'Empresa Start', descricao: 'Para equipes iniciando a operação digital', preco_mensal: 299.9, modelo_cobranca: 'fixo', preco_por_motorista: null, limite_motoristas: 5, dias_trial: 14, valor_implantacao: 0, capacidade_inclusa: 5, preco_motorista_extra: 100, recursos: ['5 motoristas incluídos', 'Motorista extra R$ 100,00', 'Implantação grátis'] },
-  { id: 'empresa-essencial', nome: 'Empresa Essencial', descricao: 'Para operações em crescimento', preco_mensal: 499.9, modelo_cobranca: 'fixo', preco_por_motorista: null, limite_motoristas: 10, dias_trial: 14, valor_implantacao: 0, capacidade_inclusa: 10, preco_motorista_extra: 90, recursos: ['10 motoristas incluídos', 'Motorista extra R$ 90,00', 'Implantação grátis'] },
-  { id: 'empresa-growth', nome: 'Empresa Growth', descricao: 'Para frotas maiores com rotina comercial ativa', preco_mensal: 799.9, modelo_cobranca: 'fixo', preco_por_motorista: null, limite_motoristas: 20, dias_trial: 14, valor_implantacao: 0, capacidade_inclusa: 20, preco_motorista_extra: 80, recursos: ['20 motoristas incluídos', 'Motorista extra R$ 80,00', 'Implantação grátis'] },
-  { id: 'empresa-scale', nome: 'Empresa Scale', descricao: 'Para operações de alta capacidade', preco_mensal: 1199.9, modelo_cobranca: 'fixo', preco_por_motorista: null, limite_motoristas: 40, dias_trial: 14, valor_implantacao: 0, capacidade_inclusa: 40, preco_motorista_extra: 70, recursos: ['40 motoristas incluídos', 'Motorista extra R$ 70,00', 'Implantação grátis'] },
-  { id: 'enterprise', nome: 'Enterprise / Sob negociação', descricao: 'Para frotas acima de 40 motoristas', preco_mensal: 0, modelo_cobranca: 'fixo', preco_por_motorista: null, limite_motoristas: null, dias_trial: 14, valor_implantacao: 0, capacidade_inclusa: 41, preco_motorista_extra: null, requer_negociacao: true, recursos: ['Motoristas sob medida', 'Condições comerciais sob negociação'] },
-];
-
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export const PlanosPublicos: React.FC = () => {
@@ -45,8 +34,10 @@ export const PlanosPublicos: React.FC = () => {
   // 409 (regularização necessária / upgrade pendente): mostra CTA para faturas.
   const [acaoRegularizar, setAcaoRegularizar] = useState<{ message: string; redirect: string } | null>(null);
 
-  useEffect(() => {
+  function carregarPlanosPublicos() {
     let vivo = true;
+    setLoading(true);
+    setErro('');
     // Catálogo público leva ao cadastro de empresa (/cadastro): só planos de
     // empresa ou "ambos". Autônomo usa o app. Filtro por categoria, nunca por nome.
     api.get('/planos/publicos?categoria=empresa')
@@ -61,15 +52,21 @@ export const PlanosPublicos: React.FC = () => {
           preco_por_motorista: p.preco_por_motorista != null ? Number(p.preco_por_motorista) : null,
           recursos: normalizarRecursos(p.recursos),
         }));
-        setPlanos(lista.length ? lista : PLANOS_FALLBACK);
+        setPlanos(lista);
+        if (lista.length === 0) setErro('Nenhum plano público ativo no catálogo.');
       })
       .catch(() => {
         if (!vivo) return;
-        setErro('Não foi possível carregar os planos agora. Exibindo valores de referência.');
-        setPlanos(PLANOS_FALLBACK);
+        setErro('Não foi possível carregar os planos agora.');
+        setPlanos([]);
       })
       .finally(() => { if (vivo) setLoading(false); });
     return () => { vivo = false; };
+  }
+
+  useEffect(() => {
+    const cancelar = carregarPlanosPublicos();
+    return cancelar;
   }, []);
 
   function irParaCadastro(plano: PlanoPublico) {
@@ -193,12 +190,19 @@ export const PlanosPublicos: React.FC = () => {
           <p className="text-xl text-gray-600">Planos para todos os tamanhos de frota</p>
         </div>
 
-        {erro && (
-          <div className="max-w-2xl mx-auto mb-8 bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-xl p-3 text-center">{erro}</div>
-        )}
-
         {loading ? (
           <div className="text-center text-gray-500 py-16">Carregando planos...</div>
+        ) : erro ? (
+          <div className="max-w-2xl mx-auto mb-8 bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-xl p-4 text-center">
+            <p>{erro}</p>
+            <button
+              type="button"
+              onClick={carregarPlanosPublicos}
+              className="mt-3 px-4 py-2 rounded-lg bg-amber-700 text-white font-semibold hover:bg-amber-800"
+            >
+              Tentar novamente
+            </button>
+          </div>
         ) : (
           // Vitrine compartilhada (mesma fonte visual do cadastro público). CTA
           // depende da sessão; negociação renderizada por último e não-clicável.
