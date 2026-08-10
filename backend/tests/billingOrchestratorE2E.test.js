@@ -181,13 +181,14 @@ test('E2E add-on: add-on faturável ativo gera componente; sem duplicar se já t
   assert.equal(addonRes.created, true);
   assert.equal(mundo.componentes.get('ad1'), addonRes.id);
 
-  // Segunda execução: add-on já tem componente → skip (não duplica).
+  // Segunda execução: add-on já tem componente (convergente) → NENHUMA ação de
+  // add-on é planejada (nem cria nem remove).
   mundo.addOns[0].billing_component_id = addonRes.id;
   const provider2 = new FakeAsaasProvider();
   provider2.customers.set('cus_a', { id: 'cus_a' });
   const r2 = await ensureBillingStateComDeps({ empresaId: 'e-ad', deps: mundo.deps, provider: provider2, policyOverrides: { provider_mode: 'fake' } });
-  const addonRes2 = r2.resultados.find((x) => x.tipo === 'garantir_addon');
-  assert.equal(addonRes2.skip, true);
+  assert.equal(r2.resultados.find((x) => x.tipo === 'garantir_addon' || x.tipo === 'remover_addon'), undefined);
+  assert.equal(provider2.calls.createCharge, 0, 'add-on convergente não gera nova cobrança');
 });
 
 test('E2E estado sem cobrança nova: suspensa não cria nada', async () => {

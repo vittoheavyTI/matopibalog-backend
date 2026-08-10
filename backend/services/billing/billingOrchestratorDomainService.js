@@ -69,21 +69,31 @@ function planejarImplantacao({ situacao, policy, snapshot, trialEndsAt, agora, i
   return null;
 }
 
-// Planeja add-ons faturáveis (empresa_funcionalidades ativas com preço/origem
-// adicional). Idempotente: cada add-on vira um componente identificável.
+// Planeja add-ons faturáveis por CONVERGÊNCIA (não por evento):
+//   - ativo + preço > 0 + sem componente → criar (garantir_addon);
+//   - inativo + com componente → remover (remover_addon).
+// Idempotente: já convergente → nenhuma ação.
 function planejarAddOns({ addOns }) {
   const lista = Array.isArray(addOns) ? addOns : [];
   const acoes = [];
   for (const a of lista) {
-    if (!a || a.status !== 'ativa') continue;
+    if (!a) continue;
+    const ativo = a.status === 'ativa';
     const preco = Number(a.preco_mensal_centavos || 0);
-    if (!(preco > 0)) continue;
-    acoes.push(acao('garantir_addon', {
-      addon_id: a.id,
-      funcionalidade_id: a.funcionalidade_id,
-      preco_mensal_centavos: preco,
-      componente: a.billing_component_id || null,
-    }));
+    const temComponente = Boolean(a.billing_component_id);
+    if (ativo && preco > 0 && !temComponente) {
+      acoes.push(acao('garantir_addon', {
+        addon_id: a.id,
+        funcionalidade_id: a.funcionalidade_id,
+        preco_mensal_centavos: preco,
+        componente: null,
+      }));
+    } else if (!ativo && temComponente) {
+      acoes.push(acao('remover_addon', {
+        addon_id: a.id,
+        componente: a.billing_component_id,
+      }));
+    }
   }
   return acoes;
 }
@@ -108,7 +118,19 @@ function planejarBilling(input = {}) {
   const situacao = situ.situacao || null;
   const base = { acoes: [], motivo: null, requer_billing: false, situacao };
 
-  // Estados sem cobrança nova: nada a fazer automaticamente (contingência pode reconciliar).
+  const CANCELADAS = new Set(['cancelada', 'cancelado']);
+
+  // CANCELAMENTO (§1.5): conta cancelada com assinatura ativa → cancelar assinatura
+  // (convergência; idempotente: sem assinatura → nada).
+  if (CANCELADAS.has(situacao)) {
+    const acoesCancel = [];
+    if (billing.asaas_subscription_id && billing.assinatura_cancelada !== true) {
+      acoesCancel.push(acao('cancelar_assinatura', { subscription_id: billing.asaas_subscription_id }));
+    }
+    return { ...base, requer_billing: acoesCancel.length > 0, acoes: acoesCancel, motivo: acoesCancel.length ? 'cancelar_assinatura' : 'cancelada_sem_assinatura' };
+  }
+
+  // Demais estados sem cobrança nova: nada a fazer automaticamente.
   if (SITUACOES_SEM_COBRANCA_NOVA.has(situacao)) {
     return { ...base, motivo: `sem_cobranca_nova:${situacao}` };
   }
@@ -127,14 +149,27 @@ function planejarBilling(input = {}) {
     acoes.push(acao('garantir_customer'));
   }
 
+  const valorEsperado = Number(snapshot.valor_mensal || 0);
+
   // 2) Assinatura mensal (idempotente). Primeiro vencimento nunca antes de trial_end.
   if (!billing.asaas_subscription_id) {
     acoes.push(acao('garantir_assinatura', {
-      valor_mensal: Number(snapshot.valor_mensal || 0),
+      valor_mensal: valorEsperado,
       primeiro_vencimento: primeiroVencimentoMensalidade({ trialEndsAt, agora }),
       billing_cycle: policy.billing_cycle || 'MONTHLY',
       respeita_trial: Boolean(trialEndsAt),
     }));
+  } else {
+    // 2.1) CONVERGÊNCIA DE PLANO ALTERADO (§1.3): assinatura existe, mas o valor
+    //      esperado (snapshot) difere do valor contratado gravado localmente →
+    //      atualizar o valor da assinatura. Idempotente: iguais → nada.
+    const valorAtual = billing.billing_valor_mensal != null ? Number(billing.billing_valor_mensal) : null;
+    if (valorAtual != null && Number.isFinite(valorEsperado) && Math.abs(valorAtual - valorEsperado) > 0.001) {
+      acoes.push(acao('atualizar_assinatura_valor', {
+        subscription_id: billing.asaas_subscription_id,
+        valor_mensal: valorEsperado,
+      }));
+    }
   }
 
   // 3) Implantação conforme política (§15).
@@ -148,7 +183,8 @@ function planejarBilling(input = {}) {
   });
   if (implantacao) acoes.push(implantacao);
 
-  // 4) Add-ons faturáveis (§16).
+  // 4) Add-ons por convergência (§16/§1.4): criar ativos sem componente, remover
+  //    inativos com componente.
   for (const a of planejarAddOns({ addOns: input.addOns })) acoes.push(a);
 
   return {

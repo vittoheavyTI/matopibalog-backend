@@ -13,7 +13,7 @@ function criarDepsSupabase(supabase) {
     carregarEmpresaBilling: async (empresaId) => {
       const { data } = await supabase
         .from('empresas')
-        .select('id, asaas_customer_id, asaas_subscription_id, implantacao_cobrada, next_due_date, trial_ends_at')
+        .select('id, asaas_customer_id, asaas_subscription_id, implantacao_cobrada, next_due_date, trial_ends_at, billing_valor_mensal, assinatura_cancelada')
         .eq('id', empresaId)
         .maybeSingle();
       return data || {};
@@ -32,12 +32,17 @@ function criarDepsSupabase(supabase) {
     },
 
     carregarAddOns: async (empresaId) => {
-      const { data } = await supabase
-        .from('empresa_funcionalidades')
-        .select('id, funcionalidade_id, status, preco_mensal_centavos, billing_component_id')
-        .eq('empresa_id', empresaId)
-        .eq('status', 'ativa');
-      return data || [];
+      // Carrega add-ons ATIVOS (para criar componente) E os que têm componente
+      // (para convergência de remoção quando ficaram inativos). O orquestrador
+      // decide criar/remover por convergência.
+      const [ativos, comComponente] = await Promise.all([
+        supabase.from('empresa_funcionalidades').select('id, funcionalidade_id, status, preco_mensal_centavos, billing_component_id').eq('empresa_id', empresaId).eq('status', 'ativa'),
+        supabase.from('empresa_funcionalidades').select('id, funcionalidade_id, status, preco_mensal_centavos, billing_component_id').eq('empresa_id', empresaId).not('billing_component_id', 'is', null),
+      ]);
+      const mapa = new Map();
+      for (const a of (ativos.data || [])) mapa.set(a.id, a);
+      for (const a of (comComponente.data || [])) if (!mapa.has(a.id)) mapa.set(a.id, a);
+      return Array.from(mapa.values());
     },
 
     // Persiste o patch de billing. Trata __addon separadamente (grava o componente
@@ -49,6 +54,14 @@ function criarDepsSupabase(supabase) {
           .from('empresa_funcionalidades')
           .update({ billing_component_id: patch.__addon.billing_component_id, atualizado_em: new Date().toISOString() })
           .eq('id', patch.__addon.addon_id);
+        return;
+      }
+      if (patch.__addon_removido) {
+        // Convergência de remoção: limpa o vínculo do componente cancelado.
+        await supabase
+          .from('empresa_funcionalidades')
+          .update({ billing_component_id: null, atualizado_em: new Date().toISOString() })
+          .eq('id', patch.__addon_removido.addon_id);
         return;
       }
       const update = { ...patch, billing_updated_at: new Date().toISOString() };

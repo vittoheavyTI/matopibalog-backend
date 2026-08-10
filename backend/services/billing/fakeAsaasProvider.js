@@ -30,7 +30,7 @@ class FakeAsaasProvider {
     this.charges = new Map();
     this._seq = { cus: 0, sub: 0, pay: 0, evt: 0 };
     this._faults = opts.faults ? { ...opts.faults, _count: 0 } : null;
-    this.calls = { createCustomer: 0, createSubscription: 0, createCharge: 0, cancelSubscription: 0 };
+    this.calls = { createCustomer: 0, createSubscription: 0, createCharge: 0, cancelSubscription: 0, updateSubscription: 0, cancelComponent: 0 };
   }
 
   _id(kind) {
@@ -89,6 +89,25 @@ class FakeAsaasProvider {
     if (!sub) return { id: subscriptionId, status: 'CANCELLED', deleted: true }; // idempotente
     sub.status = 'CANCELLED';
     return { id: subscriptionId, status: 'CANCELLED' };
+  }
+
+  // Atualiza o valor de uma assinatura (convergência de plano alterado).
+  async updateSubscription({ subscriptionId, value } = {}) {
+    this.calls.updateSubscription += 1;
+    this._maybeFault('updateSubscription');
+    const sub = this.subscriptions.get(subscriptionId);
+    if (!sub) throw new FakeAsaasError(404, 'subscription inexistente');
+    sub.value = Number(value) || 0;
+    return { id: subscriptionId, value: sub.value, status: sub.status };
+  }
+
+  // Cancela um componente/cobrança de add-on (convergência de add-on removido).
+  async cancelComponent({ componentId } = {}) {
+    this.calls.cancelComponent += 1;
+    this._maybeFault('cancelComponent');
+    const charge = this.charges.get(componentId);
+    if (charge) charge.status = 'CANCELLED';
+    return { id: componentId, status: 'CANCELLED' };
   }
 
   async getCustomer(id) { return this.customers.get(id) || null; }

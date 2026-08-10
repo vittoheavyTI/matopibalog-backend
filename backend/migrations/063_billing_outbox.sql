@@ -56,6 +56,13 @@ REVOKE DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLE public.billing_outbox FROM
 COMMENT ON TABLE public.billing_outbox IS
   '3A-2: fila outbox de billing. dedupe_key UNIQUE (idempotência de enfileiramento) + claim CAS (idempotência de processamento multi-processo).';
 
+-- Colunas de CONVERGÊNCIA em empresas (aditivas/idempotentes): o valor mensal
+-- contratado na assinatura (para detectar plano alterado) e a flag de cancelamento
+-- da assinatura (para convergência idempotente de cancelamento).
+ALTER TABLE public.empresas
+  ADD COLUMN IF NOT EXISTS billing_valor_mensal numeric(10,2) NULL,
+  ADD COLUMN IF NOT EXISTS assinatura_cancelada boolean NOT NULL DEFAULT false;
+
 -- ============================================================================
 -- ROLLBACK (documentado; NÃO executar salvo necessidade):
 --   DROP TABLE IF EXISTS public.billing_outbox;

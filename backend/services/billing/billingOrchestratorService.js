@@ -115,10 +115,34 @@ async function executarPlano({ acoes = [], empresa = {}, snapshot = {}, provider
         externalReference: estado.id,
       }));
       estado.asaas_subscription_id = r.id;
+      estado.billing_valor_mensal = a.valor_mensal;
       patch.asaas_subscription_id = r.id;
       patch.next_due_date = a.primeiro_vencimento;
+      patch.billing_valor_mensal = a.valor_mensal;
       resultados.push({ tipo: a.tipo, created: true, id: r.id, next_due_date: a.primeiro_vencimento });
-      if (persist) await persist({ asaas_subscription_id: r.id, next_due_date: a.primeiro_vencimento });
+      if (persist) await persist({ asaas_subscription_id: r.id, next_due_date: a.primeiro_vencimento, billing_valor_mensal: a.valor_mensal });
+    } else if (a.tipo === 'atualizar_assinatura_valor') {
+      // Convergência de plano alterado (§1.3): idempotente (skip se já no valor).
+      if (Number(estado.billing_valor_mensal) === Number(a.valor_mensal)) { resultados.push({ tipo: a.tipo, skip: true }); continue; }
+      await retry(() => provider.updateSubscription({ subscriptionId: a.subscription_id, value: a.valor_mensal }));
+      estado.billing_valor_mensal = a.valor_mensal;
+      patch.billing_valor_mensal = a.valor_mensal;
+      resultados.push({ tipo: a.tipo, updated: true, valor: a.valor_mensal });
+      if (persist) await persist({ billing_valor_mensal: a.valor_mensal });
+    } else if (a.tipo === 'cancelar_assinatura') {
+      // Convergência de cancelamento (§1.5): idempotente.
+      if (estado.assinatura_cancelada === true) { resultados.push({ tipo: a.tipo, skip: true }); continue; }
+      await retry(() => provider.cancelSubscription({ subscriptionId: a.subscription_id }));
+      estado.assinatura_cancelada = true;
+      patch.assinatura_cancelada = true;
+      patch.billing_status = 'cancelada';
+      resultados.push({ tipo: a.tipo, cancelled: true });
+      if (persist) await persist({ assinatura_cancelada: true, billing_status: 'cancelada' });
+    } else if (a.tipo === 'remover_addon') {
+      // Convergência de add-on removido (§1.4).
+      await retry(() => provider.cancelComponent({ componentId: a.componente }));
+      resultados.push({ tipo: a.tipo, removed: true, addon_id: a.addon_id });
+      if (persist) await persist({ __addon_removido: { addon_id: a.addon_id } });
     } else if (a.tipo === 'cobrar_implantacao') {
       if (estado.implantacao_cobrada) { resultados.push({ tipo: a.tipo, skip: true }); continue; }
       const r = await retry(() => provider.createCharge({

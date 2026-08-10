@@ -29,8 +29,12 @@ async function executarUmaRodada({ supabase, provider, policyOverrides, deps, ou
 }
 
 // Runner in-process. Retorna um controlador { parar }.
-//   deps injetáveis para teste (setIntervalFn/clearIntervalFn/onTick).
-function iniciarRunner({ supabase, provider, policyOverrides, config, setIntervalFn = setInterval, clearIntervalFn = clearInterval, onTick } = {}) {
+//   Dependências injetáveis (mesmo caminho funcional do default; testes injetam
+//   deps/outboxRepo/provider para exercitar o TICK real sem chamada manual):
+//     supabase, provider, policyOverrides, deps, outboxRepo
+//   Utilitários de teste: setIntervalFn/clearIntervalFn/onTick.
+//   O default de PRODUÇÃO permanece: deps reais (supabase) + outbox real.
+function iniciarRunner({ supabase, provider, policyOverrides, deps, outboxRepo, config, setIntervalFn = setInterval, clearIntervalFn = clearInterval, onTick } = {}) {
   const cfg = config || resolveRunnerConfig();
   if (!cfg.enabled) {
     return { ativo: false, parar: () => {}, motivo: 'runner_desabilitado' };
@@ -40,7 +44,9 @@ function iniciarRunner({ supabase, provider, policyOverrides, config, setInterva
     if (rodando) return; // evita sobreposição de rodadas
     rodando = true;
     try {
-      const resumo = await executarUmaRodada({ supabase, provider, policyOverrides, batchSize: cfg.batchSize });
+      // O TICK processa via executarUmaRodada com as MESMAS dependências injetadas —
+      // é o próprio timer que dispara o processamento (sem atalho manual no teste).
+      const resumo = await executarUmaRodada({ supabase, provider, policyOverrides, deps, outboxRepo, batchSize: cfg.batchSize });
       if (onTick) onTick(resumo);
     } finally {
       rodando = false;
