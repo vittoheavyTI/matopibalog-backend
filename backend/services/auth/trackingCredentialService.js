@@ -15,6 +15,7 @@ const domain = require('./trackingCredentialDomain');
 const { erroDeCode, TrackingError } = require('./trackingCredentialErrors');
 
 const TABELA = 'frete_tracking_credenciais';
+const TABELA_FRETES = 'frete_tracking_credencial_fretes'; // escopo imutável (snapshot)
 const LAST_USED_THROTTLE_MS = 60 * 1000;
 // Mesma definição canônica de "viagem apta ao rastreamento" da telemetria/emissão
 // (freteLocalizacaoController.listarFretesAtivosDoMotorista). MULTI-VIAGEM: a
@@ -46,16 +47,32 @@ function criarTrackingCredentialService({ supabase, cfg, crypto = defaultCrypto,
     return p;
   }
 
+  // Resolve, SERVER-SIDE, as viagens ATIVAS do motorista NO MOMENTO da emissão (snapshot).
+  // Nunca confia em IDs do cliente. Limite = regra existente da localização (até 4).
+  async function carregarFretesAtivos(empresaId, motoristaId, limite = 4) {
+    const { data, error } = await supabase
+      .from('fretes')
+      .select('id')
+      .eq('empresa_id', empresaId)
+      .eq('motorista_id', motoristaId)
+      .in('status', STATUS_FRETE_ATIVO)
+      .limit(limite);
+    if (error) throw unavailable(error.message);
+    return (data || []).map((f) => f.id);
+  }
+
   /**
-   * Emite credencial vinculada a (empresa, motorista, sessão SEC-1, device, frete).
-   * TODOS obrigatórios (binding canônico). Grava só o HASH. Retorna { delivery, expiresAt, maxExpiresAt }.
+   * Emite credencial ancorada em (empresa, motorista, sessão SEC-1, device) com ESCOPO
+   * IMUTÁVEL = snapshot das viagens ATIVAS do motorista agora. Grava só o HASH + o vínculo
+   * (tabela de escopo). Sem viagem ativa → tracking_trip_inactive.
    */
-  async function emitir({ empresa_id, motorista_id, session_id, frete_id = null, device_id }) {
+  async function emitir({ empresa_id, motorista_id, session_id, device_id }) {
     if (!empresa_id || !motorista_id) throw erroDeCode('tracking_tenant_mismatch', 'empresa/motorista ausentes');
     if (!session_id) throw erroDeCode('tracking_session_revoked', 'sessão (sid) obrigatória para emitir');
     if (!device_id) throw erroDeCode('tracking_device_mismatch', 'device obrigatório para emitir');
-    // frete_id é CONTEXTO de emissão (qual viagem disparou) — opcional; a telemetria
-    // cobre TODAS as viagens ativas do motorista (multi-viagem).
+
+    const escopo = await carregarFretesAtivos(empresa_id, motorista_id);
+    if (escopo.length === 0) throw erroDeCode('tracking_trip_inactive', 'sem viagem ativa para escopar');
 
     const pepper = pepperOuFalha();
     const token = crypto.gerarTrackingToken();
@@ -64,22 +81,26 @@ function criarTrackingCredentialService({ supabase, cfg, crypto = defaultCrypto,
     const maxExpiresAt = domain.calcularMaxExpiracao(agoraMs, cfg.trackingCredentialMaxLifetimeSeconds);
     const expiresAt = domain.calcularExpiracao(agoraMs, cfg.trackingCredentialTtlSeconds, Date.parse(maxExpiresAt));
 
-    const { error } = await supabase.from(TABELA).insert({
-      empresa_id, motorista_id, session_id, frete_id, device_id,
+    const { data: inserida, error } = await supabase.from(TABELA).insert({
+      empresa_id, motorista_id, session_id, device_id,
       credential_hash: hash,
       issued_at: new Date(agoraMs).toISOString(),
       expires_at: expiresAt,
       max_expires_at: maxExpiresAt,
-    });
-    if (error) throw unavailable(error.message || 'erro ao emitir credencial');
+    }).select('id').single();
+    if (error || !inserida) throw unavailable((error && error.message) || 'erro ao emitir credencial');
 
-    return { delivery: new TrackingDelivery(token, expiresAt, maxExpiresAt), expiresAt, maxExpiresAt };
+    const vinculos = escopo.map((freteId) => ({ credencial_id: inserida.id, frete_id: freteId }));
+    const { error: erroVinculo } = await supabase.from(TABELA_FRETES).insert(vinculos);
+    if (erroVinculo) throw unavailable(erroVinculo.message || 'erro ao gravar escopo da credencial');
+
+    return { delivery: new TrackingDelivery(token, expiresAt, maxExpiresAt), expiresAt, maxExpiresAt, fretes_escopo: escopo };
   }
 
   async function carregarPorHash(hash) {
     const { data, error } = await supabase
       .from(TABELA)
-      .select('id, empresa_id, motorista_id, session_id, frete_id, device_id, expires_at, max_expires_at, revoked_at, last_used_at')
+      .select('id, empresa_id, motorista_id, session_id, device_id, expires_at, max_expires_at, revoked_at, last_used_at')
       .eq('credential_hash', hash)
       .maybeSingle();
     if (error) throw unavailable(error.message);
@@ -97,23 +118,31 @@ function criarTrackingCredentialService({ supabase, cfg, crypto = defaultCrypto,
     if (error) throw unavailable(error.message);
     return data || null;
   }
-  // MULTI-VIAGEM: o motorista tem >=1 viagem ATIVA? (contexto operacional canônico).
-  async function carregarTemViagemAtiva(empresaId, motoristaId) {
+
+  // INTERSEÇÃO: das viagens do ESCOPO (snapshot) da credencial, quais CONTINUAM ativas e
+  // pertencem ao motorista/empresa. É o único conjunto para o qual a telemetria faz
+  // fan-out. Vazio → escopo exaurido (nenhuma viagem do snapshot segue ativa).
+  async function carregarEscopoAtivo(credencialId, empresaId, motoristaId) {
+    const { data: vinc, error: e1 } = await supabase
+      .from(TABELA_FRETES).select('frete_id').eq('credencial_id', credencialId);
+    if (e1) throw unavailable(e1.message);
+    const ids = (vinc || []).map((v) => v.frete_id);
+    if (ids.length === 0) return [];
     const { data, error } = await supabase
       .from('fretes')
-      .select('id')
+      .select('id, empresa_id, motorista_id, status, data')
+      .in('id', ids)
       .eq('empresa_id', empresaId)
       .eq('motorista_id', motoristaId)
-      .in('status', STATUS_FRETE_ATIVO)
-      .limit(1);
+      .in('status', STATUS_FRETE_ATIVO);
     if (error) throw unavailable(error.message);
-    return Array.isArray(data) && data.length > 0;
+    return data || [];
   }
 
   /**
    * Valida o token. `deviceId` do header; `permitirExpirada` = fluxo de renovação.
-   * Lança erro tipado (contrato semântico) se inválido. Em sucesso retorna identidade +
-   * a linha da credencial (para rotação). Atualiza last_used_at throttled (best-effort).
+   * Lança erro tipado se inválido. Em sucesso retorna identidade + a linha da credencial
+   * (para rotação) + `fretesEscopoAtivos` (interseção escopo∩ativos, para fan-out).
    */
   async function validarInterno({ token, deviceId, permitirExpirada = false }) {
     if (!crypto.pareceTrackingToken(token)) throw erroDeCode('tracking_credential_invalid', 'formato');
@@ -122,21 +151,24 @@ function criarTrackingCredentialService({ supabase, cfg, crypto = defaultCrypto,
     const credencial = await carregarPorHash(hash);
     if (!credencial) throw erroDeCode('tracking_credential_invalid', 'não encontrada');
 
-    const [usuario, sessao, temViagemAtiva] = await Promise.all([
+    const [usuario, sessao, fretesEscopoAtivos] = await Promise.all([
       carregarUsuario(credencial.motorista_id),
       carregarSessao(credencial.session_id),
-      carregarTemViagemAtiva(credencial.empresa_id, credencial.motorista_id),
+      carregarEscopoAtivo(credencial.id, credencial.empresa_id, credencial.motorista_id),
     ]);
 
-    const veredito = domain.avaliarCredencial({ credencial, usuario, sessao, temViagemAtiva, deviceId, agoraMs: agora(), permitirExpirada });
+    const veredito = domain.avaliarCredencial({
+      credencial, usuario, sessao, temEscopoAtivo: fretesEscopoAtivos.length > 0,
+      deviceId, agoraMs: agora(), permitirExpirada,
+    });
     if (!veredito.ok) throw erroDeCode(veredito.code);
-    return { identidade: { ...veredito.identidade, credential_id: credencial.id }, credencial, hash };
+    return { identidade: { ...veredito.identidade, credential_id: credencial.id }, credencial, hash, fretesEscopoAtivos };
   }
 
   async function validar({ token, deviceId }) {
-    const { identidade, credencial } = await validarInterno({ token, deviceId, permitirExpirada: false });
+    const { identidade, credencial, fretesEscopoAtivos } = await validarInterno({ token, deviceId, permitirExpirada: false });
     await tocarUso(credencial).catch(() => {});
-    return identidade;
+    return { ...identidade, fretesAutorizados: fretesEscopoAtivos };
   }
 
   async function tocarUso(credencial) {
