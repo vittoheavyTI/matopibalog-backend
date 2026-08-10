@@ -285,3 +285,120 @@ Motivos:
 - Legacy residual ainda nao quantificado com seguranca.
 
 Gate A Compatible permanece aprovado e operacional. Gate B Strict nao foi iniciado.
+
+## Pre-Gate-B Final - 2026-08-09 22:16 -03
+
+Resultado manual do APK release correto:
+
+- `manual_release_validation=PASS`
+- APK validado pelo usuario: GitHub Actions run `31342485778`, artifact `app-release-apk`, artifact ID `9046355612`.
+- Source SHA funcional do APK: `ef93af7104bad1db2df719e63f2cd4da648c0c12`.
+- APK: `57312055` bytes.
+- SHA-256: `54D0681EC1E436C49213C26BABAE659343D274496446FDE15A35BA84B50A2205`.
+- Resultado percebido pelo usuario: sem regressao aparente.
+- Esta e validacao operacional humana, nao prova isolada de cada endpoint.
+
+Estado do PR no fechamento:
+
+- HEAD documental atual antes deste fechamento: `2648e00eb87fe230e10e1872531f6912aea38718`.
+- SHA funcional validado: `ef93af7104bad1db2df719e63f2cd4da648c0c12`.
+- Drift do SHA funcional ate o HEAD documental: somente documentacao SEC-1.
+- PR #414 permanece draft, aberta e nao mergeada.
+
+Compatible em producao:
+
+- Deployment operacional: `a1bafb7e-fe99-43ab-a962-536078a70e7b`.
+- Tempo em Compatible desde deployment final ate a coleta: aproximadamente 2.75h.
+- `AUTH_SESSIONS_ENABLED=true`
+- `AUTH_REFRESH_ROTATION_ENABLED=true`
+- `AUTH_REQUIRE_SESSION=false`
+- `AUTH_ALLOW_LEGACY_TOKENS=true`
+- `AUTH_REFRESH_COOKIE_SAMESITE=lax`
+- `AUTH_LEGACY_TOKEN_CUTOFF`: ausente
+
+Health:
+
+- `https://api.matopibalog.com.br/health`: 200
+- `https://matopibalog-backend-production.up.railway.app/health`: 200
+
+Observacao HTTP, janela 1h:
+
+- Total HTTP: 88
+- Caminho real app Flutter (`Dart`) com status 200:
+  - `/auth/login`: 2
+  - `/auth/me`: 14
+  - `/fretes`: 10
+  - `/despesas`: 10
+  - `/abastecimentos`: 10
+  - `/vales`: 10
+  - `/fretes/localizacao/sessao`: 3 respostas 201
+- `/auth/mobile/refresh`: 0 observado.
+- `/auth/refresh`: 0 observado.
+- Logs app relevantes na janela: apenas `ENOENT /painel_web/dist/index.html` residual, fora do escopo auth/session.
+- CORS/CSRF: sem erros observados.
+- Vazamento de segredo em logs app: 0 hits em auditoria de padroes.
+
+Supabase agregado apos validacao manual:
+
+- `android_real_session_created=false`
+- Android `client_type=android` nao sintetico: total 0, ativo 0, revogado 0.
+- App Flutter real criou sessoes SEC-1 nao sinteticas, mas registradas como `client_type=web`:
+  - total 2
+  - ativas 1
+  - revogadas 1
+  - primeira criacao aproximada: 2026-08-10T00:56:04Z
+  - ultima criacao aproximada: 2026-08-10T00:58:19Z
+  - ultima atividade aproximada: 2026-08-10T00:58:19Z
+- Web real nao sintetico total acumulado: 3, ativas 2, revogadas 1.
+- Evento `sessao_criada` web acumulado: 4, ultimo em 2026-08-10T00:58:19Z.
+- Evento `sessao_criada` android acumulado: somente fixture anterior do Gate A.
+- Evento `refresh_sucesso` android acumulado: somente fixture anterior do Gate A.
+
+Interpretacao Android/app:
+
+- O APK release correto atingiu o backend e executou login real com User-Agent de app Flutter (`Dart`) no deployment correto.
+- Isso prova que o app real consegue autenticar e criar sessao SEC-1 nao sintetica.
+- Porem a sessao foi persistida como `client_type=web`, nao `android`.
+- Como `client_type=web` retorna refresh por cookie e nao `refresh_token` no JSON mobile, nao houve evidencia de refresh mobile real persistido pelo app.
+- Portanto a arquitetura SEC-1 foi exercitada pelo app, mas o contrato Android/mobile ainda nao esta comprovado como correto para Gate B Strict.
+
+Legacy residual pratico:
+
+- Web real usa SEC-1 e possui sessoes reais nao sinteticas.
+- Admin real compartilha o cliente web e middleware `verifyToken`; permanece inferido por uso operacional, sem contador separado por area admin.
+- App real usa SEC-1, mas com classificacao `web`; isso impede fechar a prova Android/mobile.
+- Nao foi encontrado consumidor legitimo conhecido que necessite do formato JWT legacy em scripts, workers, integracoes, automacoes ou clientes API auditados.
+- Tokens legacy remanescentes podem ser tratados como sessoes antigas ainda nao relogadas, salvo evidencia contraria; o unico bloqueio pratico atual nao e integracao externa, e sim a comprovacao Android/mobile correta.
+
+Strict isolado:
+
+- Backend CI: PASS
+- Frontend CI: PASS
+- PG RPC Tests: PASS
+- SEC-1 Browser E2E same-site: PASS
+- App CI Flutter release: PASS
+- Strict isolado ja validado em CI, sem ativacao em producao.
+
+Rollback Strict documentado:
+
+- `AUTH_REQUIRE_SESSION=false`
+- `AUTH_ALLOW_LEGACY_TOKENS=true`
+- Retorna para Compatible, nao para Legacy total.
+
+### Decisao Pre-Gate-B Final
+
+Resultado: **NO-GO objetivo para Gate B**.
+
+Blocker unico:
+
+- Sessao real do app Flutter foi criada em SEC-1, mas como `client_type=web`; ainda nao ha `client_type=android` nao sintetico nem refresh mobile real observado.
+
+Menor acao necessaria para fechar:
+
+- No APK release correto, executar **logout -> novo login** no app e informar o horario aproximado.
+- Depois disso, reconsultar read-only:
+  - `android_real_session_created=true/false`
+  - sessao `client_type=android` ativa/revogada
+  - `refresh_real_observed=true/false`
+
+Se apos logout -> novo login o app continuar criando sessao `web`, o bloqueio deixa de ser evidencia pendente e passa a ser divergencia funcional do contrato mobile que deve ser corrigida antes do Gate B Strict.
