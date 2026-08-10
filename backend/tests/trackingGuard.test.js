@@ -1,7 +1,15 @@
-// O guard importa verificarPlano/tenant (que carregam config/supabase, o qual faz
-// process.exit(1) sem env). Injetamos env DUMMY antes dos requires (client lazy).
-process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'http://localhost:54321';
-process.env.SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || 'test-service-key';
+// O guard importa verificarPlano/tenant, que carregam config/supabase (process.exit
+// sem env; e o client real do @supabase/supabase-js quebra no Node 20 sem WebSocket).
+// Padrão do projeto: STUB do config/supabase via Module._load — o client real nunca é
+// construído. Robusto em qualquer versão do Node (os fakes do guard são injetados).
+const Module = require('node:module');
+const _origLoad = Module._load;
+Module._load = function (request, parent, isMain) {
+  if (typeof request === 'string' && request.replace(/\\/g, '/').endsWith('config/supabase')) {
+    return { from: () => ({}) };
+  }
+  return _origLoad.call(this, request, parent, isMain);
+};
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -9,6 +17,8 @@ const express = require('express');
 const http = require('node:http');
 const { criarGuardTelemetria, exigirTracking } = require('../middlewares/trackingCredential');
 const { erroDeCode } = require('../services/auth/trackingCredentialErrors');
+
+Module._load = _origLoad; // restaura após carregar os módulos que puxam config/supabase
 
 const DEV = 'dev-1';
 

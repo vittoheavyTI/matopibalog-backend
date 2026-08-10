@@ -3,17 +3,26 @@
 // credencial de rastreamento (opaca, não-JWT) NÃO passe pelo verifyToken (que a
 // rejeitaria). As rotas gerais (/:id etc.) permanecem sob verifyToken.
 //
-// Env dummy: routes/fretes.js → freteLocalizacaoController → config/supabase (process.exit
-// sem env). O client é lazy; nada conecta ao carregar.
-process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'http://localhost:54321';
-process.env.SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || 'test-service-key';
+// routes/fretes.js → controllers → config/supabase (process.exit sem env; e o client
+// real do @supabase/supabase-js quebra no Node 20 sem WebSocket). STUB via Module._load
+// (padrão do projeto): o client real nunca é construído. verifyToken real é preservado.
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'segredo-teste';
+const Module = require('node:module');
+const _origLoad = Module._load;
+Module._load = function (request, parent, isMain) {
+  if (typeof request === 'string' && request.replace(/\\/g, '/').endsWith('config/supabase')) {
+    return { from: () => ({}) };
+  }
+  return _origLoad.call(this, request, parent, isMain);
+};
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { verifyToken } = require('../middlewares/auth');
 
 const router = require('../routes/fretes');
+
+Module._load = _origLoad; // restaura após carregar routes/fretes e seus controllers
 
 // Índice da 1ª layer que casa um path; -1 se nenhuma.
 function idxPrimeiraLayer(pred) {
