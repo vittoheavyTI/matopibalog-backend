@@ -16,6 +16,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const Module = require('node:module');
+const validate = require('../middlewares/validate');
+const { loginSchema } = require('../schemas/auth');
 
 const controllerPath = require.resolve('../controllers/authController');
 
@@ -110,6 +112,26 @@ async function executarLogin({ userData, userError, authError, authRuntime, body
   const res = fakeRes();
   await controller.login(req, res);
   return { res, capturas };
+}
+
+async function executarLoginValidado({ userData, userError, authError, authRuntime, body = {}, headers = {} }) {
+  const capturas = [];
+  const controller = carregarController({ userData, userError, authError, capturas, authRuntime });
+  const req = {
+    body: { email: 'teste@example.com', senha: 'senha-de-teste', ...body },
+    headers: { 'user-agent': 'Dart/3.8 (dart:io)', ...headers },
+  };
+  const res = fakeRes();
+  let passouValidacao = false;
+  await new Promise((resolve) => {
+    validate(loginSchema)(req, res, async () => {
+      passouValidacao = true;
+      await controller.login(req, res);
+      resolve();
+    });
+    if (!passouValidacao) resolve();
+  });
+  return { res, capturas, bodyValidado: req.body };
 }
 
 const perfilComEmpresa = {
@@ -224,6 +246,36 @@ test('SEC-1 compatible mobile: login cria sessão android e entrega refresh no b
   assert.equal(res.body.refresh_token, 'refresh-mobile');
   assert.equal(res.body.refresh_expires_at, '2026-09-01T00:00:00.000Z');
   assert.equal(chamadas[0].client_type, 'android');
+});
+
+test('SEC-1 regressao: validate(loginSchema) preserva client_type android para app Flutter', async () => {
+  const chamadas = [];
+  const authRuntime = {
+    cfg: { sessionsEnabled: true, refreshCookieSameSite: 'lax' },
+    sessionService: {
+      async criarSessao(args) {
+        chamadas.push(args);
+        return {
+          accessToken: 'access-mobile',
+          refreshDelivery: { reveal: () => 'refresh-mobile', expiresAt: '2026-09-01T00:00:00.000Z' },
+        };
+      },
+    },
+  };
+  const { res, bodyValidado } = await executarLoginValidado({
+    userData: perfilComEmpresa,
+    authRuntime,
+    body: { client_type: 'android', device_id: 'dev-1', device_label: 'Android Teste' },
+  });
+
+  assert.equal(bodyValidado.client_type, 'android');
+  assert.equal(res.statusCode, 200);
+  assert.equal(chamadas[0].client_type, 'android');
+  assert.match(chamadas[0].user_agent, /^Dart/);
+  assert.equal(res.body.token, 'access-mobile');
+  assert.equal(res.body.refresh_token, 'refresh-mobile');
+  assert.equal(res.body.refresh_expires_at, '2026-09-01T00:00:00.000Z');
+  assert.equal(res.cookies.some((c) => c.nome === 'refresh_token'), false);
 });
 
 // ─── 4. Perfil realmente ausente ─────────────────────────────────────────────

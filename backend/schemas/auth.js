@@ -11,6 +11,9 @@ const planoIdSchema = z.string().regex(
 const loginSchema = z.object({
   email: z.string().email('E-mail inválido.'),
   senha: z.string().min(6, 'Senha deve ter pelo menos 6 caracteres.'),
+  client_type: z.enum(['web', 'android', 'ios', 'api']).optional(),
+  device_id: z.string().max(255).nullable().optional(),
+  device_label: z.string().max(120).nullable().optional(),
 });
 
 const registerSchema = z.object({

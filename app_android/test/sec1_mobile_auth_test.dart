@@ -100,6 +100,24 @@ void main() {
     expect(await _storage.read(key: 'refresh_token'), 'refresh-login');
   });
 
+  test('login envia client_type android no contrato mobile', () async {
+    final seen = <http.Request>[];
+    ApiService.setHttpClientForTesting(_authClient(seen: seen));
+
+    final provider = AuthProvider();
+    final ok = await provider.login(
+      'm@test.local',
+      'senha',
+      manterConectado: true,
+    );
+
+    expect(ok, isTrue);
+    final loginRequest = seen.firstWhere((request) =>
+        request.method == 'POST' && request.url.path == '/auth/login');
+    final body = jsonDecode(loginRequest.body) as Map<String, dynamic>;
+    expect(body['client_type'], 'android');
+  });
+
   test('login memoryOnly nao persiste access nem refresh', () async {
     ApiService.setHttpClientForTesting(_authClient());
 
