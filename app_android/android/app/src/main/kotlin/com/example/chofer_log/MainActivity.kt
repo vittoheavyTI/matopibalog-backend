@@ -14,11 +14,20 @@ class MainActivity : FlutterActivity() {
                 "start" -> {
                     val token = call.argument<String>("token")
                     val baseUrl = call.argument<String>("baseUrl")
+                    // SEC-1: modo de autenticação e expiração da credencial (Opção C).
+                    // Ausentes → "session" (compatível): o app envia o access token, como hoje.
+                    val mode = call.argument<String>("mode") ?: LocationTrackingService.MODE_SESSION
+                    val expiresAt = when (val v = call.argument<Any>("expiresAt")) {
+                        is Int -> v.toLong()
+                        is Long -> v
+                        is Double -> v.toLong()
+                        else -> 0L
+                    }
                     if (token.isNullOrBlank() || baseUrl.isNullOrBlank()) {
                         result.error("invalid_args", "Dados insuficientes para iniciar.", null)
                         return@setMethodCallHandler
                     }
-                    LocationTrackingService.start(this, token, baseUrl)
+                    LocationTrackingService.start(this, token, baseUrl, mode, expiresAt)
                     result.success(true)
                 }
                 "stop" -> {

@@ -80,6 +80,9 @@ const FAIXAS = {
   absolute: { def: 30 * DIA,   min: 3600, max: 365 * DIA },   // 1h..365d
   grace:    { def: 10,         min: 0,    max: 300 },
   throttle: { def: 60,         min: 0,    max: 3600 },
+  // SEC-1 tracking (GPS): TTL da credencial operacional de rastreamento. Default 24h
+  // (uma viagem típica); renovável server-side (tracking-only) para viagens longas.
+  trackingTtl: { def: DIA,     min: 900,  max: 30 * DIA },    // 15min..30d
 };
 
 /**
@@ -93,6 +96,15 @@ function loadAuthConfig(env = process.env) {
   const rotationEnabled = parseBoolEstrito(env.AUTH_REFRESH_ROTATION_ENABLED, 'AUTH_REFRESH_ROTATION_ENABLED', false);
   const requireSession  = parseBoolEstrito(env.AUTH_REQUIRE_SESSION, 'AUTH_REQUIRE_SESSION', false);
   const allowLegacy     = parseBoolEstrito(env.AUTH_ALLOW_LEGACY_TOKENS, 'AUTH_ALLOW_LEGACY_TOKENS', true);
+
+  // SEC-1 tracking (GPS): credencial operacional escopada. Rollout COMPATÍVEL: default
+  // OFF preserva 100% o fluxo atual (app envia o access token ao serviço nativo).
+  const trackingScopedCredentialEnabled = parseBoolEstrito(
+    env.TRACKING_SCOPED_CREDENTIAL_ENABLED, 'TRACKING_SCOPED_CREDENTIAL_ENABLED', false,
+  );
+  const trackingCredentialTtl = parseIntEstrito(
+    env.TRACKING_CREDENTIAL_TTL_SECONDS, 'TRACKING_CREDENTIAL_TTL_SECONDS', FAIXAS.trackingTtl,
+  );
 
   const legacyCutoffRaw = parseStr(env.AUTH_LEGACY_TOKEN_CUTOFF, null);
   let legacyCutoff = null;
@@ -167,6 +179,15 @@ function loadAuthConfig(env = process.env) {
   if (sessionsEnabled && (!issuer || !audience)) {
     throw new AuthConfigurationError('AUTH_SESSIONS_ENABLED=true exige issuer e audience.');
   }
+  // Tracking escopado usa o MESMO pepper (HMAC do token opaco) e emite a credencial
+  // a partir de uma SESSÃO SEC-1 autenticada. Habilitar sem pepper/sessões seria
+  // inseguro (não haveria como hashear/emitir com contexto de revogação) → fail-closed.
+  if (trackingScopedCredentialEnabled && !sessionsEnabled) {
+    throw new AuthConfigurationError('TRACKING_SCOPED_CREDENTIAL_ENABLED=true exige AUTH_SESSIONS_ENABLED=true.');
+  }
+  if (trackingScopedCredentialEnabled && !pepper) {
+    throw new AuthConfigurationError('TRACKING_SCOPED_CREDENTIAL_ENABLED=true exige AUTH_REFRESH_TOKEN_PEPPER (ausente).');
+  }
 
   // authMode derivado — controllers/middlewares consomem isto (não recalculam flags).
   const authMode = !sessionsEnabled ? 'legacy' : (requireSession ? 'strict' : 'compatible');
@@ -179,6 +200,8 @@ function loadAuthConfig(env = process.env) {
     refreshAbsoluteTtlSeconds: absoluteTtl,
     refreshReuseGraceSeconds: graceSecs,
     sessionActivityThrottleSeconds: throttleSecs,
+    trackingScopedCredentialEnabled,
+    trackingCredentialTtlSeconds: trackingCredentialTtl,
     issuer, audience, webOrigins, refreshCookieSameSite,
     // presença de segredos (nunca o valor no summary)
     hasPepper: !!pepper,
@@ -194,6 +217,7 @@ function loadAuthConfig(env = process.env) {
         refreshAbsoluteTtlSeconds: absoluteTtl, refreshReuseGraceSeconds: graceSecs,
         sessionActivityThrottleSeconds: throttleSecs, issuer, audience, webOrigins,
         refreshCookieSameSite,
+        trackingScopedCredentialEnabled, trackingCredentialTtlSeconds: trackingCredentialTtl,
         hasPepper: !!pepper, hasJwtSecret: !!jwtSecret,
       };
     },

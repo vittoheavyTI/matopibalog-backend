@@ -26,6 +26,15 @@ class ApiException implements Exception {
 
 enum SessionPersistence { persistent, memoryOnly }
 
+/// SEC-1 (Opção C): credencial operacional escopada de rastreamento, entregue ao
+/// serviço nativo. O token é telemetria-only, revogável e expira server-side —
+/// independente do access token de UI (sobrevive à rotação/expiração deste).
+class TrackingCredential {
+  final String credential;
+  final int expiresAtMs; // epoch millis (0 quando desconhecido)
+  const TrackingCredential({required this.credential, required this.expiresAtMs});
+}
+
 enum RefreshFailureKind {
   none,
   noRefreshToken,
@@ -1220,6 +1229,33 @@ class ApiService {
     } catch (e) {
       AppLogger.warning('ApiService', 'estado de localizacao nao enviado');
       return false;
+    }
+  }
+
+  /// SEC-1 (Opção C): tenta emitir a credencial operacional de rastreamento para a
+  /// viagem em andamento. Usa a SESSÃO autenticada (com refresh automático). Retorna
+  /// null quando o recurso está indisponível (flag OFF → 404) ou em qualquer falha —
+  /// nesse caso o chamador cai no fluxo compatível (envia o access token ao nativo).
+  static Future<TrackingCredential?> issueTrackingCredential() async {
+    try {
+      final response = await _postJsonAutenticado(
+        Uri.parse('$_baseUrl/fretes/localizacao/credencial'),
+        body: const <String, dynamic>{},
+        retryAfterAuthResponse: true,
+      );
+      AppLogger.api('ApiService', 'POST /fretes/localizacao/credencial', response.statusCode);
+      if (response.statusCode == 201) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        final cred = (data['credential'] ?? '').toString();
+        if (cred.isEmpty) return null;
+        final expIso = (data['expires_at'] ?? '').toString();
+        final expMs = DateTime.tryParse(expIso)?.millisecondsSinceEpoch ?? 0;
+        return TrackingCredential(credential: cred, expiresAtMs: expMs);
+      }
+      return null; // 404 (indisponível) / 409 (sem viagem apta) / demais → fallback
+    } catch (e) {
+      AppLogger.warning('ApiService', 'credencial de rastreamento nao emitida');
+      return null;
     }
   }
 

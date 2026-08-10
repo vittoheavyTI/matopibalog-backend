@@ -74,20 +74,27 @@ const dedupePonto = async ({ freteId, capturedAt }) => {
   return (count || 0) > 0;
 };
 
+// Definição CANÔNICA de "viagem apta ao rastreamento" (mesma usada pela sessão de
+// telemetria e pela emissão da credencial escopada — evita divergência de regra).
+const listarFretesAtivosDoMotorista = async (empresaId, motoristaId, limite = MAX_FRETES_SESSAO) => {
+  if (!empresaId || !motoristaId) return [];
+  const { data, error } = await supabase
+    .from('fretes')
+    .select('id, empresa_id, motorista_id, status, data')
+    .eq('empresa_id', empresaId)
+    .eq('motorista_id', motoristaId)
+    .in('status', Array.from(STATUS_ATIVOS))
+    .order('data', { ascending: false })
+    .limit(limite);
+  if (error) throw error;
+  return data || [];
+};
+
 const buscarFretesEmAndamentoDoMotorista = async (req) => {
   if (req.user?.role !== 'motorista' || !req.user?.uid || !req.empresa_id) {
     return [];
   }
-  const { data, error } = await supabase
-    .from('fretes')
-    .select('id, empresa_id, motorista_id, status, data')
-    .eq('empresa_id', req.empresa_id)
-    .eq('motorista_id', req.user.uid)
-    .in('status', Array.from(STATUS_ATIVOS))
-    .order('data', { ascending: false })
-    .limit(MAX_FRETES_SESSAO);
-  if (error) throw error;
-  return data || [];
+  return listarFretesAtivosDoMotorista(req.empresa_id, req.user.uid);
 };
 
 const listarUltimasPorFrete = async (ids) => {
@@ -374,3 +381,6 @@ exports.limparVencidas = async (_req, res) => {
     return res.status(500).json({ message: 'Erro ao limpar historico vencido.' });
   }
 };
+
+// Reuso pela emissão da credencial de rastreamento (mesma regra de viagem apta).
+exports.listarFretesAtivosDoMotorista = listarFretesAtivosDoMotorista;
