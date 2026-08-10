@@ -240,26 +240,41 @@ class LocationTrackingService {
       return LocationTrackingStartResult.missingSession;
     }
 
-    // SEC-1 (Opção C): tenta obter a credencial operacional escopada. Se disponível
-    // (flag ON no backend), ELA é entregue ao serviço nativo — independente do access
-    // token de UI, sobrevivendo à rotação/expiração deste. Se indisponível (flag OFF /
-    // sem viagem apta / falha), cai no fluxo COMPATÍVEL: envia o access token, como hoje.
-    final credential = await ApiService.issueTrackingCredential();
+    // SEC-1 (Opção C) — §B-1: emissão TRI-STATE da credencial escopada.
+    final result = await ApiService.issueTrackingCredential();
+
+    // FAIL-CLOSED: feature ON mas a emissão falhou → NÃO iniciar com o access token
+    // (isso reintroduziria o bug: rastreamento morre quando o access expira). Marca
+    // estado observável e permite retry (o reconcile tenta de novo no próximo ciclo).
+    if (result.outcome == TrackingIssueOutcome.failed) {
+      await _persist(LocationTrackingStatus.failed, activeTrips);
+      return LocationTrackingStartResult.failed;
+    }
+
+    late final Map<String, dynamic> args;
+    if (result.outcome == TrackingIssueOutcome.credential && result.credential != null) {
+      final c = result.credential!;
+      final deviceId = await ApiService.currentDeviceId();
+      args = <String, dynamic>{
+        'token': c.credential,
+        'baseUrl': ApiService.baseUrl,
+        'mode': 'tracking',
+        'deviceId': deviceId,
+        'expiresAt': c.expiresAtMs,
+        'maxExpiresAt': c.maxExpiresAtMs,
+      };
+    } else {
+      // disabled: o backend PROVOU flag OFF (404) → fluxo compatível (access token).
+      args = <String, dynamic>{
+        'token': token,
+        'baseUrl': ApiService.baseUrl,
+        'mode': 'session',
+        'expiresAt': 0,
+        'maxExpiresAt': 0,
+      };
+    }
 
     try {
-      final args = credential != null
-          ? <String, dynamic>{
-              'token': credential.credential,
-              'baseUrl': ApiService.baseUrl,
-              'mode': 'tracking',
-              'expiresAt': credential.expiresAtMs,
-            }
-          : <String, dynamic>{
-              'token': token,
-              'baseUrl': ApiService.baseUrl,
-              'mode': 'session',
-              'expiresAt': 0,
-            };
       await _channel.invokeMethod('start', args);
       await _persist(LocationTrackingStatus.active, activeTrips);
       return LocationTrackingStartResult.started;

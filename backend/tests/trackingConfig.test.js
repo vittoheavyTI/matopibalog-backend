@@ -13,10 +13,23 @@ function envSessoesOn(extra = {}) {
   };
 }
 
-test('default: tracking OFF e TTL = 86400s', () => {
+test('default: tracking OFF, TTL = 86400s, teto absoluto = 604800s (7d)', () => {
   const cfg = loadAuthConfig(envSessoesOn());
   assert.equal(cfg.trackingScopedCredentialEnabled, false);
   assert.equal(cfg.trackingCredentialTtlSeconds, 86400);
+  assert.equal(cfg.trackingCredentialMaxLifetimeSeconds, 604800);
+});
+
+test('teto absoluto NÃO pode ser menor que o TTL nominal (fail-closed)', () => {
+  assert.throws(
+    () => loadAuthConfig(envSessoesOn({ TRACKING_CREDENTIAL_TTL_SECONDS: '86400', TRACKING_CREDENTIAL_MAX_LIFETIME_SECONDS: '3600' })),
+    AuthConfigurationError,
+  );
+});
+
+test('teto absoluto configurável dentro da faixa', () => {
+  const cfg = loadAuthConfig(envSessoesOn({ TRACKING_CREDENTIAL_MAX_LIFETIME_SECONDS: '1209600' }));
+  assert.equal(cfg.trackingCredentialMaxLifetimeSeconds, 1209600);
 });
 
 test('tracking ON com sessões ON + pepper → habilitado', () => {
@@ -66,6 +79,7 @@ test('summary expõe flags de tracking e NUNCA o pepper', () => {
   const s = cfg.summary();
   assert.equal(s.trackingScopedCredentialEnabled, true);
   assert.equal(s.trackingCredentialTtlSeconds, 86400);
+  assert.equal(s.trackingCredentialMaxLifetimeSeconds, 604800);
   assert.equal(s.hasPepper, true);
   const json = JSON.stringify(s);
   assert.ok(!json.includes('pepper-teste'), 'summary não pode conter o valor do pepper');

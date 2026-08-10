@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
@@ -31,8 +32,23 @@ enum SessionPersistence { persistent, memoryOnly }
 /// independente do access token de UI (sobrevive à rotação/expiração deste).
 class TrackingCredential {
   final String credential;
-  final int expiresAtMs; // epoch millis (0 quando desconhecido)
-  const TrackingCredential({required this.credential, required this.expiresAtMs});
+  final int expiresAtMs;     // validade nominal (epoch millis; 0 = desconhecido)
+  final int maxExpiresAtMs;  // teto absoluto (epoch millis)
+  const TrackingCredential({
+    required this.credential,
+    required this.expiresAtMs,
+    required this.maxExpiresAtMs,
+  });
+}
+
+/// Resultado TRI-STATE da emissão (§B-1). NUNCA confundir "flag OFF" (legacy deliberado)
+/// com "falha de emissão" (que NÃO pode cair para o access token).
+enum TrackingIssueOutcome { disabled, credential, failed }
+
+class TrackingCredentialResult {
+  final TrackingIssueOutcome outcome;
+  final TrackingCredential? credential;
+  const TrackingCredentialResult(this.outcome, [this.credential]);
 }
 
 enum RefreshFailureKind {
@@ -126,6 +142,12 @@ class ApiService {
   /// Chave do token no secure storage — deve casar com AuthProvider._tokenKey.
   static const _tokenKey = 'token';
   static const _refreshTokenKey = 'refresh_token';
+  // SEC-1 (Opção C): identificador ESTÁVEL do dispositivo para o device binding da
+  // credencial de rastreamento. Aleatório por instalação, persistido no secure storage
+  // (não é segredo, mas fica no armazenamento seguro para estabilidade). Não usa
+  // fingerprint invasivo de hardware.
+  static const _deviceIdKey = 'tracking_device_id';
+  static String? _deviceIdCache;
   static const FlutterSecureStorage _secureStorage = FlutterSecureStorage();
 
   /// Token JWT da sessão atual, mantido em memória.
@@ -216,6 +238,11 @@ class ApiService {
   @visibleForTesting
   static void setHttpClientForTesting(http.Client client) {
     _httpClient = client;
+  }
+
+  @visibleForTesting
+  static void setDeviceIdForTesting(String? id) {
+    _deviceIdCache = id;
   }
 
   @visibleForTesting
@@ -406,12 +433,19 @@ class ApiService {
     return request.timeout(timeout);
   }
 
+  static Future<Map<String, String>> _headersCom(Map<String, String>? extra) async {
+    final headers = await _getHeaders();
+    if (extra != null) headers.addAll(extra);
+    return headers;
+  }
+
   static Future<http.Response> _authenticatedJsonRequest(
     String method,
     Uri uri, {
     Object? body,
     Duration timeout = _timeoutGet,
     bool retryAfterAuthResponse = false,
+    Map<String, String>? extraHeaders,
   }) async {
     final upperMethod = method.toUpperCase();
     final safeReadRetry = upperMethod == 'GET' ||
@@ -422,7 +456,7 @@ class ApiService {
     final response = await _sendJsonRequest(
       upperMethod,
       uri,
-      await _getHeaders(),
+      await _headersCom(extraHeaders),
       body: body,
       timeout: timeout,
     );
@@ -436,7 +470,7 @@ class ApiService {
     return _sendJsonRequest(
       upperMethod,
       uri,
-      await _getHeaders(),
+      await _headersCom(extraHeaders),
       body: body,
       timeout: timeout,
     );
@@ -1232,30 +1266,58 @@ class ApiService {
     }
   }
 
-  /// SEC-1 (Opção C): tenta emitir a credencial operacional de rastreamento para a
-  /// viagem em andamento. Usa a SESSÃO autenticada (com refresh automático). Retorna
-  /// null quando o recurso está indisponível (flag OFF → 404) ou em qualquer falha —
-  /// nesse caso o chamador cai no fluxo compatível (envia o access token ao nativo).
-  static Future<TrackingCredential?> issueTrackingCredential() async {
+  /// Identificador ESTÁVEL do dispositivo (device binding). Gera e persiste na 1ª vez.
+  static Future<String> currentDeviceId() async {
+    if (_deviceIdCache != null && _deviceIdCache!.isNotEmpty) return _deviceIdCache!;
+    var id = await _secureStorage.read(key: _deviceIdKey);
+    if (id == null || id.isEmpty) {
+      final rnd = Random.secure();
+      final bytes = List<int>.generate(16, (_) => rnd.nextInt(256));
+      id = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+      await _secureStorage.write(key: _deviceIdKey, value: id);
+    }
+    _deviceIdCache = id;
+    return id;
+  }
+
+  /// SEC-1 (Opção C) — §B-1: emite a credencial escopada. Retorno TRI-STATE:
+  ///   disabled → o backend PROVOU que a feature está OFF (HTTP 404) → o chamador PODE
+  ///              usar o fluxo compatível (access token).
+  ///   credential → credencial válida recebida.
+  ///   failed → timeout/rede/5xx/409/403/payload inválido → o chamador NÃO pode iniciar
+  ///            com access token; deve falhar de forma observável e permitir retry.
+  static Future<TrackingCredentialResult> issueTrackingCredential() async {
     try {
-      final response = await _postJsonAutenticado(
+      final deviceId = await currentDeviceId();
+      final response = await _authenticatedJsonRequest(
+        'POST',
         Uri.parse('$_baseUrl/fretes/localizacao/credencial'),
         body: const <String, dynamic>{},
         retryAfterAuthResponse: true,
+        extraHeaders: {'X-Tracking-Device': deviceId},
       );
       AppLogger.api('ApiService', 'POST /fretes/localizacao/credencial', response.statusCode);
       if (response.statusCode == 201) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         final cred = (data['credential'] ?? '').toString();
-        if (cred.isEmpty) return null;
-        final expIso = (data['expires_at'] ?? '').toString();
-        final expMs = DateTime.tryParse(expIso)?.millisecondsSinceEpoch ?? 0;
-        return TrackingCredential(credential: cred, expiresAtMs: expMs);
+        if (cred.isEmpty) {
+          return const TrackingCredentialResult(TrackingIssueOutcome.failed);
+        }
+        final expMs = DateTime.tryParse((data['expires_at'] ?? '').toString())?.millisecondsSinceEpoch ?? 0;
+        final maxMs = DateTime.tryParse((data['max_expires_at'] ?? '').toString())?.millisecondsSinceEpoch ?? 0;
+        return TrackingCredentialResult(
+          TrackingIssueOutcome.credential,
+          TrackingCredential(credential: cred, expiresAtMs: expMs, maxExpiresAtMs: maxMs),
+        );
       }
-      return null; // 404 (indisponível) / 409 (sem viagem apta) / demais → fallback
+      // SÓ 404 = feature OFF (legacy deliberado). Todo o resto é FALHA (fail-closed).
+      if (response.statusCode == 404) {
+        return const TrackingCredentialResult(TrackingIssueOutcome.disabled);
+      }
+      return const TrackingCredentialResult(TrackingIssueOutcome.failed);
     } catch (e) {
       AppLogger.warning('ApiService', 'credencial de rastreamento nao emitida');
-      return null;
+      return const TrackingCredentialResult(TrackingIssueOutcome.failed);
     }
   }
 

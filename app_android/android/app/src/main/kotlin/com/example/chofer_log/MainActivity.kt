@@ -14,20 +14,17 @@ class MainActivity : FlutterActivity() {
                 "start" -> {
                     val token = call.argument<String>("token")
                     val baseUrl = call.argument<String>("baseUrl")
-                    // SEC-1: modo de autenticação e expiração da credencial (Opção C).
+                    // SEC-1 (Opção C): modo, device e expirações da credencial.
                     // Ausentes → "session" (compatível): o app envia o access token, como hoje.
                     val mode = call.argument<String>("mode") ?: LocationTrackingService.MODE_SESSION
-                    val expiresAt = when (val v = call.argument<Any>("expiresAt")) {
-                        is Int -> v.toLong()
-                        is Long -> v
-                        is Double -> v.toLong()
-                        else -> 0L
-                    }
+                    val deviceId = call.argument<String>("deviceId")
+                    val expiresAt = asLong(call.argument<Any>("expiresAt"))
+                    val maxExpiresAt = asLong(call.argument<Any>("maxExpiresAt"))
                     if (token.isNullOrBlank() || baseUrl.isNullOrBlank()) {
                         result.error("invalid_args", "Dados insuficientes para iniciar.", null)
                         return@setMethodCallHandler
                     }
-                    LocationTrackingService.start(this, token, baseUrl, mode, expiresAt)
+                    LocationTrackingService.start(this, token, baseUrl, mode, deviceId, expiresAt, maxExpiresAt)
                     result.success(true)
                 }
                 "stop" -> {
@@ -37,5 +34,13 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+    }
+
+    // MethodChannel entrega int Dart como Int ou Long conforme a magnitude.
+    private fun asLong(v: Any?): Long = when (v) {
+        is Int -> v.toLong()
+        is Long -> v
+        is Double -> v.toLong()
+        else -> 0L
     }
 }

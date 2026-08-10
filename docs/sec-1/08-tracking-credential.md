@@ -164,3 +164,88 @@ volta ⇒ sincroniza. Rotação/expiração do access de UI **não** interfere n
 Esta implementação **remove o blocker** antes do Gate B, mas **não** executa o Gate B nem
 declara GO. `AUTH_REQUIRE_SESSION` permanece OFF; legado permanece ON. Decisão GO/NO-GO só
 após revisão independente do Codex sobre esta branch.
+
+---
+
+## 15. Correções pós-revisão adversarial do Codex (v2) — SUPERSEDE as seções 6/9/10 acima
+
+A 1ª revisão adversarial classificou B-1 (BLOCKER) + H-1/H-2/H-3 (HIGH) + M-1..M-5. Esta
+versão corrige todos. Diferenças em relação ao desenho inicial:
+
+### 15.1 §B-1 — emissão TRI-STATE, fail-closed (fim do fallback silencioso)
+`ApiService.issueTrackingCredential()` retorna **`disabled | credential | failed`**:
+- **`disabled`** SOMENTE quando o backend prova flag OFF (**HTTP 404**) → fallback legacy
+  (access token) **permitido**.
+- **`credential`** → credencial recebida.
+- **`failed`** (timeout/rede/5xx/409/403/payload inválido) → **NÃO** inicia com access token.
+  O app marca `LocationTrackingStatus.failed` (observável) e o `reconcile` tenta de novo no
+  próximo ciclo (sem loop agressivo). **Feature ON nunca cai para legacy por erro.**
+
+### 15.2 §M-3 — emissão exige sessão SEC-1 (sid)
+A emissão recusa token legado sem `sid` (`tracking_session_revoked`). `session_id` é
+**NOT NULL** → vínculo canônico com `auth_sessions` (logout/revogação de sessão/dispositivo).
+
+### 15.3 §M-1 — device binding obrigatório
+`device_id` **NOT NULL** na credencial. O app gera um id **estável por instalação** (aleatório,
+persistido no secure storage; sem fingerprint invasivo) e o envia em **todas** as chamadas via
+`X-Tracking-Device` (emissão, telemetria, estado, renovação). Mismatch ⇒ `tracking_device_mismatch`.
+
+### 15.4 §H-3 — vínculo canônico à VIAGEM (validação por request, sem depender de hook)
+`frete_id` **NOT NULL**. A validação server-side (`trackingCredentialDomain.avaliarCredencial`)
+checa, **a cada request**: credencial não revogada; **teto absoluto**; sessão emissora não
+revogada; motorista ativo; empresa (tenant); **device**; e a **viagem vinculada** (existe, é a
+mesma, pertence ao motorista/empresa e **ainda ATIVA**). A telemetria (ramo tracking) grava
+**somente na viagem vinculada** (`req.trackingFreteId`) — credencial da viagem X **não** grava na
+viagem Y. Fim/cancelamento ⇒ frete inativo ⇒ `tracking_trip_inactive` **canônico** (o hook
+best-effort é só aceleração; se falhar, o próximo request ainda é rejeitado).
+
+### 15.5 §H-2 — teto absoluto (sem renovação perpétua)
+Duas noções: `expires_at` (nominal) e **`max_expires_at`** (teto absoluto = `issued_at + MAX`).
+Config `TRACKING_CREDENTIAL_MAX_LIFETIME_SECONDS` (default **604800 = 7 dias**), fail-closed
+(`max ≥ ttl`). A renovação **nunca** ultrapassa o teto; além dele ⇒ `tracking_credential_max_lifetime`
+(exige nova emissão por sessão SEC-1 — **nunca** access token).
+
+### 15.6 §H-1 — renovação pós-expiração + ROTAÇÃO (CAS) + fila offline
+- A credencial **expirada** (dentro do teto) **não** autentica telemetria, mas **pode rotacionar**:
+  `POST …/sessao/renovar-credencial` revalida todos os vínculos canônicos e **troca o segredo**
+  (gera token B). A troca é **CAS** (`UPDATE … WHERE credential_hash = <antigo> AND revoked_at IS
+  NULL AND max_expires_at ≥ now`), impedindo duas credenciais válidas concorrentes (single-use real).
+- **Kotlin:** ao receber `tracking_credential_expired`/`rotated`, chama renovação → atualiza
+  `token=B` + expirações + **reemite o próprio start intent** (`updateSelfIntent`) para que o
+  `START_REDELIVER_INTENT` passe a redeliver o token **atual** (recuperação em process death sem
+  persistir segredo). Offline atravessando o `expires_at` (dentro do teto): reconecta → detecta
+  expirado → renova → **fila intacta** → flush com B. Além do teto: **preserva a fila**, encerra e
+  exige nova emissão pelo app.
+
+### 15.7 §M-2/§8 — contrato semântico de erro + fila
+Backend retorna códigos estáveis: `tracking_credential_expired | rotated | revoked |
+max_lifetime | session_revoked | driver_blocked | tenant_mismatch | device_mismatch |
+trip_inactive | trip_mismatch | invalid` (+ `tracking_unavailable` transitório). O Kotlin decide
+por **código** (não status cru): `expired/rotated`→renovar (não descarta fila); definitivos→encerra;
+`503/5xx/408/429`/rede→transitório (mantém fila). **A fila só remove um ponto em ingestão
+confirmada (2xx)** — nunca por `stopSelf`. (Em `mode=session`/legacy o comportamento antigo é
+preservado.)
+
+### 15.8 §M-4 — FKs seguros
+`session_id` e `frete_id`: **`ON DELETE CASCADE`** (antes `SET NULL`). Sessão ou viagem apagada ⇒
+credencial some junto (nunca fica órfã com vínculo nulo).
+
+### 15.9 §M-5 — teste do router real
+`tests/trackingRouterOrder.test.js` carrega o `routes/fretes.js` REAL e prova estruturalmente que
+o sub-router de telemetria é registrado **antes** do `verifyToken` global, a emissão fica **sob**
+o `verifyToken`, e as rotas gerais também.
+
+### 15.10 §16 (futuro) — caminho Strict
+Quando o SEC-1 entrar em **Strict**, a credencial escopada será o **caminho oficial** do GPS. O
+fallback por access token existe **apenas** no modo Compatible com a flag **OFF**. Nada no desenho
+mantém o legacy como requisito futuro.
+
+### 15.11 Testes (v2)
+- **Backend `node --test`: 1250/1250, 0 falhas** (baseline real deste worktree = 1201 + 49 tracking).
+  Cobre binding (viagem/device/sid), teto absoluto, rotação CAS, renovação pós-expiração, revogação
+  por frete/sessão/motorista, contrato semântico, §23 (sobrevive à expiração do access), §27
+  (privilégio), flag OFF, router real.
+- **PG efêmero (064):** `tracking_credenciais.pgtest.mjs` — schema/NOT NULL/UNIQUE/CHECK(max≥exp≥issued)/
+  RLS/grants/FK obrigatórios/**CASCADE** (sessão e frete)/revogação. **CI-gated** (sem Docker local).
+- **Flutter:** `tracking_emissao_test.dart` (tri-state + header device) + analyze/test/build --release.
+  **CI-gated** (sem Flutter local).
