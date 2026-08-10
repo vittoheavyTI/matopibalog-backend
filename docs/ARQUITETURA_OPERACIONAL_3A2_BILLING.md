@@ -1,0 +1,88 @@
+# Arquitetura Operacional — Billing Automático / Asaas (3A-2)
+
+> Complementa `ARQUITETURA_OPERACIONAL_3A1.md`. Empilhado sobre 3A-1 (núcleo
+> comercial/contratual). **NÃO implementa deploy, merge, secret ou write em Asaas
+> PRODUÇÃO.** O modo real permitido é apenas SANDBOX, gated (adapter plugado no Gate).
+
+---
+
+## 1. Princípio central: automático, backend é autoridade
+
+O fluxo financeiro é AUTOMÁTICO, disparado por mudança de estado comercial, não por
+cliques do Super Admin. A operação normal não depende de "configurar assinatura" /
+"sincronizar" manuais — estes existem só como **contingência/reconciliação/suporte**.
+
+Fluxo: cliente → plano → trial → contrato → **customer** → **assinatura** → **cobrança**
+→ pagamento → **webhook** → fatura local → estado financeiro → situação comercial →
+acesso/bloqueio → upgrade/downgrade → add-ons → cancelamento.
+
+O **estado local é a autoridade** para as telas — não consultamos o Asaas a cada
+render. O Asaas é o provedor externo; o webhook + reconciliação mantêm o local coerente.
+
+## 2. Modelo de dados (reutilizado do existente — sem migration nova)
+
+- `empresas.asaas_customer_id`, `asaas_subscription_id`, `billing_status`,
+  `next_due_date`, `billing_updated_at`, `implantacao_cobrada`.
+- `faturas` (cobranças locais) — status, valor, vencimento.
+- `asaas_webhook_events` — **idempotência de webhook** (event_id UNIQUE, insert-or-claim,
+  hash-divergence, reclaim de stale via compare-and-swap, `next_retry_at`, erros sanitizados).
+- `empresa_funcionalidades` (add-ons faturáveis: `preco_mensal_centavos`, `billing_component_id`).
+
+**Nenhuma migration nova (063) foi necessária.** Se um item futuro exigir schema, o
+próximo número livre é 063 (062 é do SEC-1).
+
+## 3. Componentes 3A-2 (novos, `backend/services/billing/`)
+
+| Componente | Papel |
+|---|---|
+| `billingPolicyConfig` | Políticas CONFIGURÁVEIS (implantação timing, prazo de graça, provider_mode). Default explícito conservador (`nao_cobrar`, graça 5d, `fake`). Sem hardcode financeiro. `production` proibido. |
+| `billingOrchestratorDomainService` (puro) | Cérebro: dado o estado comercial + billing local + política, planeja ações IDEMPOTENTES (garantir_customer, garantir_assinatura com 1º venc = trial_end, cobrar_implantacao por política, garantir_addon). |
+| `fakeAsaasProvider` | Provider em memória (mesmo contrato do real) com injeção de falhas (timeout/429/5xx) para E2E offline. |
+| `billingWebhookApplyDomainService` (puro) | Máquina de estados de fatura tolerante a fora-de-ordem + idempotente (não regride estado por evento atrasado; correção terminal de estorno/cancelamento sempre aplica). |
+| `billingReconcileDomainService` (puro) | Motor único de reconciliação (customer/subscription/charge ausentes ou defasados). Usado pela automação e pela contingência. |
+| `billingInadimplenciaDomainService` (puro) | Overdue → recomendação comercial. Trial preserva a operação; pós-trial aplica graça configurável. |
+| `billingOrchestratorService` (I/O) | `ensureBillingStateComDeps`: lock por empresa (idempotência concorrente), retry só transitório, provider injetável (fake/sandbox, nunca produção). Executor idempotente. |
+| `billingAdminViewDomainService` (puro) | Linha de estado financeiro por empresa para o Super Admin (IDs mascarados, inadimplência derivada, último webhook). |
+
+## 4. Regras canônicas honradas (com testes)
+
+- **Trial não é cancelado por pagamento/contrato/assinatura** (§13/§47). A situação
+  comercial (3A-1) é a autoridade do trial; o billing não a altera.
+- **1ª mensalidade nunca antes de `trial_end`** (§14) — `calcularPrimeiroVencimento` /
+  `primeiroVencimentoMensalidade`.
+- **Idempotência** (§10/§48): `ensureBilling` 10x concorrentes → 1 customer/1 assinatura
+  (lock por empresa). Webhook duplicado 20x → 1 efeito (§49).
+- **Fora de ordem** (§21/§50): evento atrasado não regride estado mais novo.
+- **Implantação** por política configurável (§15): imediato/fim_trial/primeira_fatura/nao_cobrar.
+- **Add-ons** (§16): componente idempotente por add-on; remoção cessa a obrigação.
+- **Retry** (§22) só para transitórios; 4xx de negócio não repete.
+- **Reconciliação** (§23/§51): recupera mapeamentos/cobranças sem duplicar.
+- **Inadimplência** (§30/§31/§32) alimenta a autoridade comercial; sem `if(overdue)` espalhado.
+
+## 5. Endpoints (Super Admin) — READ/PLAN (sem write Asaas)
+
+- `GET /pagamentos/billing/overview/:empresa_id` — estado financeiro consolidado (§36).
+- `POST /pagamentos/billing/ensure-plan/:empresa_id` — plano de billing (dry-run).
+- `POST /pagamentos/billing/reconciliar-plan/:empresa_id` — divergências (dry-run).
+
+Execução REAL (criar customer/assinatura/cobrança no sandbox) é o **Gate 3A-2 sandbox**:
+o adapter real de sandbox é plugado com prova de ambiente; enquanto não plugado, o
+`selecionarProvider` falha explicitamente (nunca cai em produção).
+
+Webhook: `POST /pagamentos/webhook/asaas` (existente) — token fixo fail-closed +
+`asaasWebhookService` idempotente (reutilizado; a state machine 3A-2 formaliza as transições).
+
+## 6. Frontend / App
+
+- Super Admin › **Billing** (`PainelBilling`): overview por empresa + ações dry (plano/reconciliar).
+- App: consome a **situação comercial** (3A-1) como autoridade (mensalidade, implantação,
+  trial, regularização). NÃO duplica engine de billing no Flutter (§57).
+
+## 7. Reservado para o Gate 3A-2 (sandbox → produção)
+
+- Adapter real de Asaas sandbox conformando ao contrato do provider (createCustomer/
+  Subscription/Charge/cancel/get) — reusa `garantirCustomer/garantirAssinatura` existentes.
+- Disparo automático (outbox/gatilho) em: contratação criada, contrato assinado, trial
+  iniciado/finalizado, plano alterado, add-on alterado, cancelamento, retorno de webhook (§25).
+- E2E Asaas sandbox com fixtures sintéticas (§45), datas controladas (§46).
+- Produção só após Gate sandbox estável + autorização explícita (§66).
