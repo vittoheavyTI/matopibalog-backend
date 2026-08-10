@@ -157,6 +157,20 @@ test('renovar com device errado → device_mismatch (não rotaciona)', async () 
   await assert.rejects(() => svc.renovar({ token: delivery.reveal(), deviceId: 'outro' }), (e) => e.code === 'tracking_device_mismatch');
 });
 
+test('frete vinculado sumiu (CASCADE não pegou / corrida) → trip_mismatch', async () => {
+  const store = novoStore(); const agora = { v: Date.now() }; const svc = criar(store, agora);
+  const { delivery } = await emitirPadrao(svc);
+  store.fretes = []; // frete não existe mais
+  await assert.rejects(() => svc.validar({ token: delivery.reveal(), deviceId: DEV }), (e) => e.code === 'tracking_trip_mismatch');
+});
+
+test('frete vinculado passou a ser de outro motorista → tenant_mismatch', async () => {
+  const store = novoStore(); const agora = { v: Date.now() }; const svc = criar(store, agora);
+  const { delivery } = await emitirPadrao(svc);
+  store.fretes[0].motorista_id = 'outro-mot';
+  await assert.rejects(() => svc.validar({ token: delivery.reveal(), deviceId: DEV }), (e) => e.code === 'tracking_tenant_mismatch');
+});
+
 test('revogarDoFrete/DaSessao/DoMotorista revogam → uso rejeitado', async () => {
   for (const [fn, arg] of [['revogarDoFrete', 'frete-1'], ['revogarDaSessao', 'sess-1'], ['revogarDoMotorista', 'mot-1']]) {
     const store = novoStore(); const agora = { v: Date.now() }; const svc = criar(store, agora);

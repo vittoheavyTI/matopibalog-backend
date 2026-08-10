@@ -22,6 +22,7 @@ import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.roundToInt
 
 class LocationTrackingService : Service() {
@@ -39,6 +40,11 @@ class LocationTrackingService : Service() {
     private var lastSent: Location? = null
     private var lastSentAt: Long = 0L
     private lateinit var locationManager: LocationManager
+    // Trava de reentrância: garante UM ciclo de rede por vez. Sem isto, a renovação
+    // (updateSelfIntent → onStartCommand → novo tick) poderia rodar captureAndSend
+    // concorrente e corromper a fila (read-modify-write do SharedPreferences).
+    private val inFlight = AtomicBoolean(false)
+    private val queueLock = Any() // serializa mutações da fila entre threads
 
     // Resultado semântico de um POST (§M-2). Decide fila e stopSelf — nunca por status cru.
     private enum class SendResult { SENT, KEEP, RENEW, STOP }
@@ -92,18 +98,24 @@ class LocationTrackingService : Service() {
             stopSelf()
             return
         }
+        // Um ciclo por vez: se já há envio em andamento, ignora este tick.
+        if (!inFlight.compareAndSet(false, true)) return
 
         Thread {
-            maybeRenewCredential()
-            flushQueue()
-            val location = bestKnownLocation()
-            if (location != null && shouldSend(location)) {
-                if (sendPoint(locationToJson(location)) == SendResult.SENT) {
-                    lastSent = location
-                    lastSentAt = System.currentTimeMillis()
+            try {
+                maybeRenewCredential()
+                flushQueue()
+                val location = bestKnownLocation()
+                if (location != null && shouldSend(location)) {
+                    if (sendPoint(locationToJson(location)) == SendResult.SENT) {
+                        lastSent = location
+                        lastSentAt = System.currentTimeMillis()
+                    }
+                } else {
+                    requestSingleUpdate()
                 }
-            } else {
-                requestSingleUpdate()
+            } finally {
+                inFlight.set(false)
             }
         }.start()
     }
@@ -121,12 +133,11 @@ class LocationTrackingService : Service() {
         locationManager.requestSingleUpdate(provider, object : LocationListener {
             override fun onLocationChanged(location: Location) {
                 if (!shouldSend(location)) return
-                Thread {
-                    if (sendPoint(locationToJson(location)) == SendResult.SENT) {
-                        lastSent = location
-                        lastSentAt = System.currentTimeMillis()
-                    }
-                }.start()
+                // Apenas ENFILEIRA (serializado); o próximo ciclo de flushQueue envia —
+                // evita envio de rede concorrente fora da trava inFlight.
+                enqueue(locationToJson(location))
+                lastSent = location
+                lastSentAt = System.currentTimeMillis()
             }
             override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
             override fun onProviderEnabled(provider: String) {}
@@ -226,13 +237,19 @@ class LocationTrackingService : Service() {
 
     private fun flushQueue() {
         val base = baseUrl ?: return
-        val queue = readQueue()
-        if (queue.length() == 0) return
-        val remaining = JSONArray()
+        // DRENA a fila sob lock (assume a posse do lote). Enfileiramentos concorrentes
+        // durante a rede vão para uma fila nova e NÃO são sobrescritos.
+        val batch = synchronized(queueLock) {
+            val q = readQueue()
+            if (q.length() > 0) writeQueue(JSONArray())
+            q
+        }
+        if (batch.length() == 0) return
         var parar = false
-        for (i in 0 until queue.length()) {
-            val payload = queue.optJSONObject(i) ?: continue
-            if (parar) { remaining.put(payload); continue } // após STOP, preserva o restante
+        val falhas = ArrayList<JSONObject>()
+        for (i in 0 until batch.length()) {
+            val payload = batch.optJSONObject(i) ?: continue
+            if (parar) { falhas.add(payload); continue } // após STOP, preserva o restante
             var res = try {
                 postJson("$base/fretes/localizacao/sessao", payload)
             } catch (_: Exception) {
@@ -246,13 +263,13 @@ class LocationTrackingService : Service() {
             when (res) {
                 SendResult.SENT -> { /* confirmado → remove (não reenfileira) */ }
                 SendResult.STOP -> {
-                    if (mode == MODE_TRACKING) remaining.put(payload) // preserva; em sessão descarta (legado)
+                    if (mode == MODE_TRACKING) falhas.add(payload) // preserva; em sessão descarta (legado)
                     parar = true
                 }
-                else -> remaining.put(payload) // KEEP/RENEW-falho → preserva
+                else -> falhas.add(payload) // KEEP/RENEW-falho → preserva
             }
         }
-        writeQueue(remaining)
+        if (falhas.isNotEmpty()) enqueueAll(falhas) // re-enfileira falhas mesclando com novos
         if (parar) stopSelf()
     }
 
@@ -350,16 +367,26 @@ class LocationTrackingService : Service() {
             .put("source", "app_foreground_service")
     }
 
-    private fun enqueue(payload: JSONObject) {
-        val queue = readQueue()
-        val next = JSONArray()
-        next.put(payload)
-        val start = maxOf(0, queue.length() - QUEUE_LIMIT + 1)
-        for (i in start until queue.length()) {
-            val item = queue.optJSONObject(i) ?: continue
-            if (item.optString("captured_at") != payload.optString("captured_at")) next.put(item)
+    private fun enqueue(payload: JSONObject) = enqueueAll(listOf(payload))
+
+    // Mescla `itens` (mais novos primeiro) com a fila atual, sob lock, com dedup por
+    // captured_at e teto QUEUE_LIMIT. Atômico entre threads (evita perda por corrida).
+    private fun enqueueAll(itens: List<JSONObject>) {
+        if (itens.isEmpty()) return
+        synchronized(queueLock) {
+            val atual = readQueue()
+            val vistos = HashSet<String>()
+            val next = JSONArray()
+            fun add(o: JSONObject) {
+                if (next.length() >= QUEUE_LIMIT) return
+                val cap = o.optString("captured_at")
+                if (cap.isNotEmpty() && !vistos.add(cap)) return
+                next.put(o)
+            }
+            for (o in itens) add(o)
+            for (i in 0 until atual.length()) { atual.optJSONObject(i)?.let { add(it) } }
+            writeQueue(next)
         }
-        writeQueue(next)
     }
 
     private fun readQueue(): JSONArray {
