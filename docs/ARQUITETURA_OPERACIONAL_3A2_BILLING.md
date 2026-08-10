@@ -124,6 +124,22 @@ implementado e testado fake/contract + PG CI; a E2E sandbox roda no workflow pro
 `billing-3a2-sandbox.yml` (environment `sandbox` + secret `ASAAS_SANDBOX_API_KEY`, fail-closed).
 **Nunca testado contra Asaas real.**
 
+## 6.3 Reconcile CONVERGENTE + config estrita (revisão)
+
+- **Orquestrador = função de convergência** (não só create-if-missing): cria customer/assinatura
+  ausentes; **`atualizar_assinatura_valor`** quando o valor esperado difere de
+  `empresas.billing_valor_mensal` (plano alterado); **cria/remove componente de add-on** por
+  convergência (ativo sem componente → criar; inativo com componente → remover);
+  **`cancelar_assinatura`** quando a conta é cancelada. **No-op quando já convergente** (idempotente).
+- **Reconcile periódico** seleciona por estado: `trial_finalizado`, `customer_ausente`,
+  `subscription_ausente`, `cancelamento_pendente`, `revalidar`. Assim eventos de
+  plano/add-on/cancelamento **perdidos** convergem sem depender do histórico.
+- Colunas de convergência (migration 063): `empresas.billing_valor_mensal`, `empresas.assinatura_cancelada`.
+- **Config do runner fail-closed** (`billingRunnerConfig`): `BILLING_OUTBOX_ENABLED` só `true`/`false`;
+  intervalo/lote inválido ou fora da faixa → `BillingRunnerConfigurationError` (sem clamp). O
+  runner/scripts falham ANTES de processar se a config for inválida.
+- **E2E automático real:** os testes exercitam o **tick** do runner (sem chamada manual ao worker).
+
 ## 7. Reservado para o Gate 3A-2 (sandbox → produção)
 
 - Adapter real de Asaas sandbox conformando ao contrato do provider (createCustomer/
