@@ -18,10 +18,17 @@ const { verificarEmpresa } = require('./tenant');
 const { verificarPlano } = require('./verificarPlano');
 
 const HEADER = 'x-tracking-credential';
+const HEADER_DEVICE = 'x-tracking-device';
 
 function lerTrackingToken(req) {
   const h = req.headers && req.headers[HEADER];
   if (typeof h === 'string' && h.trim()) return h.trim();
+  return null;
+}
+
+function lerDeviceId(req) {
+  const h = req.headers && req.headers[HEADER_DEVICE];
+  if (typeof h === 'string' && h.trim()) return h.trim().slice(0, 128);
   return null;
 }
 
@@ -57,12 +64,14 @@ function criarGuardTelemetria(deps = {}) {
 
     // Ramo TRACKING: só quando a flag está ON, há serviço e o header veio.
     if (token && cfg && cfg.trackingScopedCredentialEnabled && trackingService) {
-      trackingService.validar({ token })
+      const deviceId = lerDeviceId(req);
+      trackingService.validar({ token, deviceId })
         .then((identidade) => {
           req.user = { uid: identidade.uid, role: identidade.role, is_super_admin: false };
           req.empresa_id = identidade.empresa_id;
           req.authKind = 'tracking';
           req.trackingCredentialId = identidade.credential_id;
+          req.trackingFreteId = identidade.frete_id;   // telemetria escopada à viagem vinculada
           // MESMO gate comercial da sessão — não amplia privilégio.
           return _verificarPlano(req, res, next);
         })
@@ -82,4 +91,4 @@ function exigirTracking(req, res, next) {
   return res.status(403).json({ error: 'tracking_only', message: 'Endpoint exclusivo da credencial de rastreamento.' });
 }
 
-module.exports = { criarGuardTelemetria, exigirTracking, lerTrackingToken, HEADER };
+module.exports = { criarGuardTelemetria, exigirTracking, lerTrackingToken, lerDeviceId, HEADER, HEADER_DEVICE };

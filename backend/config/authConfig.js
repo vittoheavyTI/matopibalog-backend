@@ -80,9 +80,12 @@ const FAIXAS = {
   absolute: { def: 30 * DIA,   min: 3600, max: 365 * DIA },   // 1h..365d
   grace:    { def: 10,         min: 0,    max: 300 },
   throttle: { def: 60,         min: 0,    max: 3600 },
-  // SEC-1 tracking (GPS): TTL da credencial operacional de rastreamento. Default 24h
-  // (uma viagem típica); renovável server-side (tracking-only) para viagens longas.
+  // SEC-1 tracking (GPS): TTL nominal da credencial. Default 24h (uma viagem típica);
+  // renovável (rotação tracking-only) enquanto dentro do teto absoluto.
   trackingTtl: { def: DIA,     min: 900,  max: 30 * DIA },    // 15min..30d
+  // Teto ABSOLUTO da credencial (issued_at + max). A renovação NUNCA o ultrapassa —
+  // impede "refresh disfarçada" perpétua. Default 7 dias.
+  trackingMax: { def: 7 * DIA, min: 3600, max: 90 * DIA },    // 1h..90d
 };
 
 /**
@@ -104,6 +107,9 @@ function loadAuthConfig(env = process.env) {
   );
   const trackingCredentialTtl = parseIntEstrito(
     env.TRACKING_CREDENTIAL_TTL_SECONDS, 'TRACKING_CREDENTIAL_TTL_SECONDS', FAIXAS.trackingTtl,
+  );
+  const trackingCredentialMaxLifetime = parseIntEstrito(
+    env.TRACKING_CREDENTIAL_MAX_LIFETIME_SECONDS, 'TRACKING_CREDENTIAL_MAX_LIFETIME_SECONDS', FAIXAS.trackingMax,
   );
 
   const legacyCutoffRaw = parseStr(env.AUTH_LEGACY_TOKEN_CUTOFF, null);
@@ -188,6 +194,11 @@ function loadAuthConfig(env = process.env) {
   if (trackingScopedCredentialEnabled && !pepper) {
     throw new AuthConfigurationError('TRACKING_SCOPED_CREDENTIAL_ENABLED=true exige AUTH_REFRESH_TOKEN_PEPPER (ausente).');
   }
+  // Teto absoluto NUNCA pode ser menor que o TTL nominal (senão a credencial "nasce"
+  // já além do teto e nunca renovaria) → fail-closed.
+  if (trackingCredentialMaxLifetime < trackingCredentialTtl) {
+    throw new AuthConfigurationError(`TRACKING_CREDENTIAL_MAX_LIFETIME_SECONDS (${trackingCredentialMaxLifetime}) não pode ser menor que TRACKING_CREDENTIAL_TTL_SECONDS (${trackingCredentialTtl}).`);
+  }
 
   // authMode derivado — controllers/middlewares consomem isto (não recalculam flags).
   const authMode = !sessionsEnabled ? 'legacy' : (requireSession ? 'strict' : 'compatible');
@@ -202,6 +213,7 @@ function loadAuthConfig(env = process.env) {
     sessionActivityThrottleSeconds: throttleSecs,
     trackingScopedCredentialEnabled,
     trackingCredentialTtlSeconds: trackingCredentialTtl,
+    trackingCredentialMaxLifetimeSeconds: trackingCredentialMaxLifetime,
     issuer, audience, webOrigins, refreshCookieSameSite,
     // presença de segredos (nunca o valor no summary)
     hasPepper: !!pepper,
@@ -218,6 +230,7 @@ function loadAuthConfig(env = process.env) {
         sessionActivityThrottleSeconds: throttleSecs, issuer, audience, webOrigins,
         refreshCookieSameSite,
         trackingScopedCredentialEnabled, trackingCredentialTtlSeconds: trackingCredentialTtl,
+        trackingCredentialMaxLifetimeSeconds: trackingCredentialMaxLifetime,
         hasPepper: !!pepper, hasJwtSecret: !!jwtSecret,
       };
     },

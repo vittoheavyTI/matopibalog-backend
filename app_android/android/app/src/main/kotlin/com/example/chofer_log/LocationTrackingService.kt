@@ -26,18 +26,22 @@ import kotlin.math.roundToInt
 
 class LocationTrackingService : Service() {
     private val handler = Handler(Looper.getMainLooper())
-    private var token: String? = null
-    private var baseUrl: String? = null
-    // SEC-1: modo de autenticação do serviço nativo.
-    //   MODE_SESSION  → envia Authorization: Bearer <access token> (fluxo compatível/atual).
-    //   MODE_TRACKING → envia X-Tracking-Credential: <credencial escopada> (Opção C).
-    // A credencial de tracking NÃO expira junto com o access token de UI (§5): sobrevive
-    // à rotação/expiração do access e é renovada (tracking-only) antes de expirar.
-    private var mode: String = MODE_SESSION
-    private var credentialExpiresAt: Long = 0L
+    // SEC-1: campos VOLÁTEIS — a rotação da credencial (renovação) troca `token` em
+    // uma thread de trabalho; leituras precisam enxergar o valor atual sem snapshot.
+    //   MODE_SESSION  → Authorization: Bearer <access token> (fluxo compatível/atual).
+    //   MODE_TRACKING → X-Tracking-Credential + X-Tracking-Device (credencial escopada).
+    @Volatile private var token: String? = null
+    @Volatile private var baseUrl: String? = null
+    @Volatile private var mode: String = MODE_SESSION
+    @Volatile private var deviceId: String? = null
+    @Volatile private var credentialExpiresAt: Long = 0L   // validade nominal (renovar antes)
+    @Volatile private var maxExpiresAt: Long = 0L          // teto absoluto (não renova além)
     private var lastSent: Location? = null
     private var lastSentAt: Long = 0L
     private lateinit var locationManager: LocationManager
+
+    // Resultado semântico de um POST (§M-2). Decide fila e stopSelf — nunca por status cru.
+    private enum class SendResult { SENT, KEEP, RENEW, STOP }
 
     private val tick = object : Runnable {
         override fun run() {
@@ -61,14 +65,16 @@ class LocationTrackingService : Service() {
         token = intent?.getStringExtra(EXTRA_TOKEN)
         baseUrl = intent?.getStringExtra(EXTRA_BASE_URL)?.trimEnd('/')
         mode = intent?.getStringExtra(EXTRA_MODE) ?: MODE_SESSION
+        deviceId = intent?.getStringExtra(EXTRA_DEVICE)
         credentialExpiresAt = intent?.getLongExtra(EXTRA_EXPIRES_AT, 0L) ?: 0L
+        maxExpiresAt = intent?.getLongExtra(EXTRA_MAX_EXPIRES_AT, 0L) ?: 0L
 
         startForeground(NOTIFICATION_ID, notification())
         handler.removeCallbacks(tick)
         handler.post(tick)
         // START_REDELIVER_INTENT: se o processo morrer, o Android reentrega o ÚLTIMO
-        // intent (com a credencial), preservando o rastreamento sem guardar segredo em
-        // disco. A credencial é telemetria-only/revogável/expira — não é o access token.
+        // intent. A cada rotação atualizamos esse intent (updateSelfIntent), então o
+        // redelivery traz a credencial ATUAL — sem gravar segredo em disco.
         return START_REDELIVER_INTENT
     }
 
@@ -80,21 +86,19 @@ class LocationTrackingService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun captureAndSend() {
-        val currentToken = token ?: return
-        val currentBaseUrl = baseUrl ?: return
+        if (token == null || baseUrl == null) return
         if (!hasLocationPermission()) {
-            Thread { reportState(currentToken, currentBaseUrl, "permissao_nao_concedida") }.start()
+            Thread { reportState("permissao_nao_concedida") }.start()
             stopSelf()
             return
         }
 
         Thread {
-            maybeRenewCredential(currentToken, currentBaseUrl)
-            flushQueue(currentToken, currentBaseUrl)
+            maybeRenewCredential()
+            flushQueue()
             val location = bestKnownLocation()
             if (location != null && shouldSend(location)) {
-                val sent = sendPoint(currentToken, currentBaseUrl, locationToJson(location))
-                if (sent) {
+                if (sendPoint(locationToJson(location)) == SendResult.SENT) {
                     lastSent = location
                     lastSentAt = System.currentTimeMillis()
                 }
@@ -110,20 +114,15 @@ class LocationTrackingService : Service() {
             locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) -> LocationManager.GPS_PROVIDER
             locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER) -> LocationManager.NETWORK_PROVIDER
             else -> {
-                val currentToken = token ?: return
-                val currentBaseUrl = baseUrl ?: return
-                Thread { reportState(currentToken, currentBaseUrl, "gps_desativado") }.start()
+                Thread { reportState("gps_desativado") }.start()
                 return
             }
         }
         locationManager.requestSingleUpdate(provider, object : LocationListener {
             override fun onLocationChanged(location: Location) {
-                val currentToken = token ?: return
-                val currentBaseUrl = baseUrl ?: return
                 if (!shouldSend(location)) return
                 Thread {
-                    val sent = sendPoint(currentToken, currentBaseUrl, locationToJson(location))
-                    if (sent) {
+                    if (sendPoint(locationToJson(location)) == SendResult.SENT) {
                         lastSent = location
                         lastSentAt = System.currentTimeMillis()
                     }
@@ -154,55 +153,37 @@ class LocationTrackingService : Service() {
         return previous.distanceTo(location) >= MIN_DISTANCE_METERS
     }
 
-    private fun sendPoint(bearer: String, apiBase: String, payload: JSONObject): Boolean {
-        return try {
-            val ok = postJson("$apiBase/fretes/localizacao/sessao", bearer, payload)
-            if (!ok) enqueue(payload)
-            ok
-        } catch (_: Exception) {
-            enqueue(payload)
-            reportState(bearer, apiBase, "sem_conexao")
-            false
-        }
-    }
-
-    private fun flushQueue(bearer: String, apiBase: String) {
-        val queue = readQueue()
-        if (queue.length() == 0) return
-        val remaining = JSONArray()
-        for (i in 0 until queue.length()) {
-            val payload = queue.optJSONObject(i) ?: continue
-            val ok = try {
-                postJson("$apiBase/fretes/localizacao/sessao", bearer, payload)
-            } catch (_: Exception) {
-                reportState(bearer, apiBase, "sem_conexao")
-                false
-            }
-            if (!ok) remaining.put(payload)
-        }
-        writeQueue(remaining)
-    }
-
-    // Aplica a autenticação conforme o modo: credencial escopada (tracking) via header
-    // dedicado, ou access token (sessão) via Authorization. NUNCA loga o valor.
-    private fun applyAuth(conn: HttpURLConnection, credential: String) {
+    // ── Autenticação por modo. NUNCA loga o valor. ──────────────────────────────
+    private fun applyAuth(conn: HttpURLConnection) {
+        val credential = token ?: return
         if (mode == MODE_TRACKING) {
             conn.setRequestProperty(HEADER_TRACKING, credential)
+            deviceId?.let { conn.setRequestProperty(HEADER_DEVICE, it) }
         } else {
             conn.setRequestProperty("Authorization", "Bearer $credential")
         }
     }
 
-    // Um erro é DEFINITIVO (encerra o serviço) só quando não há como recuperar:
-    //   * MODE_SESSION: mantém o comportamento atual (401/403/409 → stop).
-    //   * MODE_TRACKING: 401/403 (credencial inválida/expirada/revogada/bloqueada/escopo)
-    //     e 409 (sem viagem apta = fim do rastreamento). 503/5xx/408/429 são TRANSITÓRIOS
-    //     e NUNCA param o serviço nem apagam a fila.
-    private fun isDefinitiveStop(code: Int): Boolean {
-        return code == 401 || code == 403 || code == 409
+    // Lê o `error` semântico do corpo (§M-2). Só chamado em não-2xx.
+    private fun readErrorCode(conn: HttpURLConnection): String? {
+        return try {
+            val body = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: return null
+            if (body.isBlank()) null else JSONObject(body).optString("error", "").ifBlank { null }
+        } catch (_: Exception) { null }
     }
 
-    private fun postJson(endpoint: String, credential: String, payload: JSONObject): Boolean {
+    // Classifica o resultado por CÓDIGO semântico + status. Erros definitivos e
+    // transitórios são distintos; expired/rotated pedem renovação (não descartam fila).
+    private fun classify(code: Int, errorCode: String?): SendResult {
+        if (code in 200..299) return SendResult.SENT
+        if (errorCode == "tracking_credential_expired" || errorCode == "tracking_credential_rotated") return SendResult.RENEW
+        if (code == 408 || code == 429 || code == 0 || code >= 500) return SendResult.KEEP
+        // Definitivos: revoked/max_lifetime/session_revoked/driver_blocked/tenant_mismatch/
+        // device_mismatch/trip_inactive/trip_mismatch/invalid — e, em MODE_SESSION, 401/403/409.
+        return SendResult.STOP
+    }
+
+    private fun postJson(endpoint: String, payload: JSONObject): SendResult {
         val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 15000
@@ -210,63 +191,154 @@ class LocationTrackingService : Service() {
             doOutput = true
             setRequestProperty("Content-Type", "application/json")
         }
-        applyAuth(conn, credential)
+        applyAuth(conn)
         OutputStreamWriter(conn.outputStream).use { it.write(payload.toString()) }
         val code = conn.responseCode
+        val errorCode = if (code in 200..299) null else readErrorCode(conn)
         conn.disconnect()
-        if (isDefinitiveStop(code)) {
-            stopSelf()
-            return true
-        }
-        // 2xx: enviado. Demais 4xx (400/404/422) não-definitivos: descarta o ponto (não
-        // reenfileira) mas NÃO para. 408/429/5xx: transitório → mantém na fila.
-        return code in 200..299 || (code in 400..499 && code != 408 && code != 429)
+        return classify(code, errorCode)
     }
 
-    // Renovação TRACKING-ONLY (viagens longas): estende a validade da PRÓPRIA credencial
-    // antes de expirar, sem jamais tocar o refresh SEC-1. Só no modo tracking e quando
-    // estamos dentro da janela de renovação. Erro definitivo → encerra; transitório → tenta depois.
-    private fun maybeRenewCredential(credential: String, apiBase: String) {
-        if (mode != MODE_TRACKING || credentialExpiresAt <= 0L) return
+    // Envia UM ponto. A fila só perde o ponto em ingestão confirmada (SENT). Em
+    // MODE_SESSION preserva o comportamento legado (descarta em erro definitivo).
+    private fun sendPoint(payload: JSONObject): SendResult {
+        val base = baseUrl ?: return SendResult.KEEP
+        return try {
+            var res = postJson("$base/fretes/localizacao/sessao", payload)
+            if (res == SendResult.RENEW) {
+                res = if (renewCredential()) postJson("$base/fretes/localizacao/sessao", payload) else SendResult.KEEP
+            }
+            when (res) {
+                SendResult.SENT -> {}
+                SendResult.KEEP, SendResult.RENEW -> enqueue(payload)
+                SendResult.STOP -> {
+                    if (mode == MODE_TRACKING) enqueue(payload) // preserva (nunca perde por stopSelf)
+                    stopSelf()
+                }
+            }
+            res
+        } catch (_: Exception) {
+            enqueue(payload)
+            reportState("sem_conexao")
+            SendResult.KEEP
+        }
+    }
+
+    private fun flushQueue() {
+        val base = baseUrl ?: return
+        val queue = readQueue()
+        if (queue.length() == 0) return
+        val remaining = JSONArray()
+        var parar = false
+        for (i in 0 until queue.length()) {
+            val payload = queue.optJSONObject(i) ?: continue
+            if (parar) { remaining.put(payload); continue } // após STOP, preserva o restante
+            var res = try {
+                postJson("$base/fretes/localizacao/sessao", payload)
+            } catch (_: Exception) {
+                reportState("sem_conexao"); SendResult.KEEP
+            }
+            if (res == SendResult.RENEW) {
+                res = if (renewCredential()) {
+                    try { postJson("$base/fretes/localizacao/sessao", payload) } catch (_: Exception) { SendResult.KEEP }
+                } else SendResult.KEEP
+            }
+            when (res) {
+                SendResult.SENT -> { /* confirmado → remove (não reenfileira) */ }
+                SendResult.STOP -> {
+                    if (mode == MODE_TRACKING) remaining.put(payload) // preserva; em sessão descarta (legado)
+                    parar = true
+                }
+                else -> remaining.put(payload) // KEEP/RENEW-falho → preserva
+            }
+        }
+        writeQueue(remaining)
+        if (parar) stopSelf()
+    }
+
+    // Renova (ROTACIONA) a credencial — só MODE_TRACKING. Aceita credencial já expirada,
+    // desde que dentro do teto absoluto. Atualiza token→B e o intent de redelivery.
+    // Retorna true se rotacionou. Erro definitivo → stopSelf. Transitório → false.
+    private fun renewCredential(): Boolean {
+        if (mode != MODE_TRACKING) return false
+        val base = baseUrl ?: return false
+        if (token == null) return false
         val now = System.currentTimeMillis()
-        if (now < credentialExpiresAt - RENEW_THRESHOLD_MS) return
-        try {
-            val conn = (URL("$apiBase/fretes/localizacao/sessao/renovar-credencial").openConnection() as HttpURLConnection).apply {
+        if (maxExpiresAt in 1..now) { // ultrapassou o teto → não renova; exige nova emissão pelo app
+            reportState("interrompida")
+            stopSelf()
+            return false
+        }
+        return try {
+            val conn = (URL("$base/fretes/localizacao/sessao/renovar-credencial").openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 connectTimeout = 15000
                 readTimeout = 15000
                 doOutput = true
                 setRequestProperty("Content-Type", "application/json")
             }
-            applyAuth(conn, credential)
+            applyAuth(conn)
             OutputStreamWriter(conn.outputStream).use { it.write("{}") }
             val code = conn.responseCode
-            val body = if (code in 200..299) conn.inputStream.bufferedReader().use { it.readText() } else ""
-            conn.disconnect()
             if (code in 200..299) {
-                val exp = JSONObject(body).optString("expires_at", "")
-                if (exp.isNotEmpty()) {
-                    try { credentialExpiresAt = java.time.Instant.parse(exp).toEpochMilli() } catch (_: Exception) {}
+                val body = conn.inputStream.bufferedReader().use { it.readText() }
+                conn.disconnect()
+                val json = JSONObject(body)
+                val novo = json.optString("credential", "")
+                if (novo.isNotBlank()) {
+                    token = novo
+                    json.optString("expires_at", "").let { if (it.isNotBlank()) credentialExpiresAt = parseIso(it) }
+                    json.optString("max_expires_at", "").let { if (it.isNotBlank()) maxExpiresAt = parseIso(it) }
+                    updateSelfIntent() // o redelivery passa a trazer o token novo
+                    return true
                 }
-            } else if (isDefinitiveStop(code)) {
-                stopSelf()
+                false
+            } else {
+                val errorCode = readErrorCode(conn)
+                conn.disconnect()
+                if (classify(code, errorCode) == SendResult.STOP) stopSelf()
+                false
             }
-            // transitório: ignora e tenta na próxima passagem.
         } catch (_: Exception) {
-            // transitório (rede): não para; tenta depois.
+            false // transitório: tenta na próxima passagem
         }
     }
 
-    private fun reportState(bearer: String, apiBase: String, state: String) {
+    // Renovação PROATIVA quando faltar <= RENEW_THRESHOLD para expirar (viagens longas).
+    private fun maybeRenewCredential() {
+        if (mode != MODE_TRACKING || credentialExpiresAt <= 0L) return
+        if (System.currentTimeMillis() < credentialExpiresAt - RENEW_THRESHOLD_MS) return
+        renewCredential()
+    }
+
+    // Reemite o próprio start intent com os valores ATUAIS → o Android passa a
+    // redeliver o token rotacionado (recuperação em process death sem persistir segredo).
+    private fun updateSelfIntent() {
+        val intent = Intent(this, LocationTrackingService::class.java).apply {
+            putExtra(EXTRA_TOKEN, token)
+            putExtra(EXTRA_BASE_URL, baseUrl)
+            putExtra(EXTRA_MODE, mode)
+            putExtra(EXTRA_DEVICE, deviceId)
+            putExtra(EXTRA_EXPIRES_AT, credentialExpiresAt)
+            putExtra(EXTRA_MAX_EXPIRES_AT, maxExpiresAt)
+        }
         try {
-            postJson(
-                "$apiBase/fretes/localizacao/sessao/estado",
-                bearer,
-                JSONObject().put("estado", state),
-            )
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent)
+            else startService(intent)
+        } catch (_: Exception) { /* best-effort */ }
+    }
+
+    private fun reportState(state: String) {
+        val base = baseUrl ?: return
+        try {
+            postJson("$base/fretes/localizacao/sessao/estado", JSONObject().put("estado", state))
         } catch (_: Exception) {
             // Best-effort: estado operacional nao pode deslogar nem expor coordenadas.
         }
+    }
+
+    private fun parseIso(iso: String): Long {
+        return try { java.time.Instant.parse(iso).toEpochMilli() } catch (_: Exception) { 0L }
     }
 
     private fun locationToJson(location: Location): JSONObject {
@@ -335,10 +407,13 @@ class LocationTrackingService : Service() {
         private const val EXTRA_TOKEN = "token"
         private const val EXTRA_BASE_URL = "baseUrl"
         private const val EXTRA_MODE = "mode"
+        private const val EXTRA_DEVICE = "deviceId"
         private const val EXTRA_EXPIRES_AT = "expiresAt"
+        private const val EXTRA_MAX_EXPIRES_AT = "maxExpiresAt"
         const val MODE_SESSION = "session"
         const val MODE_TRACKING = "tracking"
         private const val HEADER_TRACKING = "X-Tracking-Credential"
+        private const val HEADER_DEVICE = "X-Tracking-Device"
         private const val CHANNEL_ID = "matopibalog_localizacao_viagem"
         private const val NOTIFICATION_ID = 4227
         private const val INTERVAL_MS = 5 * 60 * 1000L
@@ -350,12 +425,22 @@ class LocationTrackingService : Service() {
         private const val PREFS = "matopibalog_location_tracking"
         private const val KEY_QUEUE = "queue"
 
-        fun start(context: Context, token: String, baseUrl: String, mode: String = MODE_SESSION, expiresAt: Long = 0L) {
+        fun start(
+            context: Context,
+            token: String,
+            baseUrl: String,
+            mode: String = MODE_SESSION,
+            deviceId: String? = null,
+            expiresAt: Long = 0L,
+            maxExpiresAt: Long = 0L,
+        ) {
             val intent = Intent(context, LocationTrackingService::class.java).apply {
                 putExtra(EXTRA_TOKEN, token)
                 putExtra(EXTRA_BASE_URL, baseUrl)
                 putExtra(EXTRA_MODE, mode)
+                putExtra(EXTRA_DEVICE, deviceId)
                 putExtra(EXTRA_EXPIRES_AT, expiresAt)
+                putExtra(EXTRA_MAX_EXPIRES_AT, maxExpiresAt)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent)
             else context.startService(intent)

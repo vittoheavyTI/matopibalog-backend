@@ -3,7 +3,7 @@ const notificacaoService = require('../services/notificacaoService');
 const { calcularComissao } = require('../utils/comissao');
 const { normalizarModalidade, calcularValorToneladaKm } = require('../utils/calculoFrete');
 const { validarLimitesFrete } = require('../utils/limitesFrete');
-const { revogarTrackingSeSemViagemAtiva } = require('../services/auth/trackingRevocacaoHook');
+const { revogarTrackingDoFrete } = require('../services/auth/trackingRevocacaoHook');
 
 const BUCKET_ODOMETRO = 'fretes-odometro';
 const SIGNED_URL_TTL_SECONDS = 300;
@@ -704,13 +704,9 @@ exports.finalizar = async (req, res) => {
 
     if (error) throw error;
     notificacaoService.notificarViagemFinalizada(data, { actorId: req.user?.uid }).catch(() => {});
-    // SEC-1: fim de viagem → se o motorista não tem mais viagem ativa, revoga a
-    // credencial de rastreamento (best-effort, não afeta a finalização).
-    revogarTrackingSeSemViagemAtiva({
-      empresaId: frete.empresa_id,
-      motoristaId: frete.motorista_id,
-      motivo: 'viagem_finalizada',
-    });
+    // SEC-1: fim de viagem → revoga a credencial de rastreamento VINCULADA a este frete
+    // (best-effort; a validação já rejeita canonicamente viagem inativa).
+    revogarTrackingDoFrete({ freteId: frete.id, motivo: 'viagem_finalizada' });
     res.status(200).json(data);
   } catch (error) {
     console.error('Erro ao finalizar frete:', error);
@@ -753,12 +749,8 @@ exports.delete = async (req, res) => {
       .eq('id', id);
 
     if (error) throw error;
-    // SEC-1: cancelamento de viagem → revoga a credencial se não sobrar viagem ativa.
-    revogarTrackingSeSemViagemAtiva({
-      empresaId: frete.empresa_id,
-      motoristaId: frete.motorista_id,
-      motivo: 'viagem_cancelada',
-    });
+    // SEC-1: cancelamento de viagem → revoga a credencial vinculada a este frete.
+    revogarTrackingDoFrete({ freteId: frete.id, motivo: 'viagem_cancelada' });
     res.status(200).json({ message: 'Frete cancelado com sucesso.' });
   } catch (error) {
     res.status(500).json({ message: 'Erro ao cancelar frete.' });

@@ -35,18 +35,19 @@ CREATE TABLE IF NOT EXISTS public.frete_tracking_credenciais (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   empresa_id      uuid NOT NULL REFERENCES public.empresas(id)  ON DELETE CASCADE,
   motorista_id    uuid NOT NULL REFERENCES public.usuarios(id)  ON DELETE CASCADE,
-  -- Sessão SEC-1 que emitiu a credencial (contexto de revogação por logout/admin).
-  -- ON DELETE SET NULL: manutenção de sessões (limpar_sessoes_expiradas) não apaga a
-  -- credencial; a revogação explícita é observada por revoked_at da sessão em runtime.
-  session_id      uuid NULL REFERENCES public.auth_sessions(id) ON DELETE SET NULL,
-  -- Frete/viagem que disparou a emissão (contexto/auditoria). O escopo operacional é
-  -- por motorista+empresa; a telemetria só atinge os fretes ATIVOS do próprio motorista.
-  frete_id        uuid NULL REFERENCES public.fretes(id)        ON DELETE SET NULL,
-  device_id       text NULL,
-  -- HMAC-SHA-256(pepper, 'tracking:'||token) em hex. NUNCA o token aberto.
+  -- BINDING CANÔNICO (pós-revisão adversarial): sessão SEC-1, viagem e device são
+  -- OBRIGATÓRIOS. FK ON DELETE CASCADE: se a sessão OU a viagem forem apagadas, a
+  -- credencial some junto (não fica órfã com vínculo nulo). A revogação explícita da
+  -- sessão (revoked_at) é observada em runtime; a viagem inativa também é canônica.
+  session_id      uuid NOT NULL REFERENCES public.auth_sessions(id) ON DELETE CASCADE,
+  frete_id        uuid NOT NULL REFERENCES public.fretes(id)        ON DELETE CASCADE,
+  device_id       text NOT NULL,   -- device binding: comparado em cada requisição
+  -- HMAC-SHA-256(pepper, 'tracking:'||token) em hex. NUNCA o token aberto. Rotaciona
+  -- (CAS in-place) a cada renovação → o hash antigo deixa de existir (single-use real).
   credential_hash text NOT NULL,
   issued_at       timestamptz NOT NULL DEFAULT now(),
-  expires_at      timestamptz NOT NULL,
+  expires_at      timestamptz NOT NULL,   -- validade NOMINAL (telemetria)
+  max_expires_at  timestamptz NOT NULL,   -- TETO ABSOLUTO: a renovação nunca ultrapassa
   last_used_at    timestamptz NULL,
   revoked_at      timestamptz NULL,
   revoked_reason  text NULL,
@@ -54,12 +55,13 @@ CREATE TABLE IF NOT EXISTS public.frete_tracking_credenciais (
   updated_at      timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT frete_tracking_cred_hash_uniq   UNIQUE (credential_hash),
   CONSTRAINT frete_tracking_cred_exp_chk     CHECK (expires_at >= issued_at),
-  CONSTRAINT frete_tracking_cred_devlen_chk  CHECK (char_length(coalesce(device_id, ''))      <= 128),
+  CONSTRAINT frete_tracking_cred_max_chk     CHECK (max_expires_at >= expires_at),
+  CONSTRAINT frete_tracking_cred_devlen_chk  CHECK (char_length(device_id) BETWEEN 1 AND 128),
   CONSTRAINT frete_tracking_cred_reason_chk  CHECK (char_length(coalesce(revoked_reason, '')) <= 200)
 );
 
 COMMENT ON TABLE public.frete_tracking_credenciais IS
-  'SEC-1: credencial operacional escopada de rastreamento GPS. Backend-only. Guarda só o HMAC do token (nunca o token aberto). Telemetria-only, revogável, expira server-side.';
+  'SEC-1: credencial operacional escopada de rastreamento GPS. Backend-only. Guarda só o HMAC do token (nunca o token aberto). Vinculada a sessao SEC-1 + viagem + device; telemetria-only, revogável, expira server-side, teto absoluto e rotação single-use.';
 
 CREATE INDEX IF NOT EXISTS idx_frete_tracking_cred_motorista ON public.frete_tracking_credenciais (motorista_id);
 CREATE INDEX IF NOT EXISTS idx_frete_tracking_cred_empresa   ON public.frete_tracking_credenciais (empresa_id);
