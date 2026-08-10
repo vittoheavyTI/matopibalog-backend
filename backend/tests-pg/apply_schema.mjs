@@ -21,6 +21,9 @@ const arquivos = [
   // de auth — o `GRANT ALL ON ALL TABLES` do 99_grants (test-only) roda ANTES e não
   // as alcança (fiel à produção, onde a 062 revoga logo após o create).
   join(migrations, '062_auth_sessions_revogaveis.sql'),   // SEC-1: sessões revogáveis
+  // 064 depois da 062 (FK → auth_sessions). O gap 063 é intencional (reservado ao
+  // #416 congelado); o applier usa lista explícita, então o gap é inócuo.
+  join(migrations, '064_frete_tracking_credenciais.sql'), // SEC-1: credencial de rastreamento
 ];
 
 const client = new pg.Client({ connectionString: CONN });
@@ -32,7 +35,7 @@ try {
     await client.query(sql);
     console.log('ok');
   }
-  console.log('Schema de teste aplicado (pré-bootstrap + 060 + 061).');
+  console.log('Schema de teste aplicado (pré-bootstrap + 060 + 061 + 062 + 064).');
 } finally {
   await client.end();
 }

@@ -240,11 +240,27 @@ class LocationTrackingService {
       return LocationTrackingStartResult.missingSession;
     }
 
+    // SEC-1 (Opção C): tenta obter a credencial operacional escopada. Se disponível
+    // (flag ON no backend), ELA é entregue ao serviço nativo — independente do access
+    // token de UI, sobrevivendo à rotação/expiração deste. Se indisponível (flag OFF /
+    // sem viagem apta / falha), cai no fluxo COMPATÍVEL: envia o access token, como hoje.
+    final credential = await ApiService.issueTrackingCredential();
+
     try {
-      await _channel.invokeMethod('start', {
-        'token': token,
-        'baseUrl': ApiService.baseUrl,
-      });
+      final args = credential != null
+          ? <String, dynamic>{
+              'token': credential.credential,
+              'baseUrl': ApiService.baseUrl,
+              'mode': 'tracking',
+              'expiresAt': credential.expiresAtMs,
+            }
+          : <String, dynamic>{
+              'token': token,
+              'baseUrl': ApiService.baseUrl,
+              'mode': 'session',
+              'expiresAt': 0,
+            };
+      await _channel.invokeMethod('start', args);
       await _persist(LocationTrackingStatus.active, activeTrips);
       return LocationTrackingStartResult.started;
     } catch (_) {

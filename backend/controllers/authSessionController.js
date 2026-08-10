@@ -105,6 +105,11 @@ function criarAuthSessionController({ sessionService, cfg }) {
       clearRefreshCookie(res);
       return respErro(res, e);
     }
+    // SEC-1 tracking: revoga a credencial de rastreamento da sessão (best-effort; não
+    // altera o resultado do logout — a validação já rejeitaria via sessão revogada).
+    if (req.user && req.user.sid) {
+      require('../services/auth/trackingRevocacaoHook').revogarTrackingDaSessao({ sessionId: req.user.sid, motivo: 'logout' });
+    }
     clearRefreshCookie(res);
     return res.status(200).json({ message: 'Logout realizado com sucesso' });
   }
