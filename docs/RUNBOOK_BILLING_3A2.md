@@ -10,12 +10,25 @@
 - IDs externos (customer/subscription/payment) são dados de integração: o Super
   Admin NÃO os digita livremente; só via fluxo controlado.
 
-## Automação (outbox → worker)
+## Automação (evento → outbox → runner → worker)
 - Fluxo: mudança comercial → `emitirEventoBilling` (enfileira em `billing_outbox`,
-  idempotente por `dedupe_key`) → worker `processarOutbox` (claim CAS) → `ensureBillingState`.
-- Acionar o worker (job/contingência): `POST /pagamentos/billing/processar-outbox` (super-admin).
-  Ideal: um cron chama esse endpoint periodicamente (ou um job dedicado no futuro).
+  idempotente por `dedupe_key`) → **runner** processa (claim CAS) → `ensureBillingState`.
+- **Runner automático** (SEM clique): `scripts/billing/outbox_runner.mjs` (one-shot, agendado
+  por cron do Railway, mesmo padrão dos jobs existentes) OU `billingOutboxRunner.iniciarRunner`
+  in-process (opt-in por `BILLING_OUTBOX_ENABLED`, intervalo `BILLING_OUTBOX_INTERVAL_SECONDS`,
+  lote `BILLING_OUTBOX_BATCH_SIZE`). **Multi-réplica seguro**: o claim CAS garante 1 processamento
+  por evento mesmo com vários runners.
+- **Reconcile periódico** (safety net temporal): `scripts/billing/reconcile_periodico.mjs`
+  (cron) — encontra trials vencidos por relógio (trial_finalizado) e mapeamentos ausentes e
+  enfileira `reconciliacao` idempotente. Garante convergência sem ninguém logar e recupera
+  eventos perdidos por gatilho fail-open.
+- Contingência manual (mesma engine): `POST /pagamentos/billing/processar-outbox` (super-admin).
 - Observabilidade: `GET /pagamentos/billing/jobs` → contagem pending/processing/processed/failed/dead.
+
+## Cadência recomendada (cron Railway, NÃO produção nesta frente)
+- `outbox_runner.mjs`: a cada 1–5 min.
+- `reconcile_periodico.mjs`: a cada 15–60 min (ou 1×/dia — dedupe por dia).
+- Desabilitar em ambientes que não devem processar (`BILLING_OUTBOX_ENABLED=false`; produção OFF).
 
 ## Cenário: jobs `dead` (manual_attention)
 1. `GET /pagamentos/billing/jobs` mostra `dead > 0`.

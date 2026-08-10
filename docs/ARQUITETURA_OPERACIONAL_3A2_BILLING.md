@@ -99,25 +99,30 @@ mudança comercial em evento; um **worker** processa e chama `ensureBillingState
 
 ## 6.2 Status de implementação e teste (§30)
 
-| Item | Implementado | Testado FAKE | Testado SANDBOX | Pendente PRODUÇÃO |
-|---|:--:|:--:|:--:|:--:|
-| Política configurável + guard produção | ✅ | ✅ | — | (produção proibida) |
-| Orquestrador (customer/subscription/implantação/add-on) | ✅ | ✅ | ❌ (sem credencial) | ✅ |
-| Trial preservado / 1ª mensalidade = trial_end | ✅ | ✅ | ❌ | ✅ |
-| Webhook state machine (dup/out-of-order) | ✅ | ✅ | ❌ | ✅ |
-| Reconciliação | ✅ | ✅ | ❌ | ✅ |
-| Inadimplência (trial/graça) | ✅ | ✅ | — | ✅ |
-| Outbox + trigger + worker (automação) | ✅ | ✅ | ❌ | ✅ |
-| Idempotência multi-processo | ✅ | ✅ (lógica) + pgtest CI | ❌ | ✅ |
-| Adapter real Asaas SANDBOX | ✅ (código + contract test) | ✅ (http fake) | ❌ **BLOCKER** | ✅ |
-| E2E Asaas SANDBOX externo | — | — | ❌ **BLOCKER** | — |
+| Item | Implementado | Testado FAKE (local) | Testado CI PG | Testado SANDBOX | Pendente PRODUÇÃO |
+|---|:--:|:--:|:--:|:--:|:--:|
+| Política configurável + guard produção | ✅ | ✅ | — | — | (produção proibida) |
+| Orquestrador (customer/subscription/implantação/add-on) | ✅ | ✅ | — | ❌ | ✅ |
+| Trial preservado / 1ª mensalidade = trial_end | ✅ | ✅ | — | ❌ | ✅ |
+| Webhook state machine (dup/out-of-order) | ✅ | ✅ | — | ❌ | ✅ |
+| Reconciliação (motor) + reconcile periódico | ✅ | ✅ | — | ❌ | ✅ |
+| Inadimplência (trial/graça) | ✅ | ✅ | — | — | ✅ |
+| Outbox + trigger + worker + **runner automático** | ✅ | ✅ | — | ❌ | ✅ |
+| **Idempotência multi-processo (dedupe + claim CAS)** | ✅ | ✅ (lógica) | ✅ **`billing-3a2-ci` (Postgres 16 real)** | ❌ | ✅ |
+| Migration 063 aplica em Postgres | ✅ | — | ✅ **`billing-3a2-ci`** | — | ✅ |
+| Adapter real Asaas SANDBOX | ✅ (código + contract test) | ✅ (http fake) | — | ❌ **BLOCKER** | ✅ |
+| E2E Asaas SANDBOX externo | ✅ (script + workflow protegido) | — | — | ❌ **BLOCKER** | — |
 
-**BLOCKER externo (único):** este ambiente **não possui credencial Asaas sandbox nem
-Supabase/Postgres** (`ASAAS_API_KEY`/`SUPABASE_*`/`DATABASE_URL` ausentes) — impossível provar
-`environment=sandbox` e fazer writes reais sem ação não autorizada. Todo o código (adapter,
-triggers, outbox, worker, idempotência) está implementado e testado com fake/contract; a E2E
-sandbox real e o pgtest de concorrência rodam no **Gate** (CI com Postgres efêmero + credencial
-sandbox injetada como secret protegido). **Nunca testado contra Asaas real.**
+**PG concurrency: ELIMINADO como blocker.** O workflow `billing-3a2-ci.yml` roda NA BRANCH
+(push/dispatch) com Postgres 16 efêmero: aplica migrations até 063 e executa
+`billing_outbox.pgtest.mjs` — **enfileirar 10x mesmo dedupe_key → 1 linha; claim CAS concorrente
+→ 1 vencedor; privilégios anon/authenticated negados** (verde). Billing fake: 101/101.
+
+**BLOCKER externo ÚNICO restante:** este ambiente **não possui `ASAAS_SANDBOX_API_KEY`** → a
+**E2E Asaas sandbox real = NOT RUN**. Todo o código (adapter, runner, outbox, reconcile) está
+implementado e testado fake/contract + PG CI; a E2E sandbox roda no workflow protegido
+`billing-3a2-sandbox.yml` (environment `sandbox` + secret `ASAAS_SANDBOX_API_KEY`, fail-closed).
+**Nunca testado contra Asaas real.**
 
 ## 7. Reservado para o Gate 3A-2 (sandbox → produção)
 
