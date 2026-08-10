@@ -8,6 +8,9 @@ const {
   filtrarLista,
   resumirPorStatus,
   montarListaContratos,
+  mapearSignatario,
+  mapearEvento,
+  montarDetalheContrato,
 } = require('../services/contratosAdminListDomainService');
 
 const HASH64 = 'a'.repeat(64);
@@ -175,4 +178,84 @@ test('montarListaContratos: entrada vazia/inválida não quebra', () => {
   assert.deepEqual(montarListaContratos().contratos, []);
   assert.deepEqual(montarListaContratos({ rows: null }).contratos, []);
   assert.equal(montarListaContratos({ rows: [] }).resumo.total, 0);
+});
+
+// ── Detalhe ──────────────────────────────────────────────────────────────────
+
+function rowDetalhe(over = {}) {
+  return {
+    ...rowAssinado(),
+    proposta_id: 'prop-1',
+    provider: 'interno_otp',
+    document_file_hash: 'd'.repeat(64),
+    certificate_file_hash: 'e'.repeat(64),
+    storage_path: 'contratos/emp-1/c.pdf',
+    signed_storage_path: 'contratos/emp-1/c-assinado.pdf',
+    certificate_storage_path: 'contratos/emp-1/cert.pdf',
+    atualizado_em: '2026-08-02T12:30:00.000Z',
+    propostas_comerciais: {
+      id: 'prop-1',
+      snapshot: { plano_nome: 'Empresa Start', trial_dias: 14, capacidade_inclusa: 5, preco_motorista_extra: 100, valor_mensal: 299.9, valor_implantacao: 0 },
+      valor_mensal: 299.9,
+      valor_implantacao: 0,
+      total_inicial: 0,
+      trial_dias: 14,
+      status: 'aceita',
+    },
+    contrato_signatarios: [
+      { id: 's1', papel: 'cliente', nome: 'Fulano', status: 'assinado', assinado_em: '2026-08-02T11:00:00.000Z', metodo_assinatura: 'interno_otp', email_mascarado: 'f***@x.com', criado_em: '2026-08-01T10:00:00.000Z' },
+      { id: 's2', papel: 'matopiba', nome: 'Matopiba', status: 'assinado', assinado_em: '2026-08-02T11:30:00.000Z', metodo_assinatura: 'interno_otp', email_mascarado: null, criado_em: '2026-08-01T10:00:00.000Z' },
+    ],
+    contrato_eventos: [
+      { id: 'e1', tipo: 'contrato_criado', detalhe: {}, actor_papel: 'matopiba', criado_em: '2026-08-01T10:00:00.000Z' },
+      { id: 'e2', tipo: 'assinatura_confirmada', detalhe: { papel: 'cliente' }, actor_papel: 'cliente', criado_em: '2026-08-02T11:00:00.000Z' },
+    ],
+    ...over,
+  };
+}
+
+test('montarDetalheContrato: UUID/linha ausente → null', () => {
+  assert.equal(montarDetalheContrato(null), null);
+  assert.equal(montarDetalheContrato({}), null);
+});
+
+test('montarDetalheContrato: expõe snapshot, hashes, signatários e eventos ordenados', () => {
+  const d = montarDetalheContrato(rowDetalhe());
+  assert.equal(d.contrato_id, 'c-assinado');
+  assert.equal(d.cliente, 'Empresa Alfa');
+  assert.equal(d.plano_nome, 'Empresa Start');
+  assert.equal(d.tipo, 'contrato_adesao');
+  assert.equal(d.trial_dias, 14);
+  assert.equal(d.capacidade_inclusa, 5);
+  assert.equal(d.preco_motorista_extra, 100);
+  assert.equal(d.hash_documento_original, HASH64);
+  assert.equal(d.hash_documento_arquivo, 'd'.repeat(64));
+  assert.equal(d.hash_assinado, 'b'.repeat(64));
+  assert.equal(d.hash_certificado, 'e'.repeat(64));
+  assert.equal(d.documentos.contrato_assinado_disponivel, true);
+  assert.equal(d.documentos.certificado_disponivel, true);
+  assert.equal(d.signatarios.length, 2);
+  assert.equal(d.signatarios[0].papel, 'cliente');
+  assert.equal(d.signatarios[0].assinado, true);
+  assert.equal(d.eventos.length, 2);
+  // eventos: mais recente primeiro
+  assert.equal(d.eventos[0].id, 'e2');
+  assert.equal(d.eventos[1].id, 'e1');
+  // snapshot preservado integralmente
+  assert.equal(d.snapshot.plano_nome, 'Empresa Start');
+});
+
+test('montarDetalheContrato: robusto a joins ausentes', () => {
+  const d = montarDetalheContrato({ id: 'x', status: 'rascunho' });
+  assert.equal(d.contrato_id, 'x');
+  assert.deepEqual(d.signatarios, []);
+  assert.deepEqual(d.eventos, []);
+  assert.equal(d.tipo, 'contrato_adesao');
+  assert.equal(d.snapshot && typeof d.snapshot, 'object');
+});
+
+test('mapearSignatario / mapearEvento: derivam campos básicos', () => {
+  assert.equal(mapearSignatario({ papel: 'cliente', status: 'assinado' }).assinado, true);
+  assert.equal(mapearSignatario({ papel: 'cliente', status: 'pendente' }).assinado, false);
+  assert.equal(mapearEvento({ tipo: 'x', criado_em: '2026-08-01T00:00:00.000Z' }).tipo, 'x');
 });

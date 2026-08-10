@@ -41,7 +41,7 @@ const {
 } = require('../services/assinaturaEletronicaInternaService');
 const { enviarEmail } = require('../services/emailService');
 const { STATUS_CONCLUIDOS } = require('../services/contratoGateService');
-const { montarListaContratos } = require('../services/contratosAdminListDomainService');
+const { montarListaContratos, montarDetalheContrato } = require('../services/contratosAdminListDomainService');
 const {
   BUCKET_CONTRATOS,
   caminhoContratoAssinado,
@@ -278,6 +278,46 @@ router.get('/contratos', async (req, res) => {
   } catch (err) {
     console.error('[painel-admin/contratos] Falha', { status: 500 });
     return res.status(500).json({ message: 'Erro ao listar contratos.' });
+  }
+});
+
+// Detalhe de UM contrato (cross-tenant, super-admin) — seção 5 da 3A-1.
+// Read-only. Reusa os joins da lista + snapshot imutável + signatários + eventos.
+// UUID inválido / inexistente → 404. Deploy-safe se tabelas ausentes.
+router.get('/contratos/:id', async (req, res) => {
+  const id = String(req.params.id || '');
+  if (!/^[0-9a-fA-F-]{36}$/.test(id)) {
+    return res.status(400).json({ message: 'Identificador de contrato invalido.' });
+  }
+  try {
+    const { data, error } = await supabase
+      .from('contratos_comerciais')
+      .select([
+        'id, empresa_id, proposta_id, status, obrigatorio, template_version, provider,',
+        'signature_method, content_hash, document_file_hash, signed_file_hash,',
+        'certificate_file_hash, storage_path, signed_storage_path, certificate_storage_path,',
+        'criado_em, atualizado_em, aceito_em, document_fechado_em,',
+        'empresas(nome, tipo),',
+        'propostas_comerciais(id, snapshot, valor_mensal, valor_implantacao, total_inicial, trial_dias, status),',
+        'contrato_signatarios(id, papel, nome, status, assinado_em, criado_em, metodo_assinatura, email_mascarado),',
+        'contrato_eventos(id, tipo, detalhe, actor_papel, criado_em)',
+      ].join(' '))
+      .eq('id', id)
+      .maybeSingle();
+
+    if (error) {
+      if (String(error.code) === '42P01' || /does not exist/i.test(error.message || '')) {
+        return res.status(404).json({ message: 'Contrato nao encontrado.', migration_pendente: true });
+      }
+      console.error('[painel-admin/contratos/:id] Falha', { status: 500 });
+      return res.status(500).json({ message: 'Erro ao carregar contrato.' });
+    }
+    if (!data) return res.status(404).json({ message: 'Contrato nao encontrado.' });
+
+    return res.json(montarDetalheContrato(data));
+  } catch (err) {
+    console.error('[painel-admin/contratos/:id] Falha', { status: 500 });
+    return res.status(500).json({ message: 'Erro ao carregar contrato.' });
   }
 });
 

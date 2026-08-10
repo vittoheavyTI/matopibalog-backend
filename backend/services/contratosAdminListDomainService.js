@@ -154,6 +154,77 @@ function montarListaContratos({ rows = [], filtros = {} } = {}) {
   };
 }
 
+// ── Detalhe de UM contrato (seção 5 da macrofrente 3A-1) ─────────────────────
+// Recebe a linha do contrato já com joins (empresa, proposta/snapshot,
+// signatários, eventos) e devolve o detalhe canônico para o super-admin. Puro.
+
+function mapearSignatario(s = {}) {
+  return {
+    id: s.id || null,
+    papel: s.papel || null,
+    nome: s.nome || null,
+    status: s.status || null,
+    assinado: s.status === 'assinado',
+    assinado_em: toISO(s.assinado_em),
+    metodo_assinatura: s.metodo_assinatura || null,
+    email_mascarado: s.email_mascarado || null,
+    criado_em: toISO(s.criado_em),
+  };
+}
+
+function mapearEvento(e = {}) {
+  return {
+    id: e.id || null,
+    tipo: e.tipo || null,
+    detalhe: e.detalhe || null,
+    actor_papel: e.actor_papel || null,
+    criado_em: toISO(e.criado_em),
+  };
+}
+
+function montarDetalheContrato(row) {
+  if (!row || !row.id) return null;
+  const base = mapearContratoParaLista(row);
+  const proposta = row.propostas_comerciais || {};
+  const snapshot = proposta.snapshot || {};
+  const signatarios = Array.isArray(row.contrato_signatarios)
+    ? row.contrato_signatarios.map(mapearSignatario)
+    : [];
+  // Eventos em ordem cronológica decrescente (mais recente primeiro) para a timeline.
+  const eventos = Array.isArray(row.contrato_eventos)
+    ? row.contrato_eventos.map(mapearEvento).sort((a, b) => {
+        const ta = a.criado_em ? new Date(a.criado_em).getTime() : -Infinity;
+        const tb = b.criado_em ? new Date(b.criado_em).getTime() : -Infinity;
+        return tb - ta;
+      })
+    : [];
+
+  return {
+    ...base,
+    proposta_id: row.proposta_id || proposta.id || null,
+    tipo: snapshot.tipo_contrato || 'contrato_adesao',
+    atualizado_em: toISO(row.atualizado_em),
+    // Hashes probatórios (todos os que existirem; nunca invento).
+    hash_documento_original: row.content_hash || null,
+    hash_documento_arquivo: row.document_file_hash || null,
+    hash_assinado: row.signed_file_hash || null,
+    hash_certificado: row.certificate_file_hash || null,
+    // Dados comerciais congelados (snapshot imutável — não reflete edição posterior do plano).
+    snapshot,
+    trial_dias: proposta.trial_dias != null ? Number(proposta.trial_dias) : (snapshot.trial_dias != null ? Number(snapshot.trial_dias) : null),
+    capacidade_inclusa: snapshot.capacidade_inclusa != null ? Number(snapshot.capacidade_inclusa) : null,
+    preco_motorista_extra: snapshot.preco_motorista_extra != null ? Number(snapshot.preco_motorista_extra) : null,
+    total_inicial: proposta.total_inicial != null ? Number(proposta.total_inicial) : null,
+    // Disponibilidade de documentos (o super-admin usa endpoints dedicados p/ a URL assinada).
+    documentos: {
+      contrato_assinado_disponivel: Boolean(row.signed_storage_path),
+      certificado_disponivel: Boolean(row.certificate_storage_path),
+    },
+    signatarios,
+    eventos,
+  };
+}
+
 module.exports = {
   estaAssinado,
   hashCurto,
@@ -161,4 +232,7 @@ module.exports = {
   filtrarLista,
   resumirPorStatus,
   montarListaContratos,
+  mapearSignatario,
+  mapearEvento,
+  montarDetalheContrato,
 };
