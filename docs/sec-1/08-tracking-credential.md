@@ -196,17 +196,25 @@ persistido no secure storage; sem fingerprint invasivo) e o envia em **todas** a
 > impede; sem constraint de DB; a camada de localização opera com `MAX_FRETES_SESSAO=4`). O binding
 > por-UMA-viagem seria **ambíguo** (rastrearia só a viagem de emissão). Modelo corrigido:
 
-A **âncora** é **sessão SEC-1 + device** (NOT NULL). `frete_id` é **contexto de emissão**
-(qual viagem disparou) — **NULLABLE**, `ON DELETE SET NULL` (apagar essa viagem não pode matar a
-credencial que cobre as demais). A validação server-side checa, **a cada request**: credencial não
-revogada; **teto absoluto**; sessão não revogada; motorista ativo; tenant; **device**; e
-**`temViagemAtiva`** = o motorista tem **≥1 viagem ATIVA** (`{ativo,em_viagem,em_andamento}`). Sem
-viagem ativa ⇒ `tracking_trip_inactive` **canônico** (não depende de hook). A telemetria (ramo
-tracking) **faz fan-out para TODAS as viagens ativas do motorista** — mesmo modelo da sessão
-(`buscarFretesEmAndamentoDoMotorista`). Isolamento: o resolvedor só retorna as **próprias** viagens
-do motorista/empresa ⇒ credencial de A nunca grava em viagem de B (cross-driver/tenant bloqueado).
-Fim/cancelamento da **última** viagem ⇒ sem viagem ativa ⇒ rejeitada; hook best-effort revoga.
-**O app (Flutter/Kotlin) não muda:** já posta no endpoint de sessão; o fan-out é server-side.
+> **Correção final — Credential Resurrection:** com "≥1 viagem ativa do motorista", uma credencial
+> antiga poderia **ressuscitar** quando surgisse uma viagem futura. Eliminado com **ESCOPO IMUTÁVEL**.
+
+A **âncora** é **sessão SEC-1 + device** (NOT NULL). O **conjunto de viagens autorizadas** é um
+**SNAPSHOT imutável capturado na emissão**, persistido na tabela de vínculo
+**`frete_tracking_credencial_fretes`** (server-side, `credencial_id`+`frete_id` CASCADE, PK composta,
+RLS/grants). **Não há coluna `frete_id`** na tabela principal (autoridade é só o vínculo). A emissão
+**resolve server-side** as viagens ativas do motorista (nunca IDs do cliente) e grava o snapshot;
+sem viagem ativa ⇒ `tracking_trip_inactive`.
+
+A validação server-side checa, **a cada request**: credencial não revogada; **teto absoluto**;
+sessão não revogada; motorista ativo; tenant; **device**; e **`temEscopoAtivo`** = a **interseção**
+(escopo do snapshot **∩** viagens ainda ativas) é **não-vazia**. A telemetria faz **fan-out SOMENTE
+para essa interseção** (`req.trackingFretes`, resolvida no guard). Comportamento:
+`{A,B}` ativas → A+B; A encerra → só B; A+B encerram → `tracking_trip_inactive`; **surge C → a
+credencial antiga `{A,B}` CONTINUA rejeitada** (C não está no snapshot). **Renovação NÃO amplia o
+escopo** (só rotaciona/estende) — ampliar exige **nova emissão SEC-1**. Hooks (fim/cancelamento/
+logout) são só aceleração; a **segurança não depende deles** (mesmo com hook falho + C posterior, a
+credencial antiga não rastreia C). Isolamento cross-driver/tenant preservado. **O app não muda.**
 
 ### 15.5 §H-2 — teto absoluto (sem renovação perpétua)
 Duas noções: `expires_at` (nominal) e **`max_expires_at`** (teto absoluto = `issued_at + MAX`).

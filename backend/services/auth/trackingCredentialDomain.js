@@ -37,16 +37,16 @@ function calcularMaxExpiracao(issuedMs, maxLifetimeSeconds) {
  *                 expires_at, max_expires_at, revoked_at }
  *   usuario:    { id, status, empresa_id }
  *   sessao:     { id, revoked_at }
- *   temViagemAtiva: boolean — o motorista tem >=1 viagem ATIVA (contexto operacional).
- *                   É o que impede a credencial de sobreviver ao fim das viagens (§H-3).
- *                   MULTI-VIAGEM: a telemetria cobre TODAS as viagens ativas do motorista.
+ *   temEscopoAtivo: boolean — a INTERSEÇÃO (escopo imutável da emissão ∩ viagens ainda
+ *                   ATIVAS) é não-vazia. É o que impede RESSURREIÇÃO: uma viagem FUTURA
+ *                   fora do snapshot NUNCA reativa a credencial (ela não está no escopo).
  *   deviceId:   device apresentado na requisição (header)
  *   agoraMs:    epoch atual (injetável)
  *   permitirExpirada: true no fluxo de RENOVAÇÃO (aceita expires_at vencido, mas nunca
  *                     além do teto absoluto). false na telemetria normal.
  * Retorna { ok:true, identidade } ou { ok:false, code } (code = contrato semântico).
  */
-function avaliarCredencial({ credencial, usuario, sessao, temViagemAtiva, deviceId, agoraMs, permitirExpirada = false }) {
+function avaliarCredencial({ credencial, usuario, sessao, temEscopoAtivo, deviceId, agoraMs, permitirExpirada = false }) {
   if (!credencial) return neg('tracking_credential_invalid');
   if (credencial.revoked_at) return neg('tracking_credential_revoked');
 
@@ -76,9 +76,10 @@ function avaliarCredencial({ credencial, usuario, sessao, temViagemAtiva, device
   // DEVICE BINDING (§M-1): o device apresentado tem de bater com o da emissão.
   if (!deviceId || String(deviceId) !== String(credencial.device_id)) return neg('tracking_device_mismatch');
 
-  // CONTEXTO OPERACIONAL (§H-3, multi-viagem): a credencial só vale enquanto o motorista
-  // tem >=1 viagem ATIVA. Sem viagem ativa → rejeitada (não sobrevive ao fim da operação).
-  if (!temViagemAtiva) return neg('tracking_trip_inactive');
+  // ESCOPO IMUTÁVEL (anti-ressurreição): a credencial só vale se ALGUMA viagem do SNAPSHOT
+  // de emissão CONTINUA ativa. Encerradas todas as do snapshot → rejeitada, e uma viagem
+  // futura (fora do snapshot) NÃO a reativa. Ampliar escopo exige nova emissão SEC-1.
+  if (!temEscopoAtivo) return neg('tracking_trip_inactive');
 
   return {
     ok: true,

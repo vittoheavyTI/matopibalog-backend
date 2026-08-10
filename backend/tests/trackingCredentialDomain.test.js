@@ -24,7 +24,7 @@ function credOk(over = {}) {
 const usuarioOk = (o = {}) => ({ id: MOT, status: 'ativo', empresa_id: EMP, ...o });
 const sessaoOk = (o = {}) => ({ id: SESS, revoked_at: null, ...o });
 function avaliar(over = {}) {
-  return avaliarCredencial({ credencial: credOk(), usuario: usuarioOk(), sessao: sessaoOk(), temViagemAtiva: true, deviceId: DEV, agoraMs: AGORA, ...over });
+  return avaliarCredencial({ credencial: credOk(), usuario: usuarioOk(), sessao: sessaoOk(), temEscopoAtivo: true, deviceId: DEV, agoraMs: AGORA, ...over });
 }
 
 test('calcularExpiracao respeita TTL e o teto (maxMs)', () => {
@@ -46,19 +46,19 @@ test('tudo canônico válido + tem viagem ativa → ok (escopo motorista/empresa
 
 test('credencial ausente/revogada', () => {
   assert.equal(avaliar({ credencial: null }).code, 'tracking_credential_invalid');
-  assert.equal(avaliarCredencial({ credencial: credOk({ revoked_at: new Date(AGORA).toISOString() }), usuario: usuarioOk(), sessao: sessaoOk(), temViagemAtiva: true, deviceId: DEV, agoraMs: AGORA }).code, 'tracking_credential_revoked');
+  assert.equal(avaliarCredencial({ credencial: credOk({ revoked_at: new Date(AGORA).toISOString() }), usuario: usuarioOk(), sessao: sessaoOk(), temEscopoAtivo: true, deviceId: DEV, agoraMs: AGORA }).code, 'tracking_credential_revoked');
 });
 
 test('teto absoluto ultrapassado → max_lifetime (nem renovação recupera)', () => {
   const cred = credOk({ max_expires_at: new Date(AGORA - 1000).toISOString(), expires_at: new Date(AGORA - 2000).toISOString() });
-  const base = { credencial: cred, usuario: usuarioOk(), sessao: sessaoOk(), temViagemAtiva: true, deviceId: DEV, agoraMs: AGORA };
+  const base = { credencial: cred, usuario: usuarioOk(), sessao: sessaoOk(), temEscopoAtivo: true, deviceId: DEV, agoraMs: AGORA };
   assert.equal(avaliarCredencial({ ...base }).code, 'tracking_credential_max_lifetime');
   assert.equal(avaliarCredencial({ ...base, permitirExpirada: true }).code, 'tracking_credential_max_lifetime');
 });
 
 test('expirada bloqueia telemetria mas é aceita na RENOVAÇÃO (dentro do teto)', () => {
   const cred = credOk({ expires_at: new Date(AGORA - 1000).toISOString() });
-  const base = { credencial: cred, usuario: usuarioOk(), sessao: sessaoOk(), temViagemAtiva: true, deviceId: DEV, agoraMs: AGORA };
+  const base = { credencial: cred, usuario: usuarioOk(), sessao: sessaoOk(), temEscopoAtivo: true, deviceId: DEV, agoraMs: AGORA };
   assert.equal(avaliarCredencial({ ...base }).code, 'tracking_credential_expired');
   assert.equal(avaliarCredencial({ ...base, permitirExpirada: true }).ok, true);
 });
@@ -82,7 +82,7 @@ test('device binding (§M-1): device ausente/errado → device_mismatch', () => 
 });
 
 test('contexto operacional (§H-3 multi-viagem): sem viagem ativa → trip_inactive', () => {
-  assert.equal(avaliar({ temViagemAtiva: false }).code, 'tracking_trip_inactive');
+  assert.equal(avaliar({ temEscopoAtivo: false }).code, 'tracking_trip_inactive');
   // com >=1 viagem ativa (o motorista pode ter VÁRIAS) → ok
-  assert.equal(avaliar({ temViagemAtiva: true }).ok, true);
+  assert.equal(avaliar({ temEscopoAtivo: true }).ok, true);
 });

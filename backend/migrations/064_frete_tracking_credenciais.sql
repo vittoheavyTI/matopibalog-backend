@@ -25,8 +25,9 @@
 --   * RLS habilitada e forçada; sem policy → nega anon/authenticated. service_role
 --     (backend) bypassa. EXECUTE/DML só para o backend.
 --
--- Reversão (não destrutiva por padrão):
---   DROP TABLE IF EXISTS public.frete_tracking_credenciais;  -- só se nunca recebeu dados reais
+-- Reversão (não destrutiva por padrão; só se nunca receberam dados reais):
+--   DROP TABLE IF EXISTS public.frete_tracking_credencial_fretes;
+--   DROP TABLE IF EXISTS public.frete_tracking_credenciais;
 --
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Tabela: frete_tracking_credenciais
@@ -35,20 +36,15 @@ CREATE TABLE IF NOT EXISTS public.frete_tracking_credenciais (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   empresa_id      uuid NOT NULL REFERENCES public.empresas(id)  ON DELETE CASCADE,
   motorista_id    uuid NOT NULL REFERENCES public.usuarios(id)  ON DELETE CASCADE,
-  -- BINDING CANÔNICO (pós-revisão + suporte a MULTI-VIAGEM): a ÂNCORA operacional é
-  -- SESSÃO SEC-1 + DEVICE (obrigatórios). O sistema PERMITE várias viagens ativas por
-  -- motorista (freteService trata >1; location layer projetada p/ até 4), então a
-  -- credencial autoriza a telemetria das viagens ATIVAS do motorista (não de UMA só).
+  -- BINDING CANÔNICO (MULTI-VIAGEM com ESCOPO IMUTÁVEL): a ÂNCORA é SESSÃO SEC-1 + DEVICE.
+  -- O CONJUNTO de viagens autorizadas é um SNAPSHOT capturado na emissão e persistido na
+  -- tabela de vínculo `frete_tracking_credencial_fretes` (server-side, nunca IDs do
+  -- cliente). Isso IMPEDE "ressurreição": uma viagem FUTURA nunca entra no escopo de uma
+  -- credencial antiga — só nova emissão SEC-1 autenticada cria novo escopo.
   --   session_id: FK ON DELETE CASCADE — âncora; sessão apagada → credencial some junto.
-  --   frete_id:   CONTEXTO DE EMISSÃO/auditoria (qual viagem disparou), NÃO é binding de
-  --               telemetria → NULLABLE + ON DELETE SET NULL (apagar essa viagem não pode
-  --               matar a credencial que cobre as demais viagens ativas do motorista).
-  -- A validação canônica por request exige >=1 VIAGEM ATIVA do motorista (senão
-  -- tracking_trip_inactive) — é isso que impede a credencial de sobreviver ao contexto
-  -- operacional. O isolamento "não postar para outro motorista/empresa" é garantido por
-  -- motorista_id/empresa_id + o resolvedor de viagens ativas do próprio motorista.
+  -- (Não há coluna frete_id contextual: seria redundante e um convite a autorizar por ela.
+  --  A autoridade de escopo é EXCLUSIVAMENTE a tabela de vínculo.)
   session_id      uuid NOT NULL REFERENCES public.auth_sessions(id) ON DELETE CASCADE,
-  frete_id        uuid NULL     REFERENCES public.fretes(id)        ON DELETE SET NULL,
   device_id       text NOT NULL,   -- device binding: comparado em cada requisição
   -- HMAC-SHA-256(pepper, 'tracking:'||token) em hex. NUNCA o token aberto. Rotaciona
   -- (CAS in-place) a cada renovação → o hash antigo deixa de existir (single-use real).
@@ -69,14 +65,46 @@ CREATE TABLE IF NOT EXISTS public.frete_tracking_credenciais (
 );
 
 COMMENT ON TABLE public.frete_tracking_credenciais IS
-  'SEC-1: credencial operacional escopada de rastreamento GPS. Backend-only. Guarda só o HMAC do token (nunca o token aberto). Vinculada a sessao SEC-1 + viagem + device; telemetria-only, revogável, expira server-side, teto absoluto e rotação single-use.';
+  'SEC-1: credencial operacional escopada de rastreamento GPS. Backend-only. Guarda só o HMAC do token (nunca o token aberto). Âncora sessao SEC-1 + device; escopo de viagens = SNAPSHOT imutável na tabela de vínculo; telemetria-only, revogável, expira server-side, teto absoluto e rotação single-use.';
 
 CREATE INDEX IF NOT EXISTS idx_frete_tracking_cred_motorista ON public.frete_tracking_credenciais (motorista_id);
 CREATE INDEX IF NOT EXISTS idx_frete_tracking_cred_empresa   ON public.frete_tracking_credenciais (empresa_id);
 CREATE INDEX IF NOT EXISTS idx_frete_tracking_cred_session   ON public.frete_tracking_credenciais (session_id);
-CREATE INDEX IF NOT EXISTS idx_frete_tracking_cred_frete     ON public.frete_tracking_credenciais (frete_id);
 CREATE INDEX IF NOT EXISTS idx_frete_tracking_cred_ativas    ON public.frete_tracking_credenciais (motorista_id) WHERE revoked_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_frete_tracking_cred_expires   ON public.frete_tracking_credenciais (expires_at);
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Tabela de VÍNCULO (escopo IMUTÁVEL): quais fretes uma credencial pode rastrear.
+-- Snapshot da emissão. A telemetria faz fan-out SOMENTE para (escopo ∩ ainda-ativos).
+-- Uma viagem FUTURA nunca é adicionada aqui por renovação — só por nova emissão.
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.frete_tracking_credencial_fretes (
+  credencial_id uuid NOT NULL REFERENCES public.frete_tracking_credenciais(id) ON DELETE CASCADE,
+  frete_id      uuid NOT NULL REFERENCES public.fretes(id)                     ON DELETE CASCADE,
+  criado_em     timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT frete_tracking_cred_fretes_pk PRIMARY KEY (credencial_id, frete_id)
+);
+
+COMMENT ON TABLE public.frete_tracking_credencial_fretes IS
+  'SEC-1: escopo IMUTÁVEL (snapshot da emissão) de viagens autorizadas por credencial de rastreamento. Autoridade única do fan-out. Renovação NÃO amplia; viagem futura exige nova emissão.';
+
+CREATE INDEX IF NOT EXISTS idx_frete_tracking_cred_fretes_frete ON public.frete_tracking_credencial_fretes (frete_id);
+
+ALTER TABLE public.frete_tracking_credencial_fretes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.frete_tracking_credencial_fretes FORCE  ROW LEVEL SECURITY;
+REVOKE ALL ON public.frete_tracking_credencial_fretes FROM PUBLIC;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+    EXECUTE 'REVOKE ALL ON public.frete_tracking_credencial_fretes FROM anon';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+    EXECUTE 'REVOKE ALL ON public.frete_tracking_credencial_fretes FROM authenticated';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+    EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON public.frete_tracking_credencial_fretes TO service_role';
+  END IF;
+END $$;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- RLS: habilita e força; sem policy → nega anon/authenticated. service_role bypassa.

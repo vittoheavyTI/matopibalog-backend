@@ -10,7 +10,6 @@
 
 const { getTrackingRuntime } = require('../services/auth/trackingCredentialRuntime');
 const { lerTrackingToken, lerDeviceId } = require('../middlewares/trackingCredential');
-const { listarFretesAtivosDoMotorista } = require('./freteLocalizacaoController');
 
 function respErro(res, error, statusPadrao, codePadrao) {
   const status = error?.httpStatus || statusPadrao;
@@ -43,16 +42,12 @@ exports.emitir = async (req, res) => {
       return res.status(400).json({ error: 'tracking_device_mismatch', message: 'Identificação do dispositivo ausente.' });
     }
 
-    const fretes = await listarFretesAtivosDoMotorista(req.empresa_id, req.user.uid);
-    if (!fretes.length) {
-      return res.status(409).json({ error: 'tracking_trip_inactive', message: 'Não há viagem em andamento para iniciar o rastreamento.' });
-    }
-
-    const { delivery, expiresAt, maxExpiresAt } = await trackingService.emitir({
+    // O serviço resolve, server-side, o SNAPSHOT das viagens ativas (escopo imutável) e
+    // grava o vínculo. Sem viagem ativa → tracking_trip_inactive (409).
+    const { delivery, expiresAt, maxExpiresAt, fretes_escopo } = await trackingService.emitir({
       empresa_id: req.empresa_id,
       motorista_id: req.user.uid,
       session_id: req.user.sid,
-      frete_id: fretes[0].id,
       device_id: deviceId,
     });
 
@@ -61,8 +56,7 @@ exports.emitir = async (req, res) => {
       credential: delivery.reveal(),
       expires_at: expiresAt,
       max_expires_at: maxExpiresAt,
-      frete_id: fretes[0].id,
-      fretes_ativos: fretes.length,
+      fretes_escopo: fretes_escopo.length,
     });
   } catch (error) {
     console.error('[trackingCredential:emitir] falha', { user: req.user?.uid, code: error?.code || 'erro' });
