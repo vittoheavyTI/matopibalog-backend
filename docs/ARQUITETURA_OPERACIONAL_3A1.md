@@ -4,6 +4,13 @@
 > Serve para tutoriais, treinamento, marketing, suporte e planejamento.
 > Complementa (não substitui) `ARQUITETURA_MACROFRENTES.md` e as decisões já registradas.
 > **3A-1 NÃO implementa cobrança financeira (Asaas) — isso é a macrofrente 3A-2.**
+>
+> **Billing automático (3A-2):** o fluxo financeiro (customer/assinatura/cobrança/webhook/
+> reconciliação/inadimplência/upgrade/downgrade/cancelamento/add-ons), sua automação
+> (trigger → outbox → worker), políticas configuráveis e o adapter Asaas sandbox estão
+> documentados em `ARQUITETURA_OPERACIONAL_3A2_BILLING.md` + `RUNBOOK_BILLING_3A2.md`.
+> A situação comercial (seção 5 abaixo) permanece a autoridade que o billing ALIMENTA
+> (inadimplência) e RESPEITA (trial nunca cancelado por pagamento).
 
 ---
 

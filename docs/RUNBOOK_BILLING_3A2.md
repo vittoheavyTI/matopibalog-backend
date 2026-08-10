@@ -10,6 +10,20 @@
 - IDs externos (customer/subscription/payment) são dados de integração: o Super
   Admin NÃO os digita livremente; só via fluxo controlado.
 
+## Automação (outbox → worker)
+- Fluxo: mudança comercial → `emitirEventoBilling` (enfileira em `billing_outbox`,
+  idempotente por `dedupe_key`) → worker `processarOutbox` (claim CAS) → `ensureBillingState`.
+- Acionar o worker (job/contingência): `POST /pagamentos/billing/processar-outbox` (super-admin).
+  Ideal: um cron chama esse endpoint periodicamente (ou um job dedicado no futuro).
+- Observabilidade: `GET /pagamentos/billing/jobs` → contagem pending/processing/processed/failed/dead.
+
+## Cenário: jobs `dead` (manual_attention)
+1. `GET /pagamentos/billing/jobs` mostra `dead > 0`.
+2. Investigar `last_error` (sanitizado) da linha em `billing_outbox`.
+3. Corrigir a causa (mapping, credencial sandbox, etc.) e reprocessar: como `dead` não é
+   reivindicado, reenfileirar o evento (mesmo `dedupe_key` só se a linha anterior for
+   removida/arquivada) OU rodar reconcile. Idempotência garante que reprocessar não duplica.
+
 ## Cenário: webhook parado / eventos acumulando
 1. Verificar `asaas_webhook_events` por `status='failed'` com `next_retry_at` no passado.
 2. Conferir se o endpoint `/pagamentos/webhook/asaas` responde 401 (token) ou 500.
