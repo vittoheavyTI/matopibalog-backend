@@ -28,6 +28,7 @@ function setup() {
   mockApi.get.mockImplementation((url: string) => {
     if (url === '/painel-admin/empresas') return Promise.resolve({ data: empresas });
     if (url === '/pagamentos/billing/overview/e1') return Promise.resolve({ data: overview });
+    if (url.startsWith('/pagamentos/billing/jobs')) return Promise.resolve({ data: { contagem: { pending: 0, processing: 0, processed: 0, failed: 0, dead: 0 } } });
     return Promise.resolve({ data: {} });
   });
 }

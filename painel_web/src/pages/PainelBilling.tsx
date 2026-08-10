@@ -38,6 +38,8 @@ export const PainelBilling: React.FC = () => {
   const [plano, setPlano] = useState<unknown>(null);
   const [reconc, setReconc] = useState<unknown>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [providerMode, setProviderMode] = useState<string | null>(null);
+  const [jobs, setJobs] = useState<Record<string, number> | null>(null);
 
   useEffect(() => {
     api.get('/painel-admin/empresas').then(({ data }) => {
@@ -52,6 +54,8 @@ export const PainelBilling: React.FC = () => {
     try {
       const { data } = await api.get(`/pagamentos/billing/overview/${id}`);
       setOverview(data.overview);
+      setProviderMode(data.policy?.provider_mode ?? null);
+      try { const j = await api.get(`/pagamentos/billing/jobs?empresa_id=${id}`); setJobs(j.data.contagem || null); } catch { setJobs(null); }
     } catch {
       setErro(true);
     } finally {
@@ -81,6 +85,11 @@ export const PainelBilling: React.FC = () => {
           <h1 className="text-2xl font-bold text-gray-800 leading-tight">Billing</h1>
           <p className="text-sm text-gray-500">Estado financeiro automático e contingência (dry-run)</p>
         </div>
+        {providerMode && (
+          <span className={`ml-auto px-2.5 py-1 rounded-lg text-xs font-bold uppercase ${providerMode === 'fake' ? 'bg-gray-100 text-gray-600' : 'bg-amber-100 text-amber-700'}`} title="Modo do provedor de billing">
+            {providerMode === 'sandbox' ? 'SANDBOX' : providerMode}
+          </span>
+        )}
       </div>
 
       <div className="flex flex-wrap gap-2 items-center">
@@ -120,6 +129,7 @@ export const PainelBilling: React.FC = () => {
             <Linha k="Billing status" v={overview.billing_status || '—'} />
             <Linha k="Última cobrança" v={overview.ultima_cobranca ? `${overview.ultima_cobranca.status} · ${fmtMoeda(overview.ultima_cobranca.valor)}` : '—'} />
             <Linha k="Último webhook" v={overview.ultimo_webhook ? `${overview.ultimo_webhook.tipo} (${overview.ultimo_webhook.status})` : '—'} />
+            {jobs && <Linha k="Jobs (outbox)" v={`pendentes ${jobs.pending ?? 0} · processados ${jobs.processed ?? 0} · falhos ${jobs.failed ?? 0} · dead ${jobs.dead ?? 0}`} />}
           </div>
 
           <div className="flex flex-wrap gap-2">
