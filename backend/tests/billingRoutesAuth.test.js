@@ -25,8 +25,12 @@ function supabaseStub() {
     const b = {
       select: () => b,
       eq: () => b,
+      or: () => b,
+      is: () => b,
       order: () => b,
       limit: () => b,
+      update: () => b,
+      insert: () => b,
       maybeSingle: () => Promise.resolve({ data: rowsFor(), error: null }),
       then: (res) => res({ data: tabela === 'faturas' ? [] : [], error: null }),
     };
@@ -73,6 +77,8 @@ const ENDPOINTS = [
   ['GET', '/pagamentos/billing/overview/e1'],
   ['POST', '/pagamentos/billing/ensure-plan/e1'],
   ['POST', '/pagamentos/billing/reconciliar-plan/e1'],
+  ['POST', '/pagamentos/billing/processar-outbox'],
+  ['GET', '/pagamentos/billing/jobs'],
 ];
 
 async function req(port, method, path, auth) {

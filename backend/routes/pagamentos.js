@@ -29,6 +29,9 @@ const { planejarBilling } = require('../services/billing/billingOrchestratorDoma
 const { reconciliar } = require('../services/billing/billingReconcileDomainService');
 const { resolvePolicy } = require('../services/billing/billingPolicyConfig');
 const { montarLinhaBilling } = require('../services/billing/billingAdminViewDomainService');
+const { emitirEventoBilling } = require('../services/billing/billingTriggers');
+const { processarOutbox } = require('../services/billing/billingOutboxWorker');
+const { contarPorStatus } = require('../services/billing/billingOutboxRepository');
 
 // Comparação em tempo constante (hash de tamanho fixo evita vazar comprimento)
 function safeEqual(a, b) {
@@ -970,6 +973,33 @@ router.post('/billing/reconciliar-plan/:empresa_id', verifyToken, isSuperAdmin, 
   }
 });
 
+// Worker do outbox (job/contingência) — MESMA engine da automação (§14).
+// Provider por política: fake por padrão; sandbox só com prova de ambiente +
+// credencial; produção fail-closed. NÃO executa Asaas produção.
+router.post('/billing/processar-outbox', verifyToken, isSuperAdmin, async (req, res) => {
+  try {
+    const limite = Math.min(50, Math.max(1, Number(req.body?.limite) || 10));
+    const resumo = await processarOutbox({ supabase, limite });
+    return res.json({ resumo });
+  } catch (err) {
+    console.error('[pagamentos/billing/processar-outbox] Falha', { status: 500 });
+    return res.status(500).json({ message: 'Erro ao processar outbox.' });
+  }
+});
+
+// Contagem de jobs do outbox (observabilidade do painel).
+router.get('/billing/jobs', verifyToken, isSuperAdmin, async (req, res) => {
+  try {
+    const empresaId = req.query.empresa_id || null;
+    const r = await contarPorStatus(supabase, empresaId);
+    if (r.code !== 'ok') return res.json({ contagem: { pending: 0, processing: 0, processed: 0, failed: 0, dead: 0 }, indisponivel: true });
+    return res.json({ contagem: r.contagem });
+  } catch (err) {
+    console.error('[pagamentos/billing/jobs] Falha', { status: 500 });
+    return res.status(500).json({ message: 'Erro ao contar jobs.' });
+  }
+});
+
 router.post('/webhook/asaas', async (req, res) => {
   try {
     // 1. Autenticação: token fixo no header 'asaas-access-token'.
@@ -986,6 +1016,17 @@ router.post('/webhook/asaas', async (req, res) => {
       supabase,
       body: req.body,
     });
+
+    // 3A-2: enfileira um evento de reconciliação de billing (fail-open, idempotente
+    // por competência do dia). O worker do outbox reconcilia o estado; NÃO chamamos
+    // Asaas aqui. Nunca derruba a resposta do webhook.
+    try {
+      const empId = resultado?.resultado?.empresa_id || null;
+      if (empId) {
+        const hoje = new Date().toISOString().slice(0, 10);
+        await emitirEventoBilling(supabase, { empresaId: empId, tipo: 'webhook', competencia: hoje });
+      }
+    } catch { /* fail-open: reconcile periódico recupera */ }
 
     return res.status(resultado.httpStatus).json(resultado.resultado);
   } catch (err) {

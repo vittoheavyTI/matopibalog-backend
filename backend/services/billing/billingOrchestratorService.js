@@ -12,6 +12,7 @@
 const { planejarBilling } = require('./billingOrchestratorDomainService');
 const { resolvePolicy } = require('./billingPolicyConfig');
 const { FakeAsaasProvider } = require('./fakeAsaasProvider');
+const { AsaasSandboxProvider, ehSandbox } = require('./asaasSandboxProvider');
 
 // Lock cooperativo por empresa: serializa ensureBillingState concorrentes para a
 // MESMA empresa, garantindo idempotência (10 chamadas concorrentes → 1 customer).
@@ -56,15 +57,32 @@ async function comRetry(fn, { tentativas = 3, baseMs = 5, onRetry } = {}) {
 }
 
 // Seleciona o provider conforme a política. NUNCA retorna adapter de produção.
-function selecionarProvider(policy, { providerOverride } = {}) {
-  if (providerOverride) return providerOverride; // testes injetam o fake
-  if (policy.provider_mode === 'fake') return new FakeAsaasProvider();
-  if (policy.provider_mode === 'sandbox') {
-    // Guarda dura: o adapter real de sandbox é plugado no gate, com prova de
-    // ambiente. Enquanto não plugado/aprovado, falha explicitamente — nunca cai
-    // silenciosamente em produção.
-    throw new Error('provider sandbox não plugado neste ambiente (gate 3A-2); use fake ou injete o adapter.');
+//   opts.providerOverride : injeta um provider pronto (testes usam o fake).
+//   opts.asaasConfig      : { environment, baseURL, apiKey } para o sandbox real.
+//   opts.http             : cliente HTTP (axios) para o adapter sandbox.
+function selecionarProvider(policy, { providerOverride, asaasConfig, http } = {}) {
+  if (providerOverride) return providerOverride;
+
+  // PRODUÇÃO é fail-closed em qualquer caminho: nem policy nem config podem ligá-la.
+  if (policy.provider_mode === 'production' || String(asaasConfig?.environment || '').toLowerCase() === 'production') {
+    throw new Error('Asaas produção é PROIBIDO nesta frente (fail-closed).');
   }
+
+  if (policy.provider_mode === 'fake') return new FakeAsaasProvider();
+
+  if (policy.provider_mode === 'sandbox') {
+    // Só constrói o adapter real se o ambiente for INEQUIVOCAMENTE sandbox e a
+    // credencial estiver presente. Caso contrário, falha explicitamente (nunca
+    // cai silenciosamente em produção).
+    if (!asaasConfig || !ehSandbox(asaasConfig)) {
+      throw new Error('provider sandbox recusado: prova de ambiente sandbox ausente/insuficiente.');
+    }
+    if (!asaasConfig.apiKey) {
+      throw new Error('provider sandbox recusado: credencial sandbox ausente.');
+    }
+    return new AsaasSandboxProvider({ config: asaasConfig, http });
+  }
+
   throw new Error(`provider_mode inválido: ${policy.provider_mode}`);
 }
 
@@ -140,10 +158,10 @@ async function executarPlano({ acoes = [], empresa = {}, snapshot = {}, provider
 //   deps.carregarAddOns(empresaId) -> [empresa_funcionalidades]
 //   deps.persist(empresaId, patch) -> void
 //   provider, policyOverrides, agora
-async function ensureBillingStateComDeps({ empresaId, deps, provider, policyOverrides = {}, agora = new Date() }) {
+async function ensureBillingStateComDeps({ empresaId, deps, provider, policyOverrides = {}, agora = new Date(), asaasConfig, http }) {
   return comLock(`ensure:${empresaId}`, async () => {
     const policy = resolvePolicy(policyOverrides);
-    const prov = provider || selecionarProvider(policy);
+    const prov = provider || selecionarProvider(policy, { asaasConfig, http });
 
     const situacao = await deps.carregarSituacao(empresaId);
     const empresa = await deps.carregarEmpresaBilling(empresaId);

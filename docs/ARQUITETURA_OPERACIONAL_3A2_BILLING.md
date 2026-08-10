@@ -78,6 +78,47 @@ Webhook: `POST /pagamentos/webhook/asaas` (existente) — token fixo fail-closed
 - App: consome a **situação comercial** (3A-1) como autoridade (mensalidade, implantação,
   trial, regularização). NÃO duplica engine de billing no Flutter (§57).
 
+## 6.1 Automação real (evento → outbox → worker → provider)
+
+O fluxo NÃO depende de clique. Um **outbox** (migration 063 `billing_outbox`) converte
+mudança comercial em evento; um **worker** processa e chama `ensureBillingState`.
+
+- **Trigger** (`billingTriggers.emitirEventoBilling`) — ponto único; enfileira idempotente
+  (`dedupe_key`). Ligado em: **contrato assinado** (`routes/contratacao.js`) e **webhook
+  processado** (`routes/pagamentos.js`). Demais gatilhos (trial iniciado/finalizado, plano/
+  add-on alterado, cancelamento) usam o mesmo `emitirEventoBilling` nos respectivos pontos.
+- **Outbox** (`billingOutboxRepository`) — `enfileirar` (INSERT ON CONFLICT (dedupe_key) DO
+  NOTHING → idempotência de enfileiramento) + `reivindicarProximo` (UPDATE ... WHERE status
+  RETURNING → **claim CAS**, 1 worker por evento) + `marcarProcessado/Falhou` (backoff; esgotou
+  → `dead`/manual_attention).
+- **Worker** (`billingOutboxWorker.processarOutbox`) — job/contingência: `POST
+  /pagamentos/billing/processar-outbox` (super-admin). Mesma engine para automático e manual (§14).
+- **Idempotência multi-processo (§8)**: `dedupe_key` UNIQUE + claim CAS + conditional-update dos
+  mapeamentos (`asaas_customer_id IS NULL`). Provado no `tests-pg/billing_outbox.pgtest.mjs`
+  (Postgres real, CI) e no E2E in-memory (lógica do worker).
+
+## 6.2 Status de implementação e teste (§30)
+
+| Item | Implementado | Testado FAKE | Testado SANDBOX | Pendente PRODUÇÃO |
+|---|:--:|:--:|:--:|:--:|
+| Política configurável + guard produção | ✅ | ✅ | — | (produção proibida) |
+| Orquestrador (customer/subscription/implantação/add-on) | ✅ | ✅ | ❌ (sem credencial) | ✅ |
+| Trial preservado / 1ª mensalidade = trial_end | ✅ | ✅ | ❌ | ✅ |
+| Webhook state machine (dup/out-of-order) | ✅ | ✅ | ❌ | ✅ |
+| Reconciliação | ✅ | ✅ | ❌ | ✅ |
+| Inadimplência (trial/graça) | ✅ | ✅ | — | ✅ |
+| Outbox + trigger + worker (automação) | ✅ | ✅ | ❌ | ✅ |
+| Idempotência multi-processo | ✅ | ✅ (lógica) + pgtest CI | ❌ | ✅ |
+| Adapter real Asaas SANDBOX | ✅ (código + contract test) | ✅ (http fake) | ❌ **BLOCKER** | ✅ |
+| E2E Asaas SANDBOX externo | — | — | ❌ **BLOCKER** | — |
+
+**BLOCKER externo (único):** este ambiente **não possui credencial Asaas sandbox nem
+Supabase/Postgres** (`ASAAS_API_KEY`/`SUPABASE_*`/`DATABASE_URL` ausentes) — impossível provar
+`environment=sandbox` e fazer writes reais sem ação não autorizada. Todo o código (adapter,
+triggers, outbox, worker, idempotência) está implementado e testado com fake/contract; a E2E
+sandbox real e o pgtest de concorrência rodam no **Gate** (CI com Postgres efêmero + credencial
+sandbox injetada como secret protegido). **Nunca testado contra Asaas real.**
+
 ## 7. Reservado para o Gate 3A-2 (sandbox → produção)
 
 - Adapter real de Asaas sandbox conformando ao contrato do provider (createCustomer/

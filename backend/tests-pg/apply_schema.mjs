@@ -15,6 +15,7 @@ const arquivos = [
   join(here, '00_bootstrap_pre.sql'),
   join(migrations, '060_catalogo_funcionalidades.sql'),
   join(migrations, '061_matriz_publicacao_transacional.sql'),
+  join(migrations, '063_billing_outbox.sql'),      // 3A-2: outbox de billing (062 é do SEC-1)
   join(here, '99_grants_service_role_test.sql'),   // test-only: grants padrão do Supabase p/ service_role
 ];
 
