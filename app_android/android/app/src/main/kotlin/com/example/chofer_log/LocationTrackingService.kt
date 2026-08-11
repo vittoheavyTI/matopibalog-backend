@@ -1,9 +1,11 @@
 package com.example.chofer_log
 
 import android.Manifest
+import android.app.AlarmManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -16,6 +18,8 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
+import android.os.SystemClock
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.OutputStreamWriter
@@ -45,48 +49,112 @@ class LocationTrackingService : Service() {
     // concorrente e corromper a fila (read-modify-write do SharedPreferences).
     private val inFlight = AtomicBoolean(false)
     private val queueLock = Any() // serializa mutações da fila entre threads
+    private lateinit var alarmManager: AlarmManager
+    private lateinit var powerManager: PowerManager
 
     // Resultado semântico de um POST (§M-2). Decide fila e stopSelf — nunca por status cru.
     private enum class SendResult { SENT, KEEP, RENEW, STOP }
 
-    private val tick = object : Runnable {
-        override fun run() {
-            captureAndSend()
-            handler.postDelayed(this, INTERVAL_MS)
-        }
-    }
-
     override fun onCreate() {
         super.onCreate()
         locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         createChannel()
     }
 
+    // BLOCKER-2: o "tick" NÃO é mais um Handler.postDelayed (timer local do processo, que o
+    // Doze/App Standby SUSPENDE — causa provada dos gaps de 50-80min). Agora um AlarmManager
+    // .setAndAllowWhileIdle (fonte de wakeup que dispara mesmo em Doze) entrega um broadcast
+    // LOCAL a este receiver, que roda um ciclo de captura/envio usando a credencial EM
+    // MEMÓRIA (o ForegroundService permanece vivo em Doze; só a CPU é suspensa). Por ser
+    // getBroadcast (não getService), os ticks NÃO reentram no onStartCommand → o intent de
+    // redelivery segue sendo o START completo (recuperação de process-death preservada) e a
+    // rotação (updateSelfIntent) segue idêntica.
+    private val tickReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            captureAndSend()
+            scheduleNextTick()
+        }
+    }
+    @Volatile private var tickReceiverRegistrado = false
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
+            cancelTick()
             stopSelf()
             return START_NOT_STICKY
         }
 
-        token = intent?.getStringExtra(EXTRA_TOKEN)
-        baseUrl = intent?.getStringExtra(EXTRA_BASE_URL)?.trimEnd('/')
-        mode = intent?.getStringExtra(EXTRA_MODE) ?: MODE_SESSION
-        deviceId = intent?.getStringExtra(EXTRA_DEVICE)
-        credentialExpiresAt = intent?.getLongExtra(EXTRA_EXPIRES_AT, 0L) ?: 0L
-        maxExpiresAt = intent?.getLongExtra(EXTRA_MAX_EXPIRES_AT, 0L) ?: 0L
+        // Só reseta a credencial quando o intent REALMENTE a traz (START/renovação). Isso
+        // torna o onStartCommand idempotente e nunca zera o token em memória por engano.
+        if (intent?.hasExtra(EXTRA_TOKEN) == true) {
+            token = intent.getStringExtra(EXTRA_TOKEN)
+            baseUrl = intent.getStringExtra(EXTRA_BASE_URL)?.trimEnd('/')
+            mode = intent.getStringExtra(EXTRA_MODE) ?: MODE_SESSION
+            deviceId = intent.getStringExtra(EXTRA_DEVICE)
+            credentialExpiresAt = intent.getLongExtra(EXTRA_EXPIRES_AT, 0L)
+            maxExpiresAt = intent.getLongExtra(EXTRA_MAX_EXPIRES_AT, 0L)
+        }
 
         startForeground(NOTIFICATION_ID, notification())
-        handler.removeCallbacks(tick)
-        handler.post(tick)
-        // START_REDELIVER_INTENT: se o processo morrer, o Android reentrega o ÚLTIMO
-        // intent. A cada rotação atualizamos esse intent (updateSelfIntent), então o
-        // redelivery traz a credencial ATUAL — sem gravar segredo em disco.
+        registrarTickReceiver()
+        handler.post { captureAndSend() } // captura imediata ao (re)iniciar
+        scheduleNextTick()
+        // START_REDELIVER_INTENT: se o processo morrer, o Android reentrega o ÚLTIMO intent
+        // (START/renovação completo — os ticks são broadcasts e não alteram isso), trazendo
+        // a credencial ATUAL sem gravar segredo em disco.
         return START_REDELIVER_INTENT
     }
 
     override fun onDestroy() {
-        handler.removeCallbacks(tick)
+        cancelTick()
+        if (tickReceiverRegistrado) {
+            try { unregisterReceiver(tickReceiver) } catch (_: Exception) {}
+            tickReceiverRegistrado = false
+        }
         super.onDestroy()
+    }
+
+    private fun registrarTickReceiver() {
+        if (tickReceiverRegistrado) return
+        val filtro = android.content.IntentFilter(ACTION_TICK)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(tickReceiver, filtro, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            registerReceiver(tickReceiver, filtro)
+        }
+        tickReceiverRegistrado = true
+    }
+
+    private fun tickPendingIntent(): PendingIntent {
+        val intent = Intent(ACTION_TICK).setPackage(packageName)
+        var flags = PendingIntent.FLAG_UPDATE_CURRENT
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) flags = flags or PendingIntent.FLAG_IMMUTABLE
+        return PendingIntent.getBroadcast(this, REQ_TICK, intent, flags)
+    }
+
+    // Doze-RESILIENTE: setAndAllowWhileIdle dispara mesmo em Doze (throttle do SO ~1/9min em
+    // idle profundo → cadência efetiva parada ~9-15min, batendo com o heartbeat; elimina os
+    // gaps de 50-80min do timer local). ELAPSED_REALTIME_WAKEUP acorda a CPU. Sem SCHEDULE_
+    // EXACT_ALARM (usa a variante inexata, permitida sem permissão especial).
+    private fun scheduleNextTick() {
+        val pi = tickPendingIntent()
+        val at = SystemClock.elapsedRealtime() + INTERVAL_MS
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                // API 23+: Doze existe → variante que dispara mesmo em idle profundo.
+                alarmManager.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, pi)
+            } else {
+                // API < 23: não há Doze; alarme comum basta (mesmo PendingIntent broadcast).
+                alarmManager.set(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, pi)
+            }
+        } catch (_: Exception) { /* best-effort: falha ao agendar não derruba o serviço */ }
+    }
+
+    private fun cancelTick() {
+        try { alarmManager.cancel(tickPendingIntent()) } catch (_: Exception) {}
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -102,6 +170,15 @@ class LocationTrackingService : Service() {
         if (!inFlight.compareAndSet(false, true)) return
 
         Thread {
+            // BLOCKER-2: o alarme (setAndAllowWhileIdle) acorda a CPU só brevemente; um
+            // WakeLock PARCIAL com teto de segurança garante que a captura/envio de rede
+            // termine antes de a CPU voltar a dormir. Sempre liberado no finally.
+            val wl = try {
+                powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKELOCK_TAG).apply {
+                    setReferenceCounted(false)
+                    acquire(WAKELOCK_TIMEOUT_MS)
+                }
+            } catch (_: Exception) { null }
             try {
                 maybeRenewCredential()
                 flushQueue()
@@ -116,6 +193,7 @@ class LocationTrackingService : Service() {
                 }
             } finally {
                 inFlight.set(false)
+                try { if (wl?.isHeld == true) wl.release() } catch (_: Exception) {}
             }
         }.start()
     }
@@ -431,6 +509,11 @@ class LocationTrackingService : Service() {
 
     companion object {
         private const val ACTION_STOP = "br.com.matopibalog.location.STOP"
+        // BLOCKER-2: broadcast LOCAL do alarme Doze-resiliente (não exportado).
+        private const val ACTION_TICK = "br.com.matopibalog.location.TICK"
+        private const val REQ_TICK = 4228
+        private const val WAKELOCK_TAG = "matopibalog:location_tick"
+        private const val WAKELOCK_TIMEOUT_MS = 60 * 1000L // teto de segurança (nunca vaza)
         private const val EXTRA_TOKEN = "token"
         private const val EXTRA_BASE_URL = "baseUrl"
         private const val EXTRA_MODE = "mode"
