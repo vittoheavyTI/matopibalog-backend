@@ -792,12 +792,37 @@ class ApiService {
           .timeout(_timeoutPostJson);
       AppLogger.api('ApiService', 'POST /fretes/$freteId/finalizar', response.statusCode);
       if (response.statusCode == 200) return jsonDecode(response.body);
-      final body = jsonDecode(response.body);
-      return {'_error': true, 'message': body['message'] ?? 'Erro ao finalizar.'};
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      final msgOperacional = _mensagemLimiteOperacionalFrete(body);
+      return {
+        '_error': true,
+        ...body,
+        'message': msgOperacional ?? body['message'] ?? 'Erro ao finalizar.',
+      };
     } catch (e) {
       AppLogger.error('ApiService', 'POST /fretes/finalizar exception', e);
       return {'_error': true, 'message': _mensagemErroRede(e)};
     }
+  }
+
+  static String? _mensagemLimiteOperacionalFrete(Map<String, dynamic> body) {
+    if (body['error'] != 'frete_operational_limit') return null;
+    final field = body['field']?.toString();
+    final campo = field == 'valor_tonelada_km'
+        ? 'Valor por tonelada/km'
+        : field == 'toneladas'
+            ? 'Toneladas'
+            : field == 'valor_frete'
+                ? 'Valor do frete'
+                : 'Dados do frete';
+    final atual = body['current_value'];
+    final max = body['max_value'];
+    final isValor = field == 'valor_tonelada_km' || field == 'valor_frete';
+    final sufixo = field == 'valor_tonelada_km' ? '/t·km' : '';
+    final prefixo = isValor ? 'R\$ ' : '';
+    final detalheValor = atual == null ? '' : '\nValor atual: $prefixo$atual$sufixo.';
+    final detalheLimite = max == null ? '' : '\nLimite operacional atual: $prefixo$max$sufixo.';
+    return 'Este frete possui um dado financeiro legado que precisa ser corrigido no painel por um administrador antes da finalização.\nCampo: $campo.$detalheValor$detalheLimite';
   }
 
   static Future<Map<String, dynamic>> createFrete(Map<String, dynamic> data) async {
