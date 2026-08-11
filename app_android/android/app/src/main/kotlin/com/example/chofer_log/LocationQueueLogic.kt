@@ -44,6 +44,16 @@ object LocationQueueLogic {
      * `limit`. O `captured_at` é a IDENTIDADE preservada — nunca reescrito. Modela o merge do
      * enqueue offline e do re-enqueue de falhas no flush. Chaves vazias/nulas são ignoradas.
      */
+    /**
+     * O watchdog precisa RECUPERAR o stream de localização? Baseia-se na AUSÊNCIA de FIX
+     * UTILIZÁVEL/FRESCO (não de callback): callbacks podem chegar sempre stale sem nenhum ponto
+     * útil. Recupera se os updates não estão ativos OU se faz mais que `staleMs` sem fix fresco.
+     */
+    fun watchdogNeedsRecovery(lastFreshFixAtMs: Long, nowMs: Long, staleMs: Long, updatesRequested: Boolean): Boolean {
+        if (!updatesRequested) return true
+        return (nowMs - lastFreshFixAtMs) > staleMs
+    }
+
     fun orderedDedupCap(existingKeys: List<String>, newKeys: List<String>, limit: Int): List<String> {
         val out = ArrayList<String>(limit)
         val seen = HashSet<String>()

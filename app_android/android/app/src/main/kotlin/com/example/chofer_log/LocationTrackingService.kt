@@ -63,7 +63,8 @@ class LocationTrackingService : Service() {
     @Volatile private var maxExpiresAt: Long = 0L          // teto absoluto (não renova além)
     private var lastSent: Location? = null
     private var lastSentAt: Long = 0L
-    @Volatile private var lastCallbackAt: Long = 0L        // watchdog: último callback do Fused
+    @Volatile private var lastCallbackAt: Long = 0L        // diagnóstico: último callback do Fused (mesmo stale)
+    @Volatile private var lastFreshFixAt: Long = 0L        // watchdog: último fix UTILIZÁVEL/FRESCO (autoridade da saúde)
 
     private lateinit var fusedClient: FusedLocationProviderClient
     private lateinit var alarmManager: AlarmManager
@@ -131,6 +132,7 @@ class LocationTrackingService : Service() {
         startLocationUpdates()
         registrarWatchdog()
         scheduleWatchdog()
+        running = true
         // START_REDELIVER_INTENT: o último intent (START/renovação completo) e reentregue após
         // process-death → re-request dos updates + rearme do watchdog. Prova de runtime = recheck.
         return START_REDELIVER_INTENT
@@ -144,6 +146,7 @@ class LocationTrackingService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun stopEverything() {
+        running = false
         try { fusedClient.removeLocationUpdates(locationCallback) } catch (_: Exception) {}
         updatesRequested = false
         cancelWatchdog()
@@ -159,7 +162,13 @@ class LocationTrackingService : Service() {
             Thread { reportState("permissao_nao_concedida") }.start()
             stopEverything(); stopSelf(); return
         }
-        val request = LocationRequest.Builder(Priority.PRIORITY_BALANCED_POWER_ACCURACY, INTERVAL_MS)
+        // PRIORIDADE (reassessment #5): PRIORITY_HIGH_ACCURACY durante a VIAGEM ATIVA. O serviço
+        // só roda enquanto há viagem em andamento (janela operacional curta e, tipicamente, com o
+        // aparelho carregando no veículo). Rastreamento de ROTA logística exige fidelidade de GPS;
+        // Balanced (rede/wifi) daria pontos grosseiros/saltados sob o filtro de 100m. A cadência é
+        // contida por INTERVAL_MS + filtro de distância (não é 1/seg). accuracy_m/idade/cadência
+        // serão MEDIDOS no recheck físico e a prioridade pode ser reajustada com evidência.
+        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, INTERVAL_MS)
             .setMinUpdateIntervalMillis(MIN_UPDATE_INTERVAL_MS)
             .setMinUpdateDistanceMeters(0f) // fixes periódicos mesmo parado; o filtro é no app (shouldSend)
             .setWaitForAccurateLocation(false)
@@ -167,7 +176,9 @@ class LocationTrackingService : Service() {
         try {
             fusedClient.requestLocationUpdates(request, locationCallback, Looper.getMainLooper())
             updatesRequested = true
-            lastCallbackAt = System.currentTimeMillis()
+            val agora = System.currentTimeMillis()
+            lastCallbackAt = agora
+            lastFreshFixAt = agora // grace: evita recuperação falsa antes do 1º fix
         } catch (_: SecurityException) {
             Thread { reportState("permissao_nao_concedida") }.start()
             stopEverything(); stopSelf()
@@ -178,7 +189,14 @@ class LocationTrackingService : Service() {
     private fun handleLocation(location: Location) {
         if (token == null || baseUrl == null) return
         if (!hasLocationPermission()) { Thread { reportState("permissao_nao_concedida") }.start(); stopEverything(); stopSelf(); return }
-        if (fixAgeMs(location) > MAX_FIX_AGE_MS) return // FRESCOR: descarta fix velho (não vira "fresco")
+        // FRESCOR ESTRITO (reassessment #4): sem timestamp REAL de captura → fix inválido,
+        // NÃO é enviado (nunca inventar captured_at).
+        if (location.time <= 0L) return
+        // FRESCOR: descarta fix velho (não vira "fresco"). Fix stale NÃO conta como utilizável.
+        if (fixAgeMs(location) > MAX_FIX_AGE_MS) return
+        // Fix UTILIZÁVEL/FRESCO recebido — marca a saúde do stream ANTES do filtro de envio
+        // (parado + <100m também é "saudável"; o watchdog não deve recuperar só por não enviar).
+        lastFreshFixAt = System.currentTimeMillis()
         if (!shouldSend(location)) return
         if (!inFlight.compareAndSet(false, true)) return
         Thread {
@@ -251,40 +269,45 @@ class LocationTrackingService : Service() {
 
     private fun runWatchdog() {
         if (token == null || baseUrl == null) return
-        // Renovação proativa da credencial (viagens longas) fica também no watchdog.
         Thread {
+            // Trabalho SÍNCRONO (renovação proativa + flush) sob WakeLock liberado no finally.
             val wl = acquireWakeLock()
             try {
                 maybeRenewCredential()
                 flushQueue()
-                val staleness = System.currentTimeMillis() - lastCallbackAt
-                if (staleness > WATCHDOG_STALE_MS || !updatesRequested) {
-                    // Ausência anormal de callbacks → re-request e um fix pontual de recuperação.
-                    try { fusedClient.removeLocationUpdates(locationCallback) } catch (_: Exception) {}
-                    updatesRequested = false
-                    recoverOneShotLocation()
-                    startLocationUpdates()
-                }
             } finally {
                 releaseWakeLock(wl)
+            }
+            // RECUPERAÇÃO baseada na AUSÊNCIA DE FIX UTILIZÁVEL/FRESCO (reassessment #1), não de
+            // callback: callbacks podem chegar sempre stale e nenhum ponto útil existir.
+            if (LocationQueueLogic.watchdogNeedsRecovery(
+                    lastFreshFixAt, System.currentTimeMillis(), WATCHDOG_STALE_MS, updatesRequested)) {
+                try { fusedClient.removeLocationUpdates(locationCallback) } catch (_: Exception) {}
+                updatesRequested = false
+                recoverOneShotLocation() // administra o próprio WakeLock até a conclusão do Task
+                startLocationUpdates()
             }
         }.start()
     }
 
+    // One-shot de recuperação. O WakeLock (reassessment #2) é mantido até o Task CONCLUIR
+    // (success/failure), não liberado antes da espera assíncrona. Teto de segurança no timeout.
     private fun recoverOneShotLocation() {
         if (!hasLocationPermission()) return
+        val wl = acquireWakeLock()
         try {
             val req = CurrentLocationRequest.Builder()
-                .setPriority(Priority.PRIORITY_BALANCED_POWER_ACCURACY)
+                .setPriority(Priority.PRIORITY_HIGH_ACCURACY)
                 .setMaxUpdateAgeMillis(MAX_FIX_AGE_MS)
                 .build()
-            fusedClient.getCurrentLocation(req, null).addOnSuccessListener { loc ->
-                if (loc != null) {
-                    lastCallbackAt = System.currentTimeMillis()
-                    handleLocation(loc)
+            fusedClient.getCurrentLocation(req, null)
+                .addOnSuccessListener { loc ->
+                    if (loc != null) { lastCallbackAt = System.currentTimeMillis(); handleLocation(loc) }
                 }
-            }
-        } catch (_: Exception) {}
+                .addOnCompleteListener { releaseWakeLock(wl) }
+        } catch (_: Exception) {
+            releaseWakeLock(wl)
+        }
     }
 
     private fun acquireWakeLock(): PowerManager.WakeLock? = try {
@@ -464,9 +487,10 @@ class LocationTrackingService : Service() {
         return try { java.time.Instant.parse(iso).toEpochMilli() } catch (_: Exception) { 0L }
     }
 
-    // FRESCOR: captured_at = tempo REAL do fix (loc.time), nunca Instant.now().
+    // FRESCOR: captured_at = tempo REAL do fix (loc.time). SEM fallback para "agora": handleLocation
+    // já descartou fixes com time<=0 (nunca serializar um ponto com captured_at inventado).
     private fun locationToJson(location: Location): JSONObject {
-        val capturedAt = if (location.time > 0L) java.time.Instant.ofEpochMilli(location.time).toString() else isoNow()
+        val capturedAt = java.time.Instant.ofEpochMilli(location.time).toString()
         return JSONObject()
             .put("latitude", String.format(Locale.US, "%.7f", location.latitude).toDouble())
             .put("longitude", String.format(Locale.US, "%.7f", location.longitude).toDouble())
@@ -538,11 +562,11 @@ class LocationTrackingService : Service() {
             .build()
     }
 
-    private fun isoNow(): String {
-        return java.time.Instant.now().toString()
-    }
-
     companion object {
+        // Liveness REAL do serviço (consultado pelo MethodChannel 'isActive'). @Volatile:
+        // visível entre threads. Reflete o processo atual; se o processo morreu, volta a false
+        // até o serviço reiniciar (START_REDELIVER) — que o seta true de novo.
+        @Volatile var running: Boolean = false
         private const val ACTION_STOP = "br.com.matopibalog.location.STOP"
         private const val ACTION_WATCHDOG = "br.com.matopibalog.location.WATCHDOG"
         private const val REQ_WATCHDOG = 4229

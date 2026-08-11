@@ -118,4 +118,19 @@ void main() {
       );
     });
   });
+
+  group('liveness nativo (reassessment #3)', () {
+    test('parseIsActive: só true booleano é ativo (null/outro → inativo, fail-safe)', () {
+      expect(LocationTrackingService.parseIsActive(true), isTrue);
+      expect(LocationTrackingService.parseIsActive(false), isFalse);
+      expect(LocationTrackingService.parseIsActive(null), isFalse);
+      expect(LocationTrackingService.parseIsActive('true'), isFalse);
+      expect(LocationTrackingService.parseIsActive(1), isFalse);
+    });
+
+    test('isNativeTrackingActive é fail-safe fora do Android (host) → false', () async {
+      // No host de teste Platform.isAndroid=false → nunca finge ativo (guard não reusa às cegas).
+      expect(await LocationTrackingService.isNativeTrackingActive(), isFalse);
+    });
+  });
 }

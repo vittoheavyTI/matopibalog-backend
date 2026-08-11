@@ -86,6 +86,25 @@ class LocationQueueLogicTest {
         assertEquals(listOf("t2", "t1"), r)
     }
 
+    // ── watchdog: recupera por AUSÊNCIA DE FIX FRESCO, não de callback ──────────
+    @Test fun watchdog_recupera_se_updates_inativos() {
+        assertTrue(LocationQueueLogic.watchdogNeedsRecovery(now(), now(), 5 * 60_000L, false))
+    }
+
+    @Test fun watchdog_recupera_se_sem_fix_fresco_alem_do_limiar() {
+        val agora = 10_000_000L
+        val ultimoFresco = agora - 6 * 60_000L // 6 min sem fix fresco
+        assertTrue(LocationQueueLogic.watchdogNeedsRecovery(ultimoFresco, agora, 5 * 60_000L, true))
+    }
+
+    @Test fun watchdog_NAO_recupera_com_fix_fresco_recente() {
+        val agora = 10_000_000L
+        val ultimoFresco = agora - 60_000L // 1 min (dentro do limiar)
+        assertFalse(LocationQueueLogic.watchdogNeedsRecovery(ultimoFresco, agora, 5 * 60_000L, true))
+    }
+
+    private fun now() = System.currentTimeMillis()
+
     @Test fun reconexao_flush_reenfileira_falha_transitoria_sem_perder() {
         // Simula: fila offline [t1,t2]; ao reconectar, t1 falha transitório (KEEP) e volta,
         // t2 é SENT. Modelamos o re-enqueue: falha (preservada) + eventuais novos.

@@ -31,6 +31,11 @@ class MainActivity : FlutterActivity() {
                     LocationTrackingService.stop(this)
                     result.success(true)
                 }
+                // SEC-1 (reassessment #3): liveness REAL do serviço nativo. O Flutter NÃO é a
+                // autoridade do estado nativo — o serviço pode ter feito stopSelf() sozinho
+                // (STOP semântico/permissão/etc.). O guard de reuso consulta isto antes de
+                // "economizar" uma emissão, evitando silent_dead_tracking.
+                "isActive" -> result.success(LocationTrackingService.running)
                 else -> result.notImplemented()
             }
         }

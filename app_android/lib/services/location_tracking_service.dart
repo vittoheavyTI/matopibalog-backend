@@ -120,6 +120,23 @@ class LocationTrackingService {
   static String scopeSignatureForTesting(List<dynamic> fretes) =>
       _activeTripIds(fretes).join(',');
 
+  // reassessment #3: liveness REAL do serviço nativo (autoridade do estado). Fail-safe: em
+  // qualquer incerteza (exceção/plataforma) retorna false → NÃO reusa (re-emite/recupera).
+  @visibleForTesting
+  static Future<bool> isNativeTrackingActive() async {
+    if (!Platform.isAndroid) return false;
+    try {
+      return parseIsActive(await _channel.invokeMethod('isActive'));
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // Parsing PURO da resposta do canal 'isActive' (testável). Só `true` booleano é ativo;
+  // null/qualquer outro → inativo (fail-safe → não reusa).
+  @visibleForTesting
+  static bool parseIsActive(dynamic r) => r == true;
+
   static Future<void> restoreSnapshot() async {
     final prefs = await SharedPreferences.getInstance();
     final statusName = prefs.getString(_statusKey);
@@ -312,8 +329,19 @@ class LocationTrackingService {
       maxExpiresAtMs: _trackingCredentialMaxExpiresAtMs,
       nowMs: DateTime.now().millisecondsSinceEpoch,
     )) {
-      await _persist(LocationTrackingStatus.active, activeTrips);
-      return LocationTrackingStartResult.started;
+      // reassessment #3: o Flutter NÃO é a autoridade do estado nativo. O serviço pode ter
+      // feito stopSelf() sozinho (STOP semântico/credencial inválida/permissão). Só economiza
+      // a emissão se o serviço nativo estiver REALMENTE ativo — senão recupera (re-emite), em
+      // vez de fingir `started` (evita silent_dead_tracking).
+      if (await isNativeTrackingActive()) {
+        await _persist(LocationTrackingStatus.active, activeTrips);
+        return LocationTrackingStartResult.started;
+      }
+      // Nativo morreu/parou: esquece o estado e segue para nova emissão/recuperação.
+      _trackingActive = false;
+      _trackingModeCredential = false;
+      _trackingScopeSig = null;
+      _trackingCredentialMaxExpiresAtMs = 0;
     }
 
     final serviceEnabled = await Geolocator.isLocationServiceEnabled();
