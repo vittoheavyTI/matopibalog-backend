@@ -23,6 +23,17 @@ Sem deploy, sem Gate B, sem merge. Produção segue `6d1b4bf` com tracking OFF.
 >
 > **Toda conclusão de runtime (Doze, cadência, process-death) permanece PENDENTE de recheck físico.**
 > A seção "BLOCKER-2" abaixo (AlarmManager como scheduler primário) descreve a **1ª tentativa SUPERADA**.
+>
+> ### Correções PRE-RECHECK (2ª rodada, HEAD final)
+> - **[watchdog por fix fresco]** `lastFreshFixAt` (fix UTILIZÁVEL) separado de `lastCallbackAt`;
+>   `handleLocation` só marca fresco para `time>0` e idade ≤ `MAX_FIX_AGE_MS`;
+>   `LocationQueueLogic.watchdogNeedsRecovery(...)` recupera por AUSÊNCIA DE FIX FRESCO (não de callback). Testado.
+> - **[wakelock async]** o one-shot (`getCurrentLocation`) mantém o WakeLock até o Task CONCLUIR
+>   (`addOnCompleteListener`); `runWatchdog` separa o WL síncrono do async.
+> - **[liveness nativo]** `LocationTrackingService.running` (companion) + MethodChannel `isActive`; o guard
+>   Flutter só reusa se `shouldReuseCredential` **E** `isNativeTrackingActive()` (evita `silent_dead_tracking`).
+> - **[captured_at estrito]** removido o fallback `Instant.now()`; fix com `time<=0` é DESCARTADO (não enviado).
+> - **[prioridade]** `PRIORITY_HIGH_ACCURACY` durante a viagem ativa (fidelidade de rota logística; medir no recheck).
 
 ## BLOCKER 1 — Credencial operacional única por (session + device)
 
