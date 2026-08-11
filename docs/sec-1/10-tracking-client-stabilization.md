@@ -3,6 +3,27 @@
 Gate de estabilização client-side após o E2E físico (PASS COM RELIABILITY BLOCKERS).
 Sem deploy, sem Gate B, sem merge. Produção segue `6d1b4bf` com tracking OFF.
 
+> ## ⚠️ REASSESSMENT TÉCNICO 2026-08-11 (leia primeiro)
+> Revisão pós-implementação REFUTOU/rebaixou conclusões da 1ª tentativa. Vereditos:
+> - **[1] SLA do AlarmManager** = CONFIRMED (errado): `setAndAllowWhileIdle` é INEXATO; 9min é
+>   frequência MÁXIMA, não latência garantida. `background_scheduler_fixed` **retirado**.
+> - **[2] Arquitetura** = trocada para **híbrido**: `FusedLocationProviderClient.requestLocationUpdates`
+>   como fonte PRIMÁRIA (FGS type=location) + **watchdog** só p/ recuperar ausência anormal de callbacks
+>   (não é heartbeat garantido). Ver a seção BLOCKER-2 reescrita abaixo.
+> - **[3] Process-death** = PARTIAL; afirmação de "preservado" retirada (prova = recheck).
+> - **[4] Frescor** = CONFIRMED (bug): `captured_at` agora vem do **tempo real do fix** (`location.time`),
+>   com teto de idade (`MAX_FIX_AGE_MS`); nunca `Instant.now()` p/ ponto de `getLastKnownLocation`.
+> - **[5] WakeLock × async** = CONFIRMED; com Fused o WakeLock cobre o processamento do callback.
+> - **[6] "atomic/race-safe"** = PARTIAL (retirado). Interim: single-flight Flutter + best-effort backend.
+>   Garantia FORTE (RPC transacional + índice único parcial) = **PROJETO em `11-proposta-migration-transacional.md`**
+>   (NÃO criada/aplicada; requer autorização — migration).
+> - **[7] renew × Flutter** = PARTIAL → guard de reuso agora usa `maxExpiresAt` (teto), não o nominal.
+> - **[8] offline_queue_automated** = agora ENTREGUE: lógica pura em `LocationQueueLogic` + testes JVM
+>   (`./gradlew testDebugUnitTest` no app-ci).
+>
+> **Toda conclusão de runtime (Doze, cadência, process-death) permanece PENDENTE de recheck físico.**
+> A seção "BLOCKER-2" abaixo (AlarmManager como scheduler primário) descreve a **1ª tentativa SUPERADA**.
+
 ## BLOCKER 1 — Credencial operacional única por (session + device)
 
 ### Diagnóstico (provado no código)
