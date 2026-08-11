@@ -77,6 +77,10 @@ jobs:
       - name: flutter build apk --debug (sem signing/keystore)
         run: flutter build apk --debug
 
+      - name: Testes JVM nativos (LocationQueueLogic — fila offline)
+        working-directory: app_android/android
+        run: ./gradlew :app:testDebugUnitTest --console=plain
+
       - name: flutter build apk --release (evidencia manual)
         run: flutter build apk --release
 

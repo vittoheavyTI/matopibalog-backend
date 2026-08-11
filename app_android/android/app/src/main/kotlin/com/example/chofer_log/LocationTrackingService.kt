@@ -11,15 +11,20 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Location
-import android.location.LocationListener
-import android.location.LocationManager
 import android.os.Build
-import android.os.Bundle
-import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
+import com.google.android.gms.location.CurrentLocationRequest
+import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationAvailability
+import com.google.android.gms.location.LocationCallback
+import com.google.android.gms.location.LocationRequest
+import com.google.android.gms.location.LocationResult
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
+import com.example.chofer_log.LocationQueueLogic.SendResult
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.OutputStreamWriter
@@ -29,12 +34,27 @@ import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.roundToInt
 
+/**
+ * SEC-1 (Opção C) — serviço de rastreamento. REAVALIAÇÃO 2026-08-11 (BLOCKER-2):
+ *
+ * ARQUITETURA HÍBRIDA (decisão do gate):
+ *  - FONTE PRIMÁRIA/CANÔNICA de fixes = FusedLocationProviderClient.requestLocationUpdates,
+ *    dentro de um ForegroundService type=location (contexto operacional). É a via recomendada
+ *    pelo Android para localização confiável em background e resiliente a Doze — substitui o
+ *    Handler.postDelayed (timer local suspenso pelo Doze) e o requestSingleUpdate assíncrono.
+ *  - WATCHDOG (AlarmManager + broadcast local) NÃO é a fonte de pontos nem promete heartbeat de
+ *    9-15min: serve APENAS para detectar ausência ANORMAL de callbacks e RECUPERAR (re-request +
+ *    um getCurrentLocation pontual). setAndAllowWhileIdle NÃO é usado como garantia de latência.
+ *  - FRESCOR: captured_at = tempo REAL do fix (loc.time); idade calculada via elapsedRealtimeNanos;
+ *    fixes acima de MAX_FIX_AGE_MS são descartados (nunca marcar coordenada velha como fresca).
+ *  - WakeLock parcial cobre o envio de rede disparado pelo callback / watchdog.
+ *
+ * PRESERVADOS (inalterados): fila offline (enqueue/flush, preserva em erro de rede), rotação CAS
+ * da credencial (renew), multi-viagem, anti-resurrection, device binding, revogação por sessão,
+ * teto absoluto, hash-only. TODA conclusão de runtime (entrega em Doze, cadência real, recuperação
+ * de process-death) fica PENDENTE de revalidação física com APK release.
+ */
 class LocationTrackingService : Service() {
-    private val handler = Handler(Looper.getMainLooper())
-    // SEC-1: campos VOLÁTEIS — a rotação da credencial (renovação) troca `token` em
-    // uma thread de trabalho; leituras precisam enxergar o valor atual sem snapshot.
-    //   MODE_SESSION  → Authorization: Bearer <access token> (fluxo compatível/atual).
-    //   MODE_TRACKING → X-Tracking-Credential + X-Tracking-Device (credencial escopada).
     @Volatile private var token: String? = null
     @Volatile private var baseUrl: String? = null
     @Volatile private var mode: String = MODE_SESSION
@@ -43,51 +63,54 @@ class LocationTrackingService : Service() {
     @Volatile private var maxExpiresAt: Long = 0L          // teto absoluto (não renova além)
     private var lastSent: Location? = null
     private var lastSentAt: Long = 0L
-    private lateinit var locationManager: LocationManager
-    // Trava de reentrância: garante UM ciclo de rede por vez. Sem isto, a renovação
-    // (updateSelfIntent → onStartCommand → novo tick) poderia rodar captureAndSend
-    // concorrente e corromper a fila (read-modify-write do SharedPreferences).
-    private val inFlight = AtomicBoolean(false)
-    private val queueLock = Any() // serializa mutações da fila entre threads
+    @Volatile private var lastCallbackAt: Long = 0L        // watchdog: último callback do Fused
+
+    private lateinit var fusedClient: FusedLocationProviderClient
     private lateinit var alarmManager: AlarmManager
     private lateinit var powerManager: PowerManager
+    @Volatile private var updatesRequested = false
+    @Volatile private var watchdogRegistrado = false
 
-    // Resultado semântico de um POST (§M-2). Decide fila e stopSelf — nunca por status cru.
-    private enum class SendResult { SENT, KEEP, RENEW, STOP }
+    private val inFlight = AtomicBoolean(false)
+    private val queueLock = Any()
+
+    // SendResult / classify / orderedDedupCap vivem em LocationQueueLogic (puro, testável em JVM).
+
+    // Fonte primária: callbacks contínuos do Fused (entregues no main looper).
+    private val locationCallback = object : LocationCallback() {
+        override fun onLocationResult(result: LocationResult) {
+            lastCallbackAt = System.currentTimeMillis()
+            result.lastLocation?.let { handleLocation(it) }
+        }
+        override fun onLocationAvailability(availability: LocationAvailability) {
+            if (!availability.isLocationAvailable) Thread { reportState("gps_desativado") }.start()
+        }
+    }
+
+    // Watchdog: só recupera ausência anormal de callbacks (não é a fonte de pontos).
+    private val watchdogReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            runWatchdog()
+            scheduleWatchdog()
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
-        locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        fusedClient = LocationServices.getFusedLocationProviderClient(this)
         alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
         powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         createChannel()
     }
 
-    // BLOCKER-2: o "tick" NÃO é mais um Handler.postDelayed (timer local do processo, que o
-    // Doze/App Standby SUSPENDE — causa provada dos gaps de 50-80min). Agora um AlarmManager
-    // .setAndAllowWhileIdle (fonte de wakeup que dispara mesmo em Doze) entrega um broadcast
-    // LOCAL a este receiver, que roda um ciclo de captura/envio usando a credencial EM
-    // MEMÓRIA (o ForegroundService permanece vivo em Doze; só a CPU é suspensa). Por ser
-    // getBroadcast (não getService), os ticks NÃO reentram no onStartCommand → o intent de
-    // redelivery segue sendo o START completo (recuperação de process-death preservada) e a
-    // rotação (updateSelfIntent) segue idêntica.
-    private val tickReceiver = object : android.content.BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            captureAndSend()
-            scheduleNextTick()
-        }
-    }
-    @Volatile private var tickReceiverRegistrado = false
-
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
-            cancelTick()
+            stopEverything()
             stopSelf()
             return START_NOT_STICKY
         }
 
-        // Só reseta a credencial quando o intent REALMENTE a traz (START/renovação). Isso
-        // torna o onStartCommand idempotente e nunca zera o token em memória por engano.
+        // Idempotente: só reseta a credencial quando o intent REALMENTE a traz (START/renovação).
         if (intent?.hasExtra(EXTRA_TOKEN) == true) {
             token = intent.getStringExtra(EXTRA_TOKEN)
             baseUrl = intent.getStringExtra(EXTRA_BASE_URL)?.trimEnd('/')
@@ -98,141 +121,89 @@ class LocationTrackingService : Service() {
         }
 
         startForeground(NOTIFICATION_ID, notification())
-        registrarTickReceiver()
-        handler.post { captureAndSend() } // captura imediata ao (re)iniciar
-        scheduleNextTick()
-        // START_REDELIVER_INTENT: se o processo morrer, o Android reentrega o ÚLTIMO intent
-        // (START/renovação completo — os ticks são broadcasts e não alteram isso), trazendo
-        // a credencial ATUAL sem gravar segredo em disco.
+        if (token == null || baseUrl == null) {
+            // Redelivery sem credencial em memória (process-death com último intent sem token):
+            // encerra limpo; o reconcile do app reemite ao voltar à atividade.
+            stopEverything()
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        startLocationUpdates()
+        registrarWatchdog()
+        scheduleWatchdog()
+        // START_REDELIVER_INTENT: o último intent (START/renovação completo) e reentregue após
+        // process-death → re-request dos updates + rearme do watchdog. Prova de runtime = recheck.
         return START_REDELIVER_INTENT
     }
 
     override fun onDestroy() {
-        cancelTick()
-        if (tickReceiverRegistrado) {
-            try { unregisterReceiver(tickReceiver) } catch (_: Exception) {}
-            tickReceiverRegistrado = false
-        }
+        stopEverything()
         super.onDestroy()
-    }
-
-    private fun registrarTickReceiver() {
-        if (tickReceiverRegistrado) return
-        val filtro = android.content.IntentFilter(ACTION_TICK)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(tickReceiver, filtro, Context.RECEIVER_NOT_EXPORTED)
-        } else {
-            @Suppress("UnspecifiedRegisterReceiverFlag")
-            registerReceiver(tickReceiver, filtro)
-        }
-        tickReceiverRegistrado = true
-    }
-
-    private fun tickPendingIntent(): PendingIntent {
-        val intent = Intent(ACTION_TICK).setPackage(packageName)
-        var flags = PendingIntent.FLAG_UPDATE_CURRENT
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) flags = flags or PendingIntent.FLAG_IMMUTABLE
-        return PendingIntent.getBroadcast(this, REQ_TICK, intent, flags)
-    }
-
-    // Doze-RESILIENTE: setAndAllowWhileIdle dispara mesmo em Doze (throttle do SO ~1/9min em
-    // idle profundo → cadência efetiva parada ~9-15min, batendo com o heartbeat; elimina os
-    // gaps de 50-80min do timer local). ELAPSED_REALTIME_WAKEUP acorda a CPU. Sem SCHEDULE_
-    // EXACT_ALARM (usa a variante inexata, permitida sem permissão especial).
-    private fun scheduleNextTick() {
-        val pi = tickPendingIntent()
-        val at = SystemClock.elapsedRealtime() + INTERVAL_MS
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                // API 23+: Doze existe → variante que dispara mesmo em idle profundo.
-                alarmManager.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, pi)
-            } else {
-                // API < 23: não há Doze; alarme comum basta (mesmo PendingIntent broadcast).
-                alarmManager.set(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, pi)
-            }
-        } catch (_: Exception) { /* best-effort: falha ao agendar não derruba o serviço */ }
-    }
-
-    private fun cancelTick() {
-        try { alarmManager.cancel(tickPendingIntent()) } catch (_: Exception) {}
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    private fun captureAndSend() {
-        if (token == null || baseUrl == null) return
+    private fun stopEverything() {
+        try { fusedClient.removeLocationUpdates(locationCallback) } catch (_: Exception) {}
+        updatesRequested = false
+        cancelWatchdog()
+        if (watchdogRegistrado) {
+            try { unregisterReceiver(watchdogReceiver) } catch (_: Exception) {}
+            watchdogRegistrado = false
+        }
+    }
+
+    // ── Fonte primária: Fused requestLocationUpdates ────────────────────────────
+    private fun startLocationUpdates() {
         if (!hasLocationPermission()) {
             Thread { reportState("permissao_nao_concedida") }.start()
-            stopSelf()
-            return
+            stopEverything(); stopSelf(); return
         }
-        // Um ciclo por vez: se já há envio em andamento, ignora este tick.
-        if (!inFlight.compareAndSet(false, true)) return
+        val request = LocationRequest.Builder(Priority.PRIORITY_BALANCED_POWER_ACCURACY, INTERVAL_MS)
+            .setMinUpdateIntervalMillis(MIN_UPDATE_INTERVAL_MS)
+            .setMinUpdateDistanceMeters(0f) // fixes periódicos mesmo parado; o filtro é no app (shouldSend)
+            .setWaitForAccurateLocation(false)
+            .build()
+        try {
+            fusedClient.requestLocationUpdates(request, locationCallback, Looper.getMainLooper())
+            updatesRequested = true
+            lastCallbackAt = System.currentTimeMillis()
+        } catch (_: SecurityException) {
+            Thread { reportState("permissao_nao_concedida") }.start()
+            stopEverything(); stopSelf()
+        } catch (_: Exception) { /* best-effort; o watchdog tenta re-request */ }
+    }
 
+    // Processa UM fix: valida frescor, aplica filtro (distância/heartbeat) e envia sob WakeLock.
+    private fun handleLocation(location: Location) {
+        if (token == null || baseUrl == null) return
+        if (!hasLocationPermission()) { Thread { reportState("permissao_nao_concedida") }.start(); stopEverything(); stopSelf(); return }
+        if (fixAgeMs(location) > MAX_FIX_AGE_MS) return // FRESCOR: descarta fix velho (não vira "fresco")
+        if (!shouldSend(location)) return
+        if (!inFlight.compareAndSet(false, true)) return
         Thread {
-            // BLOCKER-2: o alarme (setAndAllowWhileIdle) acorda a CPU só brevemente; um
-            // WakeLock PARCIAL com teto de segurança garante que a captura/envio de rede
-            // termine antes de a CPU voltar a dormir. Sempre liberado no finally.
-            val wl = try {
-                powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKELOCK_TAG).apply {
-                    setReferenceCounted(false)
-                    acquire(WAKELOCK_TIMEOUT_MS)
-                }
-            } catch (_: Exception) { null }
+            val wl = acquireWakeLock()
             try {
                 maybeRenewCredential()
                 flushQueue()
-                val location = bestKnownLocation()
-                if (location != null && shouldSend(location)) {
-                    if (sendPoint(locationToJson(location)) == SendResult.SENT) {
-                        lastSent = location
-                        lastSentAt = System.currentTimeMillis()
-                    }
-                } else {
-                    requestSingleUpdate()
+                if (sendPoint(locationToJson(location)) == SendResult.SENT) {
+                    lastSent = location
+                    lastSentAt = System.currentTimeMillis()
                 }
             } finally {
                 inFlight.set(false)
-                try { if (wl?.isHeld == true) wl.release() } catch (_: Exception) {}
+                releaseWakeLock(wl)
             }
         }.start()
     }
 
-    private fun requestSingleUpdate() {
-        if (!hasLocationPermission()) return
-        val provider = when {
-            locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) -> LocationManager.GPS_PROVIDER
-            locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER) -> LocationManager.NETWORK_PROVIDER
-            else -> {
-                Thread { reportState("gps_desativado") }.start()
-                return
-            }
+    // Idade do fix por relógio MONOTÔNICO (imune a ajustes de wall-clock).
+    private fun fixAgeMs(location: Location): Long {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1 && location.elapsedRealtimeNanos > 0L) {
+            (SystemClock.elapsedRealtimeNanos() - location.elapsedRealtimeNanos) / 1_000_000L
+        } else {
+            System.currentTimeMillis() - location.time
         }
-        locationManager.requestSingleUpdate(provider, object : LocationListener {
-            override fun onLocationChanged(location: Location) {
-                if (!shouldSend(location)) return
-                // Apenas ENFILEIRA (serializado); o próximo ciclo de flushQueue envia —
-                // evita envio de rede concorrente fora da trava inFlight.
-                enqueue(locationToJson(location))
-                lastSent = location
-                lastSentAt = System.currentTimeMillis()
-            }
-            override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
-            override fun onProviderEnabled(provider: String) {}
-            override fun onProviderDisabled(provider: String) {}
-        }, Looper.getMainLooper())
-    }
-
-    private fun bestKnownLocation(): Location? {
-        if (!hasLocationPermission()) return null
-        val providers = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
-        return providers.mapNotNull { provider ->
-            try {
-                if (locationManager.isProviderEnabled(provider)) locationManager.getLastKnownLocation(provider) else null
-            } catch (_: Exception) {
-                null
-            }
-        }.maxByOrNull { it.time }
     }
 
     private fun shouldSend(location: Location): Boolean {
@@ -240,6 +211,91 @@ class LocationTrackingService : Service() {
         val elapsed = System.currentTimeMillis() - lastSentAt
         if (elapsed >= HEARTBEAT_MS) return true
         return previous.distanceTo(location) >= MIN_DISTANCE_METERS
+    }
+
+    // ── Watchdog: recupera ausência anormal de callbacks (NÃO é heartbeat garantido) ──
+    private fun registrarWatchdog() {
+        if (watchdogRegistrado) return
+        val filtro = android.content.IntentFilter(ACTION_WATCHDOG)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(watchdogReceiver, filtro, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            registerReceiver(watchdogReceiver, filtro)
+        }
+        watchdogRegistrado = true
+    }
+
+    private fun watchdogPendingIntent(): PendingIntent {
+        val intent = Intent(ACTION_WATCHDOG).setPackage(packageName)
+        var flags = PendingIntent.FLAG_UPDATE_CURRENT
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) flags = flags or PendingIntent.FLAG_IMMUTABLE
+        return PendingIntent.getBroadcast(this, REQ_WATCHDOG, intent, flags)
+    }
+
+    private fun scheduleWatchdog() {
+        val pi = watchdogPendingIntent()
+        val at = SystemClock.elapsedRealtime() + WATCHDOG_INTERVAL_MS
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmManager.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, pi)
+            } else {
+                alarmManager.set(AlarmManager.ELAPSED_REALTIME_WAKEUP, at, pi)
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun cancelWatchdog() {
+        try { alarmManager.cancel(watchdogPendingIntent()) } catch (_: Exception) {}
+    }
+
+    private fun runWatchdog() {
+        if (token == null || baseUrl == null) return
+        // Renovação proativa da credencial (viagens longas) fica também no watchdog.
+        Thread {
+            val wl = acquireWakeLock()
+            try {
+                maybeRenewCredential()
+                flushQueue()
+                val staleness = System.currentTimeMillis() - lastCallbackAt
+                if (staleness > WATCHDOG_STALE_MS || !updatesRequested) {
+                    // Ausência anormal de callbacks → re-request e um fix pontual de recuperação.
+                    try { fusedClient.removeLocationUpdates(locationCallback) } catch (_: Exception) {}
+                    updatesRequested = false
+                    recoverOneShotLocation()
+                    startLocationUpdates()
+                }
+            } finally {
+                releaseWakeLock(wl)
+            }
+        }.start()
+    }
+
+    private fun recoverOneShotLocation() {
+        if (!hasLocationPermission()) return
+        try {
+            val req = CurrentLocationRequest.Builder()
+                .setPriority(Priority.PRIORITY_BALANCED_POWER_ACCURACY)
+                .setMaxUpdateAgeMillis(MAX_FIX_AGE_MS)
+                .build()
+            fusedClient.getCurrentLocation(req, null).addOnSuccessListener { loc ->
+                if (loc != null) {
+                    lastCallbackAt = System.currentTimeMillis()
+                    handleLocation(loc)
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun acquireWakeLock(): PowerManager.WakeLock? = try {
+        powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKELOCK_TAG).apply {
+            setReferenceCounted(false)
+            acquire(WAKELOCK_TIMEOUT_MS)
+        }
+    } catch (_: Exception) { null }
+
+    private fun releaseWakeLock(wl: PowerManager.WakeLock?) {
+        try { if (wl?.isHeld == true) wl.release() } catch (_: Exception) {}
     }
 
     // ── Autenticação por modo. NUNCA loga o valor. ──────────────────────────────
@@ -253,23 +309,11 @@ class LocationTrackingService : Service() {
         }
     }
 
-    // Lê o `error` semântico do corpo (§M-2). Só chamado em não-2xx.
     private fun readErrorCode(conn: HttpURLConnection): String? {
         return try {
             val body = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: return null
             if (body.isBlank()) null else JSONObject(body).optString("error", "").ifBlank { null }
         } catch (_: Exception) { null }
-    }
-
-    // Classifica o resultado por CÓDIGO semântico + status. Erros definitivos e
-    // transitórios são distintos; expired/rotated pedem renovação (não descartam fila).
-    private fun classify(code: Int, errorCode: String?): SendResult {
-        if (code in 200..299) return SendResult.SENT
-        if (errorCode == "tracking_credential_expired" || errorCode == "tracking_credential_rotated") return SendResult.RENEW
-        if (code == 408 || code == 429 || code == 0 || code >= 500) return SendResult.KEEP
-        // Definitivos: revoked/max_lifetime/session_revoked/driver_blocked/tenant_mismatch/
-        // device_mismatch/trip_inactive/trip_mismatch/invalid — e, em MODE_SESSION, 401/403/409.
-        return SendResult.STOP
     }
 
     private fun postJson(endpoint: String, payload: JSONObject): SendResult {
@@ -285,11 +329,9 @@ class LocationTrackingService : Service() {
         val code = conn.responseCode
         val errorCode = if (code in 200..299) null else readErrorCode(conn)
         conn.disconnect()
-        return classify(code, errorCode)
+        return LocationQueueLogic.classify(code, errorCode)
     }
 
-    // Envia UM ponto. A fila só perde o ponto em ingestão confirmada (SENT). Em
-    // MODE_SESSION preserva o comportamento legado (descarta em erro definitivo).
     private fun sendPoint(payload: JSONObject): SendResult {
         val base = baseUrl ?: return SendResult.KEEP
         return try {
@@ -302,7 +344,7 @@ class LocationTrackingService : Service() {
                 SendResult.KEEP, SendResult.RENEW -> enqueue(payload)
                 SendResult.STOP -> {
                     if (mode == MODE_TRACKING) enqueue(payload) // preserva (nunca perde por stopSelf)
-                    stopSelf()
+                    stopEverything(); stopSelf()
                 }
             }
             res
@@ -315,8 +357,6 @@ class LocationTrackingService : Service() {
 
     private fun flushQueue() {
         val base = baseUrl ?: return
-        // DRENA a fila sob lock (assume a posse do lote). Enfileiramentos concorrentes
-        // durante a rede vão para uma fila nova e NÃO são sobrescritos.
         val batch = synchronized(queueLock) {
             val q = readQueue()
             if (q.length() > 0) writeQueue(JSONArray())
@@ -327,7 +367,7 @@ class LocationTrackingService : Service() {
         val falhas = ArrayList<JSONObject>()
         for (i in 0 until batch.length()) {
             val payload = batch.optJSONObject(i) ?: continue
-            if (parar) { falhas.add(payload); continue } // após STOP, preserva o restante
+            if (parar) { falhas.add(payload); continue }
             var res = try {
                 postJson("$base/fretes/localizacao/sessao", payload)
             } catch (_: Exception) {
@@ -339,31 +379,25 @@ class LocationTrackingService : Service() {
                 } else SendResult.KEEP
             }
             when (res) {
-                SendResult.SENT -> { /* confirmado → remove (não reenfileira) */ }
+                SendResult.SENT -> { /* confirmado → remove */ }
                 SendResult.STOP -> {
-                    if (mode == MODE_TRACKING) falhas.add(payload) // preserva; em sessão descarta (legado)
+                    if (mode == MODE_TRACKING) falhas.add(payload)
                     parar = true
                 }
-                else -> falhas.add(payload) // KEEP/RENEW-falho → preserva
+                else -> falhas.add(payload)
             }
         }
-        if (falhas.isNotEmpty()) enqueueAll(falhas) // re-enfileira falhas mesclando com novos
-        if (parar) stopSelf()
+        if (falhas.isNotEmpty()) enqueueAll(falhas)
+        if (parar) { stopEverything(); stopSelf() }
     }
 
-    // Renova (ROTACIONA) a credencial — só MODE_TRACKING. Aceita credencial já expirada,
-    // desde que dentro do teto absoluto. Atualiza token→B e o intent de redelivery.
-    // Retorna true se rotacionou. Erro definitivo → stopSelf. Transitório → false.
+    // Renova (ROTACIONA) a credencial — só MODE_TRACKING. Aceita expirada dentro do teto.
     private fun renewCredential(): Boolean {
         if (mode != MODE_TRACKING) return false
         val base = baseUrl ?: return false
         if (token == null) return false
         val now = System.currentTimeMillis()
-        if (maxExpiresAt in 1..now) { // ultrapassou o teto → não renova; exige nova emissão pelo app
-            reportState("interrompida")
-            stopSelf()
-            return false
-        }
+        if (maxExpiresAt in 1..now) { reportState("interrompida"); stopEverything(); stopSelf(); return false }
         return try {
             val conn = (URL("$base/fretes/localizacao/sessao/renovar-credencial").openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
@@ -384,30 +418,26 @@ class LocationTrackingService : Service() {
                     token = novo
                     json.optString("expires_at", "").let { if (it.isNotBlank()) credentialExpiresAt = parseIso(it) }
                     json.optString("max_expires_at", "").let { if (it.isNotBlank()) maxExpiresAt = parseIso(it) }
-                    updateSelfIntent() // o redelivery passa a trazer o token novo
+                    updateSelfIntent()
                     return true
                 }
                 false
             } else {
                 val errorCode = readErrorCode(conn)
                 conn.disconnect()
-                if (classify(code, errorCode) == SendResult.STOP) stopSelf()
+                if (LocationQueueLogic.classify(code, errorCode) == SendResult.STOP) { stopEverything(); stopSelf() }
                 false
             }
-        } catch (_: Exception) {
-            false // transitório: tenta na próxima passagem
-        }
+        } catch (_: Exception) { false }
     }
 
-    // Renovação PROATIVA quando faltar <= RENEW_THRESHOLD para expirar (viagens longas).
     private fun maybeRenewCredential() {
         if (mode != MODE_TRACKING || credentialExpiresAt <= 0L) return
         if (System.currentTimeMillis() < credentialExpiresAt - RENEW_THRESHOLD_MS) return
         renewCredential()
     }
 
-    // Reemite o próprio start intent com os valores ATUAIS → o Android passa a
-    // redeliver o token rotacionado (recuperação em process death sem persistir segredo).
+    // Reemite o start intent com os valores ATUAIS → redelivery traz o token rotacionado.
     private fun updateSelfIntent() {
         val intent = Intent(this, LocationTrackingService::class.java).apply {
             putExtra(EXTRA_TOKEN, token)
@@ -420,49 +450,54 @@ class LocationTrackingService : Service() {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent)
             else startService(intent)
-        } catch (_: Exception) { /* best-effort */ }
+        } catch (_: Exception) {}
     }
 
     private fun reportState(state: String) {
         val base = baseUrl ?: return
         try {
             postJson("$base/fretes/localizacao/sessao/estado", JSONObject().put("estado", state))
-        } catch (_: Exception) {
-            // Best-effort: estado operacional nao pode deslogar nem expor coordenadas.
-        }
+        } catch (_: Exception) {}
     }
 
     private fun parseIso(iso: String): Long {
         return try { java.time.Instant.parse(iso).toEpochMilli() } catch (_: Exception) { 0L }
     }
 
+    // FRESCOR: captured_at = tempo REAL do fix (loc.time), nunca Instant.now().
     private fun locationToJson(location: Location): JSONObject {
+        val capturedAt = if (location.time > 0L) java.time.Instant.ofEpochMilli(location.time).toString() else isoNow()
         return JSONObject()
             .put("latitude", String.format(Locale.US, "%.7f", location.latitude).toDouble())
             .put("longitude", String.format(Locale.US, "%.7f", location.longitude).toDouble())
             .put("accuracy_m", if (location.hasAccuracy()) (location.accuracy * 100.0).roundToInt() / 100.0 else JSONObject.NULL)
-            .put("captured_at", isoNow())
+            .put("captured_at", capturedAt)
             .put("source", "app_foreground_service")
     }
 
     private fun enqueue(payload: JSONObject) = enqueueAll(listOf(payload))
 
-    // Mescla `itens` (mais novos primeiro) com a fila atual, sob lock, com dedup por
-    // captured_at e teto QUEUE_LIMIT. Atômico entre threads (evita perda por corrida).
     private fun enqueueAll(itens: List<JSONObject>) {
         if (itens.isEmpty()) return
         synchronized(queueLock) {
             val atual = readQueue()
-            val vistos = HashSet<String>()
-            val next = JSONArray()
-            fun add(o: JSONObject) {
-                if (next.length() >= QUEUE_LIMIT) return
-                val cap = o.optString("captured_at")
-                if (cap.isNotEmpty() && !vistos.add(cap)) return
-                next.put(o)
+            // chave(captured_at) → JSONObject; novos primeiro (primeiro a inserir vence o dedup).
+            val porChave = HashMap<String, JSONObject>()
+            val newKeys = ArrayList<String>()
+            val existingKeys = ArrayList<String>()
+            for (o in itens) {
+                val k = o.optString("captured_at")
+                if (k.isNotEmpty()) { newKeys.add(k); if (!porChave.containsKey(k)) porChave[k] = o }
             }
-            for (o in itens) add(o)
-            for (i in 0 until atual.length()) { atual.optJSONObject(i)?.let { add(it) } }
+            for (i in 0 until atual.length()) {
+                atual.optJSONObject(i)?.let { o ->
+                    val k = o.optString("captured_at")
+                    if (k.isNotEmpty()) { existingKeys.add(k); if (!porChave.containsKey(k)) porChave[k] = o }
+                }
+            }
+            val ordem = LocationQueueLogic.orderedDedupCap(existingKeys, newKeys, QUEUE_LIMIT)
+            val next = JSONArray()
+            for (k in ordem) porChave[k]?.let { next.put(it) }
             writeQueue(next)
         }
     }
@@ -509,11 +544,10 @@ class LocationTrackingService : Service() {
 
     companion object {
         private const val ACTION_STOP = "br.com.matopibalog.location.STOP"
-        // BLOCKER-2: broadcast LOCAL do alarme Doze-resiliente (não exportado).
-        private const val ACTION_TICK = "br.com.matopibalog.location.TICK"
-        private const val REQ_TICK = 4228
-        private const val WAKELOCK_TAG = "matopibalog:location_tick"
-        private const val WAKELOCK_TIMEOUT_MS = 60 * 1000L // teto de segurança (nunca vaza)
+        private const val ACTION_WATCHDOG = "br.com.matopibalog.location.WATCHDOG"
+        private const val REQ_WATCHDOG = 4229
+        private const val WAKELOCK_TAG = "matopibalog:location_send"
+        private const val WAKELOCK_TIMEOUT_MS = 60 * 1000L
         private const val EXTRA_TOKEN = "token"
         private const val EXTRA_BASE_URL = "baseUrl"
         private const val EXTRA_MODE = "mode"
@@ -526,11 +560,17 @@ class LocationTrackingService : Service() {
         private const val HEADER_DEVICE = "X-Tracking-Device"
         private const val CHANNEL_ID = "matopibalog_localizacao_viagem"
         private const val NOTIFICATION_ID = 4227
-        private const val INTERVAL_MS = 5 * 60 * 1000L
+        // Intervalo desejado dos updates do Fused; envio real e filtrado por shouldSend (100m/heartbeat).
+        private const val INTERVAL_MS = 60 * 1000L
+        private const val MIN_UPDATE_INTERVAL_MS = 30 * 1000L
         private const val HEARTBEAT_MS = 15 * 60 * 1000L
-        // Renova a credencial quando faltar <= 1h para expirar (viagens longas).
         private const val RENEW_THRESHOLD_MS = 60 * 60 * 1000L
         private const val MIN_DISTANCE_METERS = 100f
+        // Frescor: descarta fixes mais velhos que isto (nao atualizar Torre com stale).
+        private const val MAX_FIX_AGE_MS = 3 * 60 * 1000L
+        // Watchdog: periodo do check e limiar de "ausencia anormal" de callbacks.
+        private const val WATCHDOG_INTERVAL_MS = 8 * 60 * 1000L
+        private const val WATCHDOG_STALE_MS = 5 * 60 * 1000L
         private const val QUEUE_LIMIT = 20
         private const val PREFS = "matopibalog_location_tracking"
         private const val KEY_QUEUE = "queue"

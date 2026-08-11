@@ -68,4 +68,10 @@ dependencies {
     // Suporte de desugaring exigido por flutter_local_notifications (java.time)
     // quando minSdk < 26.
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+    // SEC-1 BLOCKER-2: FusedLocationProviderClient (fonte primaria de fixes do
+    // LocationTrackingService). Ja presente transitivamente via geolocator_android;
+    // declarada explicitamente para estabilidade de versao.
+    implementation("com.google.android.gms:play-services-location:21.3.0")
+    // SEC-1: testes JVM da logica PURA da fila offline (LocationQueueLogic).
+    testImplementation("junit:junit:4.13.2")
 }
