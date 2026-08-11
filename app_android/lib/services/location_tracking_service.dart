@@ -77,15 +77,11 @@ class LocationTrackingService {
   static const int _reuseMarginMs = 2 * 60 * 1000; // reusar só se faltar > 2 min p/ o vencimento
 
   @visibleForTesting
-  static int issueCallsForTesting = 0; // instrumentação de teste: nº de emissões efetivas
-
-  @visibleForTesting
   static void resetTrackingStateForTesting() {
     _trackingActive = false;
     _trackingModeCredential = false;
     _trackingScopeSig = null;
     _trackingCredentialExpiresAtMs = 0;
-    issueCallsForTesting = 0;
   }
 
   // Predicado PURO (testável sem plataforma): reusar a credencial vigente em vez de
@@ -328,7 +324,6 @@ class LocationTrackingService {
     }
 
     // SEC-1 (Opção C) — §B-1: emissão TRI-STATE da credencial escopada.
-    issueCallsForTesting++;
     final result = await ApiService.issueTrackingCredential();
 
     // FAIL-CLOSED: feature ON mas a emissão falhou → NÃO iniciar com o access token
@@ -409,19 +404,6 @@ class LocationTrackingService {
     } catch (_) {
       return false;
     }
-  }
-
-  static int _countActiveTrips(List<dynamic> fretes) {
-    final ids = <String>{};
-    for (final frete in fretes) {
-      if (frete is! Map) continue;
-      final status = (frete['status'] ?? '').toString();
-      final id = frete['id']?.toString();
-      if (id != null && id.isNotEmpty && _activeStatuses.contains(status)) {
-        ids.add(id);
-      }
-    }
-    return ids.length.clamp(0, 4);
   }
 
   static Future<void> _persist(LocationTrackingStatus status, int activeTrips) async {
