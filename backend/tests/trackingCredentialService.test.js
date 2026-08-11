@@ -6,12 +6,13 @@ const { criarTrackingCredentialService } = require('../services/auth/trackingCre
 function criarFakeSupabase(store) {
   let seq = 0;
   function builder(tabela) {
-    const st = { tabela, op: 'select', payload: null, eqs: [], isNulls: [], gtes: [], ins: [], limit: null, select: false };
+    const st = { tabela, op: 'select', payload: null, eqs: [], isNulls: [], gtes: [], lts: [], ins: [], limit: null, select: false };
     const rows = () => (store[tabela] = store[tabela] || []);
     const casa = (r) =>
       st.eqs.every(([c, v]) => String(r[c]) === String(v)) &&
       st.isNulls.every((c) => r[c] === null || r[c] === undefined) &&
       st.gtes.every(([c, v]) => new Date(r[c]).getTime() >= new Date(v).getTime()) &&
+      st.lts.every(([c, v]) => new Date(r[c]).getTime() < new Date(v).getTime()) &&
       st.ins.every(([c, arr]) => arr.map(String).includes(String(r[c])));
 
     function exec() {
@@ -45,6 +46,7 @@ function criarFakeSupabase(store) {
       eq(c, v) { st.eqs.push([c, v]); return b; },
       is(c) { st.isNulls.push(c); return b; },
       gte(c, v) { st.gtes.push([c, v]); return b; },
+      lt(c, v) { st.lts.push([c, v]); return b; },
       in(c, arr) { st.ins.push([c, arr]); return b; },
       limit(n) { st.limit = n; return b; },
       async maybeSingle() { const r = exec(); return { data: (r.data && r.data[0]) || null, error: r.error }; },
@@ -191,4 +193,47 @@ test('revogarDaSessao/DoMotorista revogam → uso rejeitado', async () => {
     assert.equal((await svc[fn](arg, 'motivo')).revogadas, 1);
     await assert.rejects(() => svc.validar({ token, deviceId: DEV }), (e) => e.code === 'tracking_credential_revoked', fn);
   }
+});
+
+const ativas = (store) => store.frete_tracking_credenciais.filter((c) => !c.revoked_at).length;
+
+test('BLOCKER-1: re-emissão na mesma sessão+device → 1 ativa (mais nova); anterior revogada (reemitida_substituida)', async () => {
+  const store = novoStore(); const agora = { v: Date.now() }; const svc = criar(store, agora);
+  const rA = await emitirPadrao(svc); const tokenA = rA.delivery.reveal();
+  agora.v += 60_000; // emissão POSTERIOR (issued_at maior) → mantém a mais nova
+  const rB = await emitirPadrao(svc); const tokenB = rB.delivery.reveal();
+  assert.equal(ativas(store), 1, 'exatamente 1 credencial ativa após re-emissão');
+  assert.ok((await svc.validar({ token: tokenB, deviceId: DEV })).uid, 'a nova valida');
+  await assert.rejects(() => svc.validar({ token: tokenA, deviceId: DEV }), (e) => e.code === 'tracking_credential_revoked', 'a antiga foi revogada');
+  assert.equal(store.frete_tracking_credenciais.filter((c) => c.revoked_reason === 'reemitida_substituida').length, 1);
+});
+
+test('BLOCKER-1: reconcile/resume/timer repetido (5 emissões, único start) → continua 1 ativa', async () => {
+  const store = novoStore(); const agora = { v: Date.now() }; const svc = criar(store, agora);
+  let ultima;
+  for (let i = 0; i < 5; i++) { agora.v += 30_000; ultima = await emitirPadrao(svc); }
+  assert.equal(ativas(store), 1, 'nunca acumula credenciais simultâneas');
+  assert.ok((await svc.validar({ token: ultima.delivery.reveal(), deviceId: DEV })).uid);
+  assert.equal(store.frete_tracking_credenciais.length, 5, 'históricas preservadas para auditoria');
+  assert.equal(store.frete_tracking_credenciais.filter((c) => c.revoked_reason === 'reemitida_substituida').length, 4);
+});
+
+test('BLOCKER-1: mudança legítima de escopo (nova viagem C) re-emite, revoga a anterior e mantém 1 ativa com escopo novo', async () => {
+  const store = novoStore(); const agora = { v: Date.now() }; const svc = criar(store, agora);
+  const rAB = await emitirPadrao(svc);
+  store.fretes.push({ id: 'frete-C', status: 'ativo', empresa_id: 'emp-1', motorista_id: 'mot-1' });
+  agora.v += 60_000;
+  const rABC = await emitirPadrao(svc);
+  assert.equal(ativas(store), 1);
+  assert.deepEqual([...rABC.fretes_escopo].sort(), ['frete-A', 'frete-B', 'frete-C']);
+  // Anti-resurrection: a credencial ANTIGA não volta a valer após a nova emissão.
+  await assert.rejects(() => svc.validar({ token: rAB.delivery.reveal(), deviceId: DEV }), (e) => e.code === 'tracking_credential_revoked');
+});
+
+test('BLOCKER-1: unicidade é por (session+device) — outro device não é revogado pela emissão', async () => {
+  const store = novoStore(); const agora = { v: Date.now() }; const svc = criar(store, agora);
+  await svc.emitir({ empresa_id: 'emp-1', motorista_id: 'mot-1', session_id: 'sess-1', device_id: 'device-1' });
+  agora.v += 60_000;
+  await svc.emitir({ empresa_id: 'emp-1', motorista_id: 'mot-1', session_id: 'sess-1', device_id: 'device-2' });
+  assert.equal(ativas(store), 2, 'cada device tem sua credencial operacional corrente');
 });

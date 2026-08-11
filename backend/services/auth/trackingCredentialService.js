@@ -81,10 +81,11 @@ function criarTrackingCredentialService({ supabase, cfg, crypto = defaultCrypto,
     const maxExpiresAt = domain.calcularMaxExpiracao(agoraMs, cfg.trackingCredentialMaxLifetimeSeconds);
     const expiresAt = domain.calcularExpiracao(agoraMs, cfg.trackingCredentialTtlSeconds, Date.parse(maxExpiresAt));
 
+    const issuedIso = new Date(agoraMs).toISOString();
     const { data: inserida, error } = await supabase.from(TABELA).insert({
       empresa_id, motorista_id, session_id, device_id,
       credential_hash: hash,
-      issued_at: new Date(agoraMs).toISOString(),
+      issued_at: issuedIso,
       expires_at: expiresAt,
       max_expires_at: maxExpiresAt,
     }).select('id').single();
@@ -93,6 +94,25 @@ function criarTrackingCredentialService({ supabase, cfg, crypto = defaultCrypto,
     const vinculos = escopo.map((freteId) => ({ credencial_id: inserida.id, frete_id: freteId }));
     const { error: erroVinculo } = await supabase.from(TABELA_FRETES).insert(vinculos);
     if (erroVinculo) throw unavailable(erroVinculo.message || 'erro ao gravar escopo da credencial');
+
+    // BLOCKER-1 (single_native_tracking_credential): UMA credencial operacional corrente por
+    // (session_id, device_id). O app re-chamava a emissão em cada reconcile/resume/timer de
+    // foreground e acumulava N credenciais VÁLIDAS simultâneas (superfície ampliada). Ao emitir
+    // a nova, revogamos atomicamente as ANTERIORES ATIVAS da MESMA sessão+device — mantendo só a
+    // mais nova (issued_at < a recém-emitida). Race-safe: a recém-emitida (issued_at = issuedIso)
+    // NUNCA é alvo (nada é mais novo que ela); sob emissões concorrentes a mais nova sempre
+    // sobrevive → converge para 1 ativa. Uma emissão LEGÍTIMA de novo escopo (nova viagem) também
+    // passa por aqui e substitui/revoga a anterior — nova viagem futura continua exigindo emissão
+    // SEC-1 autenticada (não reativa credencial antiga). Best-effort: falha aqui não invalida a
+    // credencial recém-emitida (apenas deixaria históricas ativas, corrigidas na próxima emissão).
+    try {
+      await supabase.from(TABELA)
+        .update({ revoked_at: issuedIso, revoked_reason: 'reemitida_substituida', updated_at: issuedIso })
+        .eq('session_id', session_id)
+        .eq('device_id', device_id)
+        .is('revoked_at', null)
+        .lt('issued_at', issuedIso);
+    } catch (_) { /* best-effort: cleanup nunca derruba a emissão corrente */ }
 
     return { delivery: new TrackingDelivery(token, expiresAt, maxExpiresAt), expiresAt, maxExpiresAt, fretes_escopo: escopo };
   }

@@ -62,6 +62,57 @@ class LocationTrackingService {
     ),
   );
 
+  // BLOCKER-1 (single_native_tracking_credential): estado da credencial de rastreamento
+  // CORRENTE, para NÃO re-emitir em cada reconcile/resume/timer de foreground. Antes,
+  // `_startSession` chamava `issueTrackingCredential()` incondicionalmente e o app
+  // acumulava dezenas de credenciais numa mesma sessão/device após um único start.
+  // Agora reusamos a credencial vigente enquanto: (a) o serviço nativo está ativo em modo
+  // credencial; (b) o ESCOPO (conjunto de viagens ativas) não mudou; (c) a credencial não
+  // está perto do vencimento nominal. Uma mudança legítima de escopo (nova viagem) tem
+  // assinatura diferente → nova emissão SEC-1 (que, no backend, substitui a anterior).
+  static bool _trackingActive = false;          // serviço nativo rodando
+  static bool _trackingModeCredential = false;  // último start foi em modo credencial (não legacy)
+  static String? _trackingScopeSig;             // assinatura do escopo (IDs de viagens ativas, ordenados)
+  static int _trackingCredentialExpiresAtMs = 0; // validade NOMINAL da credencial vigente
+  static const int _reuseMarginMs = 2 * 60 * 1000; // reusar só se faltar > 2 min p/ o vencimento
+
+  @visibleForTesting
+  static int issueCallsForTesting = 0; // instrumentação de teste: nº de emissões efetivas
+
+  @visibleForTesting
+  static void resetTrackingStateForTesting() {
+    _trackingActive = false;
+    _trackingModeCredential = false;
+    _trackingScopeSig = null;
+    _trackingCredentialExpiresAtMs = 0;
+    issueCallsForTesting = 0;
+  }
+
+  // Predicado PURO (testável sem plataforma): reusar a credencial vigente em vez de
+  // re-emitir? Só quando o nativo está ativo em modo credencial, o escopo pedido é o
+  // MESMO e a credencial ainda está longe do vencimento nominal.
+  @visibleForTesting
+  static bool shouldReuseCredential({
+    required bool active,
+    required bool credentialMode,
+    required String? currentSig,
+    required String? requestedSig,
+    required int expiresAtMs,
+    required int nowMs,
+  }) {
+    return active &&
+        credentialMode &&
+        requestedSig != null &&
+        requestedSig == currentSig &&
+        expiresAtMs > 0 &&
+        nowMs < expiresAtMs - _reuseMarginMs;
+  }
+
+  // Assinatura estável do escopo a partir da lista de fretes (exposta p/ teste).
+  @visibleForTesting
+  static String scopeSignatureForTesting(List<dynamic> fretes) =>
+      _activeTripIds(fretes).join(',');
+
   static Future<void> restoreSnapshot() async {
     final prefs = await SharedPreferences.getInstance();
     final statusName = prefs.getString(_statusKey);
@@ -77,17 +128,35 @@ class LocationTrackingService {
     List<dynamic> fretes, {
     bool requestPermission = false,
   }) async {
-    final activeTrips = _countActiveTrips(fretes);
-    if (activeTrips == 0) {
+    final activeIds = _activeTripIds(fretes);
+    if (activeIds.isEmpty) {
       await stop();
       return LocationTrackingStartResult.started;
     }
 
     final result = await _startSession(
-      activeTrips: activeTrips,
+      activeTrips: activeIds.length.clamp(1, 4),
       requestPermission: requestPermission,
+      scopeSignature: activeIds.join(','),
     );
     return result;
+  }
+
+  // IDs (ordenados) das viagens ATIVAS — assinatura estável do escopo. Reconcile com o
+  // MESMO conjunto de viagens não deve gerar nova credencial (BLOCKER-1). Só a lista de
+  // fretes (reconcile) conhece os IDs; chamadas por contagem passam scopeSignature=null.
+  static List<String> _activeTripIds(List<dynamic> fretes) {
+    final ids = <String>{};
+    for (final frete in fretes) {
+      if (frete is! Map) continue;
+      final status = (frete['status'] ?? '').toString();
+      final id = frete['id']?.toString();
+      if (id != null && id.isNotEmpty && _activeStatuses.contains(status)) {
+        ids.add(id);
+      }
+    }
+    final list = ids.toList()..sort();
+    return list;
   }
 
   static Future<LocationTrackingStartResult> startForActiveTrips({
@@ -197,10 +266,28 @@ class LocationTrackingService {
   static Future<LocationTrackingStartResult> _startSession({
     required int activeTrips,
     required bool requestPermission,
+    String? scopeSignature,
   }) async {
     if (!Platform.isAndroid) {
       await _persist(LocationTrackingStatus.unsupported, activeTrips);
       return LocationTrackingStartResult.unsupported;
+    }
+
+    // BLOCKER-1: se o serviço nativo já está ativo em modo credencial, com o MESMO escopo
+    // (mesmo conjunto de viagens) e a credencial vigente ainda longe do vencimento nominal,
+    // NÃO re-emitir. O nativo já roda e se auto-renova (rotação CAS). Evita a enxurrada de
+    // emissões por reconcile/resume/timer. scopeSignature=null (chamadas por contagem, sem
+    // IDs) não reusa — mas o backend deduplica para 1 credencial ativa por session+device.
+    if (shouldReuseCredential(
+      active: _trackingActive,
+      credentialMode: _trackingModeCredential,
+      currentSig: _trackingScopeSig,
+      requestedSig: scopeSignature,
+      expiresAtMs: _trackingCredentialExpiresAtMs,
+      nowMs: DateTime.now().millisecondsSinceEpoch,
+    )) {
+      await _persist(LocationTrackingStatus.active, activeTrips);
+      return LocationTrackingStartResult.started;
     }
 
     final serviceEnabled = await Geolocator.isLocationServiceEnabled();
@@ -241,6 +328,7 @@ class LocationTrackingService {
     }
 
     // SEC-1 (Opção C) — §B-1: emissão TRI-STATE da credencial escopada.
+    issueCallsForTesting++;
     final result = await ApiService.issueTrackingCredential();
 
     // FAIL-CLOSED: feature ON mas a emissão falhou → NÃO iniciar com o access token
@@ -252,9 +340,13 @@ class LocationTrackingService {
     }
 
     late final Map<String, dynamic> args;
+    var startedInCredentialMode = false;
+    var credentialExpiresAtMs = 0;
     if (result.outcome == TrackingIssueOutcome.credential && result.credential != null) {
       final c = result.credential!;
       final deviceId = await ApiService.currentDeviceId();
+      startedInCredentialMode = true;
+      credentialExpiresAtMs = c.expiresAtMs;
       args = <String, dynamic>{
         'token': c.credential,
         'baseUrl': ApiService.baseUrl,
@@ -276,6 +368,13 @@ class LocationTrackingService {
 
     try {
       await _channel.invokeMethod('start', args);
+      // BLOCKER-1: registra a credencial/escopo CORRENTE para o guard de reuso. Em modo
+      // legacy (flag OFF) não há credencial vigente → não reusar (o access token rotaciona
+      // e precisa ser re-empurrado ao nativo).
+      _trackingActive = true;
+      _trackingModeCredential = startedInCredentialMode;
+      _trackingScopeSig = startedInCredentialMode ? scopeSignature : null;
+      _trackingCredentialExpiresAtMs = credentialExpiresAtMs;
       await _persist(LocationTrackingStatus.active, activeTrips);
       return LocationTrackingStartResult.started;
     } catch (_) {
@@ -293,6 +392,12 @@ class LocationTrackingService {
         // Best-effort: o backend tambem rejeita viagem encerrada e o servico para.
       }
     }
+    // BLOCKER-1: encerrou o rastreamento → esquece a credencial corrente (novo start
+    // fará nova emissão legítima; logout/fim de viagem revogam no backend).
+    _trackingActive = false;
+    _trackingModeCredential = false;
+    _trackingScopeSig = null;
+    _trackingCredentialExpiresAtMs = 0;
     await _persist(LocationTrackingStatus.inactive, 0);
   }
 
