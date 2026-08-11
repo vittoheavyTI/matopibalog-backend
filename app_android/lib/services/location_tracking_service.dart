@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -73,15 +74,25 @@ class LocationTrackingService {
   static bool _trackingActive = false;          // serviço nativo rodando
   static bool _trackingModeCredential = false;  // último start foi em modo credencial (não legacy)
   static String? _trackingScopeSig;             // assinatura do escopo (IDs de viagens ativas, ordenados)
-  static int _trackingCredentialExpiresAtMs = 0; // validade NOMINAL da credencial vigente
-  static const int _reuseMarginMs = 2 * 60 * 1000; // reusar só se faltar > 2 min p/ o vencimento
+  // Reuso baseado no TETO ABSOLUTO (max_expires_at, ~7d), NÃO no vencimento nominal (~24h):
+  // o serviço nativo AUTO-RENOVA (rotação CAS) a credencial até o teto, mantendo a MESMA linha
+  // ativa. Basear o reuso no nominal fazia o Flutter re-emitir a cada ~24h e revogar a credencial
+  // renovada que o nativo estava usando (ponto 7 do reassessment). Após o teto → re-emite.
+  static int _trackingCredentialMaxExpiresAtMs = 0;
+  static const int _reuseMarginMs = 2 * 60 * 1000; // reusar só se faltar > 2 min p/ o teto
+
+  // Single-flight: serializa chamadas concorrentes de _startSession (reconcile + resume + timer
+  // podem coincidir). Com a serialização, a 2ª chamada roda APÓS a 1ª já ter marcado o estado →
+  // o guard de reuso evita a emissão duplicada (mesmo escopo). Camada client-side do BLOCKER-1.
+  static Future<void> _startLock = Future<void>.value();
 
   @visibleForTesting
   static void resetTrackingStateForTesting() {
     _trackingActive = false;
     _trackingModeCredential = false;
     _trackingScopeSig = null;
-    _trackingCredentialExpiresAtMs = 0;
+    _trackingCredentialMaxExpiresAtMs = 0;
+    _startLock = Future<void>.value();
   }
 
   // Predicado PURO (testável sem plataforma): reusar a credencial vigente em vez de
@@ -93,15 +104,15 @@ class LocationTrackingService {
     required bool credentialMode,
     required String? currentSig,
     required String? requestedSig,
-    required int expiresAtMs,
+    required int maxExpiresAtMs,
     required int nowMs,
   }) {
     return active &&
         credentialMode &&
         requestedSig != null &&
         requestedSig == currentSig &&
-        expiresAtMs > 0 &&
-        nowMs < expiresAtMs - _reuseMarginMs;
+        maxExpiresAtMs > 0 &&
+        nowMs < maxExpiresAtMs - _reuseMarginMs;
   }
 
   // Assinatura estável do escopo a partir da lista de fretes (exposta p/ teste).
@@ -259,7 +270,26 @@ class LocationTrackingService {
     }
   }
 
+  // BLOCKER-1 (single-flight): serializa as chamadas de _startSession. Duas chamadas
+  // concorrentes (reconcile + resume + timer) não emitem em paralelo — a 2ª só roda depois
+  // que a 1ª marcou o estado, permitindo o guard de reuso agir. Combina com a orquestração
+  // do backend e (futuramente) a garantia transacional do Postgres.
   static Future<LocationTrackingStartResult> _startSession({
+    required int activeTrips,
+    required bool requestPermission,
+    String? scopeSignature,
+  }) {
+    final prior = _startLock;
+    final gate = Completer<void>();
+    _startLock = gate.future;
+    return prior.then((_) => _startSessionInner(
+          activeTrips: activeTrips,
+          requestPermission: requestPermission,
+          scopeSignature: scopeSignature,
+        )).whenComplete(gate.complete);
+  }
+
+  static Future<LocationTrackingStartResult> _startSessionInner({
     required int activeTrips,
     required bool requestPermission,
     String? scopeSignature,
@@ -279,7 +309,7 @@ class LocationTrackingService {
       credentialMode: _trackingModeCredential,
       currentSig: _trackingScopeSig,
       requestedSig: scopeSignature,
-      expiresAtMs: _trackingCredentialExpiresAtMs,
+      maxExpiresAtMs: _trackingCredentialMaxExpiresAtMs,
       nowMs: DateTime.now().millisecondsSinceEpoch,
     )) {
       await _persist(LocationTrackingStatus.active, activeTrips);
@@ -336,12 +366,12 @@ class LocationTrackingService {
 
     late final Map<String, dynamic> args;
     var startedInCredentialMode = false;
-    var credentialExpiresAtMs = 0;
+    var credentialMaxExpiresAtMs = 0;
     if (result.outcome == TrackingIssueOutcome.credential && result.credential != null) {
       final c = result.credential!;
       final deviceId = await ApiService.currentDeviceId();
       startedInCredentialMode = true;
-      credentialExpiresAtMs = c.expiresAtMs;
+      credentialMaxExpiresAtMs = c.maxExpiresAtMs;
       args = <String, dynamic>{
         'token': c.credential,
         'baseUrl': ApiService.baseUrl,
@@ -369,7 +399,7 @@ class LocationTrackingService {
       _trackingActive = true;
       _trackingModeCredential = startedInCredentialMode;
       _trackingScopeSig = startedInCredentialMode ? scopeSignature : null;
-      _trackingCredentialExpiresAtMs = credentialExpiresAtMs;
+      _trackingCredentialMaxExpiresAtMs = credentialMaxExpiresAtMs;
       await _persist(LocationTrackingStatus.active, activeTrips);
       return LocationTrackingStartResult.started;
     } catch (_) {
@@ -392,7 +422,7 @@ class LocationTrackingService {
     _trackingActive = false;
     _trackingModeCredential = false;
     _trackingScopeSig = null;
-    _trackingCredentialExpiresAtMs = 0;
+    _trackingCredentialMaxExpiresAtMs = 0;
     await _persist(LocationTrackingStatus.inactive, 0);
   }
 

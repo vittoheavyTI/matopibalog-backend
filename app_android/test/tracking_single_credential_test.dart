@@ -6,9 +6,9 @@ import 'package:chofer_log/services/location_tracking_service.dart';
 /// guard de reuso e a assinatura de escopo (detecção de mudança legítima de viagens),
 /// sem depender de plataforma (Geolocator/MethodChannel).
 void main() {
-  const nominalTtlMs = 24 * 60 * 60 * 1000; // 24h nominal
+  const maxTtlMs = 7 * 24 * 60 * 60 * 1000; // teto absoluto (~7d)
   final now = DateTime.now().millisecondsSinceEpoch;
-  final validExpiry = now + nominalTtlMs;
+  final validExpiry = now + maxTtlMs;
 
   setUp(LocationTrackingService.resetTrackingStateForTesting);
 
@@ -45,7 +45,7 @@ void main() {
         LocationTrackingService.shouldReuseCredential(
           active: false, credentialMode: false,
           currentSig: null, requestedSig: 'f1,f2',
-          expiresAtMs: validExpiry, nowMs: now,
+          maxExpiresAtMs: validExpiry, nowMs: now,
         ),
         isFalse,
       );
@@ -56,7 +56,7 @@ void main() {
         LocationTrackingService.shouldReuseCredential(
           active: true, credentialMode: true,
           currentSig: 'f1,f2', requestedSig: 'f1,f2',
-          expiresAtMs: validExpiry, nowMs: now,
+          maxExpiresAtMs: validExpiry, nowMs: now,
         ),
         isTrue,
       );
@@ -67,18 +67,18 @@ void main() {
         LocationTrackingService.shouldReuseCredential(
           active: true, credentialMode: true,
           currentSig: 'f1,f2', requestedSig: 'f1,f2,f3',
-          expiresAtMs: validExpiry, nowMs: now,
+          maxExpiresAtMs: validExpiry, nowMs: now,
         ),
         isFalse,
       );
     });
 
-    test('credencial perto do vencimento nominal → NÃO reusa (re-emite/renova)', () {
+    test('credencial perto do TETO absoluto → NÃO reusa (re-emite)', () {
       expect(
         LocationTrackingService.shouldReuseCredential(
           active: true, credentialMode: true,
           currentSig: 'f1,f2', requestedSig: 'f1,f2',
-          expiresAtMs: now + 30 * 1000, nowMs: now, // 30s p/ expirar (< margem)
+          maxExpiresAtMs: now + 30 * 1000, nowMs: now, // 30s p/ expirar (< margem)
         ),
         isFalse,
       );
@@ -89,7 +89,7 @@ void main() {
         LocationTrackingService.shouldReuseCredential(
           active: true, credentialMode: false,
           currentSig: null, requestedSig: 'f1,f2',
-          expiresAtMs: 0, nowMs: now,
+          maxExpiresAtMs: 0, nowMs: now,
         ),
         isFalse,
       );
@@ -100,7 +100,7 @@ void main() {
         LocationTrackingService.shouldReuseCredential(
           active: true, credentialMode: true,
           currentSig: 'f1,f2', requestedSig: null,
-          expiresAtMs: validExpiry, nowMs: now,
+          maxExpiresAtMs: validExpiry, nowMs: now,
         ),
         isFalse,
       );
@@ -112,7 +112,7 @@ void main() {
         LocationTrackingService.shouldReuseCredential(
           active: false, credentialMode: false,
           currentSig: null, requestedSig: 'f1,f2',
-          expiresAtMs: 0, nowMs: now,
+          maxExpiresAtMs: 0, nowMs: now,
         ),
         isFalse,
       );
