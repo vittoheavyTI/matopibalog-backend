@@ -42,9 +42,18 @@ Não altera a compat do `guardTelemetria`.
   (`--dart-define`).
 
 ### Android
-- `AndroidManifest`: `allowBackup=true` + `dataExtractionRules` + `fullBackupContent`
-  excluindo o arquivo do `flutter_secure_storage` (tokens/refresh/device_id) de backup e
-  device-transfer. Preferências não sensíveis seguem no backup.
+- `AndroidManifest`: `allowBackup=true` + `dataExtractionRules` + `fullBackupContent`.
+- As regras excluem **todo o domínio `sharedpref`** (`<exclude domain="sharedpref"
+  path="." />`) de backup em nuvem e de device-transfer, nos dois regimes (API<=31 e
+  API 31+). **Por que o domínio inteiro, e não só `FlutterSecureStorage.xml`:**
+  `AuthProvider.tryAutoLogin()` migra o token legado de `SharedPreferences['token']`
+  para o secure storage; excluir só o arquivo do plugin deixaria o token legado
+  restaurável via SharedPreferences e re-migrado — quebrando a garantia de "instalação
+  limpa sem auth state restaurado". **Trade-off aceito:** preferências não críticas
+  (ex.: tema) não sobrevivem a backup/restore; segurança e determinismo de sessão têm
+  prioridade. O nome físico interno do arquivo do plugin **não** é usado.
+- Trava estática: `test/backup_exclusion_test.dart` garante a exclusão `sharedpref
+  path="."` nos dois regimes e que não se volta a depender do nome do arquivo do plugin.
 
 ### CI
 - `app-ci.yml`: passo de identidade + `--dart-define=GIT_SHA/APP_VERSION/APP_BUILD_NUMBER`

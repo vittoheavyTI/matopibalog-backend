@@ -1,18 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  SEC-1 hardening (Android 12+ / API 31+). O material de autenticação — access token,
-  refresh token e device_id — vive no flutter_secure_storage, cujo arquivo de
-  SharedPreferences no Android chama "FlutterSecureStorage". Esse arquivo NÃO deve
-  ser restaurado por backup em nuvem nem por transferência device-to-device: restaurar
-  refresh/token/binding de outro estado foi identificado como risco no laudo forense
-  (stale refresh / device binding indevido). Preferências não sensíveis (tema etc.)
-  seguem elegíveis ao backup normalmente.
+  SEC-1 hardening (Android 12+ / API 31+). Exclui TODO o domínio SharedPreferences de
+  backup em nuvem E de transferência device-to-device. Não basta excluir só o arquivo do
+  flutter_secure_storage: AuthProvider.tryAutoLogin() migra o token legado de
+  SharedPreferences['token'] para o secure storage, então um backup antigo com esse token
+  seria restaurado e re-migrado — quebrando a garantia de "instalação limpa sem auth state
+  restaurado". Trade-off aceito: preferências não críticas (ex.: tema) não sobrevivem a
+  backup/restore; segurança e determinismo de sessão têm prioridade. Ver docs/sec-1/12.
 -->
 <data-extraction-rules>
     <cloud-backup>
-        <exclude domain="sharedpref" path="FlutterSecureStorage.xml" />
+        <exclude domain="sharedpref" path="." />
     </cloud-backup>
     <device-transfer>
-        <exclude domain="sharedpref" path="FlutterSecureStorage.xml" />
+        <exclude domain="sharedpref" path="." />
     </device-transfer>
 </data-extraction-rules>
