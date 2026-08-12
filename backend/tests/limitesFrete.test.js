@@ -74,6 +74,9 @@ test('valor_tonelada_km invalido recusa e identifica o campo', () => {
   const acima = validarLimitesFrete({ valorToneladaKm: 10.0001 });
   assert.equal(acima.ok, false);
   assert.equal(acima.campo, 'valor_tonelada_km');
+  assert.equal(acima.valorAtual, 10.0001);
+  assert.equal(acima.limiteValor, VALOR_TONELADA_KM_MAX);
+  assert.match(acima.limite, /R\$ 10/);
   assert.equal(validarLimitesFrete({ valorToneladaKm: 10 }).ok, true);
 });
 
@@ -82,11 +85,18 @@ test('toneladas invalidas recusam e identificam o campo', () => {
   const acima = validarLimitesFrete({ toneladas: 100.001 });
   assert.equal(acima.ok, false);
   assert.equal(acima.campo, 'toneladas');
+  assert.equal(acima.valorAtual, 100.001);
+  assert.equal(acima.limiteValor, TONELADAS_MAX);
+  assert.match(acima.limite, /100 t/);
   assert.equal(validarLimitesFrete({ toneladas: 100 }).ok, true);
 });
 
 test('valor_frete respeita zero, negativo e teto', () => {
-  assert.equal(validarLimitesFrete({ modalidade: 'valor_fixo', valorFrete: 1000000.01 }).campo, 'valor_frete');
+  const acima = validarLimitesFrete({ modalidade: 'valor_fixo', valorFrete: 1000000.01 });
+  assert.equal(acima.campo, 'valor_frete');
+  assert.equal(acima.valorAtual, 1000000.01);
+  assert.equal(acima.limiteValor, VALOR_FRETE_MAX);
+  assert.match(acima.limite, /R\$ 1.000.000/);
   assert.equal(validarLimitesFrete({ modalidade: 'valor_fixo', valorFrete: 1000000 }).ok, true);
   assert.equal(validarLimitesFrete({ modalidade: 'valor_fixo', valorFrete: -1 }).campo, 'valor_frete');
   assert.equal(validarLimitesFrete({ modalidade: 'valor_fixo', valorFrete: 0 }).campo, 'valor_frete');
