@@ -145,20 +145,19 @@ class LocationTrackingService : Service() {
     }
 
     override fun onDestroy() {
-        stopEverything()
+        // Teardown de recursos SEM degradar TERMINAL: um encerramento terminal (stopSelf após
+        // erro/permissão/credencial morta) permanece TERMINAL até uma nova ação explícita; parada
+        // limpa/RUNNING colapsa para STOPPED. Não afeta fila/renew/liveness.
+        tearDownResources()
+        transitionOnDestroy()
         super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    // terminal=true → estado TERMINAL (erro/permissão/credencial morta; recuperação controlada
-    // permitida). terminal=false → STOPPED (parada limpa: ACTION_STOP, redelivery sem credencial,
-    // onDestroy). Ambos são "não-vivos" para o Flutter; a distinção é diagnóstica/semântica.
-    private fun stopEverything(terminal: Boolean = false) {
-        transitionTo(
-            if (terminal) LocationQueueLogic.NativeTrackingState.TERMINAL
-            else LocationQueueLogic.NativeTrackingState.STOPPED
-        )
+    // Libera recursos (updates do Fused, watchdog, receiver) SEM mexer no estado — reutilizado
+    // por stopEverything e por onDestroy (que preserva TERMINAL).
+    private fun tearDownResources() {
         try { fusedClient.removeLocationUpdates(locationCallback) } catch (_: Exception) {}
         updatesRequested = false
         cancelWatchdog()
@@ -166,6 +165,17 @@ class LocationTrackingService : Service() {
             try { unregisterReceiver(watchdogReceiver) } catch (_: Exception) {}
             watchdogRegistrado = false
         }
+    }
+
+    // terminal=true → estado TERMINAL (erro/permissão/credencial morta; recuperação controlada
+    // permitida). terminal=false → STOPPED (parada limpa: ACTION_STOP, redelivery sem credencial).
+    // Ambos são "não-vivos" para o Flutter; a distinção é diagnóstica/semântica.
+    private fun stopEverything(terminal: Boolean = false) {
+        transitionTo(
+            if (terminal) LocationQueueLogic.NativeTrackingState.TERMINAL
+            else LocationQueueLogic.NativeTrackingState.STOPPED
+        )
+        tearDownResources()
     }
 
     // ── Fonte primária: Fused requestLocationUpdates ────────────────────────────
@@ -599,6 +609,13 @@ class LocationTrackingService : Service() {
         @Synchronized private fun transitionTo(next: LocationQueueLogic.NativeTrackingState) {
             trackingState = next
             stateSinceElapsedMs = SystemClock.elapsedRealtime()
+        }
+
+        // Transição de teardown (onDestroy): PRESERVA TERMINAL; qualquer outro estado → STOPPED.
+        // Só transiciona se mudar (evita resetar a idade de um TERMINAL preservado).
+        @Synchronized private fun transitionOnDestroy() {
+            val next = LocationQueueLogic.stateAfterTeardown(trackingState)
+            if (next != trackingState) transitionTo(next)
         }
 
         // Marca STARTING SINCRONAMENTE, antes de startForegroundService — fecha a janela em que o

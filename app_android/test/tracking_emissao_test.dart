@@ -63,6 +63,23 @@ void main() {
     expect(r.outcome, TrackingIssueOutcome.failed);
   });
 
+  test('reason diagnóstico vai no header X-Tracking-Reason', () async {
+    final seen = <http.Request>[];
+    ApiService.setHttpClientForTesting(clienteQue(404, body: '{"error":"tracking_disabled"}', seen: seen));
+    await ApiService.issueTrackingCredential(reason: 'trip_started');
+    final emissao = seen.firstWhere((req) => req.url.path == emissaoPath);
+    expect(emissao.headers['X-Tracking-Reason'], 'trip_started');
+    expect(emissao.headers['X-Tracking-Device'], 'device-fixo-teste');
+  });
+
+  test('sem reason → header X-Tracking-Reason ausente (backend trata como unknown)', () async {
+    final seen = <http.Request>[];
+    ApiService.setHttpClientForTesting(clienteQue(404, body: '{"error":"tracking_disabled"}', seen: seen));
+    await ApiService.issueTrackingCredential();
+    final emissao = seen.firstWhere((req) => req.url.path == emissaoPath);
+    expect(emissao.headers.containsKey('X-Tracking-Reason'), isFalse);
+  });
+
   test('fail-closed: 500/409/403 → failed (nunca access token)', () async {
     for (final status in const [500, 502, 409, 403, 400]) {
       ApiService.setHttpClientForTesting(clienteQue(status, body: '{"error":"x"}'));

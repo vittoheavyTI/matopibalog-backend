@@ -1357,15 +1357,19 @@ class ApiService {
   ///   credential → credencial válida recebida.
   ///   failed → timeout/rede/5xx/409/403/payload inválido → o chamador NÃO pode iniciar
   ///            com access token; deve falhar de forma observável e permitir retry.
-  static Future<TrackingCredentialResult> issueTrackingCredential() async {
+  static Future<TrackingCredentialResult> issueTrackingCredential({String? reason}) async {
     try {
       final deviceId = await currentDeviceId();
+      // X-Tracking-Reason é DIAGNÓSTICO (correlação de log server-side). O backend só o usa para
+      // log sanitizado — nunca para autorização/escopo. Ausente/desconhecido → 'unknown' no backend.
+      final headers = <String, String>{'X-Tracking-Device': deviceId};
+      if (reason != null && reason.isNotEmpty) headers['X-Tracking-Reason'] = reason;
       final response = await _authenticatedJsonRequest(
         'POST',
         Uri.parse('$_baseUrl/fretes/localizacao/credencial'),
         body: const <String, dynamic>{},
         retryAfterAuthResponse: true,
-        extraHeaders: {'X-Tracking-Device': deviceId},
+        extraHeaders: headers,
       );
       AppLogger.api('ApiService', 'POST /fretes/localizacao/credencial', response.statusCode);
       if (response.statusCode == 201) {

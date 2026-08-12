@@ -10,6 +10,10 @@
 
 const { getTrackingRuntime } = require('../services/auth/trackingCredentialRuntime');
 const { lerTrackingToken, lerDeviceId } = require('../middlewares/trackingCredential');
+// Observabilidade DIAGNÓSTICA da emissão (credential storm hardening). Módulo PURO: o app envia
+// o motivo da tentativa no header X-Tracking-Reason; é usado APENAS para log de correlação —
+// NUNCA para autorização, escopo ou decisão de segurança, e NÃO é persistido.
+const { montarLogEmissao } = require('../services/auth/trackingEmissaoDiag');
 
 function respErro(res, error, statusPadrao, codePadrao) {
   const status = error?.httpStatus || statusPadrao;
@@ -50,6 +54,16 @@ exports.emitir = async (req, res) => {
       session_id: req.user.sid,
       device_id: deviceId,
     });
+
+    // Log de correlação SANITIZADO no Railway: permite ligar cada 201 a reason + sessão + device
+    // + scope_count SÓ pelos logs server-side (sem ADB). NUNCA loga credential/token/hash da
+    // credential — o token aberto sai apenas no corpo da resposta abaixo.
+    console.log('[trackingCredential:emitir] 201', montarLogEmissao({
+      req,
+      sid: req.user.sid,
+      deviceId,
+      scopeCount: fretes_escopo.length,
+    }));
 
     // O token aberto é entregue UMA vez, só no corpo desta resposta (nunca logado).
     return res.status(201).json({

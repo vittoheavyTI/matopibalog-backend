@@ -164,6 +164,27 @@ class LocationQueueLogicTest {
         assertFalse(LocationQueueLogic.nativeStateIsAlive(LocationQueueLogic.NativeTrackingState.TERMINAL))
     }
 
+    @Test fun state_after_teardown_preserva_TERMINAL_e_colapsa_o_resto_p_STOPPED() {
+        // onDestroy após um ramo terminal NÃO pode degradar TERMINAL→STOPPED (apagaria o diagnóstico).
+        assertEquals(
+            LocationQueueLogic.NativeTrackingState.TERMINAL,
+            LocationQueueLogic.stateAfterTeardown(LocationQueueLogic.NativeTrackingState.TERMINAL),
+        )
+        // Parada limpa / RUNNING / STARTING colapsam para STOPPED (process-death também é STOPPED).
+        assertEquals(
+            LocationQueueLogic.NativeTrackingState.STOPPED,
+            LocationQueueLogic.stateAfterTeardown(LocationQueueLogic.NativeTrackingState.RUNNING),
+        )
+        assertEquals(
+            LocationQueueLogic.NativeTrackingState.STOPPED,
+            LocationQueueLogic.stateAfterTeardown(LocationQueueLogic.NativeTrackingState.STARTING),
+        )
+        assertEquals(
+            LocationQueueLogic.NativeTrackingState.STOPPED,
+            LocationQueueLogic.stateAfterTeardown(LocationQueueLogic.NativeTrackingState.STOPPED),
+        )
+    }
+
     private fun now() = System.currentTimeMillis()
 
     @Test fun reconexao_flush_reenfileira_falha_transitoria_sem_perder() {

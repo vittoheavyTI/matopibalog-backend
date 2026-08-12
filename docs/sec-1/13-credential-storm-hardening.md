@@ -91,6 +91,31 @@ Tracking ON: revogar pelo **fluxo normal** (logout/stop) e comprovar `sessão an
 revogada` + `refresh family anterior revogada` + `0 tracking credentials operacionais ativas`.
 Nunca DELETE manual.
 
+## Follow-up (pré-Checkpoint A) — observabilidade server-side + semântica
+
+- **Observabilidade da emissão agora é SERVER-SIDE.** O app envia o motivo no header
+  **`X-Tracking-Reason`** no `POST /fretes/localizacao/credencial`. O backend
+  (`services/auth/trackingEmissaoDiag.js`) valida contra uma allowlist fechada
+  (`login_reconcile/finance_reconcile/trip_started/manual_enable/native_recovery`; ausente/
+  desconhecido → `unknown`) e **loga sanitizado no Railway** em cada 201:
+  `reason + session_id (prefixo do sid autenticado) + device_present/device_hash + scope_count +
+  result`. O reason é **exclusivamente diagnóstico** — nunca usado para autorização, escopo ou
+  qualquer decisão de segurança, e **não é persistido**. Nunca loga credential/access/refresh/hash
+  da credential. Assim cada `201 /credencial` é correlacionável no próximo Checkpoint A **só pelos
+  logs server-side**, sem ADB.
+- **`sid` removido do log client-side.** O client não hasheia mais o access token como “sid”
+  (era incorreto). A correlação de sessão é feita no backend, com o sid autenticado real.
+- **`TERMINAL` preservado no teardown.** `onDestroy` não degrada mais `TERMINAL → STOPPED`
+  (`LocationQueueLogic.stateAfterTeardown`): um encerramento terminal permanece `TERMINAL` até uma
+  nova ação explícita; parada limpa/RUNNING → `STOPPED`; process-death continua `STOPPED`
+  fail-safe. Sem efeito em fila offline/renew/liveness.
+
+## APK release — signing
+
+O APK release é **release-optimized, signing inalterado**: o `release` usa
+`signingConfig = signingConfigs.getByName("debug")` (`android/app/build.gradle.kts`) — assinado
+com a debug key, gradle intocado (não é “unsigned”).
+
 ## Não incluído / não autorizado
 
 Sem migration 065, sem deploy, sem Tracking ON, sem merge #414, sem Checkpoints B–G. Runtime só

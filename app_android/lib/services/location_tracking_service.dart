@@ -50,6 +50,24 @@ enum TrackingEmissionReason {
   nativeRecovery,   // serviço nativo morto/terminal → recuperação controlada
 }
 
+/// Nome de FIO (snake_case) do motivo diagnóstico, enviado no header X-Tracking-Reason do POST
+/// /credencial. É a allowlist que o backend aceita (qualquer outro valor → 'unknown' no backend).
+/// Diagnóstico apenas — o backend NUNCA o usa para autorização/escopo.
+String trackingReasonWire(TrackingEmissionReason r) {
+  switch (r) {
+    case TrackingEmissionReason.loginReconcile:
+      return 'login_reconcile';
+    case TrackingEmissionReason.financeReconcile:
+      return 'finance_reconcile';
+    case TrackingEmissionReason.tripStarted:
+      return 'trip_started';
+    case TrackingEmissionReason.manualEnable:
+      return 'manual_enable';
+    case TrackingEmissionReason.nativeRecovery:
+      return 'native_recovery';
+  }
+}
+
 class LocationTrackingSnapshot {
   final LocationTrackingStatus status;
   final int activeTrips;
@@ -104,10 +122,10 @@ class LocationTrackingService {
   // o guard de reuso evita a emissão duplicada (mesmo escopo). Camada client-side do BLOCKER-1.
   static Future<void> _startLock = Future<void>.value();
 
-  // Correlação diagnóstica (observabilidade): últimos device/session vistos, guardados só para
-  // logar HASH CURTO não sensível. Nunca usados como autorização; nunca logados em claro.
+  // Correlação diagnóstica client-side (log local): último device visto, guardado só para logar
+  // HASH CURTO não sensível. A correlação de SESSÃO fica no backend (que conhece o sid autenticado
+  // na emissão) — o cliente NÃO loga sid/hash de access token.
   static String? _lastDeviceIdForLog;
-  static String? _lastSessionTokenForLog;
 
   @visibleForTesting
   static void resetTrackingStateForTesting() {
@@ -116,7 +134,6 @@ class LocationTrackingService {
     _trackingScopeSig = null;
     _trackingCredentialMaxExpiresAtMs = 0;
     _lastDeviceIdForLog = null;
-    _lastSessionTokenForLog = null;
     _startLock = Future<void>.value();
   }
 
@@ -450,8 +467,11 @@ class LocationTrackingService {
       return LocationTrackingStartResult.started;
     }
     // Não reusou. 'recover' = havia estado marcado mas o nativo NÃO está vivo (morto/terminal):
-    // esquece o estado e segue para nova emissão legítima.
+    // esquece o estado e segue para nova emissão legítima. O motivo EFETIVO (recovery vira
+    // native_recovery) vale para o header diagnóstico e para o log.
     final isRecovery = decision == 'recover';
+    final effectiveReason =
+        isRecovery ? TrackingEmissionReason.nativeRecovery : reason;
     if (!alive) {
       _trackingActive = false;
       _trackingModeCredential = false;
@@ -495,10 +515,12 @@ class LocationTrackingService {
       await _persist(LocationTrackingStatus.missingSession, activeTrips);
       return LocationTrackingStartResult.missingSession;
     }
-    _lastSessionTokenForLog = token; // correlação diagnóstica (hash curto no log)
 
-    // SEC-1 (Opção C) — §B-1: emissão TRI-STATE da credencial escopada.
-    final result = await ApiService.issueTrackingCredential();
+    // SEC-1 (Opção C) — §B-1: emissão TRI-STATE da credencial escopada. O motivo diagnóstico
+    // (effectiveReason) segue no header X-Tracking-Reason p/ correlação server-side no Railway.
+    final result = await ApiService.issueTrackingCredential(
+      reason: trackingReasonWire(effectiveReason),
+    );
 
     // FAIL-CLOSED: feature ON mas a emissão falhou → NÃO iniciar com o access token
     // (isso reintroduziria o bug: rastreamento morre quando o access expira). Marca
@@ -506,7 +528,7 @@ class LocationTrackingService {
     if (result.outcome == TrackingIssueOutcome.failed) {
       await _persist(LocationTrackingStatus.failed, activeTrips);
       _logTrackingDecision(
-        reason: reason, state: nativeState, scopeSig: scopeSignature, result: 'failed',
+        reason: effectiveReason, state: nativeState, scopeSig: scopeSignature, result: 'failed',
       );
       return LocationTrackingStartResult.failed;
     }
@@ -550,7 +572,7 @@ class LocationTrackingService {
       _trackingCredentialMaxExpiresAtMs = credentialMaxExpiresAtMs;
       await _persist(LocationTrackingStatus.active, activeTrips);
       _logTrackingDecision(
-        reason: isRecovery ? TrackingEmissionReason.nativeRecovery : reason,
+        reason: effectiveReason,
         state: nativeState,
         scopeSig: scopeSignature,
         result: isRecovery ? 'recover' : 'issue',
@@ -560,7 +582,7 @@ class LocationTrackingService {
       await ApiService.reportLocationTrackingState('interrompida');
       await _persist(LocationTrackingStatus.failed, activeTrips);
       _logTrackingDecision(
-        reason: reason, state: nativeState, scopeSig: scopeSignature, result: 'stop',
+        reason: effectiveReason, state: nativeState, scopeSig: scopeSignature, result: 'stop',
       );
       return LocationTrackingStartResult.failed;
     }
@@ -585,7 +607,8 @@ class LocationTrackingService {
       'scope_count': scopeCount,
       'scope_sig': _shortHash(scopeSig),
       'device': _shortHash(_lastDeviceIdForLog),
-      'sid': _shortHash(_lastSessionTokenForLog),
+      // sid REMOVIDO do log client-side: a correlação de session_id é feita no backend, com o
+      // sid autenticado real (nunca hash de access token, que não é um session id).
     });
   }
 

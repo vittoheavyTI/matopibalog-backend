@@ -289,4 +289,14 @@ void main() {
       expect(emissoes, 1);
     });
   });
+
+  group('trackingReasonWire (nome de fio diagnóstico → allowlist do backend)', () {
+    test('mapeia cada motivo para snake_case da allowlist', () {
+      expect(trackingReasonWire(TrackingEmissionReason.loginReconcile), 'login_reconcile');
+      expect(trackingReasonWire(TrackingEmissionReason.financeReconcile), 'finance_reconcile');
+      expect(trackingReasonWire(TrackingEmissionReason.tripStarted), 'trip_started');
+      expect(trackingReasonWire(TrackingEmissionReason.manualEnable), 'manual_enable');
+      expect(trackingReasonWire(TrackingEmissionReason.nativeRecovery), 'native_recovery');
+    });
+  });
 }

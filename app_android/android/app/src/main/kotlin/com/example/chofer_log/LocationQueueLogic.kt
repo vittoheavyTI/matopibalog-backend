@@ -61,6 +61,16 @@ object LocationQueueLogic {
         state == NativeTrackingState.STARTING || state == NativeTrackingState.RUNNING
 
     /**
+     * Estado após um teardown de recursos (onDestroy). PRESERVA TERMINAL — um encerramento por
+     * erro/permissão/credencial morta continua semanticamente TERMINAL até uma nova ação explícita
+     * (novo start marca STARTING). Qualquer outro estado colapsa para STOPPED (parada limpa;
+     * process-death já reinicia o estático em STOPPED). Impede que o onDestroy que segue o
+     * stopSelf de um ramo terminal degrade TERMINAL→STOPPED e apague o diagnóstico.
+     */
+    fun stateAfterTeardown(current: NativeTrackingState): NativeTrackingState =
+        if (current == NativeTrackingState.TERMINAL) NativeTrackingState.TERMINAL else NativeTrackingState.STOPPED
+
+    /**
      * Classifica por CÓDIGO semântico + status HTTP.
      *  - 2xx → SENT (confirmado, remove da fila).
      *  - expired/rotated → RENEW (renova a credencial; NÃO descarta o ponto).
