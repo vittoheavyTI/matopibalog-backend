@@ -18,6 +18,9 @@ Map<String, dynamic> _loginBody({
     {
       'token': access,
       'refresh_token': refresh,
+      // Contrato do backend endurecido (SEC-1): o app mobile faz FAIL-CLOSED se a
+      // resposta não trouxer resolved_client_type == esperado (android) + refresh.
+      'resolved_client_type': 'android',
       'user': {
         'uid': 'motorista-1',
         'nome': 'Motorista Teste',
