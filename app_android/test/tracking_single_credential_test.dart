@@ -117,6 +117,20 @@ void main() {
         isFalse,
       );
     });
+
+    test('native isActive=false → NÃO reutiliza silenciosamente credencial', () {
+      expect(
+        LocationTrackingService.shouldReuseCredential(
+          active: false,
+          credentialMode: true,
+          currentSig: 'f1,f2',
+          requestedSig: 'f1,f2',
+          maxExpiresAtMs: validExpiry,
+          nowMs: now,
+        ),
+        isFalse,
+      );
+    });
   });
 
   group('liveness nativo (reassessment #3)', () {

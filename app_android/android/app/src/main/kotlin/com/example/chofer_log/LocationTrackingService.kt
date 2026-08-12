@@ -25,6 +25,7 @@ import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.example.chofer_log.LocationQueueLogic.SendResult
+import com.example.chofer_log.LocationQueueLogic.StartUpdatesResult
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.OutputStreamWriter
@@ -43,8 +44,8 @@ import kotlin.math.roundToInt
  *    pelo Android para localização confiável em background e resiliente a Doze — substitui o
  *    Handler.postDelayed (timer local suspenso pelo Doze) e o requestSingleUpdate assíncrono.
  *  - WATCHDOG (AlarmManager + broadcast local) NÃO é a fonte de pontos nem promete heartbeat de
- *    9-15min: serve APENAS para detectar ausência ANORMAL de callbacks e RECUPERAR (re-request +
- *    um getCurrentLocation pontual). setAndAllowWhileIdle NÃO é usado como garantia de latência.
+ *    9-15min: serve APENAS para detectar ausência ANORMAL de fix fresco/utilizável e RECUPERAR
+ *    (re-request + um getCurrentLocation pontual). setAndAllowWhileIdle NÃO é usado como garantia.
  *  - FRESCOR: captured_at = tempo REAL do fix (loc.time); idade calculada via elapsedRealtimeNanos;
  *    fixes acima de MAX_FIX_AGE_MS são descartados (nunca marcar coordenada velha como fresca).
  *  - WakeLock parcial cobre o envio de rede disparado pelo callback / watchdog.
@@ -88,7 +89,7 @@ class LocationTrackingService : Service() {
         }
     }
 
-    // Watchdog: só recupera ausência anormal de callbacks (não é a fonte de pontos).
+    // Watchdog: recupera ausência anormal de fix fresco/utilizável (não é a fonte de pontos).
     private val watchdogReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             runWatchdog()
@@ -129,10 +130,14 @@ class LocationTrackingService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        startLocationUpdates()
+        val startResult = startLocationUpdates()
+        if (startResult == StartUpdatesResult.TERMINAL) {
+            running = false
+            return START_NOT_STICKY
+        }
         registrarWatchdog()
         scheduleWatchdog()
-        running = true
+        running = LocationQueueLogic.nativeRunningAfterStart(startResult)
         // START_REDELIVER_INTENT: o último intent (START/renovação completo) e reentregue após
         // process-death → re-request dos updates + rearme do watchdog. Prova de runtime = recheck.
         return START_REDELIVER_INTENT
@@ -157,10 +162,12 @@ class LocationTrackingService : Service() {
     }
 
     // ── Fonte primária: Fused requestLocationUpdates ────────────────────────────
-    private fun startLocationUpdates() {
+    private fun startLocationUpdates(): StartUpdatesResult {
         if (!hasLocationPermission()) {
             Thread { reportState("permissao_nao_concedida") }.start()
-            stopEverything(); stopSelf(); return
+            stopEverything()
+            stopSelf()
+            return StartUpdatesResult.TERMINAL
         }
         // PRIORIDADE (reassessment #5): PRIORITY_HIGH_ACCURACY durante a VIAGEM ATIVA. O serviço
         // só roda enquanto há viagem em andamento (janela operacional curta e, tipicamente, com o
@@ -179,10 +186,16 @@ class LocationTrackingService : Service() {
             val agora = System.currentTimeMillis()
             lastCallbackAt = agora
             lastFreshFixAt = agora // grace: evita recuperação falsa antes do 1º fix
+            return StartUpdatesResult.STARTED
         } catch (_: SecurityException) {
             Thread { reportState("permissao_nao_concedida") }.start()
-            stopEverything(); stopSelf()
-        } catch (_: Exception) { /* best-effort; o watchdog tenta re-request */ }
+            stopEverything()
+            stopSelf()
+            return StartUpdatesResult.TERMINAL
+        } catch (_: Exception) {
+            updatesRequested = false
+            return StartUpdatesResult.RECOVERABLE
+        }
     }
 
     // Processa UM fix: valida frescor, aplica filtro (distância/heartbeat) e envia sob WakeLock.
@@ -231,7 +244,7 @@ class LocationTrackingService : Service() {
         return previous.distanceTo(location) >= MIN_DISTANCE_METERS
     }
 
-    // ── Watchdog: recupera ausência anormal de callbacks (NÃO é heartbeat garantido) ──
+    // ── Watchdog: recupera ausência anormal de fix fresco/utilizável (NÃO é heartbeat garantido) ──
     private fun registrarWatchdog() {
         if (watchdogRegistrado) return
         val filtro = android.content.IntentFilter(ACTION_WATCHDOG)
@@ -285,7 +298,7 @@ class LocationTrackingService : Service() {
                 try { fusedClient.removeLocationUpdates(locationCallback) } catch (_: Exception) {}
                 updatesRequested = false
                 recoverOneShotLocation() // administra o próprio WakeLock até a conclusão do Task
-                startLocationUpdates()
+                if (startLocationUpdates() == StartUpdatesResult.TERMINAL) return@Thread
             }
         }.start()
     }
@@ -592,7 +605,7 @@ class LocationTrackingService : Service() {
         private const val MIN_DISTANCE_METERS = 100f
         // Frescor: descarta fixes mais velhos que isto (nao atualizar Torre com stale).
         private const val MAX_FIX_AGE_MS = 3 * 60 * 1000L
-        // Watchdog: periodo do check e limiar de "ausencia anormal" de callbacks.
+        // Watchdog: periodo do check e limiar de "ausencia anormal" de fix fresco/utilizavel.
         private const val WATCHDOG_INTERVAL_MS = 8 * 60 * 1000L
         private const val WATCHDOG_STALE_MS = 5 * 60 * 1000L
         private const val QUEUE_LIMIT = 20

@@ -103,6 +103,12 @@ class LocationQueueLogicTest {
         assertFalse(LocationQueueLogic.watchdogNeedsRecovery(ultimoFresco, agora, 5 * 60_000L, true))
     }
 
+    @Test fun native_running_so_fica_true_quando_start_vivo_ou_recuperavel() {
+        assertTrue(LocationQueueLogic.nativeRunningAfterStart(LocationQueueLogic.StartUpdatesResult.STARTED))
+        assertTrue(LocationQueueLogic.nativeRunningAfterStart(LocationQueueLogic.StartUpdatesResult.RECOVERABLE))
+        assertFalse(LocationQueueLogic.nativeRunningAfterStart(LocationQueueLogic.StartUpdatesResult.TERMINAL))
+    }
+
     private fun now() = System.currentTimeMillis()
 
     @Test fun reconexao_flush_reenfileira_falha_transitoria_sem_perder() {

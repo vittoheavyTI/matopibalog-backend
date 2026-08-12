@@ -12,6 +12,22 @@ object LocationQueueLogic {
     enum class SendResult { SENT, KEEP, RENEW, STOP }
 
     /**
+     * Resultado explícito da tentativa de iniciar updates nativos. Evita tratar caminho terminal
+     * (stopSelf) como serviço vivo apenas porque onStartCommand foi chamado.
+     */
+    enum class StartUpdatesResult { STARTED, RECOVERABLE, TERMINAL }
+
+    /**
+     * `running` significa serviço nativo vivo e autorizado a manter/recoverar tracking.
+     * STARTED: Fused aceitou updates. RECOVERABLE: serviço segue vivo sem updates ativos e o
+     * watchdog pode tentar recovery. TERMINAL: serviço encerrou/encerrará limpo.
+     */
+    fun nativeRunningAfterStart(result: StartUpdatesResult): Boolean = when (result) {
+        StartUpdatesResult.STARTED, StartUpdatesResult.RECOVERABLE -> true
+        StartUpdatesResult.TERMINAL -> false
+    }
+
+    /**
      * Classifica por CÓDIGO semântico + status HTTP.
      *  - 2xx → SENT (confirmado, remove da fila).
      *  - expired/rotated → RENEW (renova a credencial; NÃO descarta o ponto).
