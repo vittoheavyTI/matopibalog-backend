@@ -7,6 +7,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'api_service.dart';
+import 'app_logger.dart';
 
 enum LocationTrackingStartResult {
   started,
@@ -30,6 +31,23 @@ enum LocationTrackingStatus {
   missingSession,
   unsupported,
   failed,
+}
+
+/// SEC-1 (credential storm hardening) — estado EXPLÍCITO do serviço nativo, espelhando a
+/// máquina de estados Kotlin (LocationQueueLogic.NativeTrackingState). `starting` e `running`
+/// são VIVOS: o serviço está inicializando legitimamente ou operando → o guard NÃO reemite.
+/// `stopped`/`terminal` são não-vivos → recuperação controlada (reemissão pela reconciliação).
+enum NativeTrackingState { stopped, starting, running, terminal }
+
+/// Motivo ENUMERADO (diagnóstico, nunca autorização) de uma tentativa de emissão/decisão de
+/// tracking. Permite provar a ORIGEM de uma emissão no próximo Checkpoint A sem depender de
+/// inferência temporal/ADB. Registrado sanitizado (sem token/credential/hash sensível).
+enum TrackingEmissionReason {
+  loginReconcile,   // 1º reconcile pós-login
+  financeReconcile, // FinanceProvider.loadData / refresh / pós-ação
+  tripStarted,      // criação/início de viagem → snapshot precisa incluir a nova viagem
+  manualEnable,     // usuário tocou "Ativar" (Home/Detalhe)
+  nativeRecovery,   // serviço nativo morto/terminal → recuperação controlada
 }
 
 class LocationTrackingSnapshot {
@@ -86,12 +104,19 @@ class LocationTrackingService {
   // o guard de reuso evita a emissão duplicada (mesmo escopo). Camada client-side do BLOCKER-1.
   static Future<void> _startLock = Future<void>.value();
 
+  // Correlação diagnóstica (observabilidade): últimos device/session vistos, guardados só para
+  // logar HASH CURTO não sensível. Nunca usados como autorização; nunca logados em claro.
+  static String? _lastDeviceIdForLog;
+  static String? _lastSessionTokenForLog;
+
   @visibleForTesting
   static void resetTrackingStateForTesting() {
     _trackingActive = false;
     _trackingModeCredential = false;
     _trackingScopeSig = null;
     _trackingCredentialMaxExpiresAtMs = 0;
+    _lastDeviceIdForLog = null;
+    _lastSessionTokenForLog = null;
     _startLock = Future<void>.value();
   }
 
@@ -120,22 +145,69 @@ class LocationTrackingService {
   static String scopeSignatureForTesting(List<dynamic> fretes) =>
       _activeTripIds(fretes).join(',');
 
-  // reassessment #3: liveness REAL do serviço nativo (autoridade do estado). Fail-safe: em
-  // qualquer incerteza (exceção/plataforma) retorna false → NÃO reusa (re-emite/recupera).
+  // Estado nativo tri-state (autoridade da liveness). Fail-safe: fora do Android ou em qualquer
+  // incerteza (exceção/plataforma/desconhecido) → `stopped` → NÃO reusa (re-emite/recupera).
   @visibleForTesting
-  static Future<bool> isNativeTrackingActive() async {
-    if (!Platform.isAndroid) return false;
+  static Future<NativeTrackingState> nativeTrackingState() async {
+    if (!Platform.isAndroid) return NativeTrackingState.stopped;
     try {
-      return parseIsActive(await _channel.invokeMethod('isActive'));
+      return parseNativeState(await _channel.invokeMethod('trackingState'));
     } catch (_) {
-      return false;
+      return NativeTrackingState.stopped;
     }
   }
 
-  // Parsing PURO da resposta do canal 'isActive' (testável). Só `true` booleano é ativo;
-  // null/qualquer outro → inativo (fail-safe → não reusa).
+  // Parsing PURO da resposta do canal 'trackingState' (testável). Só os nomes conhecidos são
+  // aceitos; null/qualquer outro → `stopped` (fail-safe → não reusa às cegas).
   @visibleForTesting
-  static bool parseIsActive(dynamic r) => r == true;
+  static NativeTrackingState parseNativeState(dynamic r) {
+    switch (r) {
+      case 'running':
+        return NativeTrackingState.running;
+      case 'starting':
+        return NativeTrackingState.starting;
+      case 'terminal':
+        return NativeTrackingState.terminal;
+      default:
+        return NativeTrackingState.stopped;
+    }
+  }
+
+  // STARTING e RUNNING são "vivos": o serviço está em inicialização legítima (janela da ack-race)
+  // ou operando → NÃO reemitir. Espelha LocationQueueLogic.nativeStateIsAlive no nativo.
+  @visibleForTesting
+  static bool nativeStateIsAlive(NativeTrackingState s) =>
+      s == NativeTrackingState.running || s == NativeTrackingState.starting;
+
+  // Decisão PURA de emissão (a MESMA usada pelo fluxo real — sem drift). Modela a máquina de
+  // reconciliação para o teste da aceitação (emit#1 → STARTING → reconcile → reconcile ⇒ 1
+  // emissão), já que o fluxo completo (_startSessionInner) só roda no Android (Platform.isAndroid).
+  //   'reuse'   → nativo VIVO (starting/running) + mesmo escopo + credencial longe do teto.
+  //   'recover' → havia estado marcado mas o nativo NÃO está vivo (morto/terminal).
+  //   'issue'   → 1ª emissão ou mudança legítima de escopo.
+  @visibleForTesting
+  static String classifyStartDecision({
+    required bool trackingActive,
+    required bool nativeAlive,
+    required bool credentialMode,
+    required String? currentSig,
+    required String? requestedSig,
+    required int maxExpiresAtMs,
+    required int nowMs,
+  }) {
+    if (shouldReuseCredential(
+      active: trackingActive && nativeAlive,
+      credentialMode: credentialMode,
+      currentSig: currentSig,
+      requestedSig: requestedSig,
+      maxExpiresAtMs: maxExpiresAtMs,
+      nowMs: nowMs,
+    )) {
+      return 'reuse';
+    }
+    if (trackingActive && !nativeAlive) return 'recover';
+    return 'issue';
+  }
 
   static Future<void> restoreSnapshot() async {
     final prefs = await SharedPreferences.getInstance();
@@ -148,9 +220,15 @@ class LocationTrackingService {
     _setSnapshot(status, activeTrips);
   }
 
+  // MÁQUINA DE RECONCILIAÇÃO CANÔNICA (Fase 4): a ÚNICA via que decide emitir/reusar/recuperar,
+  // sempre a partir do conjunto CANÔNICO de IDs de viagens ativas. Todos os fluxos que têm (ou
+  // podem obter) a lista de fretes passam por aqui — evita dois caminhos concorrentes disputando
+  // a mesma credencial. Escopo vazio → stop() (encerra tracking). O snapshot REAL do escopo é
+  // server-side na emissão; os IDs client-side são a assinatura de mudança de escopo.
   static Future<LocationTrackingStartResult> reconcileWithFretes(
     List<dynamic> fretes, {
     bool requestPermission = false,
+    TrackingEmissionReason reason = TrackingEmissionReason.financeReconcile,
   }) async {
     final activeIds = _activeTripIds(fretes);
     if (activeIds.isEmpty) {
@@ -162,6 +240,7 @@ class LocationTrackingService {
       activeTrips: activeIds.length.clamp(1, 4),
       requestPermission: requestPermission,
       scopeSignature: activeIds.join(','),
+      reason: reason,
     );
     return result;
   }
@@ -183,14 +262,39 @@ class LocationTrackingService {
     return list;
   }
 
+  // ENSURE-LIVENESS (Fase 4): caminho SEM conhecimento de escopo. NÃO decide emitir/reescopar
+  // credencial — isso é exclusivo da reconciliação por IDs (reconcileWithFretes). Se o serviço
+  // nativo está VIVO (starting/running) → nada a fazer ('started'). Se não está, NÃO fabrica
+  // escopo nem emite: a reconciliação canônica (Home refresh/loadData) fará a emissão/recuperação
+  // legítima. Mantido só por compatibilidade de API (startForTrip); os call-sites de UI passaram
+  // a usar reconcileWithFretes(ids). `activeTrips`/`requestPermission` preservados por assinatura.
   static Future<LocationTrackingStartResult> startForActiveTrips({
     int activeTrips = 1,
     bool requestPermission = false,
   }) async {
-    return _startSession(
-      activeTrips: activeTrips.clamp(1, 4),
-      requestPermission: requestPermission,
+    if (!Platform.isAndroid) {
+      await _persist(LocationTrackingStatus.unsupported, activeTrips);
+      return LocationTrackingStartResult.unsupported;
+    }
+    final estado = await nativeTrackingState();
+    if (nativeStateIsAlive(estado)) {
+      await _persist(LocationTrackingStatus.active, activeTrips.clamp(1, 4));
+      _logTrackingDecision(
+        reason: TrackingEmissionReason.manualEnable,
+        state: estado,
+        scopeSig: _trackingScopeSig,
+        result: 'reuse',
+      );
+      return LocationTrackingStartResult.started;
+    }
+    // Nativo não-vivo e sem escopo conhecido aqui: não emitir (evita storm/escopo fabricado).
+    _logTrackingDecision(
+      reason: TrackingEmissionReason.manualEnable,
+      state: estado,
+      scopeSig: null,
+      result: 'ensure_noop',
     );
+    return LocationTrackingStartResult.failed;
   }
 
   static Future<LocationTrackingStartResult> prepareForTripStart({
@@ -295,6 +399,7 @@ class LocationTrackingService {
     required int activeTrips,
     required bool requestPermission,
     String? scopeSignature,
+    required TrackingEmissionReason reason,
   }) {
     final prior = _startLock;
     final gate = Completer<void>();
@@ -303,6 +408,7 @@ class LocationTrackingService {
           activeTrips: activeTrips,
           requestPermission: requestPermission,
           scopeSignature: scopeSignature,
+          reason: reason,
         )).whenComplete(gate.complete);
   }
 
@@ -310,34 +416,43 @@ class LocationTrackingService {
     required int activeTrips,
     required bool requestPermission,
     String? scopeSignature,
+    required TrackingEmissionReason reason,
   }) async {
     if (!Platform.isAndroid) {
       await _persist(LocationTrackingStatus.unsupported, activeTrips);
       return LocationTrackingStartResult.unsupported;
     }
 
-    // BLOCKER-1: se o serviço nativo já está ativo em modo credencial, com o MESMO escopo
-    // (mesmo conjunto de viagens) e a credencial vigente ainda longe do vencimento nominal,
-    // NÃO re-emitir. O nativo já roda e se auto-renova (rotação CAS). Evita a enxurrada de
-    // emissões por reconcile/resume/timer. scopeSignature=null (chamadas por contagem, sem
-    // IDs) não reusa — mas o backend deduplica para 1 credencial ativa por session+device.
-    if (shouldReuseCredential(
-      active: _trackingActive,
+    // Estado nativo é a AUTORIDADE da liveness. STARTING (serviço em inicialização legítima —
+    // janela em que 'start' já deu ACK mas onStartCommand ainda não rodou) conta como VIVO:
+    // fecha a native_start_ack_race que revogava a credencial recém-emitida.
+    final nativeState = await nativeTrackingState();
+    final alive = nativeStateIsAlive(nativeState);
+
+    // Decisão de emissão (classificador PURO, mesma lógica testada). Reuso NÃO reemite nem em
+    // STARTING nem em RUNNING. scopeSignature=null NÃO reusa e NÃO deve chegar aqui: a decisão de
+    // emissão é exclusiva da reconciliação por IDs (Fase 4). O backend NÃO deduplica — cada POST
+    // cria uma credencial nova e revoga a anterior; por isso o guard client-side é essencial.
+    final decision = classifyStartDecision(
+      trackingActive: _trackingActive,
+      nativeAlive: alive,
       credentialMode: _trackingModeCredential,
       currentSig: _trackingScopeSig,
       requestedSig: scopeSignature,
       maxExpiresAtMs: _trackingCredentialMaxExpiresAtMs,
       nowMs: DateTime.now().millisecondsSinceEpoch,
-    )) {
-      // reassessment #3: o Flutter NÃO é a autoridade do estado nativo. O serviço pode ter
-      // feito stopSelf() sozinho (STOP semântico/credencial inválida/permissão). Só economiza
-      // a emissão se o serviço nativo estiver REALMENTE ativo — senão recupera (re-emite), em
-      // vez de fingir `started` (evita silent_dead_tracking).
-      if (await isNativeTrackingActive()) {
-        await _persist(LocationTrackingStatus.active, activeTrips);
-        return LocationTrackingStartResult.started;
-      }
-      // Nativo morreu/parou: esquece o estado e segue para nova emissão/recuperação.
+    );
+    if (decision == 'reuse') {
+      await _persist(LocationTrackingStatus.active, activeTrips);
+      _logTrackingDecision(
+        reason: reason, state: nativeState, scopeSig: scopeSignature, result: 'reuse',
+      );
+      return LocationTrackingStartResult.started;
+    }
+    // Não reusou. 'recover' = havia estado marcado mas o nativo NÃO está vivo (morto/terminal):
+    // esquece o estado e segue para nova emissão legítima.
+    final isRecovery = decision == 'recover';
+    if (!alive) {
       _trackingActive = false;
       _trackingModeCredential = false;
       _trackingScopeSig = null;
@@ -380,6 +495,7 @@ class LocationTrackingService {
       await _persist(LocationTrackingStatus.missingSession, activeTrips);
       return LocationTrackingStartResult.missingSession;
     }
+    _lastSessionTokenForLog = token; // correlação diagnóstica (hash curto no log)
 
     // SEC-1 (Opção C) — §B-1: emissão TRI-STATE da credencial escopada.
     final result = await ApiService.issueTrackingCredential();
@@ -389,6 +505,9 @@ class LocationTrackingService {
     // estado observável e permite retry (o reconcile tenta de novo no próximo ciclo).
     if (result.outcome == TrackingIssueOutcome.failed) {
       await _persist(LocationTrackingStatus.failed, activeTrips);
+      _logTrackingDecision(
+        reason: reason, state: nativeState, scopeSig: scopeSignature, result: 'failed',
+      );
       return LocationTrackingStartResult.failed;
     }
 
@@ -398,6 +517,7 @@ class LocationTrackingService {
     if (result.outcome == TrackingIssueOutcome.credential && result.credential != null) {
       final c = result.credential!;
       final deviceId = await ApiService.currentDeviceId();
+      _lastDeviceIdForLog = deviceId; // correlação diagnóstica (hash curto no log)
       startedInCredentialMode = true;
       credentialMaxExpiresAtMs = c.maxExpiresAtMs;
       args = <String, dynamic>{
@@ -429,12 +549,55 @@ class LocationTrackingService {
       _trackingScopeSig = startedInCredentialMode ? scopeSignature : null;
       _trackingCredentialMaxExpiresAtMs = credentialMaxExpiresAtMs;
       await _persist(LocationTrackingStatus.active, activeTrips);
+      _logTrackingDecision(
+        reason: isRecovery ? TrackingEmissionReason.nativeRecovery : reason,
+        state: nativeState,
+        scopeSig: scopeSignature,
+        result: isRecovery ? 'recover' : 'issue',
+      );
       return LocationTrackingStartResult.started;
     } catch (_) {
       await ApiService.reportLocationTrackingState('interrompida');
       await _persist(LocationTrackingStatus.failed, activeTrips);
+      _logTrackingDecision(
+        reason: reason, state: nativeState, scopeSig: scopeSignature, result: 'stop',
+      );
       return LocationTrackingStartResult.failed;
     }
+  }
+
+  // Observabilidade SANITIZADA (Fase 3) — prova a ORIGEM de qualquer emissão no próximo
+  // Checkpoint A sem ADB/inferência temporal. NUNCA loga token/credential/hash sensível: só
+  // reason enumerado, estado nativo, resultado e IDENTIFICADORES CURTOS não sensíveis do
+  // escopo/sessão/device (hashes curtos). Diagnóstico apenas — nunca autorização/security input.
+  static void _logTrackingDecision({
+    required TrackingEmissionReason reason,
+    required NativeTrackingState state,
+    required String? scopeSig,
+    required String result,
+  }) {
+    final scopeCount =
+        (scopeSig == null || scopeSig.isEmpty) ? 0 : scopeSig.split(',').length;
+    AppLogger.action('tracking_emission', params: {
+      'reason': reason.name,
+      'native_state': state.name,
+      'result': result, // reuse | issue | recover | failed | stop | ensure_noop
+      'scope_count': scopeCount,
+      'scope_sig': _shortHash(scopeSig),
+      'device': _shortHash(_lastDeviceIdForLog),
+      'sid': _shortHash(_lastSessionTokenForLog),
+    });
+  }
+
+  // Hash curto NÃO reversível (correlação diagnóstica, não sigilo). Entrada nula → '-'.
+  static String _shortHash(String? value) {
+    if (value == null || value.isEmpty) return '-';
+    var h = 0x811c9dc5; // FNV-1a 32-bit
+    for (final code in value.codeUnits) {
+      h ^= code;
+      h = (h * 0x01000193) & 0xffffffff;
+    }
+    return h.toRadixString(16).padLeft(8, '0');
   }
 
   static Future<void> stop() async {

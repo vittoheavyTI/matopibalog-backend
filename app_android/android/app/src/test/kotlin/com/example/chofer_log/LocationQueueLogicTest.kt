@@ -109,6 +109,61 @@ class LocationQueueLogicTest {
         assertFalse(LocationQueueLogic.nativeRunningAfterStart(LocationQueueLogic.StartUpdatesResult.TERMINAL))
     }
 
+    // ── máquina de estados nativa (credential storm hardening) ──────────────────
+    @Test fun state_after_start_started_ou_recuperavel_e_RUNNING_terminal_e_TERMINAL() {
+        assertEquals(
+            LocationQueueLogic.NativeTrackingState.RUNNING,
+            LocationQueueLogic.stateAfterStart(LocationQueueLogic.StartUpdatesResult.STARTED),
+        )
+        assertEquals(
+            LocationQueueLogic.NativeTrackingState.RUNNING,
+            LocationQueueLogic.stateAfterStart(LocationQueueLogic.StartUpdatesResult.RECOVERABLE),
+        )
+        assertEquals(
+            LocationQueueLogic.NativeTrackingState.TERMINAL,
+            LocationQueueLogic.stateAfterStart(LocationQueueLogic.StartUpdatesResult.TERMINAL),
+        )
+    }
+
+    @Test fun reported_state_starting_dentro_do_limite_continua_STARTING() {
+        // STARTING recente (inicialização legítima) permanece STARTING → Flutter NÃO reemite.
+        assertEquals(
+            LocationQueueLogic.NativeTrackingState.STARTING,
+            LocationQueueLogic.reportedState(LocationQueueLogic.NativeTrackingState.STARTING, 5_000L, 30_000L),
+        )
+    }
+
+    @Test fun reported_state_starting_travado_alem_do_limite_vira_TERMINAL_failsafe() {
+        // STARTING preso além do teto (startup travado) → TERMINAL → recuperação permitida.
+        assertEquals(
+            LocationQueueLogic.NativeTrackingState.TERMINAL,
+            LocationQueueLogic.reportedState(LocationQueueLogic.NativeTrackingState.STARTING, 31_000L, 30_000L),
+        )
+    }
+
+    @Test fun reported_state_nao_downgrada_running_stopped_terminal() {
+        // Só STARTING sofre downgrade por idade; os demais são reportados como estão.
+        assertEquals(
+            LocationQueueLogic.NativeTrackingState.RUNNING,
+            LocationQueueLogic.reportedState(LocationQueueLogic.NativeTrackingState.RUNNING, 10 * 60_000L, 30_000L),
+        )
+        assertEquals(
+            LocationQueueLogic.NativeTrackingState.STOPPED,
+            LocationQueueLogic.reportedState(LocationQueueLogic.NativeTrackingState.STOPPED, 10 * 60_000L, 30_000L),
+        )
+        assertEquals(
+            LocationQueueLogic.NativeTrackingState.TERMINAL,
+            LocationQueueLogic.reportedState(LocationQueueLogic.NativeTrackingState.TERMINAL, 10 * 60_000L, 30_000L),
+        )
+    }
+
+    @Test fun native_state_is_alive_starting_e_running_vivos_demais_nao() {
+        assertTrue(LocationQueueLogic.nativeStateIsAlive(LocationQueueLogic.NativeTrackingState.STARTING))
+        assertTrue(LocationQueueLogic.nativeStateIsAlive(LocationQueueLogic.NativeTrackingState.RUNNING))
+        assertFalse(LocationQueueLogic.nativeStateIsAlive(LocationQueueLogic.NativeTrackingState.STOPPED))
+        assertFalse(LocationQueueLogic.nativeStateIsAlive(LocationQueueLogic.NativeTrackingState.TERMINAL))
+    }
+
     private fun now() = System.currentTimeMillis()
 
     @Test fun reconexao_flush_reenfileira_falha_transitoria_sem_perder() {

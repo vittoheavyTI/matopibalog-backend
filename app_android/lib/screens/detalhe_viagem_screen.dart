@@ -157,7 +157,20 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
       _alterandoRastreamento = true;
       _rastreamentoMensagem = '';
     });
-    final result = await LocationTrackingService.startForActiveTrips(requestPermission: true);
+    // Fase 4: reconcilia pelo conjunto CANÔNICO de fretes (busca fresca) em vez de emitir por
+    // contagem sem escopo — garante a viagem atual no snapshot e evita storm/escopo fabricado.
+    // Falha de busca → o próximo refresh/loadData recupera pela reconciliação canônica.
+    LocationTrackingStartResult result;
+    try {
+      final fretes = await ApiService.getFretes();
+      result = await LocationTrackingService.reconcileWithFretes(
+        fretes,
+        requestPermission: true,
+        reason: TrackingEmissionReason.manualEnable,
+      );
+    } catch (_) {
+      result = LocationTrackingStartResult.failed;
+    }
     if (!mounted) {
       return;
     }

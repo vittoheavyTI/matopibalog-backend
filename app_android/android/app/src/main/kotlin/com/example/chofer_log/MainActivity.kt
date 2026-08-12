@@ -31,11 +31,11 @@ class MainActivity : FlutterActivity() {
                     LocationTrackingService.stop(this)
                     result.success(true)
                 }
-                // SEC-1 (reassessment #3): liveness REAL do serviço nativo. O Flutter NÃO é a
-                // autoridade do estado nativo — o serviço pode ter feito stopSelf() sozinho
-                // (STOP semântico/permissão/etc.). O guard de reuso consulta isto antes de
-                // "economizar" uma emissão, evitando silent_dead_tracking.
-                "isActive" -> result.success(LocationTrackingService.running)
+                // SEC-1 (credential storm hardening): estado EXPLÍCITO do serviço nativo
+                // (stopped|starting|running|terminal). O Flutter NÃO é a autoridade da liveness —
+                // consulta este estado antes de decidir reusar/reemitir. STARTING é VIVO (serviço
+                // em inicialização legítima) → o guard NÃO reemite nessa janela (fecha a ack-race).
+                "trackingState" -> result.success(LocationTrackingService.reportedStateName())
                 else -> result.notImplemented()
             }
         }

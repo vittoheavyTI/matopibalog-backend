@@ -28,6 +28,39 @@ object LocationQueueLogic {
     }
 
     /**
+     * SEC-1 (credential storm hardening) — máquina de estados EXPLÍCITA do serviço nativo,
+     * reportada ao Flutter para fechar a race de liveness (native_start_ack_race):
+     *  - STOPPED:  parado limpo (ou estado estático perdido por process-death — fail-safe).
+     *  - STARTING: start() disparado; ForegroundService ainda inicializando (janela em que o
+     *              MethodChannel 'start' JÁ deu ACK mas onStartCommand ainda NÃO rodou). É VIVO:
+     *              o Flutter NÃO deve reemitir credencial nessa janela.
+     *  - RUNNING:  onStartCommand aceitou a inicialização operacional (updates ativos/recuperáveis).
+     *  - TERMINAL: encerrou por erro/permissão/credencial morta → recuperação controlada permitida.
+     */
+    enum class NativeTrackingState { STOPPED, STARTING, RUNNING, TERMINAL }
+
+    /** Estado após onStartCommand a partir do resultado de iniciar os updates. */
+    fun stateAfterStart(result: StartUpdatesResult): NativeTrackingState = when (result) {
+        StartUpdatesResult.STARTED, StartUpdatesResult.RECOVERABLE -> NativeTrackingState.RUNNING
+        StartUpdatesResult.TERMINAL -> NativeTrackingState.TERMINAL
+    }
+
+    /**
+     * Estado EFETIVO reportado ao Flutter. Fail-safe de startup travado: um STARTING que passa
+     * de `startingMaxAgeMs` (relógio MONOTÔNICO no chamador) é reportado como TERMINAL — assim um
+     * ForegroundService que nunca chegou a RUNNING (startup preso) permite recuperação, sem sleep
+     * arbitrário. Limite explícito/documentado, usado APENAS como rede de segurança de startup.
+     */
+    fun reportedState(raw: NativeTrackingState, stateAgeMs: Long, startingMaxAgeMs: Long): NativeTrackingState {
+        if (raw == NativeTrackingState.STARTING && stateAgeMs > startingMaxAgeMs) return NativeTrackingState.TERMINAL
+        return raw
+    }
+
+    /** STARTING e RUNNING são "vivos" — o serviço está em inicialização legítima ou operando. */
+    fun nativeStateIsAlive(state: NativeTrackingState): Boolean =
+        state == NativeTrackingState.STARTING || state == NativeTrackingState.RUNNING
+
+    /**
      * Classifica por CÓDIGO semântico + status HTTP.
      *  - 2xx → SENT (confirmado, remove da fila).
      *  - expired/rotated → RENEW (renova a credencial; NÃO descarta o ponto).

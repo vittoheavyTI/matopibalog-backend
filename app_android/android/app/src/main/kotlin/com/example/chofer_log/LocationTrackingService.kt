@@ -132,12 +132,13 @@ class LocationTrackingService : Service() {
         }
         val startResult = startLocationUpdates()
         if (startResult == StartUpdatesResult.TERMINAL) {
-            running = false
+            // startLocationUpdates já fez stopEverything(terminal) nos ramos terminais.
             return START_NOT_STICKY
         }
         registrarWatchdog()
         scheduleWatchdog()
-        running = LocationQueueLogic.nativeRunningAfterStart(startResult)
+        // Inicialização operacional aceita → RUNNING (updates ativos ou recuperáveis pelo watchdog).
+        transitionTo(LocationQueueLogic.stateAfterStart(startResult))
         // START_REDELIVER_INTENT: o último intent (START/renovação completo) e reentregue após
         // process-death → re-request dos updates + rearme do watchdog. Prova de runtime = recheck.
         return START_REDELIVER_INTENT
@@ -150,8 +151,14 @@ class LocationTrackingService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    private fun stopEverything() {
-        running = false
+    // terminal=true → estado TERMINAL (erro/permissão/credencial morta; recuperação controlada
+    // permitida). terminal=false → STOPPED (parada limpa: ACTION_STOP, redelivery sem credencial,
+    // onDestroy). Ambos são "não-vivos" para o Flutter; a distinção é diagnóstica/semântica.
+    private fun stopEverything(terminal: Boolean = false) {
+        transitionTo(
+            if (terminal) LocationQueueLogic.NativeTrackingState.TERMINAL
+            else LocationQueueLogic.NativeTrackingState.STOPPED
+        )
         try { fusedClient.removeLocationUpdates(locationCallback) } catch (_: Exception) {}
         updatesRequested = false
         cancelWatchdog()
@@ -165,7 +172,7 @@ class LocationTrackingService : Service() {
     private fun startLocationUpdates(): StartUpdatesResult {
         if (!hasLocationPermission()) {
             Thread { reportState("permissao_nao_concedida") }.start()
-            stopEverything()
+            stopEverything(terminal = true)
             stopSelf()
             return StartUpdatesResult.TERMINAL
         }
@@ -189,7 +196,7 @@ class LocationTrackingService : Service() {
             return StartUpdatesResult.STARTED
         } catch (_: SecurityException) {
             Thread { reportState("permissao_nao_concedida") }.start()
-            stopEverything()
+            stopEverything(terminal = true)
             stopSelf()
             return StartUpdatesResult.TERMINAL
         } catch (_: Exception) {
@@ -201,7 +208,7 @@ class LocationTrackingService : Service() {
     // Processa UM fix: valida frescor, aplica filtro (distância/heartbeat) e envia sob WakeLock.
     private fun handleLocation(location: Location) {
         if (token == null || baseUrl == null) return
-        if (!hasLocationPermission()) { Thread { reportState("permissao_nao_concedida") }.start(); stopEverything(); stopSelf(); return }
+        if (!hasLocationPermission()) { Thread { reportState("permissao_nao_concedida") }.start(); stopEverything(terminal = true); stopSelf(); return }
         // FRESCOR ESTRITO (reassessment #4): sem timestamp REAL de captura → fix inválido,
         // NÃO é enviado (nunca inventar captured_at).
         if (location.time <= 0L) return
@@ -380,7 +387,7 @@ class LocationTrackingService : Service() {
                 SendResult.KEEP, SendResult.RENEW -> enqueue(payload)
                 SendResult.STOP -> {
                     if (mode == MODE_TRACKING) enqueue(payload) // preserva (nunca perde por stopSelf)
-                    stopEverything(); stopSelf()
+                    stopEverything(terminal = true); stopSelf()
                 }
             }
             res
@@ -424,7 +431,7 @@ class LocationTrackingService : Service() {
             }
         }
         if (falhas.isNotEmpty()) enqueueAll(falhas)
-        if (parar) { stopEverything(); stopSelf() }
+        if (parar) { stopEverything(terminal = true); stopSelf() }
     }
 
     // Renova (ROTACIONA) a credencial — só MODE_TRACKING. Aceita expirada dentro do teto.
@@ -433,7 +440,7 @@ class LocationTrackingService : Service() {
         val base = baseUrl ?: return false
         if (token == null) return false
         val now = System.currentTimeMillis()
-        if (maxExpiresAt in 1..now) { reportState("interrompida"); stopEverything(); stopSelf(); return false }
+        if (maxExpiresAt in 1..now) { reportState("interrompida"); stopEverything(terminal = true); stopSelf(); return false }
         return try {
             val conn = (URL("$base/fretes/localizacao/sessao/renovar-credencial").openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
@@ -461,7 +468,7 @@ class LocationTrackingService : Service() {
             } else {
                 val errorCode = readErrorCode(conn)
                 conn.disconnect()
-                if (LocationQueueLogic.classify(code, errorCode) == SendResult.STOP) { stopEverything(); stopSelf() }
+                if (LocationQueueLogic.classify(code, errorCode) == SendResult.STOP) { stopEverything(terminal = true); stopSelf() }
                 false
             }
         } catch (_: Exception) { false }
@@ -576,10 +583,35 @@ class LocationTrackingService : Service() {
     }
 
     companion object {
-        // Liveness REAL do serviço (consultado pelo MethodChannel 'isActive'). @Volatile:
-        // visível entre threads. Reflete o processo atual; se o processo morreu, volta a false
-        // até o serviço reiniciar (START_REDELIVER) — que o seta true de novo.
-        @Volatile var running: Boolean = false
+        // SEC-1 (credential storm hardening) — máquina de estados EXPLÍCITA do serviço, consultada
+        // pelo MethodChannel 'trackingState'. @Volatile: visível entre threads. Default STOPPED:
+        // process-death perde o estado estático → volta a STOPPED (NUNCA interpretado como RUNNING),
+        // preservando o fail-safe (o Flutter recupera). START_REDELIVER reexecuta onStartCommand,
+        // que volta a marcar RUNNING.
+        @Volatile private var trackingState: LocationQueueLogic.NativeTrackingState =
+            LocationQueueLogic.NativeTrackingState.STOPPED
+        // Instante (relógio MONOTÔNICO) da última transição — base do fail-safe de STARTING travado.
+        @Volatile private var stateSinceElapsedMs: Long = 0L
+        // Fail-safe de startup: STARTING que exceda isto (startup preso, sem chegar a RUNNING) é
+        // reportado como TERMINAL, permitindo recuperação. Rede de segurança, não cadência normal.
+        private const val STARTING_MAX_AGE_MS = 30 * 1000L
+
+        @Synchronized private fun transitionTo(next: LocationQueueLogic.NativeTrackingState) {
+            trackingState = next
+            stateSinceElapsedMs = SystemClock.elapsedRealtime()
+        }
+
+        // Marca STARTING SINCRONAMENTE, antes de startForegroundService — fecha a janela em que o
+        // MethodChannel 'start' dá ACK mas onStartCommand ainda não rodou (native_start_ack_race).
+        fun markStarting() = transitionTo(LocationQueueLogic.NativeTrackingState.STARTING)
+
+        // Estado EFETIVO para o Flutter (com downgrade fail-safe de STARTING travado por idade
+        // monotônica). Retorna o nome em minúsculas: stopped|starting|running|terminal.
+        @Synchronized fun reportedStateName(): String {
+            val idade = SystemClock.elapsedRealtime() - stateSinceElapsedMs
+            return LocationQueueLogic.reportedState(trackingState, idade, STARTING_MAX_AGE_MS)
+                .name.lowercase(Locale.US)
+        }
         private const val ACTION_STOP = "br.com.matopibalog.location.STOP"
         private const val ACTION_WATCHDOG = "br.com.matopibalog.location.WATCHDOG"
         private const val REQ_WATCHDOG = 4229
@@ -629,6 +661,9 @@ class LocationTrackingService : Service() {
                 putExtra(EXTRA_EXPIRES_AT, expiresAt)
                 putExtra(EXTRA_MAX_EXPIRES_AT, maxExpiresAt)
             }
+            // SÍNCRONO antes do disparo: marca STARTING para que uma consulta de liveness imediata
+            // (reconcile logo após o start) veja o serviço como VIVO e NÃO reemita credencial.
+            markStarting()
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent)
             else context.startService(intent)
         }

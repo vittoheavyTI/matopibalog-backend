@@ -55,9 +55,13 @@ class _HomeScreenState extends State<HomeScreen> {
       await LocationTrackingService.stop();
       return;
     }
-    final result = await LocationTrackingService.startForActiveTrips(
-      activeTrips: activeTrips,
+    // Fase 4: a Home JÁ tem a lista de fretes → reconcilia pelo conjunto CANÔNICO de IDs
+    // (não por contagem). Emissão/reuso decididos pela máquina de reconciliação, sem escopo
+    // fabricado nem storm.
+    final result = await LocationTrackingService.reconcileWithFretes(
+      finance.fretes,
       requestPermission: true,
+      reason: TrackingEmissionReason.manualEnable,
     );
     if (!mounted) return;
     final msg = _mensagemRastreamento(result);
