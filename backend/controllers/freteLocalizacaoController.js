@@ -223,6 +223,16 @@ exports.registrarSessao = async (req, res) => {
       return res.status(403).json({ message: 'Apenas o motorista autenticado pode enviar localizacao da viagem.' });
     }
 
+    // SEC-1 observabilidade (sem segredo): distingue telemetria por CREDENCIAL de
+    // rastreamento (authKind=tracking) da telemetria por SESSÃO/access token
+    // (authKind=session). Permite ver no E2E qual caminho o cliente usou SEM
+    // alterar a compat do guard. Nunca loga token/refresh.
+    console.info('[freteLocalizacao:telemetria]', JSON.stringify({
+      authKind: req.authKind === 'tracking' ? 'tracking' : 'session',
+      has_credential: Boolean(req.trackingCredentialId),
+      uid8: String(req.user?.uid || '').slice(0, 8),
+    }));
+
     const fretes = await buscarFretesParaTelemetria(req);
     if (!fretes.length) {
       return res.status(409).json({ error: 'tracking_trip_inactive', message: 'Compartilhamento pausado: nao ha viagem em andamento.' });

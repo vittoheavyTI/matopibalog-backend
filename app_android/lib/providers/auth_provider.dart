@@ -239,6 +239,33 @@ class AuthProvider extends ChangeNotifier {
       return false;
     }
 
+    // SEC-1 hardening (FAIL-CLOSED): o app só aceita a sessão se o backend RESOLVEU
+    // client_type=android E entregou refresh_token não vazio. Um contrato "web"
+    // (sem refresh / resolved_client_type=web) foi a causa do achado forense (sessão
+    // web em UA mobile). Aqui NÃO persistimos nada — devolvemos erro claro e paramos.
+    // Requer backend que ecoa resolved_client_type (SEC-1 hardening) — o APK novo e o
+    // backend novo DEVEM ser implantados juntos.
+    if (!ApiService.isHealthyMobileLoginResponse(
+      res,
+      expectedClientType: ApiService.expectedClientType,
+    )) {
+      _status = AuthStatus.error;
+      _error =
+          'Não foi possível iniciar uma sessão segura no aplicativo. Tente novamente; '
+          'se persistir, reinstale o app na versão mais recente.';
+      final refreshPresente = res['refresh_token'] is String &&
+          (res['refresh_token'] as String).trim().isNotEmpty;
+      AppLogger.action('login_error', params: {
+        'email': email,
+        'error': 'contrato_login_nao_mobile',
+        'resolved_client_type':
+            res['resolved_client_type']?.toString() ?? 'ausente',
+        'has_refresh': refreshPresente.toString(),
+      });
+      notifyListeners();
+      return false;
+    }
+
     final prefs = await SharedPreferences.getInstance();
     _token = res['token'];
     final refreshToken = res['refresh_token'] as String?;

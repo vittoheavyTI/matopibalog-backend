@@ -222,6 +222,11 @@ class ApiService {
       await _secureStorage.write(key: _tokenKey, value: accessToken);
       if (refreshToken != null && refreshToken.isNotEmpty) {
         await _secureStorage.write(key: _refreshTokenKey, value: refreshToken);
+      } else {
+        // SEC-1 hardening: sem refresh novo → NÃO deixar refresh antigo persistido.
+        // Sem isto, currentRefreshToken() relê e "ressuscita" um refresh de família
+        // obsoleta (achado do laudo: stale_refresh_risk). Fail-safe: apaga.
+        await _secureStorage.delete(key: _refreshTokenKey);
       }
     } else {
       await _secureStorage.delete(key: _tokenKey);
@@ -528,15 +533,23 @@ class ApiService {
   static Future<Map<String, dynamic>?> login(String email, String senha) async {
     AppLogger.action('login_attempt', params: {'email': email});
     try {
+      // SEC-1 hardening: device binding no login. device_id ESTÁVEL (mesmo usado
+      // pela credencial de rastreamento) + label sanitizado permitem provar, no
+      // backend, qual aparelho criou a sessão (o achado forense mostrou device_id
+      // ausente em todas as sessões). client_type=android é obrigatório aqui.
+      final deviceId = await currentDeviceId();
+      final deviceLabel = _deviceLabelSanitizado();
       final response = await _httpClient
           .post(
             Uri.parse('$_baseUrl/auth/login'),
             headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({
-              'email': email,
-              'senha': senha,
-              'client_type': Platform.isIOS ? 'ios' : 'android',
-            }),
+            body: jsonEncode(montarLoginBody(
+              email: email,
+              senha: senha,
+              clientType: expectedClientType,
+              deviceId: deviceId,
+              deviceLabel: deviceLabel,
+            )),
           )
           .timeout(const Duration(seconds: 20));
 
@@ -1279,6 +1292,64 @@ class ApiService {
     _deviceIdCache = id;
     return id;
   }
+
+  /// client_type que ESTE app deve enviar/receber. Fonte única para o login e para
+  /// o guard fail-closed (evita divergência entre o que enviamos e o que validamos).
+  static String get expectedClientType => Platform.isIOS ? 'ios' : 'android';
+
+  /// Label de device sanitizado (sem PII/segredo): só [A-Za-z0-9 ._-], até 120 chars.
+  static String _deviceLabelSanitizado() {
+    final os = Platform.isIOS ? 'ios' : 'android';
+    final raw = '$os ${Platform.operatingSystemVersion}';
+    final limpo = raw
+        .replaceAll(RegExp(r'[^A-Za-z0-9 ._\-]'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    return limpo.length > 120 ? limpo.substring(0, 120) : limpo;
+  }
+
+  /// SEC-1 hardening (FAIL-CLOSED) — predicado PURO e testável. Uma resposta de
+  /// login mobile só é saudável se o backend RESOLVEU o mesmo client_type esperado
+  /// (ex.: android) E entregou refresh_token não vazio. Um contrato "web" (sem
+  /// refresh e/ou resolved_client_type=web) indica binário/fluxo errado e NÃO deve
+  /// ser aceito silenciosamente como sessão mobile — foi exatamente o achado do
+  /// laudo forense (sessão client_type=web em UA Dart).
+  static bool isHealthyMobileLoginResponse(
+    Map<String, dynamic> resp, {
+    required String expectedClientType,
+  }) {
+    final resolved = resp['resolved_client_type'];
+    final refresh = resp['refresh_token'];
+    final resolvedOk = resolved is String && resolved == expectedClientType;
+    final refreshOk = refresh is String && refresh.trim().isNotEmpty;
+    return resolvedOk && refreshOk;
+  }
+
+  /// Monta o body do login (PURO/testável). Garante o device binding (device_id +
+  /// device_label) e o client_type em uma fonte única — usado por login().
+  static Map<String, dynamic> montarLoginBody({
+    required String email,
+    required String senha,
+    required String clientType,
+    required String deviceId,
+    required String deviceLabel,
+  }) =>
+      {
+        'email': email,
+        'senha': senha,
+        'client_type': clientType,
+        'device_id': deviceId,
+        'device_label': deviceLabel,
+      };
+
+  /// Regra PURA/testável do hardening: ao gravar tokens de forma PERSISTENTE sem um
+  /// refresh novo válido, o refresh antigo persistido deve ser APAGADO (não
+  /// ressuscitado por currentRefreshToken). Espelha o ramo de setSessionTokens.
+  static bool deveApagarRefreshPersistido({
+    required bool persistent,
+    required String? novoRefresh,
+  }) =>
+      persistent && (novoRefresh == null || novoRefresh.isEmpty);
 
   /// SEC-1 (Opção C) — §B-1: emite a credencial escopada. Retorno TRI-STATE:
   ///   disabled → o backend PROVOU que a feature está OFF (HTTP 404) → o chamador PODE

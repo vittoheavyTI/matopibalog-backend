@@ -203,6 +203,7 @@ test('SEC-1 compatible web: login cria sessão, entrega refresh só em cookie e 
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.token, 'access-sec1');
   assert.equal(res.body.refresh_token, undefined);
+  assert.equal(res.body.resolved_client_type, 'web');
   assert.equal(chamadas[0].client_type, 'web');
   assert.equal(res.cookies.find((c) => c.nome === 'refresh_token')?.opts.httpOnly, true);
   assert.equal(res.cookies.find((c) => c.nome === 'refresh_token')?.opts.sameSite, 'none');
@@ -245,6 +246,7 @@ test('SEC-1 compatible mobile: login cria sessão android e entrega refresh no b
   assert.equal(res.body.token, 'access-mobile');
   assert.equal(res.body.refresh_token, 'refresh-mobile');
   assert.equal(res.body.refresh_expires_at, '2026-09-01T00:00:00.000Z');
+  assert.equal(res.body.resolved_client_type, 'android');
   assert.equal(chamadas[0].client_type, 'android');
 });
 

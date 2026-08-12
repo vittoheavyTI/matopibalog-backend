@@ -41,10 +41,15 @@ jobs:
         working-directory: app_android
 
     steps:
-      - name: Checkout
+      # SEC-1 build identity: no evento pull_request, o github.sha é o MERGE-ref
+      # sintético — não o HEAD do PR. Fazemos checkout EXPLÍCITO do HEAD real do PR
+      # (head.sha), com fallback para github.sha em push/workflow_dispatch, para que
+      # o código COMPILADO seja exatamente o HEAD selado, não só o rótulo exibido.
+      - name: Checkout (HEAD real do PR; fallback github.sha)
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Setup Java (Temurin)
         uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3  # v4
@@ -68,6 +73,24 @@ jobs:
       - name: flutter pub get
         run: flutter pub get
 
+      # SEC-1 hardening: identidade de build injetada no APK via --dart-define.
+      # GIT_SHA = HEAD real do PR (head.sha) / github.sha em push — o MESMO ref do
+      # checkout acima. Versão/build derivados do pubspec. A assert garante a regra de
+      # aceitação: APK source SHA == PR head_sha == BuildInfo.gitSha.
+      - name: Identidade de build (dart-define) + assert HEAD==GIT_SHA
+        run: |
+          VER=$(grep '^version:' pubspec.yaml | sed 's/version:[[:space:]]*//')
+          HEAD_SHA="${{ github.event.pull_request.head.sha || github.sha }}"
+          echo "APP_VERSION=${VER%%+*}" >> "$GITHUB_ENV"
+          echo "APP_BUILD_NUMBER=${VER##*+}" >> "$GITHUB_ENV"
+          echo "GIT_SHA=${HEAD_SHA}" >> "$GITHUB_ENV"
+          ATUAL=$(git rev-parse HEAD)
+          echo "checkout HEAD=${ATUAL}  GIT_SHA=${HEAD_SHA}"
+          if [ "${ATUAL}" != "${HEAD_SHA}" ]; then
+            echo "::error::Identidade de build inconsistente: HEAD (${ATUAL}) != GIT_SHA (${HEAD_SHA})"
+            exit 1
+          fi
+
       - name: flutter analyze
         run: flutter analyze
 
@@ -75,14 +98,22 @@ jobs:
         run: flutter test --reporter expanded
 
       - name: flutter build apk --debug (sem signing/keystore)
-        run: flutter build apk --debug
+        run: >-
+          flutter build apk --debug
+          --dart-define=GIT_SHA=${{ env.GIT_SHA }}
+          --dart-define=APP_VERSION=${{ env.APP_VERSION }}
+          --dart-define=APP_BUILD_NUMBER=${{ env.APP_BUILD_NUMBER }}
 
       - name: Testes JVM nativos (LocationQueueLogic — fila offline)
         working-directory: app_android/android
         run: ./gradlew :app:testDebugUnitTest --console=plain
 
       - name: flutter build apk --release (evidencia manual)
-        run: flutter build apk --release
+        run: >-
+          flutter build apk --release
+          --dart-define=GIT_SHA=${{ env.GIT_SHA }}
+          --dart-define=APP_VERSION=${{ env.APP_VERSION }}
+          --dart-define=APP_BUILD_NUMBER=${{ env.APP_BUILD_NUMBER }}
 
       - name: Upload APK debug (artifact — sem signing)
         if: success()

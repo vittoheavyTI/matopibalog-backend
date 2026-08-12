@@ -534,26 +534,47 @@ exports.login = async (req, res) => {
     const client_type = clientTypeAuth(req);
 
     if (cfg.sessionsEnabled && sessionService) {
+      const deviceIdEntrada = req.body?.device_id || null;
       const sessao = await sessionService.criarSessao({
         usuario_id: userData.id,
         empresa_id: userData.empresa_id,
         client_type,
-        device_id: req.body?.device_id || null,
+        device_id: deviceIdEntrada,
         device_label: req.body?.device_label || null,
         role: userData.tipo,
         is_super_admin: userData.is_super_admin ?? false,
         user_agent: String(req.headers['user-agent'] || '').slice(0, 512),
       });
 
+      // Observabilidade de login SANITIZADA (SEC-1 hardening): permite correlacionar
+      // qual client_type foi RESOLVIDO pelo backend e se o device binding chegou, sem
+      // NUNCA registrar token, refresh ou senha. Usado no diagnóstico do achado
+      // client_type=web em UA mobile (ver docs/sec-1 forensic).
+      console.info('[auth.login]', JSON.stringify({
+        event: 'sessao_criada',
+        session_id: sessao.session?.id || null,
+        resolved_client_type: client_type,
+        has_device_id: Boolean(deviceIdEntrada),
+        user_agent: String(req.headers['user-agent'] || '').slice(0, 120),
+        uid8: String(userData.id || '').slice(0, 8),
+      }));
+
       if (client_type === 'web') {
         setRefreshCookie(res, sessao.refreshDelivery, cfg);
-        return res.status(200).json({ token: sessao.accessToken, user: userResponse });
+        // resolved_client_type explícito na resposta (sem segredo): o cliente mobile
+        // usa isso para FAIL-CLOSED quando recebe um contrato web indevido.
+        return res.status(200).json({
+          token: sessao.accessToken,
+          resolved_client_type: client_type,
+          user: userResponse,
+        });
       }
 
       return res.status(200).json({
         token: sessao.accessToken,
         refresh_token: sessao.refreshDelivery.reveal(),
         refresh_expires_at: sessao.refreshDelivery.expiresAt,
+        resolved_client_type: client_type,
         user: userResponse,
       });
     }

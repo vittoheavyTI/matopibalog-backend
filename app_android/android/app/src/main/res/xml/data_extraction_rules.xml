@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SEC-1 hardening (Android 12+ / API 31+). O material de autenticação — access token,
+  refresh token e device_id — vive no flutter_secure_storage, cujo arquivo de
+  SharedPreferences no Android chama "FlutterSecureStorage". Esse arquivo NÃO deve
+  ser restaurado por backup em nuvem nem por transferência device-to-device: restaurar
+  refresh/token/binding de outro estado foi identificado como risco no laudo forense
+  (stale refresh / device binding indevido). Preferências não sensíveis (tema etc.)
+  seguem elegíveis ao backup normalmente.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="FlutterSecureStorage.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="FlutterSecureStorage.xml" />
+    </device-transfer>
+</data-extraction-rules>

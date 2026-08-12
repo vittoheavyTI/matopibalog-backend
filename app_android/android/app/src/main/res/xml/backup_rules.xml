@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SEC-1 hardening (Android 11 / API < 31, Auto Backup legado). Exclui o arquivo do
+  flutter_secure_storage ("FlutterSecureStorage") do backup automático, para que
+  access token, refresh token e device_id NÃO sejam restaurados. Ver
+  data_extraction_rules.xml (API 31+) e o laudo forense SEC-1.
+-->
+<full-backup-content>
+    <exclude domain="sharedpref" path="FlutterSecureStorage.xml" />
+</full-backup-content>
