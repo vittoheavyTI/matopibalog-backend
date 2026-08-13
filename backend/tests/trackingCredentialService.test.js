@@ -195,6 +195,17 @@ test('revogarDaSessao/DoMotorista revogam → uso rejeitado', async () => {
   }
 });
 
+// REGRESSÃO D1 (fechamento SEC-1): NÃO deve existir revogador por `frete_id`. A tabela 064
+// `frete_tracking_credenciais` não tem coluna frete_id (escopo = snapshot imutável na tabela de
+// vínculo). Um `revogarDoFrete` filtrando `.eq('frete_id', …)` quebraria em runtime ("column does
+// not exist"). A revogação ao fim/cancelamento de viagem é por `revogarDoMotorista` (via hook).
+test('D1: serviço NÃO expõe revogarDoFrete (coluna frete_id inexistente); só sessão/motorista', () => {
+  const store = novoStore(); const agora = { v: Date.now() }; const svc = criar(store, agora);
+  assert.equal(typeof svc.revogarDoFrete, 'undefined', 'revogarDoFrete não deve existir (coluna frete_id removida na 064)');
+  assert.equal(typeof svc.revogarDaSessao, 'function');
+  assert.equal(typeof svc.revogarDoMotorista, 'function');
+});
+
 const ativas = (store) => store.frete_tracking_credenciais.filter((c) => !c.revoked_at).length;
 
 test('BLOCKER-1: re-emissão na mesma sessão+device → 1 ativa (mais nova); anterior revogada (reemitida_substituida)', async () => {

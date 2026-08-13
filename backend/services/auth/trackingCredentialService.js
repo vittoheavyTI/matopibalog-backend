@@ -247,11 +247,16 @@ function criarTrackingCredentialService({ supabase, cfg, crypto = defaultCrypto,
 
   const revogarDoMotorista = (motoristaId, motivo = 'logout') => _revogarPor('motorista_id', motoristaId, motivo);
   const revogarDaSessao = (sessionId, motivo = 'logout') => _revogarPor('session_id', sessionId, motivo);
-  const revogarDoFrete = (freteId, motivo = 'viagem_encerrada') => _revogarPor('frete_id', freteId, motivo);
+  // NOTA (SEC-1 fechamento): NÃO existe revogação por `frete_id`. A tabela 064
+  // `frete_tracking_credenciais` NÃO tem coluna frete_id (o escopo de viagens é o SNAPSHOT
+  // imutável em `frete_tracking_credencial_fretes`). A revogação ao fim/cancelamento de viagem
+  // é feita por `revogarDoMotorista` via `trackingRevocacaoHook.revogarTrackingSeSemViagemAtiva`
+  // (só quando o motorista NÃO tem mais viagem ativa). Um revogador por `frete_id` filtraria uma
+  // coluna inexistente (erro em runtime) — por isso foi removido.
 
   return {
     emitir, validar, renovar,
-    revogarDoMotorista, revogarDaSessao, revogarDoFrete,
+    revogarDoMotorista, revogarDaSessao,
     STATUS_FRETE_ATIVO,
     TrackingDelivery,
   };
