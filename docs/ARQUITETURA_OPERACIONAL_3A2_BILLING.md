@@ -28,7 +28,8 @@ render. O Asaas é o provedor externo; o webhook + reconciliação mantêm o loc
   hash-divergence, reclaim de stale via compare-and-swap, `next_retry_at`, erros sanitizados).
 - `empresa_funcionalidades` (add-ons faturáveis: `preco_mensal_centavos`, `billing_component_id`).
 
-**Migration nova:** `066_billing_outbox.sql`. A `065` fica reservada ao #417.
+**Migration nova da 3A-2:** `066_billing_outbox.sql`. A `065_fretes_financeiro_auditoria.sql`
+vem do #417 e deve existir antes da aplicação da 066 em ambientes compartilhados.
 
 ## 3. Componentes 3A-2 (novos, `backend/services/billing/`)
 

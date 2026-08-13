@@ -65,8 +65,9 @@
 ## Rollback / desativar automação sem apagar dados
 - Definir `BILLING_PROVIDER_MODE=fake` (ou remover o adapter sandbox) → nenhuma
   chamada externa; o núcleo continua planejando/observando (dry).
-- Reverter o deploy por SHA (Railway/Pages) sem tocar em dados: 3A-2 não adiciona
-  migration; as colunas/tabelas usadas já existiam.
+- Reverter o deploy por SHA (Railway/Pages) sem tocar em dados. A 3A-2 adiciona a
+  migration `066_billing_outbox.sql`; se ela já tiver sido aplicada, desativar o
+  runner/provider é o rollback operacional sem apagar dados.
 - Menu "Billing" pode ser ocultado no Sidebar como mini-rollback de UI.
 
 ## Investigação sem expor secrets

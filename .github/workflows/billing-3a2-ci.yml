@@ -69,7 +69,7 @@ jobs:
       - name: Billing fake/unit tests (sem DB, sem segredo)
         run: node --test tests/billing*.test.js
 
-      - name: Apply isolated schema (pre-bootstrap + 060 + 061 + 062 + 064 + 066)
+      - name: Apply isolated schema (pre-bootstrap + 060 + 061 + 062 + 064 + 065 + 066)
         run: npm run test:pg:apply
 
       - name: PG outbox concurrency (billing_outbox.pgtest.mjs)
