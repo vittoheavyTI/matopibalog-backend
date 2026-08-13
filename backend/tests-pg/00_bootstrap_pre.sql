@@ -44,9 +44,15 @@ CREATE TABLE IF NOT EXISTS public.empresas (
 -- Tabela `fretes` mínima — pré-requisito do FK frete_id da migration 064
 -- (frete_tracking_credenciais). SOMENTE colunas tocadas pelos testes; 100% sintética.
 CREATE TABLE IF NOT EXISTS public.fretes (
-  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  empresa_id   uuid NULL,
-  motorista_id uuid NULL,
-  status       text NULL,
-  data         timestamptz NULL
+  id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  empresa_id          uuid NULL,
+  motorista_id        uuid NULL,
+  status              text NULL,
+  data                timestamptz NULL,
+  modalidade_calculo  text NULL,
+  toneladas           numeric NULL,
+  valor_tonelada_km   numeric NULL,
+  valor_frete         numeric NULL,
+  km_inicial          numeric NULL,
+  km_final            numeric NULL
 );

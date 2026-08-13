@@ -66,51 +66,46 @@ const executarUpdate = async (frete, body = {}) => {
 test('PATCH parcial em legado tonelada_km >10 continua rejeitado sem persistir KM', async () => {
   const { resposta, capt } = await executarUpdate(freteTonKmLegado(), { km_final: 800 });
   assert.equal(resposta.status, 422);
-  assert.equal(resposta.body.error, 'frete_operational_limit');
-  assert.equal(resposta.body.field, 'valor_tonelada_km');
-  assert.equal(resposta.body.current_value, 245);
-  assert.equal(resposta.body.max_value, 10);
-  assert.match(resposta.body.message, /valor por tonelada\/km/i);
+  assert.equal(resposta.body.error, 'frete_financial_correction_endpoint_required');
+  assert.match(resposta.body.message, /correcao financeira auditada/i);
   assert.equal(capt.updatePayload, undefined, 'PATCH parcial nao pode gravar KM sobre legado invalido');
 });
 
-test('update explicito tonelada_km >10 continua rejeitado', async () => {
+test('update explicito tonelada_km exige endpoint auditado', async () => {
   const { resposta, capt } = await executarUpdate(
     freteTonKmLegado({ valor_tonelada_km: 0.2 }),
     { valor_tonelada_km: 245 },
   );
   assert.equal(resposta.status, 422);
-  assert.equal(resposta.body.field, 'valor_tonelada_km');
+  assert.equal(resposta.body.error, 'frete_financial_correction_endpoint_required');
   assert.equal(capt.updatePayload, undefined);
 });
 
-test('corrigir explicitamente legado para escala valida permite update e deriva valor_frete', async () => {
+test('corrigir explicitamente legado pelo PATCH generico fica bloqueado para auditoria', async () => {
   const { resposta, capt } = await executarUpdate(
     freteTonKmLegado(),
     { valor_tonelada_km: 0.245, km_final: 800 },
   );
-  assert.equal(resposta.status, 200);
-  assert.equal(capt.updatePayload.valor_tonelada_km, 0.245);
-  assert.equal(capt.updatePayload.km_final, 800);
-  assert.equal(capt.updatePayload.valor_frete, 978.78);
+  assert.equal(resposta.status, 422);
+  assert.equal(resposta.body.error, 'frete_financial_correction_endpoint_required');
+  assert.equal(capt.updatePayload, undefined);
 });
 
-test('depois de corrigido, PATCH de KM funciona e preserva formula canonica', async () => {
+test('depois de corrigido, PATCH de KM tambem exige correcao auditada', async () => {
   const { resposta, capt } = await executarUpdate(
     freteTonKmLegado({ valor_tonelada_km: 0.245 }),
     { km_final: 800 },
   );
-  assert.equal(resposta.status, 200);
-  assert.equal(capt.updatePayload.km_final, 800);
-  assert.equal(capt.updatePayload.valor_frete, 978.78);
+  assert.equal(resposta.status, 422);
+  assert.equal(resposta.body.error, 'frete_financial_correction_endpoint_required');
+  assert.equal(capt.updatePayload, undefined);
 });
 
-test('update valor_fixo nao sofre regressao', async () => {
+test('update nao financeiro nao sofre regressao', async () => {
   const { resposta, capt } = await executarUpdate(
     freteTonKmLegado({ modalidade_calculo: 'valor_fixo', toneladas: null, valor_tonelada_km: null, valor_frete: 100 }),
-    { valor_frete: 250, origem: 'Ajustada' },
+    { origem: 'Ajustada' },
   );
   assert.equal(resposta.status, 200);
-  assert.equal(capt.updatePayload.valor_frete, 250);
   assert.equal(capt.updatePayload.origem, 'Ajustada');
 });

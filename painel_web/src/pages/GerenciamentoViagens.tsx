@@ -35,6 +35,21 @@ type DocumentoFretePendente = {
   file: File;
 };
 
+const STATUS_CORRECAO_FINANCEIRA = new Set(['ativo', 'pendente']);
+const STATUS_FINANCEIRO_READONLY = new Set(['finalizado', 'cancelado']);
+
+const numeroOuNull = (valor: unknown): number | null => {
+  if (valor === null || valor === undefined || valor === '') return null;
+  const n = Number(valor);
+  return Number.isFinite(n) ? n : null;
+};
+
+const numeroIgual = (a: unknown, b: unknown): boolean => {
+  const nA = numeroOuNull(a);
+  const nB = numeroOuNull(b);
+  return nA === nB;
+};
+
 export const GerenciamentoViagens: React.FC = () => {
   const [fretes, setFretes] = useState<any[]>([]);
   const [motoristas, setMotoristas] = useState<any[]>([]);
@@ -149,6 +164,7 @@ export const GerenciamentoViagens: React.FC = () => {
     status: 'ativo',
     data: format(new Date(), 'yyyy-MM-dd')
   });
+  const [correcaoFinanceiraReason, setCorrecaoFinanceiraReason] = useState('');
 
   const [despesas, setDespesas] = useState<any[]>([]);
   const [abastecimentos, setAbastecimentos] = useState<any[]>([]);
@@ -397,6 +413,7 @@ export const GerenciamentoViagens: React.FC = () => {
 
   const openNewModal = (motId?: string) => {
     setEditingFrete(null);
+    setCorrecaoFinanceiraReason('');
     selecionarFotoInicial(null);
     setDocumentosNovoFrete([]);
     setTipoDocumentoNovoFrete('cte');
@@ -431,6 +448,7 @@ export const GerenciamentoViagens: React.FC = () => {
 
   const openEditModal = (frete: any) => {
     setEditingFrete(frete);
+    setCorrecaoFinanceiraReason('');
     setInlineRecovery(null);
     selecionarFotoInicial(null);
     setDocumentosNovoFrete([]);
@@ -450,6 +468,27 @@ export const GerenciamentoViagens: React.FC = () => {
       data: frete.data ? format(new Date(frete.data), 'yyyy-MM-dd') : ''
     });
     setShowModal(true);
+  };
+
+  const montarCamposCorrecaoFinanceira = () => {
+    if (!editingFrete) return {};
+    const fields: any = {};
+    const modalidadeAtual = editingFrete.modalidade_calculo || 'valor_fixo';
+    if (formData.modalidade_calculo !== modalidadeAtual) fields.modalidade_calculo = formData.modalidade_calculo;
+
+    for (const campo of ['km_inicial', 'km_final'] as const) {
+      if (!numeroIgual(formData[campo], editingFrete[campo])) fields[campo] = numeroOuNull(formData[campo]);
+    }
+
+    if (formData.modalidade_calculo === 'tonelada_km') {
+      for (const campo of ['toneladas', 'valor_tonelada_km'] as const) {
+        if (!numeroIgual(formData[campo], editingFrete[campo])) fields[campo] = numeroOuNull(formData[campo]);
+      }
+    } else if (!numeroIgual(formData.valor_frete, editingFrete.valor_frete)) {
+      fields.valor_frete = numeroOuNull(formData.valor_frete);
+    }
+
+    return fields;
   };
 
   const handleSave = async () => {
@@ -536,7 +575,39 @@ export const GerenciamentoViagens: React.FC = () => {
         if (editingFrete.status === 'pendente' && !editingFrete.foto_odometro_inicial_path) {
           payload.status = 'pendente';
         }
-        await api.patch('/fretes/' + editingFrete.id, {...payload});
+        const camposFinanceiros = montarCamposCorrecaoFinanceira();
+        const temCorrecaoFinanceira = Object.keys(camposFinanceiros).length > 0;
+        if (temCorrecaoFinanceira && !STATUS_CORRECAO_FINANCEIRA.has(editingFrete.status)) {
+          alert('Fretes finalizados ou cancelados ficam somente leitura para correção financeira.');
+          return;
+        }
+        if (temCorrecaoFinanceira && correcaoFinanceiraReason.trim().length < 8) {
+          alert('Informe o motivo da correção financeira.');
+          return;
+        }
+
+        const payloadOperacional: any = {};
+        if ((formData.origem || '') !== (editingFrete.origem || '')) payloadOperacional.origem = payload.origem;
+        if ((formData.destino || '') !== (editingFrete.destino || '')) payloadOperacional.destino = payload.destino;
+        if ((payload.quem_recebeu || '') !== (editingFrete.quem_recebeu || '')) payloadOperacional.quem_recebeu = payload.quem_recebeu;
+        if ((payload.status || '') !== (editingFrete.status || '')) payloadOperacional.status = payload.status;
+        if ((payload.data || '') !== (editingFrete.data ? format(new Date(editingFrete.data), 'yyyy-MM-dd') : '')) payloadOperacional.data = payload.data;
+
+        if (temCorrecaoFinanceira && Object.keys(payloadOperacional).length > 0) {
+          alert('Salve a correção financeira separadamente das demais alterações do frete.');
+          return;
+        }
+
+        if (temCorrecaoFinanceira) {
+          await api.post('/fretes/' + editingFrete.id + '/correcao-financeira', {
+            fields: camposFinanceiros,
+            reason: correcaoFinanceiraReason.trim(),
+            request_id: newClientRequestId(),
+            correction_type: 'manual_legacy_financial_correction',
+          });
+        } else if (Object.keys(payloadOperacional).length > 0) {
+          await api.patch('/fretes/' + editingFrete.id, payloadOperacional);
+        }
         freteId = editingFrete.id;
       } else {
         // Na CRIAÇÃO enviamos quem_recebeu (autônomo travado em 'motorista'; vinculado escolhe,
@@ -1559,6 +1630,18 @@ export const GerenciamentoViagens: React.FC = () => {
     : erroSanidadeValorFixo(formData.valor_frete);
   const legadoIncompativelModal = Boolean(editingFrete && formData.modalidade_calculo === 'tonelada_km' && sanidadeFreteErro);
   const valorTonKmForaLimiteModal = legadoIncompativelModal && Number(formData.valor_tonelada_km) > 10;
+  const financeiroReadOnly = Boolean(editingFrete && STATUS_FINANCEIRO_READONLY.has(editingFrete.status));
+  const camposCorrecaoFinanceiraModal = montarCamposCorrecaoFinanceira();
+  const correcaoFinanceiraNecessaria = Boolean(editingFrete && Object.keys(camposCorrecaoFinanceiraModal).length > 0);
+  const motivoCorrecaoInvalido = correcaoFinanceiraNecessaria
+    && STATUS_CORRECAO_FINANCEIRA.has(editingFrete?.status)
+    && correcaoFinanceiraReason.trim().length < 8;
+  const salvarDesabilitado = isSubmitting || !!sanidadeFreteErro || motivoCorrecaoInvalido || (correcaoFinanceiraNecessaria && financeiroReadOnly);
+  const textoBotaoSalvar = isSubmitting
+    ? 'Salvando...'
+    : correcaoFinanceiraNecessaria && STATUS_CORRECAO_FINANCEIRA.has(editingFrete?.status)
+      ? 'Corrigir dados financeiros'
+      : 'Salvar';
 
   return (
 
@@ -1617,6 +1700,11 @@ export const GerenciamentoViagens: React.FC = () => {
                       <p className="mt-1">Este frete foi criado antes dos limites operacionais atuais. Não altere o valor sem confirmar o dado comercial correto.</p>
                     </div>
                   </div>
+                </div>
+              )}
+              {financeiroReadOnly && freteTonKmIncompativelAtual(editingFrete) && (
+                <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700">
+                  Frete finalizado ou cancelado: dados financeiros ficam somente leitura e não podem ser corrigidos por este fluxo.
                 </div>
               )}
               <div className="grid grid-cols-2 gap-3">
@@ -1687,7 +1775,7 @@ export const GerenciamentoViagens: React.FC = () => {
               )}
               <div className="grid grid-cols-2 gap-3">
                 <div><label className="block text-xs font-bold text-gray-600 uppercase mb-1">Modalidade de Cálculo</label>
-                  <select className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white outline-none focus:border-blue-500" value={formData.modalidade_calculo} onChange={e => setFormData({...formData, modalidade_calculo: e.target.value})}>
+                  <select disabled={financeiroReadOnly} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white outline-none focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed" value={formData.modalidade_calculo} onChange={e => setFormData({...formData, modalidade_calculo: e.target.value})}>
                     <option value="valor_fixo">Valor fixo</option>
                     <option value="tonelada_km">Tonelada / km</option>
                   </select>
@@ -1699,12 +1787,12 @@ export const GerenciamentoViagens: React.FC = () => {
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Toneladas *</label>
-                      <input type="number" step="0.001" min="0" max={TONELADAS_MAX} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" value={formData.toneladas} onChange={e => setFormData({...formData, toneladas: e.target.value})} placeholder="Ex.: 30" />
+                      <input disabled={financeiroReadOnly} type="number" step="0.001" min="0" max={TONELADAS_MAX} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed" value={formData.toneladas} onChange={e => setFormData({...formData, toneladas: e.target.value})} placeholder="Ex.: 30" />
                       <p className="text-[10px] text-gray-400 mt-0.5">Peso da carga, até {TONELADAS_MAX} t.</p>
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Valor por Tonelada/km (R$/t·km) *</label>
-                      <input type="number" step="0.0001" min="0" className={`w-full border rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500 ${valorTonKmForaLimiteModal ? 'border-amber-400 bg-amber-50' : 'border-gray-200'}`} value={formData.valor_tonelada_km} onChange={e => setFormData({...formData, valor_tonelada_km: e.target.value})} placeholder="Ex.: 0,20" />
+                      <input disabled={financeiroReadOnly} type="number" step="0.0001" min="0" className={`w-full border rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed ${valorTonKmForaLimiteModal ? 'border-amber-400 bg-amber-50' : 'border-gray-200'}`} value={formData.valor_tonelada_km} onChange={e => setFormData({...formData, valor_tonelada_km: e.target.value})} placeholder="Ex.: 0,20" />
                       <p className="text-[10px] text-gray-400 mt-0.5">Valor por tonelada a cada km. Ex.: 0,20 = R$ 0,20.</p>
                     </div>
                   </div>
@@ -1743,7 +1831,7 @@ export const GerenciamentoViagens: React.FC = () => {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Valor do Frete *</label>
-                    <input type="number" step="0.01" min="0" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" value={formData.valor_frete} onChange={e => setFormData({...formData, valor_frete: e.target.value})} placeholder="0,00" />
+                    <input disabled={financeiroReadOnly} type="number" step="0.01" min="0" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed" value={formData.valor_frete} onChange={e => setFormData({...formData, valor_frete: e.target.value})} placeholder="0,00" />
                     {sanidadeFreteErro && (
                       <p className="text-[11px] text-red-600 mt-1 flex items-start"><AlertTriangle size={12} className="mr-1 mt-0.5 shrink-0" />{sanidadeFreteErro}</p>
                     )}
@@ -1752,9 +1840,21 @@ export const GerenciamentoViagens: React.FC = () => {
                 </div>
               )}
               <div className="grid grid-cols-2 gap-3">
-                <div><label className="block text-xs font-bold text-gray-600 uppercase mb-1">KM Inicial {editingFrete && editingFrete.status === 'pendente' && !editingFrete.foto_odometro_inicial_path ? '*' : '(opcional)'}</label><input type="number" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" value={formData.km_inicial} onChange={e => setFormData({...formData, km_inicial: e.target.value})} placeholder="0" /></div>
-                <div><label className="block text-xs font-bold text-gray-600 uppercase mb-1">KM Final</label><input type="number" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" value={formData.km_final} onChange={e => setFormData({...formData, km_final: e.target.value})} placeholder="0" /></div>
+                <div><label className="block text-xs font-bold text-gray-600 uppercase mb-1">KM Inicial {editingFrete && editingFrete.status === 'pendente' && !editingFrete.foto_odometro_inicial_path ? '*' : '(opcional)'}</label><input disabled={financeiroReadOnly} type="number" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed" value={formData.km_inicial} onChange={e => setFormData({...formData, km_inicial: e.target.value})} placeholder="0" /></div>
+                <div><label className="block text-xs font-bold text-gray-600 uppercase mb-1">KM Final</label><input disabled={financeiroReadOnly} type="number" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-500 disabled:cursor-not-allowed" value={formData.km_final} onChange={e => setFormData({...formData, km_final: e.target.value})} placeholder="0" /></div>
               </div>
+              {correcaoFinanceiraNecessaria && STATUS_CORRECAO_FINANCEIRA.has(editingFrete?.status) && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+                  <label className="block text-xs font-bold text-amber-900 uppercase mb-1">Motivo da correção financeira *</label>
+                  <textarea
+                    value={correcaoFinanceiraReason}
+                    onChange={e => setCorrecaoFinanceiraReason(e.target.value)}
+                    className="w-full min-h-[80px] resize-y rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm outline-none focus:border-amber-500"
+                    placeholder="Descreva a fonte e o motivo da correção."
+                  />
+                  <p className="mt-1 text-[11px] text-amber-800">A correção será gravada com auditoria e sem sugestão automática de conversão.</p>
+                </div>
+              )}
               <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-3 space-y-2">
                 <label className="text-xs font-bold text-blue-800 uppercase flex items-center">
                   <Camera size={15} className="mr-1.5" />Foto do odômetro inicial {editingFrete?.foto_odometro_inicial_path ? '(substituir)' : (editingFrete && editingFrete.status === 'pendente' ? '*' : '(opcional)')}
@@ -1792,8 +1892,8 @@ export const GerenciamentoViagens: React.FC = () => {
             </div>
             <div className="p-5 pt-0 flex justify-end gap-3">
               <button onClick={() => setShowModal(false)} className="px-4 py-2 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">Cancelar</button>
-              <button onClick={handleSave} disabled={isSubmitting || !!sanidadeFreteErro} title={sanidadeFreteErro || undefined} className="px-4 py-2 text-sm font-bold bg-green-700 text-white rounded-lg hover:bg-green-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center">
-                <Check size={18} className="mr-2" />{isSubmitting ? 'Salvando...' : 'Salvar'}
+              <button onClick={handleSave} disabled={salvarDesabilitado} title={sanidadeFreteErro || (motivoCorrecaoInvalido ? 'Informe o motivo da correção financeira.' : undefined)} className="px-4 py-2 text-sm font-bold bg-green-700 text-white rounded-lg hover:bg-green-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center">
+                <Check size={18} className="mr-2" />{textoBotaoSalvar}
               </button>
             </div>
           </div>

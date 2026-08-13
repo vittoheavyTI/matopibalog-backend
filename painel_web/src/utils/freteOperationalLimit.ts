@@ -15,7 +15,7 @@ export type InlineFreteRecovery = {
   mostrarEditorCompleto: boolean;
 };
 
-const CAMPOS_INLINE_FRETE = new Set(['origem', 'destino', 'km', 'km_inicial', 'km_final']);
+const CAMPOS_INLINE_FRETE = new Set(['origem', 'destino']);
 
 export function obterErroLimiteFrete(err: unknown): FreteOperationalLimitError | null {
   const data = (err as any)?.response?.data;

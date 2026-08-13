@@ -31,13 +31,13 @@ Conclusao: HARD STOP estrutural para uso em producao do fluxo de recuperacao man
 | `cancelado` | Sim hoje; a tela lista cancelados e permite abrir o modal de edicao. | Alto: preservacao historica tende a ser preferivel; pode reescrever dado de um registro que saiu dos agregados. | Bloquear alteracao financeira por padrao, salvo papel/fluxo excepcional auditado. |
 | `finalizado` | Sim em tese pelo endpoint de update; a UI tambem tem acao de editar em linhas finalizadas. | Muito alto: altera resultado financeiro historico e relatorios. | Bloquear alteracao financeira por padrao; liberar apenas por fluxo formal de correcao/estorno auditado. |
 
-Nenhuma regra de status foi alterada neste gate.
+A politica implementada neste gate permite correcao financeira somente para `ativo` e `pendente`. `cancelado` e `finalizado` retornam `frete_financial_correction_status_locked` e permanecem read-only para este fluxo.
 
-## Migration proposta
+## Migration implementada
 
-Numero: `NEXT_AVAILABLE_MIGRATION`.
+Numero: `065_fretes_financeiro_auditoria.sql`.
 
-Motivo: `063` permanece reservado para #416, `064` para SEC-1 e `065` esta apenas projetada para tracking credential. A numeracao final precisa de coordenacao antes de criar arquivo.
+Motivo: `063` permanece reservado para #416 e `064` para SEC-1; `065` estava livre no branch integrado.
 
 ### Schema proposto
 
@@ -49,19 +49,21 @@ CREATE TABLE public.fretes_financeiro_auditoria (
   actor_user_id uuid NULL REFERENCES public.usuarios(id) ON DELETE SET NULL,
   reason text NOT NULL,
   source text NOT NULL,
-  request_id text NULL,
-  correction_type text NOT NULL DEFAULT 'manual_legacy_ton_km_recovery',
+  request_id text NOT NULL,
+  correction_type text NOT NULL,
   before_snapshot jsonb NOT NULL,
   after_snapshot jsonb NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT fretes_fin_audit_source_chk CHECK (source IN ('painel_web', 'admin_support', 'migration', 'rpc')),
-  CONSTRAINT fretes_fin_audit_type_chk CHECK (correction_type IN ('manual_legacy_ton_km_recovery', 'admin_financial_correction', 'rollback'))
+  CONSTRAINT fretes_fin_aud_reason_chk CHECK (length(btrim(reason)) >= 8 AND length(reason) <= 500),
+  CONSTRAINT fretes_fin_aud_source_chk CHECK (length(btrim(source)) >= 3 AND length(source) <= 64),
+  CONSTRAINT fretes_fin_aud_request_id_chk CHECK (length(btrim(request_id)) >= 8 AND length(request_id) <= 128),
+  CONSTRAINT fretes_fin_aud_correction_type_chk CHECK (length(btrim(correction_type)) >= 3 AND length(correction_type) <= 64)
 );
 
 CREATE INDEX idx_fretes_fin_audit_frete ON public.fretes_financeiro_auditoria (frete_id, created_at DESC);
 CREATE INDEX idx_fretes_fin_audit_empresa ON public.fretes_financeiro_auditoria (empresa_id, created_at DESC);
-CREATE UNIQUE INDEX idx_fretes_fin_audit_request_id ON public.fretes_financeiro_auditoria (request_id)
-  WHERE request_id IS NOT NULL;
+CREATE UNIQUE INDEX idx_fretes_fin_aud_idempotency
+  ON public.fretes_financeiro_auditoria (source, request_id);
 ```
 
 Snapshots devem incluir somente campos relevantes:
@@ -76,7 +78,7 @@ Snapshots devem incluir somente campos relevantes:
 
 Nao guardar tokens, cookies, secrets ou payload bruto de sessao.
 
-## RPC/transacao proposta
+## RPC/transacao implementada
 
 Criar uma RPC `public.corrigir_frete_financeiro_legacy(...)` com:
 
@@ -93,7 +95,7 @@ Fluxo atomico:
 3. `SELECT ... FOR UPDATE` do frete.
 4. Validar `empresa_id`/ownership no backend antes da RPC ou dentro dela por parametro confiavel.
 5. Montar `before_snapshot`.
-6. Aplicar as mesmas regras canonicas de calculo e guardrails.
+6. Aplicar patch allowlisted ja preparado pela API; a formula canonica continua no backend JS.
 7. Atualizar `fretes`.
 8. Montar `after_snapshot`.
 9. Inserir `fretes_financeiro_auditoria`.
@@ -117,7 +119,7 @@ Nao aceitar desenho `UPDATE fretes` seguido de auditoria best-effort.
 - `before_snapshot` e `after_snapshot` contem os campos exigidos.
 - Nao persiste cookies/tokens/secrets.
 - Admin comum nao corrige frete de outro tenant.
-- `cancelado` e `finalizado` seguem a politica que for decidida antes da migration.
+- `cancelado` e `finalizado` retornam `frete_financial_correction_status_locked`.
 
 ## Checklist visual posterior
 

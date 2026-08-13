@@ -41,7 +41,7 @@ describe('freteOperationalLimit', () => {
 
   it('identifica campo financeiro fora do alcance do editor rapido', () => {
     expect(campoFreteEditavelNoInline('valor_tonelada_km')).toBe(false);
-    expect(campoFreteEditavelNoInline('km_final')).toBe(true);
+    expect(campoFreteEditavelNoInline('km_final')).toBe(false);
   });
 
   it('marca frete tonelada_km legado incompatível com regra atual', () => {
