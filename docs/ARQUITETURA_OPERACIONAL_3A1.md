@@ -43,10 +43,13 @@ Tabela `planos` + migrations 044–047/059. Administrado em **Super Admin › Pl
 | `visivel_cadastro` | Aparece na vitrine/cadastro | Comercial |
 | `matriz_funcionalidades_versao` | Versão da matriz p/ snapshot | Sistema |
 
-**Valores congelados (sandbox/lançamento):** Autônomo Solo R$ 99,90 (cap 1, trial 7);
-Autônomo + Admin R$ 149,90 (cap 1, trial 7); Empresa Start R$ 299,90 (cap 5, extra
-R$ 100, self-service 40, trial 14). **Growth/Scale: sem preço inventado** — o valor é
-configurável no Super Admin; enquanto vazio, é pendência comercial (não hardcodar).
+**Valores auditados no catálogo real (2026-08-10, leitura Supabase):** Autônomo Solo
+R$ 99,90 (cap 1, trial 7); Autônomo + Admin R$ 149,90 (cap 1, trial 7);
+Empresa Start R$ 299,90 (cap 5, extra R$ 100, self-service 40, trial 14);
+Empresa Essencial R$ 499,90 (cap 10, extra R$ 90); Empresa Growth R$ 799,90
+(cap 20, extra R$ 80); Empresa Scale R$ 1.199,90 (cap 40, extra R$ 70);
+Enterprise sob negociação. O app não possui fallback local hardcoded: exibe apenas
+o catálogo retornado por `/planos/publicos`.
 
 ### Implantação/aquisição (ponta a ponta)
 `valor_implantacao` no catálogo → `/planos/publicos` → vitrine pública (`PlanosVitrine`)
@@ -138,8 +141,9 @@ Situações canônicas: `aguardando_assinatura`, `trial_ativo`, `trial_expirando
 - **Trial é gratuito**: nenhuma cobrança durante o teste.
 - **Trial ativo → `operar_escrita = true`**, mesmo com contrato pendente. Pagamento,
   contrato ou aceite antecipado **não** encerram o trial.
-- **Contrato obrigatório pendente sozinho não bloqueia trial válido**; no fluxo v2 o
-  trial só inicia após o contrato ser plenamente assinado.
+- **Contrato obrigatório pendente sozinho não bloqueia trial válido**; quando há
+  `trial_ends_at` futuro, o backend preserva `operar_escrita=true` e expõe
+  `assinar_contrato=true` como próxima ação, sem encerrar o teste.
 - Fim do trial exige **decisão explícita**; "não continuar" não gera dívida.
 - **Bloqueio duro** (administrativo/segurança/fraude/jurídico) nunca é removido por pagamento.
 - Contas **legado** (`commercial_flow_version` ≠ v2) seguem o caminho antigo.
@@ -178,10 +182,18 @@ sem edição de código.
 
 ## 8. Banco / migrations
 
-3A-1 **não exigiu migration nova** — usa as tabelas 053–061 já existentes. Se uma migration
-futura desta frente for necessária, o próximo número livre é **063** (a **062** pertence ao
-SEC-1 — `062_auth_sessions_revogaveis.sql`). Toda migration desta frente deve ser aditiva,
-idempotente, testada em Postgres efêmero, **nunca aplicada em banco compartilhado** aqui.
+3A-1 **não criou migration nova nesta rodada** — usa as tabelas 053–061 já existentes.
+As alterações diretas tentadas nas migrations históricas `041_catalogo_comercial.sql` e
+`046_implantacao_gratis_lancamento.sql` foram revertidas; os arquivos permanecem como
+histórico versionado. Auditoria read-only no Supabase confirmou que o histórico gerenciado
+em `supabase_migrations.schema_migrations` usa versões timestamped e já contém até
+`062_auth_sessions_revogaveis`; não houve escrita no banco e não foi criada migration
+corretiva porque não há prova de dado comercial errado no catálogo real.
+
+Se uma migration futura desta frente for necessária, o próximo número livre é **063** (a
+**062** pertence ao SEC-1 — `062_auth_sessions_revogaveis.sql`). Toda migration desta frente
+deve ser aditiva, idempotente, testada em Postgres efêmero, **nunca aplicada em banco
+compartilhado** aqui.
 
 ---
 
@@ -216,3 +228,33 @@ evitados por 3A-1: subsistema de auth, `adminController.js`, `server.js`, `paine
 `app_android/lib/services/api_service.dart`, `auth_provider.dart`. O app de 3A-1 compõe sobre a
 API pública do `ApiService` em vez de alterá-la. Quando SEC-1 entrar em `main`: fetch → rebase
 controlado → resolver conflitos → repetir toda a suíte → manter #415 Draft até o Gate 3A-1.
+
+---
+
+## 12. Estado real desta revisão (2026-08-10)
+
+### IMPLEMENTADO
+- Catálogo público sem fallback local de preços: página `/planos` e cadastro consomem somente
+  `/planos/publicos`; falha de API mostra indisponibilidade, não valores de referência.
+- Textos fixos de "grátis no lançamento" removidos das telas comerciais; a UI deriva a
+  isenção do valor `valor_implantacao`.
+- Trial v2 preservado mesmo com contrato obrigatório pendente: `operar_escrita=true` durante
+  trial válido e assinatura pendente como próxima ação.
+- Migrations 041/046 preservadas como histórico; auditoria do banco foi somente leitura e
+  nenhuma migration corretiva foi criada sem prova de dado comercial errado.
+
+### TESTADO
+- Backend full: `node --test tests/*.test.js` — 1162 testes PASS.
+- Frontend full serial: `npm.cmd test -- --run --no-file-parallelism --maxWorkers=1` —
+  75 testes PASS. A execução paralela padrão apresentou uma falha intermitente em
+  `PainelFuncionalidades.test.tsx`; o arquivo isolado passou 9/9.
+- Frontend build/typecheck: `npm.cmd run build` — PASS.
+
+### PENDENTE INTEGRAÇÃO SEC-1
+- Rebase/integração após #414 entrar em `main`.
+- Repetir backend full, frontend full, build web e validação Flutter depois da integração.
+
+### PENDENTE PRODUÇÃO
+- Não mergeado.
+- Não deployado.
+- Flutter local não validado nesta máquina: `flutter` não está disponível no PATH.

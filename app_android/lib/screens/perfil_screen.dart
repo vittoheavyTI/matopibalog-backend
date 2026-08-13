@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+import '../config/build_info.dart';
 import '../providers/auth_provider.dart';
 import '../services/api_service.dart';
 import '../services/app_logger.dart';
@@ -367,6 +368,42 @@ class _PerfilScreenState extends State<PerfilScreen> {
               _linha('Nome', empresa['nome'] ?? '--'),
               _linha('Tipo', empresa['tipo'] ?? '--'),
             ],
+
+            // SEC-1 hardening: identidade do build VISÍVEL na tela. Prova qual APK
+            // está rodando (elimina a dúvida "qual binário está no device?").
+            const SizedBox(height: 16),
+            _secao('Sobre / Diagnóstico'),
+            _linha('Versão', '${BuildInfo.appVersion}+${BuildInfo.appBuildNumber}'),
+            _linha('Build (SHA)', BuildInfo.gitShaShort),
+            FutureBuilder<String>(
+              future: ApiService.currentDeviceId(),
+              builder: (context, snap) {
+                final id = snap.data ?? '';
+                final curto = id.isEmpty
+                    ? '--'
+                    : id.substring(0, id.length >= 12 ? 12 : id.length);
+                return _linha('Device ID', curto);
+              },
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: () async {
+                final messenger = ScaffoldMessenger.of(context);
+                final deviceId = await ApiService.currentDeviceId();
+                await Clipboard.setData(ClipboardData(
+                  text:
+                      'build=${BuildInfo.gitSha} versao=${BuildInfo.appVersion}+${BuildInfo.appBuildNumber} device=$deviceId',
+                ));
+                messenger.showSnackBar(
+                  const SnackBar(content: Text('Diagnóstico copiado.')),
+                );
+              },
+              icon: const Icon(Icons.copy_all_outlined, size: 18),
+              label: const Text('Copiar diagnóstico'),
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size(double.infinity, 44),
+              ),
+            ),
 
             const SizedBox(height: 24),
           ],

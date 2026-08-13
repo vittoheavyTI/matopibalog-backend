@@ -5,9 +5,11 @@ const freteDocumentosController = require('../controllers/freteDocumentosControl
 const freteEpodController = require('../controllers/freteEpodController');
 const freteOcorrenciasController = require('../controllers/freteOcorrenciasController');
 const freteLocalizacaoController = require('../controllers/freteLocalizacaoController');
+const trackingCredentialController = require('../controllers/trackingCredentialController');
 const { verifyToken, isAdmin } = require('../middlewares/auth');
 const { verificarEmpresa } = require('../middlewares/tenant');
 const { verificarPlano } = require('../middlewares/verificarPlano');
+const { criarGuardTelemetria, exigirTracking } = require('../middlewares/trackingCredential');
 const validate = require('../middlewares/validate');
 const upload = require('../middlewares/upload');
 const uploadDocumento = require('../middlewares/uploadDocumento');
@@ -16,13 +18,28 @@ const { registrarEpodSchema, atualizarEpodSchema, validarEvidenciaSchema, rejeit
 const { criarOcorrenciaSchema, atualizarOcorrenciaSchema } = require('../schemas/freteOcorrencias');
 const { localizacaoSchema, localizacaoEstadoSchema } = require('../schemas/freteLocalizacao');
 
+// ─────────────────────────────────────────────────────────────────────────────
+// TELEMETRIA de localização — sub-router com guard PRÓPRIO, montado ANTES do
+// router.use(verifyToken) global. Aceita EITHER a credencial de rastreamento
+// escopada (flag ON) OU a sessão SEC-1 normal (fluxo atual). Preserva as URLs
+// existentes (/fretes/localizacao/sessao[...]) e NÃO passa pelo verifyToken global
+// (uma credencial opaca não é JWT e seria rejeitada por ele). Ver §9 do mandato.
+const guardTelemetria = criarGuardTelemetria();
+const telemetriaSessao = express.Router();
+telemetriaSessao.use(guardTelemetria);
+telemetriaSessao.get('/', freteLocalizacaoController.obterSessao);
+telemetriaSessao.post('/', validate(localizacaoSchema), freteLocalizacaoController.registrarSessao);
+telemetriaSessao.post('/estado', validate(localizacaoEstadoSchema), freteLocalizacaoController.registrarEstadoSessao);
+// Renovação TRACKING-ONLY (viagens longas): estende a validade da própria credencial.
+telemetriaSessao.post('/renovar-credencial', exigirTracking, trackingCredentialController.renovar);
+router.use('/localizacao/sessao', telemetriaSessao);
+
 router.use(verifyToken, verificarEmpresa, verificarPlano);
 
 router.get('/', fretesController.getAll);
 router.post('/', validate(createFreteSchema), fretesController.create);
-router.get('/localizacao/sessao', freteLocalizacaoController.obterSessao);
-router.post('/localizacao/sessao', validate(localizacaoSchema), freteLocalizacaoController.registrarSessao);
-router.post('/localizacao/sessao/estado', validate(localizacaoEstadoSchema), freteLocalizacaoController.registrarEstadoSessao);
+// Emissão da credencial de rastreamento — SEMPRE sob sessão SEC-1 (guard global acima).
+router.post('/localizacao/credencial', trackingCredentialController.emitir);
 router.get('/:id', fretesController.getById);
 router.post('/:id/odometro/inicial', upload.single('foto'), fretesController.uploadOdometroInicial);
 router.post('/:id/odometro/final', upload.single('foto'), fretesController.uploadOdometroFinal);

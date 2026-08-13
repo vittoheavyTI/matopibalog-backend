@@ -47,16 +47,9 @@ test('trial ativo + contrato assinado → OPERA (escrita liberada)', () => {
 });
 
 test('trial ativo + contrato obrigatório PENDENTE → NÃO bloqueia trial válido... ', () => {
-  // Regra v2: o trial só inicia após o contrato ser concluído (o backend só grava
-  // trial_ends_at depois da assinatura). Portanto, se HÁ trial_ends_at no futuro,
-  // o contrato já foi concluído — a combinação "trial válido + obrigatório pendente"
-  // não deve NUNCA resultar em bloqueio de escrita durante o trial.
-  // Aqui o contrato pendente vem sem trial ainda iniciado:
-  const semTrial = empresaV2({ trial_ends_at: null, trial_started_at: null });
-  const r = avaliar(semTrial, contratoPendente);
-  // Sem trial iniciado e com contrato obrigatório pendente → aguardando assinatura.
-  assert.equal(r.situacao, SITUACAO.AGUARDANDO_ASSINATURA);
-  assert.equal(r.acoes.operar_escrita, false);
+  const r = avaliar(empresaV2(), contratoPendente);
+  assert.ok([SITUACAO.TRIAL_ATIVO, SITUACAO.TRIAL_EXPIRANDO].includes(r.situacao));
+  assert.equal(r.acoes.operar_escrita, true);
   assert.equal(r.acoes.assinar_contrato, true);
 });
 

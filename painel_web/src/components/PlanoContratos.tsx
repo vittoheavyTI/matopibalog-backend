@@ -139,7 +139,7 @@ export const PlanoContratos: React.FC = () => {
           <div className="text-xs font-semibold uppercase text-gray-400">Implantação / valor inicial</div>
           <div className="mt-1 font-semibold text-gray-900">
             {(Number(proposta.resumo?.valor_implantacao ?? proposta.valor_implantacao ?? 0) <= 0)
-              ? 'Implantação grátis no lançamento'
+              ? 'Sem cobrança de implantação'
               : brl(proposta.resumo?.valor_implantacao ?? proposta.valor_implantacao)}
           </div>
         </div>

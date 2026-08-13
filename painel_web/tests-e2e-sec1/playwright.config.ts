@@ -1,0 +1,24 @@
+import { defineConfig, devices } from '@playwright/test';
+
+export default defineConfig({
+  testDir: '.',
+  testMatch: /sec1\.spec\.ts/,
+  timeout: 90_000,
+  expect: { timeout: 10_000 },
+  fullyParallel: false,
+  workers: 1,
+  reporter: [['list']],
+  use: {
+    ...devices['Desktop Chrome'],
+    ignoreHTTPSErrors: true,
+    trace: 'retain-on-failure',
+    actionTimeout: 15_000,
+    navigationTimeout: 20_000,
+    launchOptions: {
+      args: [
+        '--host-resolver-rules=MAP app.matopibalog.test 127.0.0.1,MAP api.matopibalog.test 127.0.0.1,MAP evil.matopibalog.test 127.0.0.1',
+        '--ignore-certificate-errors',
+      ],
+    },
+  },
+});

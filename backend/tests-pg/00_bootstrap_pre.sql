@@ -40,3 +40,13 @@ CREATE TABLE IF NOT EXISTS public.empresas (
   arquivada_em   timestamptz NULL,          -- idem (flag arquivada + ordenação)
   codigo_convite text    NULL               -- idem (match exato de convite)
 );
+
+-- Tabela `fretes` mínima — pré-requisito do FK frete_id da migration 064
+-- (frete_tracking_credenciais). SOMENTE colunas tocadas pelos testes; 100% sintética.
+CREATE TABLE IF NOT EXISTS public.fretes (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  empresa_id   uuid NULL,
+  motorista_id uuid NULL,
+  status       text NULL,
+  data         timestamptz NULL
+);
