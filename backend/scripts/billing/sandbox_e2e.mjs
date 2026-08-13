@@ -31,7 +31,7 @@ async function main() {
   const provider = new AsaasSandboxProvider({ config: { environment: 'sandbox', baseURL, apiKey }, http: axios });
 
   const marca = `MATOPIBA-E2E-${Date.now()}-${randomUUID().slice(0, 8)}`;
-  const empresaSintetica = { id: marca, nome: marca, cnpj: undefined, email_contato: `${marca}@example.com` };
+  const empresaSintetica = { id: marca, nome: marca, cnpj: '11222333000181', email_contato: `${marca}@example.com` };
 
   console.log(`[sandbox_e2e] iniciando com fixture ${marca}`);
   const cust = await provider.createCustomer({ empresa: empresaSintetica });
