@@ -107,6 +107,19 @@ test('v2: contrato obrigatório pendente → aguardando_assinatura, sem escrita'
   assert.equal(r.acoes.operar_escrita, false);
 });
 
+test('v2: trial vigente + contrato obrigatório pendente → trial preservado, escrita OK', () => {
+  const r = avaliarSituacaoComercial({
+    empresa: v2({ trial_started_at: PASSADO, trial_ends_at: FUTURO }),
+    contrato: { status: 'aguardando_assinatura', obrigatorio: true },
+    snapshot: SNAP_ZERO,
+    agora: AGORA,
+  });
+  assert.equal(r.situacao, SITUACAO.TRIAL_ATIVO);
+  assert.equal(r.acoes.operar_escrita, true);
+  assert.equal(r.acoes.assinar_contrato, true);
+  assert.equal(r.proxima_acao, 'assinar_contrato');
+});
+
 test('v2: contrato assinado + trial vigente → trial_ativo, escrita OK, sem cobrança', () => {
   const r = avaliarSituacaoComercial({ empresa: v2({ trial_started_at: PASSADO, trial_ends_at: FUTURO }), contrato: CONTRATO_ASSINADO, snapshot: SNAP_ZERO, agora: AGORA });
   assert.equal(r.situacao, SITUACAO.TRIAL_ATIVO);

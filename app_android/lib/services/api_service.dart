@@ -487,6 +487,16 @@ class ApiService {
   }) =>
       _authenticatedJsonRequest('GET', uri, timeout: timeout);
 
+  /// GET autenticado publico para servicos de dominio do app.
+  ///
+  /// Mantem o SEC-1 como autoridade unica de sessao: access token atual,
+  /// refresh mobile canonico, single-flight e retry unico em 401/403.
+  static Future<http.Response> getAutenticado(
+    Uri uri, {
+    Duration timeout = _timeoutGet,
+  }) =>
+      _getAutenticado(uri, timeout: timeout);
+
   static Future<http.Response> _postJsonAutenticado(
     Uri uri, {
     Object? body,
@@ -850,7 +860,7 @@ class ApiService {
       final failureKind = _classificarRefreshFalho(response.statusCode, body);
 
       if (failureKind == RefreshFailureKind.collisionRecoverable) {
-        return _recuperarColisaoRefresh(
+        return await _recuperarColisaoRefresh(
           refreshApresentado: refresh,
           status: response.statusCode,
         );

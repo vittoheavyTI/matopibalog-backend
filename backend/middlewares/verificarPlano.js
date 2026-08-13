@@ -67,18 +67,6 @@ const verificarPlano = async (req, res, next) => {
   // Admin não tem empresa, pula verificação
   if (!req.empresa_id) return next();
 
-  // Gate de contrato obrigatório: se o tenant tem contrato/aditivo OBRIGATÓRIO
-  // pendente de assinatura, bloqueia as escritas operacionais (vale inclusive
-  // para empresa 'ativo'/'trial'). Assinatura (/contratacao), regularização
-  // (/pagamentos) e suporte NÃO passam por este middleware, então seguem
-  // liberados. GET e super-admin já foram liberados acima. Fail-open em erro.
-  if (await empresaTemContratoObrigatorioPendente(supabase, req.empresa_id)) {
-    return res.status(403).json({
-      message: 'Para continuar usando o sistema, finalize a assinatura do contrato.',
-      motivo: 'contrato_obrigatorio_pendente',
-    });
-  }
-
   try {
     const { data, error } = await supabase
       .from('empresas')
@@ -91,10 +79,9 @@ const verificarPlano = async (req, res, next) => {
     }
 
     // Fluxo comercial v2: o domínio canônico de situação comercial decide a
-    // liberação de escrita (trial gratuito, decisão pós-trial, conversão,
-    // suspensão). Contas legadas (commercial_flow_version != 'v2') NÃO entram
-    // aqui e seguem exatamente pelo caminho abaixo, inalterado. O gate de
-    // contrato obrigatório (acima) já é comum aos dois fluxos.
+    // liberação de escrita (trial gratuito, contrato, decisão pós-trial,
+    // conversão, suspensão). Durante trial válido, contrato pendente não bloqueia
+    // operação; ele aparece como próxima ação.
     if (data.commercial_flow_version === 'v2') {
       const situ = await carregarSituacaoComercial(supabase, req.empresa_id, { empresa: data });
       if (situ && situ.pode_operar === false) {
@@ -106,6 +93,15 @@ const verificarPlano = async (req, res, next) => {
         });
       }
       return next();
+    }
+
+    // Contas legadas preservam o gate contratual anterior: contrato/aditivo
+    // obrigatório pendente bloqueia escritas operacionais.
+    if (await empresaTemContratoObrigatorioPendente(supabase, req.empresa_id)) {
+      return res.status(403).json({
+        message: 'Para continuar usando o sistema, finalize a assinatura do contrato.',
+        motivo: 'contrato_obrigatorio_pendente',
+      });
     }
 
     const hoje = new Date();

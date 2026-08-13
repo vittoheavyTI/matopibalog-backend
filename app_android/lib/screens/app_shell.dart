@@ -15,6 +15,7 @@ import 'add_despesa_screen.dart';
 import 'add_abastecimento_screen.dart';
 import 'add_vale_screen.dart';
 import 'perfil_screen.dart';
+import 'situacao_comercial_screen.dart';
 import 'notificacoes_screen.dart';
 import 'minhas_faturas_screen.dart';
 
@@ -298,6 +299,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               onTap: () {
                 AppLogger.action('menu_nav', params: {'destino': 'perfil'});
                 _navegarPara(context, const PerfilScreen());
+              },
+            ),
+            // Situação comercial (plano, trial, contrato) — 3A-1. Sempre acessível,
+            // inclusive quando a operação está bloqueada, para orientar a assinatura.
+            ListTile(
+              leading: const Icon(Icons.workspace_premium_outlined),
+              title: const Text('Minha conta'),
+              onTap: () {
+                AppLogger.action('menu_nav', params: {'destino': 'situacao_comercial'});
+                _navegarPara(context, const SituacaoComercialScreen());
               },
             ),
             const Divider(),

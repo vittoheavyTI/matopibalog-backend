@@ -113,9 +113,18 @@ test('conta LEGADA (sem flow v2) ativa → segue caminho antigo, não bloqueia',
   assert.equal(r.resposta, null);
 });
 
-test('v2 contrato obrigatório pendente → bloqueado pelo gate de contrato (comum aos fluxos)', async () => {
+test('v2 trial ativo + contrato obrigatório pendente → escrita liberada pelo estado comercial', async () => {
   const r = await executar({
     empresa: { commercial_flow_version: 'v2', status: 'trial', trial_ends_at: FUTURO },
+    contratos: [{ obrigatorio: true, status: 'aguardando_assinatura' }], proposta: SNAP,
+  });
+  assert.equal(r.nextChamado, 1);
+  assert.equal(r.resposta, null);
+});
+
+test('v2 sem trial vigente + contrato obrigatório pendente → escrita bloqueada', async () => {
+  const r = await executar({
+    empresa: { commercial_flow_version: 'v2', status: 'trial', trial_ends_at: null },
     contratos: [{ obrigatorio: true, status: 'aguardando_assinatura' }], proposta: SNAP,
   });
   assert.equal(r.nextChamado, 0);

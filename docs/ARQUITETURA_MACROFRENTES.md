@@ -12,8 +12,15 @@
 - Cards públicos consomem o catálogo (rótulos: Incluído / Adicional / Em breve / Sob consulta).
 
 ## Macrofrentes registradas (NÃO implementadas — não vender como concluídas)
-- **A. Catálogo de Funcionalidades, Entitlements e Add-ons** — fundação entregue; falta
-  página super-admin completa (Matriz/Clientes) e cobrança de adicionais (PR 3A).
+- **A. Catálogo de Funcionalidades, Entitlements e Add-ons** — **núcleo comercial/contratual
+  entregue ponta a ponta na macrofrente 3A-1** (Super Admin de Planos/Funcionalidades/Matriz/
+  Clientes/Contratos, entitlement efetivo, contratos+snapshot imutável+assinatura, estado
+  comercial canônico com trial correto, página pública e app integrado). Revisão de
+  2026-08-10: catálogo público sem fallback hardcoded de preços, migrations históricas
+  041/046 preservadas após auditoria read-only do banco, e trial v2 preservado mesmo com
+  contrato obrigatório pendente. Detalhes:
+  `ARQUITETURA_OPERACIONAL_3A1.md`. Falta apenas a **cobrança** de adicionais/mensalidade
+  (Asaas) = macrofrente **3A-2**.
 - **B. Integration Hub e conectores de ERP** — adapters, modelo canônico, filas,
   idempotência, auditoria. `funcionalidades.codigo = 'erp_api' / 'webhooks_empresariais'`.
 - **C. Orquestração de documentos fiscais pelo ERP/provedor** — `vinculo_docs_fiscais`,
