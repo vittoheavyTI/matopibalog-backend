@@ -13,7 +13,7 @@ const { criarGuardTelemetria, exigirTracking } = require('../middlewares/trackin
 const validate = require('../middlewares/validate');
 const upload = require('../middlewares/upload');
 const uploadDocumento = require('../middlewares/uploadDocumento');
-const { createFreteSchema, updateFreteSchema } = require('../schemas/fretes');
+const { createFreteSchema, updateFreteSchema, correcaoFinanceiraFreteSchema } = require('../schemas/fretes');
 const { registrarEpodSchema, atualizarEpodSchema, validarEvidenciaSchema, rejeitarComprovacaoSchema } = require('../schemas/freteEpod');
 const { criarOcorrenciaSchema, atualizarOcorrenciaSchema } = require('../schemas/freteOcorrencias');
 const { localizacaoSchema, localizacaoEstadoSchema } = require('../schemas/freteLocalizacao');
@@ -40,6 +40,7 @@ router.get('/', fretesController.getAll);
 router.post('/', validate(createFreteSchema), fretesController.create);
 // Emissão da credencial de rastreamento — SEMPRE sob sessão SEC-1 (guard global acima).
 router.post('/localizacao/credencial', trackingCredentialController.emitir);
+router.post('/:id/correcao-financeira', validate(correcaoFinanceiraFreteSchema), fretesController.corrigirFinanceiro);
 router.get('/:id', fretesController.getById);
 router.post('/:id/odometro/inicial', upload.single('foto'), fretesController.uploadOdometroInicial);
 router.post('/:id/odometro/final', upload.single('foto'), fretesController.uploadOdometroFinal);

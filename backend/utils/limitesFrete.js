@@ -20,11 +20,12 @@ const fmt = (valor, casas = 2) => {
   });
 };
 
-const falha = ({ campo, message, valorAtual, limite }) => ({
+const falha = ({ campo, message, valorAtual, limite, limiteValor }) => ({
   ok: false,
   campo,
   valorAtual,
   limite,
+  limiteValor,
   message,
 });
 
@@ -39,6 +40,7 @@ const validarLimitesFrete = ({ modalidade, valorFrete, toneladas, valorToneladaK
         campo: 'toneladas',
         valorAtual: toneladas,
         limite: `maior que 0 e ate ${TONELADAS_MAX} t`,
+        limiteValor: TONELADAS_MAX,
         message: `Campo invalido: Toneladas. Valor atual: ${fmt(toneladas, 3)}. Limite aceitavel: maior que 0 e ate ${TONELADAS_MAX} t. ${orientarPainel}`,
       });
     }
@@ -47,6 +49,7 @@ const validarLimitesFrete = ({ modalidade, valorFrete, toneladas, valorToneladaK
         campo: 'toneladas',
         valorAtual: t,
         limite: `ate ${TONELADAS_MAX} t`,
+        limiteValor: TONELADAS_MAX,
         message: `Campo invalido: Toneladas. Valor atual: ${fmt(t, 3)} t. Limite aceitavel: ate ${TONELADAS_MAX} t. ${orientarPainel}`,
       });
     }
@@ -59,6 +62,7 @@ const validarLimitesFrete = ({ modalidade, valorFrete, toneladas, valorToneladaK
         campo: 'valor_tonelada_km',
         valorAtual: valorToneladaKm,
         limite: `maior que 0 e ate R$ ${fmt(VALOR_TONELADA_KM_MAX)}`,
+        limiteValor: VALOR_TONELADA_KM_MAX,
         message: `Campo invalido: Valor por tonelada/km. Valor atual: R$ ${fmt(valorToneladaKm, 4)}. Limite aceitavel: maior que 0 e ate R$ ${fmt(VALOR_TONELADA_KM_MAX)}. ${orientarPainel}`,
       });
     }
@@ -67,6 +71,7 @@ const validarLimitesFrete = ({ modalidade, valorFrete, toneladas, valorToneladaK
         campo: 'valor_tonelada_km',
         valorAtual: v,
         limite: `ate R$ ${fmt(VALOR_TONELADA_KM_MAX)}`,
+        limiteValor: VALOR_TONELADA_KM_MAX,
         message: `Campo invalido: Valor por tonelada/km. Valor atual: R$ ${fmt(v, 4)}. Limite aceitavel: ate R$ ${fmt(VALOR_TONELADA_KM_MAX)}. ${orientarPainel}`,
       });
     }
@@ -100,6 +105,7 @@ const validarLimitesFrete = ({ modalidade, valorFrete, toneladas, valorToneladaK
         campo: 'valor_frete',
         valorAtual: valorFrete,
         limite: `ate R$ ${fmt(VALOR_FRETE_MAX)}`,
+        limiteValor: VALOR_FRETE_MAX,
         message: `Campo invalido: Valor do frete. Valor atual: ${fmt(valorFrete)}. Limite aceitavel: ate R$ ${fmt(VALOR_FRETE_MAX)}. ${orientarPainel}`,
       });
     }
@@ -108,6 +114,7 @@ const validarLimitesFrete = ({ modalidade, valorFrete, toneladas, valorToneladaK
         campo: 'valor_frete',
         valorAtual: vf,
         limite: `maior que zero e ate R$ ${fmt(VALOR_FRETE_MAX)}`,
+        limiteValor: VALOR_FRETE_MAX,
         message: `Campo invalido: Valor do frete. Valor atual: R$ ${fmt(vf)}. Limite aceitavel: maior que zero e ate R$ ${fmt(VALOR_FRETE_MAX)}. ${orientarPainel}`,
       });
     }
@@ -116,6 +123,7 @@ const validarLimitesFrete = ({ modalidade, valorFrete, toneladas, valorToneladaK
         campo: 'valor_frete',
         valorAtual: vf,
         limite: `maior que zero e ate R$ ${fmt(VALOR_FRETE_MAX)}`,
+        limiteValor: VALOR_FRETE_MAX,
         message: `Campo invalido: Valor do frete. Valor atual: R$ ${fmt(vf)}. Limite aceitavel: maior que zero e ate R$ ${fmt(VALOR_FRETE_MAX)}. ${orientarPainel}`,
       });
     }
@@ -124,6 +132,7 @@ const validarLimitesFrete = ({ modalidade, valorFrete, toneladas, valorToneladaK
         campo: 'valor_frete',
         valorAtual: vf,
         limite: `ate R$ ${fmt(VALOR_FRETE_MAX)}`,
+        limiteValor: VALOR_FRETE_MAX,
         message: `Campo invalido: Valor do frete calculado. Valor atual: R$ ${fmt(vf)}. Limite aceitavel: ate R$ ${fmt(VALOR_FRETE_MAX)}. Revise toneladas, KM e valor por tonelada/km; toneladas e valor por tonelada/km devem ser corrigidos pelo painel, e o KM final pelo app.`,
       });
     }

@@ -3,6 +3,10 @@ const notificacaoService = require('../services/notificacaoService');
 const { calcularComissao } = require('../utils/comissao');
 const { normalizarModalidade, calcularValorToneladaKm } = require('../utils/calculoFrete');
 const { validarLimitesFrete } = require('../utils/limitesFrete');
+const {
+  prepararCorrecaoFinanceira,
+  contemCampoFinanceiro,
+} = require('../services/freteFinanceiroCorrecaoService');
 const { revogarTrackingSeSemViagemAtiva } = require('../services/auth/trackingRevocacaoHook');
 
 const BUCKET_ODOMETRO = 'fretes-odometro';
@@ -123,6 +127,62 @@ const mensagemFinalizacaoLimite = (limite) => (
 
 // Datas simples representam o último dia incluído pelo cliente. Converte esse
 // dia no limite exclusivo seguinte; datetimes já expressam o limite desejado.
+const respostaLimiteFrete = (limite, message = limite?.message) => ({
+  error: 'frete_operational_limit',
+  field: limite?.campo,
+  current_value: limite?.valorAtual,
+  max_value: limite?.limiteValor,
+  limit: limite?.limite,
+  message: message || 'Valor fora dos limites operacionais. Confira os dados do frete.',
+});
+
+const respostaErroCorrecaoFinanceira = (erro, frete) => {
+  if (erro?.error === 'frete_operational_limit') return respostaLimiteFrete({
+    campo: erro.field,
+    valorAtual: erro.current_value,
+    limiteValor: erro.max_value,
+    limite: erro.limit,
+    message: erro.message,
+  });
+
+  const field = erro?.field || (erro?.error?.includes('status') ? 'status' : undefined);
+  return {
+    error: erro?.error || 'frete_financial_correction_invalid',
+    field,
+    current_value: field === 'status' ? frete?.status : undefined,
+    message: erro?.message || 'Correcao financeira invalida.',
+  };
+};
+
+const erroRpcCorrecaoFinanceira = (error) => {
+  const msg = error?.message || '';
+  if (msg.includes('frete_financial_correction_concurrent_change')) return 'frete_financial_correction_concurrent_change';
+  if (msg.includes('frete_financial_correction_status_locked')) return 'frete_financial_correction_status_locked';
+  if (msg.includes('frete_financial_correction_status_unknown')) return 'frete_financial_correction_status_unknown';
+  if (msg.includes('frete_financial_correction_not_found')) return 'frete_financial_correction_not_found';
+  if (msg.includes('frete_financial_correction_reason_required')) return 'frete_financial_correction_reason_required';
+  if (msg.includes('frete_financial_correction_request_id_required')) return 'frete_financial_correction_request_id_required';
+  if (msg.includes('frete_financial_correction_request_id_conflict')) return 'frete_financial_correction_request_id_conflict';
+  if (msg.includes('frete_financial_correction_source_not_allowed')) return 'frete_financial_correction_source_not_allowed';
+  if (msg.includes('frete_financial_correction_type_not_allowed')) return 'frete_financial_correction_type_not_allowed';
+  if (msg.includes('frete_financial_correction_expected_snapshot_required')) return 'frete_financial_correction_expected_snapshot_required';
+  if (msg.includes('frete_financial_correction_empty')) return 'frete_financial_correction_empty';
+  if (msg.includes('frete_financial_correction_field_not_allowed')) return 'frete_financial_correction_field_not_allowed';
+  if (msg.includes('frete_operational_limit')) return 'frete_operational_limit';
+  return null;
+};
+
+const resolverActorUserIdAuditoria = async (uid) => {
+  if (!uid) return null;
+  const { data, error } = await supabase
+    .from('usuarios')
+    .select('id')
+    .eq('id', uid)
+    .maybeSingle();
+  if (error) throw error;
+  return data?.id || null;
+};
+
 const normalizarDataFimExclusiva = (dataFim) => {
   if (typeof dataFim !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(dataFim)) return dataFim;
 
@@ -296,7 +356,7 @@ exports.create = async (req, res) => {
       kmInicial: km_inicial,
       kmFinal: km_final,
     });
-    if (!limite.ok) return res.status(422).json({ message: limite.message });
+    if (!limite.ok) return res.status(422).json(respostaLimiteFrete(limite));
 
     // Comissão só para VINCULADO (empresa.tipo conhecido e ≠ 'autonomo'). Autônomo e
     // tipo desconhecido → 0 (nunca assume 12%). Campo comissao_calculada mantido no
@@ -410,6 +470,83 @@ exports.getOdometroSignedUrl = async (req, res) => {
   }
 };
 
+exports.corrigirFinanceiro = async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const isSuperAdmin = req.user.is_super_admin === true;
+    const isAdmin = req.user.role === 'admin';
+    if (!isAdmin && !isSuperAdmin) {
+      return res.status(403).json({ message: 'Acesso negado.' });
+    }
+
+    const { data: frete, error: freteError } = await supabase
+      .from('fretes')
+      .select('id, motorista_id, empresa_id, status, modalidade_calculo, toneladas, valor_tonelada_km, valor_frete, km_inicial, km_final')
+      .eq('id', id)
+      .single();
+
+    if (freteError || !frete) {
+      return res.status(404).json({ message: 'Frete nao encontrado.' });
+    }
+    if (!isSuperAdmin && frete.empresa_id !== req.empresa_id) {
+      return res.status(403).json({ message: 'Acesso negado.' });
+    }
+
+    const preparo = prepararCorrecaoFinanceira({
+      freteAtual: frete,
+      campos: req.body.fields,
+    });
+    if (!preparo.ok) {
+      return res.status(422).json(respostaErroCorrecaoFinanceira(preparo, frete));
+    }
+
+    const actorUserId = await resolverActorUserIdAuditoria(req.user.uid);
+    const { data, error } = await supabase.rpc('corrigir_frete_financeiro_legacy', {
+      p_frete_id: id,
+      p_empresa_id: frete.empresa_id,
+      p_actor_user_id: actorUserId,
+      p_actor_auth_uid: req.user.uid || null,
+      p_reason: req.body.reason,
+      p_source: 'painel_admin',
+      p_request_id: req.body.request_id,
+      p_correction_type: 'manual_legacy_financial_correction',
+      p_expected_before_snapshot: preparo.before_snapshot,
+      p_patch: preparo.patch,
+    });
+
+    if (error) {
+      const codigo = erroRpcCorrecaoFinanceira(error);
+      if (codigo === 'frete_financial_correction_not_found') {
+        return res.status(404).json({ error: codigo, message: 'Frete nao encontrado.' });
+      }
+      if (codigo === 'frete_financial_correction_concurrent_change') {
+        return res.status(409).json({
+          error: codigo,
+          message: 'Este frete foi alterado por outra operacao. Atualize os dados e tente novamente.',
+        });
+      }
+      if (codigo) {
+        return res.status(422).json({
+          error: codigo,
+          message: codigo === 'frete_operational_limit'
+            ? 'Valor fora dos limites operacionais. Confira os dados do frete.'
+            : 'Correcao financeira invalida.',
+        });
+      }
+      throw error;
+    }
+
+    return res.status(200).json({
+      ok: true,
+      ...data,
+    });
+  } catch (error) {
+    console.error('Erro ao corrigir financeiro do frete:', error);
+    return res.status(500).json({ message: 'Erro ao corrigir dados financeiros do frete.' });
+  }
+};
+
 exports.update = async (req, res) => {
   const { id } = req.params;
 
@@ -439,6 +576,13 @@ exports.update = async (req, res) => {
       } else if (checkData.motorista_id !== req.user.uid) {
         return res.status(403).json({ message: 'Acesso negado.' });
       }
+    }
+
+    if (contemCampoFinanceiro(req.body || {})) {
+      return res.status(422).json({
+        error: 'frete_financial_correction_endpoint_required',
+        message: 'Use a correcao financeira auditada para alterar modalidade, valores, toneladas ou KM do frete.',
+      });
     }
 
     // Extrair APENAS campos permitidos (previne mass assignment)
@@ -527,7 +671,7 @@ exports.update = async (req, res) => {
       kmInicial: allowedUpdate.km_inicial ?? checkData.km_inicial,
       kmFinal: allowedUpdate.km_final ?? checkData.km_final,
     });
-    if (!limite.ok) return res.status(422).json({ message: limite.message });
+    if (!limite.ok) return res.status(422).json(respostaLimiteFrete(limite));
 
     const { data, error } = await supabase
       .from('fretes')
@@ -691,7 +835,7 @@ exports.finalizar = async (req, res) => {
         kmInicial: kmInicialEfetivo,
         kmFinal: kmFinalEfetivo,
       });
-      if (!limite.ok) return res.status(422).json({ message: mensagemFinalizacaoLimite(limite) });
+      if (!limite.ok) return res.status(422).json(respostaLimiteFrete(limite, mensagemFinalizacaoLimite(limite)));
       updatePayload.valor_frete = calc;
     }
 

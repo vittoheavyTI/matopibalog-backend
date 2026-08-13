@@ -22,7 +22,8 @@ const arquivos = [
   // as alcança (fiel à produção, onde a 062 revoga logo após o create).
   join(migrations, '062_auth_sessions_revogaveis.sql'),   // SEC-1: sessões revogáveis
   join(migrations, '064_frete_tracking_credenciais.sql'), // SEC-1: credencial de rastreamento
-  join(migrations, '066_billing_outbox.sql'),      // 3A-2: outbox de billing (065 pertence ao #417)
+  join(migrations, '065_fretes_financeiro_auditoria.sql'), // Fretes: correcao financeira atomica
+  join(migrations, '066_billing_outbox.sql'),      // 3A-2: outbox de billing
 ];
 
 const client = new pg.Client({ connectionString: CONN });
@@ -34,7 +35,7 @@ try {
     await client.query(sql);
     console.log('ok');
   }
-  console.log('Schema de teste aplicado (pré-bootstrap + 060 + 061 + 062 + 064 + 066).');
+  console.log('Schema de teste aplicado (pré-bootstrap + 060 + 061 + 062 + 064 + 065 + 066).');
 } finally {
   await client.end();
 }
