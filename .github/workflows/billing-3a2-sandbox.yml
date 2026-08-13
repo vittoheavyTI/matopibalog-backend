@@ -1,0 +1,63 @@
+name: Billing 3A-2 SANDBOX E2E (protegido)
+
+# E2E REAL contra Asaas SANDBOX. Manual (workflow_dispatch) e protegido por
+# GitHub Environment "sandbox". NUNCA roda automaticamente. Usa SOMENTE o secret
+# de sandbox (ASAAS_SANDBOX_API_KEY) — jamais ASAAS_API_KEY (que pode apontar
+# produção). Fail-closed: sem secret OU host não-sandbox → ABORTA sem "PASS".
+# PRODUÇÃO é proibida (o adapter recusa host de produção no construtor).
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmar_sandbox:
+        description: "Digite SANDBOX para confirmar (fixtures sintéticas apenas)"
+        required: true
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  sandbox-e2e:
+    name: Asaas SANDBOX E2E (fixture sintética)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: sandbox
+
+    defaults:
+      run:
+        working-directory: backend
+
+    env:
+      # SOMENTE sandbox. Base URL fixa sandbox. Nunca reutiliza ASAAS_API_KEY.
+      ASAAS_SANDBOX_API_KEY: ${{ secrets.ASAAS_SANDBOX_API_KEY }}
+      BILLING_PROVIDER_MODE: sandbox
+      ASAAS_SANDBOX_BASE_URL: https://sandbox.asaas.com/api/v3
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Guard — confirmação e secret sandbox (fail-closed)
+        run: |
+          if [ "${{ github.event.inputs.confirmar_sandbox }}" != "SANDBOX" ]; then
+            echo "ABORT: confirmação inválida (esperado SANDBOX)."; exit 1
+          fi
+          if [ -z "${ASAAS_SANDBOX_API_KEY}" ]; then
+            echo "SANDBOX E2E = NOT RUN / BLOCKED BY MISSING SANDBOX SECRET (ASAAS_SANDBOX_API_KEY)."; exit 1
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: backend/.nvmrc
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Rodar E2E SANDBOX (fixture sintética, fail-closed p/ produção)
+        run: node scripts/billing/sandbox_e2e.mjs
