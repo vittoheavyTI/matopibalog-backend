@@ -113,6 +113,14 @@ async function aplicarUpgradePago({ supabase, faturaId, empresaId, asaasPaymentI
     .eq('status', 'pendente');
   if (eSolic) throw erroDb('erro_marcar_pago');
 
+  // 3A-2: plano efetivado → gatilho de billing (fail-open, idempotente). O worker
+  // do outbox reconcilia a assinatura/valor; NÃO chama Asaas aqui. O reconcile
+  // periódico recupera caso este enfileiramento falhe.
+  try {
+    const { emitirEventoBilling } = require('./billing/billingTriggers');
+    await emitirEventoBilling(supabase, { empresaId, tipo: 'plano_alterado', competencia: new Date().toISOString().slice(0, 10) });
+  } catch { /* fail-open */ }
+
   return { resultado: 'aplicado', motivo: 'ok', planoNovoId: decisao.planoNovoId, empresaId };
 }
 

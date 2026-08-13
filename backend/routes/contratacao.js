@@ -34,6 +34,7 @@ const {
   validarSandboxImplantacao,
 } = require('../services/implantacaoCobrancaService');
 const { carregarSituacaoComercial } = require('../services/situacaoComercialService');
+const { emitirEventoBilling } = require('../services/billing/billingTriggers');
 
 const router = express.Router();
 const upload = multer({
@@ -242,6 +243,12 @@ router.post('/contratos/:id/assinatura/confirmar', verifyToken, verificarEmpresa
       ip: req.ip,
       userAgent: req.get('user-agent'),
     });
+    // 3A-2: assinatura concluída → gatilho de billing (fail-open, idempotente).
+    // O worker do outbox garante customer/assinatura respeitando o trial.
+    if (r.status >= 200 && r.status < 300) {
+      try { await emitirEventoBilling(supabase, { empresaId: req.empresa_id, tipo: 'contrato_assinado' }); }
+      catch { /* fail-open: reconcile recupera */ }
+    }
     return res.status(r.status).json(r.body);
   } catch (err) {
     console.error('[contratacao/assinatura/confirmar] Falha', { status: 500 });

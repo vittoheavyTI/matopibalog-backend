@@ -1,5 +1,5 @@
-// Aplica, em ordem, no Postgres isolado (CI): pré-bootstrap → migration 060 real
-// → migration 061 real. Usa node-postgres (sem depender de psql no runner).
+// Aplica, em ordem, no Postgres isolado (CI): pré-bootstrap + migrations reais
+// usadas pelos testes PG. Usa node-postgres (sem depender de psql no runner).
 // NUNCA rodar contra produção: exige DATABASE_URL apontando para o banco de teste.
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -21,10 +21,9 @@ const arquivos = [
   // de auth — o `GRANT ALL ON ALL TABLES` do 99_grants (test-only) roda ANTES e não
   // as alcança (fiel à produção, onde a 062 revoga logo após o create).
   join(migrations, '062_auth_sessions_revogaveis.sql'),   // SEC-1: sessões revogáveis
-  // 064 depois da 062 (FK → auth_sessions). O gap 063 é intencional (reservado ao
-  // #416 congelado); o applier usa lista explícita, então o gap é inócuo.
   join(migrations, '064_frete_tracking_credenciais.sql'), // SEC-1: credencial de rastreamento
   join(migrations, '065_fretes_financeiro_auditoria.sql'), // Fretes: correcao financeira atomica
+  join(migrations, '066_billing_outbox.sql'),      // 3A-2: outbox de billing
 ];
 
 const client = new pg.Client({ connectionString: CONN });
@@ -36,7 +35,7 @@ try {
     await client.query(sql);
     console.log('ok');
   }
-  console.log('Schema de teste aplicado (pré-bootstrap + 060 + 061 + 062 + 064).');
+  console.log('Schema de teste aplicado (pré-bootstrap + 060 + 061 + 062 + 064 + 065 + 066).');
 } finally {
   await client.end();
 }

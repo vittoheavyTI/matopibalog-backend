@@ -22,6 +22,7 @@ import { PainelEmpresas } from './pages/PainelEmpresas';
 import { PainelPlanos } from './pages/PainelPlanos';
 import { PainelFuncionalidades } from './pages/PainelFuncionalidades';
 import { PainelContratos } from './pages/PainelContratos';
+import { PainelBilling } from './pages/PainelBilling';
 import { PainelPromocoes } from './pages/PainelPromocoes';
 import { PainelMotoristas } from './pages/PainelMotoristas';
 import { PainelRelatorios } from './pages/PainelRelatorios';
@@ -93,6 +94,7 @@ const AppRoutes = () => {
           <Route path="planos" element={<SuperAdminRoute><ErrorBoundary><PainelPlanos /></ErrorBoundary></SuperAdminRoute>} />
           <Route path="funcionalidades" element={<SuperAdminRoute><ErrorBoundary><PainelFuncionalidades /></ErrorBoundary></SuperAdminRoute>} />
           <Route path="contratos" element={<SuperAdminRoute><ErrorBoundary><PainelContratos /></ErrorBoundary></SuperAdminRoute>} />
+          <Route path="billing" element={<SuperAdminRoute><ErrorBoundary><PainelBilling /></ErrorBoundary></SuperAdminRoute>} />
           <Route path="promocoes" element={<SuperAdminRoute><ErrorBoundary><PainelPromocoes /></ErrorBoundary></SuperAdminRoute>} />
           <Route path="assinaturas" element={<Navigate to="../financeiro?aba=assinaturas" replace />} />
           <Route path="usuarios" element={<SuperAdminRoute><Usuarios /></SuperAdminRoute>} />

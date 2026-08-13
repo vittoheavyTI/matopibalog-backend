@@ -4,6 +4,13 @@
 > Serve para tutoriais, treinamento, marketing, suporte e planejamento.
 > Complementa (não substitui) `ARQUITETURA_MACROFRENTES.md` e as decisões já registradas.
 > **3A-1 NÃO implementa cobrança financeira (Asaas) — isso é a macrofrente 3A-2.**
+>
+> **Billing automático (3A-2):** o fluxo financeiro (customer/assinatura/cobrança/webhook/
+> reconciliação/inadimplência/upgrade/downgrade/cancelamento/add-ons), sua automação
+> (trigger → outbox → worker), políticas configuráveis e o adapter Asaas sandbox estão
+> documentados em `ARQUITETURA_OPERACIONAL_3A2_BILLING.md` + `RUNBOOK_BILLING_3A2.md`.
+> A situação comercial (seção 5 abaixo) permanece a autoridade que o billing ALIMENTA
+> (inadimplência) e RESPEITA (trial nunca cancelado por pagamento).
 
 ---
 
@@ -183,10 +190,10 @@ em `supabase_migrations.schema_migrations` usa versões timestamped e já conté
 `062_auth_sessions_revogaveis`; não houve escrita no banco e não foi criada migration
 corretiva porque não há prova de dado comercial errado no catálogo real.
 
-Se uma migration futura desta frente for necessária, o próximo número livre é **063** (a
-**062** pertence ao SEC-1 — `062_auth_sessions_revogaveis.sql`). Toda migration desta frente
-deve ser aditiva, idempotente, testada em Postgres efêmero, **nunca aplicada em banco
-compartilhado** aqui.
+Se uma migration futura desta frente for necessária, ela deve respeitar a ordem real já
+ocupada: **062** e **064** pertencem ao SEC-1, **065** pertence ao #417, e **066** pertence
+ao billing 3A-2. Toda migration desta frente deve ser aditiva, idempotente, testada em
+Postgres efêmero, **nunca aplicada em banco compartilhado** aqui.
 
 ---
 

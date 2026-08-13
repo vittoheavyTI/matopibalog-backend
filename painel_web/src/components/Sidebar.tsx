@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Users, FileText, Truck, ChevronLeft, ChevronRight, Upload, X, Check, Trash2, Settings, UserCircle, Receipt, History, Building2, DollarSign, Bell, Plug, ClipboardList, Ticket, TrendingUp, TowerControl, Boxes, FileSignature } from 'lucide-react';
+import { LayoutDashboard, Users, FileText, Truck, ChevronLeft, ChevronRight, Upload, X, Check, Trash2, Settings, UserCircle, Receipt, History, Building2, DollarSign, Bell, Plug, ClipboardList, Ticket, TrendingUp, TowerControl, Boxes, FileSignature, CreditCard } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useContratacaoStatus } from '../hooks/useContratacaoStatus';
 import api from '../api';
@@ -177,6 +177,7 @@ export const Sidebar: React.FC = () => {
         { to: '/painel-administrativo/planos', icon: ClipboardList, label: 'Planos' },
         { to: '/painel-administrativo/funcionalidades', icon: Boxes, label: 'Funcionalidades e Add-ons' },
         { to: '/painel-administrativo/contratos', icon: FileSignature, label: 'Contratos' },
+        { to: '/painel-administrativo/billing', icon: CreditCard, label: 'Billing' },
         { to: '/painel-administrativo/promocoes', icon: Ticket, label: 'Promoções' },
         { to: '/painel-administrativo/financeiro', icon: DollarSign, label: 'Financeiro' },
         { to: '/relatorios/torre-controle', icon: TowerControl, label: 'Torre de Controle' },

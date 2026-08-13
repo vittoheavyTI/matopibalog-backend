@@ -23,6 +23,15 @@ const { processarWebhook } = require('../services/asaasWebhookService');
 const { sanitizar } = require('../services/asaasWebhookEventRepository');
 const { patchSuspensaoFinanceiraAutomatica, patchLimparSuspensao } = require('../utils/suspensao');
 const { gerarFaturaRegularizacao } = require('../services/regularizacaoService');
+// 3A-2 — orquestração de billing (planejamento/reconciliação; sem writes Asaas aqui).
+const { carregarSituacaoComercial } = require('../services/situacaoComercialService');
+const { planejarBilling } = require('../services/billing/billingOrchestratorDomainService');
+const { reconciliar } = require('../services/billing/billingReconcileDomainService');
+const { resolvePolicy } = require('../services/billing/billingPolicyConfig');
+const { montarLinhaBilling } = require('../services/billing/billingAdminViewDomainService');
+const { emitirEventoBilling } = require('../services/billing/billingTriggers');
+const { processarOutbox } = require('../services/billing/billingOutboxWorker');
+const { contarPorStatus } = require('../services/billing/billingOutboxRepository');
 
 // Comparação em tempo constante (hash de tamanho fixo evita vazar comprimento)
 function safeEqual(a, b) {
@@ -862,6 +871,135 @@ router.get('/faturas/:id/pix', verifyToken, async (req, res) => {
   }
 });
 
+// ─── 3A-2: BILLING AUTOMÁTICO — visão e contingência (super-admin) ────────────
+// Endpoints READ/PLAN: NÃO fazem write no Asaas (execução real é o Gate 3A-2
+// sandbox). Servem para observar o estado e planejar/reconciliar de forma segura.
+
+// Visão administrativa do billing de UMA empresa (§36).
+router.get('/billing/overview/:empresa_id', verifyToken, isSuperAdmin, async (req, res) => {
+  const empresaId = req.params.empresa_id;
+  try {
+    const { data: empresa, error } = await supabase
+      .from('empresas')
+      .select('id, nome, status, plano_id, trial_ends_at, asaas_customer_id, asaas_subscription_id, billing_status, next_due_date, billing_updated_at, planos(nome)')
+      .eq('id', empresaId)
+      .maybeSingle();
+    if (error) throw error;
+    if (!empresa) return res.status(404).json({ message: 'Empresa nao encontrada.' });
+
+    const [{ data: faturas }, situacao, { data: webhook }] = await Promise.all([
+      supabase.from('faturas').select('status, valor, vencimento, created_at').eq('empresa_id', empresaId).order('created_at', { ascending: false }).limit(12),
+      carregarSituacaoComercial(supabase, empresaId),
+      supabase.from('asaas_webhook_events').select('event_type, status, processed_at').eq('empresa_id', empresaId).order('processed_at', { ascending: false }).limit(1).maybeSingle().then((r) => r).catch(() => ({ data: null })),
+    ]);
+
+    const policy = resolvePolicy();
+    const linha = montarLinhaBilling({
+      empresa,
+      plano: empresa.planos || null,
+      faturas: faturas || [],
+      situacao,
+      ultimoWebhook: webhook || null,
+      gracaDias: policy.grace_period_days,
+    });
+    return res.json({ overview: linha, policy });
+  } catch (err) {
+    console.error('[pagamentos/billing/overview] Falha', { status: 500 });
+    return res.status(500).json({ message: 'Erro ao carregar overview de billing.' });
+  }
+});
+
+// Plano de billing para a empresa (dry-run do orquestrador; sem writes) (§24/§37).
+router.post('/billing/ensure-plan/:empresa_id', verifyToken, isSuperAdmin, async (req, res) => {
+  const empresaId = req.params.empresa_id;
+  try {
+    const { data: empresa, error } = await supabase
+      .from('empresas')
+      .select('id, asaas_customer_id, asaas_subscription_id, implantacao_cobrada, next_due_date, trial_ends_at')
+      .eq('id', empresaId)
+      .maybeSingle();
+    if (error) throw error;
+    if (!empresa) return res.status(404).json({ message: 'Empresa nao encontrada.' });
+
+    const situacao = await carregarSituacaoComercial(supabase, empresaId);
+    const { data: proposta } = await supabase
+      .from('propostas_comerciais')
+      .select('snapshot, valor_mensal, valor_implantacao')
+      .eq('empresa_id', empresaId)
+      .order('criado_em', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const snapshot = proposta?.snapshot || { valor_mensal: proposta?.valor_mensal, valor_implantacao: proposta?.valor_implantacao } || {};
+
+    const policy = resolvePolicy(req.body?.policy || {});
+    const plano = planejarBilling({ situacao, empresaBilling: empresa, snapshot, addOns: [], policy });
+    return res.json({ plano, policy, executado: false, nota: 'dry-run: execução real é o Gate 3A-2 (sandbox).' });
+  } catch (err) {
+    console.error('[pagamentos/billing/ensure-plan] Falha', { status: 500 });
+    return res.status(500).json({ message: 'Erro ao planejar billing.' });
+  }
+});
+
+// Reconciliação (divergências) — dry, sem reparar automaticamente aqui (§23).
+router.post('/billing/reconciliar-plan/:empresa_id', verifyToken, isSuperAdmin, async (req, res) => {
+  const empresaId = req.params.empresa_id;
+  try {
+    const { data: empresa, error } = await supabase
+      .from('empresas')
+      .select('id, asaas_customer_id, asaas_subscription_id')
+      .eq('id', empresaId)
+      .maybeSingle();
+    if (error) throw error;
+    if (!empresa) return res.status(404).json({ message: 'Empresa nao encontrada.' });
+
+    const { data: faturas } = await supabase
+      .from('faturas')
+      .select('asaas_payment_id, status')
+      .eq('empresa_id', empresaId);
+
+    // Estado remoto é fornecido pelo chamador (contingência) ou vazio: sem chamada
+    // externa aqui. Em sandbox/gate, o remoto vem do provider.
+    const remoto = req.body?.remoto || { customer: null, subscription: null, charges: [] };
+    const local = {
+      asaas_customer_id: empresa.asaas_customer_id || null,
+      asaas_subscription_id: empresa.asaas_subscription_id || null,
+      faturas: faturas || [],
+    };
+    const resultado = reconciliar({ local, remoto });
+    return res.json({ reconciliacao: resultado, executado: false });
+  } catch (err) {
+    console.error('[pagamentos/billing/reconciliar-plan] Falha', { status: 500 });
+    return res.status(500).json({ message: 'Erro ao reconciliar billing.' });
+  }
+});
+
+// Worker do outbox (job/contingência) — MESMA engine da automação (§14).
+// Provider por política: fake por padrão; sandbox só com prova de ambiente +
+// credencial; produção fail-closed. NÃO executa Asaas produção.
+router.post('/billing/processar-outbox', verifyToken, isSuperAdmin, async (req, res) => {
+  try {
+    const limite = Math.min(50, Math.max(1, Number(req.body?.limite) || 10));
+    const resumo = await processarOutbox({ supabase, limite });
+    return res.json({ resumo });
+  } catch (err) {
+    console.error('[pagamentos/billing/processar-outbox] Falha', { status: 500 });
+    return res.status(500).json({ message: 'Erro ao processar outbox.' });
+  }
+});
+
+// Contagem de jobs do outbox (observabilidade do painel).
+router.get('/billing/jobs', verifyToken, isSuperAdmin, async (req, res) => {
+  try {
+    const empresaId = req.query.empresa_id || null;
+    const r = await contarPorStatus(supabase, empresaId);
+    if (r.code !== 'ok') return res.json({ contagem: { pending: 0, processing: 0, processed: 0, failed: 0, dead: 0 }, indisponivel: true });
+    return res.json({ contagem: r.contagem });
+  } catch (err) {
+    console.error('[pagamentos/billing/jobs] Falha', { status: 500 });
+    return res.status(500).json({ message: 'Erro ao contar jobs.' });
+  }
+});
+
 router.post('/webhook/asaas', async (req, res) => {
   try {
     // 1. Autenticação: token fixo no header 'asaas-access-token'.
@@ -878,6 +1016,17 @@ router.post('/webhook/asaas', async (req, res) => {
       supabase,
       body: req.body,
     });
+
+    // 3A-2: enfileira um evento de reconciliação de billing (fail-open, idempotente
+    // por competência do dia). O worker do outbox reconcilia o estado; NÃO chamamos
+    // Asaas aqui. Nunca derruba a resposta do webhook.
+    try {
+      const empId = resultado?.resultado?.empresa_id || null;
+      if (empId) {
+        const hoje = new Date().toISOString().slice(0, 10);
+        await emitirEventoBilling(supabase, { empresaId: empId, tipo: 'webhook', competencia: hoje });
+      }
+    } catch { /* fail-open: reconcile periódico recupera */ }
 
     return res.status(resultado.httpStatus).json(resultado.resultado);
   } catch (err) {
