@@ -170,6 +170,27 @@ function avaliarSituacaoComercial(input = {}) {
   // 4.a) Contrato obrigatório pendente de assinatura → bloqueia escrita, libera assinatura.
   const contratoConcluido = contrato && CONTRATO_CONCLUIDO.has(contrato.status);
   const temContratoObrigatorioPendente = contrato && contrato.obrigatorio === true && !contratoConcluido && contrato.status !== 'cancelado';
+
+  // Trial vigente preserva a operacao. Contrato/pagamento/aquisicao nao
+  // encerram nem encurtam o trial; se houver assinatura pendente, ela vira
+  // proxima acao sem bloquear escrita.
+  if (trialEnds && agora < trialEnds) {
+    const expirando = diasRestantes !== null && diasRestantes <= diasAviso;
+    return {
+      ...base,
+      situacao: expirando ? SITUACAO.TRIAL_EXPIRANDO : SITUACAO.TRIAL_ATIVO,
+      motivo: 'trial_gratuito',
+      acoes: {
+        consultar: true,
+        operar_escrita: true,
+        assinar_contrato: Boolean(temContratoObrigatorioPendente),
+        converter: false,
+        regularizar: false,
+      },
+      proxima_acao: temContratoObrigatorioPendente ? 'assinar_contrato' : (expirando ? 'avaliar_continuacao' : 'operar'),
+    };
+  }
+
   if (temContratoObrigatorioPendente) {
     return { ...base, situacao: SITUACAO.AGUARDANDO_ASSINATURA, motivo: 'contrato_obrigatorio_pendente', acoes: apenasConsulta({ assinar_contrato: true }), proxima_acao: 'assinar_contrato' };
   }
@@ -188,23 +209,10 @@ function avaliarSituacaoComercial(input = {}) {
     return { ...base, situacao: SITUACAO.CONVERSAO_AGUARDANDO_PAGAMENTO, motivo: 'pagamentos_iniciais_pendentes', acoes: apenasConsulta({ regularizar: true }), proxima_acao: 'pagar_iniciais' };
   }
 
-  // 4.d) Trial. Só existe trial se o contrato foi concluído (o backend só grava
-  //      trial_ends_at após a assinatura). Sem contrato concluído e sem trial,
-  //      a conta ainda está aguardando assinatura.
+  // 4.d) Sem trial vigente e sem contrato concluído, a conta ainda está
+  //      aguardando assinatura.
   if (!contratoConcluido && !trialEnds) {
     return { ...base, situacao: SITUACAO.AGUARDANDO_ASSINATURA, motivo: 'trial_nao_iniciado', acoes: apenasConsulta({ assinar_contrato: true }), proxima_acao: 'assinar_contrato' };
-  }
-
-  if (trialEnds && agora < trialEnds) {
-    const expirando = diasRestantes !== null && diasRestantes <= diasAviso;
-    return {
-      ...base,
-      situacao: expirando ? SITUACAO.TRIAL_EXPIRANDO : SITUACAO.TRIAL_ATIVO,
-      motivo: 'trial_gratuito',
-      // Durante o trial: operação liberada, NENHUMA cobrança.
-      acoes: { consultar: true, operar_escrita: true, assinar_contrato: false, converter: false, regularizar: false },
-      proxima_acao: expirando ? 'avaliar_continuacao' : 'operar',
-    };
   }
 
   // 4.e) Trial expirado: decisão explícita do cliente comanda.

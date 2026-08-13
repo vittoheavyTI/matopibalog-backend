@@ -38,16 +38,6 @@ type PlanoPublicoApi = Partial<PlanoPublico> & {
   nome: string;
 };
 
-// Fallback usado APENAS se /planos/publicos falhar — mantém o cadastro funcionando
-// e a vitrine com o mesmo visual. ids são aliases legados (não-UUID).
-const PLANOS_FALLBACK: PlanoPublico[] = [
-  { id: 'empresa-start', nome: 'Empresa Start', descricao: 'Para equipes iniciando a operação digital', preco_mensal: 299.9, modelo_cobranca: 'fixo', preco_por_motorista: null, limite_motoristas: 5, dias_trial: 14, valor_implantacao: 0, capacidade_inclusa: 5, preco_motorista_extra: 100, recursos: ['5 motoristas incluídos', 'Motorista extra R$ 100,00', 'Implantação grátis'] },
-  { id: 'empresa-essencial', nome: 'Empresa Essencial', descricao: 'Para operações em crescimento', preco_mensal: 499.9, modelo_cobranca: 'fixo', preco_por_motorista: null, limite_motoristas: 10, dias_trial: 14, valor_implantacao: 0, capacidade_inclusa: 10, preco_motorista_extra: 90, recursos: ['10 motoristas incluídos', 'Motorista extra R$ 90,00', 'Implantação grátis'] },
-  { id: 'empresa-growth', nome: 'Empresa Growth', descricao: 'Para frotas maiores com rotina comercial ativa', preco_mensal: 799.9, modelo_cobranca: 'fixo', preco_por_motorista: null, limite_motoristas: 20, dias_trial: 14, valor_implantacao: 0, capacidade_inclusa: 20, preco_motorista_extra: 80, recursos: ['20 motoristas incluídos', 'Motorista extra R$ 80,00', 'Implantação grátis'] },
-  { id: 'empresa-scale', nome: 'Empresa Scale', descricao: 'Para operações de alta capacidade', preco_mensal: 1199.9, modelo_cobranca: 'fixo', preco_por_motorista: null, limite_motoristas: 40, dias_trial: 14, valor_implantacao: 0, capacidade_inclusa: 40, preco_motorista_extra: 70, recursos: ['40 motoristas incluídos', 'Motorista extra R$ 70,00', 'Implantação grátis'] },
-  { id: 'enterprise', nome: 'Enterprise / Sob negociação', descricao: 'Para frotas acima de 40 motoristas', preco_mensal: 0, modelo_cobranca: 'fixo', preco_por_motorista: null, limite_motoristas: null, dias_trial: 14, valor_implantacao: 0, capacidade_inclusa: 41, preco_motorista_extra: null, requer_negociacao: true, recursos: ['Motoristas sob medida', 'Condições comerciais sob negociação'] },
-];
-
 // Mapeia alias legado (?plano=) para um plano real do catálogo, por nome.
 const ALIAS_NOME: Record<string, string[]> = {
   basico: ['básico', 'basico'],
@@ -85,6 +75,8 @@ export const CadastroPublico: React.FC = () => {
   const [reenviando, setReenviando] = useState(false);
   const [reenvioMsg, setReenvioMsg] = useState('');
   const [planos, setPlanos] = useState<PlanoPublico[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(true);
+  const [catalogError, setCatalogError] = useState('');
   const [promoPreview, setPromoPreview] = useState<PromoPreview | null>(null);
   const [promoErro, setPromoErro] = useState('');
   const [validandoPromo, setValidandoPromo] = useState(false);
@@ -97,11 +89,15 @@ export const CadastroPublico: React.FC = () => {
   // aplica a seleção inicial vinda da URL (?plano_id=<uuid> preferido; ?plano=
   // <alias> legado como fallback). A seleção NUNCA cai sobre um plano sob
   // negociação (Enterprise): ele aparece na vitrine, mas não é self-service.
-  useEffect(() => {
+  function carregarCatalogoPublico() {
+    let vivo = true;
     const qpId = searchParams.get('plano_id');
     const qpAlias = searchParams.get('plano');
+    setCatalogLoading(true);
+    setCatalogError('');
     api.get('/planos/publicos?categoria=empresa')
       .then((res) => {
+        if (!vivo) return;
         const lista: PlanoPublico[] = ((res.data?.planos || []) as PlanoPublicoApi[]).map((p) => ({
           ...p,
           descricao: p.descricao || '',
@@ -113,14 +109,22 @@ export const CadastroPublico: React.FC = () => {
           valor_implantacao: p.valor_implantacao != null ? Number(p.valor_implantacao) : null,
           recursos: normalizarRecursos(p.recursos),
         }));
-        const catalogo = lista.length ? lista : PLANOS_FALLBACK;
-        setPlanos(catalogo);
-        aplicarSelecaoInicial(catalogo, qpId, qpAlias);
+        setPlanos(lista);
+        if (lista.length === 0) setCatalogError('Nenhum plano público ativo no catálogo.');
+        aplicarSelecaoInicial(lista, qpId, qpAlias);
       })
       .catch(() => {
-        setPlanos(PLANOS_FALLBACK);
-        aplicarSelecaoInicial(PLANOS_FALLBACK, null, qpAlias);
-      });
+        if (!vivo) return;
+        setCatalogError('Não foi possível carregar os planos agora.');
+        setPlanos([]);
+      })
+      .finally(() => { if (vivo) setCatalogLoading(false); });
+    return () => { vivo = false; };
+  }
+
+  useEffect(() => {
+    const cancelar = carregarCatalogoPublico();
+    return cancelar;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -344,8 +348,19 @@ export const CadastroPublico: React.FC = () => {
         {/* Etapa 1 — Escolha do plano (vitrine compartilhada com a página de upgrade) */}
         {!concluido && step === 1 && (
           <div>
-            {planos.length === 0 ? (
+            {catalogLoading ? (
               <div className="text-center text-gray-500 py-16">Carregando planos...</div>
+            ) : catalogError ? (
+              <div className="max-w-2xl mx-auto bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-4 text-center">
+                <p className="text-sm">{catalogError}</p>
+                <button
+                  type="button"
+                  onClick={carregarCatalogoPublico}
+                  className="mt-3 px-4 py-2 rounded-lg bg-amber-700 text-white font-semibold hover:bg-amber-800"
+                >
+                  Tentar novamente
+                </button>
+              </div>
             ) : (
               // Clicar no card APENAS seleciona e destaca o plano. O avanço de
               // etapa é só pelo botão "Continuar com [Plano] →" abaixo.

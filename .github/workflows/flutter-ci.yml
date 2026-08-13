@@ -1,0 +1,77 @@
+name: Flutter CI
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+    paths:
+      - "app_android/**"
+      - ".github/workflows/flutter-ci.yml"
+
+  push:
+    branches:
+      - main
+    paths:
+      - "app_android/**"
+      - ".github/workflows/flutter-ci.yml"
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flutter-ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Flutter - analyze, test & build APK release
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    defaults:
+      run:
+        working-directory: app_android
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Java (para o build Android)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Flutter pub get
+        run: flutter pub get
+
+      - name: Analyze (flutter analyze)
+        run: flutter analyze
+
+      - name: Test (flutter test)
+        run: flutter test
+
+      - name: Build APK RELEASE
+        run: flutter build apk --release
+
+      - name: Upload artifact (app-release-apk)
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-apk
+          path: app_android/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: warn

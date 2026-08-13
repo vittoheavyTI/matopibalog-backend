@@ -33,12 +33,15 @@ function supabaseMock(rows) {
   return { from() { return chain; } };
 }
 
-function carregarRouter(rows) {
+function carregarRouter(rows, matrizPublica = {}) {
   const originalLoad = Module._load;
   delete require.cache[routerPath];
   try {
     Module._load = function (request, parent, isMain) {
       if (request === '../config/supabase') return supabaseMock(rows);
+      if (request === '../services/funcionalidadeService') {
+        return { carregarMatrizPublicaPorPlano: async () => matrizPublica };
+      }
       return originalLoad.call(this, request, parent, isMain);
     };
     return require(routerPath);
@@ -126,6 +129,40 @@ test('planos/publicos expoe modelo_cobranca e preco_por_motorista', async () => 
   assert.equal(porMotorista.limite_motoristas, 10);
   // O headline continua sendo o VALOR FINAL, nao o unitario.
   assert.equal(porMotorista.preco_mensal, 1000);
+});
+
+test('planos/publicos propaga implantacao e funcionalidades estruturadas da fonte real', async () => {
+  const rows = [
+    {
+      id: 'empresa-start',
+      nome: 'Empresa Start',
+      preco_mensal: 299.9,
+      ativo: true,
+      categoria: 'empresa',
+      recursos: ['fallback legado'],
+      modelo_cobranca: 'fixo',
+      preco_por_motorista: null,
+      limite_motoristas: 5,
+      capacidade_inclusa: 5,
+      preco_motorista_extra: 100,
+      valor_implantacao: 490,
+    },
+  ];
+  const matriz = {
+    'empresa-start': [
+      { codigo: 'gestao_fretes', texto: 'Gestao de fretes', rotulo: 'Incluido', destaque: true },
+      { codigo: 'erp_api', texto: 'ERP via API', rotulo: 'Adicional', destaque: false },
+    ],
+  };
+  const router = carregarRouter(rows, matriz);
+  const handler = getHandler(router, 'get', '/publicos');
+  const res = fakeRes();
+  await handler({ query: { categoria: 'empresa' } }, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.planos.length, 1);
+  assert.equal(res.body.planos[0].valor_implantacao, 490);
+  assert.deepEqual(res.body.planos[0].funcionalidades, matriz['empresa-start']);
 });
 
 test('plano fixo vem com modelo_cobranca=fixo e unitario nulo', async () => {
