@@ -1,7 +1,19 @@
 const jwt = require('jsonwebtoken');
+const { getAuthRuntime } = require('../services/auth/authRuntime');
+const { criarVerifyTokenSec1 } = require('./authSession');
+
+let verifyTokenSec1Memo = null;
 
 // Middleware 1: Verifica se o usuário está logado olhando o Cookie
 const verifyToken = (req, res, next) => {
+  const { cfg, sessionService } = getAuthRuntime();
+  if (cfg.sessionsEnabled) {
+    if (!verifyTokenSec1Memo) {
+      verifyTokenSec1Memo = criarVerifyTokenSec1({ cfg, sessionService });
+    }
+    return verifyTokenSec1Memo(req, res, next);
+  }
+
   const tokenFromCookie = req.cookies ? req.cookies.token : null;
   const authHeader = req.headers['authorization'];
   const tokenFromHeader = authHeader && authHeader.startsWith('Bearer ')

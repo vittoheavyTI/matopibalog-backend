@@ -157,7 +157,19 @@ class _AddFreteScreenState extends State<AddFreteScreen> {
         return;
       }
 
-      await LocationTrackingService.startForActiveTrips(requestPermission: false);
+      // Fase 4 (crítico): viagem recém-criada → reconcilia pelo conjunto ATUALIZADO de fretes
+      // (busca fresca) para que o snapshot server-side da credencial INCLUA a nova viagem. Emitir
+      // por contagem sem escopo poderia preservar uma credencial cujo snapshot não a contém.
+      try {
+        final fretesAtualizados = await ApiService.getFretes();
+        await LocationTrackingService.reconcileWithFretes(
+          fretesAtualizados,
+          requestPermission: false,
+          reason: TrackingEmissionReason.tripStarted,
+        );
+      } catch (_) {
+        // Reconciliação falhou → Home/loadData reconciliará no próximo ciclo.
+      }
       final documentosComFalha = await _enviarDocumentosPendentes(freteId);
       if (!mounted) {
         return;

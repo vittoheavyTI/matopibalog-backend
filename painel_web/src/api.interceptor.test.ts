@@ -1,5 +1,10 @@
 import { describe, test, expect } from 'vitest';
-import { avaliarErroResposta } from './api';
+import {
+  aguardarTokenPublicadoAposColisao,
+  avaliarErroResposta,
+  classificarFalhaRefreshWeb,
+  podeTentarRefresh,
+} from './api';
 
 // Decisão pura do interceptor de resposta (comportamento de sessão/rate-limit).
 // Erros SEM resposta (timeout/cancelamento) não passam por esta função — o
@@ -36,5 +41,60 @@ describe('avaliarErroResposta (interceptor)', () => {
     const r = avaliarErroResposta({ status: 500 });
     expect(r.sessaoExpirada).toBe(false);
     expect(r.rateLimited).toBe(false);
+  });
+});
+
+describe('refresh web SEC-1 — colisao entre abas', () => {
+  test('RefreshAlreadyRotated e recuperavel, nao definitivo', () => {
+    expect(classificarFalhaRefreshWeb(409, 'RefreshAlreadyRotated')).toBe('collision');
+    expect(classificarFalhaRefreshWeb(401, 'RefreshReuseDetected')).toBe('definitive');
+    expect(classificarFalhaRefreshWeb(409, 'SessionConflict')).toBe('transient');
+    expect(classificarFalhaRefreshWeb(409, 'Outro409')).toBe('invalid_response');
+  });
+
+  test('duas abas: perdedora relê o novo access publicado pela vencedora', async () => {
+    const leituras = ['access-antigo', 'access-novo'];
+    let chamadas = 0;
+    const token = await aguardarTokenPublicadoAposColisao(
+      'access-antigo',
+      () => leituras[Math.min(chamadas++, leituras.length - 1)],
+      async () => {},
+    );
+
+    expect(token).toBe('access-novo');
+    expect(chamadas).toBe(2);
+  });
+
+  test('RefreshAlreadyRotated sem token novo tem releituras limitadas e nao limpa sessao', async () => {
+    let chamadas = 0;
+    const token = await aguardarTokenPublicadoAposColisao(
+      'access-antigo',
+      () => {
+        chamadas++;
+        return 'access-antigo';
+      },
+      async () => {},
+    );
+
+    expect(token).toBeNull();
+    expect(chamadas).toBe(3);
+  });
+});
+
+describe('podeTentarRefresh (SEC-1)', () => {
+  test('tenta refresh para GET 401 uma única vez', () => {
+    expect(podeTentarRefresh({ status: 401, url: '/auth/me', method: 'get' })).toBe(true);
+    expect(podeTentarRefresh({ status: 401, url: '/auth/me', method: 'get', jaTentou: true })).toBe(false);
+  });
+
+  test('não tenta refresh em POST arbitrário nem nas rotas de refresh/login', () => {
+    expect(podeTentarRefresh({ status: 401, url: '/fretes', method: 'post' })).toBe(false);
+    expect(podeTentarRefresh({ status: 401, url: '/auth/refresh', method: 'post' })).toBe(false);
+    expect(podeTentarRefresh({ status: 401, url: '/auth/login', method: 'post' })).toBe(false);
+  });
+
+  test('403 só tenta refresh quando representa sessão/token inválido', () => {
+    expect(podeTentarRefresh({ status: 403, tokenExpiradoInvalido: true, url: '/dashboard', method: 'get' })).toBe(true);
+    expect(podeTentarRefresh({ status: 403, tokenExpiradoInvalido: false, url: '/dashboard', method: 'get' })).toBe(false);
   });
 });
