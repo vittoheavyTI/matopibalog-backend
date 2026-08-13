@@ -53,6 +53,32 @@ function dataFutura(dias) {
 }
 
 main().catch((err) => {
-  console.error('[sandbox_e2e] erro:', String(err && err.message).slice(0, 200));
+  console.error('[sandbox_e2e] erro:', resumirErroAsaas(err));
   process.exit(1);
 });
+
+function resumirErroAsaas(err) {
+  const status = err?.response?.status;
+  const data = err?.response?.data;
+  const detalhes = Array.isArray(data?.errors)
+    ? data.errors.map((e) => ({
+      code: sanitizar(e?.code),
+      description: sanitizar(e?.description),
+    }))
+    : undefined;
+  return JSON.stringify({
+    message: sanitizar(err?.message),
+    status: status || null,
+    errors: detalhes || null,
+  }).slice(0, 1000);
+}
+
+function sanitizar(v) {
+  if (v == null) return null;
+  return String(v)
+    .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]')
+    .replace(/access_token['":\s]+[^"',\s}]+/gi, 'access_token [redacted]')
+    .replace(/\\$aact_[A-Za-z0-9_$-]+/g, '[redacted_api_key]')
+    .replace(/https?:\/\/\S+/gi, '[url]')
+    .slice(0, 300);
+}
