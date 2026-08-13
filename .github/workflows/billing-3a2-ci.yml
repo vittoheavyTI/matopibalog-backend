@@ -3,7 +3,7 @@ name: Billing 3A-2 CI (fake + PG outbox)
 # CI DEDICADA da macrofrente 3A-2 (billing automático). Roda na PRÓPRIA branch
 # (push + manual) — não depende de retarget para main. Valida SEM segredo Asaas:
 #   - testes de billing (fake provider, orquestrador, outbox, guard produção);
-#   - Postgres 16 efêmero: migrations até 063 + concorrência do billing_outbox.
+#   - Postgres 16 efêmero: migrations até 066 + concorrência do billing_outbox.
 # NÃO usa Asaas produção, NÃO usa banco compartilhado, NÃO exige secret.
 
 on:
@@ -69,7 +69,7 @@ jobs:
       - name: Billing fake/unit tests (sem DB, sem segredo)
         run: node --test tests/billing*.test.js
 
-      - name: Apply isolated schema (pre-bootstrap + 060 + 061 + 063 + test grants)
+      - name: Apply isolated schema (pre-bootstrap + 060 + 061 + 062 + 064 + 066)
         run: npm run test:pg:apply
 
       - name: PG outbox concurrency (billing_outbox.pgtest.mjs)

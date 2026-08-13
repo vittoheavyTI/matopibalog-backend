@@ -1,4 +1,4 @@
--- 063_billing_outbox.sql
+-- 066_billing_outbox.sql
 -- Macrofrente 3A-2 — Outbox de billing (automação confiável).
 --
 -- ADITIVA e idempotente. Converte "mudança comercial" em um evento pendente,
@@ -9,7 +9,7 @@
 --   2) claim por compare-and-swap (UPDATE ... WHERE status='pending' RETURNING)
 --      → apenas 1 worker processa cada evento, mesmo com várias réplicas.
 --
--- Nº 063: o 062 pertence ao SEC-1 (auth sessions). Esta frente pula o 062.
+-- Nº 066: o 062 e o 064 pertencem ao SEC-1; o 065 esta reservado ao #417.
 -- NÃO aplicar em banco compartilhado aqui; testar em Postgres efêmero (pgtest/CI).
 
 CREATE TABLE IF NOT EXISTS public.billing_outbox (

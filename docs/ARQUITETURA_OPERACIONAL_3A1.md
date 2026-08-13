@@ -190,10 +190,10 @@ em `supabase_migrations.schema_migrations` usa versões timestamped e já conté
 `062_auth_sessions_revogaveis`; não houve escrita no banco e não foi criada migration
 corretiva porque não há prova de dado comercial errado no catálogo real.
 
-Se uma migration futura desta frente for necessária, o próximo número livre é **063** (a
-**062** pertence ao SEC-1 — `062_auth_sessions_revogaveis.sql`). Toda migration desta frente
-deve ser aditiva, idempotente, testada em Postgres efêmero, **nunca aplicada em banco
-compartilhado** aqui.
+Se uma migration futura desta frente for necessária, ela deve respeitar a ordem real já
+ocupada: **062** e **064** pertencem ao SEC-1, **065** pertence ao #417, e **066** pertence
+ao billing 3A-2. Toda migration desta frente deve ser aditiva, idempotente, testada em
+Postgres efêmero, **nunca aplicada em banco compartilhado** aqui.
 
 ---
 

@@ -19,7 +19,7 @@ acesso/bloqueio → upgrade/downgrade → add-ons → cancelamento.
 O **estado local é a autoridade** para as telas — não consultamos o Asaas a cada
 render. O Asaas é o provedor externo; o webhook + reconciliação mantêm o local coerente.
 
-## 2. Modelo de dados (reutilizado do existente — sem migration nova)
+## 2. Modelo de dados
 
 - `empresas.asaas_customer_id`, `asaas_subscription_id`, `billing_status`,
   `next_due_date`, `billing_updated_at`, `implantacao_cobrada`.
@@ -28,8 +28,7 @@ render. O Asaas é o provedor externo; o webhook + reconciliação mantêm o loc
   hash-divergence, reclaim de stale via compare-and-swap, `next_retry_at`, erros sanitizados).
 - `empresa_funcionalidades` (add-ons faturáveis: `preco_mensal_centavos`, `billing_component_id`).
 
-**Nenhuma migration nova (063) foi necessária.** Se um item futuro exigir schema, o
-próximo número livre é 063 (062 é do SEC-1).
+**Migration nova:** `066_billing_outbox.sql`. A `065` fica reservada ao #417.
 
 ## 3. Componentes 3A-2 (novos, `backend/services/billing/`)
 
@@ -80,7 +79,7 @@ Webhook: `POST /pagamentos/webhook/asaas` (existente) — token fixo fail-closed
 
 ## 6.1 Automação real (evento → outbox → worker → provider)
 
-O fluxo NÃO depende de clique. Um **outbox** (migration 063 `billing_outbox`) converte
+O fluxo NÃO depende de clique. Um **outbox** (migration 066 `billing_outbox`) converte
 mudança comercial em evento; um **worker** processa e chama `ensureBillingState`.
 
 - **Trigger** (`billingTriggers.emitirEventoBilling`) — ponto único; enfileira idempotente
@@ -109,12 +108,12 @@ mudança comercial em evento; um **worker** processa e chama `ensureBillingState
 | Inadimplência (trial/graça) | ✅ | ✅ | — | — | ✅ |
 | Outbox + trigger + worker + **runner automático** | ✅ | ✅ | — | ❌ | ✅ |
 | **Idempotência multi-processo (dedupe + claim CAS)** | ✅ | ✅ (lógica) | ✅ **`billing-3a2-ci` (Postgres 16 real)** | ❌ | ✅ |
-| Migration 063 aplica em Postgres | ✅ | — | ✅ **`billing-3a2-ci`** | — | ✅ |
+| Migration 066 aplica em Postgres | ✅ | — | ✅ **`billing-3a2-ci`** | — | ✅ |
 | Adapter real Asaas SANDBOX | ✅ (código + contract test) | ✅ (http fake) | — | ❌ **BLOCKER** | ✅ |
 | E2E Asaas SANDBOX externo | ✅ (script + workflow protegido) | — | — | ❌ **BLOCKER** | — |
 
 **PG concurrency: ELIMINADO como blocker.** O workflow `billing-3a2-ci.yml` roda NA BRANCH
-(push/dispatch) com Postgres 16 efêmero: aplica migrations até 063 e executa
+(push/dispatch) com Postgres 16 efêmero: aplica migrations até 066 e executa
 `billing_outbox.pgtest.mjs` — **enfileirar 10x mesmo dedupe_key → 1 linha; claim CAS concorrente
 → 1 vencedor; privilégios anon/authenticated negados** (verde). Billing fake: 101/101.
 
@@ -134,7 +133,7 @@ implementado e testado fake/contract + PG CI; a E2E sandbox roda no workflow pro
 - **Reconcile periódico** seleciona por estado: `trial_finalizado`, `customer_ausente`,
   `subscription_ausente`, `cancelamento_pendente`, `revalidar`. Assim eventos de
   plano/add-on/cancelamento **perdidos** convergem sem depender do histórico.
-- Colunas de convergência (migration 063): `empresas.billing_valor_mensal`, `empresas.assinatura_cancelada`.
+- Colunas de convergência (migration 066): `empresas.billing_valor_mensal`, `empresas.assinatura_cancelada`.
 - **Config do runner fail-closed** (`billingRunnerConfig`): `BILLING_OUTBOX_ENABLED` só `true`/`false`;
   intervalo/lote inválido ou fora da faixa → `BillingRunnerConfigurationError` (sem clamp). O
   runner/scripts falham ANTES de processar se a config for inválida.

@@ -1,4 +1,4 @@
-// Testes REAIS (PostgreSQL isolado) do outbox de billing — migration 063 (3A-2).
+// Testes REAIS (PostgreSQL isolado) do outbox de billing — migration 066 (3A-2).
 //
 // Prova a garantia PERSISTENTE de idempotência multi-processo (§8):
 //   - dedupe_key UNIQUE → enfileirar o mesmo evento 10x cria 1 linha só;
