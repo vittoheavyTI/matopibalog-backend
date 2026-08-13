@@ -123,6 +123,15 @@ const mensagemFinalizacaoLimite = (limite) => (
 
 // Datas simples representam o último dia incluído pelo cliente. Converte esse
 // dia no limite exclusivo seguinte; datetimes já expressam o limite desejado.
+const respostaLimiteFrete = (limite, message = limite?.message) => ({
+  error: 'frete_operational_limit',
+  field: limite?.campo,
+  current_value: limite?.valorAtual,
+  max_value: limite?.limiteValor,
+  limit: limite?.limite,
+  message: message || 'Valor fora dos limites operacionais. Confira os dados do frete.',
+});
+
 const normalizarDataFimExclusiva = (dataFim) => {
   if (typeof dataFim !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(dataFim)) return dataFim;
 
@@ -296,7 +305,7 @@ exports.create = async (req, res) => {
       kmInicial: km_inicial,
       kmFinal: km_final,
     });
-    if (!limite.ok) return res.status(422).json({ message: limite.message });
+    if (!limite.ok) return res.status(422).json(respostaLimiteFrete(limite));
 
     // Comissão só para VINCULADO (empresa.tipo conhecido e ≠ 'autonomo'). Autônomo e
     // tipo desconhecido → 0 (nunca assume 12%). Campo comissao_calculada mantido no
@@ -527,7 +536,7 @@ exports.update = async (req, res) => {
       kmInicial: allowedUpdate.km_inicial ?? checkData.km_inicial,
       kmFinal: allowedUpdate.km_final ?? checkData.km_final,
     });
-    if (!limite.ok) return res.status(422).json({ message: limite.message });
+    if (!limite.ok) return res.status(422).json(respostaLimiteFrete(limite));
 
     const { data, error } = await supabase
       .from('fretes')
@@ -691,7 +700,7 @@ exports.finalizar = async (req, res) => {
         kmInicial: kmInicialEfetivo,
         kmFinal: kmFinalEfetivo,
       });
-      if (!limite.ok) return res.status(422).json({ message: mensagemFinalizacaoLimite(limite) });
+      if (!limite.ok) return res.status(422).json(respostaLimiteFrete(limite, mensagemFinalizacaoLimite(limite)));
       updatePayload.valor_frete = calc;
     }
 

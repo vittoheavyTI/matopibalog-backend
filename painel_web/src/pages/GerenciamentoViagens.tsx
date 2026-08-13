@@ -6,6 +6,7 @@ import { formatCurrency } from '../utils';
 import api, { newClientRequestId } from '../api';
 import { mensagemErro } from '../utils/mensagemErro';
 import { erroSanidadeTonKm, erroSanidadeValorFixo, TONELADAS_MAX } from '../utils/limitesFrete';
+import { freteTonKmIncompativelAtual, montarRecuperacaoInlineFrete, obterErroLimiteFrete, type InlineFreteRecovery } from '../utils/freteOperationalLimit';
 import { PlanoBloqueadoCard } from '../components/PlanoBloqueadoCard';
 import { EVENTO_NOTIFICACOES_NOVAS } from '../components/NotificacoesDropdown';
 import { FreteEpodOcorrencias } from '../components/FreteEpodOcorrencias';
@@ -153,6 +154,7 @@ export const GerenciamentoViagens: React.FC = () => {
   const [abastecimentos, setAbastecimentos] = useState<any[]>([]);
   const [vales, setVales] = useState<any[]>([]);
   const [editingItem, setEditingItem] = useState<{ id: string, type: string, data: any } | null>(null);
+  const [inlineRecovery, setInlineRecovery] = useState<InlineFreteRecovery | null>(null);
   const [showAddModal, setShowAddModal] = useState<'despesa' | 'abastecimento' | 'vale' | 'manutencao' | null>(null);
   const [newItemData, setNewItemData] = useState<any>({});
 
@@ -429,6 +431,7 @@ export const GerenciamentoViagens: React.FC = () => {
 
   const openEditModal = (frete: any) => {
     setEditingFrete(frete);
+    setInlineRecovery(null);
     selecionarFotoInicial(null);
     setDocumentosNovoFrete([]);
     setTipoDocumentoNovoFrete('cte');
@@ -688,7 +691,16 @@ export const GerenciamentoViagens: React.FC = () => {
     }
   };
 
-  const handleStartEdit = (item: any, type: any) => setEditingItem({ id: item.id, type, data: { ...item } });
+  const handleStartEdit = (item: any, type: any) => {
+    setInlineRecovery(null);
+    setEditingItem({ id: item.id, type, data: { ...item } });
+  };
+
+  const abrirEditorCompletoRecuperacao = () => {
+    if (!inlineRecovery?.frete) return;
+    setEditingItem(null);
+    openEditModal(inlineRecovery.frete);
+  };
 
   // Baixa o comprovante via fetch->blob. Em falha (CORS/erro), abre em nova aba
   // como fallback seguro — nunca quebra a tela.
@@ -735,7 +747,14 @@ export const GerenciamentoViagens: React.FC = () => {
       if (filterMot !== 'todos') loadMotoristaData(filterMot);
       setEditingItem(null);
     } catch (err) {
-      alert('Erro ao salvar edição.');
+      if (type === 'frete') {
+        const limite = obterErroLimiteFrete(err);
+        if (limite) {
+          setInlineRecovery(montarRecuperacaoInlineFrete(fretes, id, data, limite));
+          return;
+        }
+      }
+      alert(mensagemErro(err, 'Erro ao salvar edição.'));
     }
   };
 
@@ -1114,6 +1133,11 @@ export const GerenciamentoViagens: React.FC = () => {
                           Ton/km{frete.toneladas ? ` · ${frete.toneladas}t` : ''}
                         </span>
                       )}
+                      {freteTonKmIncompativelAtual(frete) && (
+                        <span className="ml-1 mt-0.5 inline-block text-[10px] font-bold uppercase tracking-wide text-amber-700 bg-amber-50 rounded px-1.5 py-0.5">
+                          Dado legado
+                        </span>
+                      )}
                     </td>
                     <td className="p-4">
                       {(frete.km_final || frete.kmFinal) && (frete.km_inicial || frete.kmInicial) ? (
@@ -1277,6 +1301,28 @@ export const GerenciamentoViagens: React.FC = () => {
         </div>
       )}
 
+      {inlineRecovery && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900 shadow-sm">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex items-start">
+              <AlertTriangle size={18} className="mr-2 mt-0.5 shrink-0 text-amber-700" />
+              <div>
+                <p className="text-sm font-bold">Dado legado incompatível com regras atuais</p>
+                <p className="mt-1 whitespace-pre-line text-sm leading-relaxed">{inlineRecovery.message}</p>
+              </div>
+            </div>
+            {inlineRecovery.mostrarEditorCompleto && (
+              <button
+                onClick={abrirEditorCompletoRecuperacao}
+                className="inline-flex shrink-0 items-center justify-center rounded-lg bg-amber-700 px-3 py-2 text-sm font-bold text-white transition-colors hover:bg-amber-800"
+              >
+                <Edit size={16} className="mr-1.5" /> Editar frete completo
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-4">
         <div className="space-y-6 order-2 lg:order-1">
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
@@ -1360,6 +1406,7 @@ export const GerenciamentoViagens: React.FC = () => {
                             <span className="bg-gray-100 px-1.5 py-0.5 rounded">{despFrete.length} desp · {abastFrete.length} abast · {valesFrete.length} vale</span>
                             {deducoesAprov > 0 && <span className="text-gray-600">Deduções aprov.: {formatCurrency(deducoesAprov)}</span>}
                             {pendentesFrete > 0 && <span className="bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded font-bold">{pendentesFrete} pendente(s)</span>}
+                            {freteTonKmIncompativelAtual(f) && <span className="bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-bold">dado legado</span>}
                             {consultaFocada && <span className="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded font-bold">consulta via Torre</span>}
                             {f.id === freteQuery && painelQuery === 'ocorrencias' && <span className="bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-bold">ocorrências em foco</span>}
                             {f.id === freteQuery && painelQuery === 'comprovante' && <span className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-bold">comprovante em foco</span>}
@@ -1510,6 +1557,8 @@ export const GerenciamentoViagens: React.FC = () => {
         kmFinal: formData.km_final,
       })
     : erroSanidadeValorFixo(formData.valor_frete);
+  const legadoIncompativelModal = Boolean(editingFrete && formData.modalidade_calculo === 'tonelada_km' && sanidadeFreteErro);
+  const valorTonKmForaLimiteModal = legadoIncompativelModal && Number(formData.valor_tonelada_km) > 10;
 
   return (
 
@@ -1557,6 +1606,17 @@ export const GerenciamentoViagens: React.FC = () => {
                       )}
                     </ul>
                   )}
+                </div>
+              )}
+              {legadoIncompativelModal && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                  <div className="flex items-start">
+                    <AlertTriangle size={14} className="mr-1.5 mt-0.5 shrink-0 text-amber-700" />
+                    <div>
+                      <p className="font-bold">Dado legado incompatível com regras atuais</p>
+                      <p className="mt-1">Este frete foi criado antes dos limites operacionais atuais. Não altere o valor sem confirmar o dado comercial correto.</p>
+                    </div>
+                  </div>
                 </div>
               )}
               <div className="grid grid-cols-2 gap-3">
@@ -1644,7 +1704,7 @@ export const GerenciamentoViagens: React.FC = () => {
                     </div>
                     <div>
                       <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Valor por Tonelada/km (R$/t·km) *</label>
-                      <input type="number" step="0.0001" min="0" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" value={formData.valor_tonelada_km} onChange={e => setFormData({...formData, valor_tonelada_km: e.target.value})} placeholder="Ex.: 0,20" />
+                      <input type="number" step="0.0001" min="0" className={`w-full border rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500 ${valorTonKmForaLimiteModal ? 'border-amber-400 bg-amber-50' : 'border-gray-200'}`} value={formData.valor_tonelada_km} onChange={e => setFormData({...formData, valor_tonelada_km: e.target.value})} placeholder="Ex.: 0,20" />
                       <p className="text-[10px] text-gray-400 mt-0.5">Valor por tonelada a cada km. Ex.: 0,20 = R$ 0,20.</p>
                     </div>
                   </div>
