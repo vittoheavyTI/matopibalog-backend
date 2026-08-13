@@ -47,6 +47,7 @@ CREATE TABLE public.fretes_financeiro_auditoria (
   frete_id uuid NOT NULL REFERENCES public.fretes(id) ON DELETE RESTRICT,
   empresa_id uuid NOT NULL REFERENCES public.empresas(id) ON DELETE RESTRICT,
   actor_user_id uuid NULL REFERENCES public.usuarios(id) ON DELETE SET NULL,
+  actor_auth_uid text NULL,
   reason text NOT NULL,
   source text NOT NULL,
   request_id text NOT NULL,
@@ -55,9 +56,10 @@ CREATE TABLE public.fretes_financeiro_auditoria (
   after_snapshot jsonb NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT fretes_fin_aud_reason_chk CHECK (length(btrim(reason)) >= 8 AND length(reason) <= 500),
-  CONSTRAINT fretes_fin_aud_source_chk CHECK (length(btrim(source)) >= 3 AND length(source) <= 64),
+  CONSTRAINT fretes_fin_aud_source_chk CHECK (btrim(source) IN ('painel_admin')),
   CONSTRAINT fretes_fin_aud_request_id_chk CHECK (length(btrim(request_id)) >= 8 AND length(request_id) <= 128),
-  CONSTRAINT fretes_fin_aud_correction_type_chk CHECK (length(btrim(correction_type)) >= 3 AND length(correction_type) <= 64)
+  CONSTRAINT fretes_fin_aud_correction_type_chk CHECK (btrim(correction_type) IN ('manual_legacy_financial_correction')),
+  CONSTRAINT fretes_fin_aud_actor_auth_uid_chk CHECK (actor_auth_uid IS NULL OR length(btrim(actor_auth_uid)) BETWEEN 8 AND 128)
 );
 
 CREATE INDEX idx_fretes_fin_audit_frete ON public.fretes_financeiro_auditoria (frete_id, created_at DESC);
@@ -90,16 +92,20 @@ Criar uma RPC `public.corrigir_frete_financeiro_legacy(...)` com:
 
 Fluxo atomico:
 
-1. Receber `frete_id`, patch permitido, `actor_user_id`, `reason`, `source`, `request_id`.
+1. Receber `frete_id`, patch permitido, `actor_user_id`, `actor_auth_uid`, `reason`, `source`, `request_id` e `expected_before_snapshot`.
 2. Validar `reason` obrigatorio.
-3. `SELECT ... FOR UPDATE` do frete.
-4. Validar `empresa_id`/ownership no backend antes da RPC ou dentro dela por parametro confiavel.
-5. Montar `before_snapshot`.
-6. Aplicar patch allowlisted ja preparado pela API; a formula canonica continua no backend JS.
-7. Atualizar `fretes`.
-8. Montar `after_snapshot`.
-9. Inserir `fretes_financeiro_auditoria`.
-10. Commit unico.
+3. Validar `source='painel_admin'` e `correction_type='manual_legacy_financial_correction'`.
+4. Serializar a chave idempotente com advisory lock transacional por `source/request_id`.
+5. Reaproveitar auditoria existente para replay idempotente antes de mutar.
+6. `SELECT ... FOR UPDATE` do frete.
+7. Validar `empresa_id`/ownership no backend antes da RPC e por parametro confiavel na RPC.
+8. Montar `before_snapshot` sob lock e comparar com `expected_before_snapshot`.
+9. Em divergencia, rejeitar com `frete_financial_correction_concurrent_change` sem update/auditoria.
+10. Aplicar patch allowlisted ja preparado pela API; a formula canonica continua no backend JS.
+11. Atualizar `fretes`.
+12. Montar `after_snapshot`.
+13. Inserir `fretes_financeiro_auditoria`.
+14. Commit unico.
 
 Nao aceitar desenho `UPDATE fretes` seguido de auditoria best-effort.
 
@@ -114,8 +120,10 @@ Nao aceitar desenho `UPDATE fretes` seguido de auditoria best-effort.
 
 - RPC grava update + auditoria em uma transacao.
 - Falha no insert de auditoria faz rollback do update.
-- `request_id` torna chamada idempotente quando enviado.
+- `request_id` torna chamada idempotente quando enviado, inclusive em concorrencia real.
+- `request_id` diferente com snapshot esperado obsoleto retorna conflito deterministico.
 - `reason` vazio rejeita.
+- `source` e `correction_type` fora da allowlist rejeitam.
 - `before_snapshot` e `after_snapshot` contem os campos exigidos.
 - Nao persiste cookies/tokens/secrets.
 - Admin comum nao corrige frete de outro tenant.

@@ -86,7 +86,6 @@ const correcaoFinanceiraFreteSchema = z.object({
   }),
   reason: z.string().trim().min(8, 'Informe o motivo da correcao.').max(500),
   request_id: z.string().trim().min(8).max(128),
-  correction_type: z.string().trim().min(3).max(64).optional(),
 }).strict();
 
 module.exports = { createFreteSchema, updateFreteSchema, correcaoFinanceiraFreteSchema };

@@ -18,7 +18,7 @@ const frete = (over = {}) => ({
   ...over,
 });
 
-const criarController = (freteData) => {
+const criarController = (freteData, { rpcError = null } = {}) => {
   const capt = { rpcName: null, rpcArgs: null };
   const supabaseMock = {
     from(tabela) {
@@ -29,12 +29,17 @@ const criarController = (freteData) => {
           if (tabela === 'fretes') return { data: freteData, error: freteData ? null : new Error('not found') };
           return { data: null, error: null };
         },
+        async maybeSingle() {
+          if (tabela === 'usuarios') return { data: { id: '11111111-1111-1111-1111-111111111111' }, error: null };
+          return { data: null, error: null };
+        },
       };
       return b;
     },
     async rpc(name, args) {
       capt.rpcName = name;
       capt.rpcArgs = args;
+      if (rpcError) return { data: null, error: rpcError };
       return {
         data: {
           idempotent: false,
@@ -62,8 +67,8 @@ const criarController = (freteData) => {
   }
 };
 
-async function executar({ freteData = frete(), user = { role: 'admin', uid: '11111111-1111-1111-1111-111111111111' }, empresaId = frete().empresa_id, body } = {}) {
-  const { controller, capt } = criarController(freteData);
+async function executar({ freteData = frete(), user = { role: 'admin', uid: '11111111-1111-1111-1111-111111111111' }, empresaId = frete().empresa_id, body, rpcError = null } = {}) {
+  const { controller, capt } = criarController(freteData, { rpcError });
   let resposta = null;
   await controller.corrigirFinanceiro(
     { params: { id: freteData?.id || frete().id }, body, user, empresa_id: empresaId },
@@ -84,6 +89,17 @@ test('POST correcao-financeira chama RPC auditada com patch derivado', async () 
   assert.equal(capt.rpcName, 'corrigir_frete_financeiro_legacy');
   assert.equal(capt.rpcArgs.p_source, 'painel_admin');
   assert.equal(capt.rpcArgs.p_request_id, 'req-controller-1');
+  assert.equal(capt.rpcArgs.p_correction_type, 'manual_legacy_financial_correction');
+  assert.equal(capt.rpcArgs.p_actor_auth_uid, '11111111-1111-1111-1111-111111111111');
+  assert.deepEqual(capt.rpcArgs.p_expected_before_snapshot, {
+    modalidade_calculo: 'tonelada_km',
+    toneladas: 5,
+    valor_tonelada_km: 245,
+    valor_frete: 0,
+    km_inicial: 1,
+    km_final: null,
+    status: 'ativo',
+  });
   assert.equal(capt.rpcArgs.p_patch.valor_tonelada_km, 0.245);
   assert.equal(capt.rpcArgs.p_patch.km_final, 800);
   assert.equal(capt.rpcArgs.p_patch.valor_frete, 978.78);
@@ -115,4 +131,18 @@ test('POST correcao-financeira bloqueia cancelado com erro estruturado', async (
   assert.equal(resposta.body.field, 'status');
   assert.equal(resposta.body.current_value, 'cancelado');
   assert.equal(capt.rpcName, null);
+});
+
+test('POST correcao-financeira mapeia concorrencia otimista para 409', async () => {
+  const { resposta, capt } = await executar({
+    body: {
+      fields: { valor_tonelada_km: 0.245 },
+      reason: 'correcao financeira legado auditada',
+      request_id: 'req-controller-5',
+    },
+    rpcError: new Error('frete_financial_correction_concurrent_change'),
+  });
+  assert.equal(capt.rpcName, 'corrigir_frete_financeiro_legacy');
+  assert.equal(resposta.status, 409);
+  assert.equal(resposta.body.error, 'frete_financial_correction_concurrent_change');
 });

@@ -156,16 +156,31 @@ const respostaErroCorrecaoFinanceira = (erro, frete) => {
 
 const erroRpcCorrecaoFinanceira = (error) => {
   const msg = error?.message || '';
+  if (msg.includes('frete_financial_correction_concurrent_change')) return 'frete_financial_correction_concurrent_change';
   if (msg.includes('frete_financial_correction_status_locked')) return 'frete_financial_correction_status_locked';
   if (msg.includes('frete_financial_correction_status_unknown')) return 'frete_financial_correction_status_unknown';
   if (msg.includes('frete_financial_correction_not_found')) return 'frete_financial_correction_not_found';
   if (msg.includes('frete_financial_correction_reason_required')) return 'frete_financial_correction_reason_required';
   if (msg.includes('frete_financial_correction_request_id_required')) return 'frete_financial_correction_request_id_required';
   if (msg.includes('frete_financial_correction_request_id_conflict')) return 'frete_financial_correction_request_id_conflict';
+  if (msg.includes('frete_financial_correction_source_not_allowed')) return 'frete_financial_correction_source_not_allowed';
+  if (msg.includes('frete_financial_correction_type_not_allowed')) return 'frete_financial_correction_type_not_allowed';
+  if (msg.includes('frete_financial_correction_expected_snapshot_required')) return 'frete_financial_correction_expected_snapshot_required';
   if (msg.includes('frete_financial_correction_empty')) return 'frete_financial_correction_empty';
   if (msg.includes('frete_financial_correction_field_not_allowed')) return 'frete_financial_correction_field_not_allowed';
   if (msg.includes('frete_operational_limit')) return 'frete_operational_limit';
   return null;
+};
+
+const resolverActorUserIdAuditoria = async (uid) => {
+  if (!uid) return null;
+  const { data, error } = await supabase
+    .from('usuarios')
+    .select('id')
+    .eq('id', uid)
+    .maybeSingle();
+  if (error) throw error;
+  return data?.id || null;
 };
 
 const normalizarDataFimExclusiva = (dataFim) => {
@@ -486,14 +501,17 @@ exports.corrigirFinanceiro = async (req, res) => {
       return res.status(422).json(respostaErroCorrecaoFinanceira(preparo, frete));
     }
 
+    const actorUserId = await resolverActorUserIdAuditoria(req.user.uid);
     const { data, error } = await supabase.rpc('corrigir_frete_financeiro_legacy', {
       p_frete_id: id,
       p_empresa_id: frete.empresa_id,
-      p_actor_user_id: req.user.uid || null,
+      p_actor_user_id: actorUserId,
+      p_actor_auth_uid: req.user.uid || null,
       p_reason: req.body.reason,
       p_source: 'painel_admin',
       p_request_id: req.body.request_id,
-      p_correction_type: req.body.correction_type || 'manual_legacy_financial_correction',
+      p_correction_type: 'manual_legacy_financial_correction',
+      p_expected_before_snapshot: preparo.before_snapshot,
       p_patch: preparo.patch,
     });
 
@@ -501,6 +519,12 @@ exports.corrigirFinanceiro = async (req, res) => {
       const codigo = erroRpcCorrecaoFinanceira(error);
       if (codigo === 'frete_financial_correction_not_found') {
         return res.status(404).json({ error: codigo, message: 'Frete nao encontrado.' });
+      }
+      if (codigo === 'frete_financial_correction_concurrent_change') {
+        return res.status(409).json({
+          error: codigo,
+          message: 'Este frete foi alterado por outra operacao. Atualize os dados e tente novamente.',
+        });
       }
       if (codigo) {
         return res.status(422).json({

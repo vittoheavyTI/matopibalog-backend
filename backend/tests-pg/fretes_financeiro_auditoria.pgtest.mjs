@@ -47,21 +47,51 @@ function registrar() {
 
   after(async () => { await pool.end(); });
 
-  async function rpc({ frete = F1, empresa = E1, requestId = `req-${randomUUID()}`, patch = {}, reason = 'correcao financeira legado auditada' } = {}) {
+  async function snapshot(frete = F1) {
+    const { rows } = await pool.query(
+      `SELECT jsonb_build_object(
+        'modalidade_calculo', modalidade_calculo,
+        'toneladas', toneladas,
+        'valor_tonelada_km', valor_tonelada_km,
+        'valor_frete', valor_frete,
+        'km_inicial', km_inicial,
+        'km_final', km_final,
+        'status', status
+      ) AS snapshot
+       FROM public.fretes
+       WHERE id=$1`,
+      [frete],
+    );
+    return rows[0].snapshot;
+  }
+
+  async function rpc({
+    frete = F1,
+    empresa = E1,
+    requestId = `req-${randomUUID()}`,
+    patch = {},
+    reason = 'correcao financeira legado auditada',
+    source = 'painel_admin',
+    correctionType = 'manual_legacy_financial_correction',
+    expectedBeforeSnapshot,
+  } = {}) {
+    const expected = expectedBeforeSnapshot ?? await snapshot(frete);
     const c = await pool.connect();
     try {
       await c.query('BEGIN');
       await c.query('SET LOCAL ROLE service_role');
       const { rows } = await c.query(
-        `SELECT public.corrigir_frete_financeiro_legacy($1,$2,$3,$4,$5,$6,$7,$8::jsonb) AS result`,
+        `SELECT public.corrigir_frete_financeiro_legacy($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb) AS result`,
         [
           frete,
           empresa,
           A1,
+          A1,
           reason,
-          'painel_admin',
+          source,
           requestId,
-          'manual_legacy_financial_correction',
+          correctionType,
+          JSON.stringify(expected),
           JSON.stringify(patch),
         ],
       );
@@ -84,7 +114,7 @@ function registrar() {
       const { rows } = await pool.query(`SELECT has_table_privilege($1, '${TABELA}', 'SELECT') AS ok`, [role]);
       assert.equal(rows[0].ok, false, `${role} sem SELECT direto`);
       const { rows: exec } = await pool.query(
-        `SELECT has_function_privilege($1, 'public.corrigir_frete_financeiro_legacy(uuid,uuid,uuid,text,text,text,text,jsonb)', 'EXECUTE') AS ok`,
+        `SELECT has_function_privilege($1, 'public.corrigir_frete_financeiro_legacy(uuid,uuid,uuid,text,text,text,text,text,jsonb,jsonb)', 'EXECUTE') AS ok`,
         [role],
       );
       assert.equal(exec[0].ok, false, `${role} sem EXECUTE`);
@@ -111,16 +141,71 @@ function registrar() {
     assert.equal(Number(fretes[0].valor_tonelada_km), 0.245);
     assert.equal(Number(fretes[0].km_final), 800);
 
-    const { rows: audit } = await pool.query(`SELECT reason, source, request_id FROM ${TABELA} WHERE frete_id=$1`, [F1]);
+    const { rows: audit } = await pool.query(`SELECT reason, source, request_id, actor_user_id, actor_auth_uid FROM ${TABELA} WHERE frete_id=$1`, [F1]);
     assert.equal(audit.length, 1);
     assert.equal(audit[0].source, 'painel_admin');
+    assert.equal(audit[0].actor_user_id, A1);
+    assert.equal(audit[0].actor_auth_uid, A1);
   });
 
   test('request_id torna a correcao idempotente e nao aplica segundo patch', async () => {
     const requestId = `req-${randomUUID()}`;
-    await rpc({ requestId, patch: { valor_tonelada_km: 0.245, valor_frete: 0 } });
-    const again = await rpc({ requestId, patch: { valor_tonelada_km: 0.5, valor_frete: 0 } });
+    const expected = await snapshot(F1);
+    await rpc({ requestId, expectedBeforeSnapshot: expected, patch: { valor_tonelada_km: 0.245, valor_frete: 0 } });
+    const again = await rpc({ requestId, expectedBeforeSnapshot: expected, patch: { valor_tonelada_km: 0.5, valor_frete: 0 } });
     assert.equal(again.idempotent, true);
+
+    const { rows: fretes } = await pool.query('SELECT valor_tonelada_km FROM public.fretes WHERE id=$1', [F1]);
+    assert.equal(Number(fretes[0].valor_tonelada_km), 0.245);
+    const { rows: audit } = await pool.query(`SELECT count(*)::int AS n FROM ${TABELA} WHERE frete_id=$1`, [F1]);
+    assert.equal(audit[0].n, 1);
+  });
+
+  test('mesmo request_id concorrente serializa e retorna replay idempotente', async () => {
+    const requestId = `req-${randomUUID()}`;
+    const expected = await snapshot(F1);
+    const calls = await Promise.allSettled([
+      rpc({ requestId, expectedBeforeSnapshot: expected, patch: { valor_tonelada_km: 0.245, valor_frete: 0 } }),
+      rpc({ requestId, expectedBeforeSnapshot: expected, patch: { valor_tonelada_km: 0.245, valor_frete: 0 } }),
+    ]);
+
+    assert.deepEqual(calls.map((r) => r.status), ['fulfilled', 'fulfilled']);
+    const results = calls.map((r) => r.value);
+    assert.equal(results.filter((r) => r.idempotent === false).length, 1);
+    assert.equal(results.filter((r) => r.idempotent === true).length, 1);
+    assert.equal(results[0].audit_id, results[1].audit_id);
+
+    const { rows: audit } = await pool.query(`SELECT count(*)::int AS n FROM ${TABELA} WHERE frete_id=$1`, [F1]);
+    assert.equal(audit[0].n, 1);
+  });
+
+  test('request_ids diferentes concorrentes no mesmo snapshot produzem 1 sucesso e 1 conflito', async () => {
+    const expected = await snapshot(F1);
+    const calls = await Promise.allSettled([
+      rpc({ requestId: `req-${randomUUID()}`, expectedBeforeSnapshot: expected, patch: { valor_tonelada_km: 0.245, valor_frete: 0 } }),
+      rpc({ requestId: `req-${randomUUID()}`, expectedBeforeSnapshot: expected, patch: { valor_tonelada_km: 0.5, valor_frete: 0 } }),
+    ]);
+
+    assert.equal(calls.filter((r) => r.status === 'fulfilled').length, 1);
+    const rejected = calls.find((r) => r.status === 'rejected');
+    assert.match(rejected.reason.message, /frete_financial_correction_concurrent_change/);
+
+    const { rows: audit } = await pool.query(`SELECT count(*)::int AS n FROM ${TABELA} WHERE frete_id=$1`, [F1]);
+    assert.equal(audit[0].n, 1);
+    const { rows: fretes } = await pool.query('SELECT modalidade_calculo, toneladas, valor_tonelada_km, valor_frete, km_inicial, km_final FROM public.fretes WHERE id=$1', [F1]);
+    const final = fretes[0];
+    if (Number(final.valor_tonelada_km) === 0.245) assert.equal(Number(final.valor_frete), 0);
+    else if (Number(final.valor_tonelada_km) === 0.5) assert.equal(Number(final.valor_frete), 0);
+    else assert.fail(`valor_tonelada_km final inesperado: ${final.valor_tonelada_km}`);
+  });
+
+  test('snapshot esperado obsoleto recusa sem update e sem auditoria', async () => {
+    const stale = await snapshot(F1);
+    await rpc({ patch: { valor_tonelada_km: 0.245, valor_frete: 0 } });
+    await assert.rejects(
+      () => rpc({ requestId: `req-${randomUUID()}`, expectedBeforeSnapshot: stale, patch: { valor_tonelada_km: 0.5, valor_frete: 0 } }),
+      /frete_financial_correction_concurrent_change/,
+    );
 
     const { rows: fretes } = await pool.query('SELECT valor_tonelada_km FROM public.fretes WHERE id=$1', [F1]);
     assert.equal(Number(fretes[0].valor_tonelada_km), 0.245);
@@ -165,6 +250,19 @@ function registrar() {
     await assert.rejects(() => rpc({ patch: { valor_tonelada_km: 150, valor_frete: 0 } }), /frete_operational_limit:valor_tonelada_km/);
     const { rows } = await pool.query('SELECT valor_tonelada_km FROM public.fretes WHERE id=$1', [F1]);
     assert.equal(Number(rows[0].valor_tonelada_km), 245);
+  });
+
+  test('source e correction_type sao allowlisted no banco', async () => {
+    await assert.rejects(
+      () => rpc({ source: 'browser', patch: { valor_tonelada_km: 0.245, valor_frete: 0 } }),
+      /frete_financial_correction_source_not_allowed/,
+    );
+    await assert.rejects(
+      () => rpc({ correctionType: 'tipo_livre', patch: { valor_tonelada_km: 0.245, valor_frete: 0 } }),
+      /frete_financial_correction_type_not_allowed/,
+    );
+    const { rows: audit } = await pool.query(`SELECT count(*)::int AS n FROM ${TABELA}`);
+    assert.equal(audit[0].n, 0);
   });
 
   test('se a auditoria falha, o update do frete tambem faz rollback', async () => {

@@ -7,6 +7,11 @@ import api, { newClientRequestId } from '../api';
 import { mensagemErro } from '../utils/mensagemErro';
 import { erroSanidadeTonKm, erroSanidadeValorFixo, TONELADAS_MAX } from '../utils/limitesFrete';
 import { freteTonKmIncompativelAtual, montarRecuperacaoInlineFrete, obterErroLimiteFrete, type InlineFreteRecovery } from '../utils/freteOperationalLimit';
+import {
+  limparRequestIdFreteFinancialCorrection,
+  obterRequestIdFreteFinancialCorrection,
+  type FreteFinancialCorrectionRequestState,
+} from '../utils/freteFinancialCorrectionRequest';
 import { PlanoBloqueadoCard } from '../components/PlanoBloqueadoCard';
 import { EVENTO_NOTIFICACOES_NOVAS } from '../components/NotificacoesDropdown';
 import { FreteEpodOcorrencias } from '../components/FreteEpodOcorrencias';
@@ -165,6 +170,7 @@ export const GerenciamentoViagens: React.FC = () => {
     data: format(new Date(), 'yyyy-MM-dd')
   });
   const [correcaoFinanceiraReason, setCorrecaoFinanceiraReason] = useState('');
+  const correcaoFinanceiraRequestRef = useRef<FreteFinancialCorrectionRequestState | null>(null);
 
   const [despesas, setDespesas] = useState<any[]>([]);
   const [abastecimentos, setAbastecimentos] = useState<any[]>([]);
@@ -414,6 +420,7 @@ export const GerenciamentoViagens: React.FC = () => {
   const openNewModal = (motId?: string) => {
     setEditingFrete(null);
     setCorrecaoFinanceiraReason('');
+    limparRequestIdFreteFinancialCorrection(correcaoFinanceiraRequestRef);
     selecionarFotoInicial(null);
     setDocumentosNovoFrete([]);
     setTipoDocumentoNovoFrete('cte');
@@ -449,6 +456,7 @@ export const GerenciamentoViagens: React.FC = () => {
   const openEditModal = (frete: any) => {
     setEditingFrete(frete);
     setCorrecaoFinanceiraReason('');
+    limparRequestIdFreteFinancialCorrection(correcaoFinanceiraRequestRef);
     setInlineRecovery(null);
     selecionarFotoInicial(null);
     setDocumentosNovoFrete([]);
@@ -599,12 +607,21 @@ export const GerenciamentoViagens: React.FC = () => {
         }
 
         if (temCorrecaoFinanceira) {
+          const requestId = obterRequestIdFreteFinancialCorrection(
+            correcaoFinanceiraRequestRef,
+            {
+              freteId: editingFrete.id,
+              fields: camposFinanceiros,
+              reason: correcaoFinanceiraReason,
+            },
+            newClientRequestId,
+          );
           await api.post('/fretes/' + editingFrete.id + '/correcao-financeira', {
             fields: camposFinanceiros,
             reason: correcaoFinanceiraReason.trim(),
-            request_id: newClientRequestId(),
-            correction_type: 'manual_legacy_financial_correction',
+            request_id: requestId,
           });
+          limparRequestIdFreteFinancialCorrection(correcaoFinanceiraRequestRef);
         } else if (Object.keys(payloadOperacional).length > 0) {
           await api.patch('/fretes/' + editingFrete.id, payloadOperacional);
         }
@@ -669,9 +686,15 @@ export const GerenciamentoViagens: React.FC = () => {
         alert(`Frete salvo, mas ${documentosComFalha} documento(s) não foram anexados. Anexe depois no detalhe do frete.`);
       }
     } catch (err: any) {
+      const data = err.response?.data;
+      if (err.response?.status === 409 && data?.error === 'frete_financial_correction_concurrent_change') {
+        limparRequestIdFreteFinancialCorrection(correcaoFinanceiraRequestRef);
+        if (filterMot !== 'todos') { await loadMotoristaData(filterMot); } else { await loadData(); }
+        alert(data.message || 'Este frete foi alterado por outra operacao. Atualize os dados e tente novamente.');
+        return;
+      }
       // PR-G2: mostra o(s) campo(s) inválido(s) que o backend devolve em errors[], em vez de
       // só "Dados inválidos." — facilita diagnosticar qual campo reprovou.
-      const data = err.response?.data;
       const detalhe = Array.isArray(data?.errors) && data.errors.length
         ? ' (' + data.errors.map((e: any) => `${e.campo}: ${e.mensagem}`).join('; ') + ')'
         : '';
