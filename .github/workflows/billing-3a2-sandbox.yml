@@ -22,7 +22,7 @@ jobs:
     name: Asaas SANDBOX E2E (fixture sintética)
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    environment: sandbox   # gate de aprovação/secret do GitHub
+    environment: sandbox
 
     defaults:
       run:
