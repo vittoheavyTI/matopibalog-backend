@@ -24,6 +24,7 @@ const arquivos = [
   // 064 depois da 062 (FK → auth_sessions). O gap 063 é intencional (reservado ao
   // #416 congelado); o applier usa lista explícita, então o gap é inócuo.
   join(migrations, '064_frete_tracking_credenciais.sql'), // SEC-1: credencial de rastreamento
+  join(migrations, '065_fretes_financeiro_auditoria.sql'), // Fretes: correcao financeira atomica
 ];
 
 const client = new pg.Client({ connectionString: CONN });

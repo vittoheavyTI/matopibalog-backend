@@ -71,4 +71,21 @@ const updateFreteSchema = z.object({
   // para valor_fixo — edição parcial de outros campos não é bloqueada.
   .superRefine((data, ctx) => aplicarRegraModalidade(data, ctx, { exigirValorFixo: data.modalidade_calculo === 'valor_fixo' }));
 
-module.exports = { createFreteSchema, updateFreteSchema };
+const campoCorrecaoFinanceiraSchema = z.object({
+  modalidade_calculo: modalidadeSchema,
+  toneladas: vazioComoIndefinido(z.coerce.number().positive('Toneladas deve ser maior que zero.').optional()),
+  valor_tonelada_km: vazioComoIndefinido(z.coerce.number().positive('Valor por tonelada/km deve ser maior que zero.').optional()),
+  valor_frete: vazioComoIndefinido(z.coerce.number().nonnegative('Valor do frete nao pode ser negativo.').optional()),
+  km_inicial: vazioComoIndefinido(z.coerce.number().positive('KM inicial deve ser maior que zero.').optional()),
+  km_final: vazioComoIndefinido(z.coerce.number().positive('KM final deve ser maior que zero.').optional()),
+}).strict();
+
+const correcaoFinanceiraFreteSchema = z.object({
+  fields: campoCorrecaoFinanceiraSchema.refine((data) => Object.keys(data).length > 0, {
+    message: 'Informe ao menos um campo financeiro para corrigir.',
+  }),
+  reason: z.string().trim().min(8, 'Informe o motivo da correcao.').max(500),
+  request_id: z.string().trim().min(8).max(128),
+}).strict();
+
+module.exports = { createFreteSchema, updateFreteSchema, correcaoFinanceiraFreteSchema };
