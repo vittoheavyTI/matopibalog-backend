@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SEC-1 hardening (Android 11 / API < 31, Auto Backup legado). Exclui TODO o domínio
+  SharedPreferences do backup. Não basta excluir só o arquivo do flutter_secure_storage:
+  AuthProvider.tryAutoLogin() ainda migra o token legado de SharedPreferences['token']
+  para o secure storage, então um backup antigo com esse token seria restaurado e
+  re-migrado — quebrando a garantia de "instalação limpa sem auth state restaurado".
+  Trade-off aceito: preferências não críticas (ex.: tema) não sobrevivem a backup/restore;
+  segurança e determinismo de sessão têm prioridade. Ver docs/sec-1/12.
+-->
+<full-backup-content>
+    <exclude domain="sharedpref" path="." />
+</full-backup-content>

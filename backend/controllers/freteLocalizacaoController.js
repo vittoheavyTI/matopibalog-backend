@@ -74,20 +74,39 @@ const dedupePonto = async ({ freteId, capturedAt }) => {
   return (count || 0) > 0;
 };
 
+// Definição CANÔNICA de "viagem apta ao rastreamento" (mesma usada pela sessão de
+// telemetria e pela emissão da credencial escopada — evita divergência de regra).
+const listarFretesAtivosDoMotorista = async (empresaId, motoristaId, limite = MAX_FRETES_SESSAO) => {
+  if (!empresaId || !motoristaId) return [];
+  const { data, error } = await supabase
+    .from('fretes')
+    .select('id, empresa_id, motorista_id, status, data')
+    .eq('empresa_id', empresaId)
+    .eq('motorista_id', motoristaId)
+    .in('status', Array.from(STATUS_ATIVOS))
+    .order('data', { ascending: false })
+    .limit(limite);
+  if (error) throw error;
+  return data || [];
+};
+
 const buscarFretesEmAndamentoDoMotorista = async (req) => {
   if (req.user?.role !== 'motorista' || !req.user?.uid || !req.empresa_id) {
     return [];
   }
-  const { data, error } = await supabase
-    .from('fretes')
-    .select('id, empresa_id, motorista_id, status, data')
-    .eq('empresa_id', req.empresa_id)
-    .eq('motorista_id', req.user.uid)
-    .in('status', Array.from(STATUS_ATIVOS))
-    .order('data', { ascending: false })
-    .limit(MAX_FRETES_SESSAO);
-  if (error) throw error;
-  return data || [];
+  return listarFretesAtivosDoMotorista(req.empresa_id, req.user.uid);
+};
+
+// Fretes que RECEBEM telemetria nesta requisição:
+//  - Ramo TRACKING (credencial escopada): SOMENTE a INTERSEÇÃO já resolvida no guard
+//    (escopo IMUTÁVEL da emissão ∩ viagens ainda ativas). Uma viagem futura fora do
+//    snapshot NUNCA entra — evita RESSURREIÇÃO de credencial.
+//  - Ramo SESSÃO (Flutter/legado): todas as viagens ativas do motorista (comportamento atual).
+const buscarFretesParaTelemetria = async (req) => {
+  if (req.authKind === 'tracking') {
+    return Array.isArray(req.trackingFretes) ? req.trackingFretes : [];
+  }
+  return buscarFretesEmAndamentoDoMotorista(req);
 };
 
 const listarUltimasPorFrete = async (ids) => {
@@ -172,7 +191,7 @@ exports.obterSessao = async (req, res) => {
       return res.status(403).json({ message: 'Sessao de localizacao disponivel somente para motorista autenticado.' });
     }
 
-    const fretes = await buscarFretesEmAndamentoDoMotorista(req);
+    const fretes = await buscarFretesParaTelemetria(req);
     const ids = fretes.map((f) => f.id);
     const [ultimas, estados] = await Promise.all([
       listarUltimasPorFrete(ids),
@@ -204,9 +223,19 @@ exports.registrarSessao = async (req, res) => {
       return res.status(403).json({ message: 'Apenas o motorista autenticado pode enviar localizacao da viagem.' });
     }
 
-    const fretes = await buscarFretesEmAndamentoDoMotorista(req);
+    // SEC-1 observabilidade (sem segredo): distingue telemetria por CREDENCIAL de
+    // rastreamento (authKind=tracking) da telemetria por SESSÃO/access token
+    // (authKind=session). Permite ver no E2E qual caminho o cliente usou SEM
+    // alterar a compat do guard. Nunca loga token/refresh.
+    console.info('[freteLocalizacao:telemetria]', JSON.stringify({
+      authKind: req.authKind === 'tracking' ? 'tracking' : 'session',
+      has_credential: Boolean(req.trackingCredentialId),
+      uid8: String(req.user?.uid || '').slice(0, 8),
+    }));
+
+    const fretes = await buscarFretesParaTelemetria(req);
     if (!fretes.length) {
-      return res.status(409).json({ message: 'Compartilhamento pausado: nao ha viagem em andamento.' });
+      return res.status(409).json({ error: 'tracking_trip_inactive', message: 'Compartilhamento pausado: nao ha viagem em andamento.' });
     }
 
     const resultados = [];
@@ -244,7 +273,7 @@ exports.registrarEstadoSessao = async (req, res) => {
       return res.status(400).json({ message: 'Estado de localizacao invalido.' });
     }
 
-    const fretes = await buscarFretesEmAndamentoDoMotorista(req);
+    const fretes = await buscarFretesParaTelemetria(req);
     if (!fretes.length) {
       return res.status(200).json({ ok: true, fretes_atualizados: 0, ativa: false });
     }
@@ -374,3 +403,6 @@ exports.limparVencidas = async (_req, res) => {
     return res.status(500).json({ message: 'Erro ao limpar historico vencido.' });
   }
 };
+
+// Reuso pela emissão da credencial de rastreamento (mesma regra de viagem apta).
+exports.listarFretesAtivosDoMotorista = listarFretesAtivosDoMotorista;

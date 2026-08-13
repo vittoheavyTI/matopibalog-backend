@@ -1,6 +1,7 @@
 const supabase = require('../config/supabase');
 const crypto = require('crypto');
 const planoLimiteService = require('../services/planoLimiteService');
+const { revogarSessoesDoUsuarioSeSec1, responderErroRevogacao } = require('../services/auth/sessionRevocationEvents');
 
 // Gera senha temporária aleatória e forte (sem caracteres ambíguos: 0/O/1/l/I)
 // usando o crypto nativo do Node. Substitui o antigo default fixo '123456' em
@@ -42,6 +43,7 @@ exports.getPendentes = async (req, res) => {
     const { data, error } = await query;
 
     if (error) throw error;
+
     res.status(200).json(data);
   } catch (error) {
     console.error('[adminController:getPendentes] Erro:', error);
@@ -317,6 +319,20 @@ exports.updateComissao = async (req, res) => {
       }
     }
 
+    const alteracaoAutorizativa = status !== undefined || tipo !== undefined || permissoes !== undefined;
+    if (alteracaoAutorizativa && !usuarioAtual) {
+      const { data: usuario, error: usuarioError } = await supabase
+        .from('usuarios')
+        .select('id, tipo, status')
+        .eq('id', id)
+        .single();
+
+      if (usuarioError || !usuario) {
+        return res.status(404).json({ message: 'UsuÃ¡rio nÃ£o encontrado.' });
+      }
+      usuarioAtual = usuario;
+    }
+
     const updateData = {};
     if (percentual_comissao !== undefined) updateData.percentual_comissao = percentual_comissao;
     if (placa_veiculo !== undefined) updateData.placa_veiculo = placa_veiculo;
@@ -329,7 +345,7 @@ exports.updateComissao = async (req, res) => {
       .eq('id', id);
 
     if (error) throw error;
-    
+
     console.log(`[adminController:updateComissao] Motorista ${id} atualizado com sucesso no banco.`);
     res.status(200).json({ message: 'Dados do motorista atualizados com sucesso.' });
   } catch (error) {
@@ -383,9 +399,14 @@ exports.blockMotorista = async (req, res) => {
       throw motError;
     }
 
+    if (status !== undefined && String(status || '').toLowerCase() !== 'ativo') {
+      await revogarSessoesDoUsuarioSeSec1(id, 'usuario_desabilitado');
+    }
+
     console.log(`[adminController:blockMotorista] Status do motorista ${id} alterado com sucesso.`);
     res.status(200).json({ message: `Motorista ${motStatus === 'bloqueado' ? 'bloqueado' : 'desbloqueado'}.` });
   } catch (error) {
+    if (error && typeof error.httpStatus === 'number') return responderErroRevogacao(res, error);
     console.error('[adminController:blockMotorista] Erro detalhado:', error);
     res.status(500).json({ message: 'Erro ao alterar status do motorista: ' + (error.message || error) });
   }
@@ -577,7 +598,7 @@ exports.resetSenhaUsuario = async (req, res) => {
     if (!isSuperAdmin) {
       const { data: pertence, error: pertenceError } = await supabase
         .from('usuarios')
-        .select('id, tipo')
+        .select('id, tipo, status')
         .eq('id', id)
         .eq('empresa_id', req.empresa_id)
         .single();
@@ -609,9 +630,12 @@ exports.resetSenhaUsuario = async (req, res) => {
       console.error('[adminController:resetSenhaUsuario] Erro ao atualizar senha_temporaria:', dbError.message);
     }
 
+    await revogarSessoesDoUsuarioSeSec1(id, 'senha_resetada');
+
     console.log(`[adminController:resetSenhaUsuario] Senha resetada com sucesso para ${id}.`);
     res.status(200).json({ message: 'Senha resetada com sucesso.' });
   } catch (error) {
+    if (error && typeof error.httpStatus === 'number') return responderErroRevogacao(res, error);
     console.error('[adminController:resetSenhaUsuario] Erro detalhado:', error);
     res.status(500).json({ message: 'Erro ao resetar senha do usuário: ' + (error.message || error) });
   }
@@ -630,7 +654,7 @@ exports.updateUsuario = async (req, res) => {
     if (!isSuperAdmin) {
       const { data: pertence, error: pertenceError } = await supabase
         .from('usuarios')
-        .select('id, tipo')
+        .select('id, tipo, status')
         .eq('id', id)
         .eq('empresa_id', req.empresa_id)
         .single();
@@ -678,9 +702,18 @@ exports.updateUsuario = async (req, res) => {
 
     if (error) throw error;
 
+    const statusDesabilita = status !== undefined && String(status || '').toLowerCase() !== 'ativo';
+    const tipoMudou = tipo !== undefined && (!usuarioAtual || String(tipo) !== String(usuarioAtual.tipo));
+    const permissoesMudaram = permissoes !== undefined;
+    if (statusDesabilita || tipoMudou || permissoesMudaram) {
+      const motivo = statusDesabilita ? 'usuario_desabilitado' : (tipoMudou ? 'role_alterada' : 'permissoes_alteradas');
+      await revogarSessoesDoUsuarioSeSec1(id, motivo);
+    }
+
     console.log(`[adminController:updateUsuario] Usuário ${id} atualizado com sucesso.`);
     res.status(200).json({ message: 'Usuário atualizado com sucesso.' });
   } catch (error) {
+    if (error && typeof error.httpStatus === 'number') return responderErroRevogacao(res, error);
     console.error('[adminController:updateUsuario] Erro detalhado ao atualizar admin:', error);
     res.status(500).json({ message: 'Erro ao atualizar administrador: ' + (error.message || error) });
   }

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -19,6 +20,9 @@ bool ehFalhaTransitoriaAutoLogin(int status) =>
     status == 0 || status == 429 || status >= 500;
 
 class AuthProvider extends ChangeNotifier {
+  @visibleForTesting
+  static bool skipExternalSideEffectsForTesting = false;
+
   // Token JWT vive no secure storage (Keystore/EncryptedSharedPreferences),
   // não mais em SharedPreferences (texto claro). Só é persistido quando o
   // usuário marca "Manter conectado neste aparelho".
@@ -45,6 +49,7 @@ class AuthProvider extends ChangeNotifier {
   bool _senhaTemporaria = false;
   bool _termosPendentes = false;
   int _termosPendentesCount = 0;
+  LogoutRemotoResult? _ultimoLogoutRemoto;
   // Login barrado por e-mail não confirmado (backend responde 403 { naoConfirmado }).
   // A tela usa isto para oferecer o reenvio do link — não é senha errada.
   bool _naoConfirmado = false;
@@ -64,6 +69,7 @@ class AuthProvider extends ChangeNotifier {
   bool get naoConfirmado => _naoConfirmado;
   bool get isLoggedIn => _status == AuthStatus.authenticated;
   bool get isMotorista => _role == 'motorista';
+  LogoutRemotoResult? get ultimoLogoutRemoto => _ultimoLogoutRemoto;
 
   Future<void> tryAutoLogin() async {
     AppLogger.action('try_auto_login');
@@ -93,6 +99,7 @@ class AuthProvider extends ChangeNotifier {
 
     _token = token;
     ApiService.setSessionToken(token);
+    ApiService.setSessionPersistence(SessionPersistence.persistent);
     _nome = prefs.getString('user_nome') ?? '';
     _role = prefs.getString('user_role') ?? '';
     _uid = prefs.getString('user_uid') ?? '';
@@ -104,31 +111,42 @@ class AuthProvider extends ChangeNotifier {
       _nome = profile['nome'] ?? _nome;
       _fotoUrl = profile['foto_url'] ?? '';
       // Restaura empresaTipo do perfil (fonte mais confiável que SharedPreferences)
-      _empresaTipo = (profile['empresas'] as Map?)?['tipo'] as String? ?? _empresaTipo;
+      _empresaTipo =
+          (profile['empresas'] as Map?)?['tipo'] as String? ?? _empresaTipo;
       // Restaura senha_temporaria do perfil: sem isso, ao reabrir o app com token
       // salvo o flag seria false e o motorista pularia a tela de troca de senha.
       _senhaTemporaria = profile['senha_temporaria'] == true;
       // Termos LGPD pendentes (gate após a troca de senha temporária).
       _termosPendentes = profile['termos_pendentes'] == true;
-      _termosPendentesCount = (profile['termos_pendentes_count'] as num?)?.toInt() ?? 0;
+      _termosPendentesCount =
+          (profile['termos_pendentes_count'] as num?)?.toInt() ?? 0;
       _status = AuthStatus.authenticated;
       // Registra o token de push para este aparelho (best-effort, não bloqueia).
-      PushService.registrarTokenAposLogin();
-      AppLogger.action('try_auto_login', params: {'result': 'success', 'user': _nome});
+      if (!skipExternalSideEffectsForTesting) {
+        PushService.registrarTokenAposLogin();
+      }
+      AppLogger.action(
+        'try_auto_login',
+        params: {'result': 'success', 'user': _nome},
+      );
     } else if (ehFalhaTransitoriaAutoLogin(resultado.status)) {
       // Falha TRANSITÓRIA (429 rate limit / 5xx / rede): NÃO desloga nem apaga o
       // token. Mantém a sessão restaurada das prefs (nome/role/uid já lidos) e
       // segue autenticado; as telas refazem o fetch quando o backend voltar.
       _status = AuthStatus.authenticated;
-      AppLogger.action('try_auto_login',
-          params: {'result': 'transient_kept', 'status': resultado.status});
+      AppLogger.action(
+        'try_auto_login',
+        params: {'result': 'transient_kept', 'status': resultado.status},
+      );
     } else {
       // Definitiva (401/403 = token inválido/expirado, ou 4xx): encerra a sessão.
       await _limparSessao(prefs);
       _token = '';
       _status = AuthStatus.unauthenticated;
-      AppLogger.action('try_auto_login',
-          params: {'result': 'api_failed', 'status': resultado.status});
+      AppLogger.action(
+        'try_auto_login',
+        params: {'result': 'api_failed', 'status': resultado.status},
+      );
     }
     notifyListeners();
   }
@@ -137,15 +155,18 @@ class AuthProvider extends ChangeNotifier {
   /// legado), sem usar prefs.clear() para não apagar preferências de outros
   /// módulos, como o tema (theme_mode).
   Future<void> _limparSessao(SharedPreferences prefs) async {
-    ApiService.clearSessionToken();
-    await _secureStorage.delete(key: _tokenKey);
+    await ApiService.clearPersistedSession();
     await prefs.remove('token'); // legado em texto claro
     for (final k in _prefKeysSessao) {
       await prefs.remove(k);
     }
   }
 
-  Future<bool> login(String email, String senha, {bool manterConectado = true}) async {
+  Future<bool> login(
+    String email,
+    String senha, {
+    bool manterConectado = true,
+  }) async {
     AppLogger.action('login_attempt', params: {'email': email});
     _status = AuthStatus.loading;
     _error = '';
@@ -158,12 +179,14 @@ class AuthProvider extends ChangeNotifier {
       final httpStatus = res?['_status'] as int? ?? 0;
       if (httpStatus == 0) {
         // Exceção de rede (sem conexão, timeout, SSL) — _body não é JSON
-        _error = 'Não foi possível conectar ao servidor. Verifique sua conexão.';
+        _error =
+            'Não foi possível conectar ao servidor. Verifique sua conexão.';
       } else {
         // Resposta HTTP do backend — extrair mensagem do JSON
         try {
           final body = jsonDecode(res?['_body'] as String? ?? '{}');
-          _error = body['message'] ?? body['error'] ?? 'E-mail ou senha incorretos.';
+          _error =
+              body['message'] ?? body['error'] ?? 'E-mail ou senha incorretos.';
           // 403 { naoConfirmado } = e-mail ainda não confirmado (não é senha
           // errada): a tela oferece o reenvio do link de confirmação.
           if (httpStatus == 403 && body['naoConfirmado'] == true) {
@@ -173,7 +196,10 @@ class AuthProvider extends ChangeNotifier {
           _error = 'Erro inesperado ao processar resposta do servidor.';
         }
       }
-      AppLogger.action('login_error', params: {'email': email, 'status': httpStatus, 'error': _error});
+      AppLogger.action(
+        'login_error',
+        params: {'email': email, 'status': httpStatus, 'error': _error},
+      );
       notifyListeners();
       return false;
     }
@@ -186,7 +212,10 @@ class AuthProvider extends ChangeNotifier {
     if (userStatus == 'pendente') {
       _status = AuthStatus.error;
       _error = 'Sua conta está aguardando aprovação.';
-      AppLogger.action('login_error', params: {'email': email, 'error': 'pendente'});
+      AppLogger.action(
+        'login_error',
+        params: {'email': email, 'error': 'pendente'},
+      );
       notifyListeners();
       return false;
     }
@@ -198,13 +227,48 @@ class AuthProvider extends ChangeNotifier {
     if (userRole != 'motorista') {
       _status = AuthStatus.error;
       _error = 'Este acesso é permitido apenas para motoristas no aplicativo.';
-      AppLogger.action('login_error', params: {'email': email, 'error': 'role_nao_motorista', 'role': userRole ?? 'null'});
+      AppLogger.action(
+        'login_error',
+        params: {
+          'email': email,
+          'error': 'role_nao_motorista',
+          'role': userRole ?? 'null',
+        },
+      );
+      notifyListeners();
+      return false;
+    }
+
+    // SEC-1 hardening (FAIL-CLOSED): o app só aceita a sessão se o backend RESOLVEU
+    // client_type=android E entregou refresh_token não vazio. Um contrato "web"
+    // (sem refresh / resolved_client_type=web) foi a causa do achado forense (sessão
+    // web em UA mobile). Aqui NÃO persistimos nada — devolvemos erro claro e paramos.
+    // Requer backend que ecoa resolved_client_type (SEC-1 hardening) — o APK novo e o
+    // backend novo DEVEM ser implantados juntos.
+    if (!ApiService.isHealthyMobileLoginResponse(
+      res,
+      expectedClientType: ApiService.expectedClientType,
+    )) {
+      _status = AuthStatus.error;
+      _error =
+          'Não foi possível iniciar uma sessão segura no aplicativo. Tente novamente; '
+          'se persistir, reinstale o app na versão mais recente.';
+      final refreshPresente = res['refresh_token'] is String &&
+          (res['refresh_token'] as String).trim().isNotEmpty;
+      AppLogger.action('login_error', params: {
+        'email': email,
+        'error': 'contrato_login_nao_mobile',
+        'resolved_client_type':
+            res['resolved_client_type']?.toString() ?? 'ausente',
+        'has_refresh': refreshPresente.toString(),
+      });
       notifyListeners();
       return false;
     }
 
     final prefs = await SharedPreferences.getInstance();
     _token = res['token'];
+    final refreshToken = res['refresh_token'] as String?;
     _nome = res['user']['nome'];
     _role = userRole!; // garantido 'motorista' pela allowlist acima
     _uid = res['user']['uid'];
@@ -212,24 +276,24 @@ class AuthProvider extends ChangeNotifier {
     _empresaTipo = res['user']['empresa_tipo'] as String? ?? '';
     _senhaTemporaria = res['user']['senha_temporaria'] == true;
 
-    // Token disponível em memória para a sessão atual, independentemente de
-    // persistir ou não. A senha NUNCA é armazenada.
-    ApiService.setSessionToken(_token);
+    await ApiService.setSessionTokens(
+      accessToken: _token,
+      refreshToken: refreshToken,
+      persistence: manterConectado
+          ? SessionPersistence.persistent
+          : SessionPersistence.memoryOnly,
+    );
 
     if (manterConectado) {
-      // Persiste a sessão de forma segura: token no secure storage,
-      // dados não sensíveis em SharedPreferences (para restaurar a UI).
-      await _secureStorage.write(key: _tokenKey, value: _token);
       await prefs.setString('user_role', _role);
       await prefs.setString('user_nome', _nome);
       await prefs.setString('user_uid', _uid);
       await prefs.setString('user_empresa_tipo', _empresaTipo);
     } else {
-      // Não persiste sessão: ao fechar/sair do app não haverá auto-login.
-      // Garante que nada de uma sessão anterior fique salvo neste aparelho.
-      await _limparSessao(prefs);
-      // Mantém o token em memória só para esta sessão (limpo por _limparSessao acima).
-      ApiService.setSessionToken(_token);
+      await prefs.remove('token'); // legado em texto claro
+      for (final k in _prefKeysSessao) {
+        await prefs.remove(k);
+      }
     }
 
     // O /auth/login NÃO retorna termos_pendentes (só /auth/me calcula). Busca o
@@ -239,12 +303,15 @@ class AuthProvider extends ChangeNotifier {
     if (profile != null) {
       _senhaTemporaria = profile['senha_temporaria'] == true;
       _termosPendentes = profile['termos_pendentes'] == true;
-      _termosPendentesCount = (profile['termos_pendentes_count'] as num?)?.toInt() ?? 0;
+      _termosPendentesCount =
+          (profile['termos_pendentes_count'] as num?)?.toInt() ?? 0;
     }
 
     _status = AuthStatus.authenticated;
     // Registra o token de push para este aparelho (best-effort, não bloqueia o login).
-    PushService.registrarTokenAposLogin();
+    if (!skipExternalSideEffectsForTesting) {
+      PushService.registrarTokenAposLogin();
+    }
     AppLogger.action('login_success', params: {'email': email, 'user': _nome});
     notifyListeners();
     return true;
@@ -274,11 +341,14 @@ class AuthProvider extends ChangeNotifier {
 
   Future<void> logout() async {
     AppLogger.action('logout', params: {'user': _nome});
-    await LocationTrackingService.stop();
-    // Desativa o token de push deste aparelho antes de limpar a sessão.
-    // Best-effort: se falhar (offline), o backend desativa no primeiro envio
-    // que retornar token inválido.
-    await PushService.removerTokenNoLogout();
+    if (!skipExternalSideEffectsForTesting) {
+      await LocationTrackingService.stop();
+      // Desativa o token de push deste aparelho antes de limpar a sessao.
+      // Best-effort: se falhar (offline), o backend desativa no primeiro envio
+      // que retornar token invalido.
+      await PushService.removerTokenNoLogout();
+    }
+    _ultimoLogoutRemoto = await ApiService.logoutRemoto();
     final prefs = await SharedPreferences.getInstance();
     await _limparSessao(prefs);
     _token = '';

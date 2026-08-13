@@ -7,6 +7,37 @@ const notificacaoService = require('../services/notificacaoService');
 const planoLimiteService = require('../services/planoLimiteService');
 const { getTermosPendentes } = require('./termosController');
 const { gerarSenhaTemporaria } = require('../utils/senhaTemporaria');
+const { getAuthRuntime } = require('../services/auth/authRuntime');
+const { revogarSessoesDoUsuarioSeSec1, responderErroRevogacao } = require('../services/auth/sessionRevocationEvents');
+
+const REFRESH_COOKIE = 'refresh_token';
+const CLIENT_TYPES = new Set(['web', 'android', 'ios', 'api']);
+
+function noStoreAuth(res) {
+  if (typeof res.set === 'function') {
+    res.set('Cache-Control', 'no-store');
+    res.set('Pragma', 'no-cache');
+  } else if (typeof res.setHeader === 'function') {
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Pragma', 'no-cache');
+  }
+}
+
+function clientTypeAuth(req) {
+  const raw = req.body && req.body.client_type;
+  const tipo = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  return CLIENT_TYPES.has(tipo) ? tipo : 'web';
+}
+
+function setRefreshCookie(res, delivery, cfg = {}) {
+  res.cookie(REFRESH_COOKIE, delivery.reveal(), {
+    httpOnly: true,
+    secure: true,
+    sameSite: cfg.refreshCookieSameSite || 'none',
+    path: '/auth',
+    expires: new Date(delivery.expiresAt),
+  });
+}
 
 // Client ISOLADO só para autenticação (signInWithPassword no login). Mantido
 // separado do client admin (config/supabase.js) de propósito: assim a sessão do
@@ -430,6 +461,7 @@ exports.register = async (req, res) => {
 
 exports.login = async (req, res) => {
   const { email, senha } = req.body;
+  noStoreAuth(res);
 
   try {
     // 1. Autenticar no Supabase Auth (client isolado — não contamina o admin)
@@ -480,11 +512,74 @@ exports.login = async (req, res) => {
       });
     }
 
-    if (userData.status === 'bloqueado') {
-      return res.status(403).json({ message: 'Sua conta está bloqueada. Entre em contato com o suporte.' });
+    if (userData.status !== 'ativo') {
+      return res.status(403).json({ message: 'Sua conta não está habilitada para login. Entre em contato com o suporte.' });
     }
 
-    // 3. Gerar JWT para o backend
+    const userResponse = {
+      uid: userData.id,
+      nome: userData.nome,
+      email: userData.email,
+      role: userData.tipo,
+      status: userData.status,
+      foto_url: userData.foto_url,
+      is_super_admin: userData.is_super_admin ?? false,
+      senha_temporaria: userData.senha_temporaria ?? false,
+      empresa_id: userData.empresa_id,
+      empresa_tipo: userData.empresas?.tipo ?? null,
+      empresa_nome: userData.empresas?.nome ?? null,
+    };
+
+    const { cfg, sessionService } = getAuthRuntime();
+    const client_type = clientTypeAuth(req);
+
+    if (cfg.sessionsEnabled && sessionService) {
+      const deviceIdEntrada = req.body?.device_id || null;
+      const sessao = await sessionService.criarSessao({
+        usuario_id: userData.id,
+        empresa_id: userData.empresa_id,
+        client_type,
+        device_id: deviceIdEntrada,
+        device_label: req.body?.device_label || null,
+        role: userData.tipo,
+        is_super_admin: userData.is_super_admin ?? false,
+        user_agent: String(req.headers['user-agent'] || '').slice(0, 512),
+      });
+
+      // Observabilidade de login SANITIZADA (SEC-1 hardening): permite correlacionar
+      // qual client_type foi RESOLVIDO pelo backend e se o device binding chegou, sem
+      // NUNCA registrar token, refresh ou senha. Usado no diagnóstico do achado
+      // client_type=web em UA mobile (ver docs/sec-1 forensic).
+      console.info('[auth.login]', JSON.stringify({
+        event: 'sessao_criada',
+        session_id: sessao.session?.id || null,
+        resolved_client_type: client_type,
+        has_device_id: Boolean(deviceIdEntrada),
+        user_agent: String(req.headers['user-agent'] || '').slice(0, 120),
+        uid8: String(userData.id || '').slice(0, 8),
+      }));
+
+      if (client_type === 'web') {
+        setRefreshCookie(res, sessao.refreshDelivery, cfg);
+        // resolved_client_type explícito na resposta (sem segredo): o cliente mobile
+        // usa isso para FAIL-CLOSED quando recebe um contrato web indevido.
+        return res.status(200).json({
+          token: sessao.accessToken,
+          resolved_client_type: client_type,
+          user: userResponse,
+        });
+      }
+
+      return res.status(200).json({
+        token: sessao.accessToken,
+        refresh_token: sessao.refreshDelivery.reveal(),
+        refresh_expires_at: sessao.refreshDelivery.expiresAt,
+        resolved_client_type: client_type,
+        user: userResponse,
+      });
+    }
+
+    // 3. Gerar JWT legado para o backend
     const token = jwt.sign(
       { uid: userData.id, email: userData.email, role: userData.tipo, is_super_admin: userData.is_super_admin ?? false },
       process.env.JWT_SECRET,
@@ -502,21 +597,12 @@ exports.login = async (req, res) => {
     // 5. Retorna os dados do usuário (token incluso para o app Flutter)
     res.status(200).json({
       token,
-      user: {
-        uid: userData.id,
-        nome: userData.nome,
-        email: userData.email,
-        role: userData.tipo,
-        status: userData.status,
-        foto_url: userData.foto_url,
-        is_super_admin: userData.is_super_admin ?? false,
-        senha_temporaria: userData.senha_temporaria ?? false,
-        empresa_id: userData.empresa_id,
-        empresa_tipo: userData.empresas?.tipo ?? null,
-        empresa_nome: userData.empresas?.nome ?? null,
-      }
+      user: userResponse
     });
   } catch (error) {
+    if (error && typeof error.httpStatus === 'number' && typeof error.toPublic === 'function') {
+      return res.status(error.httpStatus).json(error.toPublic());
+    }
     console.error('Erro no login:', error);
     res.status(500).json({ message: 'Erro ao realizar login.' });
   }
@@ -524,6 +610,7 @@ exports.login = async (req, res) => {
 
 // NOVA FUNÇÃO: Logout para apagar o cookie (MUDANÇA FEITA AQUI!)
 exports.logout = async (req, res) => {
+  noStoreAuth(res);
   res.clearCookie('token', {
     httpOnly: true,
     secure: true, // Obriga o uso de HTTPS
@@ -628,6 +715,7 @@ exports.getMe = async (req, res) => {
 };
 
 exports.trocarSenha = async (req, res) => {
+  noStoreAuth(res);
   const { nova_senha } = req.body;
 
   if (!nova_senha || typeof nova_senha !== 'string' || nova_senha.length < 6) {
@@ -653,8 +741,11 @@ exports.trocarSenha = async (req, res) => {
       console.error('[trocarSenha] Erro ao atualizar usuarios:', dbError.message);
     }
 
+    await revogarSessoesDoUsuarioSeSec1(req.user.uid, 'senha_alterada');
+
     res.status(200).json({ message: 'Senha atualizada com sucesso.' });
   } catch (error) {
+    if (error && typeof error.httpStatus === 'number') return responderErroRevogacao(res, error);
     console.error('[trocarSenha] Erro inesperado:', error.message || error);
     res.status(500).json({ message: 'Erro inesperado ao atualizar senha.' });
   }
