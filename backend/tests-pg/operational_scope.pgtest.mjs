@@ -34,11 +34,13 @@ function registrar() {
   let r1;
 
   async function withRole(role, fn) {
-    await pool.query(`SET ROLE ${role}`);
+    const client = await pool.connect();
+    await client.query(`SET ROLE ${role}`);
     try {
-      return await fn();
+      return await fn(client);
     } finally {
-      await pool.query('RESET ROLE').catch(() => {});
+      await client.query('RESET ROLE').catch(() => {});
+      client.release();
     }
   }
 
@@ -148,7 +150,7 @@ function registrar() {
     const corpTarget = randomUUID();
     const externalTarget = randomUUID();
     await pool.query(
-      `INSERT INTO public.usuarios (id, empresa_id, tipo, status) VALUES ($1,$3,'admin','ativo'), ($2,$4,'admin','ativo')`,
+      `INSERT INTO public.usuarios (id, empresa_id, tipo, status) VALUES ($1,$3,'operador','ativo'), ($2,$4,'operador','ativo')`,
       [corpTarget, externalTarget, e1, e3],
     );
     await pool.query(
@@ -206,25 +208,25 @@ function registrar() {
 
     let unitId;
     let membershipId;
-    await withRole('service_role', async () => {
-      const unit = await pool.query(
+    await withRole('service_role', async (db) => {
+      const unit = await db.query(
         `SELECT * FROM public.p1_criar_unidade($1,NULL,'SR Unit','SR','operacional',NULL,NULL,NULL,NULL,true,$2,'sr unit')`,
         [empresa, actor],
       );
       unitId = unit.rows[0].id;
-      const membership = await pool.query(
+      const membership = await db.query(
         `SELECT * FROM public.p1_criar_membership($1,$2,NULL,'GLOBAL',NULL,NULL,'admin',true,$1,'sr membership')`,
         [actor, empresa],
       );
       membershipId = membership.rows[0].id;
-      await pool.query(
+      await db.query(
         `SELECT public.p1_atualizar_membership($1,'GLOBAL',NULL,NULL,'admin','ativo',$2,'sr update')`,
         [membershipId, actor],
       );
-      const enforced = await pool.query(`SELECT public.p1_ativar_enforcement($1,$2,'sr enforce') AS r`, [empresa, actor]);
+      const enforced = await db.query(`SELECT public.p1_ativar_enforcement($1,$2,'sr enforce') AS r`, [empresa, actor]);
       assert.equal(enforced.rows[0].r.ok, true);
       await rejectsDb(
-        () => pool.query(`DELETE FROM public.operational_scope_auditoria WHERE empresa_id=$1`, [empresa]),
+        () => db.query(`DELETE FROM public.operational_scope_auditoria WHERE empresa_id=$1`, [empresa]),
         /permission denied/i,
       );
     });
@@ -243,16 +245,16 @@ function registrar() {
     ]);
 
     for (const role of ['anon', 'authenticated']) {
-      await withRole(role, async () => {
+      await withRole(role, async (db) => {
         await rejectsDb(
-          () => pool.query(
+          () => db.query(
             `SELECT public.p1_criar_unidade($1,NULL,'Denied','D','operacional',NULL,NULL,NULL,NULL,false,$2,'denied')`,
             [empresa, actor],
           ),
           /permission denied/i,
         );
         await rejectsDb(
-          () => pool.query(
+          () => db.query(
             `SELECT public.p1_audit('unidade_criada',$1,NULL,NULL,NULL,$2,NULL,'{}'::jsonb,'denied')`,
             [empresa, actor],
           ),
