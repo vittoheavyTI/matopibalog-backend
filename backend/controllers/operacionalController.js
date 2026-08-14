@@ -1,6 +1,12 @@
 const supabase = require('../config/supabase');
-const { resolverEscopoOperacional } = require('../services/operationalScopeService');
-const { canAccessUnit } = require('../services/operationalScopeDomainService');
+const {
+  resolverEscopoOperacional,
+  canAccessUnit,
+  canDelegateScope,
+  escopoTemSelecaoInvalida,
+} = require('../services/operationalScopeService');
+
+const EMPTY_UUID = '00000000-0000-0000-0000-000000000000';
 
 function actorId(req) {
   return req.user?.uid || null;
@@ -15,46 +21,105 @@ function sanitizeText(value) {
   return text || null;
 }
 
-async function audit(action, payload) {
-  await supabase.from('operational_scope_auditoria').insert({
-    action,
-    empresa_id: payload.empresa_id || null,
-    grupo_id: payload.grupo_id || null,
-    unidade_operacional_id: payload.unidade_operacional_id || null,
-    membership_id: payload.membership_id || null,
-    actor_user_id: payload.actor_user_id || null,
-    before_snapshot: payload.before_snapshot || null,
-    after_snapshot: payload.after_snapshot || null,
-    reason: payload.reason || null,
-    request_id: payload.request_id || null,
-  });
+function targetEmpresaId(req) {
+  return isSuper(req)
+    ? (req.body?.empresa_id || req.query?.empresa_id || req.empresa_id || null)
+    : req.empresa_id;
 }
 
-async function ensureCanManage(req, empresaId) {
-  if (isSuper(req)) return { ok: true, scope: await resolverEscopoOperacional(req, { empresaId }) };
-  if (empresaId !== req.empresa_id) return { ok: false, status: 403, message: 'Empresa fora do seu escopo.' };
+function rpcErrorResponse(res, error, fallback) {
+  const msg = String(error?.message || error || '');
+  if (msg.includes('not_found')) return res.status(404).json({ message: 'Registro nao encontrado.' });
+  if (msg.includes('cross_company') || msg.includes('outside') || msg.includes('archived')) return res.status(422).json({ message: msg });
+  if (msg.includes('admins_without_operational_membership')) return res.status(409).json({ message: msg });
+  if (msg.includes('cannot_archive_only_default_unit')) return res.status(409).json({ message: 'Nao e possivel arquivar a unica unidade default ativa.' });
+  return res.status(500).json({ message: fallback });
+}
+
+async function callRpc(name, payload) {
+  const { data, error } = await supabase.rpc(name, payload);
+  if (error) throw error;
+  return data;
+}
+
+async function ensureCanManage(req, empresaId, { requireCompanyAdmin = false } = {}) {
+  if (!empresaId) return { ok: false, status: 400, message: 'Informe a empresa.' };
+  if (!isSuper(req) && empresaId !== req.empresa_id) {
+    return { ok: false, status: 403, message: 'Empresa fora do seu escopo.' };
+  }
   const scope = await resolverEscopoOperacional(req, { empresaId });
+  if (escopoTemSelecaoInvalida(scope)) {
+    return { ok: false, status: 403, message: 'Unidade operacional selecionada fora do seu escopo.' };
+  }
+  if (isSuper(req)) return { ok: true, scope };
   if (!scope.can_manage_operational_structure) {
     return { ok: false, status: 403, message: 'Voce nao pode administrar escopos operacionais.' };
   }
+  if (requireCompanyAdmin && !scope.can_enforce_operational_scope && scope.rollout_mode === 'enforced') {
+    return { ok: false, status: 403, message: 'Acao restrita ao administrador global da empresa.' };
+  }
   return { ok: true, scope };
+}
+
+async function fetchRegiao(regiaoId) {
+  const query = supabase
+    .from('regioes_operacionais')
+    .select('id, empresa_id, grupo_id, status')
+    .eq('id', regiaoId);
+  const { data, error } = typeof query.maybeSingle === 'function' ? await query.maybeSingle() : await query.single();
+  if (error) throw error;
+  return data || null;
+}
+
+async function fetchUnidade(unidadeId) {
+  const query = supabase
+    .from('unidades_operacionais')
+    .select('id, empresa_id, grupo_id, status, is_default')
+    .eq('id', unidadeId);
+  const { data, error } = typeof query.maybeSingle === 'function' ? await query.maybeSingle() : await query.single();
+  if (error) throw error;
+  return data || null;
+}
+
+async function fetchMembership(id) {
+  const query = supabase
+    .from('usuario_operacional_memberships')
+    .select('*')
+    .eq('id', id);
+  const { data, error } = typeof query.maybeSingle === 'function' ? await query.maybeSingle() : await query.single();
+  if (error) throw error;
+  return data || null;
+}
+
+async function loadRegionUnits(regiaoId) {
+  if (!regiaoId) return [];
+  const { data, error } = await supabase
+    .from('regiao_operacional_unidades')
+    .select('regiao_id, regiao_operacional_id:regiao_id, empresa_id, unidade_operacional_id, status')
+    .eq('regiao_id', regiaoId);
+  if (error) throw error;
+  return data || [];
 }
 
 exports.getContexto = async (req, res) => {
   try {
     const scope = await resolverEscopoOperacional(req);
-    const unidades = scope.empresa_id
+    if (escopoTemSelecaoInvalida(scope)) {
+      return res.status(403).json({ message: 'Unidade operacional selecionada fora do seu escopo.', scope });
+    }
+    const empresaIds = scope.authorized_empresa_ids || [];
+    const unidades = empresaIds.length
       ? await supabase
         .from('unidades_operacionais')
         .select('id, empresa_id, grupo_id, nome, codigo, tipo, cidade, uf, timezone, status, is_default')
-        .eq('empresa_id', scope.empresa_id)
+        .in('empresa_id', empresaIds)
         .order('is_default', { ascending: false })
         .order('nome', { ascending: true })
       : { data: [], error: null };
     if (unidades.error) throw unidades.error;
     return res.json({
       scope,
-      unidades: (unidades.data || []).filter((u) => scope.mode === 'SUPER_ADMIN' || canAccessUnit(scope, u.id)),
+      unidades: (unidades.data || []).filter((u) => isSuper(req) || canAccessUnit(scope, u.id)),
     });
   } catch (error) {
     console.error('[operacional:getContexto]', error?.message || error);
@@ -82,56 +147,61 @@ exports.criarGrupo = async (req, res) => {
     if (!isSuper(req)) return res.status(403).json({ message: 'Acesso restrito ao super-admin.' });
     const nome = sanitizeText(req.body?.nome);
     if (!nome) return res.status(400).json({ message: 'Informe o nome do grupo.' });
-    const { data, error } = await supabase
-      .from('grupos_empresariais')
-      .insert({ nome, created_by: actorId(req), updated_by: actorId(req) })
-      .select()
-      .single();
-    if (error) throw error;
-    await audit('grupo_criado', { grupo_id: data.id, actor_user_id: actorId(req), after_snapshot: data, reason: req.body?.reason });
+    const data = await callRpc('p1_criar_grupo', {
+      p_nome: nome,
+      p_actor_user_id: actorId(req),
+      p_reason: req.body?.reason || null,
+    });
     return res.status(201).json(data);
   } catch (error) {
     console.error('[operacional:criarGrupo]', error?.message || error);
-    return res.status(500).json({ message: 'Erro ao criar grupo empresarial.' });
+    return rpcErrorResponse(res, error, 'Erro ao criar grupo empresarial.');
+  }
+};
+
+exports.atualizarGrupo = async (req, res) => {
+  try {
+    if (!isSuper(req)) return res.status(403).json({ message: 'Acesso restrito ao super-admin.' });
+    const status = sanitizeText(req.body?.status);
+    if (status && !['ativo', 'arquivado'].includes(status)) return res.status(400).json({ message: 'Status invalido.' });
+    const data = await callRpc('p1_atualizar_grupo', {
+      p_grupo_id: req.params.id,
+      p_nome: sanitizeText(req.body?.nome),
+      p_status: status,
+      p_actor_user_id: actorId(req),
+      p_reason: req.body?.reason || null,
+    });
+    return res.json(data);
+  } catch (error) {
+    console.error('[operacional:atualizarGrupo]', error?.message || error);
+    return rpcErrorResponse(res, error, 'Erro ao atualizar grupo empresarial.');
   }
 };
 
 exports.vincularEmpresaGrupo = async (req, res) => {
   try {
     if (!isSuper(req)) return res.status(403).json({ message: 'Acesso restrito ao super-admin.' });
-    const grupoId = req.params.id;
     const empresaId = sanitizeText(req.body?.empresa_id);
+    const status = sanitizeText(req.body?.status) || 'ativo';
     if (!empresaId) return res.status(400).json({ message: 'Informe a empresa.' });
-    const { data, error } = await supabase
-      .from('grupo_empresarial_empresas')
-      .upsert({
-        grupo_id: grupoId,
-        empresa_id: empresaId,
-        status: 'ativo',
-        created_by: actorId(req),
-        updated_by: actorId(req),
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'grupo_id,empresa_id' })
-      .select()
-      .single();
-    if (error) throw error;
-    await audit('grupo_empresa_vinculada', {
-      grupo_id: grupoId,
-      empresa_id: empresaId,
-      actor_user_id: actorId(req),
-      after_snapshot: data,
-      reason: req.body?.reason,
+    if (!['ativo', 'arquivado'].includes(status)) return res.status(400).json({ message: 'Status invalido.' });
+    const data = await callRpc('p1_vincular_empresa_grupo', {
+      p_grupo_id: req.params.id,
+      p_empresa_id: empresaId,
+      p_status: status,
+      p_actor_user_id: actorId(req),
+      p_reason: req.body?.reason || null,
     });
     return res.status(200).json(data);
   } catch (error) {
     console.error('[operacional:vincularEmpresaGrupo]', error?.message || error);
-    return res.status(500).json({ message: 'Erro ao vincular empresa ao grupo.' });
+    return rpcErrorResponse(res, error, 'Erro ao vincular empresa ao grupo.');
   }
 };
 
 exports.listarUnidades = async (req, res) => {
   try {
-    const empresaId = req.query.empresa_id || req.empresa_id;
+    const empresaId = targetEmpresaId(req);
     const check = await ensureCanManage(req, empresaId);
     if (!check.ok) return res.status(check.status).json({ message: check.message });
     const { data, error } = await supabase
@@ -141,7 +211,7 @@ exports.listarUnidades = async (req, res) => {
       .order('is_default', { ascending: false })
       .order('nome', { ascending: true });
     if (error) throw error;
-    return res.json(data || []);
+    return res.json((data || []).filter((u) => isSuper(req) || canAccessUnit(check.scope, u.id)));
   } catch (error) {
     console.error('[operacional:listarUnidades]', error?.message || error);
     return res.status(500).json({ message: 'Erro ao listar unidades.' });
@@ -150,85 +220,61 @@ exports.listarUnidades = async (req, res) => {
 
 exports.criarUnidade = async (req, res) => {
   try {
-    const empresaId = req.body?.empresa_id || req.query.empresa_id || req.empresa_id;
-    const check = await ensureCanManage(req, empresaId);
+    const empresaId = targetEmpresaId(req);
+    const check = await ensureCanManage(req, empresaId, { requireCompanyAdmin: true });
     if (!check.ok) return res.status(check.status).json({ message: check.message });
-
     const nome = sanitizeText(req.body?.nome);
     if (!nome) return res.status(400).json({ message: 'Informe o nome da unidade.' });
-
-    const { count, error: countError } = await supabase
-      .from('unidades_operacionais')
-      .select('id', { count: 'exact', head: true })
-      .eq('empresa_id', empresaId)
-      .eq('status', 'ativo');
-    if (countError) throw countError;
-    const primeiraUnidade = (count || 0) === 0;
-    const isDefault = primeiraUnidade ? true : req.body?.is_default === true;
-
-    if (isDefault && !primeiraUnidade) {
-      await supabase
-        .from('unidades_operacionais')
-        .update({ is_default: false, updated_by: actorId(req), updated_at: new Date().toISOString() })
-        .eq('empresa_id', empresaId)
-        .eq('is_default', true);
-    }
-
-    const payload = {
-      empresa_id: empresaId,
-      grupo_id: req.body?.grupo_id || null,
-      nome,
-      codigo: sanitizeText(req.body?.codigo),
-      tipo: sanitizeText(req.body?.tipo) || 'operacional',
-      documento: sanitizeText(req.body?.documento),
-      cidade: sanitizeText(req.body?.cidade),
-      uf: sanitizeText(req.body?.uf),
-      timezone: sanitizeText(req.body?.timezone) || 'America/Sao_Paulo',
-      is_default: isDefault,
-      created_by: actorId(req),
-      updated_by: actorId(req),
-    };
-    const { data, error } = await supabase
-      .from('unidades_operacionais')
-      .insert(payload)
-      .select()
-      .single();
-    if (error) throw error;
-
-    if (primeiraUnidade && !isSuper(req)) {
-      const { error: membershipError } = await supabase.from('usuario_operacional_memberships').insert({
-        usuario_id: actorId(req),
-        empresa_id: empresaId,
-        grupo_id: data.grupo_id || null,
-        scope_level: 'GLOBAL',
-        papel: 'admin',
-        status: 'ativo',
-        is_primary: true,
-        created_by: actorId(req),
-        updated_by: actorId(req),
-        updated_at: new Date().toISOString(),
-      });
-      if (membershipError && membershipError.code !== '23505') throw membershipError;
-    }
-
-    await audit('unidade_criada', {
-      empresa_id: empresaId,
-      grupo_id: data.grupo_id,
-      unidade_operacional_id: data.id,
-      actor_user_id: actorId(req),
-      after_snapshot: data,
-      reason: req.body?.reason,
+    const data = await callRpc('p1_criar_unidade', {
+      p_empresa_id: empresaId,
+      p_grupo_id: req.body?.grupo_id || null,
+      p_nome: nome,
+      p_codigo: sanitizeText(req.body?.codigo),
+      p_tipo: sanitizeText(req.body?.tipo) || 'operacional',
+      p_documento: sanitizeText(req.body?.documento),
+      p_cidade: sanitizeText(req.body?.cidade),
+      p_uf: sanitizeText(req.body?.uf),
+      p_timezone: sanitizeText(req.body?.timezone) || 'America/Sao_Paulo',
+      p_is_default: req.body?.is_default === true,
+      p_actor_user_id: actorId(req),
+      p_reason: req.body?.reason || null,
     });
     return res.status(201).json(data);
   } catch (error) {
     console.error('[operacional:criarUnidade]', error?.message || error);
-    return res.status(500).json({ message: 'Erro ao criar unidade operacional.' });
+    return rpcErrorResponse(res, error, 'Erro ao criar unidade operacional.');
+  }
+};
+
+exports.atualizarUnidade = async (req, res) => {
+  try {
+    const unidade = await fetchUnidade(req.params.id);
+    if (!unidade) return res.status(404).json({ message: 'Unidade nao encontrada.' });
+    const check = await ensureCanManage(req, unidade.empresa_id, { requireCompanyAdmin: req.body?.is_default === true });
+    if (!check.ok) return res.status(check.status).json({ message: check.message });
+    if (!isSuper(req) && !canAccessUnit(check.scope, unidade.id)) return res.status(403).json({ message: 'Unidade fora do seu escopo.' });
+    const status = sanitizeText(req.body?.status);
+    if (status && !['ativo', 'arquivado'].includes(status)) return res.status(400).json({ message: 'Status invalido.' });
+    const data = await callRpc('p1_atualizar_unidade', {
+      p_unidade_id: unidade.id,
+      p_nome: sanitizeText(req.body?.nome),
+      p_codigo: sanitizeText(req.body?.codigo),
+      p_tipo: sanitizeText(req.body?.tipo),
+      p_status: status,
+      p_is_default: req.body?.is_default === true ? true : null,
+      p_actor_user_id: actorId(req),
+      p_reason: req.body?.reason || null,
+    });
+    return res.json(data);
+  } catch (error) {
+    console.error('[operacional:atualizarUnidade]', error?.message || error);
+    return rpcErrorResponse(res, error, 'Erro ao atualizar unidade operacional.');
   }
 };
 
 exports.listarRegioes = async (req, res) => {
   try {
-    const empresaId = req.query.empresa_id || req.empresa_id;
+    const empresaId = targetEmpresaId(req);
     const check = await ensureCanManage(req, empresaId);
     if (!check.ok) return res.status(check.status).json({ message: check.message });
     const { data, error } = await supabase
@@ -246,91 +292,75 @@ exports.listarRegioes = async (req, res) => {
 
 exports.criarRegiao = async (req, res) => {
   try {
-    const empresaId = req.body?.empresa_id || req.query.empresa_id || req.empresa_id;
+    const empresaId = targetEmpresaId(req);
     const check = await ensureCanManage(req, empresaId);
     if (!check.ok) return res.status(check.status).json({ message: check.message });
     const nome = sanitizeText(req.body?.nome);
     if (!nome) return res.status(400).json({ message: 'Informe o nome da regiao.' });
-    const { data, error } = await supabase
-      .from('regioes_operacionais')
-      .insert({
-        empresa_id: empresaId,
-        grupo_id: req.body?.grupo_id || null,
-        nome,
-        codigo: sanitizeText(req.body?.codigo),
-        created_by: actorId(req),
-        updated_by: actorId(req),
-      })
-      .select()
-      .single();
-    if (error) throw error;
-    await audit('regiao_criada', { empresa_id: empresaId, grupo_id: data.grupo_id, actor_user_id: actorId(req), after_snapshot: data });
+    const data = await callRpc('p1_criar_regiao', {
+      p_empresa_id: empresaId,
+      p_grupo_id: req.body?.grupo_id || null,
+      p_nome: nome,
+      p_codigo: sanitizeText(req.body?.codigo),
+      p_actor_user_id: actorId(req),
+      p_reason: req.body?.reason || null,
+    });
     return res.status(201).json(data);
   } catch (error) {
     console.error('[operacional:criarRegiao]', error?.message || error);
-    return res.status(500).json({ message: 'Erro ao criar regiao operacional.' });
+    return rpcErrorResponse(res, error, 'Erro ao criar regiao operacional.');
+  }
+};
+
+exports.atualizarRegiao = async (req, res) => {
+  try {
+    const regiao = await fetchRegiao(req.params.id);
+    if (!regiao) return res.status(404).json({ message: 'Regiao nao encontrada.' });
+    const check = await ensureCanManage(req, regiao.empresa_id);
+    if (!check.ok) return res.status(check.status).json({ message: check.message });
+    const status = sanitizeText(req.body?.status);
+    if (status && !['ativo', 'arquivado'].includes(status)) return res.status(400).json({ message: 'Status invalido.' });
+    const data = await callRpc('p1_atualizar_regiao', {
+      p_regiao_id: regiao.id,
+      p_nome: sanitizeText(req.body?.nome),
+      p_codigo: sanitizeText(req.body?.codigo),
+      p_status: status,
+      p_actor_user_id: actorId(req),
+      p_reason: req.body?.reason || null,
+    });
+    return res.json(data);
+  } catch (error) {
+    console.error('[operacional:atualizarRegiao]', error?.message || error);
+    return rpcErrorResponse(res, error, 'Erro ao atualizar regiao operacional.');
   }
 };
 
 exports.definirUnidadesRegiao = async (req, res) => {
   try {
-    const regiaoId = req.params.id;
-    const { data: regiao, error: regiaoError } = await supabase
-      .from('regioes_operacionais')
-      .select('id, empresa_id, grupo_id')
-      .eq('id', regiaoId)
-      .maybeSingle();
-    if (regiaoError) throw regiaoError;
+    const regiao = await fetchRegiao(req.params.id);
     if (!regiao) return res.status(404).json({ message: 'Regiao nao encontrada.' });
     const check = await ensureCanManage(req, regiao.empresa_id);
     if (!check.ok) return res.status(check.status).json({ message: check.message });
-
     const ids = Array.isArray(req.body?.unidades) ? req.body.unidades.map(String) : [];
-    const { data: unidades, error: unidadesError } = await supabase
-      .from('unidades_operacionais')
-      .select('id')
-      .eq('empresa_id', regiao.empresa_id)
-      .in('id', ids.length ? ids : ['00000000-0000-0000-0000-000000000000']);
-    if (unidadesError) throw unidadesError;
-    if ((unidades || []).length !== ids.length) {
-      return res.status(422).json({ message: 'Uma ou mais unidades nao pertencem a empresa.' });
+    if (!isSuper(req) && !ids.every((id) => canAccessUnit(check.scope, id))) {
+      return res.status(403).json({ message: 'Uma ou mais unidades estao fora do seu escopo delegavel.' });
     }
-
-    await supabase
-      .from('regiao_operacional_unidades')
-      .update({ status: 'arquivado' })
-      .eq('regiao_id', regiaoId)
-      .eq('status', 'ativo');
-    if (ids.length) {
-      const linhas = ids.map((id) => ({
-        empresa_id: regiao.empresa_id,
-        regiao_id: regiaoId,
-        unidade_operacional_id: id,
-        status: 'ativo',
-        created_by: actorId(req),
-      }));
-      const { error } = await supabase
-        .from('regiao_operacional_unidades')
-        .upsert(linhas, { onConflict: 'regiao_id,unidade_operacional_id' });
-      if (error) throw error;
-    }
-    await audit('regiao_unidade_alterada', {
-      empresa_id: regiao.empresa_id,
-      grupo_id: regiao.grupo_id,
-      actor_user_id: actorId(req),
-      after_snapshot: { regiao_id: regiaoId, unidades: ids },
-      reason: req.body?.reason,
+    const data = await callRpc('p1_definir_unidades_regiao', {
+      p_regiao_id: regiao.id,
+      p_unidade_ids: ids,
+      p_actor_user_id: actorId(req),
+      p_reason: req.body?.reason || null,
     });
-    return res.json({ ok: true, unidades: ids });
+    return res.json(data);
   } catch (error) {
     console.error('[operacional:definirUnidadesRegiao]', error?.message || error);
-    return res.status(500).json({ message: 'Erro ao atualizar unidades da regiao.' });
+    return rpcErrorResponse(res, error, 'Erro ao atualizar unidades da regiao.');
   }
 };
 
 exports.listarMemberships = async (req, res) => {
   try {
-    const empresaId = req.query.empresa_id || req.empresa_id;
+    const empresaId = targetEmpresaId(req);
     const check = await ensureCanManage(req, empresaId);
     if (!check.ok) return res.status(check.status).json({ message: check.message });
     let query = supabase
@@ -348,114 +378,129 @@ exports.listarMemberships = async (req, res) => {
   }
 };
 
+async function validateDelegation(req, empresaId, payload, currentMembershipId = null) {
+  const check = await ensureCanManage(req, empresaId);
+  if (!check.ok) return check;
+  if (!isSuper(req) && payload.usuario_id === actorId(req) && currentMembershipId == null) {
+    return { ok: false, status: 403, message: 'Autoelevacao de escopo nao permitida.' };
+  }
+  let regionRows = [];
+  if (payload.scope_level === 'REGIONAL') regionRows = await loadRegionUnits(payload.regiao_operacional_id);
+  const decision = canDelegateScope(check.scope, payload, regionRows);
+  if (!decision.ok) return { ok: false, status: 403, message: decision.reason };
+  return { ok: true, scope: check.scope };
+}
+
 exports.criarMembership = async (req, res) => {
   try {
-    const empresaId = req.body?.empresa_id || req.query.empresa_id || req.empresa_id;
-    const check = await ensureCanManage(req, empresaId);
-    if (!check.ok) return res.status(check.status).json({ message: check.message });
-    const scope = check.scope;
+    const empresaId = targetEmpresaId(req);
     const usuarioId = sanitizeText(req.body?.usuario_id);
     const scopeLevel = sanitizeText(req.body?.scope_level)?.toUpperCase();
     if (!usuarioId || !['LOCAL', 'REGIONAL', 'GLOBAL'].includes(scopeLevel)) {
       return res.status(400).json({ message: 'Informe usuario e escopo validos.' });
     }
-    if (!isSuper(req) && scopeLevel === 'GLOBAL' && scope.mode !== 'GLOBAL' && scope.mode !== 'LEGACY_COMPANY') {
-      return res.status(403).json({ message: 'Voce nao pode conceder escopo global.' });
-    }
-    const unidadeId = req.body?.unidade_operacional_id || null;
-    const regiaoId = req.body?.regiao_operacional_id || null;
-    if (scopeLevel === 'LOCAL' && !unidadeId) {
-      return res.status(400).json({ message: 'Informe a unidade do escopo local.' });
-    }
-    if (scopeLevel === 'REGIONAL' && !regiaoId) {
-      return res.status(400).json({ message: 'Informe a regiao do escopo regional.' });
-    }
-    if (!isSuper(req) && unidadeId && !canAccessUnit(scope, unidadeId)) {
-      return res.status(403).json({ message: 'Unidade fora do seu escopo.' });
-    }
-    if (scopeLevel === 'REGIONAL') {
-      const { data: regiao, error: regiaoError } = await supabase
-        .from('regioes_operacionais')
-        .select('id')
-        .eq('id', regiaoId)
-        .eq('empresa_id', empresaId)
-        .maybeSingle();
-      if (regiaoError) throw regiaoError;
-      if (!regiao) return res.status(422).json({ message: 'Regiao fora da empresa.' });
-    }
     const payload = {
       usuario_id: usuarioId,
-      empresa_id: empresaId,
-      grupo_id: req.body?.grupo_id || null,
-      unidade_operacional_id: scopeLevel === 'LOCAL' ? unidadeId : null,
-      regiao_operacional_id: scopeLevel === 'REGIONAL' ? regiaoId : null,
       scope_level: scopeLevel,
-      papel: sanitizeText(req.body?.papel) || 'operador',
-      status: 'ativo',
-      is_primary: req.body?.is_primary === true,
-      motivo: sanitizeText(req.body?.motivo),
-      created_by: actorId(req),
-      updated_by: actorId(req),
+      unidade_operacional_id: scopeLevel === 'LOCAL' ? req.body?.unidade_operacional_id || null : null,
+      regiao_operacional_id: scopeLevel === 'REGIONAL' ? req.body?.regiao_operacional_id || null : null,
     };
-    const { data, error } = await supabase
-      .from('usuario_operacional_memberships')
-      .insert(payload)
-      .select()
-      .single();
-    if (error) throw error;
-    await audit('membership_criado', {
-      empresa_id: empresaId,
-      grupo_id: data.grupo_id,
-      unidade_operacional_id: data.unidade_operacional_id,
-      membership_id: data.id,
-      actor_user_id: actorId(req),
-      after_snapshot: data,
-      reason: req.body?.reason || req.body?.motivo,
+    if (scopeLevel === 'LOCAL' && !payload.unidade_operacional_id) return res.status(400).json({ message: 'Informe a unidade do escopo local.' });
+    if (scopeLevel === 'REGIONAL' && !payload.regiao_operacional_id) return res.status(400).json({ message: 'Informe a regiao do escopo regional.' });
+    const check = await validateDelegation(req, empresaId, payload);
+    if (!check.ok) return res.status(check.status).json({ message: check.message });
+    const data = await callRpc('p1_criar_membership', {
+      p_usuario_id: usuarioId,
+      p_empresa_id: empresaId,
+      p_grupo_id: null,
+      p_scope_level: scopeLevel,
+      p_unidade_id: payload.unidade_operacional_id,
+      p_regiao_id: payload.regiao_operacional_id,
+      p_papel: sanitizeText(req.body?.papel) || 'operador',
+      p_is_primary: req.body?.is_primary === true,
+      p_actor_user_id: actorId(req),
+      p_motivo: req.body?.motivo || req.body?.reason || null,
     });
     return res.status(201).json(data);
   } catch (error) {
     console.error('[operacional:criarMembership]', error?.message || error);
-    return res.status(500).json({ message: 'Erro ao criar membership.' });
+    return rpcErrorResponse(res, error, 'Erro ao criar membership.');
+  }
+};
+
+exports.atualizarMembership = async (req, res) => {
+  try {
+    const atual = await fetchMembership(req.params.id);
+    if (!atual) return res.status(404).json({ message: 'Membership nao encontrado.' });
+    if (!isSuper(req) && atual.usuario_id === actorId(req)) return res.status(403).json({ message: 'Autoelevacao de escopo nao permitida.' });
+    const scopeLevel = sanitizeText(req.body?.scope_level)?.toUpperCase() || atual.scope_level;
+    const payload = {
+      usuario_id: atual.usuario_id,
+      scope_level: scopeLevel,
+      unidade_operacional_id: scopeLevel === 'LOCAL' ? req.body?.unidade_operacional_id || atual.unidade_operacional_id : null,
+      regiao_operacional_id: scopeLevel === 'REGIONAL' ? req.body?.regiao_operacional_id || atual.regiao_operacional_id : null,
+    };
+    const check = await validateDelegation(req, atual.empresa_id, payload, atual.id);
+    if (!check.ok) return res.status(check.status).json({ message: check.message });
+    const status = sanitizeText(req.body?.status);
+    if (status && !['ativo', 'revogado', 'arquivado'].includes(status)) return res.status(400).json({ message: 'Status invalido.' });
+    const data = await callRpc('p1_atualizar_membership', {
+      p_membership_id: atual.id,
+      p_scope_level: scopeLevel,
+      p_unidade_id: payload.unidade_operacional_id,
+      p_regiao_id: payload.regiao_operacional_id,
+      p_papel: sanitizeText(req.body?.papel),
+      p_status: status,
+      p_actor_user_id: actorId(req),
+      p_motivo: req.body?.motivo || req.body?.reason || null,
+    });
+    return res.json(data);
+  } catch (error) {
+    console.error('[operacional:atualizarMembership]', error?.message || error);
+    return rpcErrorResponse(res, error, 'Erro ao atualizar membership.');
   }
 };
 
 exports.revogarMembership = async (req, res) => {
   try {
-    const { data: atual, error: atualError } = await supabase
-      .from('usuario_operacional_memberships')
-      .select('*')
-      .eq('id', req.params.id)
-      .maybeSingle();
-    if (atualError) throw atualError;
+    const atual = await fetchMembership(req.params.id);
     if (!atual) return res.status(404).json({ message: 'Membership nao encontrado.' });
+    if (!isSuper(req) && atual.usuario_id === actorId(req)) return res.status(403).json({ message: 'Voce nao pode revogar o proprio escopo.' });
     const check = await ensureCanManage(req, atual.empresa_id);
     if (!check.ok) return res.status(check.status).json({ message: check.message });
-
-    const { data, error } = await supabase
-      .from('usuario_operacional_memberships')
-      .update({
-        status: 'revogado',
-        motivo: sanitizeText(req.body?.motivo),
-        updated_by: actorId(req),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', req.params.id)
-      .select()
-      .single();
-    if (error) throw error;
-    await audit('membership_revogado', {
-      empresa_id: atual.empresa_id,
-      grupo_id: atual.grupo_id,
-      unidade_operacional_id: atual.unidade_operacional_id,
-      membership_id: atual.id,
-      actor_user_id: actorId(req),
-      before_snapshot: atual,
-      after_snapshot: data,
-      reason: req.body?.reason || req.body?.motivo,
+    const data = await callRpc('p1_atualizar_membership', {
+      p_membership_id: atual.id,
+      p_scope_level: atual.scope_level,
+      p_unidade_id: atual.unidade_operacional_id,
+      p_regiao_id: atual.regiao_operacional_id,
+      p_papel: atual.papel,
+      p_status: 'revogado',
+      p_actor_user_id: actorId(req),
+      p_motivo: req.body?.motivo || req.body?.reason || 'Revogado pelo painel operacional.',
     });
     return res.json(data);
   } catch (error) {
     console.error('[operacional:revogarMembership]', error?.message || error);
-    return res.status(500).json({ message: 'Erro ao revogar membership.' });
+    return rpcErrorResponse(res, error, 'Erro ao revogar membership.');
+  }
+};
+
+exports.ativarEnforcement = async (req, res) => {
+  try {
+    const empresaId = targetEmpresaId(req);
+    const check = await ensureCanManage(req, empresaId, { requireCompanyAdmin: true });
+    if (!check.ok) return res.status(check.status).json({ message: check.message });
+    if (!isSuper(req) && !check.scope.can_enforce_operational_scope) {
+      return res.status(403).json({ message: 'Ativacao restrita ao administrador global da empresa.' });
+    }
+    const data = await callRpc('p1_ativar_enforcement', {
+      p_empresa_id: empresaId,
+      p_actor_user_id: actorId(req),
+      p_reason: req.body?.reason || null,
+    });
+    return res.json(data);
+  } catch (error) {
+    console.error('[operacional:ativarEnforcement]', error?.message || error);
+    return rpcErrorResponse(res, error, 'Erro ao ativar enforcement operacional.');
   }
 };

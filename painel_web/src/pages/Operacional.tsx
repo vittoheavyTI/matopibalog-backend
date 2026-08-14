@@ -44,6 +44,7 @@ type Empresa = {
 
 type OperationalContext = {
   mode?: string;
+  rollout_mode?: string;
 };
 
 function mensagemErro(error: unknown, fallback: string) {
@@ -248,6 +249,73 @@ export const Operacional: React.FC = () => {
     }
   }
 
+  async function ativarEnforcement() {
+    if (!empresaId) return;
+    setSaving(true);
+    try {
+      await api.post('/operacional/enforcement', { empresa_id: empresaId, reason: 'Ativacao pelo painel operacional.' });
+      setToast({ tipo: 'ok', texto: 'Enforcement ativado.' });
+      await carregarTudo(empresaId);
+    } catch (error) {
+      setToast({ tipo: 'erro', texto: mensagemErro(error, 'Erro ao ativar enforcement.') });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function atualizarUnidade(id: string, payload: Record<string, unknown>) {
+    setSaving(true);
+    try {
+      await api.patch(`/operacional/unidades/${id}`, { ...payload, reason: 'Atualizacao pelo painel operacional.' });
+      setToast({ tipo: 'ok', texto: 'Unidade atualizada.' });
+      await carregarTudo(empresaId);
+    } catch (error) {
+      setToast({ tipo: 'erro', texto: mensagemErro(error, 'Erro ao atualizar unidade.') });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function atualizarRegiao(id: string, payload: Record<string, unknown>) {
+    setSaving(true);
+    try {
+      await api.patch(`/operacional/regioes/${id}`, { ...payload, reason: 'Atualizacao pelo painel operacional.' });
+      setToast({ tipo: 'ok', texto: 'Regiao atualizada.' });
+      await carregarTudo(empresaId);
+    } catch (error) {
+      setToast({ tipo: 'erro', texto: mensagemErro(error, 'Erro ao atualizar regiao.') });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function atualizarGrupo(id: string, payload: Record<string, unknown>) {
+    setSaving(true);
+    try {
+      await api.patch(`/operacional/grupos/${id}`, { ...payload, reason: 'Atualizacao pelo painel operacional.' });
+      setToast({ tipo: 'ok', texto: 'Grupo atualizado.' });
+      await carregarTudo(empresaId);
+    } catch (error) {
+      setToast({ tipo: 'erro', texto: mensagemErro(error, 'Erro ao atualizar grupo.') });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function vincularEmpresaAoGrupo(grupoId: string) {
+    if (!empresaId) return;
+    setSaving(true);
+    try {
+      await api.post(`/operacional/grupos/${grupoId}/empresas`, { empresa_id: empresaId, status: 'ativo', reason: 'Vinculo pelo painel operacional.' });
+      setToast({ tipo: 'ok', texto: 'Empresa vinculada ao grupo.' });
+      await carregarTudo(empresaId);
+    } catch (error) {
+      setToast({ tipo: 'erro', texto: mensagemErro(error, 'Erro ao vincular empresa ao grupo.') });
+    } finally {
+      setSaving(false);
+    }
+  }
+
   if (!canManage) {
     return (
       <div className="bg-white border border-gray-200 rounded-lg p-6">
@@ -287,6 +355,13 @@ export const Operacional: React.FC = () => {
             className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-60"
           >
             <RefreshCw size={16} className={loading ? 'animate-spin' : ''} /> Atualizar
+          </button>
+          <button
+            onClick={ativarEnforcement}
+            disabled={saving || !empresaId || contexto?.rollout_mode === 'enforced'}
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800 disabled:opacity-60"
+          >
+            <ShieldCheck size={16} /> Enforce
           </button>
         </div>
       </div>
@@ -332,7 +407,7 @@ export const Operacional: React.FC = () => {
           <div className="mt-5 overflow-hidden rounded-lg border border-gray-200">
             <table className="w-full text-left text-sm">
               <thead className="bg-gray-50 text-xs uppercase text-gray-500">
-                <tr><th className="px-3 py-2">Nome</th><th className="px-3 py-2">Local</th><th className="px-3 py-2">Status</th></tr>
+                <tr><th className="px-3 py-2">Nome</th><th className="px-3 py-2">Local</th><th className="px-3 py-2">Status</th><th className="px-3 py-2"></th></tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {unidades.map((unidade) => (
@@ -340,9 +415,15 @@ export const Operacional: React.FC = () => {
                     <td className="px-3 py-2 font-medium text-gray-900">{unidade.nome}{unidade.is_default && <span className="ml-2 rounded bg-green-50 px-2 py-0.5 text-xs text-green-700">padrao</span>}</td>
                     <td className="px-3 py-2 text-gray-600">{[unidade.cidade, unidade.uf].filter(Boolean).join(' / ') || '-'}</td>
                     <td className="px-3 py-2 text-gray-600">{unidade.status}</td>
+                    <td className="px-3 py-2 text-right">
+                      {!unidade.is_default && unidade.status === 'ativo' && <button type="button" onClick={() => atualizarUnidade(unidade.id, { is_default: true })} className="mr-3 text-sm font-semibold text-green-700">Padrao</button>}
+                      <button type="button" onClick={() => atualizarUnidade(unidade.id, { status: unidade.status === 'ativo' ? 'arquivado' : 'ativo' })} className="text-sm font-semibold text-gray-700">
+                        {unidade.status === 'ativo' ? 'Arquivar' : 'Reativar'}
+                      </button>
+                    </td>
                   </tr>
                 ))}
-                {!unidades.length && <tr><td colSpan={3} className="px-3 py-6 text-center text-gray-500">Nenhuma unidade cadastrada.</td></tr>}
+                {!unidades.length && <tr><td colSpan={4} className="px-3 py-6 text-center text-gray-500">Nenhuma unidade cadastrada.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -383,7 +464,14 @@ export const Operacional: React.FC = () => {
               </div>
             )}
             <div className="grid gap-2">
-              {regioes.map((regiao) => <div key={regiao.id} className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-800">{regiao.nome} <span className="text-gray-400">{regiao.codigo || ''}</span></div>)}
+              {regioes.map((regiao) => (
+                <div key={regiao.id} className="flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-800">
+                  <span>{regiao.nome} <span className="text-gray-400">{regiao.codigo || ''}</span></span>
+                  <button type="button" onClick={() => atualizarRegiao(regiao.id, { status: regiao.status === 'ativo' ? 'arquivado' : 'ativo' })} className="font-semibold text-gray-700">
+                    {regiao.status === 'ativo' ? 'Arquivar' : 'Reativar'}
+                  </button>
+                </div>
+              ))}
               {!regioes.length && <p className="py-4 text-center text-sm text-gray-500">Nenhuma regiao cadastrada.</p>}
             </div>
           </div>
@@ -460,7 +548,21 @@ export const Operacional: React.FC = () => {
             <button disabled={saving} className="inline-flex items-center justify-center gap-2 rounded-lg bg-green-700 px-4 py-2 text-sm font-semibold text-white hover:bg-green-800 disabled:opacity-60"><Plus size={16} /> Criar grupo</button>
           </form>
           <div className="mt-4 grid gap-2 md:grid-cols-3">
-            {grupos.map((grupo) => <div key={grupo.id} className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-800">{grupo.nome} <span className="text-gray-400">{grupo.status}</span></div>)}
+            {grupos.map((grupo) => (
+              <div key={grupo.id} className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-800">
+                <div className="flex items-center justify-between gap-2">
+                  <span>{grupo.nome} <span className="text-gray-400">{grupo.status}</span></span>
+                  <button type="button" onClick={() => atualizarGrupo(grupo.id, { status: grupo.status === 'ativo' ? 'arquivado' : 'ativo' })} className="text-gray-700">
+                    {grupo.status === 'ativo' ? 'Arquivar' : 'Reativar'}
+                  </button>
+                </div>
+                {empresaId && grupo.status === 'ativo' && (
+                  <button type="button" onClick={() => vincularEmpresaAoGrupo(grupo.id)} className="mt-2 text-xs font-semibold text-green-700">
+                    Vincular empresa selecionada
+                  </button>
+                )}
+              </div>
+            ))}
             {!grupos.length && <p className="text-sm text-gray-500">Nenhum grupo cadastrado.</p>}
           </div>
         </section>

@@ -17,6 +17,7 @@ export const OperationalContextSelector: React.FC = () => {
   const [unidades, setUnidades] = useState<Unidade[]>([]);
   const [selected, setSelected] = useState<string>(() => localStorage.getItem(STORAGE_KEY) || '');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
   const canUse = user?.is_super_admin || user?.role === 'admin';
 
@@ -26,16 +27,21 @@ export const OperationalContextSelector: React.FC = () => {
     api.get('/operacional/contexto')
       .then(({ data }) => {
         if (!alive) return;
+        setError('');
         const lista = Array.isArray(data?.unidades) ? data.unidades : [];
         setUnidades(lista);
         const saved = localStorage.getItem(STORAGE_KEY) || '';
         if (saved && !lista.some((u: Unidade) => u.id === saved)) {
           localStorage.removeItem(STORAGE_KEY);
           setSelected('');
+          setError('Contexto removido');
         }
       })
       .catch(() => {
-        if (alive) setUnidades([]);
+        if (alive) {
+          setUnidades([]);
+          setError('Contexto indisponivel');
+        }
       })
       .finally(() => {
         if (alive) setLoading(false);
@@ -45,10 +51,11 @@ export const OperationalContextSelector: React.FC = () => {
 
   const label = useMemo(() => {
     if (loading) return 'Carregando';
+    if (error) return error;
     if (!unidades.length) return 'Empresa';
     if (!selected) return 'Todas';
     return unidades.find((u) => u.id === selected)?.nome || 'Unidade';
-  }, [loading, selected, unidades]);
+  }, [error, loading, selected, unidades]);
 
   if (!canUse) return null;
 
@@ -60,15 +67,15 @@ export const OperationalContextSelector: React.FC = () => {
   };
 
   return (
-    <div className="hidden lg:flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 min-w-[220px]">
+    <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-2 py-2 min-w-0 max-w-[58vw] sm:max-w-none sm:min-w-[220px] sm:px-3">
       <Building2 size={16} className="text-green-700 shrink-0" />
       <div className="min-w-0 flex-1">
-        <p className="text-[11px] font-semibold uppercase text-gray-400 leading-none">Operacao</p>
+        <p className={`text-[11px] font-semibold uppercase leading-none ${error ? 'text-amber-600' : 'text-gray-400'}`}>Operacao</p>
         {unidades.length > 1 ? (
           <select
             value={selected}
             onChange={(event) => handleChange(event.target.value)}
-            className="mt-1 w-full bg-transparent text-sm font-semibold text-gray-800 outline-none"
+            className="mt-1 w-full bg-transparent text-xs font-semibold text-gray-800 outline-none sm:text-sm"
             aria-label="Contexto operacional"
           >
             <option value="">Todas autorizadas</option>
@@ -79,7 +86,7 @@ export const OperationalContextSelector: React.FC = () => {
             ))}
           </select>
         ) : (
-          <p className="mt-1 truncate text-sm font-semibold text-gray-800" title={label}>{label}</p>
+          <p className={`mt-1 truncate text-xs font-semibold sm:text-sm ${error ? 'text-amber-700' : 'text-gray-800'}`} title={label}>{label}</p>
         )}
       </div>
     </div>

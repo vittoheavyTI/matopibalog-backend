@@ -1,55 +1,90 @@
 # P1 - Tenancy Impact Map
 
-Base auditada: `e30e883965f3a75052b7469765da9657230a5566`.
+Base inicial da macrofrente: `e30e883965f3a75052b7469765da9657230a5566`.
 
-## Estado anterior
+## Autoridades separadas
 
-- `empresa_id` era a unica autoridade horizontal para tenant, entidade legal, filtros operacionais e relatorios.
-- `backend/middlewares/tenant.js` resolvia o tenant do usuario por `usuarios.empresa_id`; super-admin podia impersonar via `empresa_id`.
-- Nao havia modelo produtivo de grupos empresariais, filiais ou unidades operacionais.
-- As migrations produtivas aplicadas terminavam em `066_billing_outbox`; a proxima migration livre e `067`.
+- `empresa_id`: entidade legal, ownership e tenant legado.
+- `grupo_id`: visao corporativa opcional entre empresas autorizadas.
+- `unidade_operacional_id`: unidade/filial operacional apenas em `motoristas` e `fretes`.
+- Objetos filhos de frete derivam escopo pelo frete; P1 nao duplica unidade em despesas, abastecimentos, vales, ePOD, ocorrencias ou tracking.
+
+## Rollout seguro
+
+`empresas.operational_scope_mode` controla a transicao:
+
+- `legacy`: comportamento anterior, sem dependencia de tabelas P1.
+- `configured`: unidades e memberships podem ser preparados; usuarios administrativos continuam sem lockout.
+- `enforced`: memberships passam a ser autoridade operacional.
+
+A primeira unidade muda a empresa de `legacy` para `configured`, mas nao bloqueia outros admins. Enforcement exige acao explicita e a RPC valida que admins ativos possuem membership.
 
 ## Modelo P1
 
-- `grupos_empresariais`: agrupamento opcional entre empresas.
-- `grupo_empresarial_empresas`: vinculo empresa-grupo sem substituir `empresa_id`.
-- `unidades_operacionais`: unidade/filial operacional dentro da empresa.
-- `regioes_operacionais`: agrupamento operacional de unidades.
-- `usuario_operacional_memberships`: escopo LOCAL, REGIONAL ou GLOBAL por usuario.
-- `operational_scope_auditoria`: trilha de alteracoes sensiveis.
+- `grupos_empresariais`: agrupamento corporativo.
+- `grupo_empresarial_empresas`: empresas pertencentes ao grupo; uma empresa nao fica ativa em dois grupos ao mesmo tempo.
+- `unidades_operacionais`: filial/base/unidade dentro de uma empresa.
+- `regioes_operacionais`: agrupamento de unidades dentro da mesma empresa.
+- `regiao_operacional_unidades`: vinculo regiao-unidade com FK composta por empresa.
+- `usuario_operacional_memberships`: LOCAL, REGIONAL ou GLOBAL por empresa; GLOBAL corporativo por grupo.
+- `operational_scope_auditoria`: trilha append-only das mutacoes estruturais.
 
-O modelo e aditivo. Nenhuma tabela existente perde `empresa_id`.
+## Integridade no banco
 
-## Regra de compatibilidade
+- FKs compostas impedem membership empresa A apontar para unidade/regiao da empresa B.
+- Regiao-unidade exige mesma empresa nos dois lados.
+- Unidade/regiao com `grupo_id` exige vinculo empresa-grupo existente.
+- Apenas uma unidade default ativa por empresa.
+- Unicidade de memberships ativos cobre LOCAL, REGIONAL, GLOBAL empresa e GLOBAL grupo.
 
-- Empresa sem unidade ativa continua em modo `LEGACY_COMPANY`.
-- Linhas antigas com `unidade_operacional_id = null` permanecem validas.
-- Ao criar a primeira unidade, ela vira `is_default = true`.
-- Escopo de unidade padrao pode incluir linhas legadas sem unidade.
-- Empresa com unidades ativas e usuario sem membership entra em `NO_ACCESS`.
+## Mutacoes atomicas
+
+As operacoes sensiveis rodam por RPC transacional:
+
+- criar/alterar grupo;
+- vincular/arquivar empresa no grupo;
+- criar/alterar unidade e default;
+- criar/alterar regiao;
+- definir unidades da regiao;
+- criar/alterar/revogar membership;
+- ativar enforcement.
+
+Auditoria fica na mesma transacao. Erro significa rollback completo.
+
+## Autoridade administrativa
+
+- `PLATFORM_SUPER_ADMIN`: administra plataforma.
+- `GLOBAL_COMPANY_ADMIN`: administra toda a empresa.
+- `GLOBAL_CORPORATE_ADMIN`: administra empresas/unidades autorizadas do grupo.
+- `REGIONAL_MANAGER`: delega apenas subconjunto da propria regiao.
+- `LOCAL_MANAGER`: delega apenas a propria unidade.
+
+Regra geral: `delegated_scope` deve ser subconjunto de `actor_effective_scope`. Usuario comum nao pode trocar `empresa_id` via query.
 
 ## Modulos tocados
 
 | Area | Classificacao | Acao |
 | --- | --- | --- |
-| Fretes | Implementado | Filtro por escopo operacional em listagem, detalhe e operacoes administrativas; escrita deriva unidade autorizada. |
+| Fretes | Implementado | Filtro por escopo operacional e contexto visual; escrita deriva unidade autorizada. |
 | Relatorios | Implementado | Rentabilidade, acerto, ficha de viagem e torre aplicam escopo operacional. |
-| Motoristas | Preparado por schema | Migration adiciona `unidade_operacional_id`; fluxo funcional nao foi alterado alem da derivacao em fretes. |
-| Financeiro operacional | Preparado por schema | Tabelas de despesas, abastecimentos e vales recebem `unidade_operacional_id` quando existirem. |
-| Tracking | Preparado por schema | Tabelas de localizacao recebem `unidade_operacional_id`; SEC-1 permanece sem alteracao funcional. |
+| Motoristas | Preparado por schema | `unidade_operacional_id` e a origem operacional canonica do motorista. |
+| Financeiro operacional | Derivado | Despesas, abastecimentos e vales continuam derivados do frete. Sem coluna duplicada em P1. |
+| ePOD/Ocorrencias | Derivado | Escopo deriva do frete vinculado. Sem coluna duplicada em P1. |
+| Tracking/SEC-1 | Intacto | Arquitetura SEC-1 nao foi alterada. Escopo de tracking segue por viagem/frete. |
 | Billing/Asaas | Fora de escopo funcional | Billing permanece OFF; P1 nao ativa cobranca. |
 | Contratos/3A | Fora de escopo funcional | Nenhuma alteracao de contrato, PR #415 ou #416. |
 
 ## Interfaces
 
-- Nova rota backend `/operacional`.
-- Nova tela web `Operacao`.
-- Novo seletor de contexto operacional no cabecalho.
-- O seletor envia `X-Operational-Unit-Id`; o backend valida contra o membership efetivo.
+- Backend `/operacional`.
+- Painel web `Operacao`.
+- Seletor de contexto operacional responsivo.
+- Header `X-Operational-Unit-Id` e validacao server-side.
+- `selected_unit_id` e `effective_filter_unit_ids` separados de `authorized_unit_ids`.
 
 ## Gates mantidos
 
 - Sem DDL em producao nesta etapa.
 - Sem ativar billing.
 - Sem deploy automatico.
-- Sem mexer em migrations 064, 065 ou 066.
+- Sem merge.

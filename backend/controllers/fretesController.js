@@ -11,6 +11,7 @@ const { revogarTrackingSeSemViagemAtiva } = require('../services/auth/trackingRe
 const {
   resolverEscopoOperacional,
   aplicarEscopoOperacionalQuery,
+  escopoTemSelecaoInvalida,
   canAccessUnit,
   deriveUnitForWrite,
 } = require('../services/operationalScopeService');
@@ -257,16 +258,20 @@ exports.getAll = async (req, res) => {
     if (isAdmin && operationalScope.mode === 'NO_ACCESS') {
       return res.status(403).json({ message: 'Escopo operacional nao autorizado.' });
     }
+    if (isAdmin && escopoTemSelecaoInvalida(operationalScope)) {
+      return res.status(403).json({ message: 'Unidade operacional selecionada fora do seu escopo.' });
+    }
 
     let idsPermitidos = null;
 
     if (!isAdmin) {
       idsPermitidos = [req.user.uid];
-    } else if (empresaAlvo) {
+    } else {
+      const empresasPermitidas = operationalScope?.authorized_empresa_ids || [];
       const { data: uids, error: uidsError } = await supabase
         .from('usuarios')
         .select('id')
-        .eq('empresa_id', empresaAlvo)
+        .in('empresa_id', empresasPermitidas.length ? empresasPermitidas : [empresaAlvo || '00000000-0000-0000-0000-000000000000'])
         .eq('tipo', 'motorista');
 
       if (uidsError) throw uidsError;
@@ -386,6 +391,9 @@ exports.create = async (req, res) => {
     let unidadeOperacionalId = motData.unidade_operacional_id || null;
     if (req.user.role === 'admin') {
       const scope = await resolverEscopoOperacional(req, { empresaId: motData.empresa_id });
+      if (escopoTemSelecaoInvalida(scope)) {
+        return res.status(403).json({ message: 'Unidade operacional selecionada fora do seu escopo.' });
+      }
       const unitDecision = deriveUnitForWrite({
         scope,
         requestedUnitId: req.body.unidade_operacional_id,
