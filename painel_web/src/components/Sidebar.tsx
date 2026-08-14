@@ -163,6 +163,7 @@ export const Sidebar: React.FC = () => {
     { to: '/relatorios/acerto-motoristas', icon: Receipt, label: 'Acerto de Motoristas' },
     { to: '/motoristas', icon: Users, label: 'Motoristas' },
     { to: '/admins', icon: UserCircle, label: 'Usuários' },
+    { to: '/operacional', icon: Building2, label: 'Operacao' },
   ];
 
   // O super-admin administra a plataforma. Antes as páginas administrativas viviam
@@ -174,6 +175,7 @@ export const Sidebar: React.FC = () => {
     ? [
         { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
         { to: '/painel-administrativo/empresas', icon: Building2, label: 'Empresas e Autônomos' },
+        { to: '/painel-administrativo/operacional', icon: Building2, label: 'Operacao' },
         { to: '/painel-administrativo/planos', icon: ClipboardList, label: 'Planos' },
         { to: '/painel-administrativo/funcionalidades', icon: Boxes, label: 'Funcionalidades e Add-ons' },
         { to: '/painel-administrativo/contratos', icon: FileSignature, label: 'Contratos' },

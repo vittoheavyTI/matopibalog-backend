@@ -17,6 +17,7 @@ import { ResumoMotorista } from './pages/ResumoMotorista';
 import { Usuarios } from './pages/Usuarios';
 import { Configuracoes } from './pages/Configuracoes';
 import { Integracoes } from './pages/Integracoes';
+import { Operacional } from './pages/Operacional';
 import { PainelVisaoGeral } from './pages/PainelVisaoGeral';
 import { PainelEmpresas } from './pages/PainelEmpresas';
 import { PainelPlanos } from './pages/PainelPlanos';
@@ -87,10 +88,12 @@ const AppRoutes = () => {
         <Route path="relatorios/acerto-motoristas" element={<AcertoMotoristas />} />
         <Route path="relatorios/torre-controle" element={<TorreControle />} />
         <Route path="admins" element={<Usuarios />} />
+        <Route path="operacional" element={<Operacional />} />
         <Route path="painel-administrativo">
           <Route index element={<Navigate to="visao-geral" replace />} />
           <Route path="visao-geral" element={<SuperAdminRoute><PainelVisaoGeral /></SuperAdminRoute>} />
           <Route path="empresas" element={<SuperAdminRoute><PainelEmpresas /></SuperAdminRoute>} />
+          <Route path="operacional" element={<SuperAdminRoute><Operacional /></SuperAdminRoute>} />
           <Route path="planos" element={<SuperAdminRoute><ErrorBoundary><PainelPlanos /></ErrorBoundary></SuperAdminRoute>} />
           <Route path="funcionalidades" element={<SuperAdminRoute><ErrorBoundary><PainelFuncionalidades /></ErrorBoundary></SuperAdminRoute>} />
           <Route path="contratos" element={<SuperAdminRoute><ErrorBoundary><PainelContratos /></ErrorBoundary></SuperAdminRoute>} />

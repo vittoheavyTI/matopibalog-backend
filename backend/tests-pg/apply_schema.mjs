@@ -24,6 +24,7 @@ const arquivos = [
   join(migrations, '064_frete_tracking_credenciais.sql'), // SEC-1: credencial de rastreamento
   join(migrations, '065_fretes_financeiro_auditoria.sql'), // Fretes: correcao financeira atomica
   join(migrations, '066_billing_outbox.sql'),      // 3A-2: outbox de billing
+  join(migrations, '067_grupos_filiais_escopos_operacionais.sql'), // P1: grupos/unidades/escopos
 ];
 
 const client = new pg.Client({ connectionString: CONN });
@@ -35,7 +36,7 @@ try {
     await client.query(sql);
     console.log('ok');
   }
-  console.log('Schema de teste aplicado (pré-bootstrap + 060 + 061 + 062 + 064 + 065 + 066).');
+  console.log('Schema de teste aplicado (pré-bootstrap + 060 + 061 + 062 + 064 + 065 + 066 + 067).');
 } finally {
   await client.end();
 }

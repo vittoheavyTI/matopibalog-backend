@@ -3,6 +3,7 @@ import { Outlet, useNavigate } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { SessionTimeoutWatcher } from './SessionTimeoutWatcher';
 import { NotificacoesDropdown } from './NotificacoesDropdown';
+import { OperationalContextSelector } from './OperationalContextSelector';
 import { useAuth } from '../contexts/AuthContext';
 import { useContratacaoStatus } from '../hooks/useContratacaoStatus';
 import { LogOut, User as UserIcon, ChevronDown, UserCog, AlertTriangle, FileSignature } from 'lucide-react';
@@ -63,8 +64,9 @@ export const Layout: React.FC = () => {
       
       <div className="flex-1 flex flex-col h-full overflow-hidden">
         {/* Cabeçalho Superior */}
-        <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-end px-3 md:px-6 shadow-sm z-10">
-          <div className="flex items-center gap-3">
+        <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-3 md:px-6 shadow-sm z-10">
+          <OperationalContextSelector />
+          <div className="flex items-center gap-3 ml-auto">
             <NotificacoesDropdown />
             <div className="relative" ref={dropdownRef}>
             <button 

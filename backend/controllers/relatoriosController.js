@@ -4,6 +4,29 @@ const { freteEstaCancelado } = require('../utils/agregacaoFinanceiraFretes');
 const { calcularRentabilidadeFrete, resumirRentabilidade } = require('../utils/rentabilidadeFrete');
 const { calcularAcertoMotoristas } = require('../utils/acertoMotorista');
 const { montarTorreControle, resumirItensTorre } = require('../utils/torreControle');
+const {
+  resolverEscopoOperacional,
+  aplicarEscopoOperacionalQuery,
+  escopoTemSelecaoInvalida,
+  canAccessUnit,
+} = require('../services/operationalScopeService');
+
+const ZERO_UUID = '00000000-0000-0000-0000-000000000000';
+
+function getGrupoAlvo(req) {
+  const header = req.headers?.['x-operational-group-id'];
+  return req.query?.grupo_id
+    || (Array.isArray(header) ? header[0] : header)
+    || null;
+}
+
+function aplicarEmpresasAutorizadasQuery(query, operationalScope, fallbackEmpresaId = null) {
+  const empresaIds = operationalScope?.authorized_empresa_ids || [];
+  if (empresaIds.length > 1) return query.in('empresa_id', empresaIds);
+  if (empresaIds.length === 1) return query.eq('empresa_id', empresaIds[0]);
+  if (fallbackEmpresaId) return query.eq('empresa_id', fallbackEmpresaId);
+  return query.in('empresa_id', [ZERO_UUID]);
+}
 
 exports.getFichaViagem = async (req, res) => {
   const { motorista_id, fretes_ids } = req.query;
@@ -17,7 +40,17 @@ exports.getFichaViagem = async (req, res) => {
   try {
     // Validar que o motorista pertence à empresa do admin (super-admin pula)
     const isSuperAdmin = req.user.is_super_admin === true;
-    if (!isSuperAdmin) {
+    const grupoAlvo = getGrupoAlvo(req);
+    const operationalScope = isSuperAdmin
+      ? await resolverEscopoOperacional(req, { empresaId: req.query.empresa_id || null, grupoId: grupoAlvo })
+      : await resolverEscopoOperacional(req, { empresaId: req.empresa_id, grupoId: grupoAlvo });
+    if (operationalScope.mode === 'NO_ACCESS') {
+      return res.status(403).json({ message: 'Escopo operacional nao autorizado.' });
+    }
+    if (escopoTemSelecaoInvalida(operationalScope)) {
+      return res.status(403).json({ message: 'Unidade operacional selecionada fora do seu escopo.' });
+    }
+    if (!isSuperAdmin && !grupoAlvo) {
       const { data: pertence, error: pertenceError } = await supabase
         .from('usuarios')
         .select('id')
@@ -28,6 +61,19 @@ exports.getFichaViagem = async (req, res) => {
 
       if (pertenceError || !pertence) {
         return res.status(403).json({ message: 'Acesso negado: motorista não pertence a esta empresa.' });
+      }
+    } else if (grupoAlvo) {
+      const empresaIds = operationalScope.authorized_empresa_ids || [];
+      const { data: pertence, error: pertenceError } = await supabase
+        .from('usuarios')
+        .select('id, empresa_id')
+        .eq('id', motorista_id)
+        .in('empresa_id', empresaIds.length ? empresaIds : [ZERO_UUID])
+        .eq('tipo', 'motorista')
+        .single();
+
+      if (pertenceError || !pertence) {
+        return res.status(403).json({ message: 'Acesso negado: motorista fora do escopo corporativo.' });
       }
     }
 
@@ -43,11 +89,13 @@ exports.getFichaViagem = async (req, res) => {
     }
 
     // 2. Fretes Selecionados
-    const { data: fretesRaw, error: fretesError } = await supabase
+    let fretesFichaQuery = supabase
       .from('fretes')
       .select('*')
       .in('id', idsArray)
       .eq('motorista_id', motorista_id);
+    fretesFichaQuery = aplicarEmpresasAutorizadasQuery(fretesFichaQuery, operationalScope, req.empresa_id || req.query?.empresa_id || null);
+    const { data: fretesRaw, error: fretesError } = await fretesFichaQuery;
 
     if (fretesError) throw fretesError;
 
@@ -64,32 +112,41 @@ exports.getFichaViagem = async (req, res) => {
     }
 
     // 3. Movimentações vinculadas
-    const { data: abastecimentosRaw, error: eAbast } = await supabase
+    let abastecimentosFichaQuery = supabase
       .from('abastecimentos')
       .select('*')
       .in('frete_id', idsArray)
       .eq('motorista_id', motorista_id);
+    abastecimentosFichaQuery = aplicarEmpresasAutorizadasQuery(abastecimentosFichaQuery, operationalScope, req.empresa_id || req.query?.empresa_id || null);
+    const { data: abastecimentosRaw, error: eAbast } = await abastecimentosFichaQuery;
 
     if (eAbast) throw eAbast;
 
-    const { data: despesasRaw, error: eDespesas } = await supabase
+    let despesasFichaQuery = supabase
       .from('despesas')
       .select('*')
       .in('frete_id', idsArray)
       .eq('motorista_id', motorista_id);
+    despesasFichaQuery = aplicarEmpresasAutorizadasQuery(despesasFichaQuery, operationalScope, req.empresa_id || req.query?.empresa_id || null);
+    const { data: despesasRaw, error: eDespesas } = await despesasFichaQuery;
 
     if (eDespesas) throw eDespesas;
 
-    const { data: valesRaw, error: eVales } = await supabase
+    let valesFichaQuery = supabase
       .from('vales')
       .select('*')
       .in('frete_id', idsArray)
       .eq('motorista_id', motorista_id);
+    valesFichaQuery = aplicarEmpresasAutorizadasQuery(valesFichaQuery, operationalScope, req.empresa_id || req.query?.empresa_id || null);
+    const { data: valesRaw, error: eVales } = await valesFichaQuery;
 
     if (eVales) throw eVales;
 
     // Garantir arrays nunca nulos
     const fretes = fretesRaw || [];
+    if (fretes.some((frete) => !canAccessUnit(operationalScope, frete.unidade_operacional_id || null))) {
+      return res.status(403).json({ message: 'Ha frete fora do seu escopo operacional.' });
+    }
     const abastecimentos = abastecimentosRaw || [];
     const despesas = despesasRaw || [];
     const vales = valesRaw || [];
@@ -147,17 +204,25 @@ exports.getRentabilidade = async (req, res) => {
   const LIMITE_FRETES = 1000;
   try {
     const isSuperAdmin = req.user.is_super_admin === true;
+    const grupoAlvo = getGrupoAlvo(req);
     const empresaAlvo = isSuperAdmin ? (req.query.empresa_id || null) : req.empresa_id;
-    if (!empresaAlvo) {
+    if (!empresaAlvo && !grupoAlvo) {
       return res.status(400).json({ message: 'Empresa não identificada.' });
+    }
+    const operationalScope = await resolverEscopoOperacional(req, { empresaId: empresaAlvo, grupoId: grupoAlvo });
+    if (operationalScope.mode === 'NO_ACCESS') {
+      return res.status(403).json({ message: 'Escopo operacional nao autorizado.' });
+    }
+    if (escopoTemSelecaoInvalida(operationalScope)) {
+      return res.status(403).json({ message: 'Unidade operacional selecionada fora do seu escopo.' });
     }
 
     const { inicio, fim, motorista_id, status, resultado } = req.query;
 
     let fretesQuery = supabase
       .from('fretes')
-      .select('*, motoristas(usuarios(nome), percentual_comissao, empresas!left(tipo))')
-      .eq('empresa_id', empresaAlvo);
+      .select('*, motoristas(usuarios(nome), percentual_comissao, empresas!left(tipo))');
+    fretesQuery = aplicarEscopoOperacionalQuery(fretesQuery, operationalScope);
     if (inicio) fretesQuery = fretesQuery.gte('data', inicio);
     if (fim) fretesQuery = fretesQuery.lte('data', fim);
     if (motorista_id) fretesQuery = fretesQuery.eq('motorista_id', motorista_id);
@@ -174,8 +239,16 @@ exports.getRentabilidade = async (req, res) => {
     let despesas = [];
     if (ids.length) {
       const [abRes, dpRes] = await Promise.all([
-        supabase.from('abastecimentos').select('frete_id, valor_total, status').eq('empresa_id', empresaAlvo).in('frete_id', ids),
-        supabase.from('despesas').select('frete_id, valor, tipo, status').eq('empresa_id', empresaAlvo).in('frete_id', ids),
+        aplicarEmpresasAutorizadasQuery(
+          supabase.from('abastecimentos').select('frete_id, valor_total, status'),
+          operationalScope,
+          empresaAlvo,
+        ).in('frete_id', ids),
+        aplicarEmpresasAutorizadasQuery(
+          supabase.from('despesas').select('frete_id, valor, tipo, status'),
+          operationalScope,
+          empresaAlvo,
+        ).in('frete_id', ids),
       ]);
       if (abRes.error) throw abRes.error;
       if (dpRes.error) throw dpRes.error;
@@ -238,17 +311,25 @@ exports.getAcertoMotoristas = async (req, res) => {
   const LIMITE_FRETES = 1500;
   try {
     const isSuperAdmin = req.user.is_super_admin === true;
+    const grupoAlvo = getGrupoAlvo(req);
     const empresaAlvo = isSuperAdmin ? (req.query.empresa_id || null) : req.empresa_id;
-    if (!empresaAlvo) {
+    if (!empresaAlvo && !grupoAlvo) {
       return res.status(400).json({ message: 'Empresa não identificada.' });
+    }
+    const operationalScope = await resolverEscopoOperacional(req, { empresaId: empresaAlvo, grupoId: grupoAlvo });
+    if (operationalScope.mode === 'NO_ACCESS') {
+      return res.status(403).json({ message: 'Escopo operacional nao autorizado.' });
+    }
+    if (escopoTemSelecaoInvalida(operationalScope)) {
+      return res.status(403).json({ message: 'Unidade operacional selecionada fora do seu escopo.' });
     }
 
     const { inicio, fim, motorista_id } = req.query;
 
     let fretesQuery = supabase
       .from('fretes')
-      .select('id, empresa_id, motorista_id, data, origem, destino, status, valor_frete, motoristas(usuarios(nome), percentual_comissao, empresas!left(tipo, nome))')
-      .eq('empresa_id', empresaAlvo);
+      .select('id, empresa_id, motorista_id, data, origem, destino, status, valor_frete, motoristas(usuarios(nome), percentual_comissao, empresas!left(tipo, nome))');
+    fretesQuery = aplicarEscopoOperacionalQuery(fretesQuery, operationalScope);
     if (inicio) fretesQuery = fretesQuery.gte('data', inicio);
     if (fim) fretesQuery = fretesQuery.lte('data', fim);
     if (motorista_id) fretesQuery = fretesQuery.eq('motorista_id', motorista_id);
@@ -266,19 +347,16 @@ exports.getAcertoMotoristas = async (req, res) => {
     if (ids.length) {
       let despesasQuery = supabase
         .from('despesas')
-        .select('id, empresa_id, motorista_id, frete_id, data, tipo, descricao, valor, quem_pagou, status')
-        .eq('empresa_id', empresaAlvo)
-        .in('frete_id', ids);
+        .select('id, empresa_id, motorista_id, frete_id, data, tipo, descricao, valor, quem_pagou, status');
+      despesasQuery = aplicarEmpresasAutorizadasQuery(despesasQuery, operationalScope, empresaAlvo).in('frete_id', ids);
       let abastecimentosQuery = supabase
         .from('abastecimentos')
-        .select('id, empresa_id, motorista_id, frete_id, data, posto, valor_total, quem_pagou, status')
-        .eq('empresa_id', empresaAlvo)
-        .in('frete_id', ids);
+        .select('id, empresa_id, motorista_id, frete_id, data, posto, valor_total, quem_pagou, status');
+      abastecimentosQuery = aplicarEmpresasAutorizadasQuery(abastecimentosQuery, operationalScope, empresaAlvo).in('frete_id', ids);
       let valesQuery = supabase
         .from('vales')
-        .select('id, empresa_id, motorista_id, frete_id, data, descricao, posto, valor, quem_pagou, status')
-        .eq('empresa_id', empresaAlvo)
-        .in('frete_id', ids);
+        .select('id, empresa_id, motorista_id, frete_id, data, descricao, posto, valor, quem_pagou, status');
+      valesQuery = aplicarEmpresasAutorizadasQuery(valesQuery, operationalScope, empresaAlvo).in('frete_id', ids);
       if (inicio) {
         despesasQuery = despesasQuery.gte('data', inicio);
         abastecimentosQuery = abastecimentosQuery.gte('data', inicio);
@@ -320,9 +398,18 @@ exports.getAcertoMotoristas = async (req, res) => {
 exports.getTorreControle = async (req, res) => {
   const LIMITE_FRETES = 1000;
   try {
-    const empresaAlvo = req.empresa_id;
-    if (!empresaAlvo) {
+    const isSuperAdmin = req.user.is_super_admin === true;
+    const grupoAlvo = getGrupoAlvo(req);
+    const empresaAlvo = isSuperAdmin ? (req.query.empresa_id || null) : req.empresa_id;
+    if (!empresaAlvo && !grupoAlvo) {
       return res.status(400).json({ message: 'Empresa nao identificada.' });
+    }
+    const operationalScope = await resolverEscopoOperacional(req, { empresaId: empresaAlvo, grupoId: grupoAlvo });
+    if (operationalScope.mode === 'NO_ACCESS') {
+      return res.status(403).json({ message: 'Escopo operacional nao autorizado.' });
+    }
+    if (escopoTemSelecaoInvalida(operationalScope)) {
+      return res.status(403).json({ message: 'Unidade operacional selecionada fora do seu escopo.' });
     }
 
     const { inicio, fim, motorista_id, status, nivel } = req.query;
@@ -331,20 +418,22 @@ exports.getTorreControle = async (req, res) => {
       return res.status(400).json({ message: 'Prioridade invalida.' });
     }
 
-    const { data: empresaExiste, error: empresaErr } = await supabase
-      .from('empresas')
-      .select('id')
-      .eq('id', empresaAlvo)
-      .maybeSingle();
-    if (empresaErr) throw empresaErr;
-    if (!empresaExiste) {
-      return res.status(404).json({ message: 'Empresa nao encontrada.' });
+    if (empresaAlvo) {
+      const { data: empresaExiste, error: empresaErr } = await supabase
+        .from('empresas')
+        .select('id')
+        .eq('id', empresaAlvo)
+        .maybeSingle();
+      if (empresaErr) throw empresaErr;
+      if (!empresaExiste) {
+        return res.status(404).json({ message: 'Empresa nao encontrada.' });
+      }
     }
 
     let fretesQuery = supabase
       .from('fretes')
-      .select('id, empresa_id, motorista_id, data, origem, destino, placa, status, valor_frete')
-      .eq('empresa_id', empresaAlvo);
+      .select('id, empresa_id, motorista_id, data, origem, destino, placa, status, valor_frete');
+    fretesQuery = aplicarEscopoOperacionalQuery(fretesQuery, operationalScope);
     if (inicio) fretesQuery = fretesQuery.gte('data', inicio);
     if (fim) fretesQuery = fretesQuery.lte('data', fim);
     if (motorista_id) fretesQuery = fretesQuery.eq('motorista_id', motorista_id);
@@ -362,11 +451,12 @@ exports.getTorreControle = async (req, res) => {
     const motoristasIds = [...new Set(fretesBase.map((f) => f.motorista_id).filter(Boolean))];
     let motoristasPorId = new Map();
     if (motoristasIds.length) {
-      const { data: motoristasRaw, error: motoristasErr } = await supabase
+      let motoristasQuery = supabase
         .from('motoristas')
         .select('id, empresa_id, usuarios(nome)')
-        .eq('empresa_id', empresaAlvo)
         .in('id', motoristasIds);
+      motoristasQuery = aplicarEmpresasAutorizadasQuery(motoristasQuery, operationalScope, empresaAlvo);
+      const { data: motoristasRaw, error: motoristasErr } = await motoristasQuery;
       if (motoristasErr) throw motoristasErr;
       motoristasPorId = new Map((motoristasRaw || []).map((m) => [m.id, m]));
     }
@@ -384,31 +474,31 @@ exports.getTorreControle = async (req, res) => {
 
     if (ids.length) {
       const [ocRes, epodRes, evidRes, locRes, locEstadoRes] = await Promise.all([
-        supabase
-          .from('frete_ocorrencias')
-          .select('id, frete_id, empresa_id, tipo, status, impacto, ocorrido_em, created_at')
-          .eq('empresa_id', empresaAlvo)
-          .in('frete_id', ids),
-        supabase
-          .from('frete_epod')
-          .select('id, frete_id, empresa_id, status, comprovado_em, validado_em')
-          .eq('empresa_id', empresaAlvo)
-          .in('frete_id', ids),
-        supabase
-          .from('frete_epod_evidencias')
-          .select('id, frete_id, empresa_id, status, created_at')
-          .eq('empresa_id', empresaAlvo)
-          .in('frete_id', ids),
-        supabase
-          .from('frete_ultima_localizacao')
-          .select('frete_id, empresa_id, motorista_id, accuracy_m, captured_at, received_at')
-          .eq('empresa_id', empresaAlvo)
-          .in('frete_id', ids),
-        supabase
-          .from('frete_localizacao_estado')
-          .select('frete_id, empresa_id, motorista_id, estado, detalhe, atualizado_em, ultima_localizacao_em')
-          .eq('empresa_id', empresaAlvo)
-          .in('frete_id', ids),
+        aplicarEmpresasAutorizadasQuery(
+          supabase.from('frete_ocorrencias').select('id, frete_id, empresa_id, tipo, status, impacto, ocorrido_em, created_at'),
+          operationalScope,
+          empresaAlvo,
+        ).in('frete_id', ids),
+        aplicarEmpresasAutorizadasQuery(
+          supabase.from('frete_epod').select('id, frete_id, empresa_id, status, comprovado_em, validado_em'),
+          operationalScope,
+          empresaAlvo,
+        ).in('frete_id', ids),
+        aplicarEmpresasAutorizadasQuery(
+          supabase.from('frete_epod_evidencias').select('id, frete_id, empresa_id, status, created_at'),
+          operationalScope,
+          empresaAlvo,
+        ).in('frete_id', ids),
+        aplicarEmpresasAutorizadasQuery(
+          supabase.from('frete_ultima_localizacao').select('frete_id, empresa_id, motorista_id, accuracy_m, captured_at, received_at'),
+          operationalScope,
+          empresaAlvo,
+        ).in('frete_id', ids),
+        aplicarEmpresasAutorizadasQuery(
+          supabase.from('frete_localizacao_estado').select('frete_id, empresa_id, motorista_id, estado, detalhe, atualizado_em, ultima_localizacao_em'),
+          operationalScope,
+          empresaAlvo,
+        ).in('frete_id', ids),
       ]);
       if (ocRes.error) throw ocRes.error;
       if (epodRes.error) throw epodRes.error;

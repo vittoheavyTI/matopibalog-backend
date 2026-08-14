@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import api, { decodificarPayloadJwt } from '../api';
 import { definirMotivoSessao, type MotivoSessao } from '../utils/sessionReason';
+import { OPERATIONAL_GROUP_CONTEXT_KEY, OPERATIONAL_UNIT_CONTEXT_KEY } from '../utils/operationalContextStorage';
 
 export interface User {
   uid: string;
@@ -177,6 +178,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     ['matopibalog_company', 'choferlog_company',
      'matopibalog_logo', 'matopibalog_logo_scale', 'matopibalog_logo_y',
      'matopibalog_empresa_logo',
+     OPERATIONAL_GROUP_CONTEXT_KEY,
+     OPERATIONAL_UNIT_CONTEXT_KEY,
     ].forEach(k => localStorage.removeItem(k));
     setUser(null);
   };
