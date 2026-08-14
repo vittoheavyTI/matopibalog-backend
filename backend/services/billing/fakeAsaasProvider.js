@@ -56,8 +56,11 @@ class FakeAsaasProvider {
   async createCustomer({ empresa } = {}) {
     this.calls.createCustomer += 1;
     this._maybeFault('createCustomer');
+    const ref = empresa?.id || null;
+    const existente = Array.from(this.customers.values()).find((c) => c.externalReference === ref);
+    if (existente) return { id: existente.id };
     const id = this._id('cus');
-    const obj = { id, name: empresa?.nome || 'cliente', externalReference: empresa?.id || null };
+    const obj = { id, name: empresa?.nome || 'cliente', externalReference: ref };
     this.customers.set(id, obj);
     return { id };
   }
@@ -66,6 +69,10 @@ class FakeAsaasProvider {
     this.calls.createSubscription += 1;
     this._maybeFault('createSubscription');
     if (!this.customers.has(customerId)) throw new FakeAsaasError(400, 'customer inexistente');
+    if (externalReference) {
+      const existente = Array.from(this.subscriptions.values()).find((s) => s.externalReference === externalReference);
+      if (existente) return { id: existente.id, nextDueDate: existente.nextDueDate, status: existente.status };
+    }
     const id = this._id('sub');
     const obj = { id, customer: customerId, value: Number(value) || 0, nextDueDate, cycle, status: 'ACTIVE', externalReference: externalReference || null };
     this.subscriptions.set(id, obj);
@@ -76,6 +83,10 @@ class FakeAsaasProvider {
     this.calls.createCharge += 1;
     this._maybeFault('createCharge');
     if (!this.customers.has(customerId)) throw new FakeAsaasError(400, 'customer inexistente');
+    if (externalReference) {
+      const existente = Array.from(this.charges.values()).find((c) => c.externalReference === externalReference);
+      if (existente) return { id: existente.id, status: existente.status, value: existente.value, dueDate: existente.dueDate };
+    }
     const id = this._id('pay');
     const obj = { id, customer: customerId, value: Number(value) || 0, dueDate, description: description || null, status: 'PENDING', externalReference: externalReference || null };
     this.charges.set(id, obj);
@@ -92,12 +103,13 @@ class FakeAsaasProvider {
   }
 
   // Atualiza o valor de uma assinatura (convergência de plano alterado).
-  async updateSubscription({ subscriptionId, value } = {}) {
+  async updateSubscription({ subscriptionId, value, updatePendingPayments = false } = {}) {
     this.calls.updateSubscription += 1;
     this._maybeFault('updateSubscription');
     const sub = this.subscriptions.get(subscriptionId);
     if (!sub) throw new FakeAsaasError(404, 'subscription inexistente');
     sub.value = Number(value) || 0;
+    sub.updatePendingPayments = updatePendingPayments === true;
     return { id: subscriptionId, value: sub.value, status: sub.status };
   }
 

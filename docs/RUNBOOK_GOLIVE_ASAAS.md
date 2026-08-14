@@ -1,11 +1,18 @@
 # Runbook - Go-live Financeiro / Asaas Production
 
-Estado deste runbook: arquitetura preparada, Asaas production desligado.
+Estado deste runbook: production preparado e desligado.
 
-Este documento substitui o runbook historico de 22/07/2026 para o caminho 3A-2.
-Ele nao autoriza dinheiro real. O proximo gate unico e:
+Este documento nao autoriza dinheiro real. O proximo gate unico e:
 
 `FINAL_ASAAS_PRODUCTION_ACTIVATION_GATE`
+
+Estado canonico apos o correction pass:
+
+`PAYMENT_PRODUCTION_READINESS = READY_FOR_CONTROLLED_FIRST_PAYMENT`
+
+`PRODUCTION_ASAAS_WRITES = 0`
+
+`PRODUCTION_BILLING_RUNNER_ENABLED = false`
 
 ## Autoridade Canonica
 
@@ -21,10 +28,10 @@ bloqueadas por `bloquearSeNaoSandbox`. Elas nao sao o motor de production.
 `PRODUCTION_SECRET_AUTHORITY = ASAAS_API_KEY_ENV_ONLY`
 
 A chave production deve existir somente em variavel protegida do runtime. A chave
-legada em `configuracoes.dados.integracao_asaas.apiKey` segue existindo para o
-mundo sandbox/legado, mas nao e autoridade para o provider production 3A-2.
+legada em `configuracoes.dados.integracao_asaas.apiKey` segue existindo para
+sandbox/legado, mas nao e autoridade para o provider production 3A-2.
 
-Nunca copiar, imprimir ou commitar chave production.
+Nunca copiar, imprimir, logar ou commitar chave production.
 
 ## Gate Cumulativo
 
@@ -37,44 +44,121 @@ Production write so pode acontecer quando todos forem verdadeiros:
 - `ASAAS_API_KEY` esta presente no runtime
 - a operacao e elegivel pelo orquestrador 3A-2
 
-Qualquer item ausente ou invalido resulta em fail-closed.
+Qualquer item ausente ou invalido resulta em fail-closed antes do adapter HTTP.
 
-Estados exibidos em billing-health:
+## Headers Asaas
 
-- `PRODUCTION_DISABLED`: default seguro, sem production armado
-- `SANDBOX`: provider sandbox configurado
-- `PRODUCTION_BLOCKED`: modo production pedido, mas falta trava/secret/allowlist
-- `PRODUCTION_ARMED`: production configurado, mas runner OFF
-- `PRODUCTION_ACTIVE`: todas as travas ativas
+Todo provider Asaas deve enviar explicitamente:
 
-## Allowlist
+- `access_token`
+- `Content-Type: application/json`
+- `User-Agent: MatopibaLog/1.0 (Node.js; <environment>)`
 
-`BILLING_PRODUCTION_ALLOWLIST` recebe UUIDs de empresas separados por virgula.
+A documentacao oficial Asaas exige `User-Agent` para novas contas raiz e recomenda
+identificacao explicita da aplicacao.
 
-Allowlist vazia significa zero write Asaas production. Empresa fora da allowlist
-tambem significa zero write.
+## Create Idempotency Recovery
 
-Primeiro go-live deve conter uma unica empresa piloto.
+Customer, subscription e payment usam `externalReference` para reconciliacao.
 
-## Runner
+Fluxo obrigatorio para creates:
 
-`RUNNER_ENTRYPOINT = backend/scripts/billing/outbox_runner.mjs`
+1. consultar por `externalReference`;
+2. se existir, reutilizar;
+3. se nao existir, fazer POST;
+4. se o POST retornar timeout, 408, 429 ou 5xx, consultar novamente;
+5. se o recurso apareceu, tratar como sucesso reconciliado;
+6. so permitir retry externo se o recurso realmente nao apareceu.
 
-`RUNNER_HOST = Railway cron/service dedicado ou execucao one-shot operacional`
+Referencias canonicas:
 
-`RUNNER_DEFAULT_STATE = OFF`
+- customer: `empresa.id`
+- subscription mensal: `matopiba:billing:v1:subscription:monthly:<empresa_id>`
+- implantacao: `matopiba:billing:v1:charge:implantation:<empresa_id>`
 
-`RUNNER_KILL_SWITCH = BILLING_OUTBOX_ENABLED=false`
+Isso cobre response lost after commit, worker restart, reconcile posterior e eventos
+outbox equivalentes.
 
-Nao deixar runner legado e runner 3A-2 criando cobrancas ao mesmo tempo. O caminho
-canonico e o outbox; os caminhos legados seguem sandbox-only.
+## Trial
+
+Trial e respeitado integralmente.
+
+Mesmo com contrato, customer, assinatura, pagamento ou add-on aceito, a mensalidade
+nao pode vencer antes de `trial_ends_at`. Pagamento nao encurta trial.
+
+## Implantacao e Mensalidade
+
+Implantacao e mensalidade sao separadas:
+
+- implantacao R$ 0 nao cria cobranca ficticia;
+- valor vem de snapshot/catalogo comercial vigente;
+- contrato historico nao e recalculado;
+- `BILLING_IMPLANTACAO_TIMING` controla quando cobrar implantacao;
+- create de implantacao e idempotente por externalReference canonica.
+
+## Add-on Monthly Composition
+
+Add-on mensal nao e payment avulso.
+
+Modelo canonico atual:
+
+`mensalidade_base + soma(add-ons mensais aceitos e vigentes) = valor mensal da subscription`
+
+Se o add-on for removido, o historico de payments anteriores permanece. A remocao
+significa nao compor proximos ciclos.
+
+Nunca deletar payment recebido/confirmado como simples efeito de desabilitar
+funcionalidade.
+
+## Add-on Acceptance Authority
+
+Add-on com impacto financeiro so pode entrar no billing quando houver aceite
+comercial explicito.
+
+Estados aceitos pelo dominio atual:
+
+- `billing_status_addon=accepted`
+- `billing_status_addon=effective`
+
+Campos equivalentes suportados para compatibilidade futura:
+
+- `billing_addon_status`
+- `addon_billing_status`
+
+Ausencia desses campos ou status diferente significa fail-closed: zero billing de
+add-on. Como o schema atual ainda nao possui essa autoridade persistida de forma
+canonica, add-ons vindos de `empresa_funcionalidades` permanecem fora de cobranca
+production ate proxima migration/desenho comercial especifico.
+
+## Subscription Update Effective Date
+
+Update de valor da subscription deve preservar cobrancas pendentes ja geradas:
+
+`updatePendingPayments=false`
+
+Pelo contrato oficial Asaas, alteracoes de valor/metodo afetam cobrancas futuras;
+para alterar pendentes ja geradas seria necessario enviar `updatePendingPayments=true`,
+o que e proibido neste fluxo padrao.
+
+## Cancellation vs Suspension
+
+DELETE de subscription e cancelamento permanente da recorrencia e pode afetar
+cobrancas pendentes/overdue vinculadas.
+
+Regra Matopiba:
+
+- `suspensa_financeiramente`: nao deleta subscription;
+- inadimplencia temporaria: nao deleta subscription;
+- `cancelada`/`cancelado`: pode cancelar subscription de forma definitiva;
+- cancelamento definitivo exige auditoria comercial e nao e rollback silencioso.
 
 ## Reconcile
 
 `backend/scripts/billing/reconcile_periodico.mjs`
 
 O reconcile periodico enfileira eventos idempotentes de `reconciliacao`; ele nao
-chama Asaas diretamente. O runner do outbox processa a convergencia.
+chama Asaas diretamente. O runner do outbox processa a convergencia e o provider
+faz lookup por `externalReference` antes de criar.
 
 Cadencia inicial recomendada para production: manual/one-shot no primeiro pagamento.
 Automacao periodica so apos observacao do piloto.
@@ -89,35 +173,8 @@ Autenticacao:
 
 header `asaas-access-token` igual a `ASAAS_WEBHOOK_TOKEN`.
 
-Eventos minimos:
-
-- `PAYMENT_CREATED`
-- `PAYMENT_RECEIVED`
-- `PAYMENT_CONFIRMED`
-- `PAYMENT_OVERDUE`
-- `PAYMENT_DELETED`
-- `PAYMENT_REFUNDED`
-
 O webhook e idempotente por `asaas_webhook_events` e hash canonico. Eventos
 duplicados, replay e out-of-order devem convergir sem marcar pagamento falso.
-
-Nao registrar secret production neste PR.
-
-## Trial
-
-Trial e respeitado integralmente.
-
-Mesmo com contrato, customer, assinatura ou pagamento, mensalidade nao pode vencer
-antes de `trial_ends_at`. Pagamento nao encurta trial.
-
-## Implantacao e Mensalidade
-
-Implantacao e mensalidade sao separadas:
-
-- implantacao R$ 0 nao cria cobranca ficticia
-- valor vem de snapshot/catalogo comercial vigente
-- contrato historico nao e recalculado
-- `BILLING_IMPLANTACAO_TIMING` controla quando cobrar implantacao
 
 ## Primeiro Pagamento Controlado
 
@@ -144,7 +201,7 @@ Ordem de desligamento:
 4. voltar `BILLING_PROVIDER_MODE=fake` ou remover a variavel
 5. manter registros locais para auditoria
 
-Cobranças reais ja criadas devem ser tratadas no painel/API Asaas por autorizacao
+Cobrancas reais ja criadas devem ser tratadas no painel/API Asaas por autorizacao
 financeira especifica.
 
 ## Incidente
@@ -158,10 +215,11 @@ Em caso de erro:
 - reconciliar estado local x Asaas;
 - registrar decisao operacional antes de qualquer cancelamento/estorno real.
 
-## Estado Atual
+## Referencias Oficiais Asaas
 
-`PAYMENT_PRODUCTION_READINESS = ENGINEERING_READY_FOR_PRODUCTION_GATE`
-
-`PRODUCTION_ASAAS_WRITES = 0`
-
-`PRODUCTION_BILLING_RUNNER_ENABLED = false`
+- Authentication / User-Agent: https://docs.asaas.com/docs/authentication
+- List subscriptions by externalReference: https://docs.asaas.com/reference/list-subscriptions
+- List payments by externalReference: https://docs.asaas.com/reference/list-payments
+- Update subscription / updatePendingPayments: https://docs.asaas.com/reference/update-existing-subscription
+- Remove subscription: https://docs.asaas.com/reference/remove-subscription
+- Delete payment: https://docs.asaas.com/reference/delete-payment

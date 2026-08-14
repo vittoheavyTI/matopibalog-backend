@@ -32,7 +32,7 @@ jobs:
       # SOMENTE sandbox. Base URL fixa sandbox. Nunca reutiliza ASAAS_API_KEY.
       ASAAS_SANDBOX_API_KEY: ${{ secrets.ASAAS_SANDBOX_API_KEY }}
       BILLING_PROVIDER_MODE: sandbox
-      ASAAS_SANDBOX_BASE_URL: https://sandbox.asaas.com/api/v3
+      ASAAS_SANDBOX_BASE_URL: https://api-sandbox.asaas.com/v3
 
     steps:
       - name: Checkout repository

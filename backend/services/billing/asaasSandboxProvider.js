@@ -1,44 +1,39 @@
-// Adapter REAL do Asaas — restrito a SANDBOX (macrofrente 3A-2, §3).
+// Adapter real do Asaas restrito a SANDBOX.
 //
-// Implementa o MESMO contrato do fakeAsaasProvider, para que o orquestrador e os
-// testes usem um único motor. Fail-closed para PRODUÇÃO: recusa construir se o
-// environment/host não for inequivocamente sandbox.
-//
-// Documentação oficial (contrato técnico usado — registrado, não copiado):
-//   Base URL sandbox : https://sandbox.asaas.com/api/v3
-//   Auth             : header `access_token: <API key sandbox>`
-//   POST /customers            → { id, ... }
-//   POST /subscriptions        → { id, nextDueDate, status, ... }
-//   POST /payments             → { id, status, value, dueDate, ... }
-//   DELETE /subscriptions/:id  → { deleted, id }
-//   GET  /customers/:id | /subscriptions/:id | /payments/:id
-//   Dedup: usamos `externalReference` + busca prévia para evitar duplicatas.
-//
-// NÃO loga API key / Authorization / payload sensível.
+// Mantem o mesmo contrato do provider production, mas recusa qualquer host de
+// producao. Faz lookup por externalReference antes do POST e, em erro
+// inconclusivo, consulta novamente antes de permitir retry externo.
 
-const HOST_SANDBOX = 'sandbox.asaas.com';
-const BASE_SANDBOX = 'https://sandbox.asaas.com/api/v3';
+const HOST_SANDBOX = 'api-sandbox.asaas.com';
+const LEGACY_HOST_SANDBOX = 'sandbox.asaas.com';
+const BASE_SANDBOX = 'https://api-sandbox.asaas.com/v3';
+const {
+  asaasHeaders,
+  canonicalCustomerReference,
+  erroPodeTerCommitado,
+  primeiroItem,
+} = require('./asaasProviderSafety');
 
 function ehSandbox({ environment, baseURL } = {}) {
   const envOk = String(environment || '').toLowerCase() === 'sandbox';
-  const hostOk = typeof baseURL === 'string' && baseURL.includes(HOST_SANDBOX);
-  // Bloqueio explícito: qualquer indício de produção reprova.
-  const pareceProducao = typeof baseURL === 'string' && /(^|\.)api\.asaas\.com/.test(baseURL);
+  let host = '';
+  try { host = new URL(baseURL || '').hostname; } catch { host = ''; }
+  const hostOk = host === HOST_SANDBOX || host === LEGACY_HOST_SANDBOX;
+  const pareceProducao = host === 'api.asaas.com' || /\.api\.asaas\.com$/.test(host);
   return envOk && hostOk && !pareceProducao;
 }
 
 class AsaasSandboxProvider {
-  // config: { environment:'sandbox', baseURL, apiKey }; http: cliente axios-like.
   constructor({ config, http } = {}) {
     if (!ehSandbox(config)) {
-      throw new Error('AsaasSandboxProvider recusado: environment/host não é sandbox inequívoco (fail-closed).');
+      throw new Error('AsaasSandboxProvider recusado: environment/host nao e sandbox inequivoco (fail-closed).');
     }
     if (!config.apiKey) {
       throw new Error('AsaasSandboxProvider: apiKey sandbox ausente.');
     }
     this._http = http;
     this._base = config.baseURL || BASE_SANDBOX;
-    this._headers = { access_token: config.apiKey, 'Content-Type': 'application/json' };
+    this._headers = asaasHeaders({ apiKey: config.apiKey, environment: 'sandbox' });
     this.environment = 'sandbox';
   }
 
@@ -46,6 +41,7 @@ class AsaasSandboxProvider {
     const { data } = await this._http.post(`${this._base}${path}`, body, { headers: this._headers });
     return data;
   }
+
   async _get(path) {
     try {
       const { data } = await this._http.get(`${this._base}${path}`, { headers: this._headers });
@@ -56,53 +52,103 @@ class AsaasSandboxProvider {
     }
   }
 
-  // Busca customer sintético por externalReference (dedup antes de criar).
   async _acharCustomerPorRef(ref) {
     if (!ref) return null;
-    const data = await this._get(`/customers?externalReference=${encodeURIComponent(ref)}`);
-    const lista = data?.data || [];
-    return lista.length ? { id: lista[0].id } : null;
+    const item = primeiroItem(await this._get(`/customers?externalReference=${encodeURIComponent(ref)}`));
+    return item ? { id: item.id } : null;
+  }
+
+  async _acharSubscriptionPorRef(ref) {
+    if (!ref) return null;
+    const item = primeiroItem(await this._get(`/subscriptions?externalReference=${encodeURIComponent(ref)}`));
+    return item ? {
+      id: item.id,
+      nextDueDate: item.nextDueDate || null,
+      status: item.status || 'ACTIVE',
+      value: item.value,
+    } : null;
+  }
+
+  async _acharChargePorRef(ref) {
+    if (!ref) return null;
+    const item = primeiroItem(await this._get(`/payments?externalReference=${encodeURIComponent(ref)}`));
+    return item ? {
+      id: item.id,
+      status: item.status || 'PENDING',
+      value: item.value,
+      dueDate: item.dueDate || null,
+    } : null;
   }
 
   async createCustomer({ empresa } = {}) {
-    const ref = empresa?.id || null;
+    const ref = canonicalCustomerReference(empresa?.id);
     const existente = await this._acharCustomerPorRef(ref);
     if (existente) return { id: existente.id };
-    const data = await this._post('/customers', {
-      name: empresa?.nome || 'Cliente',
-      cpfCnpj: empresa?.cnpj || undefined,
-      email: empresa?.email_contato || undefined,
-      externalReference: ref || undefined,
-    });
-    return { id: data.id };
+    try {
+      const data = await this._post('/customers', {
+        name: empresa?.nome || 'Cliente',
+        cpfCnpj: empresa?.cnpj || undefined,
+        email: empresa?.email_contato || undefined,
+        externalReference: ref || undefined,
+      });
+      return { id: data.id };
+    } catch (err) {
+      if (erroPodeTerCommitado(err)) {
+        const reconciliado = await this._acharCustomerPorRef(ref);
+        if (reconciliado) return { id: reconciliado.id, reconciled: true };
+      }
+      throw err;
+    }
   }
 
   async createSubscription({ customerId, value, nextDueDate, cycle = 'MONTHLY', externalReference } = {}) {
-    const data = await this._post('/subscriptions', {
-      customer: customerId,
-      billingType: 'PIX',
-      value: Number(value) || 0,
-      nextDueDate,
-      cycle,
-      externalReference: externalReference || undefined,
-    });
-    return { id: data.id, nextDueDate: data.nextDueDate || nextDueDate, status: data.status || 'ACTIVE' };
+    if (!externalReference) throw new Error('AsaasSandboxProvider: externalReference obrigatorio para subscription.');
+    const existente = await this._acharSubscriptionPorRef(externalReference);
+    if (existente) return existente;
+    try {
+      const data = await this._post('/subscriptions', {
+        customer: customerId,
+        billingType: 'PIX',
+        value: Number(value) || 0,
+        nextDueDate,
+        cycle,
+        externalReference,
+      });
+      return { id: data.id, nextDueDate: data.nextDueDate || nextDueDate, status: data.status || 'ACTIVE' };
+    } catch (err) {
+      if (erroPodeTerCommitado(err)) {
+        const reconciliado = await this._acharSubscriptionPorRef(externalReference);
+        if (reconciliado) return { ...reconciliado, reconciled: true };
+      }
+      throw err;
+    }
   }
 
   async createCharge({ customerId, value, dueDate, description, externalReference } = {}) {
-    const data = await this._post('/payments', {
-      customer: customerId,
-      billingType: 'PIX',
-      value: Number(value) || 0,
-      dueDate,
-      description: description || undefined,
-      externalReference: externalReference || undefined,
-    });
-    return { id: data.id, status: data.status || 'PENDING', value: data.value, dueDate: data.dueDate || dueDate };
+    if (!externalReference) throw new Error('AsaasSandboxProvider: externalReference obrigatorio para charge.');
+    const existente = await this._acharChargePorRef(externalReference);
+    if (existente) return existente;
+    try {
+      const data = await this._post('/payments', {
+        customer: customerId,
+        billingType: 'PIX',
+        value: Number(value) || 0,
+        dueDate,
+        description: description || undefined,
+        externalReference,
+      });
+      return { id: data.id, status: data.status || 'PENDING', value: data.value, dueDate: data.dueDate || dueDate };
+    } catch (err) {
+      if (erroPodeTerCommitado(err)) {
+        const reconciliado = await this._acharChargePorRef(externalReference);
+        if (reconciliado) return { ...reconciliado, reconciled: true };
+      }
+      throw err;
+    }
   }
 
   async updateSubscription({ subscriptionId, value } = {}) {
-    const data = await this._http.put(`${this._base}/subscriptions/${subscriptionId}`, { value: Number(value) || 0 }, { headers: this._headers })
+    const data = await this._http.put(`${this._base}/subscriptions/${subscriptionId}`, { value: Number(value) || 0, updatePendingPayments: false }, { headers: this._headers })
       .then((r) => r.data);
     return { id: subscriptionId, value: data?.value ?? value, status: data?.status || null };
   }
@@ -126,4 +172,4 @@ class AsaasSandboxProvider {
   async getCharge(id) { return this._get(`/payments/${id}`); }
 }
 
-module.exports = { AsaasSandboxProvider, ehSandbox, HOST_SANDBOX, BASE_SANDBOX };
+module.exports = { AsaasSandboxProvider, ehSandbox, HOST_SANDBOX, LEGACY_HOST_SANDBOX, BASE_SANDBOX };

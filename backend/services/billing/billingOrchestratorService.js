@@ -15,6 +15,10 @@ const { FakeAsaasProvider } = require('./fakeAsaasProvider');
 const { AsaasSandboxProvider, ehSandbox } = require('./asaasSandboxProvider');
 const { AsaasProductionProvider } = require('./asaasProductionProvider');
 const { PROVIDER_PRODUCTION, avaliarBillingProductionGate } = require('./billingProductionGate');
+const {
+  canonicalSubscriptionReference,
+  canonicalImplantationChargeReference,
+} = require('./asaasProviderSafety');
 
 // Lock cooperativo por empresa: serializa ensureBillingState concorrentes para a
 // MESMA empresa, garantindo idempotência (10 chamadas concorrentes → 1 customer).
@@ -126,7 +130,7 @@ async function executarPlano({ acoes = [], empresa = {}, snapshot = {}, provider
         value: a.valor_mensal,
         nextDueDate: a.primeiro_vencimento,
         cycle: a.billing_cycle,
-        externalReference: estado.id,
+        externalReference: canonicalSubscriptionReference(estado.id),
       }));
       estado.asaas_subscription_id = r.id;
       estado.billing_valor_mensal = a.valor_mensal;
@@ -138,7 +142,7 @@ async function executarPlano({ acoes = [], empresa = {}, snapshot = {}, provider
     } else if (a.tipo === 'atualizar_assinatura_valor') {
       // Convergência de plano alterado (§1.3): idempotente (skip se já no valor).
       if (Number(estado.billing_valor_mensal) === Number(a.valor_mensal)) { resultados.push({ tipo: a.tipo, skip: true }); continue; }
-      await retry(() => provider.updateSubscription({ subscriptionId: a.subscription_id, value: a.valor_mensal }));
+      await retry(() => provider.updateSubscription({ subscriptionId: a.subscription_id, value: a.valor_mensal, updatePendingPayments: false }));
       estado.billing_valor_mensal = a.valor_mensal;
       patch.billing_valor_mensal = a.valor_mensal;
       resultados.push({ tipo: a.tipo, updated: true, valor: a.valor_mensal });
@@ -154,9 +158,7 @@ async function executarPlano({ acoes = [], empresa = {}, snapshot = {}, provider
       if (persist) await persist({ assinatura_cancelada: true, billing_status: 'cancelada' });
     } else if (a.tipo === 'remover_addon') {
       // Convergência de add-on removido (§1.4).
-      await retry(() => provider.cancelComponent({ componentId: a.componente }));
-      resultados.push({ tipo: a.tipo, removed: true, addon_id: a.addon_id });
-      if (persist) await persist({ __addon_removido: { addon_id: a.addon_id } });
+      resultados.push({ tipo: a.tipo, skip: true, addon_id: a.addon_id, motivo: 'addon_mensal_nao_deleta_historico' });
     } else if (a.tipo === 'cobrar_implantacao') {
       if (estado.implantacao_cobrada) { resultados.push({ tipo: a.tipo, skip: true }); continue; }
       const r = await retry(() => provider.createCharge({
@@ -164,23 +166,16 @@ async function executarPlano({ acoes = [], empresa = {}, snapshot = {}, provider
         value: a.valor,
         dueDate: a.vencimento,
         description: 'Implantação',
-        externalReference: `${estado.id}:implantacao`,
+        externalReference: canonicalImplantationChargeReference(estado.id),
       }));
       estado.implantacao_cobrada = true;
       patch.implantacao_cobrada = true;
       resultados.push({ tipo: a.tipo, created: true, id: r.id, valor: a.valor });
       if (persist) await persist({ implantacao_cobrada: true });
     } else if (a.tipo === 'garantir_addon') {
-      if (a.componente) { resultados.push({ tipo: a.tipo, skip: true, addon_id: a.addon_id }); continue; }
-      const r = await retry(() => provider.createCharge({
-        customerId: estado.asaas_customer_id,
-        value: (a.preco_mensal_centavos || 0) / 100,
-        dueDate: patch.next_due_date || estado.next_due_date || null,
-        description: `Add-on ${a.funcionalidade_id || ''}`.trim(),
-        externalReference: `${estado.id}:addon:${a.addon_id}`,
-      }));
-      resultados.push({ tipo: a.tipo, created: true, id: r.id, addon_id: a.addon_id });
-      if (persist) await persist({ __addon: { addon_id: a.addon_id, billing_component_id: r.id } });
+      resultados.push({ tipo: a.tipo, skip: true, addon_id: a.addon_id, motivo: 'addon_mensal_compoe_subscription_nao_payment_avulso' });
+    } else if (a.tipo === 'addon_sem_aceite_billing') {
+      resultados.push({ tipo: a.tipo, skip: true, addon_id: a.addon_id, motivo: 'addon_sem_aceite_financeiro' });
     } else {
       resultados.push({ tipo: a.tipo, skip: true, motivo: 'acao_desconhecida' });
     }

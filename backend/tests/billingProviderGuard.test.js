@@ -25,6 +25,7 @@ test('policy padrão resolve para fake (nunca sandbox/produção por acidente)',
 
 // ── Prova de sandbox (§1/§5) ─────────────────────────────────────────────────
 test('ehSandbox: exige environment=sandbox E host sandbox E não-produção', () => {
+  assert.equal(ehSandbox({ environment: 'sandbox', baseURL: 'https://api-sandbox.asaas.com/v3' }), true);
   assert.equal(ehSandbox({ environment: 'sandbox', baseURL: 'https://sandbox.asaas.com/api/v3' }), true);
   assert.equal(ehSandbox({ environment: 'production', baseURL: 'https://sandbox.asaas.com/api/v3' }), false);
   assert.equal(ehSandbox({ environment: 'sandbox', baseURL: 'https://api.asaas.com/v3' }), false);
@@ -75,17 +76,18 @@ function httpFake() {
 
 test('adapter sandbox: createCustomer usa access_token e externalReference (contract)', async () => {
   const http = httpFake();
-  const p = new AsaasSandboxProvider({ config: { environment: 'sandbox', baseURL: 'https://sandbox.asaas.com/api/v3', apiKey: 'k' }, http });
+  const p = new AsaasSandboxProvider({ config: { environment: 'sandbox', baseURL: 'https://api-sandbox.asaas.com/v3', apiKey: 'k' }, http });
   const r = await p.createCustomer({ empresa: { id: 'e1', nome: 'Alfa' } });
   assert.equal(r.id, 'cus_real_1');
   const post = http.calls.find((c) => c.m === 'POST' && c.url.endsWith('/customers'));
   assert.equal(post.headers.access_token, 'k');
+  assert.equal(post.headers['User-Agent'], 'MatopibaLog/1.0 (Node.js; sandbox)');
   assert.equal(post.body.externalReference, 'e1');
 });
 
 test('adapter sandbox: createSubscription envia customer/value/nextDueDate/cycle', async () => {
   const http = httpFake();
-  const p = new AsaasSandboxProvider({ config: { environment: 'sandbox', baseURL: 'https://sandbox.asaas.com/api/v3', apiKey: 'k' }, http });
+  const p = new AsaasSandboxProvider({ config: { environment: 'sandbox', baseURL: 'https://api-sandbox.asaas.com/v3', apiKey: 'k' }, http });
   const r = await p.createSubscription({ customerId: 'cus_real_1', value: 299.9, nextDueDate: '2026-08-20', cycle: 'MONTHLY', externalReference: 'e1' });
   assert.equal(r.id, 'sub_real_1');
   const post = http.calls.find((c) => c.url.endsWith('/subscriptions'));
@@ -98,6 +100,6 @@ test('adapter sandbox: createSubscription envia customer/value/nextDueDate/cycle
 test('adapter sandbox NÃO constrói com base de produção (fail-closed no construtor)', () => {
   assert.throws(
     () => new AsaasSandboxProvider({ config: { environment: 'sandbox', baseURL: 'https://api.asaas.com/v3', apiKey: 'k' }, http: httpFake() }),
-    /não é sandbox inequívoco/i,
+    /sandbox.*inequivoco/i,
   );
 });

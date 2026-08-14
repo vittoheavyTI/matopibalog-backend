@@ -34,6 +34,11 @@ compor a futura Arquitetura Operacional V8.0.
 | Billing-health | IMPLEMENTADO |
 | Trial preservado | CI VALIDADO |
 | Implantacao/mensalidade separadas | CI VALIDADO |
+| Create idempotency recovery | IMPLEMENTADO / CI VALIDADO |
+| Response lost after commit | CI VALIDADO |
+| Add-on mensal por composicao | IMPLEMENTADO / CI VALIDADO |
+| Add-on sem aceite explicito | FAIL-CLOSED |
+| Suspensao vs cancelamento | SEPARADO / CI VALIDADO |
 
 ## Asaas Production
 
@@ -41,6 +46,8 @@ compor a futura Arquitetura Operacional V8.0.
 | --- | --- |
 | Production provider | IMPLEMENTADO |
 | Production gate cumulativo | IMPLEMENTADO / CI VALIDADO |
+| User-Agent Asaas | IMPLEMENTADO |
+| externalReference recovery | IMPLEMENTADO |
 | Fonte canonica do segredo | IMPLEMENTADO (`ASAAS_API_KEY_ENV_ONLY`) |
 | Allowlist production | IMPLEMENTADO |
 | Billing runner production | DESATIVADO POR SEGURANCA |

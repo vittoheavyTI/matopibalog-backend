@@ -171,7 +171,7 @@ test('convergência plano: valor igual → nenhuma ação (§1.6 no-op idempoten
   assert.equal(plano.acoes.length, 0);
 });
 
-test('convergência add-on: ativo sem componente → criar; inativo com componente → remover (§1.4)', () => {
+test('add-on sem aceite financeiro explicito nao cobra nem cria payment avulso', () => {
   const plano = planejarBilling({
     situacao: { situacao: 'ativa' },
     empresaBilling: { asaas_customer_id: 'cus', asaas_subscription_id: 'sub', billing_valor_mensal: 299.9 },
@@ -181,8 +181,22 @@ test('convergência add-on: ativo sem componente → criar; inativo com componen
       { id: 'add-removido', status: 'inativa', preco_mensal_centavos: 5000, billing_component_id: 'pay_addon_1' },
     ],
   });
-  assert.ok(plano.acoes.find((a) => a.tipo === 'garantir_addon' && a.addon_id === 'add-novo'));
-  assert.ok(plano.acoes.find((a) => a.tipo === 'remover_addon' && a.addon_id === 'add-removido'));
+  assert.ok(plano.acoes.find((a) => a.tipo === 'addon_sem_aceite_billing' && a.addon_id === 'add-novo'));
+  assert.equal(plano.acoes.find((a) => a.tipo === 'garantir_addon' || a.tipo === 'remover_addon'), undefined);
+});
+
+test('add-on mensal aceito compoe proximo valor da subscription', () => {
+  const plano = planejarBilling({
+    situacao: { situacao: 'ativa' },
+    empresaBilling: { asaas_customer_id: 'cus', asaas_subscription_id: 'sub', billing_valor_mensal: 299.9 },
+    snapshot: { valor_mensal: 299.9 },
+    addOns: [
+      { id: 'add-aceito', status: 'ativa', preco_mensal_centavos: 5000, billing_status_addon: 'accepted' },
+    ],
+    agora: new Date('2026-08-10T00:00:00.000Z'),
+  });
+  const upd = plano.acoes.find((a) => a.tipo === 'atualizar_assinatura_valor');
+  assert.equal(upd.valor_mensal, 349.9);
 });
 
 test('convergência cancelamento: cancelada + assinatura ativa → cancelar_assinatura; já cancelada → nada (§1.5)', () => {
@@ -190,6 +204,16 @@ test('convergência cancelamento: cancelada + assinatura ativa → cancelar_assi
   assert.ok(p1.acoes.find((a) => a.tipo === 'cancelar_assinatura'));
   const p2 = planejarBilling({ situacao: { situacao: 'cancelada' }, empresaBilling: { asaas_subscription_id: 'sub', assinatura_cancelada: true }, snapshot: {} });
   assert.equal(p2.acoes.length, 0);
+});
+
+test('suspensao financeira temporaria nao deleta subscription', () => {
+  const plano = planejarBilling({
+    situacao: { situacao: 'suspensa_financeiramente' },
+    empresaBilling: { asaas_subscription_id: 'sub', assinatura_cancelada: false },
+    snapshot: { valor_mensal: 299.9 },
+  });
+  assert.equal(plano.requer_billing, false);
+  assert.equal(plano.acoes.find((a) => a.tipo === 'cancelar_assinatura'), undefined);
 });
 
 // ── GAP1: convergência ponta a ponta via worker (§1.3/§1.4/§1.6) ─────────────

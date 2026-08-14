@@ -7,6 +7,12 @@
 
 const HOST_PRODUCTION = 'api.asaas.com';
 const BASE_PRODUCTION = 'https://api.asaas.com/v3';
+const {
+  asaasHeaders,
+  canonicalCustomerReference,
+  erroPodeTerCommitado,
+  primeiroItem,
+} = require('./asaasProviderSafety');
 
 function ehProduction({ environment, baseURL } = {}) {
   const envOk = String(environment || '').toLowerCase() === 'production';
@@ -25,7 +31,7 @@ class AsaasProductionProvider {
     }
     this._http = http;
     this._base = config.baseURL || BASE_PRODUCTION;
-    this._headers = { access_token: config.apiKey, 'Content-Type': 'application/json' };
+    this._headers = asaasHeaders({ apiKey: config.apiKey, environment: 'production' });
     this.environment = 'production';
   }
 
@@ -47,49 +53,103 @@ class AsaasProductionProvider {
   async _acharCustomerPorRef(ref) {
     if (!ref) return null;
     const data = await this._get(`/customers?externalReference=${encodeURIComponent(ref)}`);
-    const lista = data?.data || [];
-    return lista.length ? { id: lista[0].id } : null;
+    const item = primeiroItem(data);
+    return item ? { id: item.id } : null;
+  }
+
+  async _acharSubscriptionPorRef(ref) {
+    if (!ref) return null;
+    const data = await this._get(`/subscriptions?externalReference=${encodeURIComponent(ref)}`);
+    const item = primeiroItem(data);
+    return item ? {
+      id: item.id,
+      nextDueDate: item.nextDueDate || null,
+      status: item.status || 'ACTIVE',
+      value: item.value,
+    } : null;
+  }
+
+  async _acharChargePorRef(ref) {
+    if (!ref) return null;
+    const data = await this._get(`/payments?externalReference=${encodeURIComponent(ref)}`);
+    const item = primeiroItem(data);
+    return item ? {
+      id: item.id,
+      status: item.status || 'PENDING',
+      value: item.value,
+      dueDate: item.dueDate || null,
+    } : null;
   }
 
   async createCustomer({ empresa } = {}) {
-    const ref = empresa?.id || null;
+    const ref = canonicalCustomerReference(empresa?.id);
     const existente = await this._acharCustomerPorRef(ref);
     if (existente) return { id: existente.id };
-    const data = await this._post('/customers', {
-      name: empresa?.nome || 'Cliente',
-      cpfCnpj: empresa?.cnpj || undefined,
-      email: empresa?.email_contato || undefined,
-      externalReference: ref || undefined,
-    });
-    return { id: data.id };
+    try {
+      const data = await this._post('/customers', {
+        name: empresa?.nome || 'Cliente',
+        cpfCnpj: empresa?.cnpj || undefined,
+        email: empresa?.email_contato || undefined,
+        externalReference: ref || undefined,
+      });
+      return { id: data.id };
+    } catch (err) {
+      if (erroPodeTerCommitado(err)) {
+        const reconciliado = await this._acharCustomerPorRef(ref);
+        if (reconciliado) return { id: reconciliado.id, reconciled: true };
+      }
+      throw err;
+    }
   }
 
   async createSubscription({ customerId, value, nextDueDate, cycle = 'MONTHLY', externalReference } = {}) {
-    const data = await this._post('/subscriptions', {
-      customer: customerId,
-      billingType: 'PIX',
-      value: Number(value) || 0,
-      nextDueDate,
-      cycle,
-      externalReference: externalReference || undefined,
-    });
-    return { id: data.id, nextDueDate: data.nextDueDate || nextDueDate, status: data.status || 'ACTIVE' };
+    if (!externalReference) throw new Error('AsaasProductionProvider: externalReference obrigatorio para subscription.');
+    const existente = await this._acharSubscriptionPorRef(externalReference);
+    if (existente) return existente;
+    try {
+      const data = await this._post('/subscriptions', {
+        customer: customerId,
+        billingType: 'PIX',
+        value: Number(value) || 0,
+        nextDueDate,
+        cycle,
+        externalReference,
+      });
+      return { id: data.id, nextDueDate: data.nextDueDate || nextDueDate, status: data.status || 'ACTIVE' };
+    } catch (err) {
+      if (erroPodeTerCommitado(err)) {
+        const reconciliado = await this._acharSubscriptionPorRef(externalReference);
+        if (reconciliado) return { ...reconciliado, reconciled: true };
+      }
+      throw err;
+    }
   }
 
   async createCharge({ customerId, value, dueDate, description, externalReference } = {}) {
-    const data = await this._post('/payments', {
-      customer: customerId,
-      billingType: 'PIX',
-      value: Number(value) || 0,
-      dueDate,
-      description: description || undefined,
-      externalReference: externalReference || undefined,
-    });
-    return { id: data.id, status: data.status || 'PENDING', value: data.value, dueDate: data.dueDate || dueDate };
+    if (!externalReference) throw new Error('AsaasProductionProvider: externalReference obrigatorio para charge.');
+    const existente = await this._acharChargePorRef(externalReference);
+    if (existente) return existente;
+    try {
+      const data = await this._post('/payments', {
+        customer: customerId,
+        billingType: 'PIX',
+        value: Number(value) || 0,
+        dueDate,
+        description: description || undefined,
+        externalReference,
+      });
+      return { id: data.id, status: data.status || 'PENDING', value: data.value, dueDate: data.dueDate || dueDate };
+    } catch (err) {
+      if (erroPodeTerCommitado(err)) {
+        const reconciliado = await this._acharChargePorRef(externalReference);
+        if (reconciliado) return { ...reconciliado, reconciled: true };
+      }
+      throw err;
+    }
   }
 
   async updateSubscription({ subscriptionId, value } = {}) {
-    const data = await this._http.put(`${this._base}/subscriptions/${subscriptionId}`, { value: Number(value) || 0 }, { headers: this._headers })
+    const data = await this._http.put(`${this._base}/subscriptions/${subscriptionId}`, { value: Number(value) || 0, updatePendingPayments: false }, { headers: this._headers })
       .then((r) => r.data);
     return { id: subscriptionId, value: data?.value ?? value, status: data?.status || null };
   }
