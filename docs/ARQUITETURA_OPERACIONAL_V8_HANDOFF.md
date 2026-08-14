@@ -1,4 +1,4 @@
-# Arquitetura Operacional V8 - Handoff
+# Arquitetura Operacional V8.0 - Handoff
 
 Este documento nao substitui historico anterior. Ele registra o estado atual para
 compor a futura Arquitetura Operacional V8.0.
@@ -7,6 +7,7 @@ compor a futura Arquitetura Operacional V8.0.
 
 | Item | Estado |
 | --- | --- |
+| Macrofrente | CLOSED |
 | PR #419 | DEPLOYADO |
 | Migration 067 | DEPLOYADO |
 | Grupos empresariais | IMPLEMENTADO |
@@ -24,6 +25,8 @@ compor a futura Arquitetura Operacional V8.0.
 
 | Item | Estado |
 | --- | --- |
+| Macrofrente | CLOSED |
+| PR #420 | MERGED / DEPLOYADO INERTE |
 | Migration 065 | DEPLOYADO |
 | Migration 066 | DEPLOYADO |
 | Outbox | IMPLEMENTADO / CI VALIDADO |
@@ -47,18 +50,34 @@ compor a futura Arquitetura Operacional V8.0.
 | Item | Estado |
 | --- | --- |
 | Production provider | IMPLEMENTADO |
+| Production provider code | DEPLOYED |
 | Production gate cumulativo | IMPLEMENTADO / CI VALIDADO |
 | User-Agent Asaas | IMPLEMENTADO |
 | externalReference recovery | IMPLEMENTADO |
+| Idempotencia commit-uncertain | IMPLEMENTADO / CI VALIDADO |
 | Fonte canonica do segredo | IMPLEMENTADO (`ASAAS_API_KEY_ENV_ONLY`) |
 | Allowlist production | IMPLEMENTADO |
+| Runner primeiro piloto | PLANEJADO COMO ONE-SHOT / BATCH 1 |
 | Billing runner production | DESATIVADO POR SEGURANCA |
 | Asaas production secret | PENDENTE DE GATE |
+| Asaas Production | DISABLED BY FINANCIAL GATE |
 | Customer production | PENDENTE DE GATE |
 | Subscription production | PENDENTE DE GATE |
 | Charge production | PENDENTE DE GATE |
 | Webhook production | PLANEJADO |
 | Final activation | PENDENTE DE GATE |
+
+Estado de integracao #420:
+
+- `PRODUCTION_ASAAS_WRITES = 0`.
+- `PAYMENT_PRODUCTION_READINESS = READY_FOR_CONTROLLED_FIRST_PAYMENT`.
+- `BILLING_PROVIDER_MODE` ausente resolve como `fake`.
+- `BILLING_PRODUCTION_ENABLED` ausente/OFF.
+- `BILLING_OUTBOX_ENABLED` ausente/OFF.
+- `BILLING_PRODUCTION_ALLOWLIST` ausente/vazia.
+- `ASAAS_API_KEY` ausente.
+- Add-on mensal: composicao de subscription com autoridade por contrato/aditivo.
+- Primeiro piloto: requer empresa escolhida, allowlist unica e runner manual/one-shot.
 
 Hard stop atual:
 

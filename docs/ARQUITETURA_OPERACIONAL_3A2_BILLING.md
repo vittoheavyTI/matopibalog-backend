@@ -102,27 +102,30 @@ mudança comercial em evento; um **worker** processa e chama `ensureBillingState
 | Item | Implementado | Testado FAKE (local) | Testado CI PG | Testado SANDBOX | Pendente PRODUÇÃO |
 |---|:--:|:--:|:--:|:--:|:--:|
 | Política configurável + guard produção | ✅ | ✅ | — | — | (produção proibida) |
-| Orquestrador (customer/subscription/implantação/add-on) | ✅ | ✅ | — | ❌ | ✅ |
-| Trial preservado / 1ª mensalidade = trial_end | ✅ | ✅ | — | ❌ | ✅ |
-| Webhook state machine (dup/out-of-order) | ✅ | ✅ | — | ❌ | ✅ |
-| Reconciliação (motor) + reconcile periódico | ✅ | ✅ | — | ❌ | ✅ |
+| Orquestrador (customer/subscription/implantação/add-on) | ✅ | ✅ | — | ✅ | ✅ gated |
+| Trial preservado / 1ª mensalidade = trial_end | ✅ | ✅ | — | ✅ | ✅ gated |
+| Webhook state machine (dup/out-of-order) | ✅ | ✅ | — | ✅ | ✅ gated |
+| Reconciliação (motor) + reconcile periódico | ✅ | ✅ | — | ✅ | ✅ gated |
 | Inadimplência (trial/graça) | ✅ | ✅ | — | — | ✅ |
-| Outbox + trigger + worker + **runner automático** | ✅ | ✅ | — | ❌ | ✅ |
-| **Idempotência multi-processo (dedupe + claim CAS)** | ✅ | ✅ (lógica) | ✅ **`billing-3a2-ci` (Postgres 16 real)** | ❌ | ✅ |
+| Outbox + trigger + worker + **runner automático** | ✅ | ✅ | ✅ | ✅ | ✅ runner OFF |
+| **Idempotência multi-processo (dedupe + claim CAS)** | ✅ | ✅ (lógica) | ✅ **`billing-3a2-ci` (Postgres 16 real)** | — | ✅ |
 | Migration 066 aplica em Postgres | ✅ | — | ✅ **`billing-3a2-ci`** | — | ✅ |
-| Adapter real Asaas SANDBOX | ✅ (código + contract test) | ✅ (http fake) | — | ❌ **BLOCKER** | ✅ |
-| E2E Asaas SANDBOX externo | ✅ (script + workflow protegido) | — | — | ❌ **BLOCKER** | — |
+| Adapter real Asaas SANDBOX | ✅ (código + contract test) | ✅ (http fake) | — | ✅ | — |
+| E2E Asaas SANDBOX externo | ✅ (script + workflow protegido) | — | — | ✅ | — |
 
 **PG concurrency: ELIMINADO como blocker.** O workflow `billing-3a2-ci.yml` roda NA BRANCH
 (push/dispatch) com Postgres 16 efêmero: aplica migrations até 066 e executa
 `billing_outbox.pgtest.mjs` — **enfileirar 10x mesmo dedupe_key → 1 linha; claim CAS concorrente
 → 1 vencedor; privilégios anon/authenticated negados** (verde). Billing fake: 101/101.
 
-**BLOCKER externo ÚNICO restante:** este ambiente **não possui `ASAAS_SANDBOX_API_KEY`** → a
-**E2E Asaas sandbox real = NOT RUN**. Todo o código (adapter, runner, outbox, reconcile) está
-implementado e testado fake/contract + PG CI; a E2E sandbox roda no workflow protegido
-`billing-3a2-sandbox.yml` (environment `sandbox` + secret `ASAAS_SANDBOX_API_KEY`, fail-closed).
-**Nunca testado contra Asaas real.**
+**Sandbox E2E externo: VALIDADO.** O workflow protegido `billing-3a2-sandbox.yml`
+(environment `sandbox` + secret `ASAAS_SANDBOX_API_KEY`, fail-closed) criou fixture
+sintética, validou lookup por `externalReference` e removeu/cancelou os recursos
+sintéticos. Nenhum dado real foi usado.
+
+**Production:** provider production está merged/deployado, mas `Asaas Production =
+DISABLED BY FINANCIAL GATE`. Sem `ASAAS_API_KEY`, sem allowlist, sem runner
+production e sem write real até o `FINAL_ASAAS_PRODUCTION_ACTIVATION_GATE`.
 
 ## 6.3 Reconcile CONVERGENTE + config estrita (revisão)
 

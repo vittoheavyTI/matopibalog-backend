@@ -1,6 +1,7 @@
 # Runbook - Go-live Financeiro / Asaas Production
 
-Estado deste runbook: production preparado e desligado.
+Estado deste runbook: #420 merged, codigo production provider deployado e
+financeiro production desligado pelo gate.
 
 Este documento nao autoriza dinheiro real. O proximo gate unico e:
 
@@ -13,6 +14,21 @@ Estado canonico apos o correction pass:
 `PRODUCTION_ASAAS_WRITES = 0`
 
 `PRODUCTION_BILLING_RUNNER_ENABLED = false`
+
+Estado apos gate de integracao:
+
+- PR #420: MERGED.
+- Production deployment: codigo de readiness financeiro em `main`.
+- Asaas Production: `PRODUCTION_DISABLED`.
+- `ASAAS_API_KEY`: ausente.
+- `BILLING_OUTBOX_ENABLED`: ausente/OFF.
+- `BILLING_PROVIDER_MODE`: ausente, resolvido como `fake`.
+- `BILLING_PRODUCTION_ENABLED`: ausente/OFF.
+- `BILLING_PRODUCTION_ALLOWLIST`: ausente/vazia.
+
+Leitura de candidatos atual: nenhuma empresa `commercial_flow_version='v2'`
+tecnicamente elegivel foi encontrada em producao. O primeiro piloto continua
+pendente de escolha humana no `FINAL_ASAAS_PRODUCTION_ACTIVATION_GATE`.
 
 ## Autoridade Canonica
 
@@ -181,15 +197,17 @@ duplicados, replay e out-of-order devem convergir sem marcar pagamento falso.
 Somente no `FINAL_ASAAS_PRODUCTION_ACTIVATION_GATE`:
 
 1. escolher uma empresa piloto e confirmar UUID;
-2. conferir `billing-health.ok`;
+2. conferir `billing-health` e pendencias conhecidas;
 3. inserir `ASAAS_API_KEY` production no runtime protegido;
-4. configurar allowlist com somente a empresa piloto;
-5. ligar `BILLING_PRODUCTION_ENABLED=true`;
-6. ligar `BILLING_PROVIDER_MODE=asaas_production`;
-7. ligar runner de forma controlada;
-8. processar um unico evento;
-9. observar customer/subscription/charge, webhook e reconcile;
-10. desligar imediatamente se qualquer sinal sair do esperado.
+4. configurar `BILLING_PRODUCTION_ALLOWLIST` com somente a empresa piloto;
+5. ligar `BILLING_PROVIDER_MODE=asaas_production`;
+6. ligar `BILLING_PRODUCTION_ENABLED=true`;
+7. executar runner manual/one-shot, batch 1, um evento por vez;
+8. observar customer/subscription/charge, webhook e reconcile;
+9. desligar `BILLING_OUTBOX_ENABLED` imediatamente apos o evento se nao houver
+   autorizacao para manter processamento;
+10. parar se ocorrer `ASAAS_COMMIT_UNCERTAIN` e reconciliar por `externalReference`
+    antes de qualquer nova tentativa.
 
 ## Rollback / Kill Switch
 
