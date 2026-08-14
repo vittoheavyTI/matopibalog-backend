@@ -10,6 +10,7 @@ const BASE_SANDBOX = 'https://api-sandbox.asaas.com/v3';
 const {
   asaasHeaders,
   canonicalCustomerReference,
+  AsaasCommitUncertainError,
   erroPodeTerCommitado,
   primeiroItem,
 } = require('./asaasProviderSafety');
@@ -34,6 +35,7 @@ class AsaasSandboxProvider {
     this._http = http;
     this._base = config.baseURL || BASE_SANDBOX;
     this._headers = asaasHeaders({ apiKey: config.apiKey, environment: 'sandbox' });
+    this._commitUncertainRefs = new Set();
     this.environment = 'sandbox';
   }
 
@@ -80,10 +82,42 @@ class AsaasSandboxProvider {
     } : null;
   }
 
+  _chaveIncerta(resource, ref) {
+    return `${resource}:${ref || ''}`;
+  }
+
+  async _reconciliarCommitIncerto({ resource, externalReference, lookup, cause }) {
+    const chave = this._chaveIncerta(resource, externalReference);
+    this._commitUncertainRefs.add(chave);
+    const delays = [0, 25, 100];
+    for (const delay of delays) {
+      if (delay > 0) await new Promise((r) => setTimeout(r, delay));
+      const item = await lookup();
+      if (item) {
+        this._commitUncertainRefs.delete(chave);
+        return { ...item, reconciled: true };
+      }
+    }
+    throw new AsaasCommitUncertainError({ resource, externalReference, cause });
+  }
+
+  async _bloquearNovoPostSeCommitIncerto(resource, externalReference, lookup) {
+    const chave = this._chaveIncerta(resource, externalReference);
+    if (!this._commitUncertainRefs.has(chave)) return null;
+    const item = await lookup();
+    if (item) {
+      this._commitUncertainRefs.delete(chave);
+      return item;
+    }
+    throw new AsaasCommitUncertainError({ resource, externalReference });
+  }
+
   async createCustomer({ empresa } = {}) {
     const ref = canonicalCustomerReference(empresa?.id);
     const existente = await this._acharCustomerPorRef(ref);
     if (existente) return { id: existente.id };
+    const pendente = await this._bloquearNovoPostSeCommitIncerto('customer', ref, () => this._acharCustomerPorRef(ref));
+    if (pendente) return { id: pendente.id };
     try {
       const data = await this._post('/customers', {
         name: empresa?.nome || 'Cliente',
@@ -94,8 +128,13 @@ class AsaasSandboxProvider {
       return { id: data.id };
     } catch (err) {
       if (erroPodeTerCommitado(err)) {
-        const reconciliado = await this._acharCustomerPorRef(ref);
-        if (reconciliado) return { id: reconciliado.id, reconciled: true };
+        const reconciliado = await this._reconciliarCommitIncerto({
+          resource: 'customer',
+          externalReference: ref,
+          lookup: () => this._acharCustomerPorRef(ref),
+          cause: err,
+        });
+        return { id: reconciliado.id, reconciled: true };
       }
       throw err;
     }
@@ -105,6 +144,8 @@ class AsaasSandboxProvider {
     if (!externalReference) throw new Error('AsaasSandboxProvider: externalReference obrigatorio para subscription.');
     const existente = await this._acharSubscriptionPorRef(externalReference);
     if (existente) return existente;
+    const pendente = await this._bloquearNovoPostSeCommitIncerto('subscription', externalReference, () => this._acharSubscriptionPorRef(externalReference));
+    if (pendente) return pendente;
     try {
       const data = await this._post('/subscriptions', {
         customer: customerId,
@@ -117,8 +158,12 @@ class AsaasSandboxProvider {
       return { id: data.id, nextDueDate: data.nextDueDate || nextDueDate, status: data.status || 'ACTIVE' };
     } catch (err) {
       if (erroPodeTerCommitado(err)) {
-        const reconciliado = await this._acharSubscriptionPorRef(externalReference);
-        if (reconciliado) return { ...reconciliado, reconciled: true };
+        return this._reconciliarCommitIncerto({
+          resource: 'subscription',
+          externalReference,
+          lookup: () => this._acharSubscriptionPorRef(externalReference),
+          cause: err,
+        });
       }
       throw err;
     }
@@ -128,6 +173,8 @@ class AsaasSandboxProvider {
     if (!externalReference) throw new Error('AsaasSandboxProvider: externalReference obrigatorio para charge.');
     const existente = await this._acharChargePorRef(externalReference);
     if (existente) return existente;
+    const pendente = await this._bloquearNovoPostSeCommitIncerto('charge', externalReference, () => this._acharChargePorRef(externalReference));
+    if (pendente) return pendente;
     try {
       const data = await this._post('/payments', {
         customer: customerId,
@@ -140,8 +187,12 @@ class AsaasSandboxProvider {
       return { id: data.id, status: data.status || 'PENDING', value: data.value, dueDate: data.dueDate || dueDate };
     } catch (err) {
       if (erroPodeTerCommitado(err)) {
-        const reconciliado = await this._acharChargePorRef(externalReference);
-        if (reconciliado) return { ...reconciliado, reconciled: true };
+        return this._reconciliarCommitIncerto({
+          resource: 'charge',
+          externalReference,
+          lookup: () => this._acharChargePorRef(externalReference),
+          cause: err,
+        });
       }
       throw err;
     }

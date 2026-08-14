@@ -36,8 +36,10 @@ compor a futura Arquitetura Operacional V8.0.
 | Implantacao/mensalidade separadas | CI VALIDADO |
 | Create idempotency recovery | IMPLEMENTADO / CI VALIDADO |
 | Response lost after commit | CI VALIDADO |
-| Add-on mensal por composicao | IMPLEMENTADO / CI VALIDADO |
-| Add-on sem aceite explicito | FAIL-CLOSED |
+| Commit incerto com visibilidade atrasada | FAIL-SAFE / CI VALIDADO |
+| Add-on mensal por composicao | CONTRATO/ADITIVO REAL / CI VALIDADO |
+| Add-on sem aceite explicito | FAIL-CLOSED / PG VALIDADO |
+| Add-on vigencia/quantidade | CI PG VALIDADO |
 | Suspensao vs cancelamento | SEPARADO / CI VALIDADO |
 
 ## Asaas Production

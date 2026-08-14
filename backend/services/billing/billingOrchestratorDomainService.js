@@ -19,24 +19,34 @@ const SITUACOES_SEM_COBRANCA_NOVA = new Set([
   'trial_encerrado_sem_contratacao',
 ]);
 
-const ADDON_BILLING_ACCEPTED_STATES = new Set(['accepted', 'effective']);
+const ADDON_BILLING_CONTRACT_STATUSES = new Set([
+  'plenamente_assinado',
+  'assinado',
+  'aceito_manualmente',
+]);
 
 function acao(tipo, payload = {}) {
   return { tipo, ...payload };
 }
 
-function addonBillingStatus(a = {}) {
-  return String(a.billing_status_addon || a.billing_addon_status || a.addon_billing_status || '').trim().toLowerCase();
+function statusContratoBilling(a = {}) {
+  return String(a.contrato_billing_status || a.contrato_status || '').trim().toLowerCase();
+}
+
+function statusAditivoBilling(a = {}) {
+  return String(a.aditivo_billing_status || a.aditivo_status || '').trim().toLowerCase();
 }
 
 function addonAceitoParaBilling(a = {}) {
-  return ADDON_BILLING_ACCEPTED_STATES.has(addonBillingStatus(a));
+  const contratoConcluido = a.contrato_id && ADDON_BILLING_CONTRACT_STATUSES.has(statusContratoBilling(a));
+  const aditivoConcluido = a.aditivo_id && ADDON_BILLING_CONTRACT_STATUSES.has(statusAditivoBilling(a));
+  return Boolean(contratoConcluido || aditivoConcluido);
 }
 
 function addonVigenteParaBilling(a = {}, agora = new Date()) {
   const hoje = agora instanceof Date ? agora : new Date(agora || Date.now());
-  const inicio = a.billing_effective_from || a.effective_from || null;
-  const fim = a.billing_effective_until || a.effective_until || null;
+  const inicio = a.vigencia_inicio || null;
+  const fim = a.vigencia_fim || null;
   if (inicio) {
     const d = new Date(inicio);
     if (!Number.isNaN(d.getTime()) && d.getTime() > hoje.getTime()) return false;
@@ -48,12 +58,27 @@ function addonVigenteParaBilling(a = {}, agora = new Date()) {
   return true;
 }
 
+function addonQuantidadeValida(a = {}) {
+  if (a.quantidade == null) return true;
+  const n = Number(a.quantidade);
+  return Number.isInteger(n) && n >= 1;
+}
+
+function addonValorMensalCentavos(a = {}) {
+  const preco = Number(a?.preco_mensal_centavos || 0);
+  if (!(preco > 0)) return 0;
+  if (!addonQuantidadeValida(a)) return 0;
+  // preco_mensal_centavos e o valor mensal TOTAL negociado do add-on. A
+  // quantidade e escopo/auditoria e nao multiplica o preco neste modelo.
+  return preco;
+}
+
 function calcularValorMensalComposicao({ snapshot, addOns, agora }) {
   const base = Number(snapshot?.valor_mensal || 0);
   const lista = Array.isArray(addOns) ? addOns : [];
   const addonCentavos = lista.reduce((total, a) => {
     const ativo = a?.status === 'ativa';
-    const preco = Number(a?.preco_mensal_centavos || 0);
+    const preco = addonValorMensalCentavos(a);
     if (!ativo || !(preco > 0)) return total;
     if (!addonAceitoParaBilling(a)) return total;
     if (!addonVigenteParaBilling(a, agora)) return total;
@@ -113,6 +138,11 @@ function planejarAddOns({ addOns }) {
     const preco = Number(a.preco_mensal_centavos || 0);
     if (ativo && preco > 0 && !addonAceitoParaBilling(a)) {
       acoes.push(acao('addon_sem_aceite_billing', {
+        addon_id: a.id,
+        funcionalidade_id: a.funcionalidade_id,
+      }));
+    } else if (ativo && preco > 0 && !addonQuantidadeValida(a)) {
+      acoes.push(acao('addon_quantidade_invalida_billing', {
         addon_id: a.id,
         funcionalidade_id: a.funcionalidade_id,
       }));
@@ -203,10 +233,13 @@ module.exports = {
   SITUACOES_SEM_COBRANCA_NOVA,
   primeiroVencimentoMensalidade,
   planejarImplantacao,
-  ADDON_BILLING_ACCEPTED_STATES,
-  addonBillingStatus,
+  ADDON_BILLING_CONTRACT_STATUSES,
+  statusContratoBilling,
+  statusAditivoBilling,
   addonAceitoParaBilling,
   addonVigenteParaBilling,
+  addonQuantidadeValida,
+  addonValorMensalCentavos,
   calcularValorMensalComposicao,
   planejarAddOns,
   planejarBilling,

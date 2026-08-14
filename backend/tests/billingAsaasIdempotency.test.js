@@ -2,6 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
 const { AsaasProductionProvider } = require('../services/billing/asaasProductionProvider');
+const { comRetry } = require('../services/billing/billingOrchestratorService');
 const {
   canonicalSubscriptionReference,
   canonicalImplantationChargeReference,
@@ -9,11 +10,13 @@ const {
 } = require('../services/billing/asaasProviderSafety');
 
 class LostAfterCommitHttp {
-  constructor({ loseOnceFor = new Set() } = {}) {
+  constructor({ loseOnceFor = new Set(), hiddenLookupsAfterCommit = {} } = {}) {
     this.customers = new Map();
     this.subscriptions = new Map();
     this.payments = new Map();
     this.loseOnceFor = loseOnceFor;
+    this.hiddenLookupsAfterCommit = hiddenLookupsAfterCommit;
+    this.hiddenRemaining = new Map();
     this.lost = new Set();
     this.posts = { customers: 0, subscriptions: 0, payments: 0 };
     this.lastHeaders = null;
@@ -24,9 +27,9 @@ class LostAfterCommitHttp {
     this.lastHeaders = opts.headers;
     const parsed = new URL(url);
     const ref = parsed.searchParams.get('externalReference');
-    if (parsed.pathname === '/v3/customers') return { data: { data: this._byRef(this.customers, ref) } };
-    if (parsed.pathname === '/v3/subscriptions') return { data: { data: this._byRef(this.subscriptions, ref) } };
-    if (parsed.pathname === '/v3/payments') return { data: { data: this._byRef(this.payments, ref) } };
+    if (parsed.pathname === '/v3/customers') return { data: { data: this._byRef('customers', this.customers, ref) } };
+    if (parsed.pathname === '/v3/subscriptions') return { data: { data: this._byRef('subscriptions', this.subscriptions, ref) } };
+    if (parsed.pathname === '/v3/payments') return { data: { data: this._byRef('payments', this.payments, ref) } };
     return { data: null };
   }
 
@@ -50,9 +53,17 @@ class LostAfterCommitHttp {
     return { data: { id: url.split('/').pop(), deleted: true } };
   }
 
-  _byRef(map, ref) {
+  _byRef(kind, map, ref) {
     if (!ref) return [];
-    return Array.from(map.values()).filter((item) => item.externalReference === ref);
+    const encontrados = Array.from(map.values()).filter((item) => item.externalReference === ref);
+    if (encontrados.length === 0) return [];
+    const chave = `${kind}:${ref}`;
+    const remaining = this.hiddenRemaining.get(chave) || 0;
+    if (remaining > 0) {
+      this.hiddenRemaining.set(chave, remaining - 1);
+      return [];
+    }
+    return encontrados;
   }
 
   _create(kind, map, body, prefix) {
@@ -62,6 +73,10 @@ class LostAfterCommitHttp {
     map.set(id, obj);
     if (this.loseOnceFor.has(kind) && !this.lost.has(kind)) {
       this.lost.add(kind);
+      const esconder = Number(this.hiddenLookupsAfterCommit[kind] || 0);
+      if (esconder > 0 && body.externalReference) {
+        this.hiddenRemaining.set(`${kind}:${body.externalReference}`, esconder);
+      }
       const err = new Error('timeout apos commit');
       err.code = 'ETIMEDOUT';
       throw err;
@@ -136,4 +151,61 @@ test('User-Agent explicito e updateSubscription preserva pending payments', asyn
   assert.equal(http.lastHeaders['User-Agent'], userAgentFor('production'));
   assert.equal(http.lastHeaders.access_token, 'secret-test');
   assert.equal(http.lastPutBody.updatePendingPayments, false);
+});
+
+test('delayed visibility: POST commitado so aparece no terceiro lookup e nunca duplica', async () => {
+  const http = new LostAfterCommitHttp({
+    loseOnceFor: new Set(['customers', 'subscriptions', 'payments']),
+    hiddenLookupsAfterCommit: { customers: 2, subscriptions: 2, payments: 2 },
+  });
+  const p = provider(http);
+  const customer = await p.createCustomer({ empresa: { id: 'emp-delay', nome: 'Cliente Delay' } });
+  const subscription = await p.createSubscription({
+    customerId: customer.id,
+    value: 299.9,
+    nextDueDate: '2026-09-01',
+    externalReference: canonicalSubscriptionReference('emp-delay'),
+  });
+  const charge = await p.createCharge({
+    customerId: customer.id,
+    value: 500,
+    dueDate: '2026-09-01',
+    externalReference: canonicalImplantationChargeReference('emp-delay'),
+  });
+
+  assert.equal(customer.id, 'cus_000001');
+  assert.equal(subscription.id, 'sub_000001');
+  assert.equal(charge.id, 'pay_000001');
+  assert.equal(http.posts.customers, 1);
+  assert.equal(http.posts.subscriptions, 1);
+  assert.equal(http.posts.payments, 1);
+});
+
+test('commit incerto inconclusivo nao e retryable no mesmo ciclo', async () => {
+  const http = new LostAfterCommitHttp({
+    loseOnceFor: new Set(['subscriptions']),
+    hiddenLookupsAfterCommit: { subscriptions: 99 },
+  });
+  const p = provider(http);
+  await assert.rejects(
+    () => comRetry(() => p.createSubscription({
+      customerId: 'cus_1',
+      value: 299.9,
+      nextDueDate: '2026-09-01',
+      externalReference: canonicalSubscriptionReference('emp-uncertain'),
+    }), { tentativas: 3, baseMs: 1 }),
+    (err) => err?.code === 'ASAAS_COMMIT_UNCERTAIN',
+  );
+  assert.equal(http.posts.subscriptions, 1);
+
+  await assert.rejects(
+    () => p.createSubscription({
+      customerId: 'cus_1',
+      value: 299.9,
+      nextDueDate: '2026-09-01',
+      externalReference: canonicalSubscriptionReference('emp-uncertain'),
+    }),
+    (err) => err?.code === 'ASAAS_COMMIT_UNCERTAIN',
+  );
+  assert.equal(http.posts.subscriptions, 1);
 });

@@ -18,6 +18,7 @@ const { PROVIDER_PRODUCTION, avaliarBillingProductionGate } = require('./billing
 const {
   canonicalSubscriptionReference,
   canonicalImplantationChargeReference,
+  isAsaasCommitUncertainError,
 } = require('./asaasProviderSafety');
 
 // Lock cooperativo por empresa: serializa ensureBillingState concorrentes para a
@@ -39,6 +40,7 @@ async function comLock(chave, fn) {
 
 // Retry só para erros TRANSITÓRIOS (timeout/429/5xx). 4xx de negócio não repete (§22).
 function ehTransitorio(err) {
+  if (isAsaasCommitUncertainError(err)) return false;
   const s = err && (err.httpStatus ?? err.status);
   if (s === 0 || err?.code === 'ETIMEDOUT') return true;
   if (s === 429) return true;
@@ -176,6 +178,8 @@ async function executarPlano({ acoes = [], empresa = {}, snapshot = {}, provider
       resultados.push({ tipo: a.tipo, skip: true, addon_id: a.addon_id, motivo: 'addon_mensal_compoe_subscription_nao_payment_avulso' });
     } else if (a.tipo === 'addon_sem_aceite_billing') {
       resultados.push({ tipo: a.tipo, skip: true, addon_id: a.addon_id, motivo: 'addon_sem_aceite_financeiro' });
+    } else if (a.tipo === 'addon_quantidade_invalida_billing') {
+      resultados.push({ tipo: a.tipo, skip: true, addon_id: a.addon_id, motivo: 'addon_quantidade_invalida' });
     } else {
       resultados.push({ tipo: a.tipo, skip: true, motivo: 'acao_desconhecida' });
     }

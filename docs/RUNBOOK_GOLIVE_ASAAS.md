@@ -113,22 +113,22 @@ funcionalidade.
 ## Add-on Acceptance Authority
 
 Add-on com impacto financeiro so pode entrar no billing quando houver aceite
-comercial explicito.
+comercial explicito e auditavel.
 
-Estados aceitos pelo dominio atual:
+Autoridade real:
 
-- `billing_status_addon=accepted`
-- `billing_status_addon=effective`
+- `empresa_funcionalidades.contrato_id` ou `aditivo_id` vinculado a
+  `contratos_comerciais.status` concluido: `plenamente_assinado`, `assinado` ou
+  `aceito_manualmente`;
+- `empresa_funcionalidades.status='ativa'`;
+- `vigencia_inicio`/`vigencia_fim` vigentes, quando preenchidos;
+- `preco_mensal_centavos > 0`.
 
-Campos equivalentes suportados para compatibilidade futura:
-
-- `billing_addon_status`
-- `addon_billing_status`
-
-Ausencia desses campos ou status diferente significa fail-closed: zero billing de
-add-on. Como o schema atual ainda nao possui essa autoridade persistida de forma
-canonica, add-ons vindos de `empresa_funcionalidades` permanecem fora de cobranca
-production ate proxima migration/desenho comercial especifico.
+`aprovado_por` sozinho nao autoriza cobranca de add-on com impacto financeiro.
+Ausencia de contrato/aditivo concluido significa fail-closed: zero billing do
+adicional. O campo `preco_mensal_centavos` representa o valor mensal TOTAL
+negociado do add-on; `quantidade` e escopo/auditoria e nao multiplica o preco.
+Quantidade nula e aceita como nao aplicavel; quantidade invalida falha fechada.
 
 ## Subscription Update Effective Date
 

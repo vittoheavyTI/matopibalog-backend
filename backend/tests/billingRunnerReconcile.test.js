@@ -191,7 +191,7 @@ test('add-on mensal aceito compoe proximo valor da subscription', () => {
     empresaBilling: { asaas_customer_id: 'cus', asaas_subscription_id: 'sub', billing_valor_mensal: 299.9 },
     snapshot: { valor_mensal: 299.9 },
     addOns: [
-      { id: 'add-aceito', status: 'ativa', preco_mensal_centavos: 5000, billing_status_addon: 'accepted' },
+      { id: 'add-aceito', status: 'ativa', preco_mensal_centavos: 5000, aditivo_id: 'aditivo-1', aditivo_billing_status: 'plenamente_assinado' },
     ],
     agora: new Date('2026-08-10T00:00:00.000Z'),
   });

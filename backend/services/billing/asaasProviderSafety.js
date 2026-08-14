@@ -32,6 +32,22 @@ function erroPodeTerCommitado(err) {
   return typeof status === 'number' && status >= 500;
 }
 
+class AsaasCommitUncertainError extends Error {
+  constructor({ resource, externalReference, cause } = {}) {
+    super(`ASAAS_COMMIT_UNCERTAIN:${resource || 'resource'}:${externalReference || 'sem_ref'}`);
+    this.name = 'AsaasCommitUncertainError';
+    this.code = 'ASAAS_COMMIT_UNCERTAIN';
+    this.resource = resource || null;
+    this.externalReference = externalReference || null;
+    this.retryable = false;
+    this.cause = cause;
+  }
+}
+
+function isAsaasCommitUncertainError(err) {
+  return err?.code === 'ASAAS_COMMIT_UNCERTAIN' || err instanceof AsaasCommitUncertainError;
+}
+
 function primeiroItem(data) {
   const lista = Array.isArray(data?.data) ? data.data : [];
   return lista.length ? lista[0] : null;
@@ -45,5 +61,7 @@ module.exports = {
   canonicalSubscriptionReference,
   canonicalImplantationChargeReference,
   erroPodeTerCommitado,
+  AsaasCommitUncertainError,
+  isAsaasCommitUncertainError,
   primeiroItem,
 };

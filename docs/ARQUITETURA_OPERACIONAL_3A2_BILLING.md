@@ -36,7 +36,7 @@ vem do #417 e deve existir antes da aplicação da 066 em ambientes compartilhad
 | Componente | Papel |
 |---|---|
 | `billingPolicyConfig` | Políticas CONFIGURÁVEIS (implantação timing, prazo de graça, provider_mode). Default explícito conservador (`nao_cobrar`, graça 5d, `fake`). Sem hardcode financeiro. `production` proibido. |
-| `billingOrchestratorDomainService` (puro) | Cérebro: dado o estado comercial + billing local + política, planeja ações IDEMPOTENTES (garantir_customer, garantir_assinatura com 1º venc = trial_end, cobrar_implantacao por política, add-on mensal por composição aceita). |
+| `billingOrchestratorDomainService` (puro) | Cérebro: dado o estado comercial + billing local + política, planeja ações IDEMPOTENTES (garantir_customer, garantir_assinatura com 1º venc = trial_end, cobrar_implantacao por política, add-on mensal por composição com contrato/aditivo concluído). |
 | `fakeAsaasProvider` | Provider em memória (mesmo contrato do real) com injeção de falhas (timeout/429/5xx) para E2E offline. |
 | `billingWebhookApplyDomainService` (puro) | Máquina de estados de fatura tolerante a fora-de-ordem + idempotente (não regride estado por evento atrasado; correção terminal de estorno/cancelamento sempre aplica). |
 | `billingReconcileDomainService` (puro) | Motor único de reconciliação (customer/subscription/charge ausentes ou defasados). Usado pela automação e pela contingência. |
@@ -54,7 +54,7 @@ vem do #417 e deve existir antes da aplicação da 066 em ambientes compartilhad
   (lock por empresa). Webhook duplicado 20x → 1 efeito (§49).
 - **Fora de ordem** (§21/§50): evento atrasado não regride estado mais novo.
 - **Implantação** por política configurável (§15): imediato/fim_trial/primeira_fatura/nao_cobrar.
-- **Add-ons** (§16): add-on mensal aceito compõe o valor da subscription; remoção cessa próximos ciclos e preserva histórico.
+- **Add-ons** (§16): add-on mensal compõe o valor da subscription somente com `empresa_funcionalidades` vinculado a contrato/aditivo concluído; vigência real e quantidade válida são respeitadas; remoção/expiração cessa próximos ciclos e preserva histórico.
 - **Retry** (§22) só para transitórios; 4xx de negócio não repete.
 - **Reconciliação** (§23/§51): recupera mapeamentos/cobranças sem duplicar.
 - **Inadimplência** (§30/§31/§32) alimenta a autoridade comercial; sem `if(overdue)` espalhado.
@@ -129,8 +129,9 @@ implementado e testado fake/contract + PG CI; a E2E sandbox roda no workflow pro
 - **Orquestrador = função de convergência** (não só create-if-missing): cria customer/assinatura
   ausentes; **`atualizar_assinatura_valor`** quando o valor esperado difere de
   `empresas.billing_valor_mensal` (plano ou composição mensal alterada); add-on mensal
-  só entra com aceite explícito e não gera payment avulso; remoção de add-on preserva
-  histórico e reduz próximos ciclos; **`cancelar_assinatura`** apenas quando a conta é
+  só entra com contrato/aditivo concluído vinculado, vigência real e quantidade válida;
+  não gera payment avulso; remoção de add-on preserva histórico e reduz próximos ciclos;
+  **`cancelar_assinatura`** apenas quando a conta é
   cancelada definitivamente. **No-op quando já convergente** (idempotente).
 - **Reconcile periódico** seleciona por estado: `trial_finalizado`, `customer_ausente`,
   `subscription_ausente`, `cancelamento_pendente`, `revalidar`. Assim eventos de

@@ -20,8 +20,8 @@ Estado: PR de go-live preparado, Asaas production desligado.
 | `billing-health` | painel admin | read-only | Nao | super-admin | auth admin | atual | expor estado sem segredo |
 | `asaasWebhookService` | webhook Asaas | sandbox/production | Nao cria cobranca | Asaas | token webhook + idempotencia | atual | receber evento e convergir local |
 | `billingReconcileJob` | safety net | agnostico | Nao direto | cron/manual | dedupe diario | atual 3A-2 | enfileirar, nao cobrar diretamente |
-| Add-on mensal | composicao no dominio | fake/sandbox/production gated | Indiretamente, por update subscription | orquestrador | aceite explicito + vigencia | atual go-live | nao criar payment avulso |
-| Remocao de add-on | composicao no dominio | fake/sandbox/production gated | Nao deleta historico | orquestrador | update subscription next cycle | atual go-live | preservar payments pagos/confirmados |
+| Add-on mensal | `empresa_funcionalidades` + contrato/aditivo concluido | fake/sandbox/production gated | Indiretamente, por update subscription | orquestrador | contrato/aditivo final + vigencia real + quantidade valida | atual go-live | nao criar payment avulso |
+| Remocao de add-on | composicao no dominio | fake/sandbox/production gated | Nao deleta historico | orquestrador | update subscription next cycle | atual go-live | preservar payments pagos/confirmados; `billing_component_id` e historico seguem auditaveis |
 | Suspensao financeira | situacao comercial | agnostico | Nao | dominio comercial | `suspensa_financeiramente` | atual | nao deletar subscription |
 | Cancelamento definitivo | situacao comercial | gated | Sim, cancela recorrencia | orquestrador | `cancelada`/`cancelado` | atual | usar apenas para encerramento comercial definitivo |
 | `configuracoes.integracao_asaas.apiKey` | config historica | sandbox/legado | Sim em rotas sandbox | rotas antigas | sandbox gate | legado | nao e fonte production canonica |
