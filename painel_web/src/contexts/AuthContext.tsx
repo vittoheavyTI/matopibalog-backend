@@ -177,6 +177,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     ['matopibalog_company', 'choferlog_company',
      'matopibalog_logo', 'matopibalog_logo_scale', 'matopibalog_logo_y',
      'matopibalog_empresa_logo',
+     'matopibalog_operational_unit_context',
     ].forEach(k => localStorage.removeItem(k));
     setUser(null);
   };

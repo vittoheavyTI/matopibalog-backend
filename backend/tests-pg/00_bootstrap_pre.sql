@@ -20,7 +20,11 @@ DO $$ BEGIN CREATE ROLE service_role NOLOGIN;  EXCEPTION WHEN duplicate_object T
 
 -- Tabelas base pré-existentes (mínimas, mas com as colunas que 060/061 e a RPC tocam).
 CREATE TABLE IF NOT EXISTS public.usuarios (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid()
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  empresa_id uuid NULL,
+  tipo text NULL,
+  status text NULL,
+  is_super_admin boolean NOT NULL DEFAULT false
 );
 
 CREATE TABLE IF NOT EXISTS public.planos (
@@ -55,4 +59,31 @@ CREATE TABLE IF NOT EXISTS public.fretes (
   valor_frete         numeric NULL,
   km_inicial          numeric NULL,
   km_final            numeric NULL
+);
+
+CREATE TABLE IF NOT EXISTS public.motoristas (
+  id uuid PRIMARY KEY REFERENCES public.usuarios(id) ON DELETE CASCADE,
+  empresa_id uuid NULL REFERENCES public.empresas(id) ON DELETE CASCADE,
+  placa_veiculo text NULL
+);
+
+CREATE TABLE IF NOT EXISTS public.despesas (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  empresa_id uuid NULL REFERENCES public.empresas(id) ON DELETE CASCADE,
+  motorista_id uuid NULL REFERENCES public.usuarios(id) ON DELETE SET NULL,
+  frete_id uuid NULL REFERENCES public.fretes(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS public.abastecimentos (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  empresa_id uuid NULL REFERENCES public.empresas(id) ON DELETE CASCADE,
+  motorista_id uuid NULL REFERENCES public.usuarios(id) ON DELETE SET NULL,
+  frete_id uuid NULL REFERENCES public.fretes(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS public.vales (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  empresa_id uuid NULL REFERENCES public.empresas(id) ON DELETE CASCADE,
+  motorista_id uuid NULL REFERENCES public.usuarios(id) ON DELETE SET NULL,
+  frete_id uuid NULL REFERENCES public.fretes(id) ON DELETE SET NULL
 );

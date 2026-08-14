@@ -4,6 +4,11 @@ const { freteEstaCancelado } = require('../utils/agregacaoFinanceiraFretes');
 const { calcularRentabilidadeFrete, resumirRentabilidade } = require('../utils/rentabilidadeFrete');
 const { calcularAcertoMotoristas } = require('../utils/acertoMotorista');
 const { montarTorreControle, resumirItensTorre } = require('../utils/torreControle');
+const {
+  resolverEscopoOperacional,
+  aplicarEscopoOperacionalQuery,
+  canAccessUnit,
+} = require('../services/operationalScopeService');
 
 exports.getFichaViagem = async (req, res) => {
   const { motorista_id, fretes_ids } = req.query;
@@ -17,6 +22,12 @@ exports.getFichaViagem = async (req, res) => {
   try {
     // Validar que o motorista pertence à empresa do admin (super-admin pula)
     const isSuperAdmin = req.user.is_super_admin === true;
+    const operationalScope = isSuperAdmin
+      ? await resolverEscopoOperacional(req, { empresaId: req.query.empresa_id || null })
+      : await resolverEscopoOperacional(req, { empresaId: req.empresa_id });
+    if (operationalScope.mode === 'NO_ACCESS') {
+      return res.status(403).json({ message: 'Escopo operacional nao autorizado.' });
+    }
     if (!isSuperAdmin) {
       const { data: pertence, error: pertenceError } = await supabase
         .from('usuarios')
@@ -90,6 +101,9 @@ exports.getFichaViagem = async (req, res) => {
 
     // Garantir arrays nunca nulos
     const fretes = fretesRaw || [];
+    if (fretes.some((frete) => !canAccessUnit(operationalScope, frete.unidade_operacional_id || null))) {
+      return res.status(403).json({ message: 'Ha frete fora do seu escopo operacional.' });
+    }
     const abastecimentos = abastecimentosRaw || [];
     const despesas = despesasRaw || [];
     const vales = valesRaw || [];
@@ -151,6 +165,10 @@ exports.getRentabilidade = async (req, res) => {
     if (!empresaAlvo) {
       return res.status(400).json({ message: 'Empresa não identificada.' });
     }
+    const operationalScope = await resolverEscopoOperacional(req, { empresaId: empresaAlvo });
+    if (operationalScope.mode === 'NO_ACCESS') {
+      return res.status(403).json({ message: 'Escopo operacional nao autorizado.' });
+    }
 
     const { inicio, fim, motorista_id, status, resultado } = req.query;
 
@@ -158,6 +176,7 @@ exports.getRentabilidade = async (req, res) => {
       .from('fretes')
       .select('*, motoristas(usuarios(nome), percentual_comissao, empresas!left(tipo))')
       .eq('empresa_id', empresaAlvo);
+    fretesQuery = aplicarEscopoOperacionalQuery(fretesQuery, operationalScope);
     if (inicio) fretesQuery = fretesQuery.gte('data', inicio);
     if (fim) fretesQuery = fretesQuery.lte('data', fim);
     if (motorista_id) fretesQuery = fretesQuery.eq('motorista_id', motorista_id);
@@ -242,6 +261,10 @@ exports.getAcertoMotoristas = async (req, res) => {
     if (!empresaAlvo) {
       return res.status(400).json({ message: 'Empresa não identificada.' });
     }
+    const operationalScope = await resolverEscopoOperacional(req, { empresaId: empresaAlvo });
+    if (operationalScope.mode === 'NO_ACCESS') {
+      return res.status(403).json({ message: 'Escopo operacional nao autorizado.' });
+    }
 
     const { inicio, fim, motorista_id } = req.query;
 
@@ -249,6 +272,7 @@ exports.getAcertoMotoristas = async (req, res) => {
       .from('fretes')
       .select('id, empresa_id, motorista_id, data, origem, destino, status, valor_frete, motoristas(usuarios(nome), percentual_comissao, empresas!left(tipo, nome))')
       .eq('empresa_id', empresaAlvo);
+    fretesQuery = aplicarEscopoOperacionalQuery(fretesQuery, operationalScope);
     if (inicio) fretesQuery = fretesQuery.gte('data', inicio);
     if (fim) fretesQuery = fretesQuery.lte('data', fim);
     if (motorista_id) fretesQuery = fretesQuery.eq('motorista_id', motorista_id);
@@ -324,6 +348,10 @@ exports.getTorreControle = async (req, res) => {
     if (!empresaAlvo) {
       return res.status(400).json({ message: 'Empresa nao identificada.' });
     }
+    const operationalScope = await resolverEscopoOperacional(req, { empresaId: empresaAlvo });
+    if (operationalScope.mode === 'NO_ACCESS') {
+      return res.status(403).json({ message: 'Escopo operacional nao autorizado.' });
+    }
 
     const { inicio, fim, motorista_id, status, nivel } = req.query;
     const niveisValidos = new Set(['critico', 'atencao', 'ok', 'informativo']);
@@ -345,6 +373,7 @@ exports.getTorreControle = async (req, res) => {
       .from('fretes')
       .select('id, empresa_id, motorista_id, data, origem, destino, placa, status, valor_frete')
       .eq('empresa_id', empresaAlvo);
+    fretesQuery = aplicarEscopoOperacionalQuery(fretesQuery, operationalScope);
     if (inicio) fretesQuery = fretesQuery.gte('data', inicio);
     if (fim) fretesQuery = fretesQuery.lte('data', fim);
     if (motorista_id) fretesQuery = fretesQuery.eq('motorista_id', motorista_id);

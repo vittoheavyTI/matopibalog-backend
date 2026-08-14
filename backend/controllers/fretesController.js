@@ -8,6 +8,12 @@ const {
   contemCampoFinanceiro,
 } = require('../services/freteFinanceiroCorrecaoService');
 const { revogarTrackingSeSemViagemAtiva } = require('../services/auth/trackingRevocacaoHook');
+const {
+  resolverEscopoOperacional,
+  aplicarEscopoOperacionalQuery,
+  canAccessUnit,
+  deriveUnitForWrite,
+} = require('../services/operationalScopeService');
 
 const BUCKET_ODOMETRO = 'fretes-odometro';
 const SIGNED_URL_TTL_SECONDS = 300;
@@ -19,7 +25,11 @@ const EXTENSAO_POR_MIME = {
 
 const acessoPermitidoAoFrete = (req, frete) => {
   if (req.user.is_super_admin === true) return true;
-  if (req.user.role === 'admin') return frete.empresa_id === req.empresa_id;
+  if (req.user.role === 'admin') {
+    if (frete.empresa_id !== req.empresa_id) return false;
+    if (req.operationalScope) return canAccessUnit(req.operationalScope, frete.unidade_operacional_id || null);
+    return true;
+  }
   return frete.motorista_id === req.user.uid;
 };
 
@@ -46,7 +56,7 @@ const uploadOdometro = async (req, res, tipo) => {
   try {
     const { data: frete, error: freteError } = await supabase
       .from('fretes')
-      .select('id, motorista_id, empresa_id, status, foto_odometro_inicial_path, foto_odometro_final_path')
+      .select('id, motorista_id, empresa_id, unidade_operacional_id, status, foto_odometro_inicial_path, foto_odometro_final_path')
       .eq('id', req.params.id)
       .single();
 
@@ -241,6 +251,12 @@ exports.getAll = async (req, res) => {
     const empresaAlvo = isSuperAdmin
       ? (req.query.empresa_id || null)
       : req.empresa_id;
+    const operationalScope = isAdmin
+      ? await resolverEscopoOperacional(req, { empresaId: empresaAlvo })
+      : null;
+    if (isAdmin && operationalScope.mode === 'NO_ACCESS') {
+      return res.status(403).json({ message: 'Escopo operacional nao autorizado.' });
+    }
 
     let idsPermitidos = null;
 
@@ -260,6 +276,10 @@ exports.getAll = async (req, res) => {
     let query = supabase
       .from('fretes')
       .select('*, motoristas(usuarios(nome))');
+
+    if (isAdmin) {
+      query = aplicarEscopoOperacionalQuery(query, operationalScope);
+    }
 
     if (idsPermitidos !== null) {
       query = query.in('motorista_id', idsPermitidos.length ? idsPermitidos : ['']);
@@ -299,7 +319,7 @@ exports.create = async (req, res) => {
     // 2. Buscar dados do motorista (placa e comissão) em uma única consulta
     const { data: motData, error: motError } = await supabase
       .from('motoristas')
-      .select('placa_veiculo, percentual_comissao, empresa_id')
+      .select('placa_veiculo, percentual_comissao, empresa_id, unidade_operacional_id')
       .eq('id', motorista_id)
       .single();
 
@@ -363,6 +383,19 @@ exports.create = async (req, res) => {
     // contrato da resposta, apenas zerado quando não há comissão fixa (inclui
     // tonelada_km ainda sem valor calculado).
     const comissao = calcularComissao(valorFreteFinal, motData.percentual_comissao, empData?.tipo);
+    let unidadeOperacionalId = motData.unidade_operacional_id || null;
+    if (req.user.role === 'admin') {
+      const scope = await resolverEscopoOperacional(req, { empresaId: motData.empresa_id });
+      const unitDecision = deriveUnitForWrite({
+        scope,
+        requestedUnitId: req.body.unidade_operacional_id,
+        motoristaUnitId: motData.unidade_operacional_id,
+      });
+      if (!unitDecision.ok) {
+        return res.status(403).json({ error: unitDecision.reason, message: 'Unidade operacional nao autorizada para este frete.' });
+      }
+      unidadeOperacionalId = unitDecision.unidade_operacional_id;
+    }
 
     // 3. Inserir frete. Campos de tonelada/km só são gravados na modalidade
     // tonelada_km; no valor_fixo ficam null para não sujar o registro.
@@ -371,6 +404,7 @@ exports.create = async (req, res) => {
       .insert({
         motorista_id,
         empresa_id: motData.empresa_id,
+        unidade_operacional_id: unidadeOperacionalId,
         origem,
         destino,
         km_inicial,
@@ -430,7 +464,8 @@ exports.getById = async (req, res) => {
     const isSuperAdmin = req.user.is_super_admin === true;
     if (!isSuperAdmin) {
       if (req.user.role === 'admin') {
-        if (data.empresa_id !== req.empresa_id) {
+        req.operationalScope = await resolverEscopoOperacional(req, { empresaId: data.empresa_id });
+        if (data.empresa_id !== req.empresa_id || !canAccessUnit(req.operationalScope, data.unidade_operacional_id || null)) {
           return res.status(403).json({ message: 'Acesso negado.' });
         }
       } else if (data.motorista_id !== req.user.uid) {
@@ -454,7 +489,7 @@ exports.getOdometroSignedUrl = async (req, res) => {
   try {
     const { data: frete, error } = await supabase
       .from('fretes')
-      .select('id, motorista_id, empresa_id, foto_odometro_inicial_path, foto_odometro_final_path')
+      .select('id, motorista_id, empresa_id, unidade_operacional_id, foto_odometro_inicial_path, foto_odometro_final_path')
       .eq('id', req.params.id)
       .single();
     if (error || !frete) return res.status(404).json({ message: 'Frete não encontrado.' });
@@ -482,14 +517,17 @@ exports.corrigirFinanceiro = async (req, res) => {
 
     const { data: frete, error: freteError } = await supabase
       .from('fretes')
-      .select('id, motorista_id, empresa_id, status, modalidade_calculo, toneladas, valor_tonelada_km, valor_frete, km_inicial, km_final')
+      .select('id, motorista_id, empresa_id, unidade_operacional_id, status, modalidade_calculo, toneladas, valor_tonelada_km, valor_frete, km_inicial, km_final')
       .eq('id', id)
       .single();
 
     if (freteError || !frete) {
       return res.status(404).json({ message: 'Frete nao encontrado.' });
     }
-    if (!isSuperAdmin && frete.empresa_id !== req.empresa_id) {
+    if (!isSuperAdmin) {
+      req.operationalScope = await resolverEscopoOperacional(req, { empresaId: frete.empresa_id });
+    }
+    if (!isSuperAdmin && (frete.empresa_id !== req.empresa_id || !canAccessUnit(req.operationalScope, frete.unidade_operacional_id || null))) {
       return res.status(403).json({ message: 'Acesso negado.' });
     }
 
@@ -556,7 +594,7 @@ exports.update = async (req, res) => {
 
     const { data: checkData, error: checkError } = await supabase
       .from('fretes')
-      .select('motorista_id, empresa_id, status, modalidade_calculo, toneladas, valor_tonelada_km, km_inicial, km_final, foto_odometro_inicial_path, foto_odometro_final_path')
+      .select('motorista_id, empresa_id, unidade_operacional_id, status, modalidade_calculo, toneladas, valor_tonelada_km, km_inicial, km_final, foto_odometro_inicial_path, foto_odometro_final_path')
       .eq('id', id)
       .single();
 
@@ -570,7 +608,8 @@ exports.update = async (req, res) => {
     //  - motorista: só o próprio frete
     if (!isSuperAdmin) {
       if (isAdmin) {
-        if (checkData.empresa_id !== req.empresa_id) {
+        req.operationalScope = await resolverEscopoOperacional(req, { empresaId: checkData.empresa_id });
+        if (checkData.empresa_id !== req.empresa_id || !canAccessUnit(req.operationalScope, checkData.unidade_operacional_id || null)) {
           return res.status(403).json({ message: 'Acesso negado.' });
         }
       } else if (checkData.motorista_id !== req.user.uid) {
@@ -697,7 +736,7 @@ exports.finalizar = async (req, res) => {
     // Busca o frete e verifica ownership
     const { data: frete, error: freteError } = await supabase
       .from('fretes')
-      .select('id, motorista_id, empresa_id, status, km_inicial, km_final, modalidade_calculo, toneladas, valor_tonelada_km, foto_odometro_inicial_path, foto_odometro_final_path')
+      .select('id, motorista_id, empresa_id, unidade_operacional_id, status, km_inicial, km_final, modalidade_calculo, toneladas, valor_tonelada_km, foto_odometro_inicial_path, foto_odometro_final_path')
       .eq('id', id)
       .single();
 
@@ -707,7 +746,8 @@ exports.finalizar = async (req, res) => {
     if (!isSuperAdmin) {
       // admin empresa: verifica se o frete é da empresa
       if (isAdmin) {
-        if (frete.empresa_id !== req.empresa_id) {
+        req.operationalScope = await resolverEscopoOperacional(req, { empresaId: frete.empresa_id });
+        if (frete.empresa_id !== req.empresa_id || !canAccessUnit(req.operationalScope, frete.unidade_operacional_id || null)) {
           return res.status(403).json({ message: 'Acesso negado.' });
         }
       } else {
@@ -871,7 +911,7 @@ exports.delete = async (req, res) => {
     //  - motorista: só o próprio frete
     const { data: frete, error: freteError } = await supabase
       .from('fretes')
-      .select('id, motorista_id, empresa_id')
+      .select('id, motorista_id, empresa_id, unidade_operacional_id')
       .eq('id', id)
       .single();
 
@@ -879,7 +919,8 @@ exports.delete = async (req, res) => {
 
     if (!isSuperAdmin) {
       if (isAdmin) {
-        if (frete.empresa_id !== req.empresa_id) {
+        req.operationalScope = await resolverEscopoOperacional(req, { empresaId: frete.empresa_id });
+        if (frete.empresa_id !== req.empresa_id || !canAccessUnit(req.operationalScope, frete.unidade_operacional_id || null)) {
           return res.status(403).json({ message: 'Acesso negado.' });
         }
       } else if (frete.motorista_id !== req.user.uid) {

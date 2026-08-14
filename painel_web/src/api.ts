@@ -26,6 +26,11 @@ api.interceptors.request.use((config) => {
       config.headers = config.headers || {};
       (config.headers as any).Authorization = `Bearer ${token}`;
     }
+    const unidadeOperacionalId = localStorage.getItem('matopibalog_operational_unit_context');
+    if (unidadeOperacionalId) {
+      config.headers = config.headers || {};
+      (config.headers as any)['X-Operational-Unit-Id'] = unidadeOperacionalId;
+    }
   } catch (e) {
     // ignore
   }

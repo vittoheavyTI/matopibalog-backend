@@ -153,6 +153,7 @@ app.use('/vales', valesRoutes);
 app.use('/dashboard', dashboardRoutes);
 app.use('/relatorios', relatoriosRoutes);
 app.use('/configuracoes', configRoutes);
+app.use('/operacional', require('./routes/operacional'));
 app.use('/impressoras', require('./routes/impressoras'));
 app.use('/integracoes', require('./routes/integracoes'));
 app.use('/painel-admin', require('./routes/painel-admin'));
