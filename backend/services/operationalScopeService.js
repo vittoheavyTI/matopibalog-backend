@@ -6,11 +6,14 @@ const {
 } = require('./operationalScopeDomainService');
 
 async function loadUser(userId) {
-  const { data, error } = await supabase
+  if (!userId) return null;
+  const query = supabase
     .from('usuarios')
     .select('id, empresa_id, tipo, status, is_super_admin')
-    .eq('id', userId)
-    .maybeSingle();
+    .eq('id', userId);
+  const { data, error } = typeof query.maybeSingle === 'function'
+    ? await query.maybeSingle()
+    : await query.single();
   if (error) throw error;
   return data || null;
 }
@@ -48,7 +51,8 @@ async function loadScopeData(empresaId, userId) {
 }
 
 async function resolverEscopoOperacional(req, options = {}) {
-  const user = await loadUser(req.user?.uid);
+  const isSuperAdmin = req.user?.is_super_admin === true;
+  const user = isSuperAdmin ? null : await loadUser(req.user?.uid);
   const empresaId = options.empresaId || req.query?.empresa_id || req.empresa_id || user?.empresa_id || null;
   const requestedUnitHeader = req.headers?.['x-operational-unit-id'];
   const requestedUnitId = options.unidadeOperacionalId
@@ -64,7 +68,7 @@ async function resolverEscopoOperacional(req, options = {}) {
     },
     empresaId,
     requestedUnitId,
-    isSuperAdmin: req.user?.is_super_admin === true || user?.is_super_admin === true,
+    isSuperAdmin: isSuperAdmin || user?.is_super_admin === true,
     ...data,
   });
 }
