@@ -12,6 +12,8 @@ router.get('/grupos', operacionalController.listarGrupos);
 router.post('/grupos', operacionalController.criarGrupo);
 router.patch('/grupos/:id', operacionalController.atualizarGrupo);
 router.post('/grupos/:id/empresas', operacionalController.vincularEmpresaGrupo);
+router.get('/grupos/:id/memberships', operacionalController.listarGrupoMemberships);
+router.post('/grupos/:id/memberships', operacionalController.criarGrupoMembership);
 
 router.get('/unidades', operacionalController.listarUnidades);
 router.post('/unidades', operacionalController.criarUnidade);

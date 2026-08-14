@@ -55,14 +55,26 @@ function resolveOperationalScopeState({
   const groupEmpresaIds = unique(activeGroupCompanyRows
     .filter((row) => !grupoId || row.grupo_id === grupoId)
     .map((row) => row.empresa_id));
-  const activeUnits = activeRows(units).filter((unit) => {
-    if (grupoId && groupEmpresaIds.length) return groupEmpresaIds.includes(unit.empresa_id);
-    return !effectiveEmpresaId || unit.empresa_id === effectiveEmpresaId;
-  });
+  const activeMembershipInput = activeRows(memberships);
+  const corporateMemberships = activeMembershipInput.filter((membership) => (
+    grupoId
+    && membership.grupo_id === grupoId
+    && membership.empresa_id == null
+    && normalizeScopeLevel(membership.scope_level) === 'GLOBAL'
+  ));
+  const userCompanyInGroup = Boolean(effectiveEmpresaId && groupEmpresaIds.includes(String(effectiveEmpresaId)));
+  const corporateGroupAllowed = Boolean(grupoId && corporateMemberships.length > 0 && userCompanyInGroup);
+  const ownActiveUnits = activeRows(units).filter((unit) => !effectiveEmpresaId || unit.empresa_id === effectiveEmpresaId);
+  const groupActiveUnits = activeRows(units).filter((unit) => groupEmpresaIds.includes(String(unit.empresa_id)));
+  const activeUnits = grupoId && (isSuperAdmin || user?.is_super_admin === true || corporateGroupAllowed)
+    ? groupActiveUnits
+    : ownActiveUnits;
   const unitIds = unique(activeUnits.map((unit) => unit.id));
   const defaultUnit = activeUnits.find((unit) => unit.is_default === true) || null;
   const hasOperationalStructure = activeUnits.length > 0;
-  const effectiveEmpresaIds = grupoId && groupEmpresaIds.length ? groupEmpresaIds : unique([effectiveEmpresaId]);
+  const effectiveEmpresaIds = grupoId && groupEmpresaIds.length && (isSuperAdmin || user?.is_super_admin === true || corporateGroupAllowed)
+    ? groupEmpresaIds
+    : unique([effectiveEmpresaId]);
 
   if (isSuperAdmin || user?.is_super_admin === true) {
     const selectedUnit = requestedUnitId ? String(requestedUnitId) : null;
@@ -114,13 +126,39 @@ function resolveOperationalScopeState({
     };
   }
 
-  const activeMemberships = activeRows(memberships)
+  if (grupoId && !(isSuperAdmin || user?.is_super_admin === true) && !corporateGroupAllowed) {
+    const ownUnitIds = unique(ownActiveUnits.map((unit) => unit.id));
+    return {
+      mode: 'NO_ACCESS',
+      empresa_id: effectiveEmpresaId,
+      grupo_id: null,
+      rollout_mode: rolloutMode,
+      scope_level: null,
+      authority_level: 'NONE',
+      has_operational_structure: ownActiveUnits.length > 0,
+      authorized_empresa_ids: unique([effectiveEmpresaId]),
+      authorized_unit_ids: [],
+      all_unit_ids: ownUnitIds,
+      allowed_unit_ids: [],
+      selected_unit_id: null,
+      effective_filter_unit_ids: [],
+      invalid_selected_unit_id: requestedUnitId ? String(requestedUnitId) : null,
+      default_unit_id: ownActiveUnits.find((unit) => unit.is_default === true)?.id || null,
+      include_legacy_unscoped: false,
+      can_manage_operational_structure: false,
+      can_enforce_operational_scope: false,
+      delegable_unit_ids: [],
+      forbidden_group_id: grupoId,
+    };
+  }
+
+  const activeMemberships = activeMembershipInput
     .filter((membership) => (
       (membership.empresa_id && effectiveEmpresaIds.includes(membership.empresa_id))
       || (grupoId && membership.grupo_id === grupoId && membership.empresa_id == null)
     ));
 
-  if (rolloutMode !== 'enforced') {
+  if (rolloutMode !== 'enforced' && !corporateGroupAllowed) {
     const requested = requestedUnitId ? String(requestedUnitId) : null;
     const requestedIsValid = !requested || unitIds.includes(requested);
     return {

@@ -593,8 +593,29 @@ LANGUAGE plpgsql
 AS $$
 DECLARE
   v_row public.usuario_operacional_memberships;
+  v_target_empresa_id uuid;
 BEGIN
   PERFORM pg_advisory_xact_lock(hashtext('p1_membership'), hashtext(p_usuario_id::text));
+  IF p_empresa_id IS NULL AND p_grupo_id IS NOT NULL THEN
+    SELECT empresa_id INTO v_target_empresa_id
+      FROM public.usuarios
+     WHERE id = p_usuario_id;
+    IF v_target_empresa_id IS NULL THEN
+      RAISE EXCEPTION 'target_user_without_company';
+    END IF;
+    IF NOT EXISTS (
+      SELECT 1
+        FROM public.grupos_empresariais g
+        JOIN public.grupo_empresarial_empresas ge
+          ON ge.grupo_id = g.id
+       WHERE g.id = p_grupo_id
+         AND g.status = 'ativo'
+         AND ge.empresa_id = v_target_empresa_id
+         AND ge.status = 'ativo'
+    ) THEN
+      RAISE EXCEPTION 'target_user_not_in_active_group';
+    END IF;
+  END IF;
   INSERT INTO public.usuario_operacional_memberships (
     usuario_id, empresa_id, grupo_id, scope_level, unidade_operacional_id,
     regiao_operacional_id, papel, status, is_primary, motivo, created_by, updated_by
@@ -722,7 +743,18 @@ GRANT SELECT, INSERT, UPDATE ON TABLE
   public.operational_scope_auditoria
 TO service_role;
 
+REVOKE DELETE, TRUNCATE ON TABLE
+  public.grupos_empresariais,
+  public.grupo_empresarial_empresas,
+  public.unidades_operacionais,
+  public.regioes_operacionais,
+  public.regiao_operacional_unidades,
+  public.usuario_operacional_memberships,
+  public.operational_scope_auditoria
+FROM service_role;
+
 GRANT EXECUTE ON FUNCTION
+  public.p1_audit(text, uuid, uuid, uuid, uuid, uuid, jsonb, jsonb, text),
   public.p1_criar_grupo(text, uuid, text),
   public.p1_atualizar_grupo(uuid, text, text, uuid, text),
   public.p1_vincular_empresa_grupo(uuid, uuid, text, uuid, text),

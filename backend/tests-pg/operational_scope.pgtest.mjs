@@ -33,6 +33,15 @@ function registrar() {
   let u2;
   let r1;
 
+  async function withRole(role, fn) {
+    await pool.query(`SET ROLE ${role}`);
+    try {
+      return await fn();
+    } finally {
+      await pool.query('RESET ROLE').catch(() => {});
+    }
+  }
+
   before(async () => {
     await pool.query(`INSERT INTO public.empresas (id, nome) VALUES ($1, 'Empresa P1 A'), ($2, 'Empresa P1 B'), ($3, 'Empresa P1 C')`, [e1, e2, e3]);
     await pool.query(
@@ -135,6 +144,23 @@ function registrar() {
     assert.equal(active.rows[0].n, 1);
   });
 
+  test('membership corporativo exige usuario alvo vinculado a empresa ativa do grupo', async () => {
+    const corpTarget = randomUUID();
+    const externalTarget = randomUUID();
+    await pool.query(
+      `INSERT INTO public.usuarios (id, empresa_id, tipo, status) VALUES ($1,$3,'admin','ativo'), ($2,$4,'admin','ativo')`,
+      [corpTarget, externalTarget, e1, e3],
+    );
+    await pool.query(
+      `SELECT public.p1_criar_membership($1,NULL,$2,'GLOBAL',NULL,NULL,'admin',true,$3,'corp ok')`,
+      [corpTarget, g1, adminA],
+    );
+    await rejectsDb(
+      () => pool.query(`SELECT public.p1_criar_membership($1,NULL,$2,'GLOBAL',NULL,NULL,'admin',true,$3,'corp externo')`, [externalTarget, g1, adminA]),
+      /target_user_not_in_active_group/i,
+    );
+  });
+
   test('enforcement falha se admin ativo nao tem membership e nao deixa estado parcial', async () => {
     await rejectsDb(
       () => pool.query(`SELECT public.p1_ativar_enforcement($1,$2,'sem admin B')`, [e1, adminA]),
@@ -170,5 +196,69 @@ function registrar() {
         AND grantee IN ('anon','authenticated','PUBLIC')
     `);
     assert.equal(grants.rows.length, 0);
+  });
+
+  test('service_role executa RPCs P1 com auditoria, mas sem DELETE direto; anon/authenticated negados', async () => {
+    const empresa = randomUUID();
+    const actor = randomUUID();
+    await pool.query(`INSERT INTO public.empresas (id, nome) VALUES ($1, 'Service Role Runtime')`, [empresa]);
+    await pool.query(`INSERT INTO public.usuarios (id, empresa_id, tipo, status) VALUES ($1,$2,'admin','ativo')`, [actor, empresa]);
+
+    let unitId;
+    let membershipId;
+    await withRole('service_role', async () => {
+      const unit = await pool.query(
+        `SELECT * FROM public.p1_criar_unidade($1,NULL,'SR Unit','SR','operacional',NULL,NULL,NULL,NULL,true,$2,'sr unit')`,
+        [empresa, actor],
+      );
+      unitId = unit.rows[0].id;
+      const membership = await pool.query(
+        `SELECT * FROM public.p1_criar_membership($1,$2,NULL,'GLOBAL',NULL,NULL,'admin',true,$1,'sr membership')`,
+        [actor, empresa],
+      );
+      membershipId = membership.rows[0].id;
+      await pool.query(
+        `SELECT public.p1_atualizar_membership($1,'GLOBAL',NULL,NULL,'admin','ativo',$2,'sr update')`,
+        [membershipId, actor],
+      );
+      const enforced = await pool.query(`SELECT public.p1_ativar_enforcement($1,$2,'sr enforce') AS r`, [empresa, actor]);
+      assert.equal(enforced.rows[0].r.ok, true);
+      await rejectsDb(
+        () => pool.query(`DELETE FROM public.operational_scope_auditoria WHERE empresa_id=$1`, [empresa]),
+        /permission denied/i,
+      );
+    });
+
+    assert.ok(unitId);
+    assert.ok(membershipId);
+    const audit = await pool.query(
+      `SELECT action FROM public.operational_scope_auditoria WHERE empresa_id=$1 ORDER BY created_at`,
+      [empresa],
+    );
+    assert.deepEqual(audit.rows.map((row) => row.action), [
+      'unidade_criada',
+      'membership_criado',
+      'membership_alterado',
+      'operational_scope_enforced',
+    ]);
+
+    for (const role of ['anon', 'authenticated']) {
+      await withRole(role, async () => {
+        await rejectsDb(
+          () => pool.query(
+            `SELECT public.p1_criar_unidade($1,NULL,'Denied','D','operacional',NULL,NULL,NULL,NULL,false,$2,'denied')`,
+            [empresa, actor],
+          ),
+          /permission denied/i,
+        );
+        await rejectsDb(
+          () => pool.query(
+            `SELECT public.p1_audit('unidade_criada',$1,NULL,NULL,NULL,$2,NULL,'{}'::jsonb,'denied')`,
+            [empresa, actor],
+          ),
+          /permission denied/i,
+        );
+      });
+    }
   });
 }

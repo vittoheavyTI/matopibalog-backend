@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { registrarMotivoSessao } from './utils/sessionReason';
+import { montarHeadersContextoOperacional } from './utils/operationalContextStorage';
 
 const api = axios.create({
   // Tente adicionar o /api no final do baseURL se suas rotas do backend usam /api
@@ -26,10 +27,10 @@ api.interceptors.request.use((config) => {
       config.headers = config.headers || {};
       (config.headers as any).Authorization = `Bearer ${token}`;
     }
-    const unidadeOperacionalId = localStorage.getItem('matopibalog_operational_unit_context');
-    if (unidadeOperacionalId) {
+    const operationalHeaders = montarHeadersContextoOperacional();
+    for (const [key, value] of Object.entries(operationalHeaders)) {
       config.headers = config.headers || {};
-      (config.headers as any)['X-Operational-Unit-Id'] = unidadeOperacionalId;
+      (config.headers as any)[key] = value;
     }
   } catch (e) {
     // ignore

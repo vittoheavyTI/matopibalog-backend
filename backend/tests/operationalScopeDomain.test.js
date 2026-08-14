@@ -173,7 +173,8 @@ test('LOCAL nao delega regional maior nem global', () => {
 
 test('GLOBAL corporativo autoriza empresas do grupo e exclui empresa externa', () => {
   const scope = resolveOperationalScopeState({
-    user: { id: 'corp', role: 'admin' },
+    user: { id: 'corp', empresa_id: 'e1', role: 'admin' },
+    empresaId: 'e1',
     grupoId: 'g1',
     empresaMode: 'enforced',
     groupCompanyRows: [
@@ -193,7 +194,7 @@ test('GLOBAL corporativo autoriza empresas do grupo e exclui empresa externa', (
   assert.deepEqual(scope.authorized_unit_ids.sort(), ['ua', 'ub']);
 });
 
-test('GLOBAL de empresa nao vira corporativo apenas por grupo selecionado', () => {
+test('GLOBAL de empresa nao usa grupo selecionado sem membership corporativa', () => {
   const scope = resolveOperationalScopeState({
     user: { id: 'admin-a', empresa_id: 'e1', role: 'admin' },
     empresaId: 'e1',
@@ -209,8 +210,92 @@ test('GLOBAL de empresa nao vira corporativo apenas por grupo selecionado', () =
     ],
     memberships: [{ usuario_id: 'admin-a', empresa_id: 'e1', scope_level: 'GLOBAL', papel: 'admin', status: 'ativo' }],
   });
-  assert.equal(scope.mode, 'GLOBAL');
+  assert.equal(scope.mode, 'NO_ACCESS');
   assert.deepEqual(scope.authorized_empresa_ids, ['e1']);
-  assert.deepEqual(scope.authorized_unit_ids, ['ua']);
+  assert.deepEqual(scope.authorized_unit_ids, []);
   assert.equal(canAccessUnit(scope, 'ub'), false);
+});
+
+test('grupo solicitado em legacy sem membership corporativa fecha acesso sem vazar empresas do grupo', () => {
+  const scope = resolveOperationalScopeState({
+    user: { id: 'admin-a', empresa_id: 'e1', role: 'admin' },
+    empresaId: 'e1',
+    grupoId: 'g1',
+    empresaMode: 'legacy',
+    groupCompanyRows: [
+      { grupo_id: 'g1', empresa_id: 'e1', status: 'ativo' },
+      { grupo_id: 'g1', empresa_id: 'e2', status: 'ativo' },
+    ],
+    units: [
+      { id: 'ua', empresa_id: 'e1', status: 'ativo' },
+      { id: 'ub', empresa_id: 'e2', status: 'ativo' },
+    ],
+    memberships: [],
+  });
+  assert.equal(scope.mode, 'NO_ACCESS');
+  assert.deepEqual(scope.authorized_empresa_ids, ['e1']);
+  assert.equal(scope.forbidden_group_id, 'g1');
+  assert.equal(canAccessUnit(scope, 'ub'), false);
+});
+
+test('grupo solicitado em configured sem membership corporativa tambem fecha acesso', () => {
+  const scope = resolveOperationalScopeState({
+    user: { id: 'admin-a', empresa_id: 'e1', role: 'admin' },
+    empresaId: 'e1',
+    grupoId: 'g1',
+    empresaMode: 'configured',
+    groupCompanyRows: [
+      { grupo_id: 'g1', empresa_id: 'e1', status: 'ativo' },
+      { grupo_id: 'g1', empresa_id: 'e2', status: 'ativo' },
+    ],
+    units: [
+      { id: 'ua', empresa_id: 'e1', status: 'ativo' },
+      { id: 'ub', empresa_id: 'e2', status: 'ativo' },
+    ],
+    memberships: [],
+  });
+  assert.equal(scope.mode, 'NO_ACCESS');
+  assert.deepEqual(scope.authorized_empresa_ids, ['e1']);
+});
+
+test('membership corporativa valida autoriza grupo mesmo com empresa configured', () => {
+  const scope = resolveOperationalScopeState({
+    user: { id: 'corp', empresa_id: 'e1', role: 'admin' },
+    empresaId: 'e1',
+    grupoId: 'g1',
+    empresaMode: 'configured',
+    groupCompanyRows: [
+      { grupo_id: 'g1', empresa_id: 'e1', status: 'ativo' },
+      { grupo_id: 'g1', empresa_id: 'e2', status: 'ativo' },
+    ],
+    units: [
+      { id: 'ua', empresa_id: 'e1', status: 'ativo' },
+      { id: 'ub', empresa_id: 'e2', status: 'ativo' },
+    ],
+    memberships: [{ usuario_id: 'corp', grupo_id: 'g1', empresa_id: null, scope_level: 'GLOBAL', papel: 'admin', status: 'ativo' }],
+  });
+  assert.equal(scope.mode, 'GLOBAL_CORPORATE');
+  assert.deepEqual(scope.authorized_empresa_ids.sort(), ['e1', 'e2']);
+  assert.deepEqual(scope.authorized_unit_ids.sort(), ['ua', 'ub']);
+});
+
+test('membership corporativa nao vale se empresa do usuario nao esta ativa no grupo', () => {
+  const scope = resolveOperationalScopeState({
+    user: { id: 'corp-c', empresa_id: 'e3', role: 'admin' },
+    empresaId: 'e3',
+    grupoId: 'g1',
+    empresaMode: 'enforced',
+    groupCompanyRows: [
+      { grupo_id: 'g1', empresa_id: 'e1', status: 'ativo' },
+      { grupo_id: 'g1', empresa_id: 'e2', status: 'ativo' },
+    ],
+    units: [
+      { id: 'ua', empresa_id: 'e1', status: 'ativo' },
+      { id: 'ub', empresa_id: 'e2', status: 'ativo' },
+      { id: 'uc', empresa_id: 'e3', status: 'ativo' },
+    ],
+    memberships: [{ usuario_id: 'corp-c', grupo_id: 'g1', empresa_id: null, scope_level: 'GLOBAL', papel: 'admin', status: 'ativo' }],
+  });
+  assert.equal(scope.mode, 'NO_ACCESS');
+  assert.deepEqual(scope.authorized_empresa_ids, ['e3']);
 });
