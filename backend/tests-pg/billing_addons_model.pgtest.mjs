@@ -156,10 +156,11 @@ function registrar() {
 
   before(async () => {
     await pool.query(`INSERT INTO public.empresas (id, nome) VALUES ($1, 'E2E-ADDON-DB')`, [ids.empresa]);
+    const codigoFuncionalidade = `addon_pg_${ids.func.replaceAll('-', '')}`;
     await pool.query(
       `INSERT INTO public.funcionalidades (id, codigo, nome, modelo_cobranca)
-       VALUES ($1, 'addon_pg_' || replace($1::text, '-', ''), 'Addon PG', 'adicional')`,
-      [ids.func],
+       VALUES ($1, $2, 'Addon PG', 'adicional')`,
+      [ids.func, codigoFuncionalidade],
     );
   });
 
