@@ -75,6 +75,18 @@ test('E2E trial + pagamento: pagar durante trial NÃO encerra trial (§13/§47)'
   assert.equal(mundo.situacao.situacao, 'trial_ativo');
 });
 
+test('E2E trial ativo + add-on aceito prepara composicao sem antecipar vencimento', async () => {
+  const mundo = criarMundo({
+    addOns: [{ id: 'ad-trial', funcionalidade_id: 'f1', status: 'ativa', preco_mensal_centavos: 5000, contrato_id: 'ct1', contrato_billing_status: 'plenamente_assinado' }],
+  });
+  const provider = new FakeAsaasProvider();
+  await ensureBillingStateComDeps({ empresaId: 'e-trial-addon', deps: mundo.deps, provider, policyOverrides: { provider_mode: 'fake' } });
+  const sub = provider.subscriptions.get(mundo.empresa.asaas_subscription_id);
+  assert.equal(sub.value, 349.9);
+  assert.equal(sub.nextDueDate, '2026-08-20');
+  assert.equal(mundo.empresa.next_due_date, '2026-08-20');
+});
+
 test('E2E implantação: política "imediato" cobra; "nao_cobrar" não cobra', async () => {
   const comImpl = criarMundo({ snapshot: { valor_mensal: 299.9, valor_implantacao: 500, trial_dias: 14 }, situacao: { situacao: 'ativa' } });
   const p1 = new FakeAsaasProvider();
@@ -168,27 +180,122 @@ test('E2E cancelamento idempotente: cancelar 2x não falha (§53)', async () => 
   assert.equal(c2.status, 'CANCELLED');
 });
 
-test('E2E add-on: add-on faturável ativo gera componente; sem duplicar se já tem componente (§52)', async () => {
+test('E2E add-on mensal aceito atualiza subscription para proximo ciclo sem payment avulso', async () => {
   const mundo = criarMundo({
     situacao: { situacao: 'ativa' },
-    empresa: { asaas_customer_id: 'cus_a', asaas_subscription_id: 'sub_a', next_due_date: '2026-09-01' },
-    addOns: [{ id: 'ad1', funcionalidade_id: 'f1', status: 'ativa', preco_mensal_centavos: 5000, billing_component_id: null }],
+    empresa: { asaas_customer_id: 'cus_a', asaas_subscription_id: 'sub_a', next_due_date: '2026-09-01', billing_valor_mensal: 299.9 },
+    addOns: [{ id: 'ad1', funcionalidade_id: 'f1', status: 'ativa', preco_mensal_centavos: 5000, contrato_id: 'ct1', contrato_billing_status: 'plenamente_assinado' }],
   });
   const provider = new FakeAsaasProvider();
   provider.customers.set('cus_a', { id: 'cus_a' });
+  provider.subscriptions.set('sub_a', { id: 'sub_a', value: 299.9, status: 'ACTIVE' });
   const r = await ensureBillingStateComDeps({ empresaId: 'e-ad', deps: mundo.deps, provider, policyOverrides: { provider_mode: 'fake' } });
-  const addonRes = r.resultados.find((x) => x.tipo === 'garantir_addon');
-  assert.equal(addonRes.created, true);
-  assert.equal(mundo.componentes.get('ad1'), addonRes.id);
+  assert.equal(provider.calls.updateSubscription, 1);
+  assert.equal(provider.calls.createCharge, 0);
+  assert.equal(provider.subscriptions.get('sub_a').value, 349.9);
+  assert.equal(provider.subscriptions.get('sub_a').updatePendingPayments, false);
+  assert.equal(r.resultados.find((x) => x.tipo === 'garantir_addon' || x.tipo === 'remover_addon'), undefined);
+});
 
-  // Segunda execução: add-on já tem componente (convergente) → NENHUMA ação de
-  // add-on é planejada (nem cria nem remove).
-  mundo.addOns[0].billing_component_id = addonRes.id;
-  const provider2 = new FakeAsaasProvider();
-  provider2.customers.set('cus_a', { id: 'cus_a' });
-  const r2 = await ensureBillingStateComDeps({ empresaId: 'e-ad', deps: mundo.deps, provider: provider2, policyOverrides: { provider_mode: 'fake' } });
-  assert.equal(r2.resultados.find((x) => x.tipo === 'garantir_addon' || x.tipo === 'remover_addon'), undefined);
-  assert.equal(provider2.calls.createCharge, 0, 'add-on convergente não gera nova cobrança');
+test('E2E add-on sem aceite explicito = zero billing', async () => {
+  const mundo = criarMundo({
+    situacao: { situacao: 'ativa' },
+    empresa: { asaas_customer_id: 'cus_a', asaas_subscription_id: 'sub_a', next_due_date: '2026-09-01', billing_valor_mensal: 299.9 },
+    addOns: [{ id: 'ad1', funcionalidade_id: 'f1', status: 'ativa', preco_mensal_centavos: 5000 }],
+  });
+  const provider = new FakeAsaasProvider();
+  provider.customers.set('cus_a', { id: 'cus_a' });
+  provider.subscriptions.set('sub_a', { id: 'sub_a', value: 299.9, status: 'ACTIVE' });
+  const r = await ensureBillingStateComDeps({ empresaId: 'e-ad', deps: mundo.deps, provider, policyOverrides: { provider_mode: 'fake' } });
+  assert.equal(provider.calls.createCharge, 0);
+  assert.equal(provider.calls.updateSubscription, 0);
+  assert.ok(r.resultados.find((x) => x.tipo === 'addon_sem_aceite_billing'));
+});
+
+test('E2E add-on aprovado_por sem contrato/aditivo concluido = zero billing', async () => {
+  const mundo = criarMundo({
+    situacao: { situacao: 'ativa' },
+    empresa: { asaas_customer_id: 'cus_a', asaas_subscription_id: 'sub_a', next_due_date: '2026-09-01', billing_valor_mensal: 299.9 },
+    addOns: [{ id: 'ad1', funcionalidade_id: 'f1', status: 'ativa', origem: 'adicional', preco_mensal_centavos: 5000, aprovado_por: 'admin-1' }],
+  });
+  const provider = new FakeAsaasProvider();
+  provider.customers.set('cus_a', { id: 'cus_a' });
+  provider.subscriptions.set('sub_a', { id: 'sub_a', value: 299.9, status: 'ACTIVE' });
+  const r = await ensureBillingStateComDeps({ empresaId: 'e-ad-admin', deps: mundo.deps, provider, policyOverrides: { provider_mode: 'fake' } });
+  assert.equal(provider.calls.updateSubscription, 0);
+  assert.ok(r.resultados.find((x) => x.tipo === 'addon_sem_aceite_billing'));
+});
+
+test('E2E add-on respeita vigencia real de inicio/fim', async () => {
+  const base = {
+    situacao: { situacao: 'ativa' },
+    empresa: { asaas_customer_id: 'cus_a', asaas_subscription_id: 'sub_a', next_due_date: '2026-09-01', billing_valor_mensal: 299.9 },
+  };
+  const futuro = criarMundo({
+    ...base,
+    addOns: [{ id: 'ad-futuro', status: 'ativa', preco_mensal_centavos: 5000, contrato_id: 'ct1', contrato_billing_status: 'plenamente_assinado', vigencia_inicio: '2026-09-01T00:00:00.000Z' }],
+  });
+  const p1 = new FakeAsaasProvider();
+  p1.subscriptions.set('sub_a', { id: 'sub_a', value: 299.9, status: 'ACTIVE' });
+  await ensureBillingStateComDeps({ empresaId: 'e-ad-futuro', deps: futuro.deps, provider: p1, policyOverrides: { provider_mode: 'fake' }, agora: new Date('2026-08-10T00:00:00.000Z') });
+  assert.equal(p1.calls.updateSubscription, 0);
+
+  const vigente = criarMundo({
+    ...base,
+    addOns: [{ id: 'ad-vigente', status: 'ativa', preco_mensal_centavos: 5000, contrato_id: 'ct1', contrato_billing_status: 'plenamente_assinado', vigencia_inicio: '2026-08-01T00:00:00.000Z', vigencia_fim: '2026-09-01T00:00:00.000Z' }],
+  });
+  const p2 = new FakeAsaasProvider();
+  p2.subscriptions.set('sub_a', { id: 'sub_a', value: 299.9, status: 'ACTIVE' });
+  await ensureBillingStateComDeps({ empresaId: 'e-ad-vigente', deps: vigente.deps, provider: p2, policyOverrides: { provider_mode: 'fake' }, agora: new Date('2026-08-10T00:00:00.000Z') });
+  assert.equal(p2.subscriptions.get('sub_a').value, 349.9);
+
+  const expirado = criarMundo({
+    situacao: { situacao: 'ativa' },
+    empresa: { asaas_customer_id: 'cus_a', asaas_subscription_id: 'sub_a', next_due_date: '2026-09-01', billing_valor_mensal: 349.9 },
+    addOns: [{ id: 'ad-expirado', status: 'ativa', preco_mensal_centavos: 5000, contrato_id: 'ct1', contrato_billing_status: 'plenamente_assinado', vigencia_fim: '2026-08-01T00:00:00.000Z' }],
+  });
+  const p3 = new FakeAsaasProvider();
+  p3.subscriptions.set('sub_a', { id: 'sub_a', value: 349.9, status: 'ACTIVE' });
+  await ensureBillingStateComDeps({ empresaId: 'e-ad-expirado', deps: expirado.deps, provider: p3, policyOverrides: { provider_mode: 'fake' }, agora: new Date('2026-08-10T00:00:00.000Z') });
+  assert.equal(p3.subscriptions.get('sub_a').value, 299.9);
+});
+
+test('E2E add-on preco_mensal_centavos e total negociado; quantidade nao multiplica', async () => {
+  const casos = [
+    { id: 'q1', quantidade: 1, esperado: 349.9, acaoInvalida: false },
+    { id: 'q3', quantidade: 3, esperado: 349.9, acaoInvalida: false },
+    { id: 'qnull', quantidade: null, esperado: 349.9, acaoInvalida: false },
+    { id: 'q0', quantidade: 0, esperado: 299.9, acaoInvalida: true },
+  ];
+  for (const caso of casos) {
+    const mundo = criarMundo({
+      situacao: { situacao: 'ativa' },
+      empresa: { asaas_customer_id: 'cus_a', asaas_subscription_id: 'sub_a', next_due_date: '2026-09-01', billing_valor_mensal: 299.9 },
+      addOns: [{ id: caso.id, status: 'ativa', preco_mensal_centavos: 5000, quantidade: caso.quantidade, contrato_id: 'ct1', contrato_billing_status: 'plenamente_assinado' }],
+    });
+    const provider = new FakeAsaasProvider();
+    provider.subscriptions.set('sub_a', { id: 'sub_a', value: 299.9, status: 'ACTIVE' });
+    const r = await ensureBillingStateComDeps({ empresaId: `e-ad-${caso.id}`, deps: mundo.deps, provider, policyOverrides: { provider_mode: 'fake' } });
+    assert.equal(provider.subscriptions.get('sub_a').value, caso.esperado);
+    assert.equal(Boolean(r.resultados.find((x) => x.tipo === 'addon_quantidade_invalida_billing')), caso.acaoInvalida);
+  }
+});
+
+test('E2E add-on removido preserva historico pago e reduz proximo ciclo', async () => {
+  const mundo = criarMundo({
+    situacao: { situacao: 'ativa' },
+    empresa: { asaas_customer_id: 'cus_a', asaas_subscription_id: 'sub_a', next_due_date: '2026-09-01', billing_valor_mensal: 349.9 },
+    addOns: [{ id: 'ad1', funcionalidade_id: 'f1', status: 'inativa', preco_mensal_centavos: 5000, contrato_id: 'ct1', contrato_billing_status: 'plenamente_assinado', billing_component_id: 'pay_pago' }],
+  });
+  const provider = new FakeAsaasProvider();
+  provider.customers.set('cus_a', { id: 'cus_a' });
+  provider.subscriptions.set('sub_a', { id: 'sub_a', value: 349.9, status: 'ACTIVE' });
+  provider.charges.set('pay_pago', { id: 'pay_pago', value: 50, status: 'RECEIVED' });
+  await ensureBillingStateComDeps({ empresaId: 'e-ad', deps: mundo.deps, provider, policyOverrides: { provider_mode: 'fake' } });
+  assert.equal(provider.calls.cancelComponent, 0);
+  assert.equal(provider.charges.get('pay_pago').status, 'RECEIVED');
+  assert.equal(provider.calls.updateSubscription, 1);
+  assert.equal(provider.subscriptions.get('sub_a').value, 299.9);
 });
 
 test('E2E estado sem cobrança nova: suspensa não cria nada', async () => {

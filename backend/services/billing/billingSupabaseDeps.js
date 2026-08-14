@@ -6,6 +6,36 @@
 
 const { carregarSituacaoComercial } = require('../situacaoComercialService');
 
+const CAMPOS_ADDON_BILLING = [
+  'id',
+  'funcionalidade_id',
+  'status',
+  'origem',
+  'preco_mensal_centavos',
+  'quantidade',
+  'vigencia_inicio',
+  'vigencia_fim',
+  'aprovado_por',
+  'contrato_id',
+  'aditivo_id',
+  'billing_component_id',
+].join(', ');
+
+function idsUnicos(lista) {
+  return Array.from(new Set((lista || []).filter(Boolean).map(String)));
+}
+
+async function carregarContratosPorIds(supabase, ids) {
+  const contratoIds = idsUnicos(ids);
+  if (contratoIds.length === 0) return new Map();
+  const { data, error } = await supabase
+    .from('contratos_comerciais')
+    .select('id, status, empresa_id, aceito_em')
+    .in('id', contratoIds);
+  if (error) return new Map();
+  return new Map((data || []).map((c) => [String(c.id), c]));
+}
+
 function criarDepsSupabase(supabase) {
   return {
     carregarSituacao: async (empresaId) => carregarSituacaoComercial(supabase, empresaId),
@@ -36,13 +66,28 @@ function criarDepsSupabase(supabase) {
       // (para convergência de remoção quando ficaram inativos). O orquestrador
       // decide criar/remover por convergência.
       const [ativos, comComponente] = await Promise.all([
-        supabase.from('empresa_funcionalidades').select('id, funcionalidade_id, status, preco_mensal_centavos, billing_component_id').eq('empresa_id', empresaId).eq('status', 'ativa'),
-        supabase.from('empresa_funcionalidades').select('id, funcionalidade_id, status, preco_mensal_centavos, billing_component_id').eq('empresa_id', empresaId).not('billing_component_id', 'is', null),
+        supabase.from('empresa_funcionalidades').select(CAMPOS_ADDON_BILLING).eq('empresa_id', empresaId).eq('status', 'ativa'),
+        supabase.from('empresa_funcionalidades').select(CAMPOS_ADDON_BILLING).eq('empresa_id', empresaId).not('billing_component_id', 'is', null),
       ]);
       const mapa = new Map();
       for (const a of (ativos.data || [])) mapa.set(a.id, a);
       for (const a of (comComponente.data || [])) if (!mapa.has(a.id)) mapa.set(a.id, a);
-      return Array.from(mapa.values());
+      const addons = Array.from(mapa.values());
+      const contratos = await carregarContratosPorIds(
+        supabase,
+        addons.flatMap((a) => [a.contrato_id, a.aditivo_id]),
+      );
+      return addons.map((a) => {
+        const contratoRaw = a.contrato_id ? contratos.get(String(a.contrato_id)) : null;
+        const aditivoRaw = a.aditivo_id ? contratos.get(String(a.aditivo_id)) : null;
+        const contrato = contratoRaw && String(contratoRaw.empresa_id) === String(empresaId) ? contratoRaw : null;
+        const aditivo = aditivoRaw && String(aditivoRaw.empresa_id) === String(empresaId) ? aditivoRaw : null;
+        return {
+          ...a,
+          contrato_billing_status: contrato?.status || null,
+          aditivo_billing_status: aditivo?.status || null,
+        };
+      });
     },
 
     // Persiste o patch de billing. Trata __addon separadamente (grava o componente
@@ -75,4 +120,4 @@ function criarDepsSupabase(supabase) {
   };
 }
 
-module.exports = { criarDepsSupabase };
+module.exports = { criarDepsSupabase, CAMPOS_ADDON_BILLING, carregarContratosPorIds };

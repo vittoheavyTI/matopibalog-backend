@@ -1,12 +1,12 @@
-// Adapter real do Asaas restrito a SANDBOX.
+// Adapter REAL do Asaas production.
 //
-// Mantem o mesmo contrato do provider production, mas recusa qualquer host de
-// producao. Faz lookup por externalReference antes do POST e, em erro
-// inconclusivo, consulta novamente antes de permitir retry externo.
+// Este arquivo nao decide se production pode escrever. Ele so implementa o mesmo
+// contrato do provider sandbox. A construcao dele fica atras de
+// billingProductionGate, que exige flag, runner, allowlist, segredo e operacao
+// elegivel. Sem gate aprovado, o orquestrador nunca instancia este provider.
 
-const HOST_SANDBOX = 'api-sandbox.asaas.com';
-const LEGACY_HOST_SANDBOX = 'sandbox.asaas.com';
-const BASE_SANDBOX = 'https://api-sandbox.asaas.com/v3';
+const HOST_PRODUCTION = 'api.asaas.com';
+const BASE_PRODUCTION = 'https://api.asaas.com/v3';
 const {
   asaasHeaders,
   canonicalCustomerReference,
@@ -15,28 +15,26 @@ const {
   primeiroItem,
 } = require('./asaasProviderSafety');
 
-function ehSandbox({ environment, baseURL } = {}) {
-  const envOk = String(environment || '').toLowerCase() === 'sandbox';
+function ehProduction({ environment, baseURL } = {}) {
+  const envOk = String(environment || '').toLowerCase() === 'production';
   let host = '';
   try { host = new URL(baseURL || '').hostname; } catch { host = ''; }
-  const hostOk = host === HOST_SANDBOX || host === LEGACY_HOST_SANDBOX;
-  const pareceProducao = host === 'api.asaas.com' || /\.api\.asaas\.com$/.test(host);
-  return envOk && hostOk && !pareceProducao;
+  return envOk && host === HOST_PRODUCTION;
 }
 
-class AsaasSandboxProvider {
+class AsaasProductionProvider {
   constructor({ config, http } = {}) {
-    if (!ehSandbox(config)) {
-      throw new Error('AsaasSandboxProvider recusado: environment/host nao e sandbox inequivoco (fail-closed).');
+    if (!ehProduction(config)) {
+      throw new Error('AsaasProductionProvider recusado: environment/host nao e production inequivoco (fail-closed).');
     }
     if (!config.apiKey) {
-      throw new Error('AsaasSandboxProvider: apiKey sandbox ausente.');
+      throw new Error('AsaasProductionProvider: apiKey production ausente.');
     }
     this._http = http;
-    this._base = config.baseURL || BASE_SANDBOX;
-    this._headers = asaasHeaders({ apiKey: config.apiKey, environment: 'sandbox' });
+    this._base = config.baseURL || BASE_PRODUCTION;
+    this._headers = asaasHeaders({ apiKey: config.apiKey, environment: 'production' });
     this._commitUncertainRefs = new Set();
-    this.environment = 'sandbox';
+    this.environment = 'production';
   }
 
   async _post(path, body) {
@@ -56,13 +54,15 @@ class AsaasSandboxProvider {
 
   async _acharCustomerPorRef(ref) {
     if (!ref) return null;
-    const item = primeiroItem(await this._get(`/customers?externalReference=${encodeURIComponent(ref)}`));
+    const data = await this._get(`/customers?externalReference=${encodeURIComponent(ref)}`);
+    const item = primeiroItem(data);
     return item ? { id: item.id } : null;
   }
 
   async _acharSubscriptionPorRef(ref) {
     if (!ref) return null;
-    const item = primeiroItem(await this._get(`/subscriptions?externalReference=${encodeURIComponent(ref)}`));
+    const data = await this._get(`/subscriptions?externalReference=${encodeURIComponent(ref)}`);
+    const item = primeiroItem(data);
     return item ? {
       id: item.id,
       nextDueDate: item.nextDueDate || null,
@@ -73,7 +73,8 @@ class AsaasSandboxProvider {
 
   async _acharChargePorRef(ref) {
     if (!ref) return null;
-    const item = primeiroItem(await this._get(`/payments?externalReference=${encodeURIComponent(ref)}`));
+    const data = await this._get(`/payments?externalReference=${encodeURIComponent(ref)}`);
+    const item = primeiroItem(data);
     return item ? {
       id: item.id,
       status: item.status || 'PENDING',
@@ -141,7 +142,7 @@ class AsaasSandboxProvider {
   }
 
   async createSubscription({ customerId, value, nextDueDate, cycle = 'MONTHLY', externalReference } = {}) {
-    if (!externalReference) throw new Error('AsaasSandboxProvider: externalReference obrigatorio para subscription.');
+    if (!externalReference) throw new Error('AsaasProductionProvider: externalReference obrigatorio para subscription.');
     const existente = await this._acharSubscriptionPorRef(externalReference);
     if (existente) return existente;
     const pendente = await this._bloquearNovoPostSeCommitIncerto('subscription', externalReference, () => this._acharSubscriptionPorRef(externalReference));
@@ -170,7 +171,7 @@ class AsaasSandboxProvider {
   }
 
   async createCharge({ customerId, value, dueDate, description, externalReference } = {}) {
-    if (!externalReference) throw new Error('AsaasSandboxProvider: externalReference obrigatorio para charge.');
+    if (!externalReference) throw new Error('AsaasProductionProvider: externalReference obrigatorio para charge.');
     const existente = await this._acharChargePorRef(externalReference);
     if (existente) return existente;
     const pendente = await this._bloquearNovoPostSeCommitIncerto('charge', externalReference, () => this._acharChargePorRef(externalReference));
@@ -223,4 +224,4 @@ class AsaasSandboxProvider {
   async getCharge(id) { return this._get(`/payments/${id}`); }
 }
 
-module.exports = { AsaasSandboxProvider, ehSandbox, HOST_SANDBOX, LEGACY_HOST_SANDBOX, BASE_SANDBOX };
+module.exports = { AsaasProductionProvider, ehProduction, HOST_PRODUCTION, BASE_PRODUCTION };

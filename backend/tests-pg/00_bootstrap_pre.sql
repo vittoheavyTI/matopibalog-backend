@@ -45,6 +45,16 @@ CREATE TABLE IF NOT EXISTS public.empresas (
   codigo_convite text    NULL               -- idem (match exato de convite)
 );
 
+-- 3A-1 ja possui contratos_comerciais em producao (migrations 053-057). O
+-- bootstrap PG de billing mantem apenas as colunas que o carregador de add-ons
+-- precisa para provar aceite financeiro por contrato/aditivo concluido.
+CREATE TABLE IF NOT EXISTS public.contratos_comerciais (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  empresa_id uuid NULL REFERENCES public.empresas(id) ON DELETE CASCADE,
+  status     text NOT NULL,
+  aceito_em  timestamptz NULL
+);
+
 -- Tabela `fretes` mínima — pré-requisito do FK frete_id da migration 064
 -- (frete_tracking_credenciais). SOMENTE colunas tocadas pelos testes; 100% sintética.
 CREATE TABLE IF NOT EXISTS public.fretes (

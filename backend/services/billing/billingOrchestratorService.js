@@ -1,7 +1,7 @@
 // Orquestrador de billing (I/O) — macrofrente 3A-2.
 //
 // Compõe o cérebro PURO (billingOrchestratorDomainService.planejarBilling) com um
-// PROVIDER injetável (fake em teste; sandbox no gate; NUNCA produção) e persiste o
+// PROVIDER injetável (fake/sandbox, ou production somente atrás do gate) e persiste o
 // resultado de forma idempotente. É o ponto único de automação: chamado quando o
 // estado comercial muda (ensureBillingState) e também pela contingência manual —
 // mesmo motor, sem lógica duplicada (§23/§24/§37).
@@ -13,6 +13,13 @@ const { planejarBilling } = require('./billingOrchestratorDomainService');
 const { resolvePolicy } = require('./billingPolicyConfig');
 const { FakeAsaasProvider } = require('./fakeAsaasProvider');
 const { AsaasSandboxProvider, ehSandbox } = require('./asaasSandboxProvider');
+const { AsaasProductionProvider } = require('./asaasProductionProvider');
+const { PROVIDER_PRODUCTION, avaliarBillingProductionGate } = require('./billingProductionGate');
+const {
+  canonicalSubscriptionReference,
+  canonicalImplantationChargeReference,
+  isAsaasCommitUncertainError,
+} = require('./asaasProviderSafety');
 
 // Lock cooperativo por empresa: serializa ensureBillingState concorrentes para a
 // MESMA empresa, garantindo idempotência (10 chamadas concorrentes → 1 customer).
@@ -33,6 +40,7 @@ async function comLock(chave, fn) {
 
 // Retry só para erros TRANSITÓRIOS (timeout/429/5xx). 4xx de negócio não repete (§22).
 function ehTransitorio(err) {
+  if (isAsaasCommitUncertainError(err)) return false;
   const s = err && (err.httpStatus ?? err.status);
   if (s === 0 || err?.code === 'ETIMEDOUT') return true;
   if (s === 429) return true;
@@ -56,19 +64,31 @@ async function comRetry(fn, { tentativas = 3, baseMs = 5, onRetry } = {}) {
   throw ultimo;
 }
 
-// Seleciona o provider conforme a política. NUNCA retorna adapter de produção.
+// Seleciona o provider conforme a política. Produção só é construída atrás
+// do gate cumulativo + allowlist; qualquer lacuna falha antes do adapter HTTP.
 //   opts.providerOverride : injeta um provider pronto (testes usam o fake).
 //   opts.asaasConfig      : { environment, baseURL, apiKey } para o sandbox real.
 //   opts.http             : cliente HTTP (axios) para o adapter sandbox.
-function selecionarProvider(policy, { providerOverride, asaasConfig, http } = {}) {
+function selecionarProvider(policy, { providerOverride, asaasConfig, http, empresaId, env = process.env } = {}) {
   if (providerOverride) return providerOverride;
 
-  // PRODUÇÃO é fail-closed em qualquer caminho: nem policy nem config podem ligá-la.
+  // Produção exige provider_mode dedicado e gate cumulativo.
   if (policy.provider_mode === 'production' || String(asaasConfig?.environment || '').toLowerCase() === 'production') {
-    throw new Error('Asaas produção é PROIBIDO nesta frente (fail-closed).');
+    throw new Error('Asaas produção é PROIBIDO sem provider_mode=asaas_production e gate cumulativo (fail-closed).');
   }
 
   if (policy.provider_mode === 'fake') return new FakeAsaasProvider();
+
+  if (policy.provider_mode === PROVIDER_PRODUCTION) {
+    const gate = avaliarBillingProductionGate({ empresaId, operation: 'billing_orchestrator', env });
+    if (!gate.allowed) {
+      throw new Error(`Asaas production bloqueado: ${gate.failures.join(',')}`);
+    }
+    return new AsaasProductionProvider({
+      config: { environment: 'production', baseURL: gate.baseURL, apiKey: env.ASAAS_API_KEY },
+      http,
+    });
+  }
 
   if (policy.provider_mode === 'sandbox') {
     // Só constrói o adapter real se o ambiente for INEQUIVOCAMENTE sandbox e a
@@ -112,7 +132,7 @@ async function executarPlano({ acoes = [], empresa = {}, snapshot = {}, provider
         value: a.valor_mensal,
         nextDueDate: a.primeiro_vencimento,
         cycle: a.billing_cycle,
-        externalReference: estado.id,
+        externalReference: canonicalSubscriptionReference(estado.id),
       }));
       estado.asaas_subscription_id = r.id;
       estado.billing_valor_mensal = a.valor_mensal;
@@ -124,7 +144,7 @@ async function executarPlano({ acoes = [], empresa = {}, snapshot = {}, provider
     } else if (a.tipo === 'atualizar_assinatura_valor') {
       // Convergência de plano alterado (§1.3): idempotente (skip se já no valor).
       if (Number(estado.billing_valor_mensal) === Number(a.valor_mensal)) { resultados.push({ tipo: a.tipo, skip: true }); continue; }
-      await retry(() => provider.updateSubscription({ subscriptionId: a.subscription_id, value: a.valor_mensal }));
+      await retry(() => provider.updateSubscription({ subscriptionId: a.subscription_id, value: a.valor_mensal, updatePendingPayments: false }));
       estado.billing_valor_mensal = a.valor_mensal;
       patch.billing_valor_mensal = a.valor_mensal;
       resultados.push({ tipo: a.tipo, updated: true, valor: a.valor_mensal });
@@ -140,9 +160,7 @@ async function executarPlano({ acoes = [], empresa = {}, snapshot = {}, provider
       if (persist) await persist({ assinatura_cancelada: true, billing_status: 'cancelada' });
     } else if (a.tipo === 'remover_addon') {
       // Convergência de add-on removido (§1.4).
-      await retry(() => provider.cancelComponent({ componentId: a.componente }));
-      resultados.push({ tipo: a.tipo, removed: true, addon_id: a.addon_id });
-      if (persist) await persist({ __addon_removido: { addon_id: a.addon_id } });
+      resultados.push({ tipo: a.tipo, skip: true, addon_id: a.addon_id, motivo: 'addon_mensal_nao_deleta_historico' });
     } else if (a.tipo === 'cobrar_implantacao') {
       if (estado.implantacao_cobrada) { resultados.push({ tipo: a.tipo, skip: true }); continue; }
       const r = await retry(() => provider.createCharge({
@@ -150,23 +168,18 @@ async function executarPlano({ acoes = [], empresa = {}, snapshot = {}, provider
         value: a.valor,
         dueDate: a.vencimento,
         description: 'Implantação',
-        externalReference: `${estado.id}:implantacao`,
+        externalReference: canonicalImplantationChargeReference(estado.id),
       }));
       estado.implantacao_cobrada = true;
       patch.implantacao_cobrada = true;
       resultados.push({ tipo: a.tipo, created: true, id: r.id, valor: a.valor });
       if (persist) await persist({ implantacao_cobrada: true });
     } else if (a.tipo === 'garantir_addon') {
-      if (a.componente) { resultados.push({ tipo: a.tipo, skip: true, addon_id: a.addon_id }); continue; }
-      const r = await retry(() => provider.createCharge({
-        customerId: estado.asaas_customer_id,
-        value: (a.preco_mensal_centavos || 0) / 100,
-        dueDate: patch.next_due_date || estado.next_due_date || null,
-        description: `Add-on ${a.funcionalidade_id || ''}`.trim(),
-        externalReference: `${estado.id}:addon:${a.addon_id}`,
-      }));
-      resultados.push({ tipo: a.tipo, created: true, id: r.id, addon_id: a.addon_id });
-      if (persist) await persist({ __addon: { addon_id: a.addon_id, billing_component_id: r.id } });
+      resultados.push({ tipo: a.tipo, skip: true, addon_id: a.addon_id, motivo: 'addon_mensal_compoe_subscription_nao_payment_avulso' });
+    } else if (a.tipo === 'addon_sem_aceite_billing') {
+      resultados.push({ tipo: a.tipo, skip: true, addon_id: a.addon_id, motivo: 'addon_sem_aceite_financeiro' });
+    } else if (a.tipo === 'addon_quantidade_invalida_billing') {
+      resultados.push({ tipo: a.tipo, skip: true, addon_id: a.addon_id, motivo: 'addon_quantidade_invalida' });
     } else {
       resultados.push({ tipo: a.tipo, skip: true, motivo: 'acao_desconhecida' });
     }
@@ -182,10 +195,10 @@ async function executarPlano({ acoes = [], empresa = {}, snapshot = {}, provider
 //   deps.carregarAddOns(empresaId) -> [empresa_funcionalidades]
 //   deps.persist(empresaId, patch) -> void
 //   provider, policyOverrides, agora
-async function ensureBillingStateComDeps({ empresaId, deps, provider, policyOverrides = {}, agora = new Date(), asaasConfig, http }) {
+async function ensureBillingStateComDeps({ empresaId, deps, provider, policyOverrides = {}, agora = new Date(), asaasConfig, http, env }) {
   return comLock(`ensure:${empresaId}`, async () => {
     const policy = resolvePolicy(policyOverrides);
-    const prov = provider || selecionarProvider(policy, { asaasConfig, http });
+    const prov = provider || selecionarProvider(policy, { asaasConfig, http, empresaId, env });
 
     const situacao = await deps.carregarSituacao(empresaId);
     const empresa = await deps.carregarEmpresaBilling(empresaId);
