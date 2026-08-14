@@ -84,6 +84,7 @@ function resumirBillingHealth({
   // FASE 5 (sync Asaas) — estado da fila de sync por empresa (migration 042).
   // Ausente (tabela não provisionada) → [] → nenhum sinal de sync dispara.
   asaasSyncEstado = [],
+  productionGate = null,
   hoje = new Date(),
 } = {}) {
   const hojeStr = soData(hoje) || new Date().toISOString().slice(0, 10);
@@ -453,6 +454,15 @@ function resumirBillingHealth({
       empresa_upgrade_recomendado,
       empresa_valor_sync_desatualizado_por_quantidade,
       webhook_por_status,
+    },
+    production_gate: productionGate || {
+      state: 'PRODUCTION_DISABLED',
+      provider_mode: 'fake',
+      runner_enabled: false,
+      production_enabled: false,
+      allowlist_count: 0,
+      production_secret_present: false,
+      production_secret_authority: 'ASAAS_API_KEY_ENV_ONLY',
     },
   };
 }

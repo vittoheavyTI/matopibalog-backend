@@ -28,6 +28,7 @@ const funcAdmin = require('../services/funcionalidadeAdminService');
 const { resolverEntitlement } = require('../services/entitlementDomainService');
 const { categoriaCompativelComTipo, mensagemIncompatibilidade } = require('../utils/planoCategoria');
 const { resumirBillingHealth } = require('../services/billingHealthService');
+const { resumoBillingProductionGate } = require('../services/billing/billingProductionGate');
 const { recomendarPlano, valorEfetivoEmpresa } = require('../services/calculadoraComercialService');
 const asaasSync = require('../services/asaasSyncDomainService');
 const {
@@ -151,6 +152,7 @@ router.get('/billing-health', async (req, res) => {
       planos,
       contagemMotoristasPorEmpresa,
       asaasSyncEstado,
+      productionGate: resumoBillingProductionGate(process.env),
     });
     if (eventosR && eventosR.error) resumo.aviso_webhook = 'nao_foi_possivel_ler_eventos_webhook';
     return res.json(resumo);

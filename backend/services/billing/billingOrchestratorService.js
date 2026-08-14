@@ -1,7 +1,7 @@
 // Orquestrador de billing (I/O) — macrofrente 3A-2.
 //
 // Compõe o cérebro PURO (billingOrchestratorDomainService.planejarBilling) com um
-// PROVIDER injetável (fake em teste; sandbox no gate; NUNCA produção) e persiste o
+// PROVIDER injetável (fake/sandbox, ou production somente atrás do gate) e persiste o
 // resultado de forma idempotente. É o ponto único de automação: chamado quando o
 // estado comercial muda (ensureBillingState) e também pela contingência manual —
 // mesmo motor, sem lógica duplicada (§23/§24/§37).
@@ -13,6 +13,8 @@ const { planejarBilling } = require('./billingOrchestratorDomainService');
 const { resolvePolicy } = require('./billingPolicyConfig');
 const { FakeAsaasProvider } = require('./fakeAsaasProvider');
 const { AsaasSandboxProvider, ehSandbox } = require('./asaasSandboxProvider');
+const { AsaasProductionProvider } = require('./asaasProductionProvider');
+const { PROVIDER_PRODUCTION, avaliarBillingProductionGate } = require('./billingProductionGate');
 
 // Lock cooperativo por empresa: serializa ensureBillingState concorrentes para a
 // MESMA empresa, garantindo idempotência (10 chamadas concorrentes → 1 customer).
@@ -56,19 +58,31 @@ async function comRetry(fn, { tentativas = 3, baseMs = 5, onRetry } = {}) {
   throw ultimo;
 }
 
-// Seleciona o provider conforme a política. NUNCA retorna adapter de produção.
+// Seleciona o provider conforme a política. Produção só é construída atrás
+// do gate cumulativo + allowlist; qualquer lacuna falha antes do adapter HTTP.
 //   opts.providerOverride : injeta um provider pronto (testes usam o fake).
 //   opts.asaasConfig      : { environment, baseURL, apiKey } para o sandbox real.
 //   opts.http             : cliente HTTP (axios) para o adapter sandbox.
-function selecionarProvider(policy, { providerOverride, asaasConfig, http } = {}) {
+function selecionarProvider(policy, { providerOverride, asaasConfig, http, empresaId, env = process.env } = {}) {
   if (providerOverride) return providerOverride;
 
-  // PRODUÇÃO é fail-closed em qualquer caminho: nem policy nem config podem ligá-la.
+  // Produção exige provider_mode dedicado e gate cumulativo.
   if (policy.provider_mode === 'production' || String(asaasConfig?.environment || '').toLowerCase() === 'production') {
-    throw new Error('Asaas produção é PROIBIDO nesta frente (fail-closed).');
+    throw new Error('Asaas produção é PROIBIDO sem provider_mode=asaas_production e gate cumulativo (fail-closed).');
   }
 
   if (policy.provider_mode === 'fake') return new FakeAsaasProvider();
+
+  if (policy.provider_mode === PROVIDER_PRODUCTION) {
+    const gate = avaliarBillingProductionGate({ empresaId, operation: 'billing_orchestrator', env });
+    if (!gate.allowed) {
+      throw new Error(`Asaas production bloqueado: ${gate.failures.join(',')}`);
+    }
+    return new AsaasProductionProvider({
+      config: { environment: 'production', baseURL: gate.baseURL, apiKey: env.ASAAS_API_KEY },
+      http,
+    });
+  }
 
   if (policy.provider_mode === 'sandbox') {
     // Só constrói o adapter real se o ambiente for INEQUIVOCAMENTE sandbox e a
@@ -182,10 +196,10 @@ async function executarPlano({ acoes = [], empresa = {}, snapshot = {}, provider
 //   deps.carregarAddOns(empresaId) -> [empresa_funcionalidades]
 //   deps.persist(empresaId, patch) -> void
 //   provider, policyOverrides, agora
-async function ensureBillingStateComDeps({ empresaId, deps, provider, policyOverrides = {}, agora = new Date(), asaasConfig, http }) {
+async function ensureBillingStateComDeps({ empresaId, deps, provider, policyOverrides = {}, agora = new Date(), asaasConfig, http, env }) {
   return comLock(`ensure:${empresaId}`, async () => {
     const policy = resolvePolicy(policyOverrides);
-    const prov = provider || selecionarProvider(policy, { asaasConfig, http });
+    const prov = provider || selecionarProvider(policy, { asaasConfig, http, empresaId, env });
 
     const situacao = await deps.carregarSituacao(empresaId);
     const empresa = await deps.carregarEmpresaBilling(empresaId);

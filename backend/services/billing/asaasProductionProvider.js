@@ -1,51 +1,39 @@
-// Adapter REAL do Asaas — restrito a SANDBOX (macrofrente 3A-2, §3).
+// Adapter REAL do Asaas production.
 //
-// Implementa o MESMO contrato do fakeAsaasProvider, para que o orquestrador e os
-// testes usem um único motor. Fail-closed para PRODUÇÃO: recusa construir se o
-// environment/host não for inequivocamente sandbox.
-//
-// Documentação oficial (contrato técnico usado — registrado, não copiado):
-//   Base URL sandbox : https://sandbox.asaas.com/api/v3
-//   Auth             : header `access_token: <API key sandbox>`
-//   POST /customers            → { id, ... }
-//   POST /subscriptions        → { id, nextDueDate, status, ... }
-//   POST /payments             → { id, status, value, dueDate, ... }
-//   DELETE /subscriptions/:id  → { deleted, id }
-//   GET  /customers/:id | /subscriptions/:id | /payments/:id
-//   Dedup: usamos `externalReference` + busca prévia para evitar duplicatas.
-//
-// NÃO loga API key / Authorization / payload sensível.
+// Este arquivo nao decide se production pode escrever. Ele so implementa o mesmo
+// contrato do provider sandbox. A construcao dele fica atras de
+// billingProductionGate, que exige flag, runner, allowlist, segredo e operacao
+// elegivel. Sem gate aprovado, o orquestrador nunca instancia este provider.
 
-const HOST_SANDBOX = 'sandbox.asaas.com';
-const BASE_SANDBOX = 'https://sandbox.asaas.com/api/v3';
+const HOST_PRODUCTION = 'api.asaas.com';
+const BASE_PRODUCTION = 'https://api.asaas.com/v3';
 
-function ehSandbox({ environment, baseURL } = {}) {
-  const envOk = String(environment || '').toLowerCase() === 'sandbox';
-  const hostOk = typeof baseURL === 'string' && baseURL.includes(HOST_SANDBOX);
-  // Bloqueio explícito: qualquer indício de produção reprova.
-  const pareceProducao = typeof baseURL === 'string' && /(^|\.)api\.asaas\.com/.test(baseURL);
-  return envOk && hostOk && !pareceProducao;
+function ehProduction({ environment, baseURL } = {}) {
+  const envOk = String(environment || '').toLowerCase() === 'production';
+  let host = '';
+  try { host = new URL(baseURL || '').hostname; } catch { host = ''; }
+  return envOk && host === HOST_PRODUCTION;
 }
 
-class AsaasSandboxProvider {
-  // config: { environment:'sandbox', baseURL, apiKey }; http: cliente axios-like.
+class AsaasProductionProvider {
   constructor({ config, http } = {}) {
-    if (!ehSandbox(config)) {
-      throw new Error('AsaasSandboxProvider recusado: environment/host não é sandbox inequívoco (fail-closed).');
+    if (!ehProduction(config)) {
+      throw new Error('AsaasProductionProvider recusado: environment/host nao e production inequivoco (fail-closed).');
     }
     if (!config.apiKey) {
-      throw new Error('AsaasSandboxProvider: apiKey sandbox ausente.');
+      throw new Error('AsaasProductionProvider: apiKey production ausente.');
     }
     this._http = http;
-    this._base = config.baseURL || BASE_SANDBOX;
+    this._base = config.baseURL || BASE_PRODUCTION;
     this._headers = { access_token: config.apiKey, 'Content-Type': 'application/json' };
-    this.environment = 'sandbox';
+    this.environment = 'production';
   }
 
   async _post(path, body) {
     const { data } = await this._http.post(`${this._base}${path}`, body, { headers: this._headers });
     return data;
   }
+
   async _get(path) {
     try {
       const { data } = await this._http.get(`${this._base}${path}`, { headers: this._headers });
@@ -56,7 +44,6 @@ class AsaasSandboxProvider {
     }
   }
 
-  // Busca customer sintético por externalReference (dedup antes de criar).
   async _acharCustomerPorRef(ref) {
     if (!ref) return null;
     const data = await this._get(`/customers?externalReference=${encodeURIComponent(ref)}`);
@@ -126,4 +113,4 @@ class AsaasSandboxProvider {
   async getCharge(id) { return this._get(`/payments/${id}`); }
 }
 
-module.exports = { AsaasSandboxProvider, ehSandbox, HOST_SANDBOX, BASE_SANDBOX };
+module.exports = { AsaasProductionProvider, ehProduction, HOST_PRODUCTION, BASE_PRODUCTION };

@@ -10,6 +10,7 @@ on:
   push:
     branches:
       - feat/3a-2-billing-asaas
+      - feat/go-live-financeiro-asaas-production
     paths:
       - "backend/**"
       - ".github/workflows/billing-3a2-ci.yml"

@@ -1,198 +1,167 @@
-# Runbook — Go-live de Billing (Asaas sandbox → production)
+# Runbook - Go-live Financeiro / Asaas Production
 
-> Documento operacional versionado. **Ler inteiro antes de qualquer ação.**
-> Escopo: como ativar cobrança real no Asaas com segurança, validar e reverter.
-> Este runbook **não ativa nada** — descreve o procedimento. Cada passo marcado
-> com 🔴 é um **hard stop** que exige autorização explícita do responsável.
+Estado deste runbook: arquitetura preparada, Asaas production desligado.
 
-Última atualização: 2026-07-22. Base de código: `main` após PR #305.
+Este documento substitui o runbook historico de 22/07/2026 para o caminho 3A-2.
+Ele nao autoriza dinheiro real. O proximo gate unico e:
 
----
+`FINAL_ASAAS_PRODUCTION_ACTIVATION_GATE`
 
-## 0. Modelo mental — por que hoje NÃO cobra de verdade
+## Autoridade Canonica
 
-O sistema é **fail-closed para sandbox** por design. Duas travas independentes:
+O motor canonico de cobranca nova e:
 
-1. **Ambiente Asaas** vive no banco, não em env var:
-   `configuracoes.dados.integracao_asaas.environment` = `'sandbox'` | `'production'`.
-   A `baseURL` deriva dele: `production` → `https://api.asaas.com/v3`;
-   qualquer outro valor → `https://sandbox.asaas.com/api/v3`
-   (`backend/routes/pagamentos.js`, `getAsaasConfig`).
+`billing_outbox -> billingOutboxRunner -> billingOutboxWorker -> billingOrchestratorService -> provider`
 
-2. **Sandbox-gate nas rotas** (`bloquearSeNaoSandbox`): **13 endpoints** de billing
-   respondem **403** se `environment !== 'sandbox'` — inclusive criar cliente,
-   criar cobrança, conciliar, PIX sob demanda, regularização, faturas
-   recorrentes e assinaturas. O job de recorrência tem a **mesma trava** embutida.
+Rotas legadas de `/pagamentos` permanecem como compatibilidade/sandbox e continuam
+bloqueadas por `bloquearSeNaoSandbox`. Elas nao sao o motor de production.
 
-**Consequência crítica:** só mudar o ambiente para `production` **não** liga a
-cobrança real — pelo contrário, **derruba** todas essas rotas (403), porque elas
-exigem `sandbox`. Portanto o go-live real é uma mudança **deliberada e
-coordenada** de DUAS coisas: (a) trocar o ambiente para `production` **e**
-(b) relaxar/ajustar o sandbox-gate para permitir produção. O item (b) é um
-**🔴 hard stop** ("remover sandbox-gate") e deve ser um PR próprio, revisado,
-com o gate virando algo como "permitir sandbox OU produção-autorizada", nunca
-uma remoção cega.
+## Fonte Canonica da Credencial
 
----
+`PRODUCTION_SECRET_AUTHORITY = ASAAS_API_KEY_ENV_ONLY`
 
-## 1. Pré-requisitos antes de cogitar produção
+A chave production deve existir somente em variavel protegida do runtime. A chave
+legada em `configuracoes.dados.integracao_asaas.apiKey` segue existindo para o
+mundo sandbox/legado, mas nao e autoridade para o provider production 3A-2.
 
-- [ ] **Preços comerciais definidos** e aplicados no catálogo (hoje são
-      placeholder: Básico 149,90 / Básico Autônomo 149,99 / Profissional 149,99 /
-      Enterprise 199,90). 🔴 Decisão comercial + alteração de preço em produção.
-- [ ] **Catálogo auditado**: nenhuma empresa em plano de categoria incompatível
-      (o PR #304 barra novas; corrigir as antigas via DML autorizado). Verificar
-      em `GET /painel-admin/billing-health` → `categoria_incompativel: 0`.
-- [ ] **Dados de teste isolados/limpos** (contas TESTE/Codex/Sandbox/Alfa/Bravo/
-      José e reservas órfãs). Ver runbook de limpeza (PR de dados) — DML autorizado.
-- [ ] **billing-health limpo**: `GET /painel-admin/billing-health` → `ok: true`
-      (ou apenas pendências conhecidas e aceitas).
-- [ ] **Conta Asaas de produção** criada, com chave de API de produção em mãos.
-- [ ] **Webhook de produção** configurado no painel do Asaas (ver §3).
+Nunca copiar, imprimir ou commitar chave production.
 
----
+## Gate Cumulativo
 
-## 2. Variáveis e configuração
+Production write so pode acontecer quando todos forem verdadeiros:
 
-### 2.1 Env vars no Railway (backend)
-| Variável | Papel | Observação no go-live |
-|----------|-------|------------------------|
-| `ASAAS_WEBHOOK_TOKEN` | autentica o webhook (header `asaas-access-token`) | 🔴 Deve casar com o token configurado no painel Asaas de produção. Trocar env = hard stop. |
-| `FATURAS_RECORRENTES_ALLOWLIST` | UUIDs elegíveis ao cron | Manter restrita no piloto de produção (1 empresa real). 🔴 |
-| `SUPABASE_URL` / `SUPABASE_SERVICE_KEY` / `JWT_SECRET` / `FRONTEND_URL` / `NODE_ENV` | infra | Não mudam no go-live. |
+- `BILLING_OUTBOX_ENABLED=true`
+- `BILLING_PROVIDER_MODE=asaas_production`
+- `BILLING_PRODUCTION_ENABLED=true`
+- `BILLING_PRODUCTION_ALLOWLIST` contem o UUID da empresa piloto
+- `ASAAS_API_KEY` esta presente no runtime
+- a operacao e elegivel pelo orquestrador 3A-2
 
-### 2.2 Config no banco (painel → Integrações, super-admin)
-`configuracoes.dados.integracao_asaas`:
-- `environment`: `'sandbox'` → `'production'` (🔴 §0 item a).
-- `apiKey`: chave de produção, **criptografada em repouso** (`resolveAsaasApiKey`).
-  Nunca versionar, nunca logar. 🔴 Alterar segredo.
+Qualquer item ausente ou invalido resulta em fail-closed.
 
-> A apiKey **não** é env var — vive cifrada no banco e é inserida pela tela de
-> Integrações. Trocar sandbox↔produção troca a chave junto.
+Estados exibidos em billing-health:
 
----
+- `PRODUCTION_DISABLED`: default seguro, sem production armado
+- `SANDBOX`: provider sandbox configurado
+- `PRODUCTION_BLOCKED`: modo production pedido, mas falta trava/secret/allowlist
+- `PRODUCTION_ARMED`: production configurado, mas runner OFF
+- `PRODUCTION_ACTIVE`: todas as travas ativas
 
-## 3. Webhook de produção
+## Allowlist
 
-- URL: `https://matopibalog-backend-production.up.railway.app/pagamentos/webhook/asaas`
-- Autenticação: header fixo `asaas-access-token` == `ASAAS_WEBHOOK_TOKEN`
-  (comparação em tempo constante; **não** é HMAC).
-- Eventos mínimos a habilitar no painel Asaas de produção:
-  `PAYMENT_CREATED`, `PAYMENT_RECEIVED`, `PAYMENT_CONFIRMED`, `PAYMENT_OVERDUE`,
-  `PAYMENT_DELETED`, `PAYMENT_REFUNDED` (os demais são reconhecidos e tratados
-  como "sem transição", ver `asaasWebhookService.EVENTOS_VALIDOS`).
-- Idempotência garantida por `event_id` único + lease (migration 024). Reenvio do
-  Asaas é seguro.
-- **Validação**: após configurar, disparar um evento de teste do painel Asaas e
-  conferir em `billing-health.detalhes.webhook_por_status` que ele aparece como
-  `processed` (ou `ignored` para eventos sem pagamento) — nunca `failed`.
+`BILLING_PRODUCTION_ALLOWLIST` recebe UUIDs de empresas separados por virgula.
 
----
+Allowlist vazia significa zero write Asaas production. Empresa fora da allowlist
+tambem significa zero write.
 
-## 4. Sequência de go-live (proposta, com hard stops)
+Primeiro go-live deve conter uma unica empresa piloto.
 
-> Ordem sugerida. NÃO executar sem autorização item a item.
+## Runner
 
-1. Fechar §1 (pré-requisitos). Confirmar `billing-health.ok = true`.
-2. 🔴 **PR de sandbox-gate**: transformar `bloquearSeNaoSandbox` em uma trava que
-   aceita `sandbox` OU `production` **somente quando** uma flag explícita de
-   produção-autorizada estiver ligada (ex.: `configuracoes...billing_go_live=true`
-   + allowlist de empresas de produção). Revisar, testar, mergear. **Ainda inerte**
-   enquanto a flag estiver desligada.
-3. 🔴 Trocar `environment` para `production` e inserir a apiKey de produção
-   (painel Integrações). A partir daqui o ambiente é real.
-4. 🔴 Configurar webhook de produção (§3) e validar com evento de teste.
-5. **Piloto controlado**: UMA empresa real na allowlist. Gerar 1 cobrança real de
-   valor baixo, pagar de verdade, confirmar o ciclo completo em `billing-health`
-   (fatura paga, empresa ativa, webhook processed, zero órfã/duplicidade).
-6. Observar 24–48h. Só então ampliar allowlist / ligar recorrência para mais
-   empresas.
+`RUNNER_ENTRYPOINT = backend/scripts/billing/outbox_runner.mjs`
 
----
+`RUNNER_HOST = Railway cron/service dedicado ou execucao one-shot operacional`
 
-## 5. Rollback
+`RUNNER_DEFAULT_STATE = OFF`
 
-Qualquer sinal de erro (webhook failed, cobrança errada, duplicidade):
+`RUNNER_KILL_SWITCH = BILLING_OUTBOX_ENABLED=false`
 
-1. **Pausar o cron**: no Railway, serviço do cron (`vivacious-flow`) →
-   desabilitar o schedule (ou apontar `Config File Path` para um toml com
-   `--dry-run`). O job também aborta sozinho se o ambiente não for exatamente o
-   esperado pela sua trava.
-2. **Voltar o ambiente para `sandbox`** (painel Integrações) — isso reativa o
-   sandbox-gate e **bloqueia (403) todas as rotas de cobrança** imediatamente,
-   estancando qualquer cobrança nova.
-3. Se o PR de sandbox-gate usa flag: **desligar a flag** de produção-autorizada
-   (efeito equivalente, sem trocar a apiKey).
-4. Cobranças já criadas no Asaas de produção: tratar caso a caso pelo painel
-   Asaas (cancelar/estornar). 🔴 Estorno/cancelamento real exige autorização.
-5. Comunicar clientes afetados apenas com aprovação. 🔴
+Nao deixar runner legado e runner 3A-2 criando cobrancas ao mesmo tempo. O caminho
+canonico e o outbox; os caminhos legados seguem sandbox-only.
 
-> **Regra de ouro do rollback:** voltar `environment` para `sandbox` é o freio de
-> emergência mais rápido — o próprio design fail-closed vira a favor.
+## Reconcile
 
----
+`backend/scripts/billing/reconcile_periodico.mjs`
 
-## 6. Pausar / retomar o cron de recorrência
+O reconcile periodico enfileira eventos idempotentes de `reconciliacao`; ele nao
+chama Asaas diretamente. O runner do outbox processa a convergencia.
 
-- **Estado atual**: Railway `vivacious-flow`, `startCommand =
-  node jobs/gerarFaturasRecorrentes.js --limite=1` (sem `--dry-run`), schedule
-  `0 6 1 * *`, sandbox-only + allowlist. Primeira execução automática:
-  **01/08/2026 06:00 UTC**.
-- **Pausar**: desabilitar o schedule no Railway, OU trocar o `Config File Path`
-  para um `railway.cron.toml` com `--dry-run`, OU esvaziar
-  `FATURAS_RECORRENTES_ALLOWLIST` (fail-closed: allowlist vazia = ninguém).
-- **Retomar**: reverter a ação acima.
-- **Nunca** remover o sandbox-gate do job nem o `--limite` sem autorização (🔴).
+Cadencia inicial recomendada para production: manual/one-shot no primeiro pagamento.
+Automacao periodica so apos observacao do piloto.
 
----
+## Webhook Production
 
-## 6.1 Verificar a execução do cron (ex.: 01/08/2026 06:00 UTC)
+URL:
 
-O job imprime **uma linha JSON** no stdout (Railway logs do serviço `vivacious-flow`)
-e sai. Não há endpoint de status — a verificação é pelos logs.
+`https://api.matopibalog.com.br/pagamentos/webhook/asaas`
 
-**Onde:** Railway → serviço `vivacious-flow` → aba Deployments/Logs, na janela do
-horário agendado.
+Autenticacao:
 
-**Resultado SAUDÁVEL (gerou a recorrente do mês):**
-```json
-{"periodo":"2026-08-01","dryRun":false,"totalCandidatas":1,
- "geradas":[{"empresa_id":"<Alfa>","resultado":"gerada","fatura_id":"...","periodo":"2026-08-01"}],
- "puladas":[],"erros":[],"dur_ms":1234}
-```
+header `asaas-access-token` igual a `ASAAS_WEBHOOK_TOKEN`.
 
-**Resultado IDEMPOTENTE (competência já existia):** igual, mas
-`"geradas":[{...,"resultado":"idempotente"}]` ou a empresa aparece em `puladas`
-com `motivo:"fatura_recorrente_ja_existe"`. **Não** é erro.
+Eventos minimos:
 
-**Abortos ESPERADOS (fail-closed — nenhuma cobrança):**
-- `{"abort":"ambiente_nao_sandbox",...}` → o ambiente Asaas não está `sandbox`.
-- `{"abort":"allowlist_vazia",...}` → `FATURAS_RECORRENTES_ALLOWLIST` vazia.
-- `{"abort":"erro_ler_configuracao",...}` → falha ao ler `configuracoes` (exit 1).
+- `PAYMENT_CREATED`
+- `PAYMENT_RECEIVED`
+- `PAYMENT_CONFIRMED`
+- `PAYMENT_OVERDUE`
+- `PAYMENT_DELETED`
+- `PAYMENT_REFUNDED`
 
-**Sinais de ATENÇÃO (investigar):** array `erros` não-vazio, ou `geradas` com mais
-empresas que o esperado (deveria ser só a allowlist), ou duplicidade — cruzar com
-`GET /painel-admin/billing-health` (`duplicidade` e `faturas_sem_asaas_id` devem
-seguir 0).
+O webhook e idempotente por `asaas_webhook_events` e hash canonico. Eventos
+duplicados, replay e out-of-order devem convergir sem marcar pagamento falso.
 
-**Esperado especificamente em 01/08/2026:** allowlist = só Empresa Alfa; como a
-recorrente de julho já existe, o resultado deve ser **1 gerada da competência
-2026-08-01** (a de agosto ainda não existe) — PIX sandbox, sem duplicidade. Se a
-Alfa não tiver `asaas_customer_id` válido, aparece em `puladas`/`erros` com motivo
-de cadastro — nesse caso, completar o cadastro e reexecutar (idempotente).
+Nao registrar secret production neste PR.
 
----
+## Trial
 
-## 7. Checklist final antes de declarar go-live
+Trial e respeitado integralmente.
 
-- [ ] Preços comerciais aplicados e conferidos.
-- [ ] `billing-health.ok = true`.
-- [ ] Sandbox-gate convertido para flag de produção-autorizada (PR revisado).
-- [ ] apiKey de produção inserida (cifrada), `environment = production`.
-- [ ] Webhook de produção validado (evento de teste `processed`).
-- [ ] Piloto real de 1 empresa concluído sem erro.
-- [ ] Allowlist do cron restrita ao piloto.
-- [ ] Plano de rollback comunicado e testado (voltar a `sandbox`).
-- [ ] Autorização explícita registrada para cada 🔴.
+Mesmo com contrato, customer, assinatura ou pagamento, mensalidade nao pode vencer
+antes de `trial_ends_at`. Pagamento nao encurta trial.
 
-**Enquanto qualquer item acima estiver aberto, o veredito é: NÃO PRONTO.**
+## Implantacao e Mensalidade
+
+Implantacao e mensalidade sao separadas:
+
+- implantacao R$ 0 nao cria cobranca ficticia
+- valor vem de snapshot/catalogo comercial vigente
+- contrato historico nao e recalculado
+- `BILLING_IMPLANTACAO_TIMING` controla quando cobrar implantacao
+
+## Primeiro Pagamento Controlado
+
+Somente no `FINAL_ASAAS_PRODUCTION_ACTIVATION_GATE`:
+
+1. escolher uma empresa piloto e confirmar UUID;
+2. conferir `billing-health.ok`;
+3. inserir `ASAAS_API_KEY` production no runtime protegido;
+4. configurar allowlist com somente a empresa piloto;
+5. ligar `BILLING_PRODUCTION_ENABLED=true`;
+6. ligar `BILLING_PROVIDER_MODE=asaas_production`;
+7. ligar runner de forma controlada;
+8. processar um unico evento;
+9. observar customer/subscription/charge, webhook e reconcile;
+10. desligar imediatamente se qualquer sinal sair do esperado.
+
+## Rollback / Kill Switch
+
+Ordem de desligamento:
+
+1. `BILLING_OUTBOX_ENABLED=false`
+2. `BILLING_PRODUCTION_ENABLED=false`
+3. remover empresa da `BILLING_PRODUCTION_ALLOWLIST`
+4. voltar `BILLING_PROVIDER_MODE=fake` ou remover a variavel
+5. manter registros locais para auditoria
+
+Cobranças reais ja criadas devem ser tratadas no painel/API Asaas por autorizacao
+financeira especifica.
+
+## Incidente
+
+Em caso de erro:
+
+- nao apagar faturas;
+- nao apagar outbox;
+- congelar runner;
+- coletar billing-health;
+- reconciliar estado local x Asaas;
+- registrar decisao operacional antes de qualquer cancelamento/estorno real.
+
+## Estado Atual
+
+`PAYMENT_PRODUCTION_READINESS = ENGINEERING_READY_FOR_PRODUCTION_GATE`
+
+`PRODUCTION_ASAAS_WRITES = 0`
+
+`PRODUCTION_BILLING_RUNNER_ENABLED = false`

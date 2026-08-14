@@ -16,7 +16,7 @@ const POLITICAS_IMPLANTACAO = Object.freeze([
   'nao_cobrar', // não cobra implantação (ex.: "grátis no lançamento")
 ]);
 
-const MODOS_PROVIDER = Object.freeze(['fake', 'sandbox']); // 'production' proibido aqui
+const MODOS_PROVIDER = Object.freeze(['fake', 'sandbox', 'asaas_production']);
 
 const DEFAULTS = Object.freeze({
   // Sem configuração explícita, NÃO cobramos implantação automaticamente — é a
