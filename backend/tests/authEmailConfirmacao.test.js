@@ -22,7 +22,7 @@ process.env.SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || 'anon-de-teste'
 process.env.FRONTEND_URL = process.env.FRONTEND_URL || 'https://exemplo.test';
 
 function carregarController(cenario = {}) {
-  const chamadas = { createUsers: [], resends: [], inserts: [], deletes: [] };
+  const chamadas = { createUsers: [], resends: [], inserts: [], deletes: [], trials: [] };
 
   const supabaseMock = {
     auth: {
@@ -89,6 +89,9 @@ function carregarController(cenario = {}) {
     if (request === '../services/empresaService') return empresaServiceMock;
     if (request === '../services/notificacaoService') return notificacaoMock;
     if (request === './termosController') return { getTermosPendentes: async () => ({ count: 0 }) };
+    if (request === '../services/trialV2Service') return {
+      iniciarTrialV2PorAceiteTermos: async (args) => { chamadas.trials.push(args); return { iniciado: true }; },
+    };
     if (request === '@supabase/supabase-js') return supabaseJsMock;
     return originalLoad.call(this, request, parent, isMain);
   };
@@ -169,14 +172,15 @@ test('register autônomo: falha no resend é não-fatal (segue 201)', async () =
   assert.equal(chamadas.resends.length, 1);
 });
 
-test('login: email_not_confirmed retorna 403 naoConfirmado', async () => {
-  const { controller } = carregarController({ authError: { code: 'email_not_confirmed', message: 'Email not confirmed' } });
+test('login: email_not_confirmed retorna 403 naoConfirmado e nao alcanca gatilho de trial', async () => {
+  const { controller, chamadas } = carregarController({ authError: { code: 'email_not_confirmed', message: 'Email not confirmed' } });
   const res = resMock();
   await controller.login({ body: { email: 'x@example.com', senha: '123456' } }, res);
 
   assert.equal(res.statusCode, 403);
   assert.equal(res.body.naoConfirmado, true);
   assert.match(res.body.message, /Confirme seu e-mail/i);
+  assert.equal(chamadas.trials.length, 0);
 });
 
 test('login: credenciais inválidas seguem 401 (não confundir com não confirmado)', async () => {

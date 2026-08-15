@@ -36,55 +36,54 @@ function criarMundo(over = {}) {
   return { empresa, situacao, snapshot, addOns, componentes, deps };
 }
 
-test('E2E: trial ativo → cria customer + assinatura com 1º vencimento = trial_end (não antecipa)', async () => {
+test('E2E: trial ativo nao cria customer nem assinatura antes da aquisicao explicita', async () => {
   const mundo = criarMundo();
   const provider = new FakeAsaasProvider();
   const r = await ensureBillingStateComDeps({ empresaId: 'e1', deps: mundo.deps, provider, policyOverrides: { provider_mode: 'fake' } });
-  assert.equal(r.requer_billing, true);
-  assert.equal(mundo.empresa.asaas_customer_id, 'cus_000001');
-  assert.equal(mundo.empresa.asaas_subscription_id, 'sub_000001');
-  // 1º vencimento = trial_end (2026-08-20), NÃO antes.
-  assert.equal(mundo.empresa.next_due_date, '2026-08-20');
-  assert.equal(provider.calls.createSubscription, 1);
+  assert.equal(r.requer_billing, false);
+  assert.equal(mundo.empresa.asaas_customer_id, null);
+  assert.equal(mundo.empresa.asaas_subscription_id, null);
+  // Trial gratuito nao prepara cobranca recorrente antes da contratacao.
+  assert.equal(provider.calls.createCustomer, 0);
+  assert.equal(provider.calls.createSubscription, 0);
 });
 
-test('E2E idempotência: ensureBilling 10x concorrentes → 1 customer e 1 assinatura (§48)', async () => {
+test('E2E idempotencia: trial ativo 10x concorrentes segue sem writes financeiros', async () => {
   const mundo = criarMundo();
   const provider = new FakeAsaasProvider();
   await Promise.all(Array.from({ length: 10 }, () => ensureBillingStateComDeps({
     empresaId: 'e-conc', deps: mundo.deps, provider, policyOverrides: { provider_mode: 'fake' },
   })));
-  assert.equal(provider.calls.createCustomer, 1, 'só 1 customer');
-  assert.equal(provider.calls.createSubscription, 1, 'só 1 assinatura');
-  assert.equal(provider.customers.size, 1);
-  assert.equal(provider.subscriptions.size, 1);
+  assert.equal(provider.calls.createCustomer, 0);
+  assert.equal(provider.calls.createSubscription, 0);
+  assert.equal(provider.customers.size, 0);
+  assert.equal(provider.subscriptions.size, 0);
 });
 
-test('E2E trial + pagamento: pagar durante trial NÃO encerra trial (§13/§47)', async () => {
-  // A situação comercial é a autoridade do trial; o billing não a altera. Aqui
-  // provamos que garantir billing + registrar pagamento NÃO muda a situação de trial.
+test('E2E pagamento antecipado durante trial nao encerra nem encurta trial', async () => {
+  // A situacao comercial e a autoridade do trial; billing/webhook nao a altera.
+  // provamos que registrar pagamento antecipado externo nao muda a situacao de trial.
   const mundo = criarMundo();
   const provider = new FakeAsaasProvider();
-  await ensureBillingStateComDeps({ empresaId: 'e2', deps: mundo.deps, provider, policyOverrides: { provider_mode: 'fake' } });
-  // Simula uma cobrança paga.
-  const charge = await provider.createCharge({ customerId: mundo.empresa.asaas_customer_id, value: 299.9, dueDate: '2026-08-20' });
+  // Simula uma cobranca paga por caminho externo/antecipado.
+  provider.customers.set('cus_antecipado', { id: 'cus_antecipado' });
+  const charge = await provider.createCharge({ customerId: 'cus_antecipado', value: 299.9, dueDate: '2026-08-20' });
   const evtPago = provider.emitWebhook(charge.id, 'PAYMENT_RECEIVED');
   const t = aplicarEvento({ faturaAtual: { status: 'pendente' }, evento: evtPago });
   assert.equal(t.novoStatus, 'pago');
-  // A situação segue trial_ativo (o billing não mexe nela).
+  // A situacao segue trial_ativo.
   assert.equal(mundo.situacao.situacao, 'trial_ativo');
 });
 
-test('E2E trial ativo + add-on aceito prepara composicao sem antecipar vencimento', async () => {
+test('E2E trial ativo + add-on aceito nao cria subscription antes da aquisicao', async () => {
   const mundo = criarMundo({
     addOns: [{ id: 'ad-trial', funcionalidade_id: 'f1', status: 'ativa', preco_mensal_centavos: 5000, contrato_id: 'ct1', contrato_billing_status: 'plenamente_assinado' }],
   });
   const provider = new FakeAsaasProvider();
-  await ensureBillingStateComDeps({ empresaId: 'e-trial-addon', deps: mundo.deps, provider, policyOverrides: { provider_mode: 'fake' } });
-  const sub = provider.subscriptions.get(mundo.empresa.asaas_subscription_id);
-  assert.equal(sub.value, 349.9);
-  assert.equal(sub.nextDueDate, '2026-08-20');
-  assert.equal(mundo.empresa.next_due_date, '2026-08-20');
+  const r = await ensureBillingStateComDeps({ empresaId: 'e-trial-addon', deps: mundo.deps, provider, policyOverrides: { provider_mode: 'fake' } });
+  assert.equal(r.requer_billing, false);
+  assert.equal(provider.calls.createCustomer, 0);
+  assert.equal(provider.calls.createSubscription, 0);
 });
 
 test('E2E implantação: política "imediato" cobra; "nao_cobrar" não cobra', async () => {

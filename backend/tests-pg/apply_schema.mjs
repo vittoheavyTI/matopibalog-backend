@@ -20,11 +20,13 @@ const arquivos = [
   // auditoria; REVOKE UPDATE/DELETE/TRUNCATE) é a autoridade final sobre as tabelas
   // de auth — o `GRANT ALL ON ALL TABLES` do 99_grants (test-only) roda ANTES e não
   // as alcança (fiel à produção, onde a 062 revoga logo após o create).
+  join(migrations, '058_fluxo_comercial_v2.sql'), // Trial/decisão/commercial_flow v2
   join(migrations, '062_auth_sessions_revogaveis.sql'),   // SEC-1: sessões revogáveis
   join(migrations, '064_frete_tracking_credenciais.sql'), // SEC-1: credencial de rastreamento
   join(migrations, '065_fretes_financeiro_auditoria.sql'), // Fretes: correcao financeira atomica
   join(migrations, '066_billing_outbox.sql'),      // 3A-2: outbox de billing
   join(migrations, '067_grupos_filiais_escopos_operacionais.sql'), // P1: grupos/unidades/escopos
+  join(migrations, '068_aquisicao_comercial_v2_rpc.sql'), // #421: aquisicao explicita v2 atomica
 ];
 
 const client = new pg.Client({ connectionString: CONN });
@@ -36,7 +38,7 @@ try {
     await client.query(sql);
     console.log('ok');
   }
-  console.log('Schema de teste aplicado (pré-bootstrap + 060 + 061 + 062 + 064 + 065 + 066 + 067).');
+  console.log('Schema de teste aplicado (pré-bootstrap + 058 + 060 + 061 + 062 + 064 + 065 + 066 + 067 + 068).');
 } finally {
   await client.end();
 }

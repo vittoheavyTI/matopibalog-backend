@@ -41,7 +41,7 @@ test('primeiroVencimento: com trial futuro → trial_end; sem trial → hoje', (
 });
 
 // ── planejar billing respeita trial e idempotência ───────────────────────────
-test('planejarBilling: trial ativo cria customer+assinatura com venc=trial_end, sem mensalidade antecipada', () => {
+test('planejarBilling: trial ativo nao requer billing nem cria customer/assinatura', () => {
   const plano = planejarBilling({
     situacao: { situacao: 'trial_ativo', trial_ends_at: '2026-08-20T00:00:00.000Z' },
     empresaBilling: {},
@@ -49,9 +49,8 @@ test('planejarBilling: trial ativo cria customer+assinatura com venc=trial_end, 
     policy: resolvePolicy({ provider_mode: 'fake' }),
     agora: new Date('2026-08-09T00:00:00.000Z'),
   });
-  const assinatura = plano.acoes.find((a) => a.tipo === 'garantir_assinatura');
-  assert.equal(assinatura.primeiro_vencimento, '2026-08-20');
-  assert.equal(assinatura.respeita_trial, true);
+  assert.equal(plano.requer_billing, false);
+  assert.equal(plano.acoes.length, 0);
 });
 
 test('planejarBilling: idempotente — com customer+subscription existentes não replaneja', () => {

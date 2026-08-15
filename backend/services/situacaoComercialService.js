@@ -11,6 +11,7 @@
 
 const { avaliarSituacaoComercial, SITUACAO, CONTRATO_CONCLUIDO } = require('./situacaoComercialDomainService');
 const { STATUS_PENDENTES, buscarContratosDaEmpresa } = require('./contratoGateService');
+const { ORIGENS_EXPLICITAS } = require('./aquisicaoComercialService');
 
 const SITUACOES_TRIAL_ATIVO = new Set([SITUACAO.TRIAL_ATIVO, SITUACAO.TRIAL_EXPIRANDO]);
 const SITUACOES_TRIAL_EXPIRADO = new Set([
@@ -41,14 +42,30 @@ function contratoGovernante(contratos = []) {
   return { status: obrig[0].status, obrigatorio: true };
 }
 
+function contratosDaProposta(proposta) {
+  const c = proposta && proposta.contratos_comerciais;
+  if (!c) return [];
+  return Array.isArray(c) ? c : [c];
+}
+
 // PURA. Recebe linhas já carregadas e devolve a situação comercial completa.
 function montarSituacaoComercial({ empresa, contratos, proposta, faturas, agora, diasAvisoTrial } = {}) {
   const emp = empresa || {};
-  const contrato = contratoGovernante(contratos);
+  const propostaContratos = contratosDaProposta(proposta);
+  const aquisicaoExplicita = ORIGENS_EXPLICITAS.has(proposta?.origem);
+  const contrato = contratoGovernante(aquisicaoExplicita && propostaContratos.length > 0 ? propostaContratos : contratos);
   const snapshot = proposta ? (proposta.snapshot || proposta) : null;
   const faturasIniciais = (faturas || []).map((f) => ({ origem: f.origem, status: f.status, valor: f.valor }));
 
-  const dominio = avaliarSituacaoComercial({ empresa: emp, contrato, snapshot, faturasIniciais, agora, diasAvisoTrial });
+  const dominio = avaliarSituacaoComercial({
+    empresa: emp,
+    contrato,
+    snapshot,
+    faturasIniciais,
+    agora,
+    diasAvisoTrial,
+    aquisicao_explicita: aquisicaoExplicita,
+  });
 
   return {
     ...dominio,
@@ -56,6 +73,10 @@ function montarSituacaoComercial({ empresa, contratos, proposta, faturas, agora,
     status_operacional: emp.status || null,
     contrato_obrigatorio: Boolean(contrato && contrato.obrigatorio),
     contrato_status: contrato ? contrato.status : null,
+    aquisicao_explicita: aquisicaoExplicita,
+    proposta_origem: proposta?.origem || null,
+    plano_id: snapshot ? (snapshot.plano_id || null) : (emp.plano_id || null),
+    quantidade_contratada: snapshot ? (snapshot.quantidade_contratada ?? null) : (emp.quantidade_contratada ?? null),
     plano_nome: snapshot ? (snapshot.plano_nome || null) : null,
     mensalidade: Number(snapshot?.valor_mensal || 0),
     implantacao: Number(snapshot?.valor_implantacao || 0),
@@ -100,7 +121,7 @@ async function carregarSituacaoComercial(supabase, empresaId, opcoes = {}) {
     try {
       const { data, error } = await supabase
         .from('propostas_comerciais')
-        .select('snapshot, valor_mensal, valor_implantacao, total_inicial, trial_dias')
+        .select('id, origem, snapshot, valor_mensal, valor_implantacao, total_inicial, trial_dias, contratos_comerciais(id, status, obrigatorio)')
         .eq('empresa_id', empresaId)
         .order('criado_em', { ascending: false })
         .limit(1)

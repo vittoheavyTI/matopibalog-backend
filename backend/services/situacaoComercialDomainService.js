@@ -11,7 +11,8 @@
 //
 // REGRA DE PRODUTO (macrofrente Fechamento Comercial):
 //   - Trial é GRATUITO: nenhuma cobrança durante o período de teste.
-//   - Trial começa só quando o contrato obrigatório está plenamente assinado.
+//   - Trial começa após e-mail confirmado, login válido e aceite de Termos.
+//   - Contrato comercial é etapa de aquisição/conversão, não requisito do trial.
 //   - Fim do trial NÃO cobra automaticamente: exige decisão explícita do cliente.
 //   - "Não continuar" NÃO gera dívida (≠ inadimplência).
 //   - "Continuar" gera cobranças; liberação só após todos os pagamentos iniciais.
@@ -23,6 +24,7 @@ const FLOW_V2 = 'v2';
 // Situações canônicas. Evitam combinações contraditórias (ex.: "trial" + "suspenso").
 const SITUACAO = Object.freeze({
   AGUARDANDO_ASSINATURA: 'aguardando_assinatura',
+  AGUARDANDO_ATIVACAO_TRIAL: 'aguardando_ativacao_trial',
   TRIAL_ATIVO: 'trial_ativo',
   TRIAL_EXPIRANDO: 'trial_expirando',
   TRIAL_EXPIRADO_AGUARDANDO_DECISAO: 'trial_expirado_aguardando_decisao',
@@ -100,6 +102,8 @@ function montarPagamentosIniciais({ snapshot, faturasIniciais }) {
 //   input.empresa   : { status, commercial_flow_version, trial_started_at, trial_ends_at,
 //                       converted_at, decisao_pos_trial, bloqueio_motivo }
 //   input.contrato  : { status, obrigatorio } | null  (contrato obrigatório vigente)
+//   input.aquisicao_explicita : true quando há proposta/contrato gerado por ação
+//                       explícita do cliente (não por cadastro automático antigo)
 //   input.snapshot  : snapshot da proposta (valor_mensal, valor_implantacao, trial_dias, ...)
 //   input.faturasIniciais : [{ origem, status, valor }]
 //   input.agora     : Date | ISO (default: relógio real)
@@ -167,9 +171,11 @@ function avaliarSituacaoComercial(input = {}) {
 
   // 4) Fluxo NOVO (v2).
 
-  // 4.a) Contrato obrigatório pendente de assinatura → bloqueia escrita, libera assinatura.
+  // 4.a) Contrato obrigatório pendente só bloqueia após aquisição/conversão explícita.
   const contratoConcluido = contrato && CONTRATO_CONCLUIDO.has(contrato.status);
   const temContratoObrigatorioPendente = contrato && contrato.obrigatorio === true && !contratoConcluido && contrato.status !== 'cancelado';
+  const aquisicaoIniciada = input.aquisicao_explicita === true || empresa.decisao_pos_trial === 'continuar' || Boolean(empresa.converted_at);
+  const contratoPendenteBloqueante = Boolean(temContratoObrigatorioPendente && aquisicaoIniciada);
 
   // Trial vigente preserva a operacao. Contrato/pagamento/aquisicao nao
   // encerram nem encurtam o trial; se houver assinatura pendente, ela vira
@@ -183,15 +189,15 @@ function avaliarSituacaoComercial(input = {}) {
       acoes: {
         consultar: true,
         operar_escrita: true,
-        assinar_contrato: Boolean(temContratoObrigatorioPendente),
+        assinar_contrato: Boolean(contratoPendenteBloqueante),
         converter: false,
         regularizar: false,
       },
-      proxima_acao: temContratoObrigatorioPendente ? 'assinar_contrato' : (expirando ? 'avaliar_continuacao' : 'operar'),
+      proxima_acao: contratoPendenteBloqueante ? 'assinar_contrato' : (expirando ? 'avaliar_continuacao' : 'operar'),
     };
   }
 
-  if (temContratoObrigatorioPendente) {
+  if (contratoPendenteBloqueante) {
     return { ...base, situacao: SITUACAO.AGUARDANDO_ASSINATURA, motivo: 'contrato_obrigatorio_pendente', acoes: apenasConsulta({ assinar_contrato: true }), proxima_acao: 'assinar_contrato' };
   }
 
@@ -209,21 +215,21 @@ function avaliarSituacaoComercial(input = {}) {
     return { ...base, situacao: SITUACAO.CONVERSAO_AGUARDANDO_PAGAMENTO, motivo: 'pagamentos_iniciais_pendentes', acoes: apenasConsulta({ regularizar: true }), proxima_acao: 'pagar_iniciais' };
   }
 
-  // 4.d) Sem trial vigente e sem contrato concluído, a conta ainda está
-  //      aguardando assinatura.
+  // 4.d) Sem trial vigente e sem contrato concluído, a conta aguarda ativação do
+  //      trial pelos termos. Não exige contrato comercial para testar.
   if (!contratoConcluido && !trialEnds) {
-    return { ...base, situacao: SITUACAO.AGUARDANDO_ASSINATURA, motivo: 'trial_nao_iniciado', acoes: apenasConsulta({ assinar_contrato: true }), proxima_acao: 'assinar_contrato' };
+    return { ...base, situacao: SITUACAO.AGUARDANDO_ATIVACAO_TRIAL, motivo: 'trial_nao_iniciado', acoes: apenasConsulta(), proxima_acao: 'aceitar_termos' };
   }
 
   // 4.e) Trial expirado: decisão explícita do cliente comanda.
   const decisao = empresa.decisao_pos_trial;
-  if (decisao === 'continuar') {
-    // Optou por continuar mas ainda não pagou tudo.
-    return { ...base, situacao: SITUACAO.CONVERSAO_AGUARDANDO_PAGAMENTO, decisao_pos_trial: 'continuar', motivo: 'pagamentos_iniciais_pendentes', acoes: apenasConsulta({ regularizar: true }), proxima_acao: 'pagar_iniciais' };
-  }
   if (decisao === 'nao_continuar') {
     // Sem dívida. Distinto de inadimplência. Pode voltar atrás e converter.
     return { ...base, situacao: SITUACAO.TRIAL_ENCERRADO_SEM_CONTRATACAO, decisao_pos_trial: 'nao_continuar', motivo: 'cliente_optou_nao_continuar', acoes: apenasConsulta({ converter: true }), proxima_acao: 'reconsiderar_continuacao' };
+  }
+  if (decisao === 'continuar' || (input.aquisicao_explicita === true && contratoConcluido)) {
+    // Optou por continuar mas ainda não pagou tudo.
+    return { ...base, situacao: SITUACAO.CONVERSAO_AGUARDANDO_PAGAMENTO, decisao_pos_trial: decisao === 'continuar' ? 'continuar' : base.decisao_pos_trial, motivo: 'pagamentos_iniciais_pendentes', acoes: apenasConsulta({ regularizar: true }), proxima_acao: 'pagar_iniciais' };
   }
   // Sem decisão registrada.
   return { ...base, situacao: SITUACAO.TRIAL_EXPIRADO_AGUARDANDO_DECISAO, decisao_pos_trial: 'pendente', motivo: 'trial_vencido_sem_decisao', acoes: apenasConsulta({ converter: true }), proxima_acao: 'decidir_continuacao' };
