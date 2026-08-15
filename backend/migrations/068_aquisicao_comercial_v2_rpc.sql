@@ -64,8 +64,14 @@ DECLARE
   v_event_id uuid;
   v_dedupe_key text;
 BEGIN
-  IF p_empresa_id IS NULL OR p_plano_id IS NULL OR p_snapshot IS NULL THEN
+  IF p_empresa_id IS NULL OR p_usuario_id IS NULL OR p_plano_id IS NULL OR p_snapshot IS NULL THEN
     RAISE EXCEPTION 'aquisicao_v2_payload_invalido';
+  END IF;
+  IF jsonb_typeof(p_snapshot) <> 'object' THEN
+    RAISE EXCEPTION 'aquisicao_v2_snapshot_invalido';
+  END IF;
+  IF COALESCE(p_snapshot->>'plano_id', '') <> p_plano_id::text THEN
+    RAISE EXCEPTION 'aquisicao_v2_plano_inconsistente';
   END IF;
   IF p_origem NOT IN ('aquisicao_explicita', 'pos_trial_continuar') THEN
     RAISE EXCEPTION 'aquisicao_v2_origem_invalida';
@@ -77,10 +83,10 @@ BEGIN
     INTO v_equiv
   FROM public.propostas_comerciais p
   LEFT JOIN LATERAL (
-    SELECT id, status
-    FROM public.contratos_comerciais
-    WHERE proposta_id = p.id
-    ORDER BY criado_em DESC
+    SELECT cc.id, cc.status
+    FROM public.contratos_comerciais cc
+    WHERE cc.proposta_id = p.id
+    ORDER BY cc.criado_em DESC
     LIMIT 1
   ) c ON true
   WHERE p.empresa_id = p_empresa_id
@@ -138,10 +144,10 @@ BEGIN
     INTO v_div
   FROM public.propostas_comerciais p
   LEFT JOIN LATERAL (
-    SELECT id, status
-    FROM public.contratos_comerciais
-    WHERE proposta_id = p.id
-    ORDER BY criado_em DESC
+    SELECT cc.id, cc.status
+    FROM public.contratos_comerciais cc
+    WHERE cc.proposta_id = p.id
+    ORDER BY cc.criado_em DESC
     LIMIT 1
   ) c ON true
   WHERE p.empresa_id = p_empresa_id
@@ -213,7 +219,7 @@ BEGIN
   )
   RETURNING id INTO v_proposta_id;
 
-  v_content_hash := encode(digest(
+  v_content_hash := encode(extensions.digest(
     p_empresa_id::text || ':' || v_proposta_id::text || ':' || p_snapshot::text,
     'sha256'
   ), 'hex');
@@ -256,7 +262,7 @@ BEGIN
     NULL
   );
 
-  v_matopiba_hash := encode(digest(
+  v_matopiba_hash := encode(extensions.digest(
     v_contrato_id::text || ':matopiba:' || v_content_hash || ':' || v_matopiba_assinado_em::text,
     'sha256'
   ), 'hex');

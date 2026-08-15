@@ -10,9 +10,6 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 
 const { Pool } = pg;
@@ -26,163 +23,13 @@ if (!CONN) {
 
 function registrar() {
   const pool = new Pool({ connectionString: CONN, max: 8 });
-  const here = dirname(fileURLToPath(import.meta.url));
-  const migration068 = readFileSync(join(here, '..', 'migrations', '068_aquisicao_comercial_v2_rpc.sql'), 'utf8');
   const ids = [];
 
   before(async () => {
-    await pool.query(`
-      CREATE SCHEMA IF NOT EXISTS extensions;
-      CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
-      DO $$ BEGIN CREATE ROLE anon NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-      DO $$ BEGIN CREATE ROLE authenticated NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-      DO $$ BEGIN CREATE ROLE service_role NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-
-      CREATE TABLE IF NOT EXISTS public.usuarios (
-        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-        empresa_id uuid NULL,
-        tipo text NULL,
-        status text NULL,
-        is_super_admin boolean NOT NULL DEFAULT false
-      );
-
-      CREATE TABLE IF NOT EXISTS public.empresas (
-        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-        nome text NULL,
-        status text NULL,
-        plano_id uuid NULL,
-        trial_started_at timestamptz NULL,
-        trial_ends_at timestamptz NULL,
-        decisao_pos_trial text NULL,
-        commercial_flow_version text NULL,
-        converted_at timestamptz NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS public.planos (
-        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-        nome text NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS public.propostas_comerciais (
-        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-        empresa_id uuid NULL REFERENCES public.empresas(id) ON DELETE CASCADE,
-        plano_id uuid NULL REFERENCES public.planos(id) ON DELETE SET NULL,
-        status text NOT NULL DEFAULT 'rascunho',
-        origem text NOT NULL DEFAULT 'cadastro_publico',
-        snapshot jsonb NOT NULL DEFAULT '{}'::jsonb,
-        valor_mensal numeric(10,2) NOT NULL DEFAULT 0,
-        valor_implantacao numeric(10,2) NOT NULL DEFAULT 0,
-        total_inicial numeric(10,2) NOT NULL DEFAULT 0,
-        trial_dias integer NOT NULL DEFAULT 0,
-        implantacao_override_motivo text NULL,
-        criado_por uuid NULL,
-        aceito_por uuid NULL,
-        aceito_em timestamptz NULL,
-        criado_em timestamptz NOT NULL DEFAULT now(),
-        atualizado_em timestamptz NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS public.contratos_comerciais (
-        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-        proposta_id uuid NULL REFERENCES public.propostas_comerciais(id) ON DELETE CASCADE,
-        empresa_id uuid NULL REFERENCES public.empresas(id) ON DELETE CASCADE,
-        status text NOT NULL DEFAULT 'rascunho',
-        obrigatorio boolean NOT NULL DEFAULT false,
-        template_version text NULL,
-        provider text NULL,
-        content_hash text NULL,
-        metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
-        aceito_por uuid NULL,
-        aceito_em timestamptz NULL,
-        criado_em timestamptz NOT NULL DEFAULT now(),
-        atualizado_em timestamptz NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS public.contrato_signatarios (
-        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-        contrato_id uuid NOT NULL REFERENCES public.contratos_comerciais(id) ON DELETE CASCADE,
-        empresa_id uuid NULL REFERENCES public.empresas(id) ON DELETE CASCADE,
-        nome text NOT NULL,
-        papel text NOT NULL,
-        email_hash text NULL,
-        status text NOT NULL DEFAULT 'pendente',
-        assinado_em timestamptz NULL,
-        metodo_assinatura text NULL,
-        assinatura_hash text NULL,
-        document_hash_assinado text NULL,
-        consent_text_version text NULL,
-        consent_text text NULL,
-        criado_em timestamptz NOT NULL DEFAULT now()
-      );
-
-      CREATE TABLE IF NOT EXISTS public.contrato_eventos (
-        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-        contrato_id uuid NOT NULL REFERENCES public.contratos_comerciais(id) ON DELETE CASCADE,
-        empresa_id uuid NULL REFERENCES public.empresas(id) ON DELETE CASCADE,
-        tipo text NOT NULL,
-        detalhe jsonb NOT NULL DEFAULT '{}'::jsonb,
-        criado_por uuid NULL,
-        criado_em timestamptz NOT NULL DEFAULT now()
-      );
-
-      CREATE TABLE IF NOT EXISTS public.billing_outbox (
-        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-        empresa_id uuid NOT NULL REFERENCES public.empresas(id) ON DELETE CASCADE,
-        event_type text NOT NULL,
-        dedupe_key text NOT NULL,
-        status text NOT NULL DEFAULT 'pending',
-        attempts integer NOT NULL DEFAULT 0,
-        payload jsonb NOT NULL DEFAULT '{}'::jsonb,
-        created_at timestamptz NOT NULL DEFAULT now()
-      );
-      CREATE UNIQUE INDEX IF NOT EXISTS ux_billing_outbox_dedupe ON public.billing_outbox (dedupe_key);
-
-      ALTER TABLE public.empresas
-        ADD COLUMN IF NOT EXISTS trial_started_at timestamptz NULL,
-        ADD COLUMN IF NOT EXISTS trial_ends_at timestamptz NULL,
-        ADD COLUMN IF NOT EXISTS decisao_pos_trial text NULL,
-        ADD COLUMN IF NOT EXISTS commercial_flow_version text NULL,
-        ADD COLUMN IF NOT EXISTS converted_at timestamptz NULL;
-
-      ALTER TABLE public.propostas_comerciais
-        ADD COLUMN IF NOT EXISTS plano_id uuid NULL,
-        ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'rascunho',
-        ADD COLUMN IF NOT EXISTS origem text NOT NULL DEFAULT 'cadastro_publico',
-        ADD COLUMN IF NOT EXISTS snapshot jsonb NOT NULL DEFAULT '{}'::jsonb,
-        ADD COLUMN IF NOT EXISTS valor_mensal numeric(10,2) NOT NULL DEFAULT 0,
-        ADD COLUMN IF NOT EXISTS valor_implantacao numeric(10,2) NOT NULL DEFAULT 0,
-        ADD COLUMN IF NOT EXISTS total_inicial numeric(10,2) NOT NULL DEFAULT 0,
-        ADD COLUMN IF NOT EXISTS trial_dias integer NOT NULL DEFAULT 0,
-        ADD COLUMN IF NOT EXISTS implantacao_override_motivo text NULL,
-        ADD COLUMN IF NOT EXISTS criado_por uuid NULL,
-        ADD COLUMN IF NOT EXISTS aceito_por uuid NULL,
-        ADD COLUMN IF NOT EXISTS aceito_em timestamptz NULL,
-        ADD COLUMN IF NOT EXISTS criado_em timestamptz NOT NULL DEFAULT now(),
-        ADD COLUMN IF NOT EXISTS atualizado_em timestamptz NULL;
-
-      ALTER TABLE public.contratos_comerciais
-        ADD COLUMN IF NOT EXISTS proposta_id uuid NULL,
-        ADD COLUMN IF NOT EXISTS obrigatorio boolean NOT NULL DEFAULT false,
-        ADD COLUMN IF NOT EXISTS template_version text NULL,
-        ADD COLUMN IF NOT EXISTS provider text NULL,
-        ADD COLUMN IF NOT EXISTS content_hash text NULL,
-        ADD COLUMN IF NOT EXISTS metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
-        ADD COLUMN IF NOT EXISTS aceito_por uuid NULL,
-        ADD COLUMN IF NOT EXISTS atualizado_em timestamptz NULL;
-
-      ALTER TABLE public.contrato_signatarios
-        ADD COLUMN IF NOT EXISTS metodo_assinatura text NULL,
-        ADD COLUMN IF NOT EXISTS assinatura_hash text NULL,
-        ADD COLUMN IF NOT EXISTS document_hash_assinado text NULL,
-        ADD COLUMN IF NOT EXISTS consent_text_version text NULL,
-        ADD COLUMN IF NOT EXISTS consent_text text NULL;
-
-      ALTER TABLE public.billing_outbox
-        ADD COLUMN IF NOT EXISTS payload jsonb NOT NULL DEFAULT '{}'::jsonb,
-        ADD COLUMN IF NOT EXISTS attempts integer NOT NULL DEFAULT 0,
-        ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'pending';
+    const { rows } = await pool.query(`
+      SELECT to_regprocedure('public.iniciar_aquisicao_comercial_v2(uuid,uuid,uuid,text,jsonb,text,text,boolean)') AS fn
     `);
-    await pool.query(migration068);
+    assert.ok(rows[0]?.fn, 'Schema PG nao aplicado: execute npm run test:pg:apply antes dos pgtests.');
   });
 
   after(async () => {

@@ -41,18 +41,99 @@ CREATE TABLE IF NOT EXISTS public.empresas (
   email_contato text    NULL,
   status         varchar NULL,              -- referenciado por buscar_empresas
   plano_id       uuid    NULL,              -- idem (JOIN com planos)
+  trial_started_at timestamptz NULL,        -- preexistente em producao antes da 058
+  trial_ends_at    timestamptz NULL,        -- idem; usado pela aquisicao v2
   arquivada_em   timestamptz NULL,          -- idem (flag arquivada + ordenação)
   codigo_convite text    NULL               -- idem (match exato de convite)
 );
 
--- 3A-1 ja possui contratos_comerciais em producao (migrations 053-057). O
--- bootstrap PG de billing mantem apenas as colunas que o carregador de add-ons
--- precisa para provar aceite financeiro por contrato/aditivo concluido.
-CREATE TABLE IF NOT EXISTS public.contratos_comerciais (
-  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+-- 3A-1 ja possui propostas/contratos comerciais em producao (migrations 053-057).
+-- O bootstrap PG reproduz o subconjunto estrutural que as migrations PG atuais
+-- precisam antes da 068. Colunas historicamente opcionais nos testes permanecem
+-- nullable para preservar fixtures sinteticas legadas.
+CREATE TABLE IF NOT EXISTS public.propostas_comerciais (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   empresa_id uuid NULL REFERENCES public.empresas(id) ON DELETE CASCADE,
-  status     text NOT NULL,
-  aceito_em  timestamptz NULL
+  plano_id uuid NULL REFERENCES public.planos(id) ON DELETE SET NULL,
+  status text NOT NULL DEFAULT 'rascunho' CHECK (status IN ('rascunho','enviada','aceita','cancelada','expirada')),
+  origem text NOT NULL DEFAULT 'cadastro_publico'
+    CONSTRAINT propostas_comerciais_origem_check
+    CHECK (origem IN ('cadastro_publico','painel_admin','upload_manual','mock')),
+  snapshot jsonb NOT NULL DEFAULT '{}'::jsonb,
+  valor_mensal numeric(10,2) NOT NULL DEFAULT 0 CHECK (valor_mensal >= 0),
+  valor_implantacao numeric(10,2) NOT NULL DEFAULT 0 CHECK (valor_implantacao >= 0),
+  total_inicial numeric(10,2) NOT NULL DEFAULT 0 CHECK (total_inicial >= 0),
+  trial_dias integer NOT NULL DEFAULT 0 CHECK (trial_dias >= 0),
+  implantacao_override_motivo text NULL CHECK (implantacao_override_motivo IS NULL OR length(implantacao_override_motivo) BETWEEN 8 AND 240),
+  criado_por uuid NULL REFERENCES public.usuarios(id) ON DELETE SET NULL,
+  aceito_por uuid NULL REFERENCES public.usuarios(id) ON DELETE SET NULL,
+  aceito_em timestamptz NULL,
+  criado_em timestamptz NOT NULL DEFAULT now(),
+  atualizado_em timestamptz NULL
+);
+
+CREATE TABLE IF NOT EXISTS public.contratos_comerciais (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  proposta_id uuid NULL REFERENCES public.propostas_comerciais(id) ON DELETE CASCADE,
+  empresa_id uuid NULL REFERENCES public.empresas(id) ON DELETE CASCADE,
+  status text NOT NULL DEFAULT 'rascunho' CHECK (status IN (
+    'rascunho',
+    'aguardando_assinatura',
+    'pronto_assinatura',
+    'aguardando_assinatura_cliente',
+    'aguardando_assinatura_matopiba',
+    'plenamente_assinado',
+    'assinado',
+    'aceito_manualmente',
+    'recusado',
+    'expirado',
+    'substituido',
+    'cancelado'
+  )),
+  obrigatorio boolean NOT NULL DEFAULT false,
+  template_version text NULL,
+  provider text NULL DEFAULT 'manual',
+  content_hash text NULL CHECK (content_hash IS NULL OR length(content_hash) = 64),
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  aceito_por uuid NULL REFERENCES public.usuarios(id) ON DELETE SET NULL,
+  aceito_em timestamptz NULL,
+  criado_em timestamptz NOT NULL DEFAULT now(),
+  atualizado_em timestamptz NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_contratos_comerciais_proposta
+  ON public.contratos_comerciais (proposta_id)
+  WHERE proposta_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS public.contrato_signatarios (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  contrato_id uuid NOT NULL REFERENCES public.contratos_comerciais(id) ON DELETE CASCADE,
+  empresa_id uuid NULL REFERENCES public.empresas(id) ON DELETE CASCADE,
+  nome text NOT NULL,
+  papel text NOT NULL CHECK (papel IN ('cliente','matopiba','testemunha','outro')),
+  email_hash text NULL,
+  status text NOT NULL DEFAULT 'pendente' CHECK (status IN ('pendente','enviado','assinado','recusado','cancelado')),
+  assinado_em timestamptz NULL,
+  metodo_assinatura text NULL,
+  assinatura_hash text NULL CHECK (assinatura_hash IS NULL OR assinatura_hash ~ '^[0-9a-f]{64}$'),
+  document_hash_assinado text NULL CHECK (document_hash_assinado IS NULL OR document_hash_assinado ~ '^[0-9a-f]{64}$'),
+  consent_text_version text NULL,
+  consent_text text NULL,
+  criado_em timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_contrato_signatarios_parte_principal
+  ON public.contrato_signatarios (contrato_id, papel)
+  WHERE papel IN ('cliente','matopiba');
+
+CREATE TABLE IF NOT EXISTS public.contrato_eventos (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  contrato_id uuid NOT NULL REFERENCES public.contratos_comerciais(id) ON DELETE CASCADE,
+  empresa_id uuid NULL REFERENCES public.empresas(id) ON DELETE CASCADE,
+  tipo text NOT NULL,
+  detalhe jsonb NOT NULL DEFAULT '{}'::jsonb,
+  criado_por uuid NULL REFERENCES public.usuarios(id) ON DELETE SET NULL,
+  criado_em timestamptz NOT NULL DEFAULT now()
 );
 
 -- Tabela `fretes` mínima — pré-requisito do FK frete_id da migration 064

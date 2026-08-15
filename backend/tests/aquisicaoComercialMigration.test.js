@@ -17,6 +17,9 @@ test('migration 068 libera origens explicitas e cria RPC atomica sem Asaas', () 
   assert.match(migration, /pos_trial_continuar/);
   assert.match(migration, /CREATE OR REPLACE FUNCTION public\.iniciar_aquisicao_comercial_v2/);
   assert.match(migration, /pg_advisory_xact_lock/);
+  assert.match(migration, /cc\.proposta_id = p\.id/);
+  assert.match(migration, /extensions\.digest/);
+  assert.doesNotMatch(migration, /WHERE proposta_id = p\.id/);
   assert.match(migration, /billing_outbox/);
   assert.match(migration, /ON CONFLICT \(dedupe_key\) DO NOTHING/);
   assert.match(migration, /GRANT EXECUTE .* TO service_role/i);
