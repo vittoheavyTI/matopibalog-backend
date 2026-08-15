@@ -8,12 +8,20 @@ import { useAuth } from '../contexts/AuthContext';
 import { useContratacaoStatus } from '../hooks/useContratacaoStatus';
 import { LogOut, User as UserIcon, ChevronDown, UserCog, AlertTriangle, FileSignature } from 'lucide-react';
 
+function formatarDataTrial(valor?: string | null) {
+  if (!valor) return null;
+  const data = new Date(valor);
+  if (Number.isNaN(data.getTime())) return null;
+  return new Intl.DateTimeFormat('pt-BR').format(data);
+}
+
 export const Layout: React.FC = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const { pendenciaObrigatoria } = useContratacaoStatus();
+  const { pendenciaObrigatoria, trialAtivo, trialEndsAt, diasRestantes, podeContratar } = useContratacaoStatus();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const dataTrial = formatarDataTrial(trialEndsAt);
 
   const [aviso429, setAviso429] = useState<string | null>(null);
 
@@ -117,6 +125,27 @@ export const Layout: React.FC = () => {
 
         {/* Banner forte: contrato obrigatório pendente. Conduz para /contratacao.
             As escritas operacionais já são bloqueadas no backend (gate). */}
+        {trialAtivo && !pendenciaObrigatoria && (
+          <div className="bg-emerald-50 border-b border-emerald-200 px-4 md:px-8 py-3">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
+              <div className="flex items-start gap-2 text-emerald-800 flex-1">
+                <FileSignature size={18} className="shrink-0 mt-0.5" />
+                <p className="text-sm font-medium">
+                  Seu teste gratuito está ativo{dataTrial ? ` até ${dataTrial}` : ''}{typeof diasRestantes === 'number' ? `, com ${diasRestantes} dia${diasRestantes === 1 ? '' : 's'} restante${diasRestantes === 1 ? '' : 's'}` : ''}.
+                </p>
+              </div>
+              {podeContratar && (
+                <button
+                  onClick={() => navigate('/planos')}
+                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-semibold px-4 py-2 shrink-0"
+                >
+                  <FileSignature size={16} /> Conhecer plano
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
         {pendenciaObrigatoria && (
           <div className="bg-amber-50 border-b border-amber-300 px-4 md:px-8 py-3">
             <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">

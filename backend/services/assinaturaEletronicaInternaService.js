@@ -711,23 +711,8 @@ async function confirmarAssinatura({
       actorPapel: papel,
     });
 
-    // Fluxo v2: a assinatura completa INICIA o trial (uma única vez). Idempotente
-    // e fail-safe — não reinicia em retry nem derruba a assinatura em caso de erro.
-    const propostaContrato = Array.isArray(contrato.propostas_comerciais)
-      ? contrato.propostas_comerciais[0]
-      : contrato.propostas_comerciais;
-    const trial = await iniciarTrialV2SeAplicavel({ supabase, empresaId, proposta: propostaContrato });
-    if (trial.iniciado) {
-      await inserirEvento({
-        supabase,
-        contratoId: contrato.id,
-        empresaId,
-        tipo: 'trial_iniciado',
-        detalhe: { origem: 'assinatura_completa', trial_ends_at: trial.trial_ends_at },
-        criadoPor: usuario.id,
-        actorPapel: papel,
-      });
-    }
+    // Fluxo v2 canonico: assinatura comercial nao inicia, reinicia nem encurta
+    // trial. O trial nasce no aceite de Termos de Uso/Privacidade.
   }
 
   return {

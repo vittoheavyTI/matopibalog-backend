@@ -84,7 +84,7 @@ test('E2E pelo TICK do runner: evento → outbox → tick → provider (sem exec
 
   let tickFn;
   const ctrl = iniciarRunner({
-    supabase: {}, provider, deps: depsDe(estado), outboxRepo,
+    supabase: {}, provider, deps: depsDe(estado, { situacao: { situacao: 'ativa' } }), outboxRepo,
     config: { enabled: true, intervalSeconds: 5, batchSize: 10 },
     setIntervalFn: (fn) => { tickFn = fn; return { unref() {} }; },
     clearIntervalFn: () => {},
@@ -105,7 +105,7 @@ test('multi-runner (2 ticks concorrentes) → cada evento 1 vez (claim CAS)', as
   // Deps por-empresa: cada empresa começa sem customer; persist é no-op (o foco é
   // provar que o claim CAS entrega cada evento a UM único runner).
   const depsPorEmpresa = {
-    carregarSituacao: async () => ({ situacao: 'trial_ativo', trial_ends_at: '2026-08-20T00:00:00.000Z' }),
+    carregarSituacao: async () => ({ situacao: 'ativa' }),
     carregarEmpresaBilling: async () => ({ asaas_customer_id: null, asaas_subscription_id: null }),
     carregarSnapshot: async () => ({ valor_mensal: 99.9, valor_implantacao: 0 }),
     carregarAddOns: async () => [],

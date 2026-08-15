@@ -122,12 +122,13 @@ test('v2 trial ativo + contrato obrigatório pendente → escrita liberada pelo 
   assert.equal(r.resposta, null);
 });
 
-test('v2 sem trial vigente + contrato obrigatório pendente → escrita bloqueada', async () => {
+test('v2 sem trial vigente + contrato obrigatorio pendente aguarda ativacao por termos', async () => {
   const r = await executar({
     empresa: { commercial_flow_version: 'v2', status: 'trial', trial_ends_at: null },
     contratos: [{ obrigatorio: true, status: 'aguardando_assinatura' }], proposta: SNAP,
   });
   assert.equal(r.nextChamado, 0);
   assert.equal(r.resposta.status, 403);
-  assert.equal(r.resposta.body.motivo, 'contrato_obrigatorio_pendente');
+  assert.equal(r.resposta.body.motivo, 'trial_nao_iniciado');
+  assert.equal(r.resposta.body.situacao, 'aguardando_ativacao_trial');
 });

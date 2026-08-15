@@ -1,4 +1,5 @@
 const supabase = require('../config/supabase');
+const { iniciarTrialV2PorAceiteTermos } = require('../services/trialV2Service');
 
 // Helper reutilizável (também usado pelo authController em /auth/me).
 // Retorna { pendentes, count } dos termos ATIVOS que se aplicam ao papel do
@@ -31,6 +32,24 @@ async function getTermosPendentes(usuarioId, role, isSuperAdmin = false) {
 
   const pendentes = ativos.filter((t) => !aceitos.has(t.id));
   return { pendentes, count: pendentes.length };
+}
+
+async function iniciarTrialV2SeTermosCompletos(req) {
+  if (!req.empresa_id || req.user?.is_super_admin === true) {
+    return { iniciado: false, motivo: 'nao_aplicavel' };
+  }
+
+  const { count } = await getTermosPendentes(
+    req.user.uid,
+    req.user.role,
+    req.user.is_super_admin === true
+  );
+  if (count > 0) return { iniciado: false, motivo: 'termos_pendentes', termos_pendentes_count: count };
+
+  return iniciarTrialV2PorAceiteTermos({
+    supabase,
+    empresaId: req.empresa_id,
+  });
 }
 
 // GET /termos/pendentes
@@ -84,10 +103,12 @@ exports.aceitarTermo = async (req, res) => {
 
     if (errExist) throw errExist;
     if (existente) {
+      const trial_v2 = await iniciarTrialV2SeTermosCompletos(req).catch(() => ({ iniciado: false, motivo: 'erro_trial' }));
       return res.status(200).json({
         message: 'Termo já aceito anteriormente.',
         aceite_id: existente.id,
         ja_aceito: true,
+        trial_v2,
       });
     }
 
@@ -114,12 +135,15 @@ exports.aceitarTermo = async (req, res) => {
     if (errInsert) {
       // Corrida: UNIQUE(termo_id, usuario_id) → trata como idempotente
       if (errInsert.code === '23505') {
+        await iniciarTrialV2SeTermosCompletos(req).catch(() => null);
         return res.status(200).json({ message: 'Termo já aceito anteriormente.', ja_aceito: true });
       }
       throw errInsert;
     }
 
-    res.status(201).json({ message: 'Termo aceito com sucesso.', aceite_id: novo.id });
+    const trial_v2 = await iniciarTrialV2SeTermosCompletos(req).catch(() => ({ iniciado: false, motivo: 'erro_trial' }));
+
+    res.status(201).json({ message: 'Termo aceito com sucesso.', aceite_id: novo.id, trial_v2 });
   } catch (error) {
     console.error('[termos.aceitarTermo]', error.message || error);
     res.status(500).json({ message: 'Erro ao registrar aceite do termo.' });

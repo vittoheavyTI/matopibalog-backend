@@ -134,7 +134,18 @@ router.get('/status', verifyToken, verificarEmpresa, permitirAssinaturaCliente, 
   if (!req.empresa_id) return res.json({ pendencia_obrigatoria: false, tem_contrato: false, concluido: false });
   try {
     const resumo = await resumoContratacaoEmpresa({ supabase, empresaId: req.empresa_id });
-    return res.json(resumo);
+    const situacao = await carregarSituacaoComercial(supabase, req.empresa_id);
+    const trialSemContratoObrigatorio = ['trial_ativo', 'trial_expirando'].includes(situacao?.situacao)
+      && situacao?.acoes?.assinar_contrato !== true;
+    return res.json({
+      ...resumo,
+      pendencia_obrigatoria: trialSemContratoObrigatorio ? false : resumo.pendencia_obrigatoria,
+      situacao: situacao?.situacao || null,
+      trial_ativo: ['trial_ativo', 'trial_expirando'].includes(situacao?.situacao),
+      trial_ends_at: situacao?.trial_ends_at || null,
+      dias_restantes: situacao?.dias_restantes ?? null,
+      pode_contratar: situacao?.acoes?.converter === true || ['trial_ativo', 'trial_expirando'].includes(situacao?.situacao),
+    });
   } catch (err) {
     console.error('[contratacao/status] Falha', { status: 500 });
     return res.json({ pendencia_obrigatoria: false, tem_contrato: false, concluido: false });

@@ -2,10 +2,10 @@ const supabase = require('../config/supabase');
 const { createClient } = require('@supabase/supabase-js');
 const jwt = require('jsonwebtoken');
 const { criarEmpresaCompleta } = require('../services/empresaService');
-const { criarPropostaEContrato } = require('../services/contratacaoComercialService');
 const notificacaoService = require('../services/notificacaoService');
 const planoLimiteService = require('../services/planoLimiteService');
 const { getTermosPendentes } = require('./termosController');
+const { iniciarTrialV2PorAceiteTermos } = require('../services/trialV2Service');
 const { gerarSenhaTemporaria } = require('../utils/senhaTemporaria');
 const { getAuthRuntime } = require('../services/auth/authRuntime');
 const { revogarSessoesDoUsuarioSeSec1, responderErroRevogacao } = require('../services/auth/sessionRevocationEvents');
@@ -283,7 +283,8 @@ exports.register = async (req, res) => {
         email_contato: email,
         plano_id: planoData?.id || null,
         tipo: 'autonomo',
-        // Fluxo v2: trial NÃO inicia na criação; só após o contrato assinado.
+        // Fluxo v2: trial nao inicia na criacao; comeca apos e-mail confirmado,
+        // login valido e aceite de Termos de Uso/Privacidade.
         commercialFlowV2: true,
       });
       if (empresaError || !novaEmpresa) {
@@ -373,7 +374,7 @@ exports.register = async (req, res) => {
       titulo: comConvite ? 'Conta vinculada' : 'Conta criada',
       mensagem: comConvite
         ? 'Sua conta foi vinculada à empresa.'
-        : 'Seu período de teste foi iniciado.',
+        : 'Confirme seu e-mail e aceite os termos para iniciar o teste gratuito.',
       entidade_tipo: 'usuario',
       entidade_id: authData.user.id,
       dedupe_key: `cadastro:${authData.user.id}`,
@@ -402,46 +403,9 @@ exports.register = async (req, res) => {
       await enviarConfirmacaoEmail(email);
       resposta.email_confirmacao_pendente = true;
 
-      // Autônomo self-service gera contrato comercial OBRIGATÓRIO (mesmo fluxo do
-      // cadastro de empresa): usa o modelo vigente do plano, Matopiba nasce
-      // pré-assinada institucionalmente e o cliente assina depois. Não-fatal: uma
-      // falha aqui NÃO desfaz o cadastro já concluído. NÃO se aplica ao motorista
-      // vinculado por convite (esse entra numa empresa existente, sem novo contrato).
-      if (empresa_id) {
-        try {
-          // plano_id vem da empresa recém-criada (scope-safe: não depende de
-          // variáveis do bloco de criação). Sem plano → não gera contrato.
-          const { data: empRow } = await supabase
-            .from('empresas')
-            .select('plano_id, nome')
-            .eq('id', empresa_id)
-            .maybeSingle();
-          if (empRow?.plano_id) {
-            const { data: planoAutonomo } = await supabase
-              .from('planos')
-              .select('id, nome, preco_mensal, dias_trial, limite_motoristas, capacidade_inclusa, preco_motorista_extra, valor_implantacao, requer_negociacao')
-              .eq('id', empRow.plano_id)
-              .maybeSingle();
-            if (planoAutonomo) {
-              const contratacao = await criarPropostaEContrato({
-                supabase,
-                empresa: { id: empresa_id, nome: empRow.nome || `${nome} (Autonomo)` },
-                responsavel: { nome, email },
-                plano: planoAutonomo,
-                origem: 'cadastro_publico',
-                criadoPor: authData.user.id,
-              });
-              if (contratacao && !contratacao.skipped) {
-                resposta.contratacao = { contrato_id: contratacao.contrato_id };
-              }
-            }
-          }
-        } catch (contratoErr) {
-          console.error('[register] contratacao autônomo (nao-fatal)', {
-            motivo: contratoErr.motivo || contratoErr.code || 'erro',
-          });
-        }
-      }
+      // Cadastro self-service nao gera contrato comercial automaticamente;
+      // a contratacao nasce somente por decisao explicita de aquisicao.
+      resposta.contratacao = null;
     }
 
     if (!comConvite && administrador && administrador.email) {
@@ -696,6 +660,7 @@ exports.getMe = async (req, res) => {
     // NÃO pode derrubar /auth/me (login / restauração de sessão) → fallback false/0.
     let termos_pendentes = false;
     let termos_pendentes_count = 0;
+    let trial_v2 = null;
     try {
       const { count } = await getTermosPendentes(
         data.id,
@@ -704,11 +669,17 @@ exports.getMe = async (req, res) => {
       );
       termos_pendentes_count = count;
       termos_pendentes = count > 0;
+      if (count === 0 && data.empresa_id && data.is_super_admin !== true) {
+        trial_v2 = await iniciarTrialV2PorAceiteTermos({
+          supabase,
+          empresaId: data.empresa_id,
+        });
+      }
     } catch (termosErr) {
       console.error('[getMe] Falha ao calcular termos pendentes:', termosErr.message || termosErr);
     }
 
-    res.status(200).json({ ...data, termos_pendentes, termos_pendentes_count });
+    res.status(200).json({ ...data, termos_pendentes, termos_pendentes_count, trial_v2 });
   } catch (error) {
     res.status(500).json({ message: 'Erro ao buscar dados do usuário.' });
   }
@@ -823,7 +794,8 @@ exports.registerEmpresa = async (req, res) => {
       plano_id,
       planoAlias: plano,
       tipo: 'transportadora',
-      // Fluxo v2: trial NÃO inicia na criação; só após o contrato assinado.
+      // Fluxo v2: trial nao inicia na criacao; comeca apos e-mail confirmado,
+      // login valido e aceite de Termos de Uso/Privacidade.
       commercialFlowV2: true,
     });
 
@@ -898,30 +870,7 @@ exports.registerEmpresa = async (req, res) => {
     }
 
     // Dispara o e-mail de confirmação (não-fatal) e sinaliza pendência ao cliente.
-    let contratacao = null;
-    if (empresaData.plano_id) {
-      try {
-        const { data: planoContrato } = await supabase
-          .from('planos')
-          .select('id, nome, preco_mensal, dias_trial, limite_motoristas, capacidade_inclusa, preco_motorista_extra, valor_implantacao, requer_negociacao')
-          .eq('id', empresaData.plano_id)
-          .maybeSingle();
-        if (planoContrato) {
-          contratacao = await criarPropostaEContrato({
-            supabase,
-            empresa: empresaData,
-            responsavel: { nome, email },
-            plano: planoContrato,
-            origem: 'cadastro_publico',
-            criadoPor: authData.user.id,
-          });
-        }
-      } catch (contratoErr) {
-        console.error('[registerEmpresa] contratacao (nao-fatal)', {
-          motivo: contratoErr.motivo || contratoErr.code || 'erro',
-        });
-      }
-    }
+    // Cadastro publico nao cria contrato comercial; contrato nasce apenas na aquisicao explicita.
 
     await enviarConfirmacaoEmail(email);
 
@@ -930,12 +879,7 @@ exports.registerEmpresa = async (req, res) => {
       empresa_id: empresaData.id,
       email_confirmacao_pendente: true,
       promocao_aplicada,
-      contratacao: contratacao && !contratacao.skipped ? {
-        proposta_id: contratacao.proposta_id,
-        contrato_id: contratacao.contrato_id,
-        implantacao: contratacao.snapshot?.implantacao_gratis ? 'gratis' : 'positiva',
-        fatura_implantacao: contratacao.snapshot?.implantacao_gratis ? 'nao_criada' : 'pendente_autorizacao',
-      } : null,
+      contratacao: null,
     });
   } catch (err) {
     console.error('Erro no register-empresa:', err);

@@ -50,7 +50,7 @@ test('trial ativo + contrato obrigatório PENDENTE → NÃO bloqueia trial váli
   const r = avaliar(empresaV2(), contratoPendente);
   assert.ok([SITUACAO.TRIAL_ATIVO, SITUACAO.TRIAL_EXPIRANDO].includes(r.situacao));
   assert.equal(r.acoes.operar_escrita, true);
-  assert.equal(r.acoes.assinar_contrato, true);
+  assert.equal(r.acoes.assinar_contrato, false);
 });
 
 test('trial ativo (contrato já concluído) + pendência residual não derruba escrita', () => {
@@ -59,11 +59,12 @@ test('trial ativo (contrato já concluído) + pendência residual não derruba e
   assert.equal(r.acoes.operar_escrita, true);
 });
 
-test('trial expirado + contrato obrigatório pendente → aplica regra comercial (bloqueia, orienta assinar)', () => {
+test('trial expirado + contrato pendente sem decisao -> aguardando decisao, nao divida', () => {
   const r = avaliar(empresaV2({ trial_ends_at: ANTES.toISOString() }), contratoPendente);
-  assert.equal(r.situacao, SITUACAO.AGUARDANDO_ASSINATURA);
+  assert.equal(r.situacao, SITUACAO.TRIAL_EXPIRADO_AGUARDANDO_DECISAO);
   assert.equal(r.acoes.operar_escrita, false);
-  assert.equal(r.acoes.assinar_contrato, true);
+  assert.equal(r.acoes.assinar_contrato, false);
+  assert.equal(r.acoes.converter, true);
 });
 
 test('trial expirado sem decisão (contrato ok) → aguardando decisão, escrita bloqueada', () => {

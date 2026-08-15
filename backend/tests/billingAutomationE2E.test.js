@@ -52,7 +52,7 @@ function criarDepsMemoria({ situacao, snapshot, empresa = {} } = {}) {
   return {
     estado,
     deps: {
-      carregarSituacao: async () => situacao || { situacao: 'trial_ativo', trial_ends_at: '2026-08-20T00:00:00.000Z' },
+      carregarSituacao: async () => situacao || { situacao: 'conversao_aguardando_pagamento', trial_ends_at: '2026-08-20T00:00:00.000Z' },
       carregarEmpresaBilling: async () => ({ ...estado }),
       carregarSnapshot: async () => snapshot || { valor_mensal: 299.9, valor_implantacao: 0, trial_dias: 14 },
       carregarAddOns: async () => [],
@@ -108,7 +108,7 @@ test('E2E automático: eventos concorrentes reivindicados uma vez (claim atômic
   }
   // 4 workers concorrentes: nenhum evento processado em duplicado.
   const depsCompart = {
-    carregarSituacao: async () => ({ situacao: 'trial_ativo', trial_ends_at: '2026-08-20T00:00:00.000Z' }),
+    carregarSituacao: async () => ({ situacao: 'conversao_aguardando_pagamento', trial_ends_at: '2026-08-20T00:00:00.000Z' }),
     carregarEmpresaBilling: async () => ({ asaas_customer_id: null, asaas_subscription_id: null }),
     carregarSnapshot: async () => ({ valor_mensal: 99.9, valor_implantacao: 0 }),
     carregarAddOns: async () => [],
@@ -131,7 +131,7 @@ test('E2E crash recovery: provider criou customer mas processo caiu antes de mar
   provider.customers.set('cus_000001', { id: 'cus_000001' });
   provider._seq.cus = 1; // próximo customer seria cus_000002 se recriasse (não deve)
   const deps = {
-    carregarSituacao: async () => ({ situacao: 'trial_ativo', trial_ends_at: '2026-08-20T00:00:00.000Z' }),
+    carregarSituacao: async () => ({ situacao: 'conversao_aguardando_pagamento', trial_ends_at: '2026-08-20T00:00:00.000Z' }),
     carregarEmpresaBilling: async () => ({ ...estado }),
     carregarSnapshot: async () => ({ valor_mensal: 299.9, valor_implantacao: 0 }),
     carregarAddOns: async () => [],

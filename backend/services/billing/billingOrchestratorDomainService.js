@@ -5,9 +5,6 @@
 // banco nem com Asaas; o executor I/O aplica as acoes via provider injetavel.
 
 const SITUACOES_COM_BILLING = new Set([
-  'trial_ativo',
-  'trial_expirando',
-  'trial_expirado_aguardando_decisao',
   'conversao_aguardando_pagamento',
   'ativa',
 ]);

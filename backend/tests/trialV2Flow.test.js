@@ -2,15 +2,12 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const Module = require('node:module');
 
-const { iniciarTrialV2SeAplicavel } = require('../services/assinaturaEletronicaInternaService');
+const { iniciarTrialV2PorAceiteTermos } = require('../services/trialV2Service');
 
-// ── Mock do supabase para iniciarTrialV2SeAplicavel ──────────────────────────
-// select empresa → maybeSingle (retorna a empresa); depois update().is().select()
-// → maybeSingle (retorna a linha atualizada ou null se a corrida perdeu).
-function mockEmpresa(empresa, updateReturns) {
+function mockTrial({ empresa, plano = { id: 'plano-1', dias_trial: 14 }, updateReturns = { id: 'e1' } } = {}) {
   const calls = { updated: null };
   const api = {
-    from() {
+    from(tabela) {
       const b = {
         select() { return b; },
         eq() { return b; },
@@ -18,7 +15,9 @@ function mockEmpresa(empresa, updateReturns) {
         update(payload) { calls.updated = payload; return b; },
         maybeSingle() {
           if (calls.updated) return Promise.resolve({ data: updateReturns, error: null });
-          return Promise.resolve({ data: empresa, error: null });
+          if (tabela === 'empresas') return Promise.resolve({ data: empresa, error: null });
+          if (tabela === 'planos') return Promise.resolve({ data: plano, error: null });
+          return Promise.resolve({ data: null, error: null });
         },
       };
       return b;
@@ -28,41 +27,49 @@ function mockEmpresa(empresa, updateReturns) {
   return api;
 }
 
-const SNAP14 = { snapshot: { trial_dias: 14 } };
-
-test('trial v2: assinatura completa inicia o trial uma vez (trial_ends_at ~14d)', async () => {
-  const sb = mockEmpresa({ id: 'e1', commercial_flow_version: 'v2', trial_started_at: null }, { id: 'e1' });
-  const r = await iniciarTrialV2SeAplicavel({ supabase: sb, empresaId: 'e1', proposta: SNAP14 });
+test('trial v2: aceite completo de termos inicia o trial uma vez pelo plano', async () => {
+  const sb = mockTrial({
+    empresa: { id: 'e1', commercial_flow_version: 'v2', trial_started_at: null, plano_id: 'plano-1' },
+    plano: { id: 'plano-1', dias_trial: 14 },
+  });
+  const agora = new Date('2026-08-15T12:00:00.000Z');
+  const r = await iniciarTrialV2PorAceiteTermos({ supabase: sb, empresaId: 'e1', agora });
   assert.equal(r.iniciado, true);
+  assert.equal(r.motivo, 'ok');
   assert.equal(sb._calls.updated.status, 'trial');
-  assert.ok(sb._calls.updated.trial_started_at);
-  const dias = (new Date(sb._calls.updated.trial_ends_at) - new Date(sb._calls.updated.trial_started_at)) / 864e5;
-  assert.ok(Math.abs(dias - 14) < 0.01, `esperava ~14 dias, veio ${dias}`);
+  assert.equal(sb._calls.updated.trial_started_at, agora.toISOString());
+  assert.equal(sb._calls.updated.trial_ends_at, '2026-08-29T12:00:00.000Z');
 });
 
-test('trial v2: idempotente — trial_started_at já setado não reinicia (retry)', async () => {
-  const sb = mockEmpresa({ id: 'e1', commercial_flow_version: 'v2', trial_started_at: '2026-08-01T00:00:00Z' }, { id: 'e1' });
-  const r = await iniciarTrialV2SeAplicavel({ supabase: sb, empresaId: 'e1', proposta: SNAP14 });
+test('trial v2: idempotente, retry/login posterior nao reinicia nem estende', async () => {
+  const sb = mockTrial({
+    empresa: { id: 'e1', commercial_flow_version: 'v2', trial_started_at: '2026-08-01T00:00:00.000Z', plano_id: 'plano-1' },
+  });
+  const r = await iniciarTrialV2PorAceiteTermos({ supabase: sb, empresaId: 'e1', agora: new Date('2026-08-15T00:00:00.000Z') });
   assert.equal(r.iniciado, false);
   assert.equal(r.motivo, 'ja_iniciado');
-  assert.equal(sb._calls.updated, null); // nao tocou o banco
+  assert.equal(sb._calls.updated, null);
 });
 
-test('trial v2: conta legada (nao-v2) nao inicia trial aqui', async () => {
-  const sb = mockEmpresa({ id: 'e1', commercial_flow_version: null, trial_started_at: null }, { id: 'e1' });
-  const r = await iniciarTrialV2SeAplicavel({ supabase: sb, empresaId: 'e1', proposta: SNAP14 });
+test('trial v2: conta legada nao passa pelo marco de termos v2', async () => {
+  const sb = mockTrial({
+    empresa: { id: 'e1', commercial_flow_version: null, trial_started_at: null, plano_id: 'plano-1' },
+  });
+  const r = await iniciarTrialV2PorAceiteTermos({ supabase: sb, empresaId: 'e1' });
   assert.equal(r.iniciado, false);
   assert.equal(r.motivo, 'nao_v2');
 });
 
-test('trial v2: corrida (update volta null) nao conta como iniciado', async () => {
-  const sb = mockEmpresa({ id: 'e1', commercial_flow_version: 'v2', trial_started_at: null }, null);
-  const r = await iniciarTrialV2SeAplicavel({ supabase: sb, empresaId: 'e1', proposta: SNAP14 });
+test('trial v2: corrida de update nao duplica inicio', async () => {
+  const sb = mockTrial({
+    empresa: { id: 'e1', commercial_flow_version: 'v2', trial_started_at: null, plano_id: 'plano-1' },
+    updateReturns: null,
+  });
+  const r = await iniciarTrialV2PorAceiteTermos({ supabase: sb, empresaId: 'e1' });
   assert.equal(r.iniciado, false);
   assert.equal(r.motivo, 'corrida_ja_iniciado');
 });
 
-// ── empresaService: criação v2 não inicia trial; legada mantém ───────────────
 function mockCriar(dias) {
   const state = { inserted: null };
   const api = {
@@ -74,7 +81,7 @@ function mockCriar(dias) {
         update() { return b; },
         maybeSingle() {
           if (t === 'planos') return Promise.resolve({ data: { id: 'plano-1', dias_trial: dias }, error: null });
-          return Promise.resolve({ data: null, error: null }); // empresas: codigo único
+          return Promise.resolve({ data: null, error: null });
         },
         single() { return Promise.resolve({ data: { id: 'emp-1', ...state.inserted }, error: null }); },
       };
@@ -101,7 +108,7 @@ function carregarEmpresaService(sb) {
   }
 }
 
-test('empresaService v2: NÃO inicia trial na criação + marca commercial_flow_version', async () => {
+test('empresaService v2: nao inicia trial na criacao + marca commercial_flow_version', async () => {
   const sb = mockCriar(14);
   const { criarEmpresaCompleta } = carregarEmpresaService(sb);
   const r = await criarEmpresaCompleta({ nome: 'Nova', plano_id: 'plano-1', commercialFlowV2: true });
@@ -112,7 +119,7 @@ test('empresaService v2: NÃO inicia trial na criação + marca commercial_flow_
   assert.equal(sb._state.inserted.status, 'trial');
 });
 
-test('empresaService legado: mantém trial iniciado na criação (sem commercial_flow_version)', async () => {
+test('empresaService legado: mantem trial iniciado na criacao', async () => {
   const sb = mockCriar(14);
   const { criarEmpresaCompleta } = carregarEmpresaService(sb);
   const r = await criarEmpresaCompleta({ nome: 'Antiga', plano_id: 'plano-1' });

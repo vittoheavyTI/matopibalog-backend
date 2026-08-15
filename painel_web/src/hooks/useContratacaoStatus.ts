@@ -8,15 +8,26 @@ import { useAuth } from '../contexts/AuthContext';
 export function useContratacaoStatus() {
   const { user } = useAuth();
   const [pendenciaObrigatoria, setPendenciaObrigatoria] = useState(false);
+  const [trialAtivo, setTrialAtivo] = useState(false);
+  const [trialEndsAt, setTrialEndsAt] = useState<string | null>(null);
+  const [diasRestantes, setDiasRestantes] = useState<number | null>(null);
+  const [podeContratar, setPodeContratar] = useState(false);
 
   useEffect(() => {
     if (user?.is_super_admin || user?.role !== 'admin') return;
     let vivo = true;
     api.get('/contratacao/status')
-      .then(({ data }) => { if (vivo) setPendenciaObrigatoria(data?.pendencia_obrigatoria === true); })
+      .then(({ data }) => {
+        if (!vivo) return;
+        setPendenciaObrigatoria(data?.pendencia_obrigatoria === true);
+        setTrialAtivo(data?.trial_ativo === true);
+        setTrialEndsAt(data?.trial_ends_at || null);
+        setDiasRestantes(typeof data?.dias_restantes === 'number' ? data.dias_restantes : null);
+        setPodeContratar(data?.pode_contratar === true);
+      })
       .catch(() => {});
     return () => { vivo = false; };
   }, [user?.is_super_admin, user?.role]);
 
-  return { pendenciaObrigatoria };
+  return { pendenciaObrigatoria, trialAtivo, trialEndsAt, diasRestantes, podeContratar };
 }

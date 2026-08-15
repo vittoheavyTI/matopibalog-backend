@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { FileText, Download, ShieldCheck, CheckCircle2, Clock, FileSignature, AlertTriangle } from 'lucide-react';
 import api from '../api';
 import { formatTechnicalDate } from '../utils';
+import { useContratacaoStatus } from '../hooks/useContratacaoStatus';
 
 // Área "Plano e contratos" dentro de Faturas / Regularização. Mostra o plano
 // contratado, o andamento da contratação e disponibiliza, em linguagem simples
@@ -63,6 +64,7 @@ export const PlanoContratos: React.FC = () => {
   const [carregado, setCarregado] = useState(false);
   const [baixando, setBaixando] = useState<string | null>(null);
   const [erro, setErro] = useState('');
+  const { pendenciaObrigatoria } = useContratacaoStatus();
 
   useEffect(() => {
     api.get('/contratacao/minha')
@@ -102,7 +104,7 @@ export const PlanoContratos: React.FC = () => {
       </div>
 
       {/* Pendência obrigatória no TOPO do card: ação obrigatória, não passiva. */}
-      {!concluido && (
+      {pendenciaObrigatoria && !concluido && (
         <div className="mb-4 rounded-lg border-2 border-amber-300 bg-amber-50 p-4">
           <div className="flex items-start gap-2 text-amber-800">
             <AlertTriangle size={18} className="shrink-0 mt-0.5" />
