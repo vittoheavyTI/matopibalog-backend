@@ -122,15 +122,54 @@ test('v2: trial vigente + contrato obrigatório pendente → trial preservado, e
 
 test('v2: compra iniciada durante trial permite assinar contrato sem encurtar o trial', () => {
   const r = avaliarSituacaoComercial({
-    empresa: v2({ trial_started_at: PASSADO, trial_ends_at: FUTURO, decisao_pos_trial: 'continuar' }),
+    empresa: v2({ trial_started_at: PASSADO, trial_ends_at: FUTURO }),
     contrato: { status: 'aguardando_assinatura', obrigatorio: true },
     snapshot: SNAP_ZERO,
+    aquisicao_explicita: true,
     agora: AGORA,
   });
   assert.equal(r.situacao, SITUACAO.TRIAL_ATIVO);
   assert.equal(r.acoes.operar_escrita, true);
   assert.equal(r.acoes.assinar_contrato, true);
   assert.equal(r.trial_ends_at, FUTURO);
+});
+
+test('v2: contrato automatico antigo durante trial nao conta como intencao de compra', () => {
+  const r = avaliarSituacaoComercial({
+    empresa: v2({ trial_started_at: PASSADO, trial_ends_at: FUTURO }),
+    contrato: { status: 'aguardando_assinatura', obrigatorio: true },
+    snapshot: SNAP_ZERO,
+    aquisicao_explicita: false,
+    agora: AGORA,
+  });
+  assert.equal(r.situacao, SITUACAO.TRIAL_ATIVO);
+  assert.equal(r.acoes.operar_escrita, true);
+  assert.equal(r.acoes.assinar_contrato, false);
+});
+
+test('v2: trial expirado + continuar cria etapa de assinatura antes de billing', () => {
+  const r = avaliarSituacaoComercial({
+    empresa: v2({ trial_started_at: PASSADO, trial_ends_at: PASSADO, decisao_pos_trial: 'continuar' }),
+    contrato: { status: 'aguardando_assinatura', obrigatorio: true },
+    snapshot: SNAP_ZERO,
+    aquisicao_explicita: true,
+    agora: AGORA,
+  });
+  assert.equal(r.situacao, SITUACAO.AGUARDANDO_ASSINATURA);
+  assert.equal(r.acoes.assinar_contrato, true);
+  assert.equal(r.acoes.regularizar, false);
+});
+
+test('v2: compra antecipada assinada entra em pagamento somente apos trial_end', () => {
+  const r = avaliarSituacaoComercial({
+    empresa: v2({ trial_started_at: PASSADO, trial_ends_at: PASSADO }),
+    contrato: CONTRATO_ASSINADO,
+    snapshot: SNAP_ZERO,
+    aquisicao_explicita: true,
+    agora: AGORA,
+  });
+  assert.equal(r.situacao, SITUACAO.CONVERSAO_AGUARDANDO_PAGAMENTO);
+  assert.equal(r.acoes.regularizar, true);
 });
 
 test('v2: contrato assinado + trial vigente → trial_ativo, escrita OK, sem cobrança', () => {

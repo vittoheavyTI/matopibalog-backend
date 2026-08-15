@@ -24,6 +24,10 @@ const {
   montarSnapshotProposta,
 } = require('../services/contratacaoComercialDomainService');
 const {
+  iniciarAquisicaoComercial,
+  registrarNaoContinuar,
+} = require('../services/aquisicaoComercialService');
+const {
   confirmarAssinatura,
   solicitarDesafioAssinatura,
   verificarContratoPublico,
@@ -135,16 +139,23 @@ router.get('/status', verifyToken, verificarEmpresa, permitirAssinaturaCliente, 
   try {
     const resumo = await resumoContratacaoEmpresa({ supabase, empresaId: req.empresa_id });
     const situacao = await carregarSituacaoComercial(supabase, req.empresa_id);
-    const trialSemContratoObrigatorio = ['trial_ativo', 'trial_expirando'].includes(situacao?.situacao)
-      && situacao?.acoes?.assinar_contrato !== true;
+    const trialSemContratoObrigatorio = ['trial_ativo', 'trial_expirando'].includes(situacao?.situacao);
     return res.json({
       ...resumo,
       pendencia_obrigatoria: trialSemContratoObrigatorio ? false : resumo.pendencia_obrigatoria,
+      assinatura_pendente: situacao?.acoes?.assinar_contrato === true,
       situacao: situacao?.situacao || null,
       trial_ativo: ['trial_ativo', 'trial_expirando'].includes(situacao?.situacao),
+      trial_expirado: ['trial_expirado_aguardando_decisao', 'trial_encerrado_sem_contratacao'].includes(situacao?.situacao),
       trial_ends_at: situacao?.trial_ends_at || null,
       dias_restantes: situacao?.dias_restantes ?? null,
-      pode_contratar: situacao?.acoes?.converter === true || ['trial_ativo', 'trial_expirando'].includes(situacao?.situacao),
+      plano_id: situacao?.plano_id || null,
+      quantidade_contratada: situacao?.quantidade_contratada ?? null,
+      aquisicao_explicita: situacao?.aquisicao_explicita === true,
+      pode_declinar: situacao?.situacao === 'trial_expirado_aguardando_decisao',
+      pode_contratar: situacao?.acoes?.assinar_contrato === true
+        ? false
+        : (situacao?.acoes?.converter === true || ['trial_ativo', 'trial_expirando'].includes(situacao?.situacao)),
     });
   } catch (err) {
     console.error('[contratacao/status] Falha', { status: 500 });
@@ -162,6 +173,38 @@ router.get('/situacao', verifyToken, verificarEmpresa, permitirAssinaturaCliente
   } catch (err) {
     console.error('[contratacao/situacao] Falha', { status: 500 });
     return res.status(500).json({ message: 'Erro ao carregar situacao comercial.' });
+  }
+});
+
+router.post('/iniciar', verifyToken, verificarEmpresa, permitirAssinaturaCliente, async (req, res) => {
+  if (!req.empresa_id) return res.status(400).json({ message: 'Empresa nao identificada.' });
+  try {
+    const r = await iniciarAquisicaoComercial({
+      supabase,
+      empresaId: req.empresa_id,
+      usuarioId: req.user.uid,
+      planoId: req.body?.plano_id,
+      quantidadeContratada: req.body?.quantidade_contratada,
+    });
+    return res.status(r.status).json(r.body);
+  } catch (err) {
+    console.error('[contratacao/iniciar] Falha', { status: 500 });
+    return res.status(500).json({ message: 'Erro ao iniciar contratacao.' });
+  }
+});
+
+router.post('/nao-continuar', verifyToken, verificarEmpresa, permitirAssinaturaCliente, async (req, res) => {
+  if (!req.empresa_id) return res.status(400).json({ message: 'Empresa nao identificada.' });
+  try {
+    const r = await registrarNaoContinuar({
+      supabase,
+      empresaId: req.empresa_id,
+      usuarioId: req.user.uid,
+    });
+    return res.status(r.status).json(r.body);
+  } catch (err) {
+    console.error('[contratacao/nao-continuar] Falha', { status: 500 });
+    return res.status(500).json({ message: 'Erro ao registrar decisao.' });
   }
 });
 

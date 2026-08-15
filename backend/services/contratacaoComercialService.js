@@ -42,6 +42,7 @@ async function criarPropostaEContrato({
   criadoPor = null,
   overrideImplantacaoValor,
   overrideImplantacaoMotivo,
+  quantidadeContratada,
   // Contratação inicial nasce OBRIGATÓRIA: o contrato precisa ser assinado para
   // liberar o uso operacional (gate). Aditivos/contratos opcionais podem passar
   // obrigatorio=false explicitamente.
@@ -49,7 +50,7 @@ async function criarPropostaEContrato({
 } = {}) {
   const snapshot = montarSnapshotProposta({
     plano,
-    quantidadeContratada: empresa?.quantidade_contratada || plano?.capacidade_inclusa || plano?.limite_motoristas || 1,
+    quantidadeContratada: quantidadeContratada ?? empresa?.quantidade_contratada ?? plano?.capacidade_inclusa ?? plano?.limite_motoristas ?? 1,
     trialDias: plano?.dias_trial || 0,
     origem,
     overrideImplantacaoValor,
@@ -163,7 +164,7 @@ async function criarPropostaEContrato({
   await supabase.from('contrato_eventos').insert({
     contrato_id: contratoRow.id,
     empresa_id: empresa.id,
-    tipo: 'cadastro_aceito',
+    tipo: origem === 'cadastro_publico' ? 'cadastro_aceito' : 'aquisicao_comercial_iniciada',
     detalhe: {
       origem,
       implantacao: snapshot.proposta.implantacao_gratis ? 'gratis' : 'positiva',
