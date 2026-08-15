@@ -43,6 +43,7 @@ function criarSupabase(over = {}) {
     usuario: { id: 'user-1', nome: 'Dono', email: 'dono@example.com' },
     propostas: over.propostas ? [...over.propostas] : [],
     contratos: over.contratos ? [...over.contratos] : [],
+    billingOutbox: [],
     inserts: [],
     updates: [],
   };
@@ -87,6 +88,15 @@ function criarSupabase(over = {}) {
             if (proposta) proposta.contratos_comerciais = [contrato];
             return { select: () => ({ single: async () => ({ data: contrato, error: null }) }) };
           }
+          if (tabela === 'billing_outbox') {
+            const existente = state.billingOutbox.find((e) => e.dedupe_key === row.dedupe_key);
+            if (existente) {
+              return { select: () => ({ maybeSingle: async () => ({ data: null, error: { code: '23505', message: 'duplicate' } }) }) };
+            }
+            const evento = { id: `out-${state.billingOutbox.length + 1}`, ...row };
+            state.billingOutbox.push(evento);
+            return { select: () => ({ maybeSingle: async () => ({ data: evento, error: null }) }) };
+          }
           return api;
         },
         update(payload) {
@@ -130,11 +140,50 @@ test('trial -> contratar agora cria proposta e contrato obrigatorio sem alterar 
   assert.equal(r.body.origem, ORIGEM_AQUISICAO);
   assert.equal(r.body.snapshot.valor_mensal, 499.9);
   assert.equal(r.body.snapshot.quantidade_extra, 2);
+  assert.equal(r.body.snapshot.trial_dias, 0);
+  assert.equal(r.body.snapshot.trial_started_at, '2026-08-15T12:00:00.000Z');
+  assert.equal(r.body.snapshot.trial_ends_at, FUTURO);
   assert.equal(supabase._state.empresa.trial_started_at, '2026-08-15T12:00:00.000Z');
   assert.equal(supabase._state.empresa.trial_ends_at, FUTURO);
   assert.equal(supabase._state.empresa.decisao_pos_trial, undefined);
   assert.equal(supabase._state.inserts.filter((i) => i.tabela === 'propostas_comerciais').length, 1);
   assert.equal(supabase._state.inserts.filter((i) => i.tabela === 'contratos_comerciais').length, 1);
+});
+
+test('aquisicao bloqueia antes do aceite/ativacao do trial', async () => {
+  const supabase = criarSupabase({ empresa: { trial_started_at: null, trial_ends_at: null } });
+  const r = await iniciarAquisicaoComercial({ supabase, empresaId: 'emp-1', usuarioId: 'user-1', planoId: 'plano-1', quantidadeContratada: 7, agora: AGORA });
+
+  assert.equal(r.status, 409);
+  assert.equal(r.body.motivo, 'aguardando_ativacao_trial');
+  assert.equal(supabase._state.inserts.filter((i) => i.tabela === 'propostas_comerciais').length, 0);
+});
+
+test('aquisicao bloqueia conta em estado administrativo bloqueado', async () => {
+  const supabase = criarSupabase({ empresa: { status: 'bloqueado' } });
+  const r = await iniciarAquisicaoComercial({ supabase, empresaId: 'emp-1', usuarioId: 'user-1', planoId: 'plano-1', quantidadeContratada: 7, agora: AGORA });
+
+  assert.equal(r.status, 409);
+  assert.equal(r.body.motivo, 'empresa_bloqueada');
+});
+
+test('aquisicao valida categoria do plano contra tipo da empresa', async () => {
+  const supabase = criarSupabase({
+    empresa: { tipo: 'autonomo', quantidade_contratada: 1 },
+    plano: { categoria: 'empresa', capacidade_inclusa: 1, limite_motoristas: 1, preco_motorista_extra: null },
+  });
+  const r = await iniciarAquisicaoComercial({ supabase, empresaId: 'emp-1', usuarioId: 'user-1', planoId: 'plano-1', quantidadeContratada: 1, agora: AGORA });
+
+  assert.equal(r.status, 422);
+  assert.equal(r.body.motivo, 'categoria_incompativel');
+});
+
+test('aquisicao bloqueia plano oculto do self-service', async () => {
+  const supabase = criarSupabase({ plano: { visivel_cadastro: false } });
+  const r = await iniciarAquisicaoComercial({ supabase, empresaId: 'emp-1', usuarioId: 'user-1', planoId: 'plano-1', quantidadeContratada: 7, agora: AGORA });
+
+  assert.equal(r.status, 422);
+  assert.equal(r.body.motivo, 'plano_oculto_self_service');
 });
 
 test('double click contratar agora retorna a mesma contratacao equivalente', async () => {
@@ -196,6 +245,64 @@ test('trial end -> continuar reutiliza compra antecipada equivalente e persiste 
   assert.equal(supabase._state.inserts.filter((i) => i.tabela === 'contratos_comerciais').length, 1);
 });
 
+test('trial end -> continuar com compra antecipada assinada rearma billing uma vez', async () => {
+  const supabase = criarSupabase({
+    empresa: { trial_ends_at: PASSADO },
+    propostas: [{
+      id: 'prop-signed',
+      empresa_id: 'emp-1',
+      plano_id: 'plano-1',
+      status: 'enviada',
+      origem: ORIGEM_AQUISICAO,
+      snapshot: { plano_id: 'plano-1', quantidade_contratada: 7, valor_mensal: 499.9 },
+      contratos_comerciais: [{ id: 'ct-signed', empresa_id: 'emp-1', status: 'plenamente_assinado', obrigatorio: true }],
+    }],
+    contratos: [{ id: 'ct-signed', empresa_id: 'emp-1', status: 'plenamente_assinado', obrigatorio: true }],
+  });
+
+  const primeiro = await iniciarAquisicaoComercial({ supabase, empresaId: 'emp-1', usuarioId: 'user-1', planoId: 'plano-1', quantidadeContratada: 7, agora: AGORA });
+  const segundo = await iniciarAquisicaoComercial({ supabase, empresaId: 'emp-1', usuarioId: 'user-1', planoId: 'plano-1', quantidadeContratada: 7, agora: AGORA });
+
+  assert.equal(primeiro.status, 200);
+  assert.equal(primeiro.body.billing_event.code, 'inserted');
+  assert.equal(segundo.status, 200);
+  assert.equal(segundo.body.billing_event.code, 'duplicate');
+  assert.equal(supabase._state.billingOutbox.length, 1);
+  assert.equal(supabase._state.billingOutbox[0].event_type, 'contratacao_apta');
+  assert.equal(supabase._state.inserts.filter((i) => i.tabela === 'faturas').length, 0);
+});
+
+test('trial end -> continuar com contrato pendente nao rearma billing', async () => {
+  const supabase = criarSupabase({
+    empresa: { trial_ends_at: PASSADO },
+    propostas: [{
+      id: 'prop-pending',
+      empresa_id: 'emp-1',
+      plano_id: 'plano-1',
+      status: 'enviada',
+      origem: ORIGEM_AQUISICAO,
+      snapshot: { plano_id: 'plano-1', quantidade_contratada: 7, valor_mensal: 499.9 },
+      contratos_comerciais: [{ id: 'ct-pending', empresa_id: 'emp-1', status: 'aguardando_assinatura', obrigatorio: true }],
+    }],
+    contratos: [{ id: 'ct-pending', empresa_id: 'emp-1', status: 'aguardando_assinatura', obrigatorio: true }],
+  });
+
+  const r = await iniciarAquisicaoComercial({ supabase, empresaId: 'emp-1', usuarioId: 'user-1', planoId: 'plano-1', quantidadeContratada: 7, agora: AGORA });
+
+  assert.equal(r.status, 200);
+  assert.equal(r.body.billing_event.code, 'contrato_nao_concluido');
+  assert.equal(supabase._state.billingOutbox.length, 0);
+});
+
+test('nao continuar durante trial ativo e negado e nao grava decisao', async () => {
+  const supabase = criarSupabase();
+  const r = await registrarNaoContinuar({ supabase, empresaId: 'emp-1', usuarioId: 'user-1', agora: AGORA });
+
+  assert.equal(r.status, 409);
+  assert.equal(r.body.motivo, 'trial_ainda_ativo');
+  assert.equal(supabase._state.empresa.decisao_pos_trial, undefined);
+});
+
 test('nao continuar persiste decisao, cancela pendencias explicitas e nao cria divida', async () => {
   const supabase = criarSupabase({
     empresa: { trial_ends_at: PASSADO },
@@ -210,7 +317,7 @@ test('nao continuar persiste decisao, cancela pendencias explicitas e nao cria d
     }],
     contratos: [{ id: 'ct-1', empresa_id: 'emp-1', status: 'aguardando_assinatura', obrigatorio: true }],
   });
-  const r = await registrarNaoContinuar({ supabase, empresaId: 'emp-1', usuarioId: 'user-1' });
+  const r = await registrarNaoContinuar({ supabase, empresaId: 'emp-1', usuarioId: 'user-1', agora: AGORA });
 
   assert.equal(r.status, 200);
   assert.equal(r.body.resultado, 'trial_encerrado_sem_contratacao');

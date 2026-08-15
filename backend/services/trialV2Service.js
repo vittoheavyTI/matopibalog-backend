@@ -10,35 +10,55 @@ function diasTrialDoPlano(plano) {
   return Number.isFinite(dias) && dias >= 0 ? dias : 0;
 }
 
+function avaliarDiasTrialDoPlano(plano) {
+  if (!plano || !plano.id) return { ok: false, motivo: 'plano_indisponivel' };
+  if (plano.ativo === false) return { ok: false, motivo: 'plano_invalido' };
+  const dias = Number(plano.dias_trial);
+  if (!Number.isInteger(dias) || dias < 0) return { ok: false, motivo: 'trial_config_indisponivel' };
+  return { ok: true, dias };
+}
+
+function usuarioPodeIniciarTrial({ usuario, empresa }) {
+  if (!usuario || !empresa) return false;
+  if (usuario.is_super_admin === true) return false;
+  if (usuario.empresa_id && String(usuario.empresa_id) !== String(empresa.id)) return false;
+
+  const role = usuario.role || usuario.tipo;
+  if (role === 'admin') return true;
+  return empresa.tipo === 'autonomo' && role === 'motorista';
+}
+
 // Marco canonico do trial v2:
 // email confirmado + login valido + aceite de todos os termos aplicaveis.
 // O chamador garante os termos; este servico apenas grava as datas uma unica vez.
-async function iniciarTrialV2PorAceiteTermos({ supabase, empresaId, agora = new Date() } = {}) {
+async function iniciarTrialV2PorAceiteTermos({ supabase, empresaId, usuario = null, agora = new Date() } = {}) {
   if (!supabase || !empresaId) return { iniciado: false, motivo: 'empresa_indisponivel' };
 
   try {
     const { data: empresa, error: empresaError } = await supabase
       .from('empresas')
-      .select('id, commercial_flow_version, trial_started_at, plano_id')
+      .select('id, tipo, commercial_flow_version, trial_started_at, plano_id')
       .eq('id', empresaId)
       .maybeSingle();
 
     if (empresaError || !empresa) return { iniciado: false, motivo: 'empresa_indisponivel' };
     if (empresa.commercial_flow_version !== 'v2') return { iniciado: false, motivo: 'nao_v2' };
     if (empresa.trial_started_at) return { iniciado: false, motivo: 'ja_iniciado' };
+    if (!usuarioPodeIniciarTrial({ usuario, empresa })) return { iniciado: false, motivo: 'usuario_sem_autoridade' };
+    if (!empresa.plano_id) return { iniciado: false, motivo: 'plano_indisponivel' };
 
-    let plano = null;
-    if (empresa.plano_id) {
-      const { data: planoRow, error: planoError } = await supabase
-        .from('planos')
-        .select('id, dias_trial')
-        .eq('id', empresa.plano_id)
-        .maybeSingle();
-      if (!planoError) plano = planoRow || null;
-    }
+    const { data: plano, error: planoError } = await supabase
+      .from('planos')
+      .select('id, dias_trial, ativo')
+      .eq('id', empresa.plano_id)
+      .maybeSingle();
+    if (planoError) return { iniciado: false, motivo: 'plano_indisponivel' };
+
+    const trial = avaliarDiasTrialDoPlano(plano);
+    if (!trial.ok) return { iniciado: false, motivo: trial.motivo };
 
     const inicio = dataValida(agora);
-    const dias = diasTrialDoPlano(plano);
+    const dias = trial.dias;
     const fim = new Date(inicio.getTime() + dias * MS_DIA);
 
     const patch = {
@@ -71,4 +91,6 @@ async function iniciarTrialV2PorAceiteTermos({ supabase, empresaId, agora = new 
 module.exports = {
   iniciarTrialV2PorAceiteTermos,
   diasTrialDoPlano,
+  avaliarDiasTrialDoPlano,
+  usuarioPodeIniciarTrial,
 };

@@ -673,6 +673,13 @@ exports.getMe = async (req, res) => {
         trial_v2 = await iniciarTrialV2PorAceiteTermos({
           supabase,
           empresaId: data.empresa_id,
+          usuario: {
+            uid: data.id,
+            empresa_id: data.empresa_id,
+            role: data.tipo,
+            tipo: data.tipo,
+            is_super_admin: data.is_super_admin === true,
+          },
         });
       }
     } catch (termosErr) {

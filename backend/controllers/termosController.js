@@ -49,6 +49,13 @@ async function iniciarTrialV2SeTermosCompletos(req) {
   return iniciarTrialV2PorAceiteTermos({
     supabase,
     empresaId: req.empresa_id,
+    usuario: {
+      uid: req.user.uid,
+      empresa_id: req.empresa_id,
+      role: req.user.role,
+      tipo: req.user.role,
+      is_super_admin: req.user.is_super_admin === true,
+    },
   });
 }
 

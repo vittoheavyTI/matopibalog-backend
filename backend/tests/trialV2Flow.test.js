@@ -4,7 +4,11 @@ const Module = require('node:module');
 
 const { iniciarTrialV2PorAceiteTermos } = require('../services/trialV2Service');
 
-function mockTrial({ empresa, plano = { id: 'plano-1', dias_trial: 14 }, updateReturns = { id: 'e1' } } = {}) {
+function usuario(over = {}) {
+  return { uid: 'u-admin', empresa_id: 'e1', role: 'admin', tipo: 'admin', is_super_admin: false, ...over };
+}
+
+function mockTrial({ empresa, plano = { id: 'plano-1', dias_trial: 14, ativo: true }, planoError = null, updateReturns = { id: 'e1' } } = {}) {
   const calls = { updated: null };
   const api = {
     from(tabela) {
@@ -16,7 +20,7 @@ function mockTrial({ empresa, plano = { id: 'plano-1', dias_trial: 14 }, updateR
         maybeSingle() {
           if (calls.updated) return Promise.resolve({ data: updateReturns, error: null });
           if (tabela === 'empresas') return Promise.resolve({ data: empresa, error: null });
-          if (tabela === 'planos') return Promise.resolve({ data: plano, error: null });
+          if (tabela === 'planos') return Promise.resolve({ data: plano, error: planoError });
           return Promise.resolve({ data: null, error: null });
         },
       };
@@ -30,10 +34,10 @@ function mockTrial({ empresa, plano = { id: 'plano-1', dias_trial: 14 }, updateR
 test('trial v2: aceite completo de termos inicia o trial uma vez pelo plano', async () => {
   const sb = mockTrial({
     empresa: { id: 'e1', commercial_flow_version: 'v2', trial_started_at: null, plano_id: 'plano-1' },
-    plano: { id: 'plano-1', dias_trial: 14 },
+    plano: { id: 'plano-1', dias_trial: 14, ativo: true },
   });
   const agora = new Date('2026-08-15T12:00:00.000Z');
-  const r = await iniciarTrialV2PorAceiteTermos({ supabase: sb, empresaId: 'e1', agora });
+  const r = await iniciarTrialV2PorAceiteTermos({ supabase: sb, empresaId: 'e1', usuario: usuario(), agora });
   assert.equal(r.iniciado, true);
   assert.equal(r.motivo, 'ok');
   assert.equal(sb._calls.updated.status, 'trial');
@@ -45,7 +49,7 @@ test('trial v2: idempotente, retry/login posterior nao reinicia nem estende', as
   const sb = mockTrial({
     empresa: { id: 'e1', commercial_flow_version: 'v2', trial_started_at: '2026-08-01T00:00:00.000Z', plano_id: 'plano-1' },
   });
-  const r = await iniciarTrialV2PorAceiteTermos({ supabase: sb, empresaId: 'e1', agora: new Date('2026-08-15T00:00:00.000Z') });
+  const r = await iniciarTrialV2PorAceiteTermos({ supabase: sb, empresaId: 'e1', usuario: usuario(), agora: new Date('2026-08-15T00:00:00.000Z') });
   assert.equal(r.iniciado, false);
   assert.equal(r.motivo, 'ja_iniciado');
   assert.equal(sb._calls.updated, null);
@@ -55,7 +59,7 @@ test('trial v2: conta legada nao passa pelo marco de termos v2', async () => {
   const sb = mockTrial({
     empresa: { id: 'e1', commercial_flow_version: null, trial_started_at: null, plano_id: 'plano-1' },
   });
-  const r = await iniciarTrialV2PorAceiteTermos({ supabase: sb, empresaId: 'e1' });
+  const r = await iniciarTrialV2PorAceiteTermos({ supabase: sb, empresaId: 'e1', usuario: usuario() });
   assert.equal(r.iniciado, false);
   assert.equal(r.motivo, 'nao_v2');
 });
@@ -65,9 +69,82 @@ test('trial v2: corrida de update nao duplica inicio', async () => {
     empresa: { id: 'e1', commercial_flow_version: 'v2', trial_started_at: null, plano_id: 'plano-1' },
     updateReturns: null,
   });
-  const r = await iniciarTrialV2PorAceiteTermos({ supabase: sb, empresaId: 'e1' });
+  const r = await iniciarTrialV2PorAceiteTermos({ supabase: sb, empresaId: 'e1', usuario: usuario() });
   assert.equal(r.iniciado, false);
   assert.equal(r.motivo, 'corrida_ja_iniciado');
+});
+
+test('trial v2: erro na leitura do plano nao grava datas nem consome beneficio', async () => {
+  const sb = mockTrial({
+    empresa: { id: 'e1', commercial_flow_version: 'v2', trial_started_at: null, plano_id: 'plano-1' },
+    planoError: { message: 'db down' },
+  });
+  const r = await iniciarTrialV2PorAceiteTermos({ supabase: sb, empresaId: 'e1', usuario: usuario() });
+  assert.equal(r.iniciado, false);
+  assert.equal(r.motivo, 'plano_indisponivel');
+  assert.equal(sb._calls.updated, null);
+});
+
+test('trial v2: plano ausente falha fechado e nao grava datas', async () => {
+  const sb = mockTrial({
+    empresa: { id: 'e1', commercial_flow_version: 'v2', trial_started_at: null, plano_id: 'plano-1' },
+    plano: null,
+  });
+  const r = await iniciarTrialV2PorAceiteTermos({ supabase: sb, empresaId: 'e1', usuario: usuario() });
+  assert.equal(r.iniciado, false);
+  assert.equal(r.motivo, 'plano_indisponivel');
+  assert.equal(sb._calls.updated, null);
+});
+
+test('trial v2: dias_trial invalido falha fechado e nao grava datas', async () => {
+  const sb = mockTrial({
+    empresa: { id: 'e1', commercial_flow_version: 'v2', trial_started_at: null, plano_id: 'plano-1' },
+    plano: { id: 'plano-1', dias_trial: 'x', ativo: true },
+  });
+  const r = await iniciarTrialV2PorAceiteTermos({ supabase: sb, empresaId: 'e1', usuario: usuario() });
+  assert.equal(r.iniciado, false);
+  assert.equal(r.motivo, 'trial_config_indisponivel');
+  assert.equal(sb._calls.updated, null);
+});
+
+test('trial v2: dias_trial zero configurado em plano existente e ativo e valido', async () => {
+  const sb = mockTrial({
+    empresa: { id: 'e1', commercial_flow_version: 'v2', trial_started_at: null, plano_id: 'plano-1' },
+    plano: { id: 'plano-1', dias_trial: 0, ativo: true },
+  });
+  const agora = new Date('2026-08-15T12:00:00.000Z');
+  const r = await iniciarTrialV2PorAceiteTermos({ supabase: sb, empresaId: 'e1', usuario: usuario(), agora });
+  assert.equal(r.iniciado, true);
+  assert.equal(r.trial_dias, 0);
+  assert.equal(sb._calls.updated.trial_started_at, sb._calls.updated.trial_ends_at);
+});
+
+test('trial v2: motorista de empresa nao inicia relogio comercial', async () => {
+  const sb = mockTrial({
+    empresa: { id: 'e1', tipo: 'transportadora', commercial_flow_version: 'v2', trial_started_at: null, plano_id: 'plano-1' },
+  });
+  const r = await iniciarTrialV2PorAceiteTermos({ supabase: sb, empresaId: 'e1', usuario: usuario({ role: 'motorista', tipo: 'motorista' }) });
+  assert.equal(r.iniciado, false);
+  assert.equal(r.motivo, 'usuario_sem_autoridade');
+  assert.equal(sb._calls.updated, null);
+});
+
+test('trial v2: proprietario autonomo inicia relogio comercial', async () => {
+  const sb = mockTrial({
+    empresa: { id: 'e1', tipo: 'autonomo', commercial_flow_version: 'v2', trial_started_at: null, plano_id: 'plano-1' },
+  });
+  const r = await iniciarTrialV2PorAceiteTermos({ supabase: sb, empresaId: 'e1', usuario: usuario({ role: 'motorista', tipo: 'motorista' }) });
+  assert.equal(r.iniciado, true);
+});
+
+test('trial v2: super-admin nao inicia trial do cliente navegando', async () => {
+  const sb = mockTrial({
+    empresa: { id: 'e1', tipo: 'transportadora', commercial_flow_version: 'v2', trial_started_at: null, plano_id: 'plano-1' },
+  });
+  const r = await iniciarTrialV2PorAceiteTermos({ supabase: sb, empresaId: 'e1', usuario: usuario({ is_super_admin: true }) });
+  assert.equal(r.iniciado, false);
+  assert.equal(r.motivo, 'usuario_sem_autoridade');
+  assert.equal(sb._calls.updated, null);
 });
 
 function mockCriar(dias) {

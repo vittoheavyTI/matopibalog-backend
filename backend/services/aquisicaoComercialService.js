@@ -1,6 +1,9 @@
 const { criarPropostaEContrato, tabelaAusente } = require('./contratacaoComercialService');
-const { STATUS_CONTRATO, STATUS_PROPOSTA } = require('./contratacaoComercialDomainService');
+const { STATUS_CONTRATO, STATUS_PROPOSTA, montarSnapshotProposta } = require('./contratacaoComercialDomainService');
+const { CONTRATO_CONCLUIDO } = require('./situacaoComercialDomainService');
 const { valorEfetivoEmpresa } = require('./calculadoraComercialService');
+const { categoriaCompativelComTipo, mensagemIncompatibilidade } = require('../utils/planoCategoria');
+const { emitirEventoBilling } = require('./billing/billingTriggers');
 
 const ORIGEM_AQUISICAO = 'aquisicao_explicita';
 const ORIGEM_POS_TRIAL_CONTINUAR = 'pos_trial_continuar';
@@ -12,6 +15,7 @@ const STATUS_CONTRATO_PENDENTE = new Set([
   STATUS_CONTRATO.AGUARDANDO_ASSINATURA_CLIENTE,
   STATUS_CONTRATO.AGUARDANDO_ASSINATURA_MATOPIBA,
 ]);
+const STATUS_EMPRESA_BLOQUEADO_AQUISICAO = new Set(['bloqueado', 'cancelado', 'cancelada', 'arquivada']);
 
 function toDate(v) {
   if (!v) return null;
@@ -70,6 +74,64 @@ function propostaPendente(proposta) {
   return contrato.status !== STATUS_CONTRATO.CANCELADO && contrato.status !== STATUS_CONTRATO.SUBSTITUIDO;
 }
 
+function validarEstadoAquisicao(empresa, agora) {
+  if (!empresa) return { ok: false, status: 404, motivo: 'empresa_indisponivel', message: 'Empresa nao encontrada.' };
+  if (empresa.commercial_flow_version !== 'v2') {
+    return { ok: false, status: 409, motivo: 'nao_v2', message: 'Aquisicao explicita disponivel apenas para contas v2.' };
+  }
+  if (STATUS_EMPRESA_BLOQUEADO_AQUISICAO.has(empresa.status)) {
+    return { ok: false, status: 409, motivo: 'empresa_bloqueada', message: 'Empresa nao pode iniciar contratacao neste estado.' };
+  }
+  if (!empresa.trial_started_at || !empresa.trial_ends_at) {
+    return { ok: false, status: 409, motivo: 'aguardando_ativacao_trial', message: 'Aceite os termos para iniciar o trial antes da contratacao.' };
+  }
+  const trialEnds = toDate(empresa.trial_ends_at);
+  const dataAgora = toDate(agora);
+  if (!trialEnds || !dataAgora) {
+    return { ok: false, status: 409, motivo: 'estado_inconsistente', message: 'Estado comercial inconsistente.' };
+  }
+  return { ok: true, posTrial: dataAgora >= trialEnds };
+}
+
+function validarPlanoSelfService({ empresa, plano }) {
+  if (!plano || plano.ativo !== true) return { ok: false, status: 404, motivo: 'plano_indisponivel', message: 'Plano nao encontrado.' };
+  if (plano.visivel_cadastro === false) {
+    return { ok: false, status: 422, motivo: 'plano_oculto_self_service', message: 'Plano indisponivel para contratacao self-service.' };
+  }
+  if (plano.requer_negociacao === true) {
+    return { ok: false, status: 422, motivo: 'requer_negociacao', message: 'Este plano exige negociacao comercial.' };
+  }
+  if (!categoriaCompativelComTipo(empresa.tipo, plano.categoria)) {
+    return { ok: false, status: 422, motivo: 'categoria_incompativel', message: mensagemIncompatibilidade(empresa.tipo) };
+  }
+  return { ok: true };
+}
+
+function montarSnapshotAquisicao({ plano, quantidade, origem, empresa }) {
+  const snapshot = montarSnapshotProposta({
+    plano,
+    quantidadeContratada: quantidade,
+    trialDias: 0,
+    origem,
+  });
+  if (!snapshot.ok) return snapshot;
+  return {
+    ok: true,
+    proposta: {
+      ...snapshot.proposta,
+      trial_dias: 0,
+      trial_status: empresa?.trial_started_at ? 'ja_iniciado' : 'nao_iniciado',
+      trial_started_at: empresa?.trial_started_at || null,
+      trial_ends_at: empresa?.trial_ends_at || null,
+      trial_dias_plano_original: Number.isInteger(Number(plano?.dias_trial)) ? Number(plano.dias_trial) : null,
+    },
+  };
+}
+
+function enriquecerSnapshotAquisicao(snapshot, composicao) {
+  return enriquecerSnapshot(snapshot, composicao);
+}
+
 async function carregarEmpresa(supabase, empresaId) {
   const { data, error } = await supabase
     .from('empresas')
@@ -83,7 +145,7 @@ async function carregarEmpresa(supabase, empresaId) {
 async function carregarPlano(supabase, planoId) {
   const { data, error } = await supabase
     .from('planos')
-    .select('id, nome, descricao, categoria, preco_mensal, dias_trial, limite_motoristas, capacidade_inclusa, preco_motorista_extra, valor_implantacao, requer_negociacao, ativo')
+    .select('id, nome, descricao, categoria, preco_mensal, dias_trial, limite_motoristas, capacidade_inclusa, preco_motorista_extra, valor_implantacao, requer_negociacao, ativo, visivel_cadastro')
     .eq('id', planoId)
     .maybeSingle();
   if (error) throw error;
@@ -122,22 +184,28 @@ async function listarPropostas(supabase, empresaId) {
   }
 }
 
+async function executarQuerySensivel(query) {
+  const { data, error } = await query;
+  if (error) throw error;
+  return data;
+}
+
 async function supersederPendenciasDivergentes({ supabase, empresaId, propostas, usuarioId }) {
   const divergentes = (propostas || []).filter((p) => propostaPendente(p));
   for (const proposta of divergentes) {
     const contrato = contratoPrincipal(proposta);
     if (ORIGENS_EXPLICITAS.has(proposta.origem)) {
-      await supabase.from('propostas_comerciais')
+      await executarQuerySensivel(supabase.from('propostas_comerciais')
         .update({ status: STATUS_PROPOSTA.CANCELADA, atualizado_em: new Date().toISOString() })
         .eq('id', proposta.id)
-        .eq('empresa_id', empresaId);
+        .eq('empresa_id', empresaId));
     }
     if (contrato && STATUS_CONTRATO_PENDENTE.has(contrato.status)) {
-      await supabase.from('contratos_comerciais')
+      await executarQuerySensivel(supabase.from('contratos_comerciais')
         .update({ status: STATUS_CONTRATO.SUBSTITUIDO, atualizado_em: new Date().toISOString() })
         .eq('id', contrato.id)
-        .eq('empresa_id', empresaId);
-      await supabase.from('contrato_eventos').insert({
+        .eq('empresa_id', empresaId));
+      await executarQuerySensivel(supabase.from('contrato_eventos').insert({
         contrato_id: contrato.id,
         empresa_id: empresaId,
         tipo: 'contrato_substituido_por_aquisicao_explicita',
@@ -147,9 +215,83 @@ async function supersederPendenciasDivergentes({ supabase, empresaId, propostas,
           politica: 'contrato_automatico_cadastro_nao_prova_intencao_compra',
         },
         criado_por: usuarioId || null,
-      });
+      }));
     }
   }
+}
+
+async function enfileirarContratacaoAptaSeAssinado({ supabase, empresaId, contrato, propostaId }) {
+  if (!contrato || !CONTRATO_CONCLUIDO.has(contrato.status)) {
+    return { enfileirado: false, code: 'contrato_nao_concluido' };
+  }
+  return emitirEventoBilling(supabase, {
+    empresaId,
+    tipo: 'contratacao_apta',
+    competencia: contrato.id,
+    payload: {
+      contrato_id: contrato.id,
+      proposta_id: propostaId || null,
+      origem: 'pos_trial_continue_rearm',
+    },
+  });
+}
+
+async function tentarRpcAquisicao({
+  supabase,
+  empresaId,
+  usuarioId,
+  planoId,
+  origem,
+  snapshot,
+  responsavel,
+  posTrial,
+} = {}) {
+  if (!supabase || typeof supabase.rpc !== 'function') return null;
+  const params = {
+    p_empresa_id: empresaId,
+    p_usuario_id: usuarioId || null,
+    p_plano_id: planoId,
+    p_origem: origem,
+    p_snapshot: snapshot,
+    p_cliente_nome: responsavel?.nome || 'Responsavel',
+    p_cliente_email_hash: responsavel?.email
+      ? require('crypto').createHash('sha256').update(String(responsavel.email).trim().toLowerCase()).digest('hex')
+      : null,
+    p_pos_trial: posTrial === true,
+  };
+  const { data, error } = await supabase.rpc('iniciar_aquisicao_comercial_v2', params);
+  if (error) {
+    if (tabelaAusente(error) || /iniciar_aquisicao_comercial_v2|function .* does not exist|schema cache/i.test(error.message || '')) {
+      return null;
+    }
+    throw error;
+  }
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row) throw new Error('RPC iniciar_aquisicao_comercial_v2 sem retorno.');
+  if (row.resultado === 'conflito_aquisicao_ativa') {
+    return {
+      status: 409,
+      body: {
+        message: 'Ja existe uma aquisicao ativa com composicao diferente.',
+        motivo: 'aquisicao_ativa_divergente',
+        proposta_id: row.proposta_id || null,
+        contrato_id: row.contrato_id || null,
+      },
+    };
+  }
+  return {
+    status: row.idempotente ? 200 : 201,
+    body: {
+      idempotente: row.idempotente === true,
+      proposta_id: row.proposta_id,
+      contrato_id: row.contrato_id,
+      contrato_status: row.contrato_status || STATUS_CONTRATO.AGUARDANDO_ASSINATURA,
+      origem: row.origem || origem,
+      snapshot,
+      billing_event: row.billing_event || null,
+      redirect: '/contratacao',
+    },
+  };
 }
 
 async function iniciarAquisicaoComercial({
@@ -164,14 +306,12 @@ async function iniciarAquisicaoComercial({
   if (!planoId) return { status: 400, body: { message: 'plano_id e obrigatorio.' } };
 
   const empresa = await carregarEmpresa(supabase, empresaId);
-  if (!empresa) return { status: 404, body: { message: 'Empresa nao encontrada.' } };
-  if (empresa.commercial_flow_version !== 'v2') {
-    return { status: 409, body: { message: 'Aquisicao explicita disponivel apenas para contas v2.', motivo: 'nao_v2' } };
-  }
+  const estado = validarEstadoAquisicao(empresa, agora);
+  if (!estado.ok) return { status: estado.status, body: { message: estado.message, motivo: estado.motivo } };
 
   const plano = await carregarPlano(supabase, planoId);
-  if (!plano || plano.ativo !== true) return { status: 404, body: { message: 'Plano nao encontrado.' } };
-  if (plano.requer_negociacao === true) return { status: 422, body: { message: 'Este plano exige negociacao comercial.', motivo: 'requer_negociacao' } };
+  const planoGate = validarPlanoSelfService({ empresa, plano });
+  if (!planoGate.ok) return { status: planoGate.status, body: { message: planoGate.message, motivo: planoGate.motivo } };
 
   const quantidade = quantidadeEscolhida({ quantidadeContratada, empresa, plano });
   if (!quantidade) return { status: 422, body: { message: 'Quantidade contratada invalida.', motivo: 'quantidade_invalida' } };
@@ -179,10 +319,31 @@ async function iniciarAquisicaoComercial({
   const efetivo = planoComValorEfetivo(plano, quantidade);
   if (!efetivo.ok) return { status: 422, body: { message: 'Nao foi possivel calcular a composicao comercial.', motivo: efetivo.motivo } };
 
-  const trialEnds = toDate(empresa.trial_ends_at);
-  const dataAgora = toDate(agora);
-  const posTrial = Boolean(trialEnds && dataAgora && dataAgora >= trialEnds);
+  const posTrial = estado.posTrial === true;
   const origem = posTrial ? ORIGEM_POS_TRIAL_CONTINUAR : ORIGEM_AQUISICAO;
+  const snapshotBase = montarSnapshotAquisicao({
+    plano: efetivo.plano,
+    quantidade,
+    origem,
+    empresa,
+  });
+  if (!snapshotBase.ok) {
+    return { status: 422, body: { message: 'Nao foi possivel montar o snapshot comercial.', motivo: snapshotBase.motivo } };
+  }
+  const snapshotFinal = enriquecerSnapshotAquisicao(snapshotBase.proposta, efetivo.composicao);
+  const responsavel = await carregarResponsavel(supabase, usuarioId, empresa);
+
+  const rpc = await tentarRpcAquisicao({
+    supabase,
+    empresaId,
+    usuarioId,
+    planoId,
+    origem,
+    snapshot: snapshotFinal,
+    responsavel,
+    posTrial,
+  });
+  if (rpc) return rpc;
 
   const propostas = await listarPropostas(supabase, empresaId);
   const equivalente = propostas.find((p) =>
@@ -192,11 +353,14 @@ async function iniciarAquisicaoComercial({
   );
   if (equivalente) {
     if (posTrial && empresa.decisao_pos_trial !== 'continuar') {
-      await supabase.from('empresas')
+      await executarQuerySensivel(supabase.from('empresas')
         .update({ decisao_pos_trial: 'continuar' })
-        .eq('id', empresaId);
+        .eq('id', empresaId));
     }
     const contrato = contratoPrincipal(equivalente);
+    const billingEvent = posTrial
+      ? await enfileirarContratacaoAptaSeAssinado({ supabase, empresaId, contrato, propostaId: equivalente.id })
+      : null;
     return {
       status: 200,
       body: {
@@ -205,6 +369,7 @@ async function iniciarAquisicaoComercial({
         contrato_id: contrato?.id || null,
         contrato_status: contrato?.status || null,
         origem: equivalente.origem,
+        billing_event: billingEvent,
         redirect: '/contratacao',
       },
     };
@@ -212,7 +377,6 @@ async function iniciarAquisicaoComercial({
 
   await supersederPendenciasDivergentes({ supabase, empresaId, propostas, usuarioId });
 
-  const responsavel = await carregarResponsavel(supabase, usuarioId, empresa);
   const r = await criarPropostaEContrato({
     supabase,
     empresa,
@@ -225,9 +389,9 @@ async function iniciarAquisicaoComercial({
   });
   if (r.skipped) return { status: 503, body: { message: 'Contratacao comercial indisponivel.', motivo: r.motivo } };
 
-  const snapshot = enriquecerSnapshot(r.snapshot, efetivo.composicao);
+  const snapshot = snapshotFinal;
   if (JSON.stringify(snapshot) !== JSON.stringify(r.snapshot)) {
-    await supabase.from('propostas_comerciais')
+    await executarQuerySensivel(supabase.from('propostas_comerciais')
       .update({
         snapshot,
         valor_mensal: snapshot.valor_mensal,
@@ -235,13 +399,13 @@ async function iniciarAquisicaoComercial({
         total_inicial: snapshot.total_inicial,
       })
       .eq('id', r.proposta_id)
-      .eq('empresa_id', empresaId);
+      .eq('empresa_id', empresaId));
   }
 
   if (origem === ORIGEM_POS_TRIAL_CONTINUAR) {
-    await supabase.from('empresas')
+    await executarQuerySensivel(supabase.from('empresas')
       .update({ decisao_pos_trial: 'continuar' })
-      .eq('id', empresaId);
+      .eq('id', empresaId));
   }
 
   return {
@@ -258,21 +422,35 @@ async function iniciarAquisicaoComercial({
   };
 }
 
-async function registrarNaoContinuar({ supabase, empresaId, usuarioId } = {}) {
+async function registrarNaoContinuar({ supabase, empresaId, usuarioId, agora = new Date() } = {}) {
   if (!supabase || !empresaId) return { status: 400, body: { message: 'Empresa nao identificada.' } };
   const empresa = await carregarEmpresa(supabase, empresaId);
   if (!empresa) return { status: 404, body: { message: 'Empresa nao encontrada.' } };
   if (empresa.commercial_flow_version !== 'v2') {
     return { status: 409, body: { message: 'Decisao pos-trial disponivel apenas para contas v2.', motivo: 'nao_v2' } };
   }
+  if (empresa.converted_at) {
+    return { status: 409, body: { message: 'Empresa ja convertida nao pode registrar nao continuar.', motivo: 'ja_convertida' } };
+  }
+  if (STATUS_EMPRESA_BLOQUEADO_AQUISICAO.has(empresa.status)) {
+    return { status: 409, body: { message: 'Empresa nao pode registrar decisao neste estado.', motivo: 'empresa_bloqueada' } };
+  }
+  if (!empresa.trial_started_at || !empresa.trial_ends_at) {
+    return { status: 409, body: { message: 'Trial ainda nao iniciado.', motivo: 'trial_nao_iniciado' } };
+  }
+  const trialEnds = toDate(empresa.trial_ends_at);
+  const dataAgora = toDate(agora);
+  if (!trialEnds || !dataAgora || dataAgora < trialEnds) {
+    return { status: 409, body: { message: 'Esta decisao so pode ser registrada apos o fim do trial.', motivo: 'trial_ainda_ativo' } };
+  }
 
   const propostas = await listarPropostas(supabase, empresaId);
   const pendentesExplicitas = propostas.filter((p) => ORIGENS_EXPLICITAS.has(p.origem) && propostaPendente(p));
   await supersederPendenciasDivergentes({ supabase, empresaId, propostas: pendentesExplicitas, usuarioId });
 
-  await supabase.from('empresas')
+  await executarQuerySensivel(supabase.from('empresas')
     .update({ decisao_pos_trial: 'nao_continuar' })
-    .eq('id', empresaId);
+    .eq('id', empresaId));
 
   return {
     status: 200,
