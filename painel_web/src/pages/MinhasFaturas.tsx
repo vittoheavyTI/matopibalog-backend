@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useSearchParams } from 'react-router-dom';
 import { Receipt, AlertCircle, ExternalLink, RefreshCw, Copy, QrCode, X, Download } from 'lucide-react';
 import api from '../api';
 import { PlanoContratos } from '../components/PlanoContratos';
+import { Contratacao } from './Contratacao';
 import { useAuth } from '../contexts/AuthContext';
 import { civilDateToDayNumber, compareCivilDates, formatCivilDate, formatTechnicalDate } from '../utils';
 
@@ -70,6 +71,7 @@ function getTipoLabel(tipo?: string): string {
 
 export const MinhasFaturas: React.FC = () => {
   const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [faturas, setFaturas] = useState<Fatura[]>([]);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
@@ -82,6 +84,11 @@ export const MinhasFaturas: React.FC = () => {
   const [pixCarregando, setPixCarregando] = useState(false);
   const [pixCopiado, setPixCopiado] = useState(false);
   const pixTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abaAtual = searchParams.get('aba') === 'contratacao' ? 'contratacao' : 'faturas';
+  const selecionarAba = (aba: 'faturas' | 'contratacao') => {
+    if (aba === 'contratacao') setSearchParams({ aba: 'contratacao' });
+    else setSearchParams({});
+  };
 
   useEffect(() => {
     if (!user?.uid) return;
@@ -297,8 +304,24 @@ export const MinhasFaturas: React.FC = () => {
         </div>
       </div>
 
+      <div className="flex flex-wrap gap-2 rounded-xl bg-gray-100 p-1 w-fit">
+        {[
+          { id: 'faturas', label: 'Faturas' },
+          { id: 'contratacao', label: 'Plano e contratação' },
+        ].map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => selecionarAba(tab.id as 'faturas' | 'contratacao')}
+            className={`rounded-lg px-4 py-2 text-sm font-bold transition-all ${abaAtual === tab.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
       {/* Sincronização */}
-      <div className="flex items-center justify-end gap-2">
+      {abaAtual === 'faturas' && <div className="flex items-center justify-end gap-2">
         {erroSync && <span className="text-xs text-red-500">{erroSync}</span>}
         <button
           onClick={() => sincronizar(true)}
@@ -308,7 +331,7 @@ export const MinhasFaturas: React.FC = () => {
           <RefreshCw size={16} className={sincronizando ? 'animate-spin' : ''} />
           {sincronizando ? 'Atualizando…' : 'Atualizar status'}
         </button>
-      </div>
+      </div>}
 
       {loading && (
         <div className="p-8 text-center text-gray-500">Carregando...</div>
@@ -350,6 +373,11 @@ export const MinhasFaturas: React.FC = () => {
 
       {/* Plano e contratos (contrato assinado, certificado, datas de assinatura) */}
       {!loading && <PlanoContratos />}
+
+      {!loading && abaAtual === 'contratacao' && <Contratacao />}
+
+      {abaAtual === 'faturas' && (
+        <>
 
       {/* Próxima mensalidade */}
       {!loading && atual && (
@@ -580,6 +608,9 @@ export const MinhasFaturas: React.FC = () => {
             )}
           </div>
         </div>
+      )}
+
+        </>
       )}
 
       {/* Modal Pix */}

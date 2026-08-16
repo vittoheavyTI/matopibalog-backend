@@ -1,5 +1,6 @@
 const supabase = require('../config/supabase');
 const { mesclarConfigEmpresa } = require('../utils/configEmpresaMerge');
+const { carregarPortalGovernanca } = require('../services/portalGovernanceService');
 
 // Whitelist de campos de APARÊNCIA (únicos que a tela de login precisa, sem auth).
 // `whatsapp_suporte` entra aqui de propósito: é um contato PÚBLICO (canal comercial/
@@ -240,5 +241,19 @@ exports.updateEmpresaConfig = async (req, res) => {
   } catch (err) {
     console.error('Erro ao salvar dados da empresa:', err);
     res.status(500).json({ message: 'Erro ao salvar dados da empresa.' });
+  }
+};
+
+exports.getPortalGovernanca = async (req, res) => {
+  try {
+    const resultado = await carregarPortalGovernanca(supabase, {
+      empresaId: req.empresa_id,
+      usuarioId: req.user?.uid,
+      user: req.user,
+    });
+    res.json(resultado);
+  } catch (err) {
+    console.error('Erro ao carregar governanca do portal:', err.message || err);
+    res.status(500).json({ message: 'Erro ao carregar governança do portal.' });
   }
 };

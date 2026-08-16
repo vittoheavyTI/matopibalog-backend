@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Building2, CheckCircle2, Globe2, MapPinned, Plus, RefreshCw, ShieldCheck, Users } from 'lucide-react';
 import api from '../api';
 import { useAuth } from '../contexts/AuthContext';
+import { usePortalGovernanca } from '../hooks/usePortalGovernanca';
 
 type Unidade = {
   id: string;
@@ -55,12 +56,27 @@ function mensagemErro(error: unknown, fallback: string) {
   return fallback;
 }
 
+function escopoLabel(valor?: string | null) {
+  if (valor === 'LOCAL') return 'Unidade';
+  if (valor === 'REGIONAL') return 'Região';
+  if (valor === 'GLOBAL') return 'Todas as unidades';
+  return valor || '-';
+}
+
+function modoLabel(valor?: string | null) {
+  if (valor === 'LEGACY' || valor === 'legacy') return 'Padrão da empresa';
+  if (valor === 'CONFIGURED' || valor === 'configured') return 'Preparado';
+  if (valor === 'ENFORCED' || valor === 'enforced') return 'Controle por escopo ativo';
+  return 'Padrão da empresa';
+}
+
 const emptyUnit = { nome: '', codigo: '', tipo: 'operacional', cidade: '', uf: '', is_default: false };
 const emptyRegion = { nome: '', codigo: '' };
 const emptyMembership = { usuario_id: '', scope_level: 'LOCAL', unidade_operacional_id: '', regiao_operacional_id: '', papel: 'operador' };
 
 export const Operacional: React.FC = () => {
   const { user } = useAuth();
+  const { governanca } = usePortalGovernanca();
   const [empresas, setEmpresas] = useState<Empresa[]>([]);
   const [empresaId, setEmpresaId] = useState(user?.empresa_id || '');
   const [unidades, setUnidades] = useState<Unidade[]>([]);
@@ -79,7 +95,8 @@ export const Operacional: React.FC = () => {
   const [grupoNome, setGrupoNome] = useState('');
 
   const isSuper = user?.is_super_admin === true;
-  const canManage = isSuper || user?.role === 'admin';
+  const estruturaLiberada = isSuper || governanca?.entitlements?.estrutura_operacional?.permitido === true;
+  const canManage = estruturaLiberada && (isSuper || user?.role === 'admin');
   const selectedEmpresa = empresas.find((e) => e.id === empresaId);
 
   const unidadeById = useMemo(() => {
@@ -174,10 +191,10 @@ export const Operacional: React.FC = () => {
     try {
       await api.post('/operacional/regioes', { ...regionForm, empresa_id: empresaId });
       setRegionForm(emptyRegion);
-      setToast({ tipo: 'ok', texto: 'Regiao criada.' });
+      setToast({ tipo: 'ok', texto: 'Região criada.' });
       await carregarTudo(empresaId);
     } catch (error) {
-      setToast({ tipo: 'erro', texto: mensagemErro(error, 'Erro ao criar regiao.') });
+      setToast({ tipo: 'erro', texto: mensagemErro(error, 'Erro ao criar região.') });
     } finally {
       setSaving(false);
     }
@@ -188,12 +205,12 @@ export const Operacional: React.FC = () => {
     setSaving(true);
     try {
       await api.put(`/operacional/regioes/${regionTarget}/unidades`, { unidades: regionUnits, empresa_id: empresaId });
-      setToast({ tipo: 'ok', texto: 'Regiao atualizada.' });
+      setToast({ tipo: 'ok', texto: 'Região atualizada.' });
       setRegionTarget('');
       setRegionUnits([]);
       await carregarTudo(empresaId);
     } catch (error) {
-      setToast({ tipo: 'erro', texto: mensagemErro(error, 'Erro ao atualizar regiao.') });
+      setToast({ tipo: 'erro', texto: mensagemErro(error, 'Erro ao atualizar região.') });
     } finally {
       setSaving(false);
     }
@@ -211,10 +228,10 @@ export const Operacional: React.FC = () => {
         regiao_operacional_id: membershipForm.scope_level === 'REGIONAL' ? membershipForm.regiao_operacional_id : null,
       });
       setMembershipForm(emptyMembership);
-      setToast({ tipo: 'ok', texto: 'Escopo concedido.' });
+      setToast({ tipo: 'ok', texto: 'Acesso concedido.' });
       await carregarTudo(empresaId);
     } catch (error) {
-      setToast({ tipo: 'erro', texto: mensagemErro(error, 'Erro ao conceder escopo.') });
+      setToast({ tipo: 'erro', texto: mensagemErro(error, 'Erro ao conceder acesso.') });
     } finally {
       setSaving(false);
     }
@@ -224,10 +241,10 @@ export const Operacional: React.FC = () => {
     setSaving(true);
     try {
       await api.patch(`/operacional/memberships/${id}/revogar`, { motivo: 'Revogado pelo painel operacional.' });
-      setToast({ tipo: 'ok', texto: 'Escopo revogado.' });
+      setToast({ tipo: 'ok', texto: 'Acesso revogado.' });
       await carregarTudo(empresaId);
     } catch (error) {
-      setToast({ tipo: 'erro', texto: mensagemErro(error, 'Erro ao revogar escopo.') });
+      setToast({ tipo: 'erro', texto: mensagemErro(error, 'Erro ao revogar acesso.') });
     } finally {
       setSaving(false);
     }
@@ -253,11 +270,11 @@ export const Operacional: React.FC = () => {
     if (!empresaId) return;
     setSaving(true);
     try {
-      await api.post('/operacional/enforcement', { empresa_id: empresaId, reason: 'Ativacao pelo painel operacional.' });
-      setToast({ tipo: 'ok', texto: 'Enforcement ativado.' });
+      await api.post('/operacional/enforcement', { empresa_id: empresaId, reason: 'Ativação pelo painel operacional.' });
+      setToast({ tipo: 'ok', texto: 'Controle por escopo ativado.' });
       await carregarTudo(empresaId);
     } catch (error) {
-      setToast({ tipo: 'erro', texto: mensagemErro(error, 'Erro ao ativar enforcement.') });
+      setToast({ tipo: 'erro', texto: mensagemErro(error, 'Erro ao ativar controle por escopo.') });
     } finally {
       setSaving(false);
     }
@@ -266,7 +283,7 @@ export const Operacional: React.FC = () => {
   async function atualizarUnidade(id: string, payload: Record<string, unknown>) {
     setSaving(true);
     try {
-      await api.patch(`/operacional/unidades/${id}`, { ...payload, reason: 'Atualizacao pelo painel operacional.' });
+      await api.patch(`/operacional/unidades/${id}`, { ...payload, reason: 'Atualização pelo painel operacional.' });
       setToast({ tipo: 'ok', texto: 'Unidade atualizada.' });
       await carregarTudo(empresaId);
     } catch (error) {
@@ -279,11 +296,11 @@ export const Operacional: React.FC = () => {
   async function atualizarRegiao(id: string, payload: Record<string, unknown>) {
     setSaving(true);
     try {
-      await api.patch(`/operacional/regioes/${id}`, { ...payload, reason: 'Atualizacao pelo painel operacional.' });
-      setToast({ tipo: 'ok', texto: 'Regiao atualizada.' });
+      await api.patch(`/operacional/regioes/${id}`, { ...payload, reason: 'Atualização pelo painel operacional.' });
+      setToast({ tipo: 'ok', texto: 'Região atualizada.' });
       await carregarTudo(empresaId);
     } catch (error) {
-      setToast({ tipo: 'erro', texto: mensagemErro(error, 'Erro ao atualizar regiao.') });
+      setToast({ tipo: 'erro', texto: mensagemErro(error, 'Erro ao atualizar região.') });
     } finally {
       setSaving(false);
     }
@@ -292,7 +309,7 @@ export const Operacional: React.FC = () => {
   async function atualizarGrupo(id: string, payload: Record<string, unknown>) {
     setSaving(true);
     try {
-      await api.patch(`/operacional/grupos/${id}`, { ...payload, reason: 'Atualizacao pelo painel operacional.' });
+      await api.patch(`/operacional/grupos/${id}`, { ...payload, reason: 'Atualização pelo painel operacional.' });
       setToast({ tipo: 'ok', texto: 'Grupo atualizado.' });
       await carregarTudo(empresaId);
     } catch (error) {
@@ -306,7 +323,7 @@ export const Operacional: React.FC = () => {
     if (!empresaId) return;
     setSaving(true);
     try {
-      await api.post(`/operacional/grupos/${grupoId}/empresas`, { empresa_id: empresaId, status: 'ativo', reason: 'Vinculo pelo painel operacional.' });
+      await api.post(`/operacional/grupos/${grupoId}/empresas`, { empresa_id: empresaId, status: 'ativo', reason: 'Vínculo pelo painel operacional.' });
       setToast({ tipo: 'ok', texto: 'Empresa vinculada ao grupo.' });
       await carregarTudo(empresaId);
     } catch (error) {
@@ -316,11 +333,15 @@ export const Operacional: React.FC = () => {
     }
   }
 
+  if (!isSuper && !governanca) {
+    return <div className="bg-white border border-gray-200 rounded-lg p-6 text-sm text-gray-600">Carregando governança do portal...</div>;
+  }
+
   if (!canManage) {
     return (
       <div className="bg-white border border-gray-200 rounded-lg p-6">
-        <h1 className="text-xl font-bold text-gray-900">Operacao</h1>
-        <p className="mt-2 text-sm text-gray-600">Seu perfil nao administra escopos operacionais.</p>
+        <h1 className="text-xl font-bold text-gray-900">Estrutura Operacional</h1>
+        <p className="mt-2 text-sm text-gray-600">Este recurso depende do plano e das permissões do seu perfil.</p>
       </div>
     );
   }
@@ -335,8 +356,8 @@ export const Operacional: React.FC = () => {
 
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Operacao</h1>
-          <p className="mt-1 text-sm text-gray-500">Grupos empresariais, unidades, regioes e escopos de acesso.</p>
+          <h1 className="text-2xl font-bold text-gray-900">Estrutura Operacional</h1>
+          <p className="mt-1 text-sm text-gray-500">Organize unidades, regiões e responsabilidades de acesso.</p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           {isSuper && (
@@ -361,7 +382,7 @@ export const Operacional: React.FC = () => {
             disabled={saving || !empresaId || contexto?.rollout_mode === 'enforced'}
             className="inline-flex items-center justify-center gap-2 rounded-lg bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800 disabled:opacity-60"
           >
-            <ShieldCheck size={16} /> Enforce
+            <ShieldCheck size={16} /> Ativar controle por escopo
           </button>
         </div>
       </div>
@@ -373,14 +394,14 @@ export const Operacional: React.FC = () => {
         </div>
         <div className="rounded-lg border border-gray-200 bg-white p-4">
           <div className="flex items-center gap-2 text-gray-500"><Globe2 size={18} /> Modo</div>
-          <p className="mt-2 text-lg font-bold text-gray-900">{contexto?.mode || 'LEGACY'}</p>
+          <p className="mt-2 text-lg font-bold text-gray-900">{modoLabel(contexto?.mode || contexto?.rollout_mode)}</p>
         </div>
         <div className="rounded-lg border border-gray-200 bg-white p-4">
           <div className="flex items-center gap-2 text-gray-500"><MapPinned size={18} /> Unidades</div>
           <p className="mt-2 text-lg font-bold text-gray-900">{unidades.length}</p>
         </div>
         <div className="rounded-lg border border-gray-200 bg-white p-4">
-          <div className="flex items-center gap-2 text-gray-500"><ShieldCheck size={18} /> Escopos ativos</div>
+          <div className="flex items-center gap-2 text-gray-500"><ShieldCheck size={18} /> Acessos ativos</div>
           <p className="mt-2 text-lg font-bold text-gray-900">{memberships.filter((m) => m.status === 'ativo').length}</p>
         </div>
       </div>
@@ -393,12 +414,12 @@ export const Operacional: React.FC = () => {
           </div>
           <form onSubmit={criarUnidade} className="mt-4 grid gap-3 md:grid-cols-6">
             <input value={unitForm.nome} onChange={(e) => setUnitForm({ ...unitForm, nome: e.target.value })} required placeholder="Nome" className="md:col-span-2 rounded-lg border border-gray-300 px-3 py-2 text-sm" />
-            <input value={unitForm.codigo} onChange={(e) => setUnitForm({ ...unitForm, codigo: e.target.value })} placeholder="Codigo" className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+            <input value={unitForm.codigo} onChange={(e) => setUnitForm({ ...unitForm, codigo: e.target.value })} placeholder="Código" className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
             <input value={unitForm.cidade} onChange={(e) => setUnitForm({ ...unitForm, cidade: e.target.value })} placeholder="Cidade" className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
             <input value={unitForm.uf} onChange={(e) => setUnitForm({ ...unitForm, uf: e.target.value.toUpperCase().slice(0, 2) })} placeholder="UF" className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
             <label className="flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700">
               <input type="checkbox" checked={unitForm.is_default} onChange={(e) => setUnitForm({ ...unitForm, is_default: e.target.checked })} />
-              Padrao
+              Padrão
             </label>
             <button disabled={saving || !empresaId} className="md:col-span-6 inline-flex items-center justify-center gap-2 rounded-lg bg-green-700 px-4 py-2 text-sm font-semibold text-white hover:bg-green-800 disabled:opacity-60">
               <Plus size={16} /> Criar unidade
@@ -412,11 +433,11 @@ export const Operacional: React.FC = () => {
               <tbody className="divide-y divide-gray-100">
                 {unidades.map((unidade) => (
                   <tr key={unidade.id}>
-                    <td className="px-3 py-2 font-medium text-gray-900">{unidade.nome}{unidade.is_default && <span className="ml-2 rounded bg-green-50 px-2 py-0.5 text-xs text-green-700">padrao</span>}</td>
+                    <td className="px-3 py-2 font-medium text-gray-900">{unidade.nome}{unidade.is_default && <span className="ml-2 rounded bg-green-50 px-2 py-0.5 text-xs text-green-700">padrão</span>}</td>
                     <td className="px-3 py-2 text-gray-600">{[unidade.cidade, unidade.uf].filter(Boolean).join(' / ') || '-'}</td>
                     <td className="px-3 py-2 text-gray-600">{unidade.status}</td>
                     <td className="px-3 py-2 text-right">
-                      {!unidade.is_default && unidade.status === 'ativo' && <button type="button" onClick={() => atualizarUnidade(unidade.id, { is_default: true })} className="mr-3 text-sm font-semibold text-green-700">Padrao</button>}
+                      {!unidade.is_default && unidade.status === 'ativo' && <button type="button" onClick={() => atualizarUnidade(unidade.id, { is_default: true })} className="mr-3 text-sm font-semibold text-green-700">Padrão</button>}
                       <button type="button" onClick={() => atualizarUnidade(unidade.id, { status: unidade.status === 'ativo' ? 'arquivado' : 'ativo' })} className="text-sm font-semibold text-gray-700">
                         {unidade.status === 'ativo' ? 'Arquivar' : 'Reativar'}
                       </button>
@@ -431,17 +452,17 @@ export const Operacional: React.FC = () => {
 
         <section className="rounded-lg border border-gray-200 bg-white p-5">
           <div className="flex items-center justify-between gap-3">
-            <h2 className="text-lg font-bold text-gray-900">Regioes</h2>
+            <h2 className="text-lg font-bold text-gray-900">Regiões</h2>
             <MapPinned size={18} className="text-gray-400" />
           </div>
           <form onSubmit={criarRegiao} className="mt-4 grid gap-3 md:grid-cols-5">
-            <input value={regionForm.nome} onChange={(e) => setRegionForm({ ...regionForm, nome: e.target.value })} required placeholder="Nome da regiao" className="md:col-span-3 rounded-lg border border-gray-300 px-3 py-2 text-sm" />
-            <input value={regionForm.codigo} onChange={(e) => setRegionForm({ ...regionForm, codigo: e.target.value })} placeholder="Codigo" className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+            <input value={regionForm.nome} onChange={(e) => setRegionForm({ ...regionForm, nome: e.target.value })} required placeholder="Nome da região" className="md:col-span-3 rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+            <input value={regionForm.codigo} onChange={(e) => setRegionForm({ ...regionForm, codigo: e.target.value })} placeholder="Código" className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
             <button disabled={saving || !empresaId} className="inline-flex items-center justify-center gap-2 rounded-lg bg-green-700 px-4 py-2 text-sm font-semibold text-white hover:bg-green-800 disabled:opacity-60"><Plus size={16} /> Criar</button>
           </form>
           <div className="mt-5 space-y-3">
             <select value={regionTarget} onChange={(e) => { setRegionTarget(e.target.value); setRegionUnits([]); }} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm">
-              <option value="">Selecione uma regiao para vincular unidades</option>
+              <option value="">Selecione uma região para vincular unidades</option>
               {regioes.map((regiao) => <option key={regiao.id} value={regiao.id}>{regiao.nome}</option>)}
             </select>
             {regionTarget && (
@@ -459,7 +480,7 @@ export const Operacional: React.FC = () => {
                   ))}
                 </div>
                 <button onClick={salvarUnidadesRegiao} disabled={saving} className="mt-3 inline-flex items-center gap-2 rounded-lg border border-green-700 px-4 py-2 text-sm font-semibold text-green-700 hover:bg-green-50 disabled:opacity-60" type="button">
-                  <CheckCircle2 size={16} /> Salvar vinculos
+                  <CheckCircle2 size={16} /> Salvar vínculos
                 </button>
               </div>
             )}
@@ -472,7 +493,7 @@ export const Operacional: React.FC = () => {
                   </button>
                 </div>
               ))}
-              {!regioes.length && <p className="py-4 text-center text-sm text-gray-500">Nenhuma regiao cadastrada.</p>}
+              {!regioes.length && <p className="py-4 text-center text-sm text-gray-500">Nenhuma região cadastrada.</p>}
             </div>
           </div>
         </section>
@@ -480,11 +501,11 @@ export const Operacional: React.FC = () => {
 
       <section className="rounded-lg border border-gray-200 bg-white p-5">
         <div className="flex items-center justify-between gap-3">
-          <h2 className="text-lg font-bold text-gray-900">Escopos de usuarios</h2>
+          <h2 className="text-lg font-bold text-gray-900">Responsabilidades de acesso</h2>
           <Users size={18} className="text-gray-400" />
         </div>
         <form onSubmit={criarMembership} className="mt-4 grid gap-3 lg:grid-cols-6">
-          <input value={membershipForm.usuario_id} onChange={(e) => setMembershipForm({ ...membershipForm, usuario_id: e.target.value })} required placeholder="ID do usuario" className="lg:col-span-2 rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+          <input value={membershipForm.usuario_id} onChange={(e) => setMembershipForm({ ...membershipForm, usuario_id: e.target.value })} required placeholder="ID do usuário" className="lg:col-span-2 rounded-lg border border-gray-300 px-3 py-2 text-sm" />
           <select value={membershipForm.scope_level} onChange={(e) => setMembershipForm({ ...membershipForm, scope_level: e.target.value as Membership['scope_level'], unidade_operacional_id: '', regiao_operacional_id: '' })} className="rounded-lg border border-gray-300 px-3 py-2 text-sm">
             <option value="LOCAL">Local</option>
             <option value="REGIONAL">Regional</option>
@@ -497,7 +518,7 @@ export const Operacional: React.FC = () => {
             </select>
           ) : membershipForm.scope_level === 'REGIONAL' ? (
             <select value={membershipForm.regiao_operacional_id} onChange={(e) => setMembershipForm({ ...membershipForm, regiao_operacional_id: e.target.value })} required className="rounded-lg border border-gray-300 px-3 py-2 text-sm">
-              <option value="">Regiao</option>
+              <option value="">Região</option>
               {regioes.map((regiao) => <option key={regiao.id} value={regiao.id}>{regiao.nome}</option>)}
             </select>
           ) : (
@@ -509,13 +530,13 @@ export const Operacional: React.FC = () => {
         <div className="mt-5 overflow-hidden rounded-lg border border-gray-200">
           <table className="w-full text-left text-sm">
             <thead className="bg-gray-50 text-xs uppercase text-gray-500">
-              <tr><th className="px-3 py-2">Usuario</th><th className="px-3 py-2">Escopo</th><th className="px-3 py-2">Destino</th><th className="px-3 py-2">Status</th><th className="px-3 py-2"></th></tr>
+              <tr><th className="px-3 py-2">Usuário</th><th className="px-3 py-2">Acesso</th><th className="px-3 py-2">Destino</th><th className="px-3 py-2">Status</th><th className="px-3 py-2"></th></tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {memberships.map((membership) => (
                 <tr key={membership.id}>
                   <td className="px-3 py-2 font-mono text-xs text-gray-700">{membership.usuario_id}</td>
-                  <td className="px-3 py-2 font-semibold text-gray-900">{membership.scope_level}</td>
+                  <td className="px-3 py-2 font-semibold text-gray-900">{escopoLabel(membership.scope_level)}</td>
                   <td className="px-3 py-2 text-gray-600">
                     {membership.scope_level === 'LOCAL'
                       ? unidadeById.get(membership.unidade_operacional_id || '')?.nome || membership.unidade_operacional_id || '-'
@@ -531,7 +552,7 @@ export const Operacional: React.FC = () => {
                   </td>
                 </tr>
               ))}
-              {!memberships.length && <tr><td colSpan={5} className="px-3 py-6 text-center text-gray-500">Nenhum escopo concedido.</td></tr>}
+              {!memberships.length && <tr><td colSpan={5} className="px-3 py-6 text-center text-gray-500">Nenhum acesso concedido.</td></tr>}
             </tbody>
           </table>
         </div>

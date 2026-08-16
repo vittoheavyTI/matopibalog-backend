@@ -476,14 +476,14 @@ export const CadastroPublico: React.FC = () => {
                   </div>
                   {!planoSelecionado.requer_negociacao && (
                     <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800">
-                      <span className="font-semibold">Contrato obrigatório.</span> Para liberar o uso do sistema, será
-                      necessário assinar eletronicamente o contrato, com código enviado por e-mail.
+                      <span className="font-semibold">Contratação explícita.</span> O contrato comercial só nasce
+                      quando você decidir continuar pelo portal.
                     </div>
                   )}
                   <div className="mt-3 rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800">
                     <span className="font-semibold">Seu período de teste é gratuito.</span> Nenhuma cobrança é feita
                     durante o trial e a contratação <span className="font-semibold">não é automática</span>. O teste
-                    começa quando você assina o contrato e, ao final, você decide se deseja continuar.
+                    começa após a confirmação da conta e o aceite dos termos; ao final, você decide se deseja continuar.
                   </div>
                 </div>
               ) : (

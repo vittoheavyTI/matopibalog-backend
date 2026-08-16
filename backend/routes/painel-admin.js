@@ -378,14 +378,14 @@ router.post('/empresas/:empresaId/contratos/:contratoId/assinatura-matopiba/conf
   }
 });
 
-// Reenvia ao CLIENTE um e-mail lembrete para assinar o contrato (link /contratacao).
+// Reenvia ao CLIENTE um e-mail lembrete para assinar o contrato (centralizado em Faturas).
 // NÃO assina pelo cliente, NÃO libera manualmente, NÃO toca contrato/plano/Asaas/faturas.
 // Idempotente (só envia e registra evento de auditoria). Se o contrato já está
 // concluído, não envia. Se o e-mail estiver desligado/falhar, devolve o link para o
 // super-admin copiar e enviar manualmente. Fluxo normal continua automático.
 router.post('/empresas/:empresaId/contratos/:contratoId/reenviar-assinatura', async (req, res) => {
   const { empresaId, contratoId } = req.params;
-  const link = `${process.env.FRONTEND_URL || 'https://matopibalog.com.br'}/contratacao`;
+  const link = `${process.env.FRONTEND_URL || 'https://matopibalog.com.br'}/minhas-faturas?aba=contratacao`;
   try {
     const { data: contrato, error } = await supabase
       .from('contratos_comerciais')
@@ -417,11 +417,11 @@ router.post('/empresas/:empresaId/contratos/:contratoId/reenviar-assinatura', as
         assunto: 'Assine seu contrato — Matopiba Log',
         html: [
           `<p>Olá ${adminUser?.nome || ''},</p>`,
-          '<p>Para liberar o uso completo do sistema, é necessário assinar eletronicamente o contrato, com confirmação por código enviado ao seu e-mail.</p>',
+          '<p>Sua contratação está iniciada. Assine eletronicamente o contrato, com confirmação por código enviado ao seu e-mail, para formalizar a continuidade comercial.</p>',
           `<p><a href="${link}">Assinar contrato agora</a></p>`,
           '<p>Ao acessar, confirme sua senha, receba o código por e-mail e conclua a assinatura.</p>',
         ].join(''),
-        texto: `Para liberar o uso do sistema, assine o contrato em ${link} (confirmação por código no seu e-mail).`,
+        texto: `Sua contratação está iniciada. Assine o contrato em ${link} para formalizar a continuidade comercial (confirmação por código no seu e-mail).`,
       });
     }
 

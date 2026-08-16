@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Building2, Save, Check, Image,
-  Palette, X, Upload, Trash2, Truck, Move, Settings, FileText
+  Palette, X, Upload, Trash2, Truck, Move, Settings, FileText, UserCircle, Users, Network, Plug, ShieldCheck
 } from 'lucide-react';
+import { useLocation } from 'react-router-dom';
 import { maskPhone, maskCNPJ, maskCEP } from '../utils/masks';
 import api from '../api';
 import { writeToLS } from '../hooks/useLoginConfig';
 import { useAuth } from '../contexts/AuthContext';
 import { BotaoCopiarCodigo } from '../components/BotaoCopiarCodigo';
+import { usePortalGovernanca } from '../hooks/usePortalGovernanca';
 
 const PREFIX = 'matopibalog_';
 
@@ -98,8 +100,13 @@ function getContrastTextColor(hexColor: string): string {
 }
 
 export const Configuracoes: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'empresa' | 'sistema' | 'aparencia'>('empresa');
+  const location = useLocation();
+  const abaInicial = new URLSearchParams(location.search).get('aba');
+  const [activeTab, setActiveTab] = useState<'perfil' | 'empresa' | 'usuarios' | 'estrutura' | 'erp' | 'sso' | 'sistema' | 'aparencia'>(
+    abaInicial === 'perfil' ? 'perfil' : 'empresa'
+  );
   const { user } = useAuth();
+  const { governanca } = usePortalGovernanca();
   const [codigoConvite, setCodigoConvite] = useState<string | null>(null);
   const [regenerandoCodigo, setRegenerandoCodigo] = useState(false);
   // Config. Sistema (super-admin) — migrada da antiga página solta "Config. Sistema"
@@ -110,6 +117,17 @@ export const Configuracoes: React.FC = () => {
     nome: '', cnpj: '', endereco: '', cep: '',
     complemento: '', pontoReferencia: '', cidade: '', estado: '', telefone: '', email: '',
   });
+  const [perfil, setPerfil] = useState({
+    nome: user?.nome || '',
+    email: user?.email || '',
+    telefone: '',
+    celular: '',
+    cep: '',
+    endereco: '',
+    bairro: '',
+    cidade: '',
+  });
+  const [perfilSalvo, setPerfilSalvo] = useState(false);
 
   // Logomarca da EMPRESA (per-tenant, config_empresa.logomarca)
   const [empresaLogo, setEmpresaLogo] = useState<string | null>(() => localStorage.getItem(EMPRESA_LOGO_KEY) || null);
@@ -149,6 +167,26 @@ export const Configuracoes: React.FC = () => {
 
   const logoFileRef = useRef<HTMLInputElement>(null);
   const bgFileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const aba = new URLSearchParams(location.search).get('aba');
+    if (aba === 'perfil') setActiveTab('perfil');
+  }, [location.search]);
+
+  useEffect(() => {
+    api.get('/auth/me')
+      .then(({ data }) => setPerfil({
+        nome: data.nome || '',
+        email: data.email || '',
+        telefone: data.telefone || '',
+        celular: data.celular || '',
+        cep: data.cep || '',
+        endereco: data.endereco || '',
+        bairro: data.bairro || '',
+        cidade: data.cidade || '',
+      }))
+      .catch(() => {});
+  }, []);
 
   // Busca código de convite da empresa
   useEffect(() => {
@@ -305,6 +343,7 @@ export const Configuracoes: React.FC = () => {
   };
 
   const handleSaveCompany = async () => {
+    if (!podeGerenciarEmpresa) return;
     localStorage.setItem(`${PREFIX}company`, JSON.stringify(company));
     try {
       await api.put('/configuracoes/empresa', company);
@@ -312,6 +351,23 @@ export const Configuracoes: React.FC = () => {
       console.error('Erro ao salvar dados da empresa:', err);
     }
     showSavedFeedback();
+  };
+
+  const handleSavePerfil = async () => {
+    try {
+      await api.patch('/auth/me', {
+        telefone: perfil.telefone,
+        celular: perfil.celular,
+        cep: perfil.cep,
+        endereco: perfil.endereco,
+        bairro: perfil.bairro,
+        cidade: perfil.cidade,
+      });
+      setPerfilSalvo(true);
+      setTimeout(() => setPerfilSalvo(false), 3000);
+    } catch (err) {
+      console.error('Erro ao salvar perfil:', err);
+    }
   };
 
   // ── Logomarca da empresa (per-tenant) ──────────────────────────────────────
@@ -455,6 +511,17 @@ export const Configuracoes: React.FC = () => {
   const footerTextColor = getContrastTextColor(footerColor);
   const footerPaddingHorizontal = Math.round(8 + (footerWidth - 20) * 52 / 80);
   const footerBgWithOpacity = footerColor + Math.round(footerOpacity * 2.55).toString(16).padStart(2, '0');
+  const podeGerenciarEmpresa = user?.is_super_admin === true || governanca?.permissoes?.empresa !== false;
+  const tabs = [
+    { id: 'perfil', label: 'Meu perfil', icon: UserCircle, show: true },
+    { id: 'empresa', label: 'Empresa', icon: Building2, show: true },
+    { id: 'usuarios', label: 'Usuários e permissões', icon: Users, show: user?.role === 'admin' || user?.is_super_admin },
+    { id: 'estrutura', label: 'Estrutura Operacional', icon: Network, show: governanca?.entitlements?.estrutura_operacional?.permitido === true || user?.is_super_admin },
+    { id: 'erp', label: 'ERP', icon: Plug, show: true },
+    { id: 'sso', label: 'SSO', icon: ShieldCheck, show: true },
+    { id: 'sistema', label: 'Sistema', icon: Settings, show: user?.is_super_admin },
+    { id: 'aparencia', label: 'Aparência', icon: Palette, show: user?.is_super_admin },
+  ] as const;
 
   return (
     <div className="space-y-6 pb-20">
@@ -474,25 +541,55 @@ export const Configuracoes: React.FC = () => {
         </div>
       </div>
 
-      <div className="flex space-x-1 bg-gray-100 p-1 rounded-xl w-fit">
-        {(['empresa', 'sistema', 'aparencia'] as const)
-          .filter((tab) => tab === 'empresa' || user?.is_super_admin)
-          .map((tab) => (
+      <div className="flex flex-wrap gap-1 bg-gray-100 p-1 rounded-xl w-fit max-w-full">
+        {tabs
+          .filter((tab) => tab.show)
+          .map((tab) => {
+            const Icon = tab.icon;
+            return (
           <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={`flex items-center px-6 py-2.5 rounded-lg font-bold text-sm transition-all ${activeTab === tab ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`flex items-center px-6 py-2.5 rounded-lg font-bold text-sm transition-all ${activeTab === tab.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
           >
-            {tab === 'empresa' && <><Building2 size={18} className="mr-2" />Dados da Empresa</>}
-            {tab === 'sistema' && <><Settings size={18} className="mr-2" />Sistema</>}
-            {tab === 'aparencia' && <><Palette size={18} className="mr-2" />Aparência do Sistema</>}
+            <Icon size={18} className="mr-2" />{tab.label}
           </button>
-        ))}
+            );
+          })}
       </div>
+
+      {activeTab === 'perfil' && (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 max-w-3xl space-y-5">
+          <div className="flex items-start gap-2.5 bg-blue-50 border border-blue-100 text-blue-800 rounded-xl p-3.5 text-sm">
+            <UserCircle size={18} className="mt-0.5 flex-shrink-0" />
+            <span>Dados pessoais da sua conta. E-mail e nome principal seguem a identidade de login e não são alterados aqui.</span>
+          </div>
+          <div className="grid md:grid-cols-2 gap-4">
+            <InfoPerfil label="Nome" value={perfil.nome} />
+            <InfoPerfil label="E-mail" value={perfil.email} />
+            <CampoPerfil label="Telefone" value={perfil.telefone} onChange={(v) => setPerfil({ ...perfil, telefone: maskPhone(v) })} />
+            <CampoPerfil label="Celular" value={perfil.celular} onChange={(v) => setPerfil({ ...perfil, celular: maskPhone(v) })} />
+            <CampoPerfil label="CEP" value={perfil.cep} onChange={(v) => setPerfil({ ...perfil, cep: maskCEP(v) })} />
+            <CampoPerfil label="Cidade" value={perfil.cidade} onChange={(v) => setPerfil({ ...perfil, cidade: v })} />
+            <CampoPerfil label="Endereço" value={perfil.endereco} onChange={(v) => setPerfil({ ...perfil, endereco: v })} className="md:col-span-2" />
+            <CampoPerfil label="Bairro" value={perfil.bairro} onChange={(v) => setPerfil({ ...perfil, bairro: v })} />
+          </div>
+          <button onClick={handleSavePerfil} className="inline-flex items-center px-4 py-2.5 bg-green-700 text-white rounded-xl font-medium text-sm hover:bg-green-800 transition-all">
+            {perfilSalvo ? <Check size={18} className="mr-2" /> : <Save size={18} className="mr-2" />}
+            {perfilSalvo ? 'Salvo!' : 'Salvar perfil'}
+          </button>
+        </div>
+      )}
 
       {/* ── ABA EMPRESA ── */}
       {activeTab === 'empresa' && (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-6">
+          {!podeGerenciarEmpresa && (
+            <div className="flex items-start gap-2.5 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-3.5 text-sm">
+              <ShieldCheck size={18} className="mt-0.5 flex-shrink-0" />
+              <span>Seu perfil pode consultar os dados da empresa, mas não possui permissão para alterá-los.</span>
+            </div>
+          )}
           <div className="flex items-start gap-2.5 bg-green-50 border border-green-100 text-green-800 rounded-xl p-3.5 text-sm">
             <FileText size={18} className="mt-0.5 flex-shrink-0" />
             <span>Esses dados serão usados nos relatórios e PDFs da sua empresa ou conta. Mantenha-os corretos e completos.</span>
@@ -635,12 +732,62 @@ export const Configuracoes: React.FC = () => {
           </div>
 
           <div className="flex justify-end pt-4 border-t border-gray-50">
-            <button onClick={handleSaveCompany} className="inline-flex items-center px-4 py-2.5 bg-green-700 text-white rounded-xl font-medium text-sm shadow-sm hover:bg-green-800 transition-all active:scale-95">
+            <button disabled={!podeGerenciarEmpresa} onClick={handleSaveCompany} className="inline-flex items-center px-4 py-2.5 bg-green-700 text-white rounded-xl font-medium text-sm shadow-sm hover:bg-green-800 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
               {showSaved ? <Check size={18} className="mr-2" /> : <Save size={18} className="mr-2" />}
               {showSaved ? 'Salvo!' : 'Salvar Configurações'}
             </button>
           </div>
         </div>
+      )}
+
+      {activeTab === 'usuarios' && (
+        <GovernancePanel
+          icon={<Users size={20} />}
+          title="Usuários e permissões"
+          tone="blue"
+          text="Administradores da empresa gerenciam usuários, permissões e responsabilidades de acesso pela tela de Usuários."
+          actionHref="/admins"
+          actionLabel="Abrir usuários"
+        />
+      )}
+
+      {activeTab === 'estrutura' && (
+        <GovernancePanel
+          icon={<Network size={20} />}
+          title="Estrutura Operacional"
+          tone={governanca?.entitlements?.estrutura_operacional?.permitido ? 'green' : 'amber'}
+          text={governanca?.entitlements?.estrutura_operacional?.permitido
+            ? 'Recurso liberado para organizar unidades, regiões e responsabilidades operacionais.'
+            : 'Este recurso depende do plano ou de adicional ativo.'}
+          actionHref={governanca?.entitlements?.estrutura_operacional?.permitido ? '/operacional' : '/minhas-faturas'}
+          actionLabel={governanca?.entitlements?.estrutura_operacional?.permitido ? 'Abrir estrutura' : 'Ver plano'}
+        />
+      )}
+
+      {activeTab === 'erp' && (
+        <GovernancePanel
+          icon={<Plug size={20} />}
+          title="Integrações ERP"
+          tone={governanca?.entitlements?.integracoes_erp?.permitido ? 'green' : 'amber'}
+          text={governanca?.entitlements?.integracoes_erp?.permitido
+            ? 'Integração disponível em modo assistido. Nenhuma credencial é solicitada nesta tela.'
+            : 'Integrações ERP dependem do plano ou de adicional ativo.'}
+          actionHref="/minhas-faturas"
+          actionLabel="Ver plano"
+        />
+      )}
+
+      {activeTab === 'sso' && (
+        <GovernancePanel
+          icon={<ShieldCheck size={20} />}
+          title="Acesso corporativo SSO"
+          tone={governanca?.entitlements?.acesso_corporativo_sso?.permitido ? 'green' : 'amber'}
+          text={governanca?.entitlements?.acesso_corporativo_sso?.permitido
+            ? 'SSO disponível em modo assistido. A configuração técnica é feita fora deste fluxo de cliente.'
+            : 'SSO corporativo fica disponível por negociação ou plano elegível.'}
+          actionHref="/minhas-faturas"
+          actionLabel="Ver plano"
+        />
       )}
 
       {/* ── ABA SISTEMA (super-admin) ── */}
@@ -1033,3 +1180,64 @@ export const Configuracoes: React.FC = () => {
     </div>
   );
 };
+
+function InfoPerfil({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">{label}</label>
+      <div className="w-full border-2 border-gray-50 rounded-xl p-3 bg-gray-50/70 text-gray-600 min-h-[50px]">
+        {value || '—'}
+      </div>
+    </div>
+  );
+}
+
+function CampoPerfil({ label, value, onChange, className = '' }: { label: string; value: string; onChange: (value: string) => void; className?: string }) {
+  return (
+    <div className={className}>
+      <label className="block text-xs font-bold text-gray-400 uppercase mb-1.5 ml-1">{label}</label>
+      <input
+        type="text"
+        className="w-full border-2 border-gray-50 rounded-xl p-3 outline-none focus:border-green-700 bg-gray-50/50"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    </div>
+  );
+}
+
+function GovernancePanel({
+  icon,
+  title,
+  text,
+  tone,
+  actionHref,
+  actionLabel,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  text: string;
+  tone: 'green' | 'blue' | 'amber';
+  actionHref: string;
+  actionLabel: string;
+}) {
+  const toneClass = tone === 'green'
+    ? 'bg-green-50 border-green-200 text-green-800'
+    : tone === 'blue'
+      ? 'bg-blue-50 border-blue-200 text-blue-800'
+      : 'bg-amber-50 border-amber-200 text-amber-800';
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 max-w-3xl space-y-5">
+      <div className={`flex items-start gap-3 rounded-xl border p-4 ${toneClass}`}>
+        <div className="mt-0.5 flex-shrink-0">{icon}</div>
+        <div>
+          <h3 className="font-bold">{title}</h3>
+          <p className="mt-1 text-sm">{text}</p>
+        </div>
+      </div>
+      <a href={actionHref} className="inline-flex items-center px-4 py-2.5 bg-green-700 text-white rounded-xl font-medium text-sm hover:bg-green-800 transition-all">
+        {actionLabel}
+      </a>
+    </div>
+  );
+}

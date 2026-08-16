@@ -106,7 +106,7 @@ export const Contratacao: React.FC = () => {
       const { data } = await api.get('/contratacao/minha');
       setDados(data);
     } catch (err: unknown) {
-      setErro(mensagemErro(err, 'Nao foi possivel carregar sua contratacao agora.'));
+      setErro(mensagemErro(err, 'Não foi possível carregar sua contratação agora.'));
     } finally {
       setLoading(false);
     }
@@ -132,7 +132,7 @@ export const Contratacao: React.FC = () => {
       const { data } = await api.get(`/contratacao/contratos/${contrato.id}/assinado-url`);
       if (data?.url) window.open(data.url, '_blank', 'noopener,noreferrer');
     } catch (err: unknown) {
-      setErro(mensagemErro(err, 'Contrato assinado ainda nao disponivel.'));
+      setErro(mensagemErro(err, 'Contrato assinado ainda não disponível.'));
     } finally {
       setAbrindo(false);
     }
@@ -140,7 +140,7 @@ export const Contratacao: React.FC = () => {
 
   async function solicitarCodigo() {
     if (!contrato?.id || !senha.trim()) {
-      setErro('Informe sua senha atual para receber o codigo.');
+      setErro('Informe sua senha atual para receber o código.');
       return;
     }
     setAssinando(true);
@@ -149,10 +149,10 @@ export const Contratacao: React.FC = () => {
     try {
       const { data } = await api.post(`/contratacao/contratos/${contrato.id}/assinatura/desafio`, { senha });
       setDesafio({ email_mascarado: data?.email_mascarado, expires_at: data?.expires_at });
-      setSucesso(`Codigo enviado para ${data?.email_mascarado || 'seu e-mail'}.`);
+      setSucesso(`Código enviado para ${data?.email_mascarado || 'seu e-mail'}.`);
       await carregar();
     } catch (err: unknown) {
-      setErro(mensagemErro(err, 'Nao foi possivel enviar o codigo.'));
+      setErro(mensagemErro(err, 'Não foi possível enviar o código.'));
     } finally {
       setAssinando(false);
     }
@@ -161,11 +161,11 @@ export const Contratacao: React.FC = () => {
   async function confirmarCodigo() {
     if (!contrato?.id) return;
     if (!consentimento || !poderes) {
-      setErro('Confirme o consentimento e a declaracao de poderes.');
+      setErro('Confirme o consentimento e a declaração de poderes.');
       return;
     }
     if (!/^\d{6}$/.test(codigo)) {
-      setErro('Informe o codigo de 6 digitos.');
+      setErro('Informe o código de 6 dígitos.');
       return;
     }
     setAssinando(true);
@@ -182,10 +182,10 @@ export const Contratacao: React.FC = () => {
       setConsentimento(false);
       setPoderes(false);
       setDesafio(null);
-      setSucesso('Contrato assinado e concluído. O uso do sistema está liberado.');
+      setSucesso('Contrato assinado e concluído. A continuidade comercial foi formalizada.');
       await carregar();
     } catch (err: unknown) {
-      setErro(mensagemErro(err, 'Nao foi possivel confirmar a assinatura.'));
+      setErro(mensagemErro(err, 'Não foi possível confirmar a assinatura.'));
     } finally {
       setAssinando(false);
     }
@@ -237,7 +237,7 @@ export const Contratacao: React.FC = () => {
             <h2 className="text-lg font-semibold">Contrato concluído</h2>
           </div>
           <p className="mt-2 text-sm text-gray-600">
-            Sua contratação está concluída e o uso do sistema está liberado. O contrato assinado, o certificado
+            Sua contratação está concluída. O contrato assinado, o certificado
             da assinatura e a verificação do documento ficam disponíveis em <span className="font-medium">Faturas / Regularização</span>,
             na área “Plano e contratos”.
           </p>
@@ -258,8 +258,8 @@ export const Contratacao: React.FC = () => {
               <div className="flex items-start gap-2 text-blue-800">
                 <ShieldCheck size={20} className="shrink-0 mt-0.5" />
                 <div>
-                  <h2 className="text-base font-bold leading-snug">Você precisa assinar o contrato para liberar o uso do sistema</h2>
-                  <p className="text-xs text-gray-500 mt-0.5">Assinatura eletrônica com confirmação por e-mail e registro técnico. A conclusão é imediata após sua assinatura.</p>
+                  <h2 className="text-base font-bold leading-snug">Assine o contrato para formalizar a continuidade comercial</h2>
+                  <p className="text-xs text-gray-500 mt-0.5">Assinatura eletrônica com confirmação por e-mail e registro técnico. O teste vigente segue conforme a regra do plano.</p>
                 </div>
               </div>
               <div className="grid sm:grid-cols-[1fr_auto] gap-2">

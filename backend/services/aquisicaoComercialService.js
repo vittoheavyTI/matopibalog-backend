@@ -7,6 +7,7 @@ const { emitirEventoBilling } = require('./billing/billingTriggers');
 
 const ORIGEM_AQUISICAO = 'aquisicao_explicita';
 const ORIGEM_POS_TRIAL_CONTINUAR = 'pos_trial_continuar';
+const REDIRECT_CONTRATACAO_CLIENTE = '/minhas-faturas?aba=contratacao';
 const ORIGENS_EXPLICITAS = new Set([ORIGEM_AQUISICAO, ORIGEM_POS_TRIAL_CONTINUAR]);
 const STATUS_PROPOSTA_PENDENTE = new Set([STATUS_PROPOSTA.ENVIADA, STATUS_PROPOSTA.ACEITA, STATUS_PROPOSTA.RASCUNHO]);
 const STATUS_CONTRATO_PENDENTE = new Set([
@@ -289,7 +290,7 @@ async function tentarRpcAquisicao({
       origem: row.origem || origem,
       snapshot,
       billing_event: row.billing_event || null,
-      redirect: '/contratacao',
+      redirect: REDIRECT_CONTRATACAO_CLIENTE,
     },
   };
 }
@@ -370,7 +371,7 @@ async function iniciarAquisicaoComercial({
         contrato_status: contrato?.status || null,
         origem: equivalente.origem,
         billing_event: billingEvent,
-        redirect: '/contratacao',
+        redirect: REDIRECT_CONTRATACAO_CLIENTE,
       },
     };
   }
@@ -417,7 +418,7 @@ async function iniciarAquisicaoComercial({
       contrato_status: STATUS_CONTRATO.AGUARDANDO_ASSINATURA,
       origem,
       snapshot,
-      redirect: '/contratacao',
+      redirect: REDIRECT_CONTRATACAO_CLIENTE,
     },
   };
 }

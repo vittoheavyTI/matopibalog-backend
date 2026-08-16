@@ -428,7 +428,7 @@ export const PainelEmpresas: React.FC = () => {
     }
   }
 
-  // Reenvia ao CLIENTE o e-mail lembrete de assinatura (link /contratacao). Não
+  // Reenvia ao CLIENTE o e-mail lembrete de assinatura (link em Faturas / Regularização). Não
   // assina pelo cliente nem libera manualmente; fluxo normal segue automático.
   async function reenviarAssinaturaCliente() {
     const contrato = contratoPrincipal(contratacaoDados?.propostas?.[0]);

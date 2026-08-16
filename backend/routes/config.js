@@ -6,6 +6,7 @@ const { verificarEmpresa } = require('../middlewares/tenant');
 const { verificarPlano } = require('../middlewares/verificarPlano');
 
 router.get('/public', configController.getPublic);
+router.get('/portal-governanca', verifyToken, verificarEmpresa, configController.getPortalGovernanca);
 router.get('/', verifyToken, isAdmin, configController.get);
 router.put('/', verifyToken, isSuperAdmin, configController.update);
 router.get('/empresa', verifyToken, isAdmin, verificarEmpresa, configController.getEmpresaConfig);
