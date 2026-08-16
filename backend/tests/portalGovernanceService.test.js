@@ -82,4 +82,27 @@ test('status técnico em_breve nega acesso mesmo com direito comercial incluído
   assert.equal(r.entitlements.integracoes_erp.motivo, 'nao_implementada');
   assert.equal(r.entitlements.acesso_corporativo_sso.permitido, false);
   assert.equal(r.entitlements.acesso_corporativo_sso.motivo, 'nao_implementada');
+  // Uso técnico negado, mas o DIREITO COMERCIAL do plano continua visível para a UI
+  // decidir aba/copy (incluída no plano, "em preparação"), sem implicar conexão.
+  assert.equal(r.entitlements.integracoes_erp.disponibilidade_comercial, 'incluida');
+  assert.equal(r.entitlements.acesso_corporativo_sso.disponibilidade_comercial, 'incluida');
+});
+
+test('disponibilidade_comercial reflete plano/override e indisponivel esconde a aba', async () => {
+  const erp = { id: 'f-erp', codigo: 'integracoes_erp', ativo: true, status_ciclo_vida: 'em_breve' };
+  const sso = { id: 'f-sso', codigo: 'acesso_corporativo_sso', ativo: true, status_ciclo_vida: 'em_breve' };
+  const estrutura = { id: 'f-estrutura', codigo: 'estrutura_operacional', ativo: true, status_ciclo_vida: 'disponivel' };
+  const r = await carregarPortalGovernanca(supabaseMock({
+    usuario: { id: 'u1', tipo: 'admin', empresa_id: 'e1', permissoes: { configuracoes: true } },
+    empresa: { id: 'e1', plano_id: 'p1', config_empresa: {} },
+    funcionalidades: [estrutura, erp, sso],
+    planoFuncs: [
+      { plano_id: 'p1', funcionalidade_id: 'f-erp', disponibilidade: 'opcional_paga' },
+      // SSO sem vínculo de plano → indisponivel (Start/Essencial): esconder aba.
+    ],
+    empresaFuncs: [],
+  }), { empresaId: 'e1', usuarioId: 'u1', user: { role: 'admin' } });
+
+  assert.equal(r.entitlements.integracoes_erp.disponibilidade_comercial, 'opcional_paga');
+  assert.equal(r.entitlements.acesso_corporativo_sso.disponibilidade_comercial, 'indisponivel');
 });

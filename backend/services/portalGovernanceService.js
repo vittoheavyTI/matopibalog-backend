@@ -34,6 +34,18 @@ function permissaoUsuario(usuario, codigo) {
   return false;
 }
 
+// Direito comercial de uma funcionalidade para a empresa, SEM I/O e independente
+// do status técnico: override ativo da empresa > disponibilidade do plano >
+// 'indisponivel'. Usado só para VISIBILIDADE/copy no portal (nunca autoriza uso).
+function disponibilidadeComercial(planoFunc, empresaFunc, agora = new Date()) {
+  const overrideVigente = empresaFunc && empresaFunc.status === 'ativa'
+    && (!empresaFunc.vigencia_inicio || new Date(empresaFunc.vigencia_inicio) <= agora)
+    && (!empresaFunc.vigencia_fim || new Date(empresaFunc.vigencia_fim) >= agora);
+  if (overrideVigente) return 'incluida';
+  if (planoFunc && planoFunc.disponibilidade) return planoFunc.disponibilidade;
+  return 'indisponivel';
+}
+
 function respostaFallback({ usuario, motivo = 'catalogo_indisponivel' } = {}) {
   const permissoes = Object.fromEntries(
     Object.entries(PERMISSOES_PORTAL).map(([k, codigo]) => [k, permissaoUsuario(usuario, codigo)])
@@ -47,6 +59,7 @@ function respostaFallback({ usuario, motivo = 'catalogo_indisponivel' } = {}) {
         permitido: false,
         origem: null,
         disponibilidade: null,
+        disponibilidade_comercial: 'indisponivel',
         motivo,
         proxima_acao: 'ver_planos',
       },
@@ -96,7 +109,7 @@ async function carregarPortalGovernanca(supabase, { empresaId, usuarioId, user }
         permissoes,
         entitlements: Object.fromEntries(Object.keys(CODIGOS_PORTAL).map((k) => [
           k,
-          { codigo: CODIGOS_PORTAL[k], permitido: true, origem: 'super_admin', disponibilidade: 'incluida', motivo: null, proxima_acao: null },
+          { codigo: CODIGOS_PORTAL[k], permitido: true, origem: 'super_admin', disponibilidade: 'incluida', disponibilidade_comercial: 'incluida', motivo: null, proxima_acao: null },
         ])),
         integracoes: {
           erp: { configurado: false, modo: 'super_admin' },
@@ -162,13 +175,21 @@ async function carregarPortalGovernanca(supabase, { empresaId, usuarioId, user }
     for (const [chave, codigo] of Object.entries(CODIGOS_PORTAL)) {
       const funcionalidade = porCodigo.get(codigo) || null;
       const papelPermitido = permissaoUsuario(usuario, PERMISSOES_PORTAL[chave]);
+      const planoFunc = funcionalidade ? pfPorFunc.get(funcionalidade.id) : null;
+      const empresaFunc = funcionalidade ? efPorFunc.get(funcionalidade.id) : null;
       entitlements[chave] = resolverEntitlement({
         codigo,
         funcionalidade,
-        planoFunc: funcionalidade ? pfPorFunc.get(funcionalidade.id) : null,
-        empresaFunc: funcionalidade ? efPorFunc.get(funcionalidade.id) : null,
+        planoFunc,
+        empresaFunc,
         papelPermitido,
       });
+      // DIREITO COMERCIAL do plano (independente do STATUS TÉCNICO). Para ERP/SSO
+      // o resolver nega o USO real (nao_implementada), mas a UI ainda precisa saber
+      // se o recurso está previsto no plano (opcional_paga/incluida) ou não
+      // (indisponivel) para decidir se mostra a aba e com qual copy. Nunca implica
+      // conexão real — apenas visibilidade/mensagem comercial honesta.
+      entitlements[chave].disponibilidade_comercial = disponibilidadeComercial(planoFunc, empresaFunc);
     }
 
     const configEmpresa = empresa.config_empresa && typeof empresa.config_empresa === 'object'

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Building2, Save, Check, Image,
-  Palette, X, Upload, Trash2, Truck, Move, Settings, FileText, UserCircle, Users, Network, Plug, ShieldCheck
+  Palette, X, Upload, Trash2, Truck, Move, Settings, FileText, UserCircle, Network, Plug, ShieldCheck
 } from 'lucide-react';
 import { useLocation, Link } from 'react-router-dom';
 import { maskPhone, maskCNPJ, maskCEP } from '../utils/masks';
@@ -102,7 +102,7 @@ function getContrastTextColor(hexColor: string): string {
 export const Configuracoes: React.FC = () => {
   const location = useLocation();
   const abaInicial = new URLSearchParams(location.search).get('aba');
-  const [activeTab, setActiveTab] = useState<'perfil' | 'empresa' | 'usuarios' | 'estrutura' | 'erp' | 'sso' | 'sistema' | 'aparencia'>(
+  const [activeTab, setActiveTab] = useState<'perfil' | 'empresa' | 'estrutura' | 'erp' | 'sso' | 'sistema' | 'aparencia'>(
     abaInicial === 'perfil' ? 'perfil' : 'empresa'
   );
   const { user } = useAuth();
@@ -512,16 +512,29 @@ export const Configuracoes: React.FC = () => {
   const footerPaddingHorizontal = Math.round(8 + (footerWidth - 20) * 52 / 80);
   const footerBgWithOpacity = footerColor + Math.round(footerOpacity * 2.55).toString(16).padStart(2, '0');
   const podeGerenciarEmpresa = user?.is_super_admin === true || governanca?.permissoes?.empresa !== false;
+  // ERP/SSO só aparecem como opção quando o plano dá direito comercial (Growth+),
+  // ou para super-admin. Start/Essencial (indisponivel) não veem as abas. O status
+  // técnico segue 'em_breve' — visibilidade ≠ ativação.
+  const erpComercial = governanca?.entitlements?.integracoes_erp?.disponibilidade_comercial;
+  const ssoComercial = governanca?.entitlements?.acesso_corporativo_sso?.disponibilidade_comercial;
+  const temDireitoComercial = (d?: string | null) =>
+    user?.is_super_admin === true || (!!d && d !== 'indisponivel');
   const tabs = [
     { id: 'perfil', label: 'Meu perfil', icon: UserCircle, show: true },
     { id: 'empresa', label: 'Empresa', icon: Building2, show: true },
-    { id: 'usuarios', label: 'Usuários e permissões', icon: Users, show: user?.role === 'admin' || user?.is_super_admin },
     { id: 'estrutura', label: 'Estrutura Operacional', icon: Network, show: governanca?.entitlements?.estrutura_operacional?.permitido === true || user?.is_super_admin },
-    { id: 'erp', label: 'ERP', icon: Plug, show: true },
-    { id: 'sso', label: 'SSO', icon: ShieldCheck, show: true },
+    { id: 'erp', label: 'ERP', icon: Plug, show: temDireitoComercial(erpComercial) },
+    { id: 'sso', label: 'SSO', icon: ShieldCheck, show: temDireitoComercial(ssoComercial) },
     { id: 'sistema', label: 'Sistema', icon: Settings, show: user?.is_super_admin },
     { id: 'aparencia', label: 'Aparência', icon: Palette, show: user?.is_super_admin },
   ] as const;
+  // Copy honesta por direito comercial (nunca "Conectado/Ativar"): o conector
+  // técnico está em preparação (status em_breve).
+  const copyEmPreparacao = (d?: string | null) =>
+    d === 'incluida' ? 'Incluído no seu plano — integração em preparação.'
+      : d === 'opcional_paga' ? 'Disponível como adicional — integração em preparação.'
+      : d === 'sob_negociacao' ? 'Sob proposta — integração assistida em preparação.'
+      : 'Integração em preparação.';
 
   return (
     <div className="space-y-6 pb-20">
@@ -541,7 +554,7 @@ export const Configuracoes: React.FC = () => {
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-1 bg-gray-100 p-1 rounded-xl w-fit max-w-full">
+      <div className="flex flex-wrap gap-1 bg-gray-100 p-1 rounded-xl w-full">
         {tabs
           .filter((tab) => tab.show)
           .map((tab) => {
@@ -550,9 +563,9 @@ export const Configuracoes: React.FC = () => {
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`flex items-center px-6 py-2.5 rounded-lg font-bold text-sm transition-all ${activeTab === tab.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+            className={`flex-1 min-w-[130px] flex items-center justify-center whitespace-nowrap px-4 py-2.5 rounded-lg font-bold text-sm transition-all ${activeTab === tab.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
           >
-            <Icon size={18} className="mr-2" />{tab.label}
+            <Icon size={18} className="mr-2 shrink-0" />{tab.label}
           </button>
             );
           })}
@@ -740,17 +753,6 @@ export const Configuracoes: React.FC = () => {
         </div>
       )}
 
-      {activeTab === 'usuarios' && (
-        <GovernancePanel
-          icon={<Users size={20} />}
-          title="Usuários e permissões"
-          tone="blue"
-          text="Administradores da empresa gerenciam usuários, permissões e responsabilidades de acesso pela tela de Usuários."
-          actionHref="/admins"
-          actionLabel="Abrir usuários"
-        />
-      )}
-
       {activeTab === 'estrutura' && (
         <GovernancePanel
           icon={<Network size={20} />}
@@ -759,8 +761,8 @@ export const Configuracoes: React.FC = () => {
           text={governanca?.entitlements?.estrutura_operacional?.permitido
             ? 'Recurso liberado para organizar unidades, regiões e responsabilidades operacionais.'
             : 'Este recurso depende do plano ou de adicional ativo.'}
-          actionHref={governanca?.entitlements?.estrutura_operacional?.permitido ? '/operacional' : '/minhas-faturas'}
-          actionLabel={governanca?.entitlements?.estrutura_operacional?.permitido ? 'Abrir estrutura' : 'Ver plano'}
+          actionHref={governanca?.entitlements?.estrutura_operacional?.permitido ? '/operacional' : undefined}
+          actionLabel={governanca?.entitlements?.estrutura_operacional?.permitido ? 'Abrir estrutura' : undefined}
         />
       )}
 
@@ -770,9 +772,7 @@ export const Configuracoes: React.FC = () => {
           title="Integrações ERP"
           tone="blue"
           badge="Em breve"
-          text="O conector técnico de ERP ainda está em preparação. A governança já está disponível, mas a configuração da integração não é feita nesta tela e nenhuma credencial (chave de API, senha ou token) é solicitada aqui — isso será feito por operação técnica segura quando o conector for liberado."
-          actionHref="/minhas-faturas"
-          actionLabel="Ver plano e disponibilidade"
+          text={`${copyEmPreparacao(erpComercial)} A configuração da integração não é feita nesta tela e nenhuma credencial (chave de API, senha ou token) é solicitada aqui — isso será feito por operação técnica segura quando o conector for liberado.`}
         />
       )}
 
@@ -782,9 +782,7 @@ export const Configuracoes: React.FC = () => {
           title="Acesso corporativo (SSO)"
           tone="blue"
           badge="Em breve"
-          text="O acesso corporativo por provedor de identidade (Microsoft Entra ID / Active Directory via OIDC ou SAML) ainda está em preparação. Nenhuma senha de domínio é solicitada aqui e não há ativação de SSO nesta tela; a configuração será assistida por operação técnica segura, preservando o acesso administrativo (break-glass)."
-          actionHref="/minhas-faturas"
-          actionLabel="Ver plano e disponibilidade"
+          text={`${copyEmPreparacao(ssoComercial)} O acesso corporativo por provedor de identidade (Microsoft Entra ID / Active Directory via OIDC ou SAML) está em preparação: nenhuma senha de domínio é solicitada aqui e não há ativação de SSO nesta tela — a configuração será assistida por operação técnica segura, preservando o acesso administrativo (break-glass).`}
         />
       )}
 
@@ -1217,8 +1215,8 @@ function GovernancePanel({
   title: string;
   text: string;
   tone: 'green' | 'blue' | 'amber';
-  actionHref: string;
-  actionLabel: string;
+  actionHref?: string;
+  actionLabel?: string;
   badge?: string;
 }) {
   const toneClass = tone === 'green'
@@ -1242,9 +1240,11 @@ function GovernancePanel({
           <p className="mt-1 text-sm">{text}</p>
         </div>
       </div>
-      <Link to={actionHref} className="inline-flex items-center px-4 py-2.5 bg-green-700 text-white rounded-xl font-medium text-sm hover:bg-green-800 transition-all">
-        {actionLabel}
-      </Link>
+      {actionHref && actionLabel && (
+        <Link to={actionHref} className="inline-flex items-center px-4 py-2.5 bg-green-700 text-white rounded-xl font-medium text-sm hover:bg-green-800 transition-all">
+          {actionLabel}
+        </Link>
+      )}
     </div>
   );
 }
