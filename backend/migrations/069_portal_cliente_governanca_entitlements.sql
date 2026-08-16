@@ -36,7 +36,7 @@ WITH upsert_func AS (
     ativo = true,
     visivel_publicamente = true,
     atualizado_em = now()
-  RETURNING id, codigo
+  RETURNING id, codigo, nome
 ),
 funcs AS (
   -- UNION (distinct), NÃO "UNION ALL": em re-execução idempotente o upsert_func
@@ -44,9 +44,10 @@ funcs AS (
   -- pré-statement. Com UNION ALL isso duplicaria os pares (id,codigo) e o
   -- CROSS JOIN abaixo geraria pares (plano,func) repetidos → o ON CONFLICT falharia
   -- com "cannot affect row a second time". UNION deduplica e mantém idempotência.
-  SELECT id, codigo FROM upsert_func
+  -- `nome` entra aqui porque o texto_publico do INSERT usa f.nome.
+  SELECT id, codigo, nome FROM upsert_func
   UNION
-  SELECT id, codigo FROM public.funcionalidades
+  SELECT id, codigo, nome FROM public.funcionalidades
    WHERE codigo IN ('estrutura_operacional', 'integracoes_erp', 'acesso_corporativo_sso')
 ),
 planos_alvo AS (
