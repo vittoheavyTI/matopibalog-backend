@@ -7,6 +7,9 @@ export type PortalEntitlement = {
   permitido: boolean;
   origem?: string | null;
   disponibilidade?: string | null;
+  // Direito comercial do plano (indisponivel|opcional_paga|incluida|sob_negociacao),
+  // independente do status técnico. Decide visibilidade/copy de ERP/SSO na UI.
+  disponibilidade_comercial?: string | null;
   motivo?: string | null;
   proxima_acao?: string | null;
 };
@@ -29,9 +32,9 @@ export type PortalGovernanca = {
 const GOVERNANCA_SUPER_ADMIN: PortalGovernanca = {
   permissoes: {},
   entitlements: {
-    estrutura_operacional: { codigo: 'estrutura_operacional', permitido: true },
-    integracoes_erp: { codigo: 'integracoes_erp', permitido: true },
-    acesso_corporativo_sso: { codigo: 'acesso_corporativo_sso', permitido: true },
+    estrutura_operacional: { codigo: 'estrutura_operacional', permitido: true, disponibilidade_comercial: 'incluida' },
+    integracoes_erp: { codigo: 'integracoes_erp', permitido: true, disponibilidade_comercial: 'incluida' },
+    acesso_corporativo_sso: { codigo: 'acesso_corporativo_sso', permitido: true, disponibilidade_comercial: 'incluida' },
   },
 };
 

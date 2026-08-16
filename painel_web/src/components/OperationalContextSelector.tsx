@@ -33,6 +33,11 @@ export const OperationalContextSelector: React.FC = () => {
   const [selectedUnit, setSelectedUnit] = useState<string>(() => lerUnidadeOperacional());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  // Conta sem Estrutura Operacional (ex.: plano Start) recebe 403 em
+  // /operacional/contexto por causa do gate de entitlement. Isso NÃO é erro para o
+  // cliente: o seletor simplesmente não se aplica → ocultar em vez de exibir um
+  // aviso laranja "Contexto indisponível" que parece falha técnica.
+  const [oculto, setOculto] = useState(false);
 
   const canUse = user?.is_super_admin || user?.role === 'admin';
 
@@ -44,6 +49,7 @@ export const OperationalContextSelector: React.FC = () => {
       api.get('/operacional/contexto')
       .then(({ data }) => {
         if (!alive) return;
+        setOculto(false);
         if (!retriedAfterStale) setError('');
         const lista = Array.isArray(data?.unidades) ? data.unidades : [];
         const gruposDisponiveis = Array.isArray(data?.grupos) ? data.grupos : [];
@@ -76,7 +82,13 @@ export const OperationalContextSelector: React.FC = () => {
           }
           setUnidades([]);
           setGrupos([]);
-          setError(hadGroup ? 'Contexto corporativo removido' : 'Contexto indisponivel');
+          if (hadGroup) {
+            setError('Contexto corporativo removido');
+          } else {
+            // Sem contexto e sem acesso à Estrutura Operacional: ocultar o seletor.
+            setOculto(true);
+            setError('');
+          }
         }
       })
       .finally(() => {
@@ -96,7 +108,7 @@ export const OperationalContextSelector: React.FC = () => {
     return unidades.find((u) => u.id === selectedUnit)?.nome || 'Unidade';
   }, [error, grupos, loading, selectedGroup, selectedUnit, unidades]);
 
-  if (!canUse) return null;
+  if (!canUse || oculto) return null;
 
   const handleGroupChange = (value: string) => {
     setSelectedGroup(value);
