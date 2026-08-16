@@ -492,6 +492,7 @@ exports.login = async (req, res) => {
       empresa_id: userData.empresa_id,
       empresa_tipo: userData.empresas?.tipo ?? null,
       empresa_nome: userData.empresas?.nome ?? null,
+      permissoes: userData.permissoes ?? null,
     };
 
     const { cfg, sessionService } = getAuthRuntime();

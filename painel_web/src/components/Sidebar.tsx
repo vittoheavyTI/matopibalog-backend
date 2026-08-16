@@ -3,6 +3,7 @@ import { NavLink } from 'react-router-dom';
 import { LayoutDashboard, Users, FileText, Truck, ChevronLeft, ChevronRight, Upload, X, Check, Trash2, Settings, UserCircle, Receipt, History, Building2, DollarSign, Bell, Plug, ClipboardList, Ticket, TrendingUp, TowerControl, Boxes, FileSignature, CreditCard } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useContratacaoStatus } from '../hooks/useContratacaoStatus';
+import { usePortalGovernanca } from '../hooks/usePortalGovernanca';
 import api from '../api';
 
 const readLocalStorage = (key: string) => (typeof window !== 'undefined' ? localStorage.getItem(key) : null);
@@ -19,6 +20,7 @@ export const Sidebar: React.FC = () => {
   // contrato obrigatório pendente de assinatura (ação necessária). Concluída,
   // some da sidebar. Super-admin não usa este item.
   const { pendenciaObrigatoria: contratacaoPendente } = useContratacaoStatus();
+  const { governanca } = usePortalGovernanca();
   const [isEditingLogo, setIsEditingLogo] = useState(false);
   const [tempLogo, setTempLogo] = useState<string | null>(null);
   const [tempScale, setTempScale] = useState<number>(100);
@@ -153,6 +155,7 @@ export const Sidebar: React.FC = () => {
     api.put('/configuracoes', { sidebarLogo: '', sidebarLogoScale: 100, sidebarLogoY: 0 }).catch(() => {});
   };
 
+  const estruturaLiberada = governanca?.entitlements?.estrutura_operacional?.permitido === true;
   const commonMainNav = [
     { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
     { to: '/relatorios/viagens', icon: Truck, label: 'Gerenciamento de Fretes' },
@@ -163,7 +166,7 @@ export const Sidebar: React.FC = () => {
     { to: '/relatorios/acerto-motoristas', icon: Receipt, label: 'Acerto de Motoristas' },
     { to: '/motoristas', icon: Users, label: 'Motoristas' },
     { to: '/admins', icon: UserCircle, label: 'Usuários' },
-    { to: '/operacional', icon: Building2, label: 'Operacao' },
+    ...(estruturaLiberada ? [{ to: '/operacional', icon: Building2, label: 'Estrutura Operacional' }] : []),
   ];
 
   // O super-admin administra a plataforma. Antes as páginas administrativas viviam
@@ -175,7 +178,7 @@ export const Sidebar: React.FC = () => {
     ? [
         { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
         { to: '/painel-administrativo/empresas', icon: Building2, label: 'Empresas e Autônomos' },
-        { to: '/painel-administrativo/operacional', icon: Building2, label: 'Operacao' },
+        { to: '/painel-administrativo/operacional', icon: Building2, label: 'Estrutura Operacional' },
         { to: '/painel-administrativo/planos', icon: ClipboardList, label: 'Planos' },
         { to: '/painel-administrativo/funcionalidades', icon: Boxes, label: 'Funcionalidades e Add-ons' },
         { to: '/painel-administrativo/contratos', icon: FileSignature, label: 'Contratos' },
@@ -265,7 +268,7 @@ export const Sidebar: React.FC = () => {
             {/* Contratação: só aparece quando há contrato obrigatório pendente
                 (ação necessária). Some quando concluída. */}
             {!user?.is_super_admin && contratacaoPendente && (
-              <NavLink to="/contratacao" className={linkClass} title={compact ? 'Contratação — ação necessária' : undefined}>
+              <NavLink to="/minhas-faturas?aba=contratacao" className={linkClass} title={compact ? 'Contratação — ação necessária' : undefined}>
                 <span className="relative flex-shrink-0">
                   <ClipboardList size={20} />
                   <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-amber-400 ring-2 ring-slate-800" />

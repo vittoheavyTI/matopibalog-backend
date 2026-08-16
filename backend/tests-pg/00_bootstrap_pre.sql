@@ -24,13 +24,29 @@ CREATE TABLE IF NOT EXISTS public.usuarios (
   empresa_id uuid NULL,
   tipo text NULL,
   status text NULL,
-  is_super_admin boolean NOT NULL DEFAULT false
+  is_super_admin boolean NOT NULL DEFAULT false,
+  -- Colunas de perfil pré-existentes em produção, referenciadas pela guarda de
+  -- último-admin da migration 069 (atualizar_usuario_guardando_ultimo_admin).
+  nome text NULL,
+  telefone text NULL,
+  cep text NULL,
+  endereco text NULL,
+  bairro text NULL,
+  cidade text NULL,
+  foto_url text NULL,
+  permissoes jsonb NULL
 );
 
 CREATE TABLE IF NOT EXISTS public.planos (
   id   uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  nome text NOT NULL
+  nome text NOT NULL,
   -- planos.matriz_funcionalidades_versao é adicionada pela migration 060 real.
+  -- Colunas comerciais pré-existentes em produção (migrations 025/038) das quais a
+  -- migration 069 depende para calcular a matriz de disponibilidade por plano.
+  categoria          text NOT NULL DEFAULT 'ambos' CHECK (categoria IN ('empresa','autonomo','ambos')),
+  limite_motoristas  integer NULL,
+  capacidade_inclusa integer NULL,
+  requer_negociacao  boolean NOT NULL DEFAULT false
 );
 
 CREATE TABLE IF NOT EXISTS public.empresas (

@@ -14,6 +14,7 @@ export interface User {
   empresa_id?: string;
   empresa_tipo?: string;
   empresa_nome?: string;
+  permissoes?: Record<string, boolean>;
   senha_temporaria?: boolean;
   termos_pendentes?: boolean;
   termos_pendentes_count?: number;
@@ -77,6 +78,7 @@ const mapMeToUser = (data: any): User => ({
   empresa_id: data.empresa_id,
   empresa_tipo: data.empresas?.tipo ?? undefined,
   empresa_nome: data.empresas?.nome ?? undefined,
+  permissoes: data.permissoes ?? undefined,
   // Sem isto, ao recarregar a página a flag se perderia e o usuário
   // com senha temporária burlaria a troca obrigatória (gate do ProtectedRoute).
   senha_temporaria: data.senha_temporaria ?? false,

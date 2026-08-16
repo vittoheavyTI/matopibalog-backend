@@ -43,8 +43,8 @@ async function criarPropostaEContrato({
   overrideImplantacaoValor,
   overrideImplantacaoMotivo,
   quantidadeContratada,
-  // Contratação inicial nasce OBRIGATÓRIA: o contrato precisa ser assinado para
-  // liberar o uso operacional (gate). Aditivos/contratos opcionais podem passar
+  // Contratação explícita nasce com contrato obrigatório para formalizar a
+  // continuidade comercial. Aditivos/contratos opcionais podem passar
   // obrigatorio=false explicitamente.
   obrigatorio = true,
 } = {}) {
@@ -198,7 +198,7 @@ async function criarPropostaEContrato({
 async function listarContratacaoEmpresa({ supabase, empresaId }) {
   const { data, error } = await supabase
     .from('propostas_comerciais')
-    .select('id, status, snapshot, valor_mensal, valor_implantacao, total_inicial, trial_dias, aceito_em, contratos_comerciais(id, status, obrigatorio, template_version, provider, signature_method, storage_path, signed_storage_path, certificate_storage_path, signed_file_hash, certificate_file_hash, aceito_em, contrato_signatarios(papel, status, assinado_em))')
+    .select('id, status, origem, snapshot, valor_mensal, valor_implantacao, total_inicial, trial_dias, aceito_em, contratos_comerciais(id, status, obrigatorio, template_version, provider, signature_method, storage_path, signed_storage_path, certificate_storage_path, signed_file_hash, certificate_file_hash, aceito_em, contrato_signatarios(papel, status, assinado_em))')
     .eq('empresa_id', empresaId)
     .order('criado_em', { ascending: false })
     .limit(10);
@@ -214,6 +214,7 @@ async function listarContratacaoEmpresa({ supabase, empresaId }) {
     return {
       id: proposta.id,
       status: proposta.status,
+      origem: proposta.origem || null,
       resumo,
       valor_mensal: proposta.valor_mensal,
       valor_implantacao: proposta.valor_implantacao,

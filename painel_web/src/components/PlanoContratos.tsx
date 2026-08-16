@@ -24,6 +24,7 @@ type Contrato = {
 type Proposta = {
   id: string;
   status: string;
+  origem?: string | null;
   resumo?: {
     plano_nome?: string | null;
     valor_mensal?: number | string | null;
@@ -79,6 +80,8 @@ export const PlanoContratos: React.FC = () => {
   if (!carregado || !proposta || !contrato) return null;
 
   const concluido = ['plenamente_assinado', 'assinado', 'aceito_manualmente'].includes(contrato.status);
+  const aquisicaoExplicita = ['aquisicao_explicita', 'pos_trial_continuar'].includes(proposta.origem || '');
+  const contratoHistorico = !aquisicaoExplicita;
 
   async function baixar(tipo: 'assinado' | 'certificado') {
     if (!contrato) return;
@@ -104,20 +107,31 @@ export const PlanoContratos: React.FC = () => {
       </div>
 
       {/* Pendência obrigatória no TOPO do card: ação obrigatória, não passiva. */}
-      {pendenciaObrigatoria && !concluido && (
+      {pendenciaObrigatoria && !concluido && aquisicaoExplicita && (
         <div className="mb-4 rounded-lg border-2 border-amber-300 bg-amber-50 p-4">
           <div className="flex items-start gap-2 text-amber-800">
             <AlertTriangle size={18} className="shrink-0 mt-0.5" />
             <p className="text-sm font-semibold">
-              Seu contrato precisa ser assinado para liberar o uso completo do sistema.
+              Sua contratação está iniciada. Assine o contrato para formalizar a continuidade comercial.
             </p>
           </div>
           <Link
-            to="/contratacao"
+            to="/minhas-faturas?aba=contratacao"
             className="mt-3 inline-flex items-center gap-2 rounded-lg bg-amber-600 hover:bg-amber-700 px-4 py-2 text-sm font-semibold text-white"
           >
             <FileSignature size={16} /> Assinar contrato
           </Link>
+        </div>
+      )}
+
+      {contratoHistorico && !concluido && (
+        <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-4">
+          <div className="flex items-start gap-2 text-blue-800">
+            <Clock size={18} className="shrink-0 mt-0.5" />
+            <p className="text-sm font-semibold">
+              Registro comercial histórico. Ele não exige assinatura agora e não bloqueia o teste vigente.
+            </p>
+          </div>
         </div>
       )}
 
@@ -130,7 +144,7 @@ export const PlanoContratos: React.FC = () => {
           <div className="text-xs font-semibold uppercase text-gray-400">Situação da contratação</div>
           <div className="mt-1 flex items-center gap-2 font-semibold text-gray-900">
             {concluido ? <CheckCircle2 size={16} className="text-green-600" /> : <Clock size={16} className="text-amber-500" />}
-            {statusLabel[contrato.status] || contrato.status}
+            {contratoHistorico && !concluido ? 'Histórico sem ação necessária' : (statusLabel[contrato.status] || contrato.status)}
           </div>
         </div>
         <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
