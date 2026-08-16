@@ -11,15 +11,21 @@ WITH upsert_func AS (
     (codigo, nome, descricao_publica, categoria, modulo, status_ciclo_vida,
      modelo_cobranca, ativo, visivel_publicamente, ordem_exibicao)
   VALUES
+    -- Estrutura Operacional é TECNICAMENTE implementada (migration 067: grupos/
+    -- filiais/unidades/regiões/escopos) → status_ciclo_vida='disponivel'.
     ('estrutura_operacional', 'Estrutura operacional',
      'Unidades, regiões e acesso por escopo operacional.', 'governanca', 'portal_cliente',
      'disponivel', 'incluso', true, true, 210),
+    -- ERP e SSO ainda NÃO possuem conector/implementação técnica real. O ENTITLEMENT
+    -- comercial pode existir por plano (plano_funcionalidades abaixo), mas o STATUS
+    -- TÉCNICO precisa ser honesto: 'em_breve'. resolverEntitlement nega o acesso real
+    -- (nao_implementada) e o card público mostra "Em breve", nunca "Conectado".
     ('integracoes_erp', 'Integrações ERP',
      'Acompanhamento assistido de integrações com sistemas de gestão.', 'integracoes', 'portal_cliente',
-     'disponivel', 'adicional', true, true, 220),
+     'em_breve', 'adicional', true, true, 220),
     ('acesso_corporativo_sso', 'Acesso corporativo SSO',
      'Governança de acesso corporativo por provedor de identidade.', 'seguranca', 'portal_cliente',
-     'disponivel', 'sob_negociacao', true, true, 230)
+     'em_breve', 'sob_negociacao', true, true, 230)
   ON CONFLICT (codigo) DO UPDATE SET
     nome = EXCLUDED.nome,
     descricao_publica = EXCLUDED.descricao_publica,
@@ -33,8 +39,13 @@ WITH upsert_func AS (
   RETURNING id, codigo
 ),
 funcs AS (
+  -- UNION (distinct), NÃO "UNION ALL": em re-execução idempotente o upsert_func
+  -- (CTE que escreve) devolve os mesmos ids que a leitura da tabela vê no snapshot
+  -- pré-statement. Com UNION ALL isso duplicaria os pares (id,codigo) e o
+  -- CROSS JOIN abaixo geraria pares (plano,func) repetidos → o ON CONFLICT falharia
+  -- com "cannot affect row a second time". UNION deduplica e mantém idempotência.
   SELECT id, codigo FROM upsert_func
-  UNION ALL
+  UNION
   SELECT id, codigo FROM public.funcionalidades
    WHERE codigo IN ('estrutura_operacional', 'integracoes_erp', 'acesso_corporativo_sso')
 ),

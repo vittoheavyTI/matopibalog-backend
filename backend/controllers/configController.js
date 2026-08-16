@@ -1,6 +1,29 @@
 const supabase = require('../config/supabase');
 const { mesclarConfigEmpresa } = require('../utils/configEmpresaMerge');
-const { carregarPortalGovernanca } = require('../services/portalGovernanceService');
+const { carregarPortalGovernanca, permissaoUsuario, PERMISSOES_PORTAL } = require('../services/portalGovernanceService');
+
+// Autorização de EDIÇÃO dos dados da empresa. O JWT não carrega `permissoes`
+// (só o corpo de /auth/login e /auth/me carregam), então a autoridade é re-lida
+// do banco — mesma fonte usada por carregarPortalGovernanca. Backend nega admin
+// sem permissão de configurações; super-admin sempre pode. Não é segurança só de
+// frontend (a tela apenas desabilita o botão).
+async function podeEditarEmpresa(req) {
+  if (req.user?.is_super_admin === true) return true;
+  const uid = req.user?.uid;
+  if (!uid) return false;
+  try {
+    const { data } = await supabase
+      .from('usuarios')
+      .select('tipo, is_super_admin, permissoes')
+      .eq('id', uid)
+      .maybeSingle();
+    const usuario = data || { tipo: req.user?.role, permissoes: null };
+    return permissaoUsuario(usuario, PERMISSOES_PORTAL.empresa);
+  } catch {
+    // Fail-closed: sem confirmar a permissão, não autoriza a escrita.
+    return false;
+  }
+}
 
 // Whitelist de campos de APARÊNCIA (únicos que a tela de login precisa, sem auth).
 // `whatsapp_suporte` entra aqui de propósito: é um contato PÚBLICO (canal comercial/
@@ -221,6 +244,9 @@ exports.getEmpresaConfig = async (req, res) => {
 exports.updateEmpresaConfig = async (req, res) => {
   try {
     if (!req.empresa_id) return res.status(400).json({ message: 'Empresa não encontrada.' });
+    if (!(await podeEditarEmpresa(req))) {
+      return res.status(403).json({ message: 'Seu perfil não tem permissão para alterar os dados da empresa.' });
+    }
     // Read-merge-write per-tenant: preserva as demais chaves de config_empresa. A
     // logomarca (config_empresa.logomarca) e os dados da empresa convivem sem se
     // apagar quando salvos separadamente. Escopo por empresa_id (multi-tenant).

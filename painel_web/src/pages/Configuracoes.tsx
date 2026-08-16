@@ -3,7 +3,7 @@ import {
   Building2, Save, Check, Image,
   Palette, X, Upload, Trash2, Truck, Move, Settings, FileText, UserCircle, Users, Network, Plug, ShieldCheck
 } from 'lucide-react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, Link } from 'react-router-dom';
 import { maskPhone, maskCNPJ, maskCEP } from '../utils/masks';
 import api from '../api';
 import { writeToLS } from '../hooks/useLoginConfig';
@@ -768,25 +768,23 @@ export const Configuracoes: React.FC = () => {
         <GovernancePanel
           icon={<Plug size={20} />}
           title="Integrações ERP"
-          tone={governanca?.entitlements?.integracoes_erp?.permitido ? 'green' : 'amber'}
-          text={governanca?.entitlements?.integracoes_erp?.permitido
-            ? 'Integração disponível em modo assistido. Nenhuma credencial é solicitada nesta tela.'
-            : 'Integrações ERP dependem do plano ou de adicional ativo.'}
+          tone="blue"
+          badge="Em breve"
+          text="O conector técnico de ERP ainda está em preparação. A governança já está disponível, mas a configuração da integração não é feita nesta tela e nenhuma credencial (chave de API, senha ou token) é solicitada aqui — isso será feito por operação técnica segura quando o conector for liberado."
           actionHref="/minhas-faturas"
-          actionLabel="Ver plano"
+          actionLabel="Ver plano e disponibilidade"
         />
       )}
 
       {activeTab === 'sso' && (
         <GovernancePanel
           icon={<ShieldCheck size={20} />}
-          title="Acesso corporativo SSO"
-          tone={governanca?.entitlements?.acesso_corporativo_sso?.permitido ? 'green' : 'amber'}
-          text={governanca?.entitlements?.acesso_corporativo_sso?.permitido
-            ? 'SSO disponível em modo assistido. A configuração técnica é feita fora deste fluxo de cliente.'
-            : 'SSO corporativo fica disponível por negociação ou plano elegível.'}
+          title="Acesso corporativo (SSO)"
+          tone="blue"
+          badge="Em breve"
+          text="O acesso corporativo por provedor de identidade (Microsoft Entra ID / Active Directory via OIDC ou SAML) ainda está em preparação. Nenhuma senha de domínio é solicitada aqui e não há ativação de SSO nesta tela; a configuração será assistida por operação técnica segura, preservando o acesso administrativo (break-glass)."
           actionHref="/minhas-faturas"
-          actionLabel="Ver plano"
+          actionLabel="Ver plano e disponibilidade"
         />
       )}
 
@@ -1213,6 +1211,7 @@ function GovernancePanel({
   tone,
   actionHref,
   actionLabel,
+  badge,
 }: {
   icon: React.ReactNode;
   title: string;
@@ -1220,6 +1219,7 @@ function GovernancePanel({
   tone: 'green' | 'blue' | 'amber';
   actionHref: string;
   actionLabel: string;
+  badge?: string;
 }) {
   const toneClass = tone === 'green'
     ? 'bg-green-50 border-green-200 text-green-800'
@@ -1231,13 +1231,20 @@ function GovernancePanel({
       <div className={`flex items-start gap-3 rounded-xl border p-4 ${toneClass}`}>
         <div className="mt-0.5 flex-shrink-0">{icon}</div>
         <div>
-          <h3 className="font-bold">{title}</h3>
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="font-bold">{title}</h3>
+            {badge && (
+              <span className="inline-flex items-center rounded-full bg-white/70 border border-current px-2 py-0.5 text-xs font-semibold">
+                {badge}
+              </span>
+            )}
+          </div>
           <p className="mt-1 text-sm">{text}</p>
         </div>
       </div>
-      <a href={actionHref} className="inline-flex items-center px-4 py-2.5 bg-green-700 text-white rounded-xl font-medium text-sm hover:bg-green-800 transition-all">
+      <Link to={actionHref} className="inline-flex items-center px-4 py-2.5 bg-green-700 text-white rounded-xl font-medium text-sm hover:bg-green-800 transition-all">
         {actionLabel}
-      </a>
+      </Link>
     </div>
   );
 }

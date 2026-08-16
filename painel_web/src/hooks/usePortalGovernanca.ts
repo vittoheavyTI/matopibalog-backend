@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import api from '../api';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -24,31 +24,39 @@ export type PortalGovernanca = {
   };
 };
 
+// Governança do super-admin é DERIVADA do usuário (sem I/O e sem estado): todos os
+// entitlements liberados. Constante estável para não recriar a cada render.
+const GOVERNANCA_SUPER_ADMIN: PortalGovernanca = {
+  permissoes: {},
+  entitlements: {
+    estrutura_operacional: { codigo: 'estrutura_operacional', permitido: true },
+    integracoes_erp: { codigo: 'integracoes_erp', permitido: true },
+    acesso_corporativo_sso: { codigo: 'acesso_corporativo_sso', permitido: true },
+  },
+};
+
 export function usePortalGovernanca() {
   const { user } = useAuth();
-  const [governanca, setGovernanca] = useState<PortalGovernanca | null>(null);
+  const isSuper = user?.is_super_admin === true;
+  const [buscado, setBuscado] = useState<PortalGovernanca | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (!user || user.is_super_admin) {
-      setGovernanca(user?.is_super_admin ? {
-        permissoes: {},
-        entitlements: {
-          estrutura_operacional: { codigo: 'estrutura_operacional', permitido: true },
-          integracoes_erp: { codigo: 'integracoes_erp', permitido: true },
-          acesso_corporativo_sso: { codigo: 'acesso_corporativo_sso', permitido: true },
-        },
-      } : null);
-      return undefined;
-    }
+    // Super-admin não busca (derivado por useMemo). Sem usuário, nada a buscar.
+    if (!user || isSuper) return undefined;
     let vivo = true;
     setLoading(true);
     api.get('/configuracoes/portal-governanca')
-      .then(({ data }) => { if (vivo) setGovernanca(data); })
-      .catch(() => { if (vivo) setGovernanca(null); })
+      .then(({ data }) => { if (vivo) setBuscado(data); })
+      .catch(() => { if (vivo) setBuscado(null); })
       .finally(() => { if (vivo) setLoading(false); });
     return () => { vivo = false; };
-  }, [user?.uid, user?.is_super_admin]);
+  }, [user, isSuper]);
+
+  const governanca = useMemo(
+    () => (isSuper ? GOVERNANCA_SUPER_ADMIN : buscado),
+    [isSuper, buscado]
+  );
 
   return { governanca, loading };
 }
