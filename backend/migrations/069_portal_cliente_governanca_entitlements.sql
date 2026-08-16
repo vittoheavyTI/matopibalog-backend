@@ -74,9 +74,13 @@ SELECT
         ELSE 'indisponivel'
       END
     WHEN f.codigo = 'acesso_corporativo_sso'
+      -- Decisão comercial do proprietário: SSO/AD segue a MESMA progressão da
+      -- Estrutura/ERP (Growth = adicional pago; Scale = incluído; Enterprise =
+      -- incluído/sob proposta). O status técnico segue 'em_breve' — o direito
+      -- comercial não implica uso técnico até a implementação real.
       THEN CASE
-        WHEN p.requer_negociacao = true THEN 'incluida'
-        WHEN COALESCE(p.capacidade_inclusa, p.limite_motoristas, 0) >= 40 THEN 'sob_negociacao'
+        WHEN p.requer_negociacao = true OR COALESCE(p.capacidade_inclusa, p.limite_motoristas, 0) >= 40 THEN 'incluida'
+        WHEN COALESCE(p.capacidade_inclusa, p.limite_motoristas, 0) >= 20 THEN 'opcional_paga'
         ELSE 'indisponivel'
       END
   END AS disponibilidade,
@@ -96,7 +100,146 @@ ON CONFLICT (plano_id, funcionalidade_id) DO UPDATE SET
   ordem_exibicao = EXCLUDED.ordem_exibicao,
   atualizado_em = now();
 
+-- ============================================================================
+-- Guarda de "último administrador" da empresa (governança de acesso)
+-- ----------------------------------------------------------------------------
+-- Impede que uma empresa fique com ZERO administradores válidos por auto-serviço
+-- do painel (rebaixar/desativar/remover o último admin). "Administrador válido"
+-- da empresa = usuarios.tipo='admin' AND usuarios.status='ativo' (a autoridade de
+-- administração no backend é `isAdmin` = role 'admin'). NÃO cria coluna owner: usa
+-- o modelo real existente (tipo/status).
+--
+-- Concorrência: `pg_advisory_xact_lock(hashtext('guarda_ultimo_admin'), hashtext(
+-- empresa_id))` serializa TODA mudança de autoridade do MESMO tenant (update e
+-- delete compartilham a chave). Duas remoções simultâneas dos dois últimos admins
+-- não passam ambas: a segunda transação espera, re-lê o estado já aplicado e é
+-- negada — a empresa termina sempre com >= 1 administrador válido.
+--
+-- Super-admin NÃO passa por estas funções (break-glass é decidido no controller).
+-- Tenant isolation: só conta/atua sobre usuarios da empresa alvo (empresa_id).
+
+CREATE OR REPLACE FUNCTION public.atualizar_usuario_guardando_ultimo_admin(
+  p_usuario_id uuid,
+  p_empresa_id uuid,
+  p_updates jsonb
+)
+RETURNS public.usuarios
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+DECLARE
+  v_alvo public.usuarios;
+  v_novo_status text;
+  v_novo_tipo text;
+  v_era_admin boolean;
+  v_sera_admin boolean;
+  v_outros integer;
+BEGIN
+  IF p_usuario_id IS NULL OR p_empresa_id IS NULL THEN
+    RAISE EXCEPTION 'guarda_admin_payload_invalido';
+  END IF;
+
+  PERFORM pg_advisory_xact_lock(hashtext('guarda_ultimo_admin'), hashtext(p_empresa_id::text));
+
+  SELECT * INTO v_alvo
+    FROM public.usuarios
+   WHERE id = p_usuario_id AND empresa_id = p_empresa_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'usuario_nao_encontrado';
+  END IF;
+
+  v_novo_status := COALESCE(p_updates->>'status', v_alvo.status);
+  v_novo_tipo   := COALESCE(p_updates->>'tipo', v_alvo.tipo);
+
+  v_era_admin  := (v_alvo.tipo = 'admin' AND v_alvo.status = 'ativo');
+  v_sera_admin := (v_novo_tipo = 'admin' AND v_novo_status = 'ativo');
+
+  IF v_era_admin AND NOT v_sera_admin THEN
+    SELECT count(*) INTO v_outros
+      FROM public.usuarios
+     WHERE empresa_id = p_empresa_id
+       AND id <> p_usuario_id
+       AND tipo = 'admin'
+       AND status = 'ativo';
+    IF v_outros = 0 THEN
+      RAISE EXCEPTION 'ultimo_admin_da_empresa';
+    END IF;
+  END IF;
+
+  UPDATE public.usuarios SET
+    nome       = CASE WHEN p_updates ? 'nome'       THEN p_updates->>'nome'       ELSE nome END,
+    telefone   = CASE WHEN p_updates ? 'telefone'   THEN p_updates->>'telefone'   ELSE telefone END,
+    cep        = CASE WHEN p_updates ? 'cep'        THEN p_updates->>'cep'        ELSE cep END,
+    endereco   = CASE WHEN p_updates ? 'endereco'   THEN p_updates->>'endereco'   ELSE endereco END,
+    bairro     = CASE WHEN p_updates ? 'bairro'     THEN p_updates->>'bairro'     ELSE bairro END,
+    cidade     = CASE WHEN p_updates ? 'cidade'     THEN p_updates->>'cidade'     ELSE cidade END,
+    foto_url   = CASE WHEN p_updates ? 'foto_url'   THEN p_updates->>'foto_url'   ELSE foto_url END,
+    permissoes = CASE WHEN p_updates ? 'permissoes' THEN p_updates->'permissoes'  ELSE permissoes END,
+    status     = v_novo_status,
+    tipo       = v_novo_tipo
+  WHERE id = p_usuario_id
+  RETURNING * INTO v_alvo;
+
+  RETURN v_alvo;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.excluir_usuario_guardando_ultimo_admin(
+  p_usuario_id uuid,
+  p_empresa_id uuid
+)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+DECLARE
+  v_alvo public.usuarios;
+  v_outros integer;
+BEGIN
+  IF p_usuario_id IS NULL OR p_empresa_id IS NULL THEN
+    RAISE EXCEPTION 'guarda_admin_payload_invalido';
+  END IF;
+
+  PERFORM pg_advisory_xact_lock(hashtext('guarda_ultimo_admin'), hashtext(p_empresa_id::text));
+
+  SELECT * INTO v_alvo
+    FROM public.usuarios
+   WHERE id = p_usuario_id AND empresa_id = p_empresa_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'usuario_nao_encontrado';
+  END IF;
+
+  IF v_alvo.tipo = 'admin' AND v_alvo.status = 'ativo' THEN
+    SELECT count(*) INTO v_outros
+      FROM public.usuarios
+     WHERE empresa_id = p_empresa_id
+       AND id <> p_usuario_id
+       AND tipo = 'admin'
+       AND status = 'ativo';
+    IF v_outros = 0 THEN
+      RAISE EXCEPTION 'ultimo_admin_da_empresa';
+    END IF;
+  END IF;
+
+  DELETE FROM public.usuarios WHERE id = p_usuario_id;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.atualizar_usuario_guardando_ultimo_admin(uuid, uuid, jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.atualizar_usuario_guardando_ultimo_admin(uuid, uuid, jsonb) FROM anon;
+REVOKE ALL ON FUNCTION public.atualizar_usuario_guardando_ultimo_admin(uuid, uuid, jsonb) FROM authenticated;
+GRANT EXECUTE ON FUNCTION public.atualizar_usuario_guardando_ultimo_admin(uuid, uuid, jsonb) TO service_role;
+
+REVOKE ALL ON FUNCTION public.excluir_usuario_guardando_ultimo_admin(uuid, uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.excluir_usuario_guardando_ultimo_admin(uuid, uuid) FROM anon;
+REVOKE ALL ON FUNCTION public.excluir_usuario_guardando_ultimo_admin(uuid, uuid) FROM authenticated;
+GRANT EXECUTE ON FUNCTION public.excluir_usuario_guardando_ultimo_admin(uuid, uuid) TO service_role;
+
 -- ROLLBACK manual:
+--   DROP FUNCTION IF EXISTS public.excluir_usuario_guardando_ultimo_admin(uuid, uuid);
+--   DROP FUNCTION IF EXISTS public.atualizar_usuario_guardando_ultimo_admin(uuid, uuid, jsonb);
 --   DELETE FROM public.plano_funcionalidades
 --    WHERE funcionalidade_id IN (SELECT id FROM public.funcionalidades WHERE codigo IN ('estrutura_operacional','integracoes_erp','acesso_corporativo_sso'));
 --   UPDATE public.funcionalidades SET ativo = false

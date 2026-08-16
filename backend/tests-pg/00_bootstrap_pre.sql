@@ -24,7 +24,17 @@ CREATE TABLE IF NOT EXISTS public.usuarios (
   empresa_id uuid NULL,
   tipo text NULL,
   status text NULL,
-  is_super_admin boolean NOT NULL DEFAULT false
+  is_super_admin boolean NOT NULL DEFAULT false,
+  -- Colunas de perfil pré-existentes em produção, referenciadas pela guarda de
+  -- último-admin da migration 069 (atualizar_usuario_guardando_ultimo_admin).
+  nome text NULL,
+  telefone text NULL,
+  cep text NULL,
+  endereco text NULL,
+  bairro text NULL,
+  cidade text NULL,
+  foto_url text NULL,
+  permissoes jsonb NULL
 );
 
 CREATE TABLE IF NOT EXISTS public.planos (

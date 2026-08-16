@@ -28,6 +28,7 @@ function registrar() {
   // Ids fixos e nomes distintos para não colidir com outros pgtests (DB compartilhado).
   const PLANOS = {
     start: { id: '10000000-0000-4000-a000-000000000101', nome: 'PG069 Start', categoria: 'empresa', limite_motoristas: 5, capacidade_inclusa: null, requer_negociacao: false },
+    essencial: { id: '10000000-0000-4000-a000-000000000105', nome: 'PG069 Essencial', categoria: 'empresa', limite_motoristas: 15, capacidade_inclusa: null, requer_negociacao: false },
     growth: { id: '10000000-0000-4000-a000-000000000102', nome: 'PG069 Growth', categoria: 'empresa', limite_motoristas: null, capacidade_inclusa: 25, requer_negociacao: false },
     scale: { id: '10000000-0000-4000-a000-000000000103', nome: 'PG069 Scale', categoria: 'empresa', limite_motoristas: null, capacidade_inclusa: 50, requer_negociacao: false },
     enterprise: { id: '10000000-0000-4000-a000-000000000104', nome: 'PG069 Enterprise', categoria: 'empresa', limite_motoristas: null, capacidade_inclusa: null, requer_negociacao: true },
@@ -79,21 +80,23 @@ function registrar() {
     assert.equal((await statusFunc('acesso_corporativo_sso')).status_ciclo_vida, 'em_breve');
   });
 
-  test('matriz comercial por plano (Start/Growth/Scale/Enterprise)', async () => {
-    // Start (base 5): nada disponível.
-    assert.equal(await disp(PLANOS.start.id, 'estrutura_operacional'), 'indisponivel');
-    assert.equal(await disp(PLANOS.start.id, 'integracoes_erp'), 'indisponivel');
-    assert.equal(await disp(PLANOS.start.id, 'acesso_corporativo_sso'), 'indisponivel');
+  test('matriz comercial por plano (Start/Essencial/Growth/Scale/Enterprise)', async () => {
+    // Start (base 5) e Essencial (base 15) — ambos < 20: nada disponível.
+    for (const plano of [PLANOS.start, PLANOS.essencial]) {
+      assert.equal(await disp(plano.id, 'estrutura_operacional'), 'indisponivel', `${plano.nome} estrutura`);
+      assert.equal(await disp(plano.id, 'integracoes_erp'), 'indisponivel', `${plano.nome} erp`);
+      assert.equal(await disp(plano.id, 'acesso_corporativo_sso'), 'indisponivel', `${plano.nome} sso`);
+    }
 
-    // Growth (base 25): estrutura/ERP como adicional pago; SSO ainda indisponível.
+    // Growth (base 25): estrutura/ERP/SSO como adicional pago (mesma progressão).
     assert.equal(await disp(PLANOS.growth.id, 'estrutura_operacional'), 'opcional_paga');
     assert.equal(await disp(PLANOS.growth.id, 'integracoes_erp'), 'opcional_paga');
-    assert.equal(await disp(PLANOS.growth.id, 'acesso_corporativo_sso'), 'indisponivel');
+    assert.equal(await disp(PLANOS.growth.id, 'acesso_corporativo_sso'), 'opcional_paga');
 
-    // Scale (base 50): estrutura/ERP incluídos; SSO sob negociação.
+    // Scale (base 50): estrutura/ERP/SSO incluídos.
     assert.equal(await disp(PLANOS.scale.id, 'estrutura_operacional'), 'incluida');
     assert.equal(await disp(PLANOS.scale.id, 'integracoes_erp'), 'incluida');
-    assert.equal(await disp(PLANOS.scale.id, 'acesso_corporativo_sso'), 'sob_negociacao');
+    assert.equal(await disp(PLANOS.scale.id, 'acesso_corporativo_sso'), 'incluida');
 
     // Enterprise (sob proposta): tudo incluído comercialmente.
     assert.equal(await disp(PLANOS.enterprise.id, 'estrutura_operacional'), 'incluida');

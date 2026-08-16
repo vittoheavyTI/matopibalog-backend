@@ -695,12 +695,35 @@ exports.updateUsuario = async (req, res) => {
     if (status !== undefined) updateData.status = status;
     if (tipo !== undefined) updateData.tipo = tipo;
 
-    const { error } = await supabase
-      .from('usuarios')
-      .update(updateData)
-      .eq('id', id);
-
-    if (error) throw error;
+    // Guarda de último administrador (concorrência-safe via RPC). Super-admin é
+    // break-glass e segue o update direto, sem a guarda. Admin comum passa pela
+    // RPC que serializa mudanças de autoridade do tenant e nega deixar a empresa
+    // sem administrador válido (409).
+    if (isSuperAdmin) {
+      const { error } = await supabase
+        .from('usuarios')
+        .update(updateData)
+        .eq('id', id);
+      if (error) throw error;
+    } else {
+      const { error } = await supabase.rpc('atualizar_usuario_guardando_ultimo_admin', {
+        p_usuario_id: id,
+        p_empresa_id: req.empresa_id,
+        p_updates: updateData,
+      });
+      if (error) {
+        const msg = String(error.message || '').toLowerCase();
+        if (msg.includes('ultimo_admin')) {
+          return res.status(409).json({
+            message: 'Não é possível remover as permissões do último administrador da empresa. Delegue a administração a outro usuário antes de continuar.',
+          });
+        }
+        if (msg.includes('usuario_nao_encontrado')) {
+          return res.status(404).json({ message: 'Usuário não encontrado.' });
+        }
+        throw error;
+      }
+    }
 
     const statusDesabilita = status !== undefined && String(status || '').toLowerCase() !== 'ativo';
     const tipoMudou = tipo !== undefined && (!usuarioAtual || String(tipo) !== String(usuarioAtual.tipo));
@@ -824,14 +847,34 @@ exports.deleteUsuario = async (req, res) => {
       if (motError) throw motError;
     }
 
-    // 2. Remover da tabela usuarios
+    // 2. Remover da tabela usuarios — com guarda de último administrador.
+    // Super-admin (break-glass) exclui direto; admin comum passa pela RPC que
+    // serializa a autoridade do tenant e nega excluir o último admin válido (409).
     console.log(`[adminController:deleteUsuario] Removendo ${id} da tabela usuarios...`);
-    const { error: dbError } = await supabase
-      .from('usuarios')
-      .delete()
-      .eq('id', id);
-
-    if (dbError) throw dbError;
+    if (isSuperAdmin) {
+      const { error: dbError } = await supabase
+        .from('usuarios')
+        .delete()
+        .eq('id', id);
+      if (dbError) throw dbError;
+    } else {
+      const { error: dbError } = await supabase.rpc('excluir_usuario_guardando_ultimo_admin', {
+        p_usuario_id: id,
+        p_empresa_id: req.empresa_id,
+      });
+      if (dbError) {
+        const msg = String(dbError.message || '').toLowerCase();
+        if (msg.includes('ultimo_admin')) {
+          return res.status(409).json({
+            message: 'Não é possível excluir o último administrador da empresa. Delegue a administração a outro usuário antes de continuar.',
+          });
+        }
+        if (msg.includes('usuario_nao_encontrado')) {
+          return res.status(404).json({ message: 'Usuário não encontrado.' });
+        }
+        throw dbError;
+      }
+    }
 
     // 3. Remover do Supabase Auth
     console.log(`[adminController:deleteUsuario] Removendo ${id} do Supabase Auth...`);
