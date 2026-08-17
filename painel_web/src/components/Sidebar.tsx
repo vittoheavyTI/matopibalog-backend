@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Users, FileText, Truck, ChevronLeft, ChevronRight, Upload, X, Check, Trash2, Settings, UserCircle, Receipt, History, Building2, DollarSign, Bell, Plug, ClipboardList, Ticket, TrendingUp, TowerControl, Boxes, FileSignature, CreditCard } from 'lucide-react';
+import { LayoutDashboard, Users, FileText, Truck, ChevronLeft, ChevronRight, Upload, X, Check, Trash2, Settings, UserCircle, Receipt, History, Building2, DollarSign, Bell, Plug, ClipboardList, Ticket, TrendingUp, TowerControl, Boxes, FileSignature, CreditCard, Network } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useContratacaoStatus } from '../hooks/useContratacaoStatus';
 import { usePortalGovernanca } from '../hooks/usePortalGovernanca';
@@ -156,45 +156,74 @@ export const Sidebar: React.FC = () => {
   };
 
   const estruturaLiberada = governanca?.entitlements?.estrutura_operacional?.permitido === true;
-  const commonMainNav = [
-    { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
-    { to: '/relatorios/viagens', icon: Truck, label: 'Gerenciamento de Fretes' },
-    { to: '/relatorios/torre-controle', icon: TowerControl, label: 'Torre de Controle' },
-    { to: '/relatorios/resumo', icon: History, label: 'Histórico de Fretes' },
-    { to: '/relatorios', icon: FileText, label: 'Relatórios' },
-    { to: '/relatorios/rentabilidade', icon: TrendingUp, label: 'Rentabilidade' },
-    { to: '/relatorios/acerto-motoristas', icon: Receipt, label: 'Acerto de Motoristas' },
-    { to: '/motoristas', icon: Users, label: 'Motoristas' },
-    { to: '/admins', icon: UserCircle, label: 'Usuários' },
-    ...(estruturaLiberada ? [{ to: '/operacional', icon: Building2, label: 'Estrutura Operacional' }] : []),
+
+  // Navegação AGRUPADA por afinidade (macrofrente IA/Navegação). Rotas e itens
+  // preservados — apenas organizados em seções com cabeçalho (oculto quando a
+  // sidebar está recolhida). Estrutura Operacional do cliente vive junto de
+  // Configurações e só aparece quando elegível; Faturas/Regularização é o hub
+  // comercial (a aba "Plano e contratação" continua dentro dela).
+  type GrupoNav = { titulo: string; itens: { to: string; icon: typeof LayoutDashboard; label: string }[] };
+
+  const gruposCliente: GrupoNav[] = [
+    { titulo: 'Operação', itens: [
+      { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
+      { to: '/relatorios/viagens', icon: Truck, label: 'Gerenciamento de Fretes' },
+      { to: '/relatorios/torre-controle', icon: TowerControl, label: 'Torre de Controle' },
+      { to: '/relatorios/resumo', icon: History, label: 'Histórico de Fretes' },
+      { to: '/relatorios', icon: FileText, label: 'Relatórios' },
+      { to: '/relatorios/rentabilidade', icon: TrendingUp, label: 'Rentabilidade' },
+      { to: '/relatorios/acerto-motoristas', icon: Receipt, label: 'Acerto de Motoristas' },
+    ] },
+    { titulo: 'Cadastros', itens: [
+      { to: '/motoristas', icon: Users, label: 'Motoristas' },
+      { to: '/admins', icon: UserCircle, label: 'Usuários' },
+    ] },
+    ...(user?.role === 'admin' ? [{ titulo: 'Financeiro', itens: [
+      { to: '/minhas-faturas', icon: Receipt, label: 'Faturas / Regularização' },
+    ] }] : []),
+    { titulo: 'Configurações', itens: [
+      { to: '/configuracoes', icon: Settings, label: 'Configurações' },
+      ...(estruturaLiberada ? [{ to: '/operacional', icon: Network, label: 'Estrutura Operacional' }] : []),
+    ] },
   ];
 
-  // O super-admin administra a plataforma. Antes as páginas administrativas viviam
-  // dentro de um agrupador expansível "Painel Admin." (com Usuários Globais duplicado
-  // dentro e fora). Agora vão em sequência direta no menu — sem duplicidade e sem o
-  // grupo. "Visão Geral" foi fundida no Dashboard, por isso saiu do menu.
-  // Para os demais perfis, a navegação anterior permanece inalterada.
-  const mainNav = user?.is_super_admin
-    ? [
-        { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
-        { to: '/painel-administrativo/empresas', icon: Building2, label: 'Empresas e Autônomos' },
-        { to: '/painel-administrativo/operacional', icon: Building2, label: 'Estrutura Operacional' },
-        { to: '/painel-administrativo/planos', icon: ClipboardList, label: 'Planos' },
-        { to: '/painel-administrativo/funcionalidades', icon: Boxes, label: 'Funcionalidades e Add-ons' },
-        { to: '/painel-administrativo/contratos', icon: FileSignature, label: 'Contratos' },
-        { to: '/painel-administrativo/billing', icon: CreditCard, label: 'Billing' },
-        { to: '/painel-administrativo/promocoes', icon: Ticket, label: 'Promoções' },
-        { to: '/painel-administrativo/financeiro', icon: DollarSign, label: 'Financeiro' },
-        { to: '/relatorios/torre-controle', icon: TowerControl, label: 'Torre de Controle' },
-        { to: '/relatorios/resumo', icon: History, label: 'Histórico de Fretes' },
-        { to: '/relatorios/acerto-motoristas', icon: Receipt, label: 'Acerto de Motoristas' },
-        { to: '/painel-administrativo/usuarios', icon: UserCircle, label: 'Usuários' },
-        { to: '/painel-administrativo/motoristas', icon: Users, label: 'Motoristas / Autônomos' },
-        { to: '/painel-administrativo/termos-lgpd', icon: FileText, label: 'Termos LGPD' },
-        { to: '/painel-administrativo/notificacoes', icon: Bell, label: 'Notificações' },
-        { to: '/integracoes', icon: Plug, label: 'Integrações' },
-      ]
-    : commonMainNav;
+  // Super-admin: mesmas páginas de antes, agora em seções claras (Visão, Empresas
+  // & Operação, Comercial, Financeiro, Pessoas & Sistema, Configurações). Sem
+  // duplicidade e sem remover acesso a nada.
+  const gruposSuper: GrupoNav[] = [
+    { titulo: 'Visão', itens: [
+      { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
+    ] },
+    { titulo: 'Empresas & Operação', itens: [
+      { to: '/painel-administrativo/empresas', icon: Building2, label: 'Empresas e Autônomos' },
+      { to: '/painel-administrativo/operacional', icon: Network, label: 'Estrutura Operacional' },
+      { to: '/painel-administrativo/motoristas', icon: Users, label: 'Motoristas / Autônomos' },
+      { to: '/relatorios/torre-controle', icon: TowerControl, label: 'Torre de Controle' },
+      { to: '/relatorios/resumo', icon: History, label: 'Histórico de Fretes' },
+      { to: '/relatorios/acerto-motoristas', icon: Receipt, label: 'Acerto de Motoristas' },
+    ] },
+    { titulo: 'Comercial', itens: [
+      { to: '/painel-administrativo/planos', icon: ClipboardList, label: 'Planos' },
+      { to: '/painel-administrativo/funcionalidades', icon: Boxes, label: 'Funcionalidades e Add-ons' },
+      { to: '/painel-administrativo/contratos', icon: FileSignature, label: 'Contratos' },
+      { to: '/painel-administrativo/promocoes', icon: Ticket, label: 'Promoções' },
+    ] },
+    { titulo: 'Financeiro', itens: [
+      { to: '/painel-administrativo/billing', icon: CreditCard, label: 'Billing' },
+      { to: '/painel-administrativo/financeiro', icon: DollarSign, label: 'Financeiro' },
+    ] },
+    { titulo: 'Pessoas & Sistema', itens: [
+      { to: '/painel-administrativo/usuarios', icon: UserCircle, label: 'Usuários' },
+      { to: '/painel-administrativo/termos-lgpd', icon: FileText, label: 'Termos LGPD' },
+      { to: '/painel-administrativo/notificacoes', icon: Bell, label: 'Notificações' },
+      { to: '/integracoes', icon: Plug, label: 'Integrações' },
+    ] },
+    { titulo: 'Configurações', itens: [
+      { to: '/configuracoes', icon: Settings, label: 'Configurações' },
+    ] },
+  ];
+
+  const grupos = user?.is_super_admin ? gruposSuper : gruposCliente;
 
   // Item de menu uniforme: mesma fonte/peso/tamanho para todos, espaçamento vertical
   // enxuto (py-2) e ícones alinhados. Evita que os itens fiquem soltos.
@@ -257,47 +286,56 @@ export const Sidebar: React.FC = () => {
             scrollbarColor: user?.is_super_admin ? 'rgba(255,255,255,0.25) transparent' : undefined,
           }}
         >
-          <nav className="space-y-1">
-            {mainNav.map(item => (
-              <NavLink key={item.to} to={item.to} end={item.to === '/' || item.to === '/relatorios'} className={linkClass} title={compact ? item.label : undefined}>
-                <item.icon size={20} className="flex-shrink-0" />
-                {!compact && <span>{item.label}</span>}
-              </NavLink>
+          <nav className="space-y-3">
+            {grupos.map((grupo) => (
+              <div key={grupo.titulo} className="space-y-1">
+                {!compact && (
+                  <p className="px-3 pt-1 text-[10px] font-bold uppercase tracking-wider text-gray-500 select-none">{grupo.titulo}</p>
+                )}
+                {grupo.itens.map((item) => (
+                  <NavLink key={item.to} to={item.to} end={item.to === '/' || item.to === '/relatorios'} className={linkClass} title={compact ? item.label : undefined}>
+                    <item.icon size={20} className="flex-shrink-0" />
+                    {!compact && <span>{item.label}</span>}
+                  </NavLink>
+                ))}
+                {/* Contratação pendente (ação necessária): fica no grupo Financeiro do
+                    cliente. Aparece só quando há contrato obrigatório pendente. */}
+                {grupo.titulo === 'Financeiro' && !user?.is_super_admin && contratacaoPendente && (
+                  <NavLink to="/minhas-faturas?aba=contratacao" className={linkClass} title={compact ? 'Contratação — ação necessária' : undefined}>
+                    <span className="relative flex-shrink-0">
+                      <ClipboardList size={20} />
+                      <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-amber-400 ring-2 ring-slate-800" />
+                    </span>
+                    {!compact && (
+                      <span className="flex-1">
+                        Contratação
+                        <span className="ml-2 rounded-full bg-amber-400/20 px-2 py-0.5 text-[10px] font-semibold text-amber-300 align-middle">Ação necessária</span>
+                      </span>
+                    )}
+                  </NavLink>
+                )}
+              </div>
             ))}
 
-            {/* Contratação: só aparece quando há contrato obrigatório pendente
-                (ação necessária). Some quando concluída. */}
-            {!user?.is_super_admin && contratacaoPendente && (
-              <NavLink to="/minhas-faturas?aba=contratacao" className={linkClass} title={compact ? 'Contratação — ação necessária' : undefined}>
-                <span className="relative flex-shrink-0">
-                  <ClipboardList size={20} />
-                  <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-amber-400 ring-2 ring-slate-800" />
-                </span>
-                {!compact && (
-                  <span className="flex-1">
-                    Contratação
-                    <span className="ml-2 rounded-full bg-amber-400/20 px-2 py-0.5 text-[10px] font-semibold text-amber-300 align-middle">Ação necessária</span>
+            {/* Salvaguarda: se o cliente NÃO é admin (ex.: dono de conta autônoma,
+                tipo motorista) mas tem contratação obrigatória pendente, não há grupo
+                Financeiro — mostra o atalho de contratação mesmo assim. */}
+            {!user?.is_super_admin && user?.role !== 'admin' && contratacaoPendente && (
+              <div className="space-y-1">
+                <NavLink to="/minhas-faturas?aba=contratacao" className={linkClass} title={compact ? 'Contratação — ação necessária' : undefined}>
+                  <span className="relative flex-shrink-0">
+                    <ClipboardList size={20} />
+                    <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-amber-400 ring-2 ring-slate-800" />
                   </span>
-                )}
-              </NavLink>
+                  {!compact && (
+                    <span className="flex-1">
+                      Contratação
+                      <span className="ml-2 rounded-full bg-amber-400/20 px-2 py-0.5 text-[10px] font-semibold text-amber-300 align-middle">Ação necessária</span>
+                    </span>
+                  )}
+                </NavLink>
+              </div>
             )}
-
-            {/* Minhas Faturas é visão do cliente: super-admin usa o item Faturas acima */}
-            {!user?.is_super_admin && user?.role === 'admin' && (
-              <NavLink
-                to="/minhas-faturas"
-                className={linkClass}
-                title={compact ? 'Faturas / Regularização' : undefined}
-              >
-                <Receipt size={20} className="flex-shrink-0" />
-                {!compact && <span>Faturas / Regularização</span>}
-              </NavLink>
-            )}
-
-            <NavLink to="/configuracoes" className={linkClass} title={compact ? 'Configurações' : undefined}>
-              <Settings size={20} className="flex-shrink-0" />
-              {!compact && <span>Configurações</span>}
-            </NavLink>
           </nav>
         </div>
 

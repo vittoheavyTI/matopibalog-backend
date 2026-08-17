@@ -92,6 +92,21 @@ export const PainelBilling: React.FC = () => {
         )}
       </div>
 
+      {/* Didática (macrofrente IA/Navegação): explica o modo atual e o que é seguro.
+          Sem tocar lógica de billing — todas as ações desta tela são dry-run. */}
+      <div className="rounded-xl border border-blue-100 bg-blue-50 p-3.5 text-sm text-blue-800">
+        <p>
+          <b>Modo atual: {providerMode ? providerMode.toUpperCase() : '—'}.</b> Em <b>fake/sandbox</b> nada é cobrado
+          de verdade e o Asaas de produção fica desligado. As ações aqui são <b>dry-run</b> (planejar/reconciliar):
+          apenas <b>calculam e mostram</b> o que o sistema faria, sem criar cobrança, fatura ou assinatura real.
+        </p>
+        <p className="mt-1 text-blue-700">
+          <b>Overview</b> = estado financeiro da empresa · <b>Outbox/jobs</b> = fila de eventos a reconciliar ·
+          <b> Reconciliar</b> = comparar o esperado com o aplicado. Ligar a cobrança real é uma etapa separada e
+          controlada, fora desta tela.
+        </p>
+      </div>
+
       <div className="flex flex-wrap gap-2 items-center">
         <select value={empresaId} onChange={(e) => setEmpresaId(e.target.value)} className="py-2 px-3 border-2 border-gray-100 rounded-xl bg-gray-50/50 text-sm min-w-64" aria-label="Empresa">
           <option value="">Selecione uma empresa…</option>
