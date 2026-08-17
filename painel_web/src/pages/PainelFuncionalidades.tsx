@@ -40,8 +40,21 @@ export const PainelFuncionalidades: React.FC = () => {
         <div className="bg-gray-800 p-1.5 rounded-lg text-white"><Boxes size={18} /></div>
         <div>
           <h1 className="text-2xl font-bold text-gray-800 leading-tight">Funcionalidades e Add-ons</h1>
-          <p className="text-sm text-gray-500">Catálogo, matriz por plano e direitos por cliente</p>
+          <p className="text-sm text-gray-500">Catálogo global da plataforma: matriz por plano e direitos por cliente</p>
         </div>
+      </div>
+
+      {/* Didática (macrofrente IA/Navegação): explica os rótulos e separa status
+          técnico de cobrança. Sem mudar regra/preço — add-ons comerciais e valores
+          são de uma frente futura. */}
+      <div className="rounded-xl border border-blue-100 bg-blue-50 p-3.5 text-sm text-blue-800">
+        <p className="font-semibold">Catálogo global de funcionalidades e add-ons da plataforma.</p>
+        <p className="mt-1 text-blue-700">
+          Rótulos por plano: <b>Incluído</b> (faz parte do plano) · <b>Adicional</b> (add-on do plano) ·
+          <b> Em breve</b> (conector técnico em preparação) · <b>Sob proposta</b> (negociação). O <b>status
+          técnico</b> (disponível/em breve) indica se o recurso está implementado — <b>não</b> significa cobrança
+          ativa. Preços e contratação de add-ons são tratados em uma frente comercial futura.
+        </p>
       </div>
 
       <div className="flex gap-1 border-b border-gray-200">
