@@ -1465,4 +1465,40 @@ router.get('/entitlements/simular', async (req, res) => {
   } catch (_) { res.status(500).json({ message: 'Erro na simulação.' }); }
 });
 
+// ── Solicitações comerciais de add-ons (Fatia 2 — super-admin comercial) ──────
+// Reaproveita empresa_funcionalidades (pendente→ativa/inativa) + funcionalidade_
+// auditoria. NÃO chama Asaas, NÃO cria cobrança, NÃO muda empresa.plano_id.
+const solicitacoesComerciais = require('../services/solicitacoesComerciaisService');
+
+router.get('/solicitacoes-comerciais', async (req, res) => {
+  try {
+    const r = await solicitacoesComerciais.listarSolicitacoes({ supabase });
+    return res.status(r.status).json(r.body);
+  } catch (err) {
+    console.error('[painel-admin/solicitacoes-comerciais] Falha', err.message || err);
+    return res.status(500).json({ message: 'Erro ao listar solicitações comerciais.' });
+  }
+});
+
+router.post('/solicitacoes-comerciais/:id/aprovar', async (req, res) => {
+  try {
+    const precoCentavos = Number.isFinite(Number(req.body?.preco_mensal_centavos)) ? Number(req.body.preco_mensal_centavos) : null;
+    const r = await solicitacoesComerciais.aprovarSolicitacao({ supabase, id: req.params.id, aprovadorId: req.user?.uid, precoCentavos });
+    return res.status(r.status).json(r.body);
+  } catch (err) {
+    console.error('[painel-admin/solicitacoes-comerciais/aprovar] Falha', err.message || err);
+    return res.status(500).json({ message: 'Erro ao aprovar solicitação.' });
+  }
+});
+
+router.post('/solicitacoes-comerciais/:id/recusar', async (req, res) => {
+  try {
+    const r = await solicitacoesComerciais.recusarSolicitacao({ supabase, id: req.params.id, aprovadorId: req.user?.uid, motivo: req.body?.motivo || null });
+    return res.status(r.status).json(r.body);
+  } catch (err) {
+    console.error('[painel-admin/solicitacoes-comerciais/recusar] Falha', err.message || err);
+    return res.status(500).json({ message: 'Erro ao recusar solicitação.' });
+  }
+});
+
 module.exports = router;

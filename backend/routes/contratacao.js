@@ -28,6 +28,7 @@ const {
   registrarNaoContinuar,
 } = require('../services/aquisicaoComercialService');
 const { carregarPreviewUpgrade } = require('../services/previewUpgradeService');
+const { solicitarAddons } = require('../services/solicitacoesComerciaisService');
 const {
   confirmarAssinatura,
   solicitarDesafioAssinatura,
@@ -210,6 +211,25 @@ router.post('/plano-preview', verifyToken, verificarEmpresa, permitirAssinaturaC
   } catch (err) {
     console.error('[contratacao/plano-preview] Falha', { status: 500 });
     return res.status(500).json({ message: 'Erro ao calcular o preview de plano.' });
+  }
+});
+
+// Cliente (admin/owner) solicita serviços adicionais (add-ons). Cria registro
+// PENDENTE (empresa_funcionalidades) para o super-admin analisar — SEM cobrança,
+// SEM ativar entitlement, SEM tocar Asaas. Idempotente.
+router.post('/solicitar-addons', verifyToken, verificarEmpresa, permitirAssinaturaCliente, async (req, res) => {
+  if (!req.empresa_id) return res.status(400).json({ message: 'Empresa nao identificada.' });
+  try {
+    const r = await solicitarAddons({
+      supabase,
+      empresaId: req.empresa_id,
+      usuarioId: req.user?.uid,
+      codigos: Array.isArray(req.body?.addons) ? req.body.addons : [],
+    });
+    return res.status(r.status).json(r.body);
+  } catch (err) {
+    console.error('[contratacao/solicitar-addons] Falha', { status: 500 });
+    return res.status(500).json({ message: 'Erro ao registrar solicitacao de servicos adicionais.' });
   }
 });
 

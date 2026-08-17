@@ -152,6 +152,22 @@ const SimulacaoUpgrade: React.FC<{ planos: PlanoPublico[]; planoAtualId: string 
   const [planoAlvoId, setPlanoAlvoId] = useState<string>('');
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const [carregando, setCarregando] = useState(false);
+  const [enviandoSolic, setEnviandoSolic] = useState(false);
+  const [solicOk, setSolicOk] = useState<string | null>(null);
+  const [solicErro, setSolicErro] = useState<string | null>(null);
+
+  async function solicitarAddons() {
+    if (!selecionados.length) return;
+    setEnviandoSolic(true); setSolicOk(null); setSolicErro(null);
+    try {
+      await api.post('/contratacao/solicitar-addons', { addons: selecionados });
+      setSolicOk('Solicitação enviada para análise. Nenhuma cobrança foi gerada; os serviços só entram após aprovação.');
+    } catch (err) {
+      setSolicErro(mensagemErro(err, 'Não foi possível enviar a solicitação agora.'));
+    } finally {
+      setEnviandoSolic(false);
+    }
+  }
 
   useEffect(() => {
     let vivo = true;
@@ -234,9 +250,28 @@ const SimulacaoUpgrade: React.FC<{ planos: PlanoPublico[]; planoAtualId: string 
 
       <div className="rounded-xl bg-gray-50 border border-gray-100 p-3 text-xs text-gray-500">
         {snap?.proxima_fatura?.texto || 'Nenhuma cobrança é gerada agora.'} ERP e Acesso corporativo (SSO) ficam
-        como <b>“integração em preparação”</b> — não são ativados automaticamente. Para efetivar plano/serviços,
-        use “Escolher este plano” acima; a aprovação e o efeito na fatura são a próxima etapa.
+        como <b>“integração em preparação”</b> — não são ativados automaticamente. A aprovação e o efeito na
+        fatura são a próxima etapa.
       </div>
+
+      {selecionados.length > 0 && (
+        <div className="space-y-2">
+          <button
+            type="button"
+            onClick={solicitarAddons}
+            disabled={enviandoSolic}
+            className="inline-flex items-center gap-2 rounded-xl bg-green-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-green-800 disabled:opacity-60"
+          >
+            {enviandoSolic ? 'Enviando…' : 'Solicitar serviços adicionais'}
+          </button>
+          {solicOk && (
+            <div className="flex items-start gap-2 rounded-xl border border-green-200 bg-green-50 p-3 text-sm text-green-800">
+              <CheckCircle2 size={16} className="mt-0.5 shrink-0" />{solicOk}
+            </div>
+          )}
+          {solicErro && <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">{solicErro}</div>}
+        </div>
+      )}
     </div>
   );
 };

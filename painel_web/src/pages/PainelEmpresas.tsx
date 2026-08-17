@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ErroCarregamento } from '../components/ErroCarregamento';
+import { SolicitacoesComerciais } from '../components/SolicitacoesComerciais';
 import { useCarregamento } from '../hooks/useCarregamento';
 import { useNavigate } from 'react-router-dom';
 import { Shield, Search, Plus, X, Check, AlertTriangle, Eye, Ban, Unlock, Trash2, KeyRound, CalendarClock, ShieldAlert, UserPlus, CreditCard, Archive, ArchiveRestore, FileText } from 'lucide-react';
@@ -550,6 +551,10 @@ export const PainelEmpresas: React.FC = () => {
           <p className="text-sm text-gray-500">Contas da plataforma. Pessoas com acesso são geridas separadamente em Usuários.</p>
         </div>
       </div>
+
+      {/* Fatia 2 comercial: solicitações de add-ons pendentes (aprovar/recusar).
+          Some quando não há pendências. */}
+      <SolicitacoesComerciais />
 
       <div className="flex flex-wrap justify-between items-center gap-4">
         <div className="flex items-center gap-2 flex-1 flex-wrap">
