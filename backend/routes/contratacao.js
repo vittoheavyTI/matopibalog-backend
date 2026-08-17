@@ -27,6 +27,7 @@ const {
   iniciarAquisicaoComercial,
   registrarNaoContinuar,
 } = require('../services/aquisicaoComercialService');
+const { carregarPreviewUpgrade } = require('../services/previewUpgradeService');
 const {
   confirmarAssinatura,
   solicitarDesafioAssinatura,
@@ -190,6 +191,25 @@ router.post('/iniciar', verifyToken, verificarEmpresa, permitirAssinaturaCliente
   } catch (err) {
     console.error('[contratacao/iniciar] Falha', { status: 500 });
     return res.status(500).json({ message: 'Erro ao iniciar contratacao.' });
+  }
+});
+
+// Preview READ-ONLY do snapshot de upgrade/add-ons (Fatia 1). Não escreve, não
+// cobra, não muda plano. Só admin/owner (permitirAssinaturaCliente). Calcula
+// plano atual × alvo + add-ons (R$149,90) + diferença + recomendação.
+router.post('/plano-preview', verifyToken, verificarEmpresa, permitirAssinaturaCliente, async (req, res) => {
+  if (!req.empresa_id) return res.status(400).json({ message: 'Empresa nao identificada.' });
+  try {
+    const r = await carregarPreviewUpgrade(supabase, {
+      empresaId: req.empresa_id,
+      planoAlvoId: req.body?.plano_alvo_id || null,
+      quantidade: Number(req.body?.quantidade) || null,
+      addonsSelecionados: Array.isArray(req.body?.addons_selecionados) ? req.body.addons_selecionados : [],
+    });
+    return res.status(r.status).json(r.body);
+  } catch (err) {
+    console.error('[contratacao/plano-preview] Falha', { status: 500 });
+    return res.status(500).json({ message: 'Erro ao calcular o preview de plano.' });
   }
 });
 

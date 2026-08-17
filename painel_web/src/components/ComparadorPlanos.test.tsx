@@ -32,6 +32,8 @@ function mockGet(planoAtual: string | null) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Default: o preview de simulação (POST /contratacao/plano-preview) resolve vazio.
+  mockApi.post.mockResolvedValue({ data: {} });
 });
 
 describe('ComparadorPlanos', () => {
@@ -43,8 +45,8 @@ describe('ComparadorPlanos', () => {
 
     // Copy honesta de "sem cobrança agora"
     await waitFor(() => expect(screen.getByText(/Nenhuma cobrança é feita agora/i)).toBeInTheDocument());
-    // Plano atual destacado
-    expect(screen.getByText(/Plano atual/i)).toBeInTheDocument();
+    // Plano atual destacado (botão do card selecionado)
+    expect(screen.getByRole('button', { name: /Plano atual/i })).toBeInTheDocument();
 
     // Escolher o Growth (não é o atual) → POST /contratacao/iniciar
     const botoes = await screen.findAllByRole('button', { name: /Escolher este plano/i });
@@ -58,10 +60,12 @@ describe('ComparadorPlanos', () => {
     // Nenhum plano atual destacado → ambos clicáveis; simulamos atual = growth e clicamos nele.
     mockGet('plano-growth');
     render(<ComparadorPlanos />);
-    await waitFor(() => expect(screen.getByText(/Plano atual/i)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('button', { name: /Plano atual/i })).toBeInTheDocument());
     // O card do plano atual mostra "✓ Plano atual" e não dispara POST ao clicar.
     fireEvent.click(screen.getByRole('button', { name: /Plano atual/i }));
-    expect(mockApi.post).not.toHaveBeenCalled();
+    // A simulação faz POST /contratacao/plano-preview; o que NÃO pode acontecer é
+    // iniciar a aquisição do próprio plano atual.
+    expect(mockApi.post).not.toHaveBeenCalledWith('/contratacao/iniciar', expect.anything());
     await waitFor(() => expect(screen.getByText(/já é o seu plano atual/i)).toBeInTheDocument());
   });
 });

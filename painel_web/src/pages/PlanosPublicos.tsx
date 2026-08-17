@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, Navigate } from 'react-router-dom';
 import { Truck, X } from 'lucide-react';
 import api, { newClientRequestId } from '../api';
 import { mensagemErro } from '../utils/mensagemErro';
@@ -159,6 +159,14 @@ export const PlanosPublicos: React.FC = () => {
     { whatsapp: whatsappSuporte, email: contactEmail, telefone: contactPhone },
     { assunto: ASSUNTO_ENTERPRISE, mensagem: 'Olá! Tenho interesse no plano Enterprise do Matopiba Log.' }
   );
+
+  // Unificação comercial (§10): cliente logado NÃO usa o fluxo pago daqui — vai
+  // para o home comercial único (Faturas / Regularização → Plano e contratação),
+  // onde compara, simula add-ons e solicita sem cobrança. Visitante (sem sessão)
+  // segue na vitrine pública → cadastro. Super-admin gerencia pelo painel.
+  if (user && !user.is_super_admin) {
+    return <Navigate to="/minhas-faturas?aba=contratacao" replace />;
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50">
