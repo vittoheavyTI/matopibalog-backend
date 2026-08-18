@@ -7,6 +7,7 @@ import { ComparadorPlanos } from '../components/ComparadorPlanos';
 import { Contratacao } from './Contratacao';
 import { useAuth } from '../contexts/AuthContext';
 import { civilDateToDayNumber, compareCivilDates, formatCivilDate, formatTechnicalDate } from '../utils';
+import { brl, mensagemRodapePagamento } from '../utils/faturaCopy';
 
 interface Fatura {
   id: string;
@@ -21,6 +22,7 @@ interface Fatura {
   due_date: string;
   pago_em: string;
   created_at: string;
+  origem?: string;
 }
 
 interface PixResponse {
@@ -359,7 +361,7 @@ export const MinhasFaturas: React.FC = () => {
               <p className="text-sm mt-1">{bannerPlano.texto}</p>
               {planoStatus?.plano && (
                 <p className="text-xs mt-2 opacity-80">
-                  {planoStatus.plano.nome} · R$ {Number(planoStatus.plano.preco_mensal).toFixed(2)}/mês
+                  {planoStatus.plano.nome} · {brl(planoStatus.plano.preco_mensal)}/mês
                 </p>
               )}
               {requerRegularizacao && suporteHref && !atual && (
@@ -404,7 +406,7 @@ export const MinhasFaturas: React.FC = () => {
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
               <div className="text-3xl font-bold text-gray-800">
-                R$ {Number(atual.valor).toFixed(2)}
+                {brl(atual.valor)}
               </div>
               <div className="text-sm text-gray-500 mt-1">
                 Plano {planoStatus?.plano?.nome || '—'} · Vencimento: {formatCivilDate(atual.due_date)}
@@ -454,7 +456,7 @@ export const MinhasFaturas: React.FC = () => {
           </div>
 
           <p className="text-[11px] text-gray-400 mt-3">
-            Durante o piloto, os pagamentos são processados em ambiente sandbox de homologação, sem valor real.
+            {mensagemRodapePagamento(atual.origem)}
             {getTipoLabel(atual.tipo_pagamento) !== 'Escolha a forma de pagamento' && (
               <> Forma: {getTipoLabel(atual.tipo_pagamento)}.</>
             )}
@@ -488,7 +490,7 @@ export const MinhasFaturas: React.FC = () => {
                     <span className={`px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest ${statusMap[f.status]?.color}`}>
                       {f.status === 'pendente' ? 'A vencer' : statusMap[f.status]?.label}
                     </span>
-                    <span className="font-bold text-gray-800">R$ {Number(f.valor).toFixed(2)}</span>
+                    <span className="font-bold text-gray-800">{brl(f.valor)}</span>
                     {f.invoice_url && validarUrl(f.invoice_url) && (
                       <a
                         href={f.invoice_url}
@@ -564,7 +566,7 @@ export const MinhasFaturas: React.FC = () => {
                             {planoStatus?.plano ? `Mensalidade ${planoStatus.plano.nome}` : 'Assinatura'}
                           </td>
                           <td className="p-4 text-sm font-bold text-gray-800">
-                            R$ {Number(f.valor).toFixed(2)}
+                            {brl(f.valor)}
                           </td>
                           <td className="p-4 text-sm text-gray-700">
                             {formatCivilDate(f.due_date)}
