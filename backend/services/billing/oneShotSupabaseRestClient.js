@@ -55,10 +55,26 @@ async function contarOutboxPendentes({ env = process.env, http = axios } = {}) {
   return Array.isArray(resp && resp.data) ? resp.data.length : 0;
 }
 
+// Conta faturas (read-only). Com empresaId → filtra por empresa; sem → total global.
+async function contarFaturas({ empresaId = null, env = process.env, http = axios } = {}) {
+  const { url, key } = resolverEnvRest(env);
+  const filtro = empresaId ? `empresa_id=eq.${encodeURIComponent(empresaId)}&` : '';
+  const endpoint = `${url}/rest/v1/faturas?${filtro}select=id`;
+  const resp = await http.get(endpoint, { headers: montarHeaders(key, { Prefer: 'count=exact', Range: '0-0' }) });
+  const headers = resp && resp.headers ? resp.headers : {};
+  const cr = headers['content-range'] || headers['Content-Range'];
+  if (cr && String(cr).includes('/')) {
+    const total = Number(String(cr).split('/').pop());
+    if (Number.isFinite(total)) return total;
+  }
+  return Array.isArray(resp && resp.data) ? resp.data.length : 0;
+}
+
 module.exports = {
   COLUNAS_EMPRESA,
   resolverEnvRest,
   montarHeaders,
   buscarEmpresaPorId,
   contarOutboxPendentes,
+  contarFaturas,
 };
