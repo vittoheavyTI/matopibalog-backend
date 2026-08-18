@@ -59,6 +59,12 @@ async function main() {
       const policy = resolvePolicy({}, env);
       return selecionarProvider(policy, { http: axios, empresaId, env });
     },
+    // Reconcile READ-ONLY (--reconcile): só GET no Asaas por externalReference.
+    reconciliarAsaas: async ({ empresaId, chargeRef, env }) => {
+      const axios = require('axios');
+      const { reconciliar } = require('../../services/billing/asaasReconcileClient');
+      return reconciliar({ empresaId, chargeRef, env, http: axios });
+    },
   };
 
   try {

@@ -61,6 +61,26 @@ function sanitizar(v) {
     .slice(0, 500);
 }
 
+// Só dígitos (para cpfCnpj — o Asaas rejeita valores com máscara .-/).
+function soDigitos(v) {
+  return String(v || '').replace(/\D/g, '');
+}
+
+// Extrai apenas o essencial (não-sensível) do erro Asaas 4xx: status HTTP +
+// errors[].code/description. NUNCA inclui headers/token/apiKey/payload bruto.
+function sanitizarErroAsaas(err) {
+  const status = err?.response?.status ?? err?.httpStatus ?? err?.status ?? null;
+  const data = err?.response?.data;
+  let errors = null;
+  if (data && Array.isArray(data.errors)) {
+    errors = data.errors.slice(0, 10).map((e) => ({
+      code: sanitizar(e?.code),
+      description: sanitizar(e?.description),
+    }));
+  }
+  return { http_status: typeof status === 'number' ? status : null, errors };
+}
+
 // Parsing de flags no formato --chave=valor / --flag. Não lança.
 function parseArgs(argv = []) {
   const raw = new Map();
@@ -84,6 +104,7 @@ function parseArgs(argv = []) {
     vencimentoDias: vencimentoDiasRaw != null ? Number(vencimentoDiasRaw) : VENCIMENTO_DIAS_PADRAO,
     permitirCustomerExistente: raw.get('permitir-customer-existente') === 'true',
     confirmValor: raw.get('confirm-valor') === 'true',
+    reconcile: raw.get('reconcile') === 'true',
   };
 }
 
@@ -126,7 +147,13 @@ function coletarValidacoes({ env = {}, args, empresa, gate, outboxPendentes = nu
     erros.push('empresa_nao_encontrada');
   } else {
     if (!empresa.email_contato) erros.push('empresa_sem_email');
-    if (!empresa.cnpj) erros.push('empresa_sem_cnpj');
+    if (!empresa.cnpj) {
+      erros.push('empresa_sem_cnpj');
+    } else if (![11, 14].includes(soDigitos(empresa.cnpj).length)) {
+      // cpfCnpj é normalizado para dígitos antes do POST; se não sobrar um
+      // CPF(11)/CNPJ(14) válido em tamanho, aborta ANTES de chamar o Asaas.
+      erros.push('cpfcnpj_invalido_apos_normalizacao');
+    }
     if (args.empresaNomeEsperado
         && String(empresa.nome || '').trim().toLowerCase() !== args.empresaNomeEsperado.toLowerCase()) {
       erros.push('nome_empresa_diverge_do_esperado');
@@ -181,6 +208,11 @@ async function executarOneShotCharge({ argv = [], env = process.env, deps = {} }
   const agora = deps.agora instanceof Date ? deps.agora : new Date();
   const log = typeof deps.log === 'function' ? deps.log : () => {};
   const args = parseArgs(argv);
+
+  // --------- RECONCILE (read-only): só GET no Asaas, nunca escreve ---------
+  if (args.reconcile) {
+    return executarReconcile({ args, env, deps, log });
+  }
 
   const gate = avaliarBillingProductionGate({ empresaId: args.empresaId, operation: OPERACAO, env });
   const resumoGate = resumoBillingProductionGate(env); // só booleans/contagens (sem segredo)
@@ -247,14 +279,17 @@ async function executarOneShotCharge({ argv = [], env = process.env, deps = {} }
 
   const provider = deps.criarProvider({ empresaId: args.empresaId, env }); // selecionarProvider → re-checa o gate
   const evidencias = { modo: 'execute', execucao_real: true, empresa_id: args.empresaId, plano };
+  let etapaAtual = 'unknown';
 
   try {
     // 1. Customer idempotente (find-or-create por externalReference = empresa.id).
+    //    cpfCnpj vai SOMENTE dígitos (Asaas rejeita máscara).
+    etapaAtual = 'createCustomer';
     const customer = await provider.createCustomer({
       empresa: {
         id: args.empresaId,
         nome: empresa.nome,
-        cnpj: empresa.cnpj,
+        cnpj: soDigitos(empresa.cnpj),
         email_contato: empresa.email_contato,
       },
     });
@@ -262,6 +297,7 @@ async function executarOneShotCharge({ argv = [], env = process.env, deps = {} }
     evidencias.customer_reconciliado = !!(customer && customer.reconciled);
 
     // 2. UMA cobrança PIX avulsa (nunca subscription).
+    etapaAtual = 'createCharge';
     const charge = await provider.createCharge({
       customerId: evidencias.customer_id,
       value: centavosParaReais(args.valorCentavos),
@@ -279,12 +315,16 @@ async function executarOneShotCharge({ argv = [], env = process.env, deps = {} }
     return evidencias;
   } catch (err) {
     const incerto = isAsaasCommitUncertainError(err);
+    const detalhe = sanitizarErroAsaas(err); // { http_status, errors } — sem segredo
     const relatorio = {
       modo: 'execute',
       execucao_real: true,
       ok: false,
       abortado: true,
       commit_incerto: incerto,
+      http_status: detalhe.http_status,
+      failed_step: etapaAtual, // createCustomer | createCharge | unknown
+      asaas_error_sanitized: { errors: detalhe.errors },
       instrucao_reconciliacao: incerto
         ? `Reconciliar manualmente por externalReference=${plano.external_reference_charge} no painel Asaas ANTES de re-executar. NÃO disparar segunda cobrança automaticamente.`
         : null,
@@ -299,6 +339,100 @@ async function executarOneShotCharge({ argv = [], env = process.env, deps = {} }
   }
 }
 
+// ---------- reconcile (read-only) ----------
+//
+// Só GET no Asaas: busca customer por externalReference=empresa.id e charge por
+// externalReference canônico. NUNCA cria/edita nada. Não exige --execute, nem
+// BILLING_OUTBOX_ENABLED=true, nem gate ACTIVE — mas exige allowlist EXATAMENTE 1
+// = o alvo (fail-closed) e o segredo presente (senão devolve fallback seguro para
+// o Jordão rodar via Railway).
+//
+// deps.reconciliarAsaas: async ({ empresaId, chargeRef, env }) =>
+//   { secret_present, customer:{id}|null, charge:{id,status,value,billingType}|null }
+async function executarReconcile({ args, env = {}, deps = {}, log = () => {} }) {
+  const allowlist = parseAllowlist(env.BILLING_PRODUCTION_ALLOWLIST);
+  const chargeRef = canonicalImplantationChargeReference(args.empresaId);
+
+  const base = {
+    modo: 'reconcile',
+    execucao_real: false,
+    read_only: true,
+    ASAAS_SUBSCRIPTION_FOUND: false,
+    external_reference_customer: canonicalCustomerReference(args.empresaId),
+    external_reference_charge: chargeRef,
+  };
+
+  // Fail-closed de escopo (mesmo sendo read-only, só reconcilia o alvo único).
+  const erros = [];
+  if (!args.empresaId) erros.push('empresa_id_ausente');
+  else if (!ehUuid(args.empresaId)) erros.push('empresa_id_invalido');
+  if (allowlist.length !== 1) erros.push('allowlist_precisa_ter_exatamente_1');
+  if (args.empresaId && allowlist.length >= 1 && !allowlist.includes(String(args.empresaId))) {
+    erros.push('empresa_fora_da_allowlist');
+  }
+  if (erros.length > 0) {
+    const r = { ...base, RECONCILE_RESULT: 'BLOQUEADO_ESCOPO', motivos: erros };
+    log(r);
+    return r;
+  }
+
+  // Sem segredo no ambiente (ex.: shell local do Claude) → fallback seguro.
+  if (!env.ASAAS_API_KEY || typeof deps.reconciliarAsaas !== 'function') {
+    const r = {
+      ...base,
+      RECONCILE_RESULT: 'NEEDS_OWNER_RAILWAY_RUN',
+      secret_present: !!env.ASAAS_API_KEY,
+      ASAAS_CUSTOMER_FOUND: null,
+      ASAAS_CUSTOMER_ID: null,
+      ASAAS_CHARGE_FOUND: null,
+      ASAAS_CHARGE_ID: null,
+      ASAAS_CHARGE_STATUS: null,
+      ASAAS_CHARGE_VALUE: null,
+      ASAAS_CHARGE_BILLING_TYPE: null,
+      observacao: 'Reconcile precisa do ASAAS_API_KEY no ambiente. Rodar via `railway run` (read-only, sem --execute).',
+    };
+    log(r);
+    return r;
+  }
+
+  let res;
+  try {
+    res = await deps.reconciliarAsaas({ empresaId: args.empresaId, chargeRef, env });
+  } catch (err) {
+    const detalhe = sanitizarErroAsaas(err);
+    const r = { ...base, RECONCILE_RESULT: 'ERRO_CONSULTA', http_status: detalhe.http_status, erro: sanitizar(err && err.message) };
+    log(r);
+    return r;
+  }
+
+  if (!res || res.secret_present === false) {
+    const r = { ...base, RECONCILE_RESULT: 'NEEDS_OWNER_RAILWAY_RUN', secret_present: false };
+    log(r);
+    return r;
+  }
+
+  const custFound = !!(res.customer && res.customer.id);
+  const chgFound = !!(res.charge && res.charge.id);
+  const resultado = chgFound
+    ? 'CHARGE_FOUND_DO_NOT_REPEAT'
+    : (custFound ? 'CUSTOMER_ONLY_NO_CHARGE' : 'NO_CUSTOMER_NO_CHARGE');
+
+  const r = {
+    ...base,
+    RECONCILE_RESULT: resultado,
+    secret_present: true,
+    ASAAS_CUSTOMER_FOUND: custFound,
+    ASAAS_CUSTOMER_ID: custFound ? res.customer.id : null,
+    ASAAS_CHARGE_FOUND: chgFound,
+    ASAAS_CHARGE_ID: chgFound ? res.charge.id : null,
+    ASAAS_CHARGE_STATUS: chgFound ? (res.charge.status || null) : null,
+    ASAAS_CHARGE_VALUE: chgFound ? (res.charge.value ?? null) : null,
+    ASAAS_CHARGE_BILLING_TYPE: chgFound ? (res.charge.billingType || null) : null,
+  };
+  log(r);
+  return r;
+}
+
 module.exports = {
   VALOR_PADRAO_CENTAVOS,
   OPERACAO,
@@ -308,8 +442,11 @@ module.exports = {
   ehUuid,
   calcularVencimentoIso,
   sanitizar,
+  soDigitos,
+  sanitizarErroAsaas,
   parseArgs,
   coletarValidacoes,
   montarPlano,
+  executarReconcile,
   executarOneShotCharge,
 };
