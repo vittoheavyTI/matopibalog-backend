@@ -46,4 +46,35 @@ async function reconciliar({ empresaId, chargeRef, env = process.env, http = axi
   };
 }
 
-module.exports = { BASE_PRODUCTION, reconciliar };
+// Lista completa (read-only) por externalReference — para detectar DUPLICATAS.
+async function listarPorRef(http, base, path, ref, apiKey) {
+  try {
+    const { data } = await http.get(`${base}${path}?externalReference=${encodeURIComponent(ref)}`, { headers: headers(apiKey) });
+    return Array.isArray(data && data.data) ? data.data : [];
+  } catch (e) {
+    if (e && e.response && e.response.status === 404) return [];
+    throw e;
+  }
+}
+
+// Certificação (read-only): retorna customer + TODAS as charges (para contar
+// duplicatas) + contagem de subscriptions com o externalReference de assinatura.
+async function certificarAsaas({ empresaId, chargeRef, subscriptionRef, env = process.env, http = axios, base = BASE_PRODUCTION } = {}) {
+  const apiKey = env.ASAAS_API_KEY;
+  if (!apiKey) return { secret_present: false };
+
+  const cust = await getPorRef(http, base, '/customers', String(empresaId), apiKey);
+  const charges = await listarPorRef(http, base, '/payments', String(chargeRef), apiKey);
+  const subs = subscriptionRef ? await listarPorRef(http, base, '/subscriptions', String(subscriptionRef), apiKey) : [];
+
+  const primeira = charges.length ? charges[0] : null;
+  return {
+    secret_present: true,
+    customer: cust ? { id: cust.id } : null,
+    charges_count: charges.length,
+    charge: primeira ? { id: primeira.id, status: primeira.status || null, value: primeira.value ?? null, billingType: primeira.billingType || null } : null,
+    subscriptions_count: subs.length,
+  };
+}
+
+module.exports = { BASE_PRODUCTION, reconciliar, listarPorRef, certificarAsaas };
