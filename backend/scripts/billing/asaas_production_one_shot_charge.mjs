@@ -18,6 +18,11 @@
 // (BILLING_PROVIDER_MODE=asaas_production, BILLING_PRODUCTION_ENABLED=true,
 //  BILLING_OUTBOX_ENABLED=true, BILLING_PRODUCTION_ALLOWLIST=<uuid único>, ASAAS_API_KEY).
 //
+// F3A — hardening de runtime: a leitura da empresa/outbox usa um cliente REST
+// mínimo (oneShotSupabaseRestClient), NÃO o config/supabase — assim NÃO carregamos
+// @supabase/supabase-js (Realtime/WebSocket), que no Windows deixava handles
+// abertos e derrubava o processo com UV_HANDLE_CLOSING após o dry-run.
+//
 // LEMBRETE: PRODUCTION_ASAAS_WRITES NÃO é controle real (o gate não a lê). Nunca
 // logar segredo. Este script NUNCA liga runner contínuo.
 
@@ -34,37 +39,18 @@ async function main() {
   const argv = process.argv.slice(2);
   const vaiExecutar = argv.includes('--execute');
 
-  // config/supabase faz process.exit(1) se as envs faltarem. Guardamos o require
-  // para que o dry-run (sem --empresa-id) rode em qualquer lugar sem derrubar o
-  // processo. As leituras são SELECT puros (read-only).
-  const getSupabaseOrNull = () => {
-    if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) return null;
-    return require('../../config/supabase');
-  };
+  // Leitura via cliente REST mínimo (SEM @supabase/supabase-js → SEM Realtime/WS).
+  const rest = require('../../services/billing/oneShotSupabaseRestClient');
 
   const deps = {
     agora: new Date(),
     log: (obj) => console.log('[asaas_one_shot]', JSON.stringify(obj)),
-    carregarEmpresa: async (empresaId) => {
-      const supabase = getSupabaseOrNull();
-      if (!supabase) throw new Error('SUPABASE_URL/SERVICE_KEY ausentes (necessarios para --empresa-id)');
-      const { data, error } = await supabase
-        .from('empresas')
-        .select('id, nome, cnpj, email_contato, asaas_customer_id, asaas_subscription_id, plano_id, commercial_flow_version')
-        .eq('id', empresaId)
-        .maybeSingle();
-      if (error) throw new Error('falha ao carregar empresa (read-only)');
-      return data || null;
-    },
+    // Read-only via PostgREST. Sem env → lança (necessário só quando há --empresa-id).
+    carregarEmpresa: async (empresaId) => rest.buscarEmpresaPorId(empresaId, { env: process.env }),
+    // Best-effort: sem env ou falha → null (não bloqueia o dry-run em qualquer lugar).
     contarOutboxPendentes: async () => {
-      const supabase = getSupabaseOrNull();
-      if (!supabase) return null; // best-effort
-      const { count, error } = await supabase
-        .from('billing_outbox')
-        .select('id', { count: 'exact', head: true })
-        .in('status', ['pendente', 'failed']);
-      if (error) return null; // best-effort
-      return count || 0;
+      try { return await rest.contarOutboxPendentes({ env: process.env }); }
+      catch { return null; }
     },
     // Provider REAL só é instanciado na execução — e via selecionarProvider, que
     // re-aplica o billingProductionGate (fail-closed). Sem gate aprovado, lança.
