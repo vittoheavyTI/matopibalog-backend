@@ -77,4 +77,34 @@ async function certificarAsaas({ empresaId, chargeRef, subscriptionRef, env = pr
   };
 }
 
-module.exports = { BASE_PRODUCTION, reconciliar, listarPorRef, certificarAsaas };
+// Busca UMA cobrança por id (read-only) — GET /payments/{id}. Retorna o objeto
+// completo (status, value, billingType, dueDate, invoiceUrl, bankSlipUrl,
+// externalReference, customer, paymentDate) ou null se 404.
+async function buscarChargePorId(chargeId, { env = process.env, http = axios, base = BASE_PRODUCTION } = {}) {
+  const apiKey = env.ASAAS_API_KEY;
+  if (!apiKey) return { secret_present: false, charge: null };
+  try {
+    const { data } = await http.get(`${base}/payments/${encodeURIComponent(chargeId)}`, { headers: headers(apiKey) });
+    if (!data || !data.id) return { secret_present: true, charge: null };
+    return {
+      secret_present: true,
+      charge: {
+        id: data.id,
+        status: data.status || null,
+        value: data.value ?? null,
+        billingType: data.billingType || null,
+        dueDate: data.dueDate || null,
+        invoiceUrl: data.invoiceUrl || null,
+        bankSlipUrl: data.bankSlipUrl || null,
+        externalReference: data.externalReference || null,
+        customer: data.customer || null,
+        paymentDate: data.paymentDate || null,
+      },
+    };
+  } catch (e) {
+    if (e && e.response && e.response.status === 404) return { secret_present: true, charge: null };
+    throw e;
+  }
+}
+
+module.exports = { BASE_PRODUCTION, reconciliar, listarPorRef, certificarAsaas, buscarChargePorId };

@@ -70,6 +70,15 @@ async function contarFaturas({ empresaId = null, env = process.env, http = axios
   return Array.isArray(resp && resp.data) ? resp.data.length : 0;
 }
 
+// Busca fatura local por asaas_id (read-only). Retorna o registro ou null.
+async function buscarFaturaPorAsaasId(asaasId, { env = process.env, http = axios } = {}) {
+  const { url, key } = resolverEnvRest(env);
+  const cols = 'id,empresa_id,asaas_id,status,valor,invoice_url,bank_slip_url,pago_em,asaas_raw_status';
+  const endpoint = `${url}/rest/v1/faturas?asaas_id=eq.${encodeURIComponent(asaasId)}&select=${cols}`;
+  const { data } = await http.get(endpoint, { headers: montarHeaders(key) });
+  return Array.isArray(data) && data.length ? data[0] : null;
+}
+
 module.exports = {
   COLUNAS_EMPRESA,
   resolverEnvRest,
@@ -77,4 +86,5 @@ module.exports = {
   buscarEmpresaPorId,
   contarOutboxPendentes,
   contarFaturas,
+  buscarFaturaPorAsaasId,
 };
