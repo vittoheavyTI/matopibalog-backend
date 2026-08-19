@@ -112,3 +112,10 @@ Qualquer um dos passos 1–4 **isoladamente** já bloqueia novas escritas (gate 
 - Print/registro do painel Asaas (1 customer + 1 cobrança PIX).
 - `billing_outbox=0` antes e depois.
 - Estado final do gate documentado (voltou a inerte).
+
+## Fechamento da frente (F5)
+
+O ciclo real foi concluído (pagamento PIX real → webhook → fatura `pago`) e **desarmado**.
+Ver o postmortem/fechamento completo (F0→F5D), com artefatos reais, falhas/correções,
+desarme final e checklist do próximo piloto:
+[`asaas-production-first-payment-postmortem.md`](./asaas-production-first-payment-postmortem.md).
