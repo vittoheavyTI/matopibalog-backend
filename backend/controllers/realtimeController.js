@@ -9,15 +9,24 @@
 // Sem token em query string. Sem Supabase Realtime. Sem expor o banco ao cliente.
 
 const bus = require('../services/realtimeBus');
+const conns = require('../services/sseConnections');
 
 const HEARTBEAT_MS = 25000; // < timeouts de proxy/idle comuns; barato
 
 function stream(req, res) {
   const empresaId = req.empresa_id || null;
-  if (!empresaId) {
-    // Sem empresa resolvida não há canal seguro para assinar (ex.: super-admin sem
-    // ?empresa_id=). Não assinamos "tudo" — isolamento de tenant é inegociável.
+  const userId = (req.user && req.user.uid) || null;
+  if (!empresaId || !userId) {
+    // Sem empresa/usuário resolvidos não há canal seguro para assinar (ex.: super-admin
+    // sem ?empresa_id=). Não assinamos "tudo" — isolamento de tenant é inegociável.
     return res.status(400).json({ message: 'Empresa não identificada para o stream.' });
+  }
+
+  // Proteção própria de conexão longa (o SSE não passa pelo rate limiter HTTP):
+  // limita streams simultâneos por usuário e por empresa. Excedeu → 429 (não abre).
+  const acq = conns.tryAcquire(userId, empresaId);
+  if (!acq.ok) {
+    return res.status(429).json({ message: 'Muitas conexões em tempo real abertas. Feche outras abas/dispositivos e tente novamente.' });
   }
 
   // Filtro opcional por frete (reduz ruído; a autoridade continua no backend).
@@ -58,6 +67,7 @@ function stream(req, res) {
     encerrado = true;
     clearInterval(heartbeat);
     unsubscribe();
+    conns.release(userId, empresaId); // libera a vaga de conexão
     try { res.end(); } catch (_) { /* já encerrado */ }
   };
 
@@ -66,4 +76,12 @@ function stream(req, res) {
   res.on('error', encerrar);
 }
 
-module.exports = { stream };
+// Observabilidade sem PII (só cardinalidades). Restrito a super-admin.
+function stats(req, res) {
+  if (!(req.user && req.user.is_super_admin === true)) {
+    return res.status(403).json({ message: 'Acesso restrito.' });
+  }
+  return res.status(200).json(conns.stats());
+}
+
+module.exports = { stream, stats };

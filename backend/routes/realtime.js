@@ -9,4 +9,7 @@ const { verificarEmpresa } = require('../middlewares/tenant');
 // as mutations continuam gated nos routers dos lançamentos.
 router.get('/stream', verifyToken, verificarEmpresa, realtimeController.stream);
 
+// Métricas de conexões SSE (só super-admin; sem PII).
+router.get('/stats', verifyToken, realtimeController.stats);
+
 module.exports = router;
