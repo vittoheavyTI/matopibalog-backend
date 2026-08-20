@@ -272,6 +272,15 @@ _Evidência coletada em 2026-08-19 (ver [FORENSIC_BASELINE](./FORENSIC_BASELINE.
 |----|------|--------|-----|
 | PROCESS-001 | `HOTFIX_071_APPLIED_BEFORE_OWNER_MIGRATION_GATE` — a migration 071 foi **aplicada em produção durante o diagnóstico do cancelamento (500), ANTES do PR #437 estar verde/mergeado e sem um `OWNER_MIGRATION_GATE` separado para a 071**. Resultado técnico saudável (aditiva/idempotente, reconciliada com o source-of-truth: repo `071_...sql` SHA256 `e6f3b7a4…d623fe` ≡ CHECK em prod; 070+071 rastreadas; sem terceiro hotfix SQL), mas é **desvio de processo**. | CLOSED_WITH_CORRECTIVE_ACTION | **NÃO rollbackar / NÃO reaplicar / NÃO alterar produção.** **Ação corretiva permanente:** toda migration de produção futura — inclusive hotfix — exige: (1) arquivo versionado; (2) hash; (3) PR/CI quando a situação permitir; (4) precheck; (5) `OWNER_MIGRATION_GATE` explícito; (6) `apply_migration` canônico; (7) tracking; (8) pós-check. Em incidente crítico onde o CI prévio não seja possível: **parar e solicitar `HOTFIX_PRODUCTION_GATE`** — nunca assumir autorização implícita de migration anterior. |
 
+## MOBILE_RELEASE_TRAIN_M1 (validações físicas do app — DEFERRED, não bloqueiam roadmap)
+
+> Política do owner (2026-08-20): mudanças Flutter não geram APK por macrofrente; o APK oficial consolidado sai por **Codemagic**. Validações que dependem de aparelho são acumuladas aqui. **`DEFERRED ≠ DONE`.** Ver ROADMAP §MOBILE_RELEASE_TRAIN_M1.
+
+| ID | Item | Status | Obs |
+|----|------|--------|-----|
+| MOBILE-M1-001 | Validar **realtime da tela de detalhe** do frete no aparelho (`detalhe_viagem_screen` atualiza sozinho: sem pull-to-refresh, sem reabrir, sem esperar o poll de 60s) | DEFERRED_TO_MOBILE_RELEASE_TRAIN_M1 | Código pronto (Onda 1 · E1.7). Aguarda APK consolidado + teste físico. |
+| MOBILE-M1-002 | Validar **criação/aprovação/rejeição/cancelamento** de lançamentos web↔app em APK consolidado (criar no app → web sem refresh; aprovar/rejeitar/cancelar no web → app atualiza; cancelado permanece visível) | DEFERRED_TO_MOBILE_RELEASE_TRAIN_M1 | Código pronto (Onda 1 · E1.2/E1.7). Aguarda APK consolidado + teste físico. |
+
 ---
 
 ### Contagem do inventário
