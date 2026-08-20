@@ -36,9 +36,11 @@ Matopiba vira **frota/operação-centric** (D-001): o eixo é o **veículo/compo
 
 ## Macrofrente atual
 
-**`CURRENT_MACROFRONT = ONDA1_REALTIME_LANCAMENTOS_AUDIT_SAFE`.**
+**`CURRENT_MACROFRONT = PERMISSIONS_TEMPLATES_OVERRIDES`** (P2 / E1.5). Onda 1 = tecnicamente CLOSED (ver §Estado da Onda 1); validação de aparelho no `MOBILE_RELEASE_TRAIN_M1`.
 
-A **RBV9 — Rebaseline V9** (docs-only) está **concluída** e inclui o **patch fiscal V9** (domínio `FISCAL_INVOICING`, decisões D-036..D-041, ledger FISC-001..020, track NFS-e). **Nenhum código/dado/env de produção alterado por estes docs.** A próxima macrofrente **funcional** é a **Onda 1 — Realtime + Lançamentos audit-safe**.
+**P2 — Permissões (templates+overrides) IMPLEMENTADO em código, `READY_FOR_OWNER_MIGRATION_GATE`.** Migration **072** (aditiva/idempotente, **NÃO aplicada em produção**, hash `4069b0e0…46ce5`): `permission_templates` + `permission_template_permissions` + `user_permission_overrides` + `permission_change_events` (append-only) + colunas `usuarios.permission_template_id` / `motoristas.pode_criar_frete` / `motoristas.financial_visibility_mode`; seed baseline por empresa; assignment por tipo legado; migração legado→overrides preservando efetivo; RPCs guardadas de governança (último admin) reusando o modelo da 069. Backend: registry canônico (28 chaves), resolver único (precedência **invariant→entitlement→override→template→default-deny**), `requirePermission`, `/auth/me` expõe `effective_permissions`; `freight.finish` reescrito via resolver (bypass autônomo + dual-read preservados), `freight.create` gated (fecha auto-criação por motorista), **redação financeira do motorista no backend** (visibility policy; autônomo=full). Web: página "Perfis e Permissões" (perfis + exceções por usuário) + `usePermissions` + sidebar gated. App: `auth_provider` carrega o efetivo + visibilidade; detalhe usa `freight.finish`/`comissao_valor`/oculta bruto redigido (mudanças no `MOBILE_RELEASE_TRAIN_M1`). Testes: **1587 backend verdes** (+resolver/redação), pgtest 072 (CI), web **tsc + 110 vitest verdes**. **Nenhuma migration aplicada, env/secrets/Asaas intocados.**
+
+A **RBV9 — Rebaseline V9** (docs-only) está **concluída** e inclui o **patch fiscal V9** (domínio `FISCAL_INVOICING`, decisões D-036..D-041, ledger FISC-001..020, track NFS-e). **Nenhum código/dado/env de produção alterado por estes docs.**
 
 ### Nota fiscal (não bloqueante)
 
