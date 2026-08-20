@@ -85,7 +85,18 @@ Ordem ajustada por dependência técnica objetiva: FLEET é pré-requisito de PL
 - **E1.5 Permissões templates+overrides** (RBV9-INV-018, D-006/D-008/D-010) — **próxima epic** (fundação para dashboards por papel, D-007).
 - **E1.6 Paridade painel↔app** (RBV9-INV-054, D-020): ✅ **entregue** (abastecimento: arla/odômetro/preço-litro/observação; observação obrigatória no create web+app). UX/máscaras/sidebar (RBV9-INV-098/099) seguem pendentes.
 - **E1.7 Hotfix + release do app** (PR #437, `MERGE_SHA=569fde7`): ✅ **DEPLOYADO** — **migration 071 aplicada+rastreada** (`20260820040645`, CHECK de `status` aceita `cancelado` → corrige 500 no cancelamento; aditiva/idempotente, reconciliada com o repo, SHA256 `e6f3b7a4…d623fe`) + **SSE na tela de detalhe do frete no app** (`detalhe_viagem_screen`). Desvio de processo registrado (**PROCESS-001**, `CLOSED_WITH_CORRECTIVE_ACTION`). **Artefato do app preparado** (mesmo pipeline: `flutter build apk --release` assinado com chave debug, sem secret novo).
-- **Dependências:** E1.5 antes de D-007/D-011. **Estado:** Onda 1 (E1.1/E1.2/E1.6 + E1.6A + E1.7) **DEPLOYADA em produção** (PR #435 `f43f009` + hotfix PR #437 `MERGE_SHA=569fde7`, migrations 070+071 aplicadas+rastreadas, CI verde, sem regressão) — `AWAITING_OWNER_FINAL_APP_VISUAL_VALIDATION` (falta o owner instalar o APK atualizado e validar realtime no aparelho). **Próxima macrofrente = `PERMISSIONS_TEMPLATES_OVERRIDES`** (E1.5 Permissões templates+overrides). **Nenhum código dessa macrofrente iniciado.**
+- **Dependências:** E1.5 antes de D-007/D-011. **Estado:** Onda 1 (E1.1/E1.2/E1.6 + E1.6A + E1.7) **DEPLOYADA em produção e tecnicamente CLOSED** (PR #435 `f43f009` + hotfix PR #437 `MERGE_SHA=569fde7`, migrations 070+071 aplicadas+rastreadas, CI verde, sem regressão). `ONDA1_TECHNICAL_STATUS=CLOSED`; `ONDA1_APP_DEVICE_VALIDATION=DEFERRED_TO_MOBILE_RELEASE_TRAIN_M1` (itens `MOBILE-M1-001/002`; **não bloqueia** o roadmap). **Macrofrente atual = `PERMISSIONS_TEMPLATES_OVERRIDES`** (E1.5 Permissões templates+overrides), em execução (P2).
+
+### MOBILE_RELEASE_TRAIN_M1 _(trem de release do app — transversal)_
+
+> **Política (owner, 2026-08-20):** mudanças Flutter **não geram APK por macrofrente** e **não bloqueiam** o roadmap. Cada macrofrente: implementa Flutter, roda `analyze`/`test`/`build` em CI quando aplicável, mantém compatibilidade e **registra aqui** as validações físicas pendentes. O APK oficial consolidado sai por **Codemagic** (`codemagic.yaml`, workflow `android-release` → `app-release.apk`, assinado com a chave debug, sem secret novo) num ponto de release definido pelo owner. **Não instalar Android SDK / não habilitar Windows Developer Mode / não validar aparelho fora do trem.** `DEFERRED ≠ DONE`.
+
+| ID | Item mobile a validar no APK consolidado | Origem | Status |
+|----|------------------------------------------|--------|--------|
+| MOBILE-M1-001 | Realtime da **tela de detalhe do frete** (`detalhe_viagem_screen`) atualiza sozinho no aparelho (sem pull-to-refresh, sem reabrir, sem esperar o poll de 60s) | Onda 1 · E1.7 | `DEFERRED_TO_MOBILE_RELEASE_TRAIN_M1` |
+| MOBILE-M1-002 | Ciclo **web↔app** de lançamentos: criar no app → web sem refresh; aprovar/rejeitar/**cancelar** no web → app atualiza e cancelado permanece visível | Onda 1 · E1.2/E1.7 | `DEFERRED_TO_MOBILE_RELEASE_TRAIN_M1` |
+
+_Itens mobile de macrofrentes futuras (ex.: enforcement de `freight.create`/`freight.finish` e visibilidade financeira do motorista da P2) entram nesta seção como `MOBILE-M1-NNN`._
 
 ### ONDA 2 — Fundação Frota
 - **E2.1 fleet_assets + composições + membros** (RBV9-INV-033/034, D-001..D-003).
