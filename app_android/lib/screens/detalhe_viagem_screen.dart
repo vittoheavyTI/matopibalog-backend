@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../services/api_service.dart';
 import '../services/app_logger.dart';
+import '../services/realtime_service.dart';
 import '../services/document_scanner_service.dart';
 import '../services/location_tracking_service.dart';
 import '../widgets/foto_preview.dart';
@@ -48,6 +49,11 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
   // rate limit. Pausa em background; ao voltar (resumed) faz um refetch imediato.
   Timer? _pollTimer;
   bool _emPrimeiroPlano = true;
+  // Onda 1 — realtime: refetch instantâneo ao chegar evento de lançamento do backend
+  // (aprovar/rejeitar/cancelar feitos no painel aparecem na hora, sem esperar o poll de
+  // 60s). O poll fica como fallback. Debounce evita rajada de refetch.
+  StreamSubscription<Map<String, dynamic>>? _realtimeSub;
+  Timer? _realtimeDebounce;
 
   @override
   void initState() {
@@ -58,6 +64,19 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
     _fetchDetalhes();
     _pollTimer = Timer.periodic(const Duration(seconds: 60), (_) {
       if (mounted && _emPrimeiroPlano && !_enviandoEpod && !_enviandoDoc) _fetchDetalhes(silent: true);
+    });
+    // Garante o stream ativo (idempotente) e assina os eventos. Filtra pelo frete
+    // desta tela quando o evento traz freight_id; eventos sintéticos (reconnect/resume)
+    // vêm sem freight_id e disparam resync.
+    RealtimeService.instance.start();
+    _realtimeSub = RealtimeService.instance.eventos.listen((ev) {
+      final fid = ev['freight_id'];
+      final freteId = _frete['id']?.toString();
+      if (fid != null && freteId != null && fid.toString() != freteId) return;
+      _realtimeDebounce?.cancel();
+      _realtimeDebounce = Timer(const Duration(milliseconds: 350), () {
+        if (mounted && !_enviandoEpod && !_enviandoDoc) _fetchDetalhes(silent: true);
+      });
     });
   }
 
@@ -74,6 +93,8 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _pollTimer?.cancel();
+    _realtimeDebounce?.cancel();
+    _realtimeSub?.cancel(); // não para o RealtimeService (compartilhado com a home)
     super.dispose();
   }
 
