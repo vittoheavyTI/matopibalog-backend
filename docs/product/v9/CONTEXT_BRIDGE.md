@@ -52,9 +52,15 @@ Adequação de **CNAE/CNPJ/regime** do owner corre **em paralelo** e **NÃO bloq
 4. Para evidências detalhadas do estado real → [FORENSIC_BASELINE](./FORENSIC_BASELINE.md).
 5. **Antes de implementar:** confirmar precedência (produção real > banco > repo/main > deploy > testes > docs). Verificar que algo "está implementado" no banco/deploy, não só no doc.
 
+## Estado da Onda 1 (macrofrente atual)
+
+**Onda 1 · Realtime + Lançamentos audit-safe — IMPLEMENTADA + hardening E1.6A, aguardando o migration gate.** PR #435 `feature/onda1-realtime-lancamentos-audit-safe` (backend SSE + web + app + migration 070 + testes). `STATUS = READY_FOR_OWNER_MIGRATION_GATE`: a migration 070 (aditiva/idempotente/backward-compatible) **não foi aplicada em produção** — aplicar só com autorização explícita; depois merge/deploy/smoke. Nada de produção alterado.
+
+**E1.6A (release safety, sem reabrir auditoria):** (1) **compat do APK legado** — observação/descrição obrigatória só para clientes NOVOS (header `X-Client-Platform`); legado não é quebrado (RBV9-INV-108, DEFERRED_REMOVAL). (2) **SSE connection safety** — limites por usuário/empresa + release no disconnect + `/realtime/stats` (super-admin). (3) **single-instance confirmado** no Railway (`numReplicas=1`) → bus in-memory permitido no escopo atual (RBV9-INV-107). (4) mutation coverage: creates/updates/transições publicam SSE; delete administrativo em cascata = recovery por refetch. Evento é invalidação (refetch canônico), nunca reverte a UI.
+
 ## Próximo passo recomendado
 
-**Onda 1 · Realtime + Lançamentos audit-safe**, depois **Permissões (templates+overrides)** — transversais, baixo risco, destravam Frota (Onda 2). Ver ROADMAP §Primeira macrofrente.
+Após o migration gate da Onda 1: **Permissões (templates editáveis por empresa + overrides individuais)** — RBV9-INV-018, D-006/D-008/D-010; transversal, destrava dashboards por papel (D-007) e check-in/out (Onda 2). Ver ROADMAP §ONDA 1 (E1.5) e §Primeira macrofrente.
 
 ## Hard stops permanentes
 

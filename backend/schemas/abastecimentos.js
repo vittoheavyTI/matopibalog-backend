@@ -7,6 +7,12 @@ const createAbastecimentoSchema = z.object({
   arla_litros: z.coerce.number().nonnegative().optional(),
   arla_valor: z.coerce.number().nonnegative().optional(),
   posto: z.string().max(200).optional(),
+  // Onda 1 (§11) — E1.6A: observação é obrigatória para os CLIENTES NOVOS (web/app que
+  // enviam X-Client-Platform), mas o SCHEMA a mantém OPCIONAL para NÃO quebrar o APK
+  // legado instalado (que não envia o campo). A obrigatoriedade estrita é aplicada no
+  // controller só quando o request é do contrato novo identificável. Ver
+  // lancamentoWorkflow.exigeCampoContexto e o débito LEGACY_OBSERVATION_ENFORCEMENT.
+  observacao: z.string().max(300).optional(),
   frete_id: z.string().uuid('ID do frete inválido.').optional().nullable(),
   motorista_id: z.string().uuid('ID do motorista inválido.').optional(),
   // Idempotência: id gerado pelo app por tentativa de lançamento. Opcional —

@@ -2,6 +2,9 @@ const { z } = require('zod');
 
 const createValeSchema = z.object({
   valor: z.coerce.number({ invalid_type_error: 'Valor deve ser um número.' }).positive('Valor do vale deve ser maior que zero.'),
+  // Onda 1 (§11) — E1.6A: obrigatória para CLIENTES NOVOS (enforçada no controller via
+  // X-Client-Platform), OPCIONAL no schema para não quebrar cliente legado. Registros
+  // históricos podem ter descricao nula.
   descricao: z.string().max(300).optional(),
   quem_pagou: z.enum(['proprietario', 'motorista']).optional(),
   posto: z.string().max(200).optional(),

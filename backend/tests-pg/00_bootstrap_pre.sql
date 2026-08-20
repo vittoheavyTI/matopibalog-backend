@@ -174,23 +174,59 @@ CREATE TABLE IF NOT EXISTS public.motoristas (
   placa_veiculo text NULL
 );
 
+-- despesas/abastecimentos/vales: colunas PRÉ-EXISTENTES em produção que a migration
+-- 070 e os testes de transição/auditoria tocam (status + colunas de resolução). As
+-- colunas NOVAS (version/created_by/updated_at/cancelado_*/observacao) vêm da 070 real.
 CREATE TABLE IF NOT EXISTS public.despesas (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   empresa_id uuid NULL REFERENCES public.empresas(id) ON DELETE CASCADE,
   motorista_id uuid NULL REFERENCES public.usuarios(id) ON DELETE SET NULL,
-  frete_id uuid NULL REFERENCES public.fretes(id) ON DELETE SET NULL
+  frete_id uuid NULL REFERENCES public.fretes(id) ON DELETE SET NULL,
+  tipo text NULL,
+  descricao text NULL,
+  valor numeric NULL,
+  quem_pagou text NULL,
+  data timestamptz NULL,
+  status text NULL DEFAULT 'pendente',
+  obs_resolucao text NULL,
+  resolvido_por uuid NULL,
+  resolvido_em timestamptz NULL,
+  client_request_id text NULL
 );
 
 CREATE TABLE IF NOT EXISTS public.abastecimentos (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   empresa_id uuid NULL REFERENCES public.empresas(id) ON DELETE CASCADE,
   motorista_id uuid NULL REFERENCES public.usuarios(id) ON DELETE SET NULL,
-  frete_id uuid NULL REFERENCES public.fretes(id) ON DELETE SET NULL
+  frete_id uuid NULL REFERENCES public.fretes(id) ON DELETE SET NULL,
+  litros numeric NULL,
+  valor_total numeric NULL,
+  quem_pagou text NULL,
+  posto text NULL,
+  arla_litros numeric NULL,
+  arla_valor numeric NULL,
+  data timestamptz NULL,
+  status text NULL DEFAULT 'pendente',
+  obs_resolucao text NULL,
+  resolvido_por uuid NULL,
+  resolvido_em timestamptz NULL,
+  client_request_id text NULL
 );
 
 CREATE TABLE IF NOT EXISTS public.vales (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   empresa_id uuid NULL REFERENCES public.empresas(id) ON DELETE CASCADE,
   motorista_id uuid NULL REFERENCES public.usuarios(id) ON DELETE SET NULL,
-  frete_id uuid NULL REFERENCES public.fretes(id) ON DELETE SET NULL
+  frete_id uuid NULL REFERENCES public.fretes(id) ON DELETE SET NULL,
+  valor numeric NULL,
+  quem_pagou text NULL,
+  descricao text NULL,
+  posto text NULL,
+  litros numeric NULL,
+  data timestamptz NULL,
+  status text NULL DEFAULT 'pendente',
+  obs_resolucao text NULL,
+  resolvido_por uuid NULL,
+  resolvido_em timestamptz NULL,
+  client_request_id text NULL
 );

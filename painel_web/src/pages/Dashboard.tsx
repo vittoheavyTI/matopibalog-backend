@@ -291,7 +291,8 @@ export const Dashboard: React.FC = () => {
   const handleAprovarDespesa = async (id: string, tipoItem: string, aprovado: boolean, obs?: string) => {
     const status = aprovado ? 'aprovado' : 'rejeitado';
     const payload: any = { status };
-    if (obs !== undefined) payload.obs_resolucao = obs;
+    if (obs !== undefined) payload.obs_resolucao = obs; // backend usa como motivo/observação
+    const recarregar = () => { if (selectedMot) loadMotoristaData(selectedMot.uid); loadDashboardData(); };
     try {
       if (tipoItem === 'despesa' || tipoItem === 'manutencao') {
         await api.patch('/despesas/' + id, payload);
@@ -300,21 +301,31 @@ export const Dashboard: React.FC = () => {
       } else if (tipoItem === 'vale') {
         await api.patch('/vales/' + id, payload);
       }
-
-      if (selectedMot) loadMotoristaData(selectedMot.uid);
-      loadDashboardData();
-    } catch (err) {
-      console.error(err);
-      alert('Erro ao atualizar status. Verifique se o servidor está rodando.');
+      recarregar();
+    } catch (err: any) {
+      // Onda 1: 409 = alguém alterou o lançamento em paralelo → refetch canônico.
+      if (err?.response?.status === 409) { alert('Este lançamento foi alterado por outra pessoa. Atualizando…'); recarregar(); return; }
+      const msg = err?.response?.data?.message;
+      alert(msg ? ('Não foi possível concluir: ' + msg) : 'Erro ao atualizar status. Verifique se o servidor está rodando.');
     }
   };
 
   const handleResolverComObservacao = async (id: string, tipoItem: string, aprovado: boolean) => {
-    const obs = window.prompt(
-      aprovado ? 'Justificativa da aprovação (opcional):' : 'Motivo da rejeição (opcional):'
-    );
-    if (obs === null) return; // cancelou
-    await handleAprovarDespesa(id, tipoItem, aprovado, obs || undefined);
+    if (aprovado) {
+      const obs = window.prompt('Justificativa da aprovação (opcional):');
+      if (obs === null) return; // cancelou
+      await handleAprovarDespesa(id, tipoItem, true, obs.trim() || undefined);
+      return;
+    }
+    // Rejeição: motivo OBRIGATÓRIO (backend é a autoridade). Repete até vir texto.
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const motivo = window.prompt('Motivo da rejeição (obrigatório):');
+      if (motivo === null) return; // desistiu
+      const t = motivo.trim();
+      if (t.length >= 2) { await handleAprovarDespesa(id, tipoItem, false, t); return; }
+      alert('É obrigatório informar o motivo da rejeição.');
+    }
   };
 
   const handleResetStatus = async (id: string, tipoItem: string) => {

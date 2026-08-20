@@ -2,6 +2,12 @@ const supabase = require('../config/supabase');
 const path = require('path');
 const notificacaoService = require('../services/notificacaoService');
 const { resolverFreteParaLancamento } = require('../services/freteService');
+const workflow = require('../services/lancamentoWorkflow');
+const bus = require('../services/realtimeBus');
+const { executarTransicao } = require('./lancamentoAcoesController');
+
+// Papel do ator para a auditoria de lançamentos (super-admin explícito).
+const papelDe = (req) => (req.user && req.user.is_super_admin === true ? 'super_admin' : (req.user && req.user.role) || 'usuario');
 
 exports.getAll = async (req, res) => {
   const { tipo, data_inicio, data_fim, frete_id, motorista_id } = req.query;
@@ -145,6 +151,7 @@ exports.create = async (req, res) => {
         quem_pagou,
         foto_url: publicUrl,
         status: statusLancamento,
+        created_by: req.user.uid,
         client_request_id: clientRequestId,
         sincronizado: true
       })
@@ -152,6 +159,8 @@ exports.create = async (req, res) => {
       .single();
 
     if (error) throw error;
+    // Auditoria append-only da criação + evento realtime (best-effort).
+    workflow.registrarCriacao({ entityType: 'despesa', row: data, actorId: req.user.uid, actorRole: papelDe(req), source: workflow.detectarOrigem(req) }).catch(() => {});
     notificacaoService.notificarLancamentoCriado(data, 'despesa').catch(() => {});
     // Lancamento criado pelo painel (admin): avisa tambem o motorista, que o
     // fluxo padrao (somenteAdmins / nasce aprovado) nao alcancava.
@@ -211,12 +220,22 @@ exports.getById = async (req, res) => {
 
 exports.update = async (req, res) => {
   const { id } = req.params;
-  const { descricao, valor, status, tipo, obs_resolucao } = req.body;
+
+  // Onda 1: SÓ as transições audit-safe (aprovado/rejeitado/cancelado) vão para a
+  // máquina de estados (RPC + auditoria + evento + CAS). Outros status legados
+  // (ex.: 'finalizado' no fechamento do frete; 'pendente' em undo administrativo)
+  // seguem o caminho direto abaixo, preservando o comportamento atual.
+  const TRANSICOES_AUDIT = new Set(['aprovado', 'rejeitado', 'cancelado']);
+  if (req.body && req.body.status !== undefined && TRANSICOES_AUDIT.has(String(req.body.status))) {
+    return executarTransicao(req, res, 'despesa', String(req.body.status));
+  }
+
+  const { descricao, valor, tipo, status, obs_resolucao } = req.body;
 
   try {
     const { data: checkData, error: checkError } = await supabase
       .from('despesas')
-      .select('motorista_id, empresa_id')
+      .select('motorista_id, empresa_id, frete_id')
       .eq('id', id)
       .single();
 
@@ -237,12 +256,12 @@ exports.update = async (req, res) => {
       }
     }
 
-    // Apenas campos explicitamente permitidos
-    const updateData = {};
+    // Apenas campos explicitamente permitidos (status NÃO entra aqui — ver acima)
+    const updateData = { updated_at: new Date().toISOString() };
     if (descricao !== undefined) updateData.descricao = descricao;
     if (valor !== undefined) updateData.valor = parseFloat(valor);
-    if (status !== undefined) updateData.status = status;
     if (tipo !== undefined) updateData.tipo = tipo;
+    if (status !== undefined) updateData.status = status; // legado: finalizado/pendente
     if (obs_resolucao !== undefined) {
       updateData.obs_resolucao = obs_resolucao;
       updateData.resolvido_por = req.user.uid;
@@ -257,10 +276,13 @@ exports.update = async (req, res) => {
       .single();
 
     if (error) throw error;
-    if (status && (status === 'aprovado' || status === 'rejeitado') && data) {
-      notificacaoService.notificarLancamentoResolvido(data, 'despesa', status === 'aprovado')
-        .catch((err) => console.error('[despesasController] Falha ao notificar lançamento resolvido', { tipo: 'despesa', id: data?.id, erro: err?.message || err }));
-    }
+    // Evento realtime de edição de campo (o cliente refaz o fetch canônico).
+    try {
+      bus.publish(workflow.construirEventoLancamento({
+        type: 'launch.updated', empresaId: checkData.empresa_id, entityType: 'despesa',
+        entityId: id, freteId: checkData.frete_id ?? null, version: data?.version ?? null,
+      }));
+    } catch (_) { /* best-effort */ }
     res.status(200).json(data);
   } catch (error) {
     console.error('[despesasController.update] falha', {

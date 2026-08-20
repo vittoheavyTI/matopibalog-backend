@@ -28,6 +28,7 @@ class _AddAbastecimentoScreenState extends State<AddAbastecimentoScreen> {
   final _arlaLitrosCtrl = TextEditingController();
   final _arlaValorCtrl = TextEditingController();
   final _postoCtrl = TextEditingController();
+  final _observacaoCtrl = TextEditingController();
   String _quemPagou = 'proprietario';
   File? _image;
   bool _loading = false;
@@ -51,6 +52,7 @@ class _AddAbastecimentoScreenState extends State<AddAbastecimentoScreen> {
     _arlaLitrosCtrl.dispose();
     _arlaValorCtrl.dispose();
     _postoCtrl.dispose();
+    _observacaoCtrl.dispose();
     super.dispose();
   }
 
@@ -147,6 +149,14 @@ class _AddAbastecimentoScreenState extends State<AddAbastecimentoScreen> {
       );
       return;
     }
+    // Onda 1 (§11): observação obrigatória no create (paridade com o web; o backend
+    // é a autoridade e rejeita sem observação).
+    if (_observacaoCtrl.text.trim().length < 2) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Informe uma observação para o abastecimento.')),
+      );
+      return;
+    }
     // Vinculado precisa de foto obrigatória
     if (!isAutonomo && _image == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -167,6 +177,7 @@ class _AddAbastecimentoScreenState extends State<AddAbastecimentoScreen> {
       'arla_litros': _arlaLitrosCtrl.text.replaceAll(',', '.'),
       'arla_valor': _arlaValorCtrl.text.replaceAll(',', '.'),
       'posto': _postoCtrl.text,
+      'observacao': _observacaoCtrl.text.trim(),
       'quem_pagou': quemPagou,
       'client_request_id': _clientRequestId,
       if (widget.freteId != null && widget.freteId!.isNotEmpty) 'frete_id': widget.freteId!,
@@ -184,6 +195,7 @@ class _AddAbastecimentoScreenState extends State<AddAbastecimentoScreen> {
             'litros': litrosText,
             'valor_total': valorText,
             'quem_pagou': quemPagou,
+            'observacao': _observacaoCtrl.text.trim(),
             'client_request_id': _clientRequestId,
             if (_arlaLitrosCtrl.text.isNotEmpty) 'arla_litros': _arlaLitrosCtrl.text.replaceAll(',', '.'),
             if (_arlaValorCtrl.text.isNotEmpty) 'arla_valor': _arlaValorCtrl.text.replaceAll(',', '.'),
@@ -292,6 +304,16 @@ class _AddAbastecimentoScreenState extends State<AddAbastecimentoScreen> {
                 prefixText: 'R\$ ',
               ),
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _observacaoCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Observação *',
+                hintText: 'Ex.: tanque cheio, diesel S10',
+              ),
+              maxLength: 300,
+              textInputAction: TextInputAction.done,
             ),
             // "Quem pagou" só aparece para motorista vinculado
             if (!isAutonomo) ...[

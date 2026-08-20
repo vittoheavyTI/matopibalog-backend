@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -5,6 +6,7 @@ import 'package:intl/intl.dart';
 import '../providers/auth_provider.dart';
 import '../providers/finance_provider.dart';
 import '../services/app_logger.dart';
+import '../services/realtime_service.dart';
 import '../widgets/seletor_frete.dart';
 import 'add_frete_screen.dart';
 import 'add_despesa_screen.dart';
@@ -24,14 +26,44 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
+  StreamSubscription<Map<String, dynamic>>? _realtimeSub;
+  Timer? _refreshDebounce;
+
   @override
   void initState() {
     super.initState();
     AppLogger.action('screen_open', params: {'tela': 'home'});
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<FinanceProvider>().loadData();
     });
+    // Onda 1 — realtime: qualquer evento de lançamento (ou reconnect/resume) refaz o
+    // fetch canônico, com debounce leve para não fazer rajada de reloads.
+    RealtimeService.instance.start();
+    _realtimeSub = RealtimeService.instance.eventos.listen((_) {
+      _refreshDebounce?.cancel();
+      _refreshDebounce = Timer(const Duration(milliseconds: 400), () {
+        if (mounted) _refresh();
+      });
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Ao voltar do background: refetch canônico (o SSE também reconecta sozinho).
+    if (state == AppLifecycleState.resumed) {
+      RealtimeService.instance.pingRefetch();
+    }
+  }
+
+  @override
+  void dispose() {
+    _refreshDebounce?.cancel();
+    _realtimeSub?.cancel();
+    RealtimeService.instance.stop();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
   }
 
   Future<void> _refresh() async {

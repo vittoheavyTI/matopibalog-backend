@@ -2,6 +2,11 @@ const supabase = require('../config/supabase');
 const path = require('path');
 const notificacaoService = require('../services/notificacaoService');
 const { resolverFreteParaLancamento } = require('../services/freteService');
+const workflow = require('../services/lancamentoWorkflow');
+const bus = require('../services/realtimeBus');
+const { executarTransicao } = require('./lancamentoAcoesController');
+
+const papelDe = (req) => (req.user && req.user.is_super_admin === true ? 'super_admin' : (req.user && req.user.role) || 'usuario');
 
 exports.getAll = async (req, res) => {
   const { motorista_id, frete_id } = req.query;
@@ -46,6 +51,10 @@ exports.getAll = async (req, res) => {
 exports.create = async (req, res) => {
   const { valor, quem_pagou, descricao, posto, litros, frete_id, motorista_id, client_request_id } = req.body;
   const motorista_id_final = req.user.role === 'admin' ? (motorista_id || req.user.uid) : req.user.uid;
+
+  // E1.6A: descrição obrigatória só para cliente NOVO (X-Client-Platform); legado passa.
+  const descCheck = workflow.exigeCampoContexto(req, descricao, 'descrição');
+  if (!descCheck.ok) return res.status(400).json({ message: descCheck.message });
 
   // Idempotência: reenvio da mesma tentativa (mesmo client_request_id) após
   // timeout não cancelado devolve o vale já criado, sem duplicar. Checado ANTES
@@ -93,6 +102,7 @@ exports.create = async (req, res) => {
         quem_pagou, descricao, posto, litros: litros ? parseFloat(litros) : 0,
         foto_url: publicUrl,
         status: req.user.role === 'admin' ? 'aprovado' : 'pendente',
+        created_by: req.user.uid,
         client_request_id: clientRequestId
       })
       .select().single();
@@ -101,6 +111,7 @@ exports.create = async (req, res) => {
       console.error('[valesController:create] Erro ao inserir vale:', error);
       throw error;
     }
+    workflow.registrarCriacao({ entityType: 'vale', row: data, actorId: req.user.uid, actorRole: papelDe(req), source: workflow.detectarOrigem(req) }).catch(() => {});
     notificacaoService.notificarLancamentoCriado(data, 'vale').catch(() => {});
     // Lancamento criado pelo painel (admin): avisa tambem o motorista, que o
     // fluxo padrao (somenteAdmins / nasce aprovado) nao alcancava.
@@ -152,10 +163,18 @@ exports.getById = async (req, res) => {
 
 exports.update = async (req, res) => {
   const { id } = req.params;
-  const { valor, status, descricao, posto, litros, obs_resolucao } = req.body;
+
+  // Onda 1: SÓ transições audit-safe (aprovado/rejeitado/cancelado) → máquina de estados.
+  // Status legados (ex.: 'finalizado' no fechamento; 'pendente' em undo) seguem direto.
+  const TRANSICOES_AUDIT = new Set(['aprovado', 'rejeitado', 'cancelado']);
+  if (req.body && req.body.status !== undefined && TRANSICOES_AUDIT.has(String(req.body.status))) {
+    return executarTransicao(req, res, 'vale', String(req.body.status));
+  }
+
+  const { valor, descricao, posto, litros, status, obs_resolucao } = req.body;
 
   try {
-    const { data: checkData, error: checkError } = await supabase.from('vales').select('motorista_id, empresa_id').eq('id', id).single();
+    const { data: checkData, error: checkError } = await supabase.from('vales').select('motorista_id, empresa_id, frete_id').eq('id', id).single();
     if (checkError || !checkData) {
       return res.status(404).json({ message: 'Vale não encontrado.' });
     }
@@ -172,10 +191,10 @@ exports.update = async (req, res) => {
       }
     }
 
-    const updateData = {};
+    const updateData = { updated_at: new Date().toISOString() };
     if (valor !== undefined) updateData.valor = parseFloat(valor);
     if (descricao !== undefined) updateData.descricao = descricao;
-    if (status !== undefined) updateData.status = status;
+    if (status !== undefined) updateData.status = status; // legado: finalizado/pendente
     if (obs_resolucao !== undefined) {
       updateData.obs_resolucao = obs_resolucao;
       updateData.resolvido_por = req.user.uid;
@@ -192,10 +211,12 @@ exports.update = async (req, res) => {
       .single();
 
     if (error) throw error;
-    if (status && (status === 'aprovado' || status === 'rejeitado') && data) {
-      notificacaoService.notificarLancamentoResolvido(data, 'vale', status === 'aprovado')
-        .catch((err) => console.error('[valesController] Falha ao notificar lançamento resolvido', { tipo: 'vale', id: data?.id, erro: err?.message || err }));
-    }
+    try {
+      bus.publish(workflow.construirEventoLancamento({
+        type: 'launch.updated', empresaId: checkData.empresa_id, entityType: 'vale',
+        entityId: id, freteId: checkData.frete_id ?? null, version: data?.version ?? null,
+      }));
+    } catch (_) { /* best-effort */ }
     res.status(200).json(data);
   } catch (error) {
     console.error('[valesController.update] falha', {

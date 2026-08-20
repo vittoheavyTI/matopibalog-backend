@@ -106,9 +106,9 @@ _Evidência coletada em 2026-08-19 (ver [FORENSIC_BASELINE](./FORENSIC_BASELINE.
 | RBV9-INV-049 | Despesas (web+app, isolamento, idempotência) | IMPL_VAL | ✓ ✓ ✓ ✓ ✓ | `despesas`(98), migration 018 |
 | RBV9-INV-050 | Abastecimentos / ARLA | IMPL_VAL | ✓ ✓ ✓ ✓ ✓ | `abastecimentos`(46) |
 | RBV9-INV-051 | Vales / adiantamentos | IMPL_VAL | ✓ ✓ ✓ ✓ ✓ | `vales`(18) |
-| RBV9-INV-052 | Estados append/audit-safe (pend/aprov/rej/cancel+motivo+ator) | PARTIAL | ~ ~ ~ ~ ~ | D-019; não uniforme em todas as entidades |
-| RBV9-INV-053 | Realtime web↔app dos lançamentos | ROADMAP | ✗ ✗ ✗ — ✗ | D-017; hoje só polling |
-| RBV9-INV-054 | Paridade painel↔app de todos os campos coletados | PARTIAL | ~ ~ ~ — — | D-020 |
+| RBV9-INV-052 | Estados append/audit-safe (pend/aprov/rej/cancel+motivo+ator) | IMPL_NV | ✓ ✓ ~ ✓ ✗ | **Onda 1**: máquina de estados + RPC transação (CAS) + ledger `lancamento_eventos` append-only. Migration 070 **não aplicada em prod** (gate). App: create; ações admin ficam no web. |
+| RBV9-INV-053 | Realtime web↔app dos lançamentos | IMPL_NV | ✓ ✓ ✓ — ✗ | **Onda 1**: SSE autenticado (`/realtime/stream`) + `realtimeBus`; web (fetch stream) e app (http stream) refazem fetch canônico. Polling não é mais o mecanismo principal. |
+| RBV9-INV-054 | Paridade painel↔app de todos os campos coletados | IMPL_NV | ✓ ✓ ~ — ✗ | **Onda 1**: painel exibe arla/odômetro/preço-litro/observação do abastecimento; observação obrigatória no create (web+app). |
 
 ## FINANCE — OPERACIONAL DO CLIENTE
 
@@ -234,7 +234,7 @@ _Evidência coletada em 2026-08-19 (ver [FORENSIC_BASELINE](./FORENSIC_BASELINE.
 
 | ID | Item | Status | B W A D P | Evidência / Obs |
 |----|------|--------|-----------|-----------------|
-| RBV9-INV-093 | Realtime sistêmico (web↔app poucos segundos) | ROADMAP | ✗ ✗ ✗ — ✗ | D-027; hoje polling (TECH_DEBT TD-02) |
+| RBV9-INV-093 | Realtime sistêmico (web↔app poucos segundos) | PARTIAL | ✓ ✓ ✓ — ✗ | **Onda 1** entrega a fundação (SSE backend-mediated) para lançamentos; estender a outros domínios (notificações/torre) fica para ondas seguintes |
 | RBV9-INV-094 | Baseline de performance (queries N+1, índices, payloads) | UNKNOWN | ~ ~ ~ ~ ~ | não medido; advisors não coletados (TD-06) |
 
 ## INFRA
@@ -263,23 +263,25 @@ _Evidência coletada em 2026-08-19 (ver [FORENSIC_BASELINE](./FORENSIC_BASELINE.
 | RBV9-INV-104 | Supabase advisors não coletados | TECH_DEBT | rodar na Onda 0/1 |
 | RBV9-INV-105 | Smoke autenticado automatizado ausente | TECH_DEBT | falta conta smoke |
 | RBV9-INV-106 | Tabelas legado (`documentos`, `contratos`, `modelo_contratos`) | TECH_DEBT | limpeza futura |
+| RBV9-INV-107 | `REALTIME_HORIZONTAL_SCALE` — bus SSE é in-memory/single-instance | DEFERRED | Onda 1/E1.6A; **Railway confirmado `numReplicas=1` (região sfo)** → `REALTIME_BUS_IN_MEMORY_ALLOWED=true` no escopo atual. **Critério de remoção:** antes de `replicas>1`, trocar o bus por pub/sub compartilhado atrás da mesma abstração. Mitigado hoje: clientes refazem fetch no reconnect/resume. **DEFERRED ≠ DONE.** |
+| RBV9-INV-108 | `LEGACY_OBSERVATION_ENFORCEMENT` — observação/descrição obrigatória é TRANSITÓRIA | DEFERRED | E1.6A; backend só exige o campo de clientes NOVOS (header `X-Client-Platform`); APK legado sem o campo NÃO é quebrado (histórico null permanece válido, sem inventar texto). **Critério de remoção:** quando existir *minimum supported app version* / forced-upgrade controlado, tornar a validação estrita para todos. **DEFERRED ≠ DONE.** |
 
 ---
 
 ### Contagem do inventário
 
-> **Recalculado após o patch fiscal RBV9** (+20 itens `FISC-001..FISC-020`, todos ROADMAP/NEW). Inventário original = 106 (`RBV9-INV-001..106`); com o domínio FISCAL_INVOICING passa a **126**.
+> **Recalculado após o patch fiscal RBV9** (+20 `FISC-001..020`, ROADMAP/NEW) **e a Onda 1 / E1.6A** (+`RBV9-INV-107` realtime horizontal scale, +`RBV9-INV-108` legacy observation enforcement; transições de status de 052/053/054/093). Inventário: 108 (`RBV9-INV`) + 20 (`FISC`) = **128**.
 
-- **Total de itens:** **126** (106 RBV9-INV + 20 FISC)
+- **Total de itens:** **128** (108 RBV9-INV + 20 FISC)
 - **IMPLEMENTED_VALIDATED:** 45
-- **IMPLEMENTED_NOT_VISUAL_VALIDATED:** 3
-- **PARTIAL:** 16
-- **ROADMAP_ONLY:** **53** (33 originais + 20 fiscais)
-- **DEFERRED:** 3
+- **IMPLEMENTED_NOT_VISUAL_VALIDATED:** 6 (+3 da Onda 1: RBV9-INV-052/053/054 — aguardam migration gate + validação visual)
+- **PARTIAL:** 15 (RBV9-INV-052/054 saíram de PARTIAL; RBV9-INV-093 entrou)
+- **ROADMAP_ONLY:** **51** (RBV9-INV-053 saiu de ROADMAP)
+- **DEFERRED:** 5 (+RBV9-INV-107 realtime horizontal scale; +RBV9-INV-108 legacy observation enforcement)
 - **TECH_DEBT:** 6 (itens 101-106; + achados TD no FORENSIC)
 - **UNKNOWN:** 1 (perf baseline)
 - **BROKEN / STUB:** 0 / 0 (impressoras = stub intencional de segurança, fora de contagem)
 
-_Contagem por ID (autoritativa): 106 (`RBV9-INV-001..106`) + 20 (`FISC-001..020`) = **126**. A soma das categorias (45+3+16+53+3+6+1 = 127) carrega o mesmo **+1 pré-existente** do baseline original (item `RBV9-INV-094` aparece como UNKNOWN e também compõe uma faixa PARTIAL); a quirk não foi "corrigida" para não reescrever o baseline forense._
+_Contagem por ID (autoritativa): 108 (`RBV9-INV-001..108`) + 20 (`FISC-001..020`) = **128**. A soma das categorias (45+6+15+51+5+6+1 = 129) carrega o mesmo **+1 pré-existente** do baseline original (item `RBV9-INV-094` aparece como UNKNOWN e também compõe uma faixa PARTIAL); a quirk não foi "corrigida" para não reescrever o baseline forense._
 
 _Ver: [CONTEXT_BRIDGE](./CONTEXT_BRIDGE.md) · [DECISIONS](./DECISIONS.md) · [ROADMAP](./ROADMAP.md) · [FORENSIC_BASELINE](./FORENSIC_BASELINE.md)_

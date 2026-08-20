@@ -123,7 +123,10 @@ app.use(cors({
     return callback(new Error(`Origem bloqueada pelo CORS: ${origin}`));
   },
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  // X-Client-Platform (E1.6A): assinatura de contrato novo do cliente. X-Operational-*:
+  // headers de escopo operacional já emitidos pelo web (só quando ORG_SCOPE ativa) —
+  // incluídos para o preflight não bloquear quando forem usados.
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Client-Platform', 'X-Operational-Group-Id', 'X-Operational-Unit-Id'],
   credentials: true,
 }));
 
@@ -136,6 +139,11 @@ app.use(cookieParser());
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'UP', timestamp: new Date().toISOString() });
 });
+
+// Stream SSE (realtime) montado ANTES do apiLimiter: uma conexão SSE é uma única
+// requisição de longa duração e um reconnect não pode ser penalizado pelo balde de
+// rate limit. A autenticação/tenant continua garantida pelo próprio router.
+app.use('/realtime', require('./routes/realtime'));
 
 app.use(apiLimiter);
 app.use('/auth/login', loginLimiter);
