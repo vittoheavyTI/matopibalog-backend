@@ -1,13 +1,23 @@
 // lancamentoWorkflow — unidades puras (envelope, origem, mapeamento de erro) e a
 // orquestração transicionar/registrarCriacao com supabase + bus FALSOS (sem DB).
-// Env dummy ANTES de requerer o módulo: config/supabase (importado pelo workflow)
-// aborta o processo sem SUPABASE_URL/SERVICE_KEY. O client real nunca é usado aqui
-// (injetamos fakes em todos os testes de orquestração).
-process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'http://localhost:54321';
-process.env.SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || 'chave-de-teste';
+//
+// Intercepta o require de '../config/supabase' ANTES de carregar o workflow: o config
+// real chama createClient(), e o @supabase/supabase-js inicializa o realtime-js, que no
+// Node 20 (sem WebSocket global) lança "Node.js 20 detected without native WebSocket
+// support". O singleton real nunca é usado aqui — todos os testes de orquestração
+// injetam fakes. Padrão idêntico aos demais testes do repo.
+const Module = require('node:module');
+const _origLoad = Module._load;
+Module._load = function (request, ...rest) {
+  if (request === '../config/supabase') {
+    return { rpc: async () => ({ data: null, error: null }), from: () => ({ insert: async () => ({ error: null }) }) };
+  }
+  return _origLoad.call(this, request, ...rest);
+};
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const wf = require('../services/lancamentoWorkflow');
+Module._load = _origLoad; // restaura após carregar o módulo sob teste
 
 test('construirEventoLancamento monta envelope mínimo', () => {
   const ev = wf.construirEventoLancamento({ type: 'launch.approved', empresaId: 'e1', entityType: 'despesa', entityId: 'd1', freteId: 'f1', version: 3 });
