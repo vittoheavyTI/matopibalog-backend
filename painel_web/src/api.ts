@@ -27,6 +27,11 @@ api.interceptors.request.use((config) => {
       config.headers = config.headers || {};
       (config.headers as any).Authorization = `Bearer ${token}`;
     }
+    // E1.6A: assinatura de CONTRATO NOVO (web). O backend usa a presença deste header
+    // para aplicar regras novas (ex.: observação obrigatória) só a clientes atualizados,
+    // sem quebrar APK legado que não o envia.
+    config.headers = config.headers || {};
+    (config.headers as any)['X-Client-Platform'] = 'web';
     const operationalHeaders = montarHeadersContextoOperacional();
     for (const [key, value] of Object.entries(operationalHeaders)) {
       config.headers = config.headers || {};

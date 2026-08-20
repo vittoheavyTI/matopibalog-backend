@@ -52,6 +52,10 @@ exports.create = async (req, res) => {
   const { litros, valor_total, quem_pagou, arla_litros, arla_valor, posto, observacao, frete_id, motorista_id, client_request_id } = req.body;
   const motorista_id_final = req.user.role === 'admin' ? (motorista_id || req.user.uid) : req.user.uid;
 
+  // E1.6A: observação obrigatória só para cliente NOVO (X-Client-Platform); legado passa.
+  const obsCheck = workflow.exigeCampoContexto(req, observacao, 'observação');
+  if (!obsCheck.ok) return res.status(400).json({ message: obsCheck.message });
+
   // Idempotência: reenvio da mesma tentativa (mesmo client_request_id) após
   // timeout não cancelado devolve o lançamento já criado, sem duplicar. Checado
   // ANTES do upload para não gerar arquivo órfão no Storage. Campo opcional.

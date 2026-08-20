@@ -313,6 +313,10 @@ class ApiService {
     final token = await currentSessionToken();
     return {
       'Content-Type': 'application/json',
+      // E1.6A: assinatura de CONTRATO NOVO (app). O backend usa a presença deste header
+      // para aplicar regras novas (ex.: observação obrigatória) só a este cliente
+      // atualizado; APK legado não o envia e mantém compatibilidade transitória.
+      'X-Client-Platform': 'app',
       if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
     };
   }

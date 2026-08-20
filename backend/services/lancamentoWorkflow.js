@@ -53,6 +53,32 @@ function detectarOrigem(req) {
   return 'api';
 }
 
+// Clientes NOVOS (web/app desta macrofrente) enviam o header X-Client-Platform. O APK
+// legado instalado NÃO o envia. Usamos a PRESENÇA do header como assinatura segura de
+// "contrato novo" — legado nunca cai no caminho estrito (fail-open p/ compat), então o
+// backend novo não quebra cliente instalado. Não é sinal de segurança (só de contrato).
+function clienteNovoContrato(req) {
+  const hdr = req && (req.get ? req.get('X-Client-Platform') : (req.headers || {})['x-client-platform']);
+  const norm = String(hdr || '').toLowerCase().trim();
+  return norm === 'web' || norm === 'app';
+}
+
+/**
+ * Regra transitória (E1.6A): um campo de contexto (observação/descrição) é OBRIGATÓRIO
+ * apenas quando o request é de um cliente NOVO identificável. Cliente legado (sem
+ * X-Client-Platform) passa mesmo sem o campo — preserva null histórico, NÃO inventa
+ * texto. Débito: LEGACY_OBSERVATION_ENFORCEMENT (remover quando houver min-app-version).
+ * PURO/testável. Retorna {ok} ou {ok:false, message}.
+ */
+function exigeCampoContexto(req, valor, rotulo = 'observação') {
+  const preenchido = valor != null && String(valor).trim().length >= 2;
+  if (preenchido) return { ok: true };
+  if (clienteNovoContrato(req)) {
+    return { ok: false, message: `Informe a ${rotulo} para concluir o lançamento.` };
+  }
+  return { ok: true }; // cliente legado: compat transitória (histórico null permanece válido)
+}
+
 /**
  * Mapeia o erro da RPC de transição para {http, code, message} em pt-BR. PURO/testável.
  * A RPC RAISE com tokens estáveis (LANCAMENTO_*) — casamos pela mensagem.
@@ -165,6 +191,8 @@ module.exports = {
   EVENTO_POR_STATUS,
   construirEventoLancamento,
   detectarOrigem,
+  clienteNovoContrato,
+  exigeCampoContexto,
   mapearErroTransicao,
   transicionar,
   registrarCriacao,

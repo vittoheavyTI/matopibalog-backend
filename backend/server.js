@@ -123,7 +123,10 @@ app.use(cors({
     return callback(new Error(`Origem bloqueada pelo CORS: ${origin}`));
   },
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  // X-Client-Platform (E1.6A): assinatura de contrato novo do cliente. X-Operational-*:
+  // headers de escopo operacional já emitidos pelo web (só quando ORG_SCOPE ativa) —
+  // incluídos para o preflight não bloquear quando forem usados.
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Client-Platform', 'X-Operational-Group-Id', 'X-Operational-Unit-Id'],
   credentials: true,
 }));
 

@@ -115,3 +115,31 @@ test('registrarCriacao: falha de auditoria NÃO propaga (create não pode quebra
   const busFake = { publish: () => {} };
   await assert.doesNotReject(wf.registrarCriacao({ entityType: 'vale', row: { id: 'v1', empresa_id: 'e1' }, supabase: supabaseFake, barramento: busFake }));
 });
+
+// E1.6A — compatibilidade de rollout (observação/descrição obrigatória só p/ cliente novo)
+const reqCom = (plataforma) => ({ get: (h) => (String(h).toLowerCase() === 'x-client-platform' ? plataforma : undefined), headers: {} });
+
+test('clienteNovoContrato: só quando X-Client-Platform = web|app', () => {
+  assert.equal(wf.clienteNovoContrato(reqCom('web')), true);
+  assert.equal(wf.clienteNovoContrato(reqCom('app')), true);
+  assert.equal(wf.clienteNovoContrato(reqCom(undefined)), false); // APK legado
+  assert.equal(wf.clienteNovoContrato(reqCom('outro')), false);
+});
+
+test('exigeCampoContexto: legado sem observação PASSA (não quebra APK antigo)', () => {
+  assert.equal(wf.exigeCampoContexto(reqCom(undefined), '', 'observação').ok, true);
+  assert.equal(wf.exigeCampoContexto(reqCom(undefined), null, 'observação').ok, true);
+});
+
+test('exigeCampoContexto: cliente NOVO sem observação é BLOQUEADO', () => {
+  const r = wf.exigeCampoContexto(reqCom('app'), '', 'observação');
+  assert.equal(r.ok, false);
+  assert.match(r.message, /observação/);
+  const w = wf.exigeCampoContexto(reqCom('web'), '   ', 'descrição');
+  assert.equal(w.ok, false);
+});
+
+test('exigeCampoContexto: com valor válido PASSA para qualquer cliente', () => {
+  assert.equal(wf.exigeCampoContexto(reqCom('app'), 'tanque cheio', 'observação').ok, true);
+  assert.equal(wf.exigeCampoContexto(reqCom(undefined), 'adiantamento', 'descrição').ok, true);
+});

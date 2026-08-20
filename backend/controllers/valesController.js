@@ -52,6 +52,10 @@ exports.create = async (req, res) => {
   const { valor, quem_pagou, descricao, posto, litros, frete_id, motorista_id, client_request_id } = req.body;
   const motorista_id_final = req.user.role === 'admin' ? (motorista_id || req.user.uid) : req.user.uid;
 
+  // E1.6A: descrição obrigatória só para cliente NOVO (X-Client-Platform); legado passa.
+  const descCheck = workflow.exigeCampoContexto(req, descricao, 'descrição');
+  if (!descCheck.ok) return res.status(400).json({ message: descCheck.message });
+
   // Idempotência: reenvio da mesma tentativa (mesmo client_request_id) após
   // timeout não cancelado devolve o vale já criado, sem duplicar. Checado ANTES
   // do upload (quando houver) para não gerar arquivo órfão. Campo opcional.
