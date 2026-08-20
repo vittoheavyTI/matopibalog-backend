@@ -297,8 +297,28 @@ BEGIN
   IF NOT FOUND THEN RETURN false; END IF;
   IF v_u.status IS DISTINCT FROM 'ativo' THEN RETURN false; END IF;
   IF v_u.is_super_admin = true THEN RETURN false; END IF;  -- authority de plataforma, não conta como governança do tenant
-  RETURN public.p2_effective_permission(p_usuario_id, 'users.manage')
-     AND public.p2_effective_permission(p_usuario_id, 'permissions.manage');
+
+  -- V9: com template ATRIBUÍDO, a autoridade é o EFETIVO (override > template).
+  IF v_u.permission_template_id IS NOT NULL THEN
+    RETURN public.p2_effective_permission(p_usuario_id, 'users.manage')
+       AND public.p2_effective_permission(p_usuario_id, 'permissions.manage');
+  END IF;
+
+  -- LEGADO/TRANSIÇÃO (SAFETY_NET_TRANSITIONAL): SEM template V9 atribuído, preserva a
+  -- autoridade coarse do modelo legado (tipo='admin' = governança), respeitando um
+  -- override DENY explícito de governança se existir. Garante que a 072 NÃO enfraqueça
+  -- NEM endureça o invariante do último admin para empresas ainda não populadas no V9
+  -- (EFFECTIVE_BEFORE = EFFECTIVE_AFTER para a governança legado).
+  IF v_u.tipo <> 'admin' THEN RETURN false; END IF;
+  IF EXISTS (
+    SELECT 1 FROM public.user_permission_overrides
+     WHERE usuario_id = p_usuario_id
+       AND permission_key IN ('users.manage', 'permissions.manage')
+       AND effect = 'deny'
+  ) THEN
+    RETURN false;
+  END IF;
+  RETURN true;
 END;
 $$;
 
