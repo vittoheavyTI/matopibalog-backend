@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from 'r
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { SuperAdminRoute } from './components/SuperAdminRoute';
+import { PermissionRoute } from './components/PermissionRoute';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Layout } from './components/Layout';
 import { Login } from './pages/Login';
@@ -84,11 +85,11 @@ const AppRoutes = () => {
         <Route path="relatorios" element={<Relatorios />} />
         <Route path="relatorios/viagens" element={<GerenciamentoViagens />} />
         <Route path="relatorios/resumo" element={<ResumoMotorista />} />
-        <Route path="relatorios/rentabilidade" element={<Rentabilidade />} />
-        <Route path="relatorios/acerto-motoristas" element={<AcertoMotoristas />} />
+        <Route path="relatorios/rentabilidade" element={<PermissionRoute permission="finance.operational.view"><Rentabilidade /></PermissionRoute>} />
+        <Route path="relatorios/acerto-motoristas" element={<PermissionRoute permission="finance.operational.view"><AcertoMotoristas /></PermissionRoute>} />
         <Route path="relatorios/torre-controle" element={<TorreControle />} />
         <Route path="admins" element={<Usuarios />} />
-        <Route path="perfis-permissoes" element={<PerfisPermissoes />} />
+        <Route path="perfis-permissoes" element={<PermissionRoute permission="permissions.manage"><PerfisPermissoes /></PermissionRoute>} />
         <Route path="operacional" element={<Operacional />} />
         <Route path="painel-administrativo">
           <Route index element={<Navigate to="visao-geral" replace />} />

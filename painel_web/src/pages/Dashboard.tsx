@@ -4,7 +4,7 @@ import { format } from 'date-fns';
 import { formatCurrency, getActiveRecurringContracts, getContractMonthlyPrice } from '../utils';
 import {
   DollarSign, AlertCircle, FileText, Check, X,
-  Save, Edit, Unlock, Lock, ChevronLeft, Plus, Fuel, TrendingUp, Truck,
+  Save, Edit, Unlock, Lock, ChevronLeft, Plus, Fuel, TrendingUp,
   Building2, Clock, AlertTriangle
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
@@ -21,27 +21,9 @@ const extrairMensagemPlano = (err: any): string | null => {
     : null;
 };
 
-// [PR2B] Card de métrica reutilizável. Recebe as classes de cor como strings
-// literais (nunca interpoladas) para não quebrar o purge do Tailwind.
-const StatCard: React.FC<{
-  label: string;
-  value: string;
-  icon: React.ElementType;
-  boxBorder: string;
-  iconBg: string;
-  iconColor: string;
-  valueColor: string;
-}> = ({ label, value, icon: Icon, boxBorder, iconBg, iconColor, valueColor }) => (
-  <div className={`bg-white p-4 rounded-xl shadow-sm border ${boxBorder}`}>
-    <div className="flex items-center space-x-3 mb-2">
-      <div className={`w-9 h-9 ${iconBg} rounded-lg flex items-center justify-center`}>
-        <Icon size={18} className={iconColor} />
-      </div>
-      <p className="text-sm text-gray-600 font-medium">{label}</p>
-    </div>
-    <p className={`text-2xl font-bold ${valueColor}`}>{value}</p>
-  </div>
-);
+// [P2] StatCard (cards financeiros) removido: o dashboard operacional não expõe
+// financeiro. Os valores vivem em Acerto de Motoristas / Rentabilidade (protegidas
+// por finance.operational.view).
 
 // Seletor de empresa pesquisável (combobox) — substitui o <select> nativo do filtro
 // "Todas as empresas" no Dashboard do super-admin. Permite digitar para filtrar a lista.
@@ -107,15 +89,11 @@ export const Dashboard: React.FC = () => {
   const [despesas, setDespesas] = useState<any[]>([]);
   const [abastecimentos, setAbastecimentos] = useState<any[]>([]);
   const [vales, setVales] = useState<any[]>([]);
-  const [summary, setSummary] = useState<any>(null);
   // Empresas da plataforma (só super-admin) — alimenta a seção Receita/Trial/Alertas
   // fundida da antiga página "Visão Geral". Reaproveita a mesma query /painel-admin/empresas.
   const [empresasPainel, setEmpresasPainel] = useState<any[]>([]);
-  // Loadings por seção: a lista "Motoristas em Frete" (rápida) não pode ficar presa
-  // esperando o /dashboard/summary (lento — várias queries sequenciais no backend).
-  // Cada área tem seu próprio loading e atualiza assim que sua resposta chega.
+  // Loading da lista "Motoristas em Frete" (rápida, independente).
   const [loadingEmViagem, setLoadingEmViagem] = useState(true);
-  const [loadingSummary, setLoadingSummary] = useState(true);
 
   // Dashboard é visão automática do mês atual. O seletor de data foi removido da UI;
   // a consulta por período vive em Relatórios e Histórico de Fretes. Mantemos o valor
@@ -136,7 +114,6 @@ export const Dashboard: React.FC = () => {
 
   const loadDashboardData = async () => {
     setLoadingEmViagem(true);
-    setLoadingSummary(true);
 
     // Motoristas + Em Viagem: a lista "em viagem" é enriquecida com a foto/empresa
     // vinda de /admin/motoristas (fonte de verdade), então essas duas chamadas rápidas
@@ -174,18 +151,10 @@ export const Dashboard: React.FC = () => {
       setLoadingEmViagem(false);
     });
 
-    // Resumo financeiro (cards): independente — não bloqueia a lista acima.
-    const summaryPromise = api.get(`/dashboard/summary?mes=${selectedMonth.getMonth() + 1}&ano=${selectedMonth.getFullYear()}`)
-      .then((resSum) => {
-        setSummary(resSum.data || null);
-      })
-      .catch((err) => {
-        console.error('Erro ao carregar resumo do dashboard', err);
-        setSummary(null);
-      })
-      .finally(() => {
-        setLoadingSummary(false);
-      });
+    // P2 (Review 10) — o dashboard operacional NÃO busca /dashboard/summary (resumo
+    // FINANCEIRO). O financeiro empresarial vive na área financeira (Acerto de
+    // Motoristas / Rentabilidade), protegida por finance.operational.view. Assim, o
+    // dashboard operacional não faz chamada financeira desnecessária para ninguém.
 
     // Super-admin: empresas da plataforma para a seção Receita/Trial/Alertas.
     // Independente e tolerante — falha não bloqueia o resto do Dashboard.
@@ -195,7 +164,7 @@ export const Dashboard: React.FC = () => {
         .catch(() => setEmpresasPainel([]));
     }
 
-    await Promise.allSettled([motoristasEmViagemPromise, summaryPromise]);
+    await Promise.allSettled([motoristasEmViagemPromise]);
   };
 
   const loadMotoristaData = async (motId: string) => {
@@ -481,9 +450,6 @@ export const Dashboard: React.FC = () => {
   };
 
 
-  const [summaryPage, setSummaryPage] = useState(1);
-  const [summaryPageSize, setSummaryPageSize] = useState(5);
-
   const mFretes = fretes;
   const mDespesas = despesas;
   const mAbast = abastecimentos;
@@ -532,22 +498,8 @@ export const Dashboard: React.FC = () => {
     valesParaCalculo.filter(v => v.status === 'aprovado').reduce((acc, v) => acc + (parseFloat(v.valor) || 0), 0);
   const autResultado = opTotalFretes - autGastos;
 
-  // Lógica de Paginação do Resumo
-  const totalItems = summary?.fretes_por_motorista?.length || 0;
-  const totalPages = Math.ceil(totalItems / summaryPageSize);
-  const paginatedSummary = summary?.fretes_por_motorista?.slice(
-    (summaryPage - 1) * summaryPageSize,
-    summaryPage * summaryPageSize
-  ) || [];
-
-  // [PR2B] Cenário dos cards. Sem scope (backend antigo) → comporta como antes (vinculado).
-  const scope = summary?.scope;
-  const temVinculados = scope?.tem_vinculados ?? true;
-  const temAutonomos = scope?.tem_autonomos ?? false;
-  const soAutonomo = temAutonomos && !temVinculados;
-  const misto = temVinculados && temAutonomos;
-  // soVinculado é o padrão: cobre vinculado-only e o caso sem motoristas (4 cards zerados, como hoje).
-  const soVinculado = !soAutonomo && !misto;
+  // P2 (Review 10) — paginação/scope/soAutonomo eram derivados de /dashboard/summary
+  // (resumo FINANCEIRO), que não alimenta mais o dashboard operacional. Removidos.
   const empresasEmFrete = Array.from(
     new Map(motoristasEmViagem.map(m => [m.empresaId, { id: m.empresaId, nome: m.empresaNome }])).values()
   ).filter(e => e.id).sort((a, b) => a.nome.localeCompare(b.nome));
@@ -589,56 +541,11 @@ export const Dashboard: React.FC = () => {
         </div>
       )}
 
-      {!selectedMot && !summary && loadingSummary && (
-        <div className="bg-white p-5 rounded-xl shadow-sm border border-gray-100 text-center text-gray-500 italic animate-fade-in">
-          Carregando resumo financeiro...
-        </div>
-      )}
-
-      {!selectedMot && summary && (
-        <div className="space-y-5 animate-fade-in">
-          {/* [PR2B] Vinculado-only: visual atual preservado (campos antigos). */}
-          {soVinculado && (
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <StatCard label="Total de Fretes" value={formatCurrency(summary.total_fretes)} icon={DollarSign} boxBorder="border-blue-100" iconBg="bg-blue-100" iconColor="text-blue-600" valueColor="text-blue-600" />
-              <StatCard label="Comissão" value={formatCurrency(summary.total_comissoes)} icon={TrendingUp} boxBorder="border-green-100" iconBg="bg-green-100" iconColor="text-green-600" valueColor="text-green-600" />
-              <StatCard label="Despesas" value={formatCurrency(summary.total_deducoes)} icon={Fuel} boxBorder="border-orange-100" iconBg="bg-orange-100" iconColor="text-orange-600" valueColor="text-orange-600" />
-              <StatCard label="Saldo a Receber" value={formatCurrency(Math.abs(summary.saldo_a_pagar))} icon={Truck} boxBorder="border-purple-100" iconBg="bg-purple-100" iconColor="text-purple-600" valueColor="text-purple-600" />
-            </div>
-          )}
-
-          {/* [PR2B] Autônomo-only: Faturamento / Gastos / Resultado (sem comissão, sem saldo a pagar). */}
-          {soAutonomo && (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <StatCard label="Faturamento" value={formatCurrency(summary.faturamento_autonomos)} icon={DollarSign} boxBorder="border-blue-100" iconBg="bg-blue-100" iconColor="text-blue-600" valueColor="text-blue-600" />
-              <StatCard label="Gastos" value={formatCurrency(summary.gastos_autonomos)} icon={Fuel} boxBorder="border-orange-100" iconBg="bg-orange-100" iconColor="text-orange-600" valueColor="text-orange-600" />
-              <StatCard label="Resultado" value={formatCurrency(summary.resultado_autonomos)} icon={TrendingUp} boxBorder="border-green-100" iconBg="bg-green-100" iconColor="text-green-600" valueColor={summary.resultado_autonomos >= 0 ? 'text-green-600' : 'text-red-600'} />
-            </div>
-          )}
-
-          {/* [PR2B] Global/misto: duas faixas separadas, sem somar conceitos. */}
-          {misto && (
-            <>
-              <div>
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Motoristas Vinculados</p>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <StatCard label="Comissão" value={formatCurrency(summary.total_comissoes_vinculados)} icon={TrendingUp} boxBorder="border-green-100" iconBg="bg-green-100" iconColor="text-green-600" valueColor="text-green-600" />
-                  <StatCard label="Despesas" value={formatCurrency(summary.deducoes_vinculados)} icon={Fuel} boxBorder="border-orange-100" iconBg="bg-orange-100" iconColor="text-orange-600" valueColor="text-orange-600" />
-                  <StatCard label="Saldo" value={formatCurrency(summary.saldo_a_pagar_vinculados)} icon={Truck} boxBorder="border-purple-100" iconBg="bg-purple-100" iconColor="text-purple-600" valueColor={summary.saldo_a_pagar_vinculados >= 0 ? 'text-purple-600' : 'text-red-600'} />
-                </div>
-              </div>
-              <div>
-                <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Motoristas Autônomos</p>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <StatCard label="Faturamento" value={formatCurrency(summary.faturamento_autonomos)} icon={DollarSign} boxBorder="border-blue-100" iconBg="bg-blue-100" iconColor="text-blue-600" valueColor="text-blue-600" />
-                  <StatCard label="Gastos" value={formatCurrency(summary.gastos_autonomos)} icon={Fuel} boxBorder="border-orange-100" iconBg="bg-orange-100" iconColor="text-orange-600" valueColor="text-orange-600" />
-                  <StatCard label="Resultado" value={formatCurrency(summary.resultado_autonomos)} icon={TrendingUp} boxBorder="border-green-100" iconBg="bg-green-100" iconColor="text-green-600" valueColor={summary.resultado_autonomos >= 0 ? 'text-green-600' : 'text-red-600'} />
-                </div>
-              </div>
-            </>
-          )}
-        </div>
-      )}
+      {/* P2 (D-044) — Os cards financeiros (Total de Fretes/Comissão/Despesas/Saldo/
+          Faturamento/Gastos/Resultado) foram REMOVIDOS do dashboard operacional: o
+          financeiro operacional vive nas telas de Acerto de Motoristas e
+          Rentabilidade, protegidas por finance.operational.view. O dashboard
+          operacional foca em operação/fretes/status/motoristas/pendências. */}
 
       {/* Seção b/c da fusão da "Visão Geral": MRR por Empresa + Trial + Alertas (só super-admin). */}
       {!selectedMot && isSuperAdmin && (
@@ -1009,122 +916,12 @@ export const Dashboard: React.FC = () => {
         </button>
       )}
 
-      {!selectedMot && !isSuperAdmin && summary?.fretes_por_motorista && (
-        <div className="space-y-5 mt-6 animate-fade-in">
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-            <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/30">
-              <button
-                onClick={() => window.open('/relatorios/resumo', '_blank', 'noopener,noreferrer')}
-                className="text-lg font-bold text-gray-800 flex items-center hover:text-blue-600 transition-colors cursor-pointer"
-                title="Ir para Histórico de Fretes"
-              >
-                <Truck size={22} className="mr-2 text-blue-600" /> Histórico de Fretes
-              </button>
-              <div className="flex items-center space-x-4">
-                <div className="flex items-center space-x-2">
-                  <span className="text-xs font-bold text-gray-400 uppercase">Mostrar:</span>
-                  <select
-                    value={summaryPageSize}
-                    onChange={(e) => { setSummaryPageSize(Number(e.target.value)); setSummaryPage(1); }}
-                    className="border border-gray-200 rounded-lg px-2 py-1 text-sm font-bold text-gray-600 outline-none focus:border-blue-500"
-                  >
-                    <option value={5}>5</option>
-                    <option value={10}>10</option>
-                    <option value={15}>15</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-gray-50/50 text-gray-600 text-[10px] font-bold uppercase tracking-widest border-b border-gray-100">
-                    <th className="p-4">Motorista</th>
-                    <th className="p-4">Última Rota</th>
-                    <th className="p-4 text-center">KM Total</th>
-                    <th className="p-4 text-center">Média</th>
-                    {/* [PR2B] autônomo-only usa linguagem própria e sem coluna Comissão */}
-                    <th className="p-4 text-right">{soAutonomo ? 'Faturamento' : 'Total Fretes'}</th>
-                    {!soAutonomo && <th className="p-4 text-right">Comissão</th>}
-                    <th className="p-4 text-right">{soAutonomo ? 'Gastos' : 'Despesas'}</th>
-                    <th className="p-4 text-right">{soAutonomo ? 'Resultado' : 'Saldo Líquido'}</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-50">
-                  {paginatedSummary.map((m: any, idx: number) => {
-                    // [PR2B] Autônomo: Comissão "—", Despesas=Gastos, Saldo=Resultado.
-                    // Vinculado: usa campos segmentados (idênticos aos antigos p/ vinculado).
-                    const auto = m.is_autonomo;
-                    const despVal = auto ? (m.gastos_autonomo ?? 0) : (m.deducoes_vinculado ?? m.deducoes);
-                    const saldoVal = auto ? (m.resultado_autonomo ?? 0) : (m.saldo_vinculado ?? m.saldo);
-                    return (
-                      <tr key={idx} className="hover:bg-blue-50/30 transition-colors group">
-                        <td className="p-4">
-                          <div className="flex items-center">
-                            <div className="w-7 h-7 bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center text-[10px] font-bold mr-2 border border-blue-200">
-                              {m.nome?.charAt(0) || '?'}
-                            </div>
-                            <span className="text-sm font-bold text-gray-700">{m.nome}</span>
-                            {auto && <span className="ml-2 text-[9px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded font-bold uppercase">Autônomo</span>}
-                          </div>
-                        </td>
-                        <td className="p-4">
-                          <span className="text-[11px] font-medium text-gray-600 bg-gray-100 px-2 py-1 rounded-md">{m.ultima_rota || '-'}</span>
-                        </td>
-                        <td className="p-4 text-center">
-                          <span className="text-xs font-bold text-gray-600">{m.total_km} KM</span>
-                        </td>
-                        <td className="p-4 text-center">
-                          <span className={`text-xs font-bold px-2 py-1 rounded-md ${parseFloat(m.media_consumo) > 0 ? 'bg-blue-50 text-blue-700' : 'bg-gray-50 text-gray-400'}`}>
-                            {m.media_consumo} KM/L
-                          </span>
-                        </td>
-                        <td className="p-4 text-right">
-                          <span className="text-xs font-bold text-gray-700">{formatCurrency(m.total_fretes)}</span>
-                        </td>
-                        {!soAutonomo && (
-                          <td className="p-4 text-right">
-                            {auto
-                              ? <span className="text-xs font-bold text-gray-400">—</span>
-                              : <span className="text-xs font-bold text-blue-600">{formatCurrency(m.comissao_vinculado ?? m.comissao)}</span>}
-                          </td>
-                        )}
-                        <td className="p-4 text-right">
-                          <span className="text-xs font-medium text-red-500">-{formatCurrency(despVal)}</span>
-                        </td>
-                        <td className="p-4 text-right">
-                          <span className={`text-sm font-black ${auto ? (saldoVal >= 0 ? 'text-green-700' : 'text-red-600') : 'text-green-700'}`}>{formatCurrency(saldoVal)}</span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            {totalPages > 1 && (
-              <div className="p-4 bg-gray-50 border-t flex justify-between items-center">
-                <span className="text-xs font-bold text-gray-400 uppercase">Página {summaryPage} de {totalPages}</span>
-                <div className="flex space-x-2">
-                  <button
-                    disabled={summaryPage === 1}
-                    onClick={() => setSummaryPage(prev => prev - 1)}
-                    className="px-3 py-1 bg-white border border-gray-200 rounded text-xs font-bold text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors"
-                  >
-                    Anterior
-                  </button>
-                  <button
-                    disabled={summaryPage === totalPages}
-                    onClick={() => setSummaryPage(prev => prev + 1)}
-                    className="px-3 py-1 bg-white border border-gray-200 rounded text-xs font-bold text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors"
-                  >
-                    Próxima
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      {/* P2 (D-044 / Review 10) — a TABELA financeira por-motorista (Total Fretes/
+          Comissão/Despesas/Saldo Líquido) foi REMOVIDA do dashboard operacional. A
+          decisão do owner é que informação financeira empresarial vive na ÁREA
+          FINANCEIRA: o acerto por motorista está em "Acerto de Motoristas" e a
+          rentabilidade em "Rentabilidade" — ambas protegidas por
+          finance.operational.view. O dashboard operacional não expõe financeiro. */}
 
       {showAddDespesaModal && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={e => { if (e.target === e.currentTarget) setShowAddDespesaModal(false); }}>

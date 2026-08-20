@@ -4,6 +4,7 @@ const adminController = require('../controllers/adminController');
 const { verifyToken, isAdmin, isSuperAdmin } = require('../middlewares/auth');
 const { verificarEmpresa } = require('../middlewares/tenant');
 const { verificarPlano } = require('../middlewares/verificarPlano');
+const { requirePermission } = require('../middlewares/requirePermission');
 const validate = require('../middlewares/validate');
 const { resetSenhaSchema } = require('../schemas/auth');
 
@@ -22,10 +23,15 @@ router.delete('/motoristas/:id', verificarEmpresa, verificarPlano, adminControll
 // Uso do plano (limite de motoristas) para o painel — read-only, escopado pela empresa.
 router.get('/plano-uso', verificarEmpresa, adminController.getPlanoUso);
 
+// P2 (Review 11) — ADMINISTRAÇÃO DE USUÁRIOS exige users.manage (distinto de
+// permissions.manage, que gere templates/overrides em routes/permissions.js). Assim,
+// um usuário com permissions.manage=true e users.manage=false pode editar perfis mas
+// NÃO criar/editar/remover usuários. Admin tem ambos via template; super-admin passa.
+// Leitura (getUsuarios) permanece isAdmin (users.view fica p/ etapa futura de UI).
 router.get('/usuarios', verificarEmpresa, adminController.getUsuarios);
-router.post('/usuarios', verificarEmpresa, verificarPlano, adminController.createUsuario);
-router.put('/usuarios/:id', verificarEmpresa, verificarPlano, adminController.updateUsuario);
-router.delete('/usuarios/:id', verificarEmpresa, verificarPlano, adminController.deleteUsuario);
-router.post('/usuarios/:id/reset-senha', verificarEmpresa, verificarPlano, validate(resetSenhaSchema), adminController.resetSenhaUsuario);
+router.post('/usuarios', verificarEmpresa, verificarPlano, requirePermission('users.manage'), adminController.createUsuario);
+router.put('/usuarios/:id', verificarEmpresa, verificarPlano, requirePermission('users.manage'), adminController.updateUsuario);
+router.delete('/usuarios/:id', verificarEmpresa, verificarPlano, requirePermission('users.manage'), adminController.deleteUsuario);
+router.post('/usuarios/:id/reset-senha', verificarEmpresa, verificarPlano, requirePermission('users.manage'), validate(resetSenhaSchema), adminController.resetSenhaUsuario);
 
 module.exports = router;

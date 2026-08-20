@@ -164,6 +164,11 @@ export const Sidebar: React.FC = () => {
   // comercial (a aba "Plano e contratação" continua dentro dela).
   type GrupoNav = { titulo: string; itens: { to: string; icon: typeof LayoutDashboard; label: string }[] };
 
+  // P2 — financeiro operacional (Rentabilidade/Acerto) exige finance.operational.view
+  // efetiva (fallback admin legado quando o modelo V9 ainda não popularizou o efetivo).
+  const podeFinanceiroOperacional = (user?.effective_permissions?.['finance.operational.view'] === true)
+    || (!user?.effective_permissions && user?.role === 'admin');
+
   const gruposCliente: GrupoNav[] = [
     { titulo: 'Operação', itens: [
       { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
@@ -171,8 +176,10 @@ export const Sidebar: React.FC = () => {
       { to: '/relatorios/torre-controle', icon: TowerControl, label: 'Torre de Controle' },
       { to: '/relatorios/resumo', icon: History, label: 'Histórico de Fretes' },
       { to: '/relatorios', icon: FileText, label: 'Relatórios' },
-      { to: '/relatorios/rentabilidade', icon: TrendingUp, label: 'Rentabilidade' },
-      { to: '/relatorios/acerto-motoristas', icon: Receipt, label: 'Acerto de Motoristas' },
+      ...(podeFinanceiroOperacional ? [
+        { to: '/relatorios/rentabilidade', icon: TrendingUp, label: 'Rentabilidade' },
+        { to: '/relatorios/acerto-motoristas', icon: Receipt, label: 'Acerto de Motoristas' },
+      ] : []),
     ] },
     { titulo: 'Cadastros', itens: [
       { to: '/motoristas', icon: Users, label: 'Motoristas' },

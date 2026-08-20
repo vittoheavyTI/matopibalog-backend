@@ -44,7 +44,11 @@ router.get('/', fretesController.getAll);
 router.post('/', requirePermission('freight.create'), validate(createFreteSchema), fretesController.create);
 // Emissão da credencial de rastreamento — SEMPRE sob sessão SEC-1 (guard global acima).
 router.post('/localizacao/credencial', trackingCredentialController.emitir);
-router.post('/:id/correcao-financeira', validate(correcaoFinanceiraFreteSchema), fretesController.corrigirFinanceiro);
+// P2 — correção FINANCEIRA do frete é uma MUTAÇÃO de financeiro operacional →
+// exige finance.operational.manage (não só ler). Admin tem por padrão via template
+// administrador/financeiro; super-admin é authority separada. O controller mantém a
+// checagem isAdmin/ownership por dentro (defesa em profundidade).
+router.post('/:id/correcao-financeira', requirePermission('finance.operational.manage'), validate(correcaoFinanceiraFreteSchema), fretesController.corrigirFinanceiro);
 router.get('/:id', fretesController.getById);
 router.post('/:id/odometro/inicial', upload.single('foto'), fretesController.uploadOdometroInicial);
 router.post('/:id/odometro/final', upload.single('foto'), fretesController.uploadOdometroFinal);
