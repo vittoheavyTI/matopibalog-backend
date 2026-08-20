@@ -244,14 +244,94 @@ SELECT u.id, u.empresa_id, 'freight.finish', 'allow', NULL
 ON CONFLICT (usuario_id, permission_key) DO NOTHING;
 
 -- ===========================================================================
--- 7) GUARDA DE GOVERNANÇA — atribuição de template preservando último admin
+-- 6.5) GOVERNANCE ADMIN V9 — definição por PERMISSÃO EFETIVA (não só tipo)
 -- ---------------------------------------------------------------------------
--- Reusa o modelo de "admin válido" (tipo='admin' AND status='ativo') da 069, mas
--- para a via NOVA de mudança de template. Trocar o template de um admin para um
--- template NÃO-administrador implica rebaixá-lo (tipo deixaria de conceder governance).
--- Mantemos tipo='admin' <=> template 'administrador' como marcador canônico durante a
--- transição: atribuir 'administrador' seta tipo='admin'; atribuir outro seta tipo p/ o
--- stable_key (não-admin) — e a guarda bloqueia se remover o último admin.
+-- GOVERNANCE_ADMIN_VALIDO = usuário da empresa, status='ativo', NÃO super-admin,
+-- com EFFECTIVE users.manage AND permissions.manage. Efetivo = override(deny/allow)
+-- > template(allow) > default-deny (governança não tem entitlement). Estas funções
+-- são a base concurrency-safe de TODAS as guardas de governança da P2.
+
+-- Efetivo de UMA permission para um usuário (sem entitlement — usado só p/ governança).
+CREATE OR REPLACE FUNCTION public.p2_effective_permission(
+  p_usuario_id uuid,
+  p_permission_key text
+)
+RETURNS boolean
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+DECLARE
+  v_effect text;
+  v_tpl uuid;
+  v_allow boolean;
+BEGIN
+  SELECT effect INTO v_effect FROM public.user_permission_overrides
+   WHERE usuario_id = p_usuario_id AND permission_key = p_permission_key;
+  IF v_effect = 'deny' THEN RETURN false; END IF;
+  IF v_effect = 'allow' THEN RETURN true; END IF;
+
+  SELECT permission_template_id INTO v_tpl FROM public.usuarios WHERE id = p_usuario_id;
+  IF v_tpl IS NULL THEN RETURN false; END IF;
+
+  SELECT allowed INTO v_allow FROM public.permission_template_permissions
+   WHERE template_id = v_tpl AND permission_key = p_permission_key;
+  RETURN COALESCE(v_allow, false);
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.eh_governance_admin(
+  p_usuario_id uuid,
+  p_empresa_id uuid
+)
+RETURNS boolean
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+DECLARE v_u public.usuarios;
+BEGIN
+  SELECT * INTO v_u FROM public.usuarios WHERE id = p_usuario_id AND empresa_id = p_empresa_id;
+  IF NOT FOUND THEN RETURN false; END IF;
+  IF v_u.status IS DISTINCT FROM 'ativo' THEN RETURN false; END IF;
+  IF v_u.is_super_admin = true THEN RETURN false; END IF;  -- authority de plataforma, não conta como governança do tenant
+  RETURN public.p2_effective_permission(p_usuario_id, 'users.manage')
+     AND public.p2_effective_permission(p_usuario_id, 'permissions.manage');
+END;
+$$;
+
+-- Conta governance admins ATIVOS da empresa, opcionalmente excluindo um usuário.
+CREATE OR REPLACE FUNCTION public.contar_governance_admins(
+  p_empresa_id uuid,
+  p_excluir_usuario_id uuid DEFAULT NULL
+)
+RETURNS integer
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+DECLARE v_n integer := 0; r record;
+BEGIN
+  FOR r IN SELECT id FROM public.usuarios
+            WHERE empresa_id = p_empresa_id AND status = 'ativo'
+              AND (p_excluir_usuario_id IS NULL OR id <> p_excluir_usuario_id)
+  LOOP
+    IF public.eh_governance_admin(r.id, p_empresa_id) THEN v_n := v_n + 1; END IF;
+  END LOOP;
+  RETURN v_n;
+END;
+$$;
+
+-- 7) GUARDA DE GOVERNANÇA — atribuição de template preservando GOVERNANCE ADMIN
+-- ---------------------------------------------------------------------------
+-- Trocar o template de um governance admin para um que NÃO concede governança só
+-- é permitido se restar >= 1 governance admin na empresa. Concurrency-safe via
+-- advisory xact lock por empresa (mesma chave da 069): duas remoções simultâneas
+-- dos dois últimos → no máximo uma passa. tipo é mantido como marcador legado
+-- (administrador->admin) mas a AUTORIDADE do invariante é a contagem efetiva.
 CREATE OR REPLACE FUNCTION public.atribuir_template_guardando_ultimo_admin(
   p_usuario_id uuid,
   p_empresa_id uuid,
@@ -288,15 +368,8 @@ BEGIN
 
   v_novo_tipo := CASE WHEN v_tpl.stable_key = 'administrador' THEN 'admin' ELSE v_tpl.stable_key END;
 
-  v_era_admin  := (v_alvo.tipo = 'admin' AND v_alvo.status = 'ativo');
-  v_sera_admin := (v_novo_tipo = 'admin' AND v_alvo.status = 'ativo');
-
-  IF v_era_admin AND NOT v_sera_admin THEN
-    SELECT count(*) INTO v_outros FROM public.usuarios
-     WHERE empresa_id = p_empresa_id AND id <> p_usuario_id
-       AND tipo = 'admin' AND status = 'ativo';
-    IF v_outros = 0 THEN RAISE EXCEPTION 'ultimo_admin_da_empresa'; END IF;
-  END IF;
+  -- Governance admin ANTES da mudança (por permissão efetiva).
+  v_era_admin := public.eh_governance_admin(p_usuario_id, p_empresa_id);
 
   v_before := v_alvo.permission_template_id::text;
   UPDATE public.usuarios
@@ -304,6 +377,14 @@ BEGIN
          tipo = v_novo_tipo
    WHERE id = p_usuario_id
   RETURNING * INTO v_alvo;
+
+  -- Governance admin DEPOIS (o template novo já vale). Se deixou de ser e a empresa
+  -- ficaria com zero → rollback (RAISE dentro da mesma tx desfaz o UPDATE).
+  v_sera_admin := public.eh_governance_admin(p_usuario_id, p_empresa_id);
+  IF v_era_admin AND NOT v_sera_admin THEN
+    v_outros := public.contar_governance_admins(p_empresa_id, p_usuario_id);
+    IF v_outros = 0 THEN RAISE EXCEPTION 'ultimo_admin_da_empresa'; END IF;
+  END IF;
 
   INSERT INTO public.permission_change_events
     (empresa_id, action, actor_user_id, target_type, target_id, before_value, after_value)
@@ -328,8 +409,7 @@ SET search_path = public, extensions
 AS $$
 DECLARE
   v_alvo public.usuarios;
-  v_is_admin boolean;
-  v_outros integer;
+  v_era_admin boolean;
   v_before text;
 BEGIN
   IF p_usuario_id IS NULL OR p_empresa_id IS NULL OR p_permission_key IS NULL THEN
@@ -345,35 +425,221 @@ BEGIN
    WHERE id = p_usuario_id AND empresa_id = p_empresa_id;
   IF NOT FOUND THEN RAISE EXCEPTION 'usuario_nao_encontrado'; END IF;
 
-  v_is_admin := (v_alvo.tipo = 'admin' AND v_alvo.status = 'ativo');
-
-  -- Negar governance no último admin ativo → bloqueio.
-  IF v_is_admin AND p_effect = 'deny'
-     AND p_permission_key IN ('users.manage','permissions.manage') THEN
-    SELECT count(*) INTO v_outros FROM public.usuarios
-     WHERE empresa_id = p_empresa_id AND id <> p_usuario_id
-       AND tipo = 'admin' AND status = 'ativo';
-    IF v_outros = 0 THEN RAISE EXCEPTION 'ultimo_admin_da_empresa'; END IF;
-  END IF;
+  -- Governança ANTES da mudança (por permissão efetiva).
+  v_era_admin := public.eh_governance_admin(p_usuario_id, p_empresa_id);
 
   SELECT effect INTO v_before FROM public.user_permission_overrides
    WHERE usuario_id = p_usuario_id AND permission_key = p_permission_key;
 
+  -- Aplica o override (qualquer key/efeito).
   IF p_effect = 'inherit' THEN
     DELETE FROM public.user_permission_overrides
      WHERE usuario_id = p_usuario_id AND permission_key = p_permission_key;
-    INSERT INTO public.permission_change_events
-      (empresa_id, action, actor_user_id, target_type, target_id, permission_key, before_value, after_value)
-    VALUES (p_empresa_id, 'user.override_removed', p_actor_user_id, 'user', p_usuario_id, p_permission_key, v_before, NULL);
   ELSE
     INSERT INTO public.user_permission_overrides
       (usuario_id, empresa_id, permission_key, effect, created_by)
     VALUES (p_usuario_id, p_empresa_id, p_permission_key, p_effect, p_actor_user_id)
     ON CONFLICT (usuario_id, permission_key)
       DO UPDATE SET effect = EXCLUDED.effect, created_by = EXCLUDED.created_by, created_at = now();
-    INSERT INTO public.permission_change_events
-      (empresa_id, action, actor_user_id, target_type, target_id, permission_key, before_value, after_value)
-    VALUES (p_empresa_id, 'user.override_set', p_actor_user_id, 'user', p_usuario_id, p_permission_key, v_before, p_effect);
+  END IF;
+
+  -- Governança DEPOIS: se o alvo deixou de ser governance admin e sobraria zero na
+  -- empresa → rollback (cobre deny de users.manage/permissions.manage, ou remover
+  -- override que os concedia). Concurrency-safe pelo advisory lock por empresa.
+  IF v_era_admin AND NOT public.eh_governance_admin(p_usuario_id, p_empresa_id) THEN
+    IF public.contar_governance_admins(p_empresa_id, p_usuario_id) = 0 THEN
+      RAISE EXCEPTION 'ultimo_admin_da_empresa';
+    END IF;
+  END IF;
+
+  INSERT INTO public.permission_change_events
+    (empresa_id, action, actor_user_id, target_type, target_id, permission_key, before_value, after_value)
+  VALUES (p_empresa_id,
+    CASE WHEN p_effect = 'inherit' THEN 'user.override_removed' ELSE 'user.override_set' END,
+    p_actor_user_id, 'user', p_usuario_id, p_permission_key, v_before,
+    CASE WHEN p_effect = 'inherit' THEN NULL ELSE p_effect END);
+END;
+$$;
+
+-- Guarda de EDIÇÃO DE TEMPLATE preservando governança (aplica as permissões e, se
+-- restar zero governance admin, faz rollback). Recebe p_allow (keys marcadas=allow)
+-- e p_remove (keys a remover). Concurrency-safe por empresa.
+CREATE OR REPLACE FUNCTION public.atualizar_template_permissions_guardando_governanca(
+  p_template_id uuid,
+  p_empresa_id uuid,
+  p_allow_keys text[],
+  p_remove_keys text[],
+  p_actor_user_id uuid
+)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+DECLARE v_tpl public.permission_templates; k text;
+BEGIN
+  IF p_template_id IS NULL OR p_empresa_id IS NULL THEN RAISE EXCEPTION 'guarda_admin_payload_invalido'; END IF;
+
+  PERFORM pg_advisory_xact_lock(hashtext('guarda_ultimo_admin'), hashtext(p_empresa_id::text));
+
+  SELECT * INTO v_tpl FROM public.permission_templates WHERE id = p_template_id AND empresa_id = p_empresa_id;
+  IF NOT FOUND THEN RAISE EXCEPTION 'template_nao_encontrado'; END IF;
+  IF v_tpl.editable = false THEN RAISE EXCEPTION 'template_nao_editavel'; END IF;
+
+  IF p_remove_keys IS NOT NULL THEN
+    DELETE FROM public.permission_template_permissions
+     WHERE template_id = p_template_id AND permission_key = ANY(p_remove_keys);
+  END IF;
+  IF p_allow_keys IS NOT NULL THEN
+    FOREACH k IN ARRAY p_allow_keys LOOP
+      INSERT INTO public.permission_template_permissions (template_id, permission_key, allowed)
+      VALUES (p_template_id, k, true)
+      ON CONFLICT (template_id, permission_key) DO UPDATE SET allowed = true;
+    END LOOP;
+  END IF;
+
+  -- Após aplicar, a empresa precisa manter >= 1 governance admin (a edição pode ter
+  -- removido users.manage/permissions.manage de todos os usuários deste template).
+  IF public.contar_governance_admins(p_empresa_id, NULL) = 0 THEN
+    RAISE EXCEPTION 'ultimo_admin_da_empresa';
+  END IF;
+
+  UPDATE public.permission_templates SET updated_at = now() WHERE id = p_template_id;
+  INSERT INTO public.permission_change_events
+    (empresa_id, action, actor_user_id, target_type, target_id)
+  VALUES (p_empresa_id, 'template.permission_changed', p_actor_user_id, 'template', p_template_id);
+END;
+$$;
+
+-- ===========================================================================
+-- 7.5) GOVERNANCE V9 NAS RPCs LEGADO (069) — UPDATE/DELETE de usuário
+-- ---------------------------------------------------------------------------
+-- As RPCs da 069 protegiam o "último admin" pelo MODELO LEGADO (tipo='admin' AND
+-- status='ativo'). Aqui as reescrevemos (CREATE OR REPLACE — a 072 roda depois da
+-- 069) PRESERVANDO integralmente a guarda legado E ADICIONANDO a rede V9: após
+-- aplicar a mudança, a empresa PRECISA manter >= 1 GOVERNANCE ADMIN efetivo
+-- (eh_governance_admin). Isso cobre TODAS as vias que retiram governança por estas
+-- RPCs: status ativo→inativo/bloqueado, tipo admin→outro, remoção do usuário e
+-- alteração legada de `permissoes`. Concurrency-safe pela MESMA chave de advisory
+-- lock por empresa ('guarda_ultimo_admin') — duas remoções simultâneas dos dois
+-- últimos governance admins: no máximo uma passa; a segunda re-lê e é negada (409).
+
+CREATE OR REPLACE FUNCTION public.atualizar_usuario_guardando_ultimo_admin(
+  p_usuario_id uuid,
+  p_empresa_id uuid,
+  p_updates jsonb
+)
+RETURNS public.usuarios
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+DECLARE
+  v_alvo public.usuarios;
+  v_novo_status text;
+  v_novo_tipo text;
+  v_era_admin boolean;
+  v_sera_admin boolean;
+  v_outros integer;
+BEGIN
+  IF p_usuario_id IS NULL OR p_empresa_id IS NULL THEN
+    RAISE EXCEPTION 'guarda_admin_payload_invalido';
+  END IF;
+
+  PERFORM pg_advisory_xact_lock(hashtext('guarda_ultimo_admin'), hashtext(p_empresa_id::text));
+
+  SELECT * INTO v_alvo
+    FROM public.usuarios
+   WHERE id = p_usuario_id AND empresa_id = p_empresa_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'usuario_nao_encontrado';
+  END IF;
+
+  v_novo_status := COALESCE(p_updates->>'status', v_alvo.status);
+  v_novo_tipo   := COALESCE(p_updates->>'tipo', v_alvo.tipo);
+
+  -- Guarda LEGADO (preservada tal qual a 069): último admin por tipo/status.
+  v_era_admin  := (v_alvo.tipo = 'admin' AND v_alvo.status = 'ativo');
+  v_sera_admin := (v_novo_tipo = 'admin' AND v_novo_status = 'ativo');
+  IF v_era_admin AND NOT v_sera_admin THEN
+    SELECT count(*) INTO v_outros
+      FROM public.usuarios
+     WHERE empresa_id = p_empresa_id
+       AND id <> p_usuario_id
+       AND tipo = 'admin'
+       AND status = 'ativo';
+    IF v_outros = 0 THEN
+      RAISE EXCEPTION 'ultimo_admin_da_empresa';
+    END IF;
+  END IF;
+
+  UPDATE public.usuarios SET
+    nome       = CASE WHEN p_updates ? 'nome'       THEN p_updates->>'nome'       ELSE nome END,
+    telefone   = CASE WHEN p_updates ? 'telefone'   THEN p_updates->>'telefone'   ELSE telefone END,
+    cep        = CASE WHEN p_updates ? 'cep'        THEN p_updates->>'cep'        ELSE cep END,
+    endereco   = CASE WHEN p_updates ? 'endereco'   THEN p_updates->>'endereco'   ELSE endereco END,
+    bairro     = CASE WHEN p_updates ? 'bairro'     THEN p_updates->>'bairro'     ELSE bairro END,
+    cidade     = CASE WHEN p_updates ? 'cidade'     THEN p_updates->>'cidade'     ELSE cidade END,
+    foto_url   = CASE WHEN p_updates ? 'foto_url'   THEN p_updates->>'foto_url'   ELSE foto_url END,
+    permissoes = CASE WHEN p_updates ? 'permissoes' THEN p_updates->'permissoes'  ELSE permissoes END,
+    status     = v_novo_status,
+    tipo       = v_novo_tipo
+  WHERE id = p_usuario_id
+  RETURNING * INTO v_alvo;
+
+  -- Rede V9: após aplicar, a empresa precisa manter >= 1 governance admin efetivo.
+  IF public.contar_governance_admins(p_empresa_id, NULL) = 0 THEN
+    RAISE EXCEPTION 'ultimo_admin_da_empresa';
+  END IF;
+
+  RETURN v_alvo;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.excluir_usuario_guardando_ultimo_admin(
+  p_usuario_id uuid,
+  p_empresa_id uuid
+)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+DECLARE
+  v_alvo public.usuarios;
+  v_outros integer;
+BEGIN
+  IF p_usuario_id IS NULL OR p_empresa_id IS NULL THEN
+    RAISE EXCEPTION 'guarda_admin_payload_invalido';
+  END IF;
+
+  PERFORM pg_advisory_xact_lock(hashtext('guarda_ultimo_admin'), hashtext(p_empresa_id::text));
+
+  SELECT * INTO v_alvo
+    FROM public.usuarios
+   WHERE id = p_usuario_id AND empresa_id = p_empresa_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'usuario_nao_encontrado';
+  END IF;
+
+  -- Guarda LEGADO (preservada tal qual a 069).
+  IF v_alvo.tipo = 'admin' AND v_alvo.status = 'ativo' THEN
+    SELECT count(*) INTO v_outros
+      FROM public.usuarios
+     WHERE empresa_id = p_empresa_id
+       AND id <> p_usuario_id
+       AND tipo = 'admin'
+       AND status = 'ativo';
+    IF v_outros = 0 THEN
+      RAISE EXCEPTION 'ultimo_admin_da_empresa';
+    END IF;
+  END IF;
+
+  DELETE FROM public.usuarios WHERE id = p_usuario_id;
+
+  -- Rede V9: após remover, a empresa precisa manter >= 1 governance admin efetivo.
+  IF public.contar_governance_admins(p_empresa_id, NULL) = 0 THEN
+    RAISE EXCEPTION 'ultimo_admin_da_empresa';
   END IF;
 END;
 $$;
@@ -403,8 +669,33 @@ REVOKE ALL ON FUNCTION public.set_user_override_guardando_governanca(uuid, uuid,
 REVOKE ALL ON FUNCTION public.set_user_override_guardando_governanca(uuid, uuid, text, text, uuid) FROM authenticated;
 GRANT EXECUTE ON FUNCTION public.set_user_override_guardando_governanca(uuid, uuid, text, text, uuid) TO service_role;
 
+-- Governance helpers + template-edit guard (fail-closed p/ anon/authenticated).
+DO $gfn$
+DECLARE sig text;
+BEGIN
+  FOREACH sig IN ARRAY ARRAY[
+    'public.p2_effective_permission(uuid, text)',
+    'public.eh_governance_admin(uuid, uuid)',
+    'public.contar_governance_admins(uuid, uuid)',
+    'public.atualizar_template_permissions_guardando_governanca(uuid, uuid, text[], text[], uuid)',
+    -- RPCs legado reescritas com governança V9 (re-asserção fail-closed).
+    'public.atualizar_usuario_guardando_ultimo_admin(uuid, uuid, jsonb)',
+    'public.excluir_usuario_guardando_ultimo_admin(uuid, uuid)'
+  ] LOOP
+    EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC', sig);
+    EXECUTE format('REVOKE ALL ON FUNCTION %s FROM anon', sig);
+    EXECUTE format('REVOKE ALL ON FUNCTION %s FROM authenticated', sig);
+    EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO service_role', sig);
+  END LOOP;
+END
+$gfn$;
+
 -- ===========================================================================
 -- ROLLBACK (documentação — NÃO executar sem gate):
+--   DROP FUNCTION IF EXISTS public.atualizar_template_permissions_guardando_governanca(uuid,uuid,text[],text[],uuid);
+--   DROP FUNCTION IF EXISTS public.contar_governance_admins(uuid,uuid);
+--   DROP FUNCTION IF EXISTS public.eh_governance_admin(uuid,uuid);
+--   DROP FUNCTION IF EXISTS public.p2_effective_permission(uuid,text);
 --   DROP FUNCTION IF EXISTS public.set_user_override_guardando_governanca(uuid,uuid,text,text,uuid);
 --   DROP FUNCTION IF EXISTS public.atribuir_template_guardando_ultimo_admin(uuid,uuid,uuid,uuid);
 --   ALTER TABLE public.motoristas DROP COLUMN IF EXISTS financial_visibility_mode;

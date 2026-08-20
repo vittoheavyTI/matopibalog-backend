@@ -31,22 +31,27 @@ function registrar() {
   // Ids fixos e distintos (DB compartilhado entre pgtests).
   const EMP = '72000000-0000-4000-a000-000000000001';
   const EMP2 = '72000000-0000-4000-a000-000000000002';
+  const EMP3 = '72000000-0000-4000-a000-000000000003'; // exatamente 2 admins (concorrência)
   const ADMIN1 = '72000000-0000-4000-a000-0000000000a1'; // menu usuarios=false
   const ADMIN2 = '72000000-0000-4000-a000-0000000000a2'; // admin "normal"
   const MOTO1 = '72000000-0000-4000-a000-0000000000b1';  // pode_finalizar=true
   const MOTO2 = '72000000-0000-4000-a000-0000000000b2';  // pode_finalizar=false
   const ADMIN_SOLO = '72000000-0000-4000-a000-0000000000c1'; // único admin da EMP2
+  const ADM_X = '72000000-0000-4000-a000-0000000000d1'; // EMP3 governance admin
+  const ADM_Y = '72000000-0000-4000-a000-0000000000d2'; // EMP3 governance admin
 
   const pool = new Pool({ connectionString: CONN });
 
   before(async () => {
-    await pool.query(`INSERT INTO public.empresas (id, nome) VALUES ($1,'PG072 Emp'),($2,'PG072 Emp2') ON CONFLICT (id) DO NOTHING`, [EMP, EMP2]);
+    await pool.query(`INSERT INTO public.empresas (id, nome) VALUES ($1,'PG072 Emp'),($2,'PG072 Emp2'),($3,'PG072 Emp3') ON CONFLICT (id) DO NOTHING`, [EMP, EMP2, EMP3]);
     const users = [
       [ADMIN1, EMP, 'admin', 'ativo', JSON.stringify({ usuarios: false, dashboard: true, motoristas: true, relatorios: true, configuracoes: false })],
       [ADMIN2, EMP, 'admin', 'ativo', JSON.stringify({ usuarios: true, dashboard: true, motoristas: true, relatorios: true, configuracoes: true })],
       [MOTO1, EMP, 'motorista', 'ativo', null],
       [MOTO2, EMP, 'motorista', 'ativo', null],
       [ADMIN_SOLO, EMP2, 'admin', 'ativo', JSON.stringify({ usuarios: true, configuracoes: true })],
+      [ADM_X, EMP3, 'admin', 'ativo', JSON.stringify({ usuarios: true, configuracoes: true })],
+      [ADM_Y, EMP3, 'admin', 'ativo', JSON.stringify({ usuarios: true, configuracoes: true })],
     ];
     for (const [id, emp, tipo, status, perms] of users) {
       await pool.query(
@@ -62,19 +67,19 @@ function registrar() {
 
     // Limpa overrides/templates de execuções anteriores desta empresa e reaplica 072
     // (o apply_schema roda 072 ANTES de existirem usuários → seed vazio).
-    await pool.query(`DELETE FROM public.user_permission_overrides WHERE empresa_id IN ($1,$2)`, [EMP, EMP2]);
-    await pool.query(`UPDATE public.usuarios SET permission_template_id=NULL WHERE empresa_id IN ($1,$2)`, [EMP, EMP2]);
+    await pool.query(`DELETE FROM public.user_permission_overrides WHERE empresa_id IN ($1,$2,$3)`, [EMP, EMP2, EMP3]);
+    await pool.query(`UPDATE public.usuarios SET permission_template_id=NULL WHERE empresa_id IN ($1,$2,$3)`, [EMP, EMP2, EMP3]);
     await pool.query(sql072);
   });
 
   after(async () => {
-    await pool.query(`DELETE FROM public.user_permission_overrides WHERE empresa_id IN ($1,$2)`, [EMP, EMP2]);
-    await pool.query(`DELETE FROM public.permission_template_permissions WHERE template_id IN (SELECT id FROM public.permission_templates WHERE empresa_id IN ($1,$2))`, [EMP, EMP2]);
-    await pool.query(`DELETE FROM public.motoristas WHERE empresa_id IN ($1,$2)`, [EMP, EMP2]);
-    await pool.query(`UPDATE public.usuarios SET permission_template_id=NULL WHERE empresa_id IN ($1,$2)`, [EMP, EMP2]);
-    await pool.query(`DELETE FROM public.permission_templates WHERE empresa_id IN ($1,$2)`, [EMP, EMP2]);
-    await pool.query(`DELETE FROM public.usuarios WHERE empresa_id IN ($1,$2)`, [EMP, EMP2]);
-    await pool.query(`DELETE FROM public.empresas WHERE id IN ($1,$2)`, [EMP, EMP2]);
+    await pool.query(`DELETE FROM public.user_permission_overrides WHERE empresa_id IN ($1,$2,$3)`, [EMP, EMP2, EMP3]);
+    await pool.query(`DELETE FROM public.permission_template_permissions WHERE template_id IN (SELECT id FROM public.permission_templates WHERE empresa_id IN ($1,$2,$3))`, [EMP, EMP2, EMP3]);
+    await pool.query(`DELETE FROM public.motoristas WHERE empresa_id IN ($1,$2,$3)`, [EMP, EMP2, EMP3]);
+    await pool.query(`UPDATE public.usuarios SET permission_template_id=NULL WHERE empresa_id IN ($1,$2,$3)`, [EMP, EMP2, EMP3]);
+    await pool.query(`DELETE FROM public.permission_templates WHERE empresa_id IN ($1,$2,$3)`, [EMP, EMP2, EMP3]);
+    await pool.query(`DELETE FROM public.usuarios WHERE empresa_id IN ($1,$2,$3)`, [EMP, EMP2, EMP3]);
+    await pool.query(`DELETE FROM public.empresas WHERE id IN ($1,$2,$3)`, [EMP, EMP2, EMP3]);
     await pool.end();
   });
 
@@ -174,5 +179,118 @@ function registrar() {
     await pool.query(sql072);
     const { rows } = await pool.query(`SELECT count(*)::int n FROM public.permission_templates WHERE empresa_id=$1`, [EMP]);
     assert.equal(rows[0].n, 9);
+  });
+
+  // ── GOVERNANCE ADMIN V9 (efetivo) ──────────────────────────────────────────
+  test('governance helpers: admin=governance, motorista=não', async () => {
+    const gov = async (uid, emp) => (await pool.query(`SELECT public.eh_governance_admin($1,$2) g`, [uid, emp])).rows[0].g;
+    assert.equal(await gov(ADMIN2, EMP), true);
+    assert.equal(await gov(MOTO1, EMP), false);
+    assert.equal(await gov(ADMIN_SOLO, EMP2), true);
+    const n = (await pool.query(`SELECT public.contar_governance_admins($1,NULL) n`, [EMP2])).rows[0].n;
+    assert.equal(n, 1);
+  });
+
+  test('override governança: 2 admins — negar permissions.manage em um passa; no segundo 409', async () => {
+    // EMP tem ADMIN1 e ADMIN2 (ambos administrador → governance). Negar em ADMIN1 passa.
+    await pool.query(`SELECT public.set_user_override_guardando_governanca($1,$2,'permissions.manage','deny',$3)`, [ADMIN1, EMP, ADMIN2]);
+    assert.equal((await pool.query(`SELECT public.eh_governance_admin($1,$2) g`, [ADMIN1, EMP])).rows[0].g, false);
+    // agora só ADMIN2 é governance; negar nele → 409
+    await assert.rejects(
+      pool.query(`SELECT public.set_user_override_guardando_governanca($1,$2,'permissions.manage','deny',$3)`, [ADMIN2, EMP, ADMIN1]),
+      /ultimo_admin_da_empresa/
+    );
+    // restaurar ADMIN1 (inherit) → volta a ser governance
+    await pool.query(`SELECT public.set_user_override_guardando_governanca($1,$2,'permissions.manage','inherit',$3)`, [ADMIN1, EMP, ADMIN2]);
+    assert.equal((await pool.query(`SELECT public.eh_governance_admin($1,$2) g`, [ADMIN1, EMP])).rows[0].g, true);
+  });
+
+  test('guard de edição de template: remover permissions.manage do administrador (EMP2, único admin) → 409', async () => {
+    const admTpl = (await pool.query(`SELECT id FROM public.permission_templates WHERE empresa_id=$1 AND stable_key='administrador'`, [EMP2])).rows[0].id;
+    await assert.rejects(
+      pool.query(`SELECT public.atualizar_template_permissions_guardando_governanca($1,$2,$3::text[],$4::text[],$5)`,
+        [admTpl, EMP2, ['company.settings.view'], ['permissions.manage','users.manage'], ADMIN_SOLO]),
+      /ultimo_admin_da_empresa/
+    );
+    // permissions.manage continua no template (rollback):
+    const still = (await pool.query(`SELECT 1 FROM public.permission_template_permissions WHERE template_id=$1 AND permission_key='permissions.manage' AND allowed`, [admTpl])).rowCount;
+    assert.equal(still, 1);
+  });
+
+  // ── RPCs LEGADO (069) com GOVERNANÇA V9 (Review 2.3) ────────────────────────
+  test('legacy UPDATE: desativar (status) o único governance admin (EMP2) → 409, sem mutação', async () => {
+    await assert.rejects(
+      pool.query(`SELECT public.atualizar_usuario_guardando_ultimo_admin($1,$2,$3::jsonb)`,
+        [ADMIN_SOLO, EMP2, JSON.stringify({ status: 'inativo' })]),
+      /ultimo_admin_da_empresa/
+    );
+    const { rows } = await pool.query(`SELECT status FROM public.usuarios WHERE id=$1`, [ADMIN_SOLO]);
+    assert.equal(rows[0].status, 'ativo'); // rollback preservou o estado
+  });
+
+  test('legacy UPDATE: rebaixar tipo do único governance admin (EMP2) → 409, sem mutação', async () => {
+    await assert.rejects(
+      pool.query(`SELECT public.atualizar_usuario_guardando_ultimo_admin($1,$2,$3::jsonb)`,
+        [ADMIN_SOLO, EMP2, JSON.stringify({ tipo: 'operador' })]),
+      /ultimo_admin_da_empresa/
+    );
+    const { rows } = await pool.query(`SELECT tipo FROM public.usuarios WHERE id=$1`, [ADMIN_SOLO]);
+    assert.equal(rows[0].tipo, 'admin');
+  });
+
+  test('legacy DELETE: excluir o único governance admin (EMP2) → 409, usuário permanece', async () => {
+    await assert.rejects(
+      pool.query(`SELECT public.excluir_usuario_guardando_ultimo_admin($1,$2)`, [ADMIN_SOLO, EMP2]),
+      /ultimo_admin_da_empresa/
+    );
+    const { rows } = await pool.query(`SELECT 1 FROM public.usuarios WHERE id=$1`, [ADMIN_SOLO]);
+    assert.equal(rows.length, 1);
+  });
+
+  test('legacy UPDATE: atualizar campo neutro (nome) do único admin passa (governança mantida)', async () => {
+    await pool.query(`SELECT public.atualizar_usuario_guardando_ultimo_admin($1,$2,$3::jsonb)`,
+      [ADMIN_SOLO, EMP2, JSON.stringify({ nome: 'Solo Renomeado' })]);
+    const { rows } = await pool.query(`SELECT nome, tipo, status FROM public.usuarios WHERE id=$1`, [ADMIN_SOLO]);
+    assert.equal(rows[0].nome, 'Solo Renomeado');
+    assert.equal(rows[0].tipo, 'admin');
+    assert.equal(rows[0].status, 'ativo');
+  });
+
+  // ── CONCORRÊNCIA REAL (advisory xact lock por empresa) ──────────────────────
+  test('concorrência: 2 governance admins (EMP3), remoção simultânea da governança → no máximo 1 passa', async () => {
+    // sanidade: EMP3 começa com 2 governance admins
+    assert.equal((await pool.query(`SELECT public.contar_governance_admins($1,NULL) n`, [EMP3])).rows[0].n, 2);
+
+    const c1 = await pool.connect();
+    const c2 = await pool.connect();
+    const worker = async (client, userId) => {
+      try {
+        await client.query('BEGIN');
+        await client.query(`SELECT public.set_user_override_guardando_governanca($1,$2,'permissions.manage','deny',$3)`, [userId, EMP3, userId]);
+        await client.query('COMMIT');
+        return 'ok';
+      } catch {
+        try { await client.query('ROLLBACK'); } catch { /* noop */ }
+        return 'fail';
+      }
+    };
+    try {
+      const resultados = await Promise.all([worker(c1, ADM_X), worker(c2, ADM_Y)]);
+      const oks = resultados.filter((r) => r === 'ok').length;
+      assert.equal(oks, 1, 'exatamente uma transação remove governança');
+      // a empresa NUNCA fica com zero governance admin
+      const n = (await pool.query(`SELECT public.contar_governance_admins($1,NULL) n`, [EMP3])).rows[0].n;
+      assert.equal(n, 1, 'EMP3 retém exatamente 1 governance admin');
+    } finally {
+      c1.release(); c2.release();
+    }
+  });
+
+  test('tenant isolation: governance admins contados só na própria empresa', async () => {
+    // EMP tem 2 admins; EMP2 tem 1; contagem não vaza entre tenants.
+    const nEmp = (await pool.query(`SELECT public.contar_governance_admins($1,NULL) n`, [EMP])).rows[0].n;
+    const nEmp2 = (await pool.query(`SELECT public.contar_governance_admins($1,NULL) n`, [EMP2])).rows[0].n;
+    assert.ok(nEmp >= 2);
+    assert.equal(nEmp2, 1);
   });
 }
