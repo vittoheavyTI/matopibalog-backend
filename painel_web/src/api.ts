@@ -27,11 +27,14 @@ api.interceptors.request.use((config) => {
       config.headers = config.headers || {};
       (config.headers as any).Authorization = `Bearer ${token}`;
     }
-    // E1.6A: assinatura de CONTRATO NOVO (web). O backend usa a presença deste header
-    // para aplicar regras novas (ex.: observação obrigatória) só a clientes atualizados,
-    // sem quebrar APK legado que não o envia.
-    config.headers = config.headers || {};
-    (config.headers as any)['X-Client-Platform'] = 'web';
+    // E1.6A: assinatura de CONTRATO NOVO (web) — só nos endpoints de lançamento, onde o
+    // backend a usa (ex.: observação obrigatória). NÃO enviamos em auth/demais rotas para
+    // não introduzir header custom (e preflight CORS) fora do necessário. O APK legado
+    // não envia o header e mantém compatibilidade transitória.
+    if (/^\/(despesas|abastecimentos|vales)\b/.test(url)) {
+      config.headers = config.headers || {};
+      (config.headers as any)['X-Client-Platform'] = 'web';
+    }
     const operationalHeaders = montarHeadersContextoOperacional();
     for (const [key, value] of Object.entries(operationalHeaders)) {
       config.headers = config.headers || {};
