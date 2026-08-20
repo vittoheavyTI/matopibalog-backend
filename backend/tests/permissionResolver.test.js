@@ -139,6 +139,15 @@ test('driver financial visibility: default commission_only; override individual 
   assert.equal(full.driverFinancialVisibility, DRIVER_FINANCIAL_VISIBILITY.FULL_FREIGHT_FINANCIAL);
 });
 
+test('driver autônomo: visibilidade financeira = full por padrão (preserva efetivo do dono)', () => {
+  const t = tpl('motorista');
+  const auto = computeEffectivePermissions({ user: { tipo: 'motorista', empresa_tipo: 'autonomo' }, template: t, legacyDriver: {} });
+  assert.equal(auto.driverFinancialVisibility, DRIVER_FINANCIAL_VISIBILITY.FULL_FREIGHT_FINANCIAL);
+  // override individual ainda vence
+  const overrideCommission = computeEffectivePermissions({ user: { tipo: 'motorista', empresa_tipo: 'autonomo' }, template: t, legacyDriver: { financial_visibility_mode: DRIVER_FINANCIAL_VISIBILITY.COMMISSION_ONLY } });
+  assert.equal(overrideCommission.driverFinancialVisibility, DRIVER_FINANCIAL_VISIBILITY.COMMISSION_ONLY);
+});
+
 // ── LEGADO: preservação de efetivo (admin coarse) ────────────────────────────
 test('admin com template administrador mantém governança independentemente de overrides de menu .view', () => {
   const eff = computeEffectivePermissions({

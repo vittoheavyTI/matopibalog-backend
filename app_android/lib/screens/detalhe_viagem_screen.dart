@@ -152,6 +152,11 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
     if (perfil == null) return false;
     if (perfil['is_super_admin'] == true) return true;
     if (perfil['role'] == 'admin') return true;
+    // P2 — permissão efetiva V9 (freight.finish) quando o backend a fornecer.
+    // O resolver já embute bypass do autônomo + dual-read do pode_finalizar_viagem.
+    final eff = perfil['effective_permissions'];
+    if (eff is Map) return eff['freight.finish'] == true;
+    // Compat backend/APK antigos (sem effective_permissions):
     final empresa = perfil['empresas'] as Map<String, dynamic>?;
     final isAutonomo = empresa?['tipo'] == 'autonomo';
     if (isAutonomo) return true;
@@ -1249,7 +1254,11 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
             _linhaDado('Origem', f['origem'] ?? '--'),
             _linhaDado('Destino', f['destino'] ?? '--'),
             if (f['placa'] != null) _linhaDado('Placa', f['placa']),
-            _linhaDado('Valor', 'R\$ ${valorFrete.toStringAsFixed(2)}'),
+            // P2 — visibilidade financeira: o backend omite valor_frete quando o
+            // motorista não pode ver o bruto (commission_only). Só exibe a linha
+            // quando o campo veio na resposta (não redigido).
+            if (f['valor_frete'] != null)
+              _linhaDado('Valor', 'R\$ ${valorFrete.toStringAsFixed(2)}'),
             if (f['quem_recebeu'] != null) _linhaDado('Quem recebeu', f['quem_recebeu']),
           ],
         ),
@@ -1401,7 +1410,11 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
     //   • despesas/abast pagos pela EMPRESA NÃO reduzem a comissão do motorista.
     // Só entram lançamentos efetivados (aprovado/finalizado); pendentes/rejeitados ficam fora.
     final pct = _percentualComissao;
-    final comissao = valorFrete * (pct / 100);
+    // P2 — visibilidade financeira: quando o backend redige o valor bruto do frete
+    // (commission_only), ele fornece `comissao_valor` já calculada. Preferimos esse
+    // valor para o motorista ver a própria comissão sem expor o bruto.
+    final comissaoBackend = double.tryParse(f['comissao_valor']?.toString() ?? '');
+    final comissao = comissaoBackend ?? (valorFrete * (pct / 100));
     final reembolso = _somaPorPagador(_despesas, 'valor', 'motorista') +
         _somaPorPagador(_abastecimentos, 'valor_total', 'motorista');
     final adiantamentos = _somaPorPagador(_vales, 'valor', 'proprietario');

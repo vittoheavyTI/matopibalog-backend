@@ -89,11 +89,14 @@ function computeEffectivePermissions(ctx = {}) {
     source[key] = 'default_deny';
   }
 
-  // VISIBILITY POLICY (motorista): override individual > template > default commission_only.
+  // VISIBILITY POLICY (motorista): override individual > (autônomo=full, preserva
+  // o efetivo — o autônomo é o próprio dono e sempre viu o financeiro completo) >
+  // template > default commission_only.
   let driverFinancialVisibility = null;
   if (isDriver) {
     driverFinancialVisibility =
       (legacyDriver && legacyDriver.financial_visibility_mode) ||
+      (isAutonomo ? DRIVER_FINANCIAL_VISIBILITY.FULL_FREIGHT_FINANCIAL : null) ||
       (template && template.driver_financial_visibility_mode) ||
       DRIVER_FINANCIAL_VISIBILITY.COMMISSION_ONLY;
   }
