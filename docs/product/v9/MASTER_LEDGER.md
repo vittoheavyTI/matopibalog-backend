@@ -106,9 +106,9 @@ _Evidência coletada em 2026-08-19 (ver [FORENSIC_BASELINE](./FORENSIC_BASELINE.
 | RBV9-INV-049 | Despesas (web+app, isolamento, idempotência) | IMPL_VAL | ✓ ✓ ✓ ✓ ✓ | `despesas`(98), migration 018 |
 | RBV9-INV-050 | Abastecimentos / ARLA | IMPL_VAL | ✓ ✓ ✓ ✓ ✓ | `abastecimentos`(46) |
 | RBV9-INV-051 | Vales / adiantamentos | IMPL_VAL | ✓ ✓ ✓ ✓ ✓ | `vales`(18) |
-| RBV9-INV-052 | Estados append/audit-safe (pend/aprov/rej/cancel+motivo+ator) | IMPL_NV | ✓ ✓ ~ ✓ ✗ | **Onda 1**: máquina de estados + RPC transação (CAS) + ledger `lancamento_eventos` append-only. Migration 070 **não aplicada em prod** (gate). App: create; ações admin ficam no web. |
-| RBV9-INV-053 | Realtime web↔app dos lançamentos | IMPL_NV | ✓ ✓ ✓ — ✗ | **Onda 1**: SSE autenticado (`/realtime/stream`) + `realtimeBus`; web (fetch stream) e app (http stream) refazem fetch canônico. Polling não é mais o mecanismo principal. |
-| RBV9-INV-054 | Paridade painel↔app de todos os campos coletados | IMPL_NV | ✓ ✓ ~ — ✗ | **Onda 1**: painel exibe arla/odômetro/preço-litro/observação do abastecimento; observação obrigatória no create (web+app). |
+| RBV9-INV-052 | Estados append/audit-safe (pend/aprov/rej/cancel+motivo+ator) | IMPL_NV | ✓ ✓ ~ ✓ ✓ | **Onda 1 DEPLOYADO**: máquina de estados + RPC transação (CAS) + ledger `lancamento_eventos` append-only. **Migration 070 aplicada+rastreada em prod** (`20260820033844`). Aguarda validação visual. App: create; ações admin no web. |
+| RBV9-INV-053 | Realtime web↔app dos lançamentos | IMPL_NV | ✓ ✓ ✓ — ✓ | **Onda 1 DEPLOYADO**: SSE autenticado (`/realtime/stream`) + `realtimeBus` + limites de conexão; web (fetch stream) e app (http stream) refazem fetch canônico. Polling não é mais o mecanismo principal. |
+| RBV9-INV-054 | Paridade painel↔app de todos os campos coletados | IMPL_NV | ✓ ✓ ~ — ✓ | **Onda 1 DEPLOYADO**: painel exibe arla/odômetro/preço-litro/observação do abastecimento; observação obrigatória no create (web+app, transitório para cliente novo). |
 
 ## FINANCE — OPERACIONAL DO CLIENTE
 

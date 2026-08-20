@@ -17,7 +17,7 @@
 
 | | |
 |---|---|
-| `origin/main` | avança com o merge de RBV9: PR #433 (runbook Asaas, merge `0b557b4`) + **este PR #434** (Rebaseline V9 + patch fiscal). Baseline anterior: `2c36450` (PR #432 / F5B-2). O SHA definitivo pós-merge = `MAIN_BASELINE_V9` (ver relatório da macrofrente). |
+| `origin/main` | **`f43f009`** (PR #435 / Onda 1 — realtime SSE + lançamentos audit-safe, migration 070 aplicada). Marcos anteriores: `6c3cc4e` (RBV9+fiscal, PRs #433/#434), `2c36450` (PR #432 / F5B-2). |
 | Deploy produção | Railway `matopibalog-backend` deploy `2ff32276` **SUCCESS** |
 | Health | **HTTP 200** `{"status":"UP"}` em `https://api.matopibalog.com.br/health` |
 | Banco | Supabase `rjahjogidyndphdxevom` · 62 tabelas públicas · RLS 100% |
@@ -54,7 +54,7 @@ Adequação de **CNAE/CNPJ/regime** do owner corre **em paralelo** e **NÃO bloq
 
 ## Estado da Onda 1 (macrofrente atual)
 
-**Onda 1 · Realtime + Lançamentos audit-safe — IMPLEMENTADA + hardening E1.6A, aguardando o migration gate.** PR #435 `feature/onda1-realtime-lancamentos-audit-safe` (backend SSE + web + app + migration 070 + testes). `STATUS = READY_FOR_OWNER_MIGRATION_GATE`: a migration 070 (aditiva/idempotente/backward-compatible) **não foi aplicada em produção** — aplicar só com autorização explícita; depois merge/deploy/smoke. Nada de produção alterado.
+**Onda 1 · Realtime + Lançamentos audit-safe — IMPLANTADA EM PRODUÇÃO (E1.6A incluída), aguardando validação visual do owner.** `STATUS = ONDA1_REALTIME_LANCAMENTOS_DEPLOYED_AWAITING_OWNER_VISUAL_VALIDATION`. PR #435 **MERGEADO** (`MERGE_SHA=f43f009`; base 4fe8e62). **Migration 070 APLICADA e RASTREADA** em produção (`schema_migrations`: `20260820033844 070_lancamentos_audit_safe_realtime`) via mecanismo canônico (`apply_migration`) — **0 escrita de dado de negócio** (PRE=POST: despesas 98 / abastecimentos 46 / vales 18; `lancamento_eventos`=0). Deploy backend Railway SUCCESS (`f43f009`, health 200, SSE anon 401, `/realtime/stats` anon 401, CORS preflight aceita `X-Client-Platform`, logs sem erro novo, `numReplicas=1`). Frontend GitHub Pages SUCCESS (bundle novo). App: código pronto/CI verde; sem pipeline de loja (compat legada preserva o APK antigo). Asaas inerte (nenhuma mudança de env).
 
 **E1.6A (release safety, sem reabrir auditoria):** (1) **compat do APK legado** — observação/descrição obrigatória só para clientes NOVOS (header `X-Client-Platform`); legado não é quebrado (RBV9-INV-108, DEFERRED_REMOVAL). (2) **SSE connection safety** — limites por usuário/empresa + release no disconnect + `/realtime/stats` (super-admin). (3) **single-instance confirmado** no Railway (`numReplicas=1`) → bus in-memory permitido no escopo atual (RBV9-INV-107). (4) mutation coverage: creates/updates/transições publicam SSE; delete administrativo em cascata = recovery por refetch. Evento é invalidação (refetch canônico), nunca reverte a UI.
 
