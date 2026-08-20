@@ -187,7 +187,9 @@ CREATE TABLE IF NOT EXISTS public.despesas (
   valor numeric NULL,
   quem_pagou text NULL,
   data timestamptz NULL,
-  status text NULL DEFAULT 'pendente',
+  -- CHECK ORIGINAL de produção (SEM 'cancelado') — a migration 071 o relaxa para incluir
+  -- 'cancelado'. Reproduz o bug pego em prod: sem a 071, o cancel do pgtest 070 falharia.
+  status text NULL DEFAULT 'pendente' CHECK (status = ANY (ARRAY['aprovado','pendente','rejeitado','finalizado'])),
   obs_resolucao text NULL,
   resolvido_por uuid NULL,
   resolvido_em timestamptz NULL,
@@ -206,7 +208,9 @@ CREATE TABLE IF NOT EXISTS public.abastecimentos (
   arla_litros numeric NULL,
   arla_valor numeric NULL,
   data timestamptz NULL,
-  status text NULL DEFAULT 'pendente',
+  -- CHECK ORIGINAL de produção (SEM 'cancelado') — a migration 071 o relaxa para incluir
+  -- 'cancelado'. Reproduz o bug pego em prod: sem a 071, o cancel do pgtest 070 falharia.
+  status text NULL DEFAULT 'pendente' CHECK (status = ANY (ARRAY['aprovado','pendente','rejeitado','finalizado'])),
   obs_resolucao text NULL,
   resolvido_por uuid NULL,
   resolvido_em timestamptz NULL,
@@ -224,7 +228,9 @@ CREATE TABLE IF NOT EXISTS public.vales (
   posto text NULL,
   litros numeric NULL,
   data timestamptz NULL,
-  status text NULL DEFAULT 'pendente',
+  -- CHECK ORIGINAL de produção (SEM 'cancelado') — a migration 071 o relaxa para incluir
+  -- 'cancelado'. Reproduz o bug pego em prod: sem a 071, o cancel do pgtest 070 falharia.
+  status text NULL DEFAULT 'pendente' CHECK (status = ANY (ARRAY['aprovado','pendente','rejeitado','finalizado'])),
   obs_resolucao text NULL,
   resolvido_por uuid NULL,
   resolvido_em timestamptz NULL,
