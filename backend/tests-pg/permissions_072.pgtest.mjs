@@ -40,7 +40,7 @@ function registrar() {
   const pool = new Pool({ connectionString: CONN });
 
   before(async () => {
-    await pool.query(`INSERT INTO public.empresas (id, nome, tipo) VALUES ($1,'PG072 Emp','transportadora'),($2,'PG072 Emp2','transportadora') ON CONFLICT (id) DO NOTHING`, [EMP, EMP2]);
+    await pool.query(`INSERT INTO public.empresas (id, nome) VALUES ($1,'PG072 Emp'),($2,'PG072 Emp2') ON CONFLICT (id) DO NOTHING`, [EMP, EMP2]);
     const users = [
       [ADMIN1, EMP, 'admin', 'ativo', JSON.stringify({ usuarios: false, dashboard: true, motoristas: true, relatorios: true, configuracoes: false })],
       [ADMIN2, EMP, 'admin', 'ativo', JSON.stringify({ usuarios: true, dashboard: true, motoristas: true, relatorios: true, configuracoes: true })],
