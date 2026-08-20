@@ -59,7 +59,7 @@ class RealtimeService {
       if (!_stopped) unawaited(_conectar());
       return;
     }
-    final base = Config.apiBaseUrl;
+    const base = Config.apiBaseUrl;
     final filtro = (_freteId != null && _freteId!.isNotEmpty) ? '?frete_id=$_freteId' : '';
     final uri = Uri.parse('$base/realtime/stream$filtro');
     _client = http.Client();

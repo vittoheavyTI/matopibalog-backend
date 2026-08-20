@@ -134,6 +134,7 @@ SET search_path = public, pg_temp
 AS $$
 DECLARE
   v_table   text;
+  v_id      uuid;
   v_empresa uuid;
   v_status  text;
   v_version integer;
@@ -158,12 +159,14 @@ BEGIN
     RAISE EXCEPTION 'LANCAMENTO_DESTINO_INVALIDO' USING errcode = '22023';
   END IF;
 
+  -- Seleciona o id junto e testa IS NULL: `FOUND` após `EXECUTE ... INTO` não é
+  -- confiável em plpgsql; o id (PK NOT NULL) é o sentinel de existência.
   EXECUTE format(
-    'SELECT empresa_id, status, version, frete_id FROM public.%I WHERE id = $1 FOR UPDATE',
+    'SELECT id, empresa_id, status, version, frete_id FROM public.%I WHERE id = $1 FOR UPDATE',
     v_table
-  ) INTO v_empresa, v_status, v_version, v_frete USING p_entity_id;
+  ) INTO v_id, v_empresa, v_status, v_version, v_frete USING p_entity_id;
 
-  IF NOT FOUND THEN
+  IF v_id IS NULL THEN
     RAISE EXCEPTION 'LANCAMENTO_NAO_ENCONTRADO' USING errcode = 'P0002';
   END IF;
   IF v_empresa IS DISTINCT FROM p_empresa_id THEN
