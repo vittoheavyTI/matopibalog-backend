@@ -225,6 +225,19 @@ exports.createMotorista = async (req, res) => {
       return res.status(500).json({ message: `Erro ao salvar motorista no banco: ${userError.message}` });
     }
 
+    // P2 — atribui o template baseline 'motorista'. O ponteiro permission_template_id
+    // é uma DENORMALIZAÇÃO não-autoritativa: o resolver faz dual-read por stable_key
+    // (tipo→template da empresa) quando o ponteiro é null, então o efetivo do usuário
+    // fica CORRETO com ou sem o assignment (sem estado parcial de permissões). Ainda
+    // assim, falha de assignment é registrada (observabilidade), nunca silenciada.
+    try {
+      const { assignTemplateByTipo } = require('../services/permissions/permissionProvisioning');
+      const r = await assignTemplateByTipo(supabase, uid, req.empresa_id, 'motorista');
+      if (!r?.ok) console.error(`[adminController:createMotorista] assignment de template não concluído (não-fatal, resolver usa baseline): ${r?.reason || 'desconhecido'} (motorista=${uid})`);
+    } catch (e) {
+      console.error('[adminController:createMotorista] erro no assignment de template (não-fatal):', e?.message || e);
+    }
+
     // Tipo da empresa do admin → define o default de comissão (autônomo → 0).
     const { data: empresaRow } = await supabase
       .from('empresas')
@@ -568,6 +581,17 @@ exports.createUsuario = async (req, res) => {
       console.error('[adminController:createUsuario] Erro ao inserir na tabela usuarios:', userError.message);
       await supabase.auth.admin.deleteUser(uid).catch(() => {});
       return res.status(500).json({ message: `Erro ao salvar dados do administrador no banco: ${userError.message}` });
+    }
+
+    // P2 — atribui o template baseline por tipo. Ponteiro permission_template_id é
+    // denormalização não-autoritativa (resolver faz dual-read por stable_key quando
+    // null → efetivo correto sem estado parcial). Falha é registrada, nunca silenciada.
+    try {
+      const { assignTemplateByTipo } = require('../services/permissions/permissionProvisioning');
+      const r = await assignTemplateByTipo(supabase, uid, req.empresa_id, tipo || 'admin');
+      if (!r?.ok) console.error(`[adminController:createUsuario] assignment de template não concluído (não-fatal, resolver usa baseline): ${r?.reason || 'desconhecido'} (usuario=${uid})`);
+    } catch (e) {
+      console.error('[adminController:createUsuario] erro no assignment de template (não-fatal):', e?.message || e);
     }
 
     console.log(`[adminController:createUsuario] Usuário ${nome} criado com sucesso.`);

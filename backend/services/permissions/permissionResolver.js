@@ -20,7 +20,28 @@ const {
   PERMISSION_KEYS,
   PERMISSION_BY_KEY,
   DRIVER_FINANCIAL_VISIBILITY,
+  LEGACY_TIPO_TO_TEMPLATE,
+  templateBaselineMap,
+  TEMPLATE_DEFAULT_FINANCIAL_VISIBILITY,
 } = require('./permissionRegistry');
+
+function legacyTipoToStableKey(tipo) {
+  return LEGACY_TIPO_TO_TEMPLATE[tipo] || null;
+}
+
+// Template sintético a partir do baseline em código (safety net anti-lockout).
+function baselineTemplateFromRegistry(stableKey) {
+  const permissions = { ...templateBaselineMap(stableKey) };
+  if (Object.keys(permissions).length === 0 && stableKey !== 'motorista' && stableKey !== 'embarcador') return null;
+  return {
+    id: null,
+    stable_key: stableKey,
+    display_name: stableKey,
+    driver_financial_visibility_mode: TEMPLATE_DEFAULT_FINANCIAL_VISIBILITY[stableKey] || null,
+    permissions,
+    _fromRegistry: true,
+  };
+}
 
 /**
  * Computa as permissões efetivas a partir de um contexto JÁ CARREGADO (pura, sem I/O).
@@ -160,13 +181,16 @@ async function loadEffectivePermissions(supabase, user = {}) {
 
     // Template: pelo id atribuído; senão baseline do tipo legado (dual-read).
     let template = null;
+    const stableKey = base.user.tipo === 'admin' ? 'administrador'
+      : base.user.tipo === 'motorista' ? 'motorista' : legacyTipoToStableKey(base.user.tipo);
     if (templateId) {
       template = await carregarTemplate(supabase, { id: templateId });
-    } else if (resolvedEmpresaId && base.user.tipo) {
-      const stableKey = base.user.tipo === 'admin' ? 'administrador'
-        : base.user.tipo === 'motorista' ? 'motorista' : null;
-      if (stableKey) template = await carregarTemplate(supabase, { empresaId: resolvedEmpresaId, stableKey });
+    } else if (resolvedEmpresaId && stableKey) {
+      template = await carregarTemplate(supabase, { empresaId: resolvedEmpresaId, stableKey });
     }
+    // Safety net: sem template no banco (ex.: empresa nova ainda não provisionada),
+    // usa o BASELINE do registry em código pelo stable_key → evita lockout do admin.
+    if (!template && stableKey) template = baselineTemplateFromRegistry(stableKey);
     base.template = template;
 
     // Overrides do usuário.

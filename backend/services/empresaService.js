@@ -147,6 +147,21 @@ async function criarEmpresaCompleta(opts) {
     }
   }
 
+  // P2 — provisiona os templates de permissão baseline da empresa NOVA (ponto único
+  // de criação de empresa: register autônomo, registerEmpresa e painel-admin passam
+  // por aqui). Persistente e idempotente. Não-fatal: se falhar, o resolver tem safety
+  // net em código (baselineTemplateFromRegistry) e o provisionamento pode ser refeito;
+  // nunca desfaz o cadastro. NÃO é write-on-read — roda só na CRIAÇÃO.
+  try {
+    const { provisionTemplatesForEmpresa } = require('./permissions/permissionProvisioning');
+    const r = await provisionTemplatesForEmpresa(supabase, empresa.id);
+    if (!r?.ok) {
+      console.error(`[empresaService] Provisionamento de templates falhou para ${empresa.id} (não-fatal): ${r?.reason || 'desconhecido'}`);
+    }
+  } catch (e) {
+    console.error('[empresaService] Erro ao provisionar templates de permissão (não-fatal):', e.message || e);
+  }
+
   console.log(
     `[empresaService] Empresa criada: ${empresa.id} (${empresa.nome}) — código ${empresa.codigo_convite}`
   );

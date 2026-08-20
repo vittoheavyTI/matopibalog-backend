@@ -28,6 +28,13 @@ exports.getRegistry = async (req, res) => {
 exports.listTemplates = async (req, res) => {
   try {
     const empresaId = req.empresa_id;
+    // READ-ONLY: este GET NÃO provisiona templates (sem write-on-read). O baseline é
+    // semeado no fluxo de CRIAÇÃO da empresa (empresaService.criarEmpresaCompleta →
+    // provisionTemplatesForEmpresa) e pela migration 072 nas empresas existentes. Se
+    // uma empresa legada estiver sem templates, o resolver tem safety net em código
+    // (baselineTemplateFromRegistry) que evita lockout — mas a lista fica vazia aqui
+    // até o provisionamento persistente rodar, o que é o comportamento correto para
+    // um endpoint de leitura.
     const { data: templates, error } = await supabase
       .from('permission_templates')
       .select('id, stable_key, display_name, descricao, is_system_baseline, editable, driver_financial_visibility_mode')
@@ -82,23 +89,18 @@ exports.updateTemplate = async (req, res) => {
     if (!tpl) return res.status(404).json({ message: 'Perfil não encontrado.' });
     if (tpl.editable === false) return res.status(409).json({ message: 'Perfil não editável.' });
 
-    // permissions: objeto { key: boolean }. Valida contra o registry.
+    // permissions: objeto { key: boolean }. Valida contra o registry e aplica via
+    // RPC GUARDADA (concurrency-safe + preserva governança da empresa).
     if (permissions && typeof permissions === 'object') {
       const invalidas = Object.keys(permissions).filter((k) => !isValidPermissionKey(k));
       if (invalidas.length) return res.status(400).json({ message: 'Permissões inválidas.', invalidas });
-      const upserts = Object.entries(permissions)
-        .filter(([, v]) => v === true)
-        .map(([permission_key]) => ({ template_id: templateId, permission_key, allowed: true }));
-      // Remove as que foram desmarcadas; upsert das marcadas.
-      const desmarcadas = Object.entries(permissions).filter(([, v]) => v !== true).map(([k]) => k);
-      if (desmarcadas.length) {
-        await supabase.from('permission_template_permissions')
-          .delete().eq('template_id', templateId).in('permission_key', desmarcadas);
-      }
-      if (upserts.length) {
-        await supabase.from('permission_template_permissions')
-          .upsert(upserts, { onConflict: 'template_id,permission_key' });
-      }
+      const allowKeys = Object.entries(permissions).filter(([, v]) => v === true).map(([k]) => k);
+      const removeKeys = Object.entries(permissions).filter(([, v]) => v !== true).map(([k]) => k);
+      const { error: rpcErr } = await supabase.rpc('atualizar_template_permissions_guardando_governanca', {
+        p_template_id: templateId, p_empresa_id: empresaId,
+        p_allow_keys: allowKeys, p_remove_keys: removeKeys, p_actor_user_id: req.user?.uid || null,
+      });
+      if (rpcErr) return mapGuardError(res, rpcErr);
     }
 
     const patch = {};
@@ -246,6 +248,9 @@ function mapGuardError(res, error) {
   }
   if (/usuario_nao_encontrado|template_nao_encontrado/.test(msg)) {
     return res.status(404).json({ message: 'Registro não encontrado.' });
+  }
+  if (/template_nao_editavel/.test(msg)) {
+    return res.status(409).json({ message: 'Perfil não editável.' });
   }
   if (/override_effect_invalido|guarda_admin_payload_invalido/.test(msg)) {
     return res.status(400).json({ message: 'Requisição inválida.' });
