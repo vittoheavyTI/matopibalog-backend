@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { Plus, X, Search, Filter, Truck, MapPin, Calendar, DollarSign, Gauge, Trash2, Edit, Check, AlertTriangle, ChevronLeft, ChevronDown, ChevronRight, Fuel, FileText, TrendingUp, Save, Unlock, Lock, Camera, Upload } from 'lucide-react';
+import { Plus, X, Search, Filter, Truck, MapPin, Calendar, DollarSign, Gauge, Trash2, Edit, Check, AlertTriangle, ChevronLeft, ChevronDown, ChevronRight, Fuel, FileText, TrendingUp, Save, Unlock, Lock, Camera, Upload, Ban } from 'lucide-react';
+import { useLancamentosRealtime } from '../hooks/useLancamentosRealtime';
 import { format } from 'date-fns';
 import { formatCurrency } from '../utils';
 import api, { newClientRequestId } from '../api';
@@ -242,13 +243,17 @@ export const GerenciamentoViagens: React.FC = () => {
       })));
       setDespesas(despesasData.filter((d: any) => d.status !== 'finalizado').map((d: any) => ({
         id: d.id, motoristaUid: d.motorista_id, descricao: d.descricao, fotoUrl: d.foto_url,
-        obsResolucao: d.obs_resolucao,
+        obsResolucao: d.obs_resolucao, version: d.version,
+        motivoCancelamento: d.motivo_cancelamento, canceladoEm: d.cancelado_em,
         valor: d.valor, quemPagou: d.quem_pagou, status: d.status, data: d.data, frete_id: d.frete_id,
         tipo: d.tipo === 'manutencao' ? 'manutencao' : 'despesa'  // preserva sub-tipo (consistente com Dashboard)
       })));
       setAbastecimentos(abastData.filter((a: any) => a.status !== 'finalizado').map((a: any) => ({
         id: a.id, motoristaUid: a.motorista_id, posto: a.posto, litros: a.litros, fotoUrl: a.foto_url,
-        obsResolucao: a.obs_resolucao,
+        obsResolucao: a.obs_resolucao, version: a.version,
+        // Onda 1 (paridade painel↔app): todos os campos ricos que o app coleta.
+        arlaLitros: a.arla_litros, arlaValor: a.arla_valor, odometro: a.odometro,
+        observacao: a.observacao, motivoCancelamento: a.motivo_cancelamento, canceladoEm: a.cancelado_em,
         valorTotal: a.valor_total, quemPagou: a.quem_pagou, status: a.status,
         data: a.data, frete_id: a.frete_id, tipo: 'abastecimento'
       })));
@@ -256,7 +261,8 @@ export const GerenciamentoViagens: React.FC = () => {
         // Vale: descricao é o campo correto; posto é fallback p/ registros antigos.
         // fotoUrl mapeado só por consistência — Vale NÃO renderiza comprovante.
         id: v.id, motoristaUid: v.motorista_id, descricao: v.descricao || v.posto || '', fotoUrl: v.foto_url,
-        obsResolucao: v.obs_resolucao,
+        obsResolucao: v.obs_resolucao, version: v.version,
+        motivoCancelamento: v.motivo_cancelamento, canceladoEm: v.cancelado_em,
         valor: v.valor, quemPagou: v.quem_pagou, status: v.status, data: v.data, frete_id: v.frete_id, tipo: 'vale'
       })));
     } catch (err) {
@@ -302,6 +308,18 @@ export const GerenciamentoViagens: React.FC = () => {
     window.addEventListener(EVENTO_NOTIFICACOES_NOVAS, handler);
     return () => window.removeEventListener(EVENTO_NOTIFICACOES_NOVAS, handler);
   }, [filterMot]);
+
+  // Realtime (Onda 1): o backend empurra eventos de lançamento por SSE; refazemos o
+  // fetch canônico do modo atual (sem F5). Debounce leve evita rajada de refetch quando
+  // vários eventos chegam juntos. Reconnect/visibility já disparam refetch dentro do hook.
+  const realtimeRefetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useLancamentosRealtime(() => {
+    if (realtimeRefetchTimer.current) clearTimeout(realtimeRefetchTimer.current);
+    realtimeRefetchTimer.current = setTimeout(() => {
+      if (filterMot !== 'todos') loadMotoristaData(filterMot);
+      else loadData();
+    }, 350);
+  });
 
   // Default do accordion: ao trocar de motorista / recarregar dados, fretes
   // ativos/pendentes abrem; demais (ex.: cancelado) e o grupo legado iniciam fechados.
@@ -742,32 +760,61 @@ export const GerenciamentoViagens: React.FC = () => {
     }
   };
 
-  const handleAprovarDespesa = async (id: string, tipoItem: string, aprovado: boolean, obs?: string) => {
-    const status = aprovado ? 'aprovado' : 'rejeitado';
-    const payload: any = { status };
-    if (obs !== undefined) payload.obs_resolucao = obs;
+  // Base de URL por tipo de lançamento (endpoints de transição audit-safe da Onda 1).
+  const baseLancamento = (tipoItem: string) =>
+    tipoItem === 'abastecimento' ? '/abastecimentos' : tipoItem === 'vale' ? '/vales' : '/despesas';
+
+  // Transição audit-safe (aprovar/rejeitar/cancelar). O backend é a autoridade: valida
+  // estado/motivo/tenant/CAS. 409 = alguém alterou o lançamento em paralelo → refetch.
+  const handleTransicao = async (
+    item: any, tipoItem: string, acao: 'aprovar' | 'rejeitar' | 'cancelar', motivo?: string,
+  ) => {
+    const payload: any = {};
+    if (motivo !== undefined) payload.motivo = motivo;
+    if (item?.version != null) payload.expected_version = item.version; // CAS otimista
     try {
-      // Usar tipoItem diretamente (já vem correto do mapeamento via item.tipo)
-      if (tipoItem === 'despesa' || tipoItem === 'manutencao') {
-        await api.patch('/despesas/' + id, payload);
-      } else if (tipoItem === 'abastecimento') {
-        await api.patch('/abastecimentos/' + id, payload);
-      } else if (tipoItem === 'vale') {
-        await api.patch('/vales/' + id, payload);
-      }
+      await api.post(`${baseLancamento(tipoItem)}/${item.id}/${acao}`, payload);
       if (filterMot !== 'todos') await loadMotoristaData(filterMot);
     } catch (err: any) {
-      const msg = mensagemErro(err, 'Tente novamente.');
-      alert('Erro ao atualizar status: ' + msg);
+      const status = err?.response?.status;
+      if (status === 409) {
+        alert('Este lançamento foi alterado por outra pessoa. Atualizando a lista…');
+        if (filterMot !== 'todos') await loadMotoristaData(filterMot);
+      } else {
+        alert('Não foi possível concluir a ação: ' + mensagemErro(err, 'Tente novamente.'));
+      }
     }
   };
 
-  const handleResolverComObservacao = async (id: string, tipoItem: string, aprovado: boolean) => {
-    const obs = window.prompt(
-      aprovado ? 'Observação ao aprovar (opcional):' : 'Motivo da rejeição (opcional):'
-    );
-    if (obs === null) return; // cancelou
-    await handleAprovarDespesa(id, tipoItem, aprovado, obs || undefined);
+  // Motivo obrigatório (rejeição/cancelamento): repete o prompt até vir texto ou o
+  // usuário desistir. Retorna null se desistir.
+  const pedirMotivo = (titulo: string): string | null => {
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const v = window.prompt(titulo);
+      if (v === null) return null; // desistiu
+      const t = v.trim();
+      if (t.length >= 2) return t;
+      alert('É obrigatório informar o motivo.');
+    }
+  };
+
+  const handleResolverComObservacao = async (item: any, tipoItem: string, aprovado: boolean) => {
+    if (aprovado) {
+      const obs = window.prompt('Observação ao aprovar (opcional):');
+      if (obs === null) return; // cancelou
+      await handleTransicao(item, tipoItem, 'aprovar', obs.trim() || undefined);
+    } else {
+      const motivo = pedirMotivo('Motivo da rejeição (obrigatório):');
+      if (motivo === null) return;
+      await handleTransicao(item, tipoItem, 'rejeitar', motivo);
+    }
+  };
+
+  const handleCancelarLancamento = async (item: any, tipoItem: string) => {
+    const motivo = pedirMotivo('Motivo do cancelamento (obrigatório):');
+    if (motivo === null) return;
+    await handleTransicao(item, tipoItem, 'cancelar', motivo);
   };
 
   const handleResetStatus = async (id: string, tipoItem: string) => {
@@ -896,7 +943,7 @@ export const GerenciamentoViagens: React.FC = () => {
       if (showAddModal === 'despesa' || showAddModal === 'manutencao') {
         await api.post('/despesas', { motorista_id: filterMot, frete_id: freteId, tipo: showAddModal === 'manutencao' ? 'manutencao' : 'geral', descricao: newItemData.descricao, valor: Number(newItemData.valor), quem_pagou: newItemData.quemPagou || 'proprietario', client_request_id: clientRequestId });
       } else if (showAddModal === 'abastecimento') {
-        await api.post('/abastecimentos', { motorista_id: filterMot, frete_id: freteId, posto: newItemData.posto, litros: Number(newItemData.litros), valor_total: Number(newItemData.valorTotal), quem_pagou: newItemData.quemPagou || 'proprietario', client_request_id: clientRequestId });
+        await api.post('/abastecimentos', { motorista_id: filterMot, frete_id: freteId, posto: newItemData.posto, litros: Number(newItemData.litros), valor_total: Number(newItemData.valorTotal), observacao: newItemData.observacao, quem_pagou: newItemData.quemPagou || 'proprietario', client_request_id: clientRequestId });
       } else if (showAddModal === 'vale') {
         await api.post('/vales', { motorista_id: filterMot, frete_id: freteId, descricao: newItemData.descricao, valor: Number(newItemData.valor), quem_pagou: newItemData.quemPagou || 'proprietario', client_request_id: clientRequestId });
       }
@@ -1294,19 +1341,42 @@ export const GerenciamentoViagens: React.FC = () => {
               {item.obsResolucao}
             </p>
           )}
+          {/* Onda 1 — paridade painel↔app: todos os detalhes coletados no abastecimento */}
+          {type === 'abastecimento' && (
+            <p className="text-xs text-gray-500 mt-0.5">
+              {item.litros != null && <>Diesel: {item.litros}L</>}
+              {item.valorTotal != null && <> • R$ {Number(item.valorTotal).toFixed(2)}</>}
+              {Number(item.litros) > 0 && item.valorTotal != null && <> ({(Number(item.valorTotal) / Number(item.litros)).toFixed(2)}/L)</>}
+              {(Number(item.arlaLitros) > 0 || Number(item.arlaValor) > 0) && <> • ARLA: {item.arlaLitros || 0}L / R$ {Number(item.arlaValor || 0).toFixed(2)}</>}
+              {item.odometro != null && <> • Odôm.: {item.odometro} km</>}
+              {item.posto && <> • Posto: {item.posto}</>}
+            </p>
+          )}
+          {item.observacao && (
+            <p className="text-xs text-gray-500 mt-0.5"><span className="font-semibold">Obs.:</span> {item.observacao}</p>
+          )}
+          {item.status === 'cancelado' && item.motivoCancelamento && (
+            <p className="text-xs mt-0.5 text-gray-500 italic"><span className="font-semibold not-italic">Motivo do cancelamento: </span>{item.motivoCancelamento}</p>
+          )}
         </div>
         <div className="flex items-center space-x-2">
           <span className={`font-bold ${type === 'vale' ? 'text-red-600' : 'text-gray-700'}`}>{formatCurrency(Math.abs(item.valor || item.valorTotal))}</span>
           {item.status === 'pendente' ? (
             <div className="flex space-x-1">
-              <button onClick={() => handleResolverComObservacao(item.id, type, true)} className="p-1 text-green-600 hover:bg-green-100 rounded transition-colors" title="Aprovar com observação"><Check size={18} /></button>
-              <button onClick={() => handleResolverComObservacao(item.id, type, false)} className="p-1 text-red-600 hover:bg-red-100 rounded transition-colors" title="Rejeitar com motivo"><X size={18} /></button>
+              <button onClick={() => handleResolverComObservacao(item, type, true)} className="p-1 text-green-600 hover:bg-green-100 rounded transition-colors" title="Aprovar com observação"><Check size={18} /></button>
+              <button onClick={() => handleResolverComObservacao(item, type, false)} className="p-1 text-red-600 hover:bg-red-100 rounded transition-colors" title="Rejeitar com motivo"><X size={18} /></button>
+              <button onClick={() => handleCancelarLancamento(item, type)} className="p-1 text-gray-500 hover:bg-gray-100 rounded transition-colors" title="Cancelar com motivo"><Ban size={18} /></button>
             </div>
+          ) : item.status === 'cancelado' ? (
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded uppercase bg-gray-200 text-gray-600" title={item.motivoCancelamento || 'Cancelado'}>cancelado</span>
           ) : (
             <div className="flex items-center space-x-1">
               <button onClick={() => handleResetStatus(item.id, type)}
                 className={`text-[10px] font-bold px-1.5 py-0.5 rounded uppercase transition-all hover:opacity-80 active:scale-95 ${item.status === 'aprovado' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}
-                title="Clique para mudar status">{item.status}</button>
+                title="Clique para reverter para pendente">{item.status}</button>
+              {item.status === 'aprovado' && (
+                <button onClick={() => handleCancelarLancamento(item, type)} className="p-1 text-gray-500 hover:bg-red-100 rounded transition-colors" title="Cancelar com motivo"><Ban size={16} /></button>
+              )}
               {editingItem?.id === item.id
                 ? <button onClick={handleSaveEdit} className="p-1 bg-green-600 text-white rounded shadow-sm"><Save size={16} /></button>
                 : <button onClick={() => handleStartEdit(item, type)} className="p-1 text-gray-400 hover:text-blue-600 transition-colors" title="Editar"><Edit size={16} /></button>}
@@ -1956,6 +2026,12 @@ export const GerenciamentoViagens: React.FC = () => {
                   </div>
                 )}
               </div>
+              {showAddModal === 'abastecimento' && (
+                <div>
+                  <label className="text-[10px] font-bold text-gray-400 uppercase ml-1 block mb-1.5">Observação *</label>
+                  <input type="text" className="w-full border-2 border-gray-100 rounded-xl p-3 outline-none focus:border-blue-500 transition-colors" placeholder="Ex.: tanque cheio, diesel S10" value={newItemData.observacao || ''} onChange={e => setNewItemData({...newItemData, observacao: e.target.value})} />
+                </div>
+              )}
               <div>
                 <label className="text-[10px] font-bold text-gray-400 uppercase ml-1 block mb-1.5">Quem Pagou?</label>
                 <select className="w-full border-2 border-gray-100 rounded-xl p-3 outline-none bg-white focus:border-blue-500 transition-colors" onChange={e => setNewItemData({...newItemData, quemPagou: e.target.value})}>
