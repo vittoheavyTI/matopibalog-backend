@@ -106,8 +106,8 @@ _Evidência coletada em 2026-08-19 (ver [FORENSIC_BASELINE](./FORENSIC_BASELINE.
 | RBV9-INV-049 | Despesas (web+app, isolamento, idempotência) | IMPL_VAL | ✓ ✓ ✓ ✓ ✓ | `despesas`(98), migration 018 |
 | RBV9-INV-050 | Abastecimentos / ARLA | IMPL_VAL | ✓ ✓ ✓ ✓ ✓ | `abastecimentos`(46) |
 | RBV9-INV-051 | Vales / adiantamentos | IMPL_VAL | ✓ ✓ ✓ ✓ ✓ | `vales`(18) |
-| RBV9-INV-052 | Estados append/audit-safe (pend/aprov/rej/cancel+motivo+ator) | IMPL_NV | ✓ ✓ ~ ✓ ✓ | **Onda 1 DEPLOYADO**: máquina de estados + RPC transação (CAS) + ledger `lancamento_eventos` append-only. **Migration 070 aplicada+rastreada em prod** (`20260820033844`). Aguarda validação visual. App: create; ações admin no web. |
-| RBV9-INV-053 | Realtime web↔app dos lançamentos | IMPL_NV | ✓ ✓ ✓ — ✓ | **Onda 1 DEPLOYADO**: SSE autenticado (`/realtime/stream`) + `realtimeBus` + limites de conexão; web (fetch stream) e app (http stream) refazem fetch canônico. Polling não é mais o mecanismo principal. |
+| RBV9-INV-052 | Estados append/audit-safe (pend/aprov/rej/cancel+motivo+ator) | IMPL_NV | ✓ ✓ ~ ✓ ✓ | **Onda 1 DEPLOYADO**: máquina de estados + RPC transação (CAS) + ledger `lancamento_eventos` append-only. **Migration 070 aplicada+rastreada em prod** (`20260820033844`). **Hotfix migration 071 aplicada+rastreada** (`20260820040645`, PR #437) — CHECK de `status` de despesas/abastecimentos/vales passou a aceitar `cancelado` (corrige 500 no cancelamento; ADITIVA/idempotente, superset do conjunto anterior). Aguarda validação visual. App: create; ações admin no web. |
+| RBV9-INV-053 | Realtime web↔app dos lançamentos | IMPL_NV | ✓ ✓ ✓ — ✓ | **Onda 1 DEPLOYADO**: SSE autenticado (`/realtime/stream`) + `realtimeBus` + limites de conexão; web (fetch stream) e app (http stream) refazem fetch canônico. **Hotfix PR #437: SSE também na tela de detalhe do frete no app** (`detalhe_viagem_screen`) — `RealtimeService` singleton (idempotente, compartilhado com a home), filtro client-side por `freight_id`, refetch canônico com debounce, poll de 60s só como fallback, refetch no resume/reconnect, cleanup no dispose sem parar o serviço compartilhado. Polling não é mais o mecanismo principal. |
 | RBV9-INV-054 | Paridade painel↔app de todos os campos coletados | IMPL_NV | ✓ ✓ ~ — ✓ | **Onda 1 DEPLOYADO**: painel exibe arla/odômetro/preço-litro/observação do abastecimento; observação obrigatória no create (web+app, transitório para cliente novo). |
 
 ## FINANCE — OPERACIONAL DO CLIENTE
@@ -265,6 +265,12 @@ _Evidência coletada em 2026-08-19 (ver [FORENSIC_BASELINE](./FORENSIC_BASELINE.
 | RBV9-INV-106 | Tabelas legado (`documentos`, `contratos`, `modelo_contratos`) | TECH_DEBT | limpeza futura |
 | RBV9-INV-107 | `REALTIME_HORIZONTAL_SCALE` — bus SSE é in-memory/single-instance | DEFERRED | Onda 1/E1.6A; **Railway confirmado `numReplicas=1` (região sfo)** → `REALTIME_BUS_IN_MEMORY_ALLOWED=true` no escopo atual. **Critério de remoção:** antes de `replicas>1`, trocar o bus por pub/sub compartilhado atrás da mesma abstração. Mitigado hoje: clientes refazem fetch no reconnect/resume. **DEFERRED ≠ DONE.** |
 | RBV9-INV-108 | `LEGACY_OBSERVATION_ENFORCEMENT` — observação/descrição obrigatória é TRANSITÓRIA | DEFERRED | E1.6A; backend só exige o campo de clientes NOVOS (header `X-Client-Platform`); APK legado sem o campo NÃO é quebrado (histórico null permanece válido, sem inventar texto). **Critério de remoção:** quando existir *minimum supported app version* / forced-upgrade controlado, tornar a validação estrita para todos. **DEFERRED ≠ DONE.** |
+
+## PROCESS / GOVERNANÇA
+
+| ID | Item | Status | Obs |
+|----|------|--------|-----|
+| PROCESS-001 | `HOTFIX_071_APPLIED_BEFORE_OWNER_MIGRATION_GATE` — a migration 071 foi **aplicada em produção durante o diagnóstico do cancelamento (500), ANTES do PR #437 estar verde/mergeado e sem um `OWNER_MIGRATION_GATE` separado para a 071**. Resultado técnico saudável (aditiva/idempotente, reconciliada com o source-of-truth: repo `071_...sql` SHA256 `e6f3b7a4…d623fe` ≡ CHECK em prod; 070+071 rastreadas; sem terceiro hotfix SQL), mas é **desvio de processo**. | CLOSED_WITH_CORRECTIVE_ACTION | **NÃO rollbackar / NÃO reaplicar / NÃO alterar produção.** **Ação corretiva permanente:** toda migration de produção futura — inclusive hotfix — exige: (1) arquivo versionado; (2) hash; (3) PR/CI quando a situação permitir; (4) precheck; (5) `OWNER_MIGRATION_GATE` explícito; (6) `apply_migration` canônico; (7) tracking; (8) pós-check. Em incidente crítico onde o CI prévio não seja possível: **parar e solicitar `HOTFIX_PRODUCTION_GATE`** — nunca assumir autorização implícita de migration anterior. |
 
 ---
 
