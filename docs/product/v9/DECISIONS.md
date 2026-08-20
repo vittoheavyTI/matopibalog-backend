@@ -114,6 +114,60 @@ Legenda de impacto: **DOMÍNIO** (muda modelo de dados) · **UX** · **SEGURANÇ
 
 ---
 
+## Patch fiscal V9 — NFS-e / entidade jurídica (D-036..D-041)
+
+> **Nota de numeração (importante).** A macrofrente RBV9 previa "adicionar D-031..D-036 fiscais". Na aplicação, os IDs **D-031..D-035 já estavam congelados** com decisões não-fiscais (Entra ID, Route Intelligence, Dispatch, Contratos, Separação financeira). Para **não sobrescrever decisão congelada** (D-030 — nenhum backlog/decisão desaparece), as 6 decisões fiscais foram atribuídas aos próximos IDs livres **D-036..D-041**. Mapeamento: fiscal-1→**D-036**, fiscal-2→**D-037**, fiscal-3→**D-038**, fiscal-4→**D-039**, fiscal-5→**D-040**, fiscal-6→**D-041**. O conteúdo é idêntico ao pedido; apenas o inteiro do ID mudou.
+
+### D-036 — Automação de NFS-e para receita SaaS elegível
+
+**Data:** 2026-08-20 · **Impacto:** DOMÍNIO/ARQ
+
+- Toda **receita SaaS elegível** do Matopiba terá automação de **NFS-e**: emissão, reconciliação, **XML/DANFSe**, armazenamento, **portal** e **e-mail** ao cliente.
+- Domínio próprio `FISCAL_INVOICING`, **separado** de `FINANCE_OPERATIONAL` e de `SAAS_BILLING`.
+
+### D-037 — Entidade jurídica emissora configurável e versionada
+
+**Data:** 2026-08-20 · **Impacto:** DOMÍNIO/ARQ
+
+- A **entidade jurídica emissora/prestadora** é **configurável, versionada por vigência e substituível**. Não hard-coded no billing/fiscal.
+- Trata-se apenas como `CURRENT_LEGAL_ENTITY=provisória` e `FUTURE_LEGAL_ENTITY=cutover planejado` — sem registrar dados pessoais desnecessários de titularidade.
+
+### D-038 — Marca independente da entidade jurídica
+
+**Data:** 2026-08-20 · **Impacto:** ARQ/UX
+
+- A marca **Matopiba Log** é **independente** da entidade jurídica que emite/cobra. Troca de CNPJ não muda a marca.
+
+### D-039 — Snapshot fiscal imutável por operação
+
+**Data:** 2026-08-20 · **Impacto:** DOMÍNIO/SEGURANÇA
+
+- Contratos, cobranças e documentos fiscais **preservam snapshot** da entidade jurídica **efetivamente utilizada** naquela operação. Histórico nunca é reescrito.
+
+### D-040 — Regime tributário como perfil fiscal versionado
+
+**Data:** 2026-08-20 · **Impacto:** DOMÍNIO/ARQ
+
+- Regime tributário é **perfil fiscal versionado**. A arquitetura deve suportar **SIMEI → Simples Nacional/ME** sem reescrever billing/fiscal.
+
+### D-041 — Cutover controlado de entidade jurídica
+
+**Data:** 2026-08-20 · **Impacto:** ARQ/PROCESSO
+
+- Troca futura de CNPJ/entidade usa **cutover controlado** (payment provider account, fiscal provider, contratos, certificado e vigência desacoplados). **Histórico nunca é reescrito.**
+
+### Flags fiscais de execução (RBV9 fiscal patch)
+
+| Flag | Valor | Significado |
+|------|-------|-------------|
+| `FISCAL_TECH_BUILD_ALLOWED` | **true** | Construir arquitetura/código fiscal é autorizado. |
+| `FISCAL_ARCHITECTURE_ALLOWED` | **true** | Modelagem/abstração fiscal autorizada. |
+| `TRIAL_TECHNICAL_ALLOWED` | **true** | Trial técnico autorizado. |
+| `CNAE_BLOCKS_TECH_DEVELOPMENT` | **false** | Adequação CNAE/CNPJ do owner corre em paralelo; **não bloqueia** desenvolvimento técnico. |
+| `CERTIFICATE_PURCHASE` | **DEFERRED** | Compra de certificado adiada. |
+
+---
+
 ## Gates registrados
 
 | Gate | Critério de liberação |
@@ -121,6 +175,8 @@ Legenda de impacto: **DOMÍNIO** (muda modelo de dados) · **UX** · **SEGURANÇ
 | `FINAL_ASAAS_PRODUCTION_ACTIVATION_GATE` | Reativar Asaas Production só com nova autorização explícita + allowlist única + runbook. Estado atual: **DESARMADO** (ver FORENSIC_BASELINE §Billing/Asaas). |
 | `INFRA_MIGRATION_GATE` (D-028) | 1–3 clientes/pilotos reais próximos de produção + benchmark de latência/custo/operação. |
 | `OPERATIONAL_SCOPE_ENFORCEMENT_GATE` | Enforcement automático de escopo P1 (grupos/filiais) está **desativado por segurança**; ativar só com dados operacionais reais + gate. |
+| `FISCAL_LEGAL_ENTITY_GATE` | **BLOCKED_PENDING_CNAE_AND_ACCOUNTING_ALIGNMENT.** Emissão fiscal real depende de adequação de CNAE/regime + alinhamento contábil do owner. Desenvolvimento/arquitetura fiscal **liberados**; emissão **real** bloqueada. |
+| `COMMERCIAL_PAID_GO_LIVE_GATE` | **BLOCKED_BY_FISCAL_LEGAL_ENTITY_GATE.** Go-live comercial pago (cobrança + NFS-e reais) só após liberar `FISCAL_LEGAL_ENTITY_GATE` **e** `FINAL_ASAAS_PRODUCTION_ACTIVATION_GATE`. |
 
 ---
 

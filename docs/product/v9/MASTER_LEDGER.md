@@ -136,6 +136,33 @@ _Evidência coletada em 2026-08-19 (ver [FORENSIC_BASELINE](./FORENSIC_BASELINE.
 | RBV9-INV-069 | Recorrência real (produção) | DEFERRED | ✓ ✓ — ✓ ✗ | validada em sandbox; produção exige autorização |
 | RBV9-INV-070 | Super-admin: dashboard comercial/financeiro SaaS/trials/conversões/MRR/churn | PARTIAL | ✓ ✓ — ✓ ✓ | Painéis existem; KPIs MRR/churn a formalizar |
 
+## FISCAL_INVOICING (NFS-e / entidade jurídica) — domínio novo (patch fiscal RBV9)
+
+> Domínio **separado** de SAAS_BILLING e FINANCE_OPERATIONAL (D-036). Todos **NEW (0 no banco)**. IDs próprios `FISC-NNN`. Arquitetura-alvo: LEGAL_ENTITY → FISCAL_PROFILE → SAAS_BILLING_EVENT → FISCAL_OUTBOX → FISCAL_PROVIDER → DPS → NFSE → RECONCILE → XML/DANFSe → EMAIL/PORTAL. Nenhum bloqueia a Onda 1.
+
+| ID | Item | Status | B W A D P | Evidência / Obs |
+|----|------|--------|-----------|-----------------|
+| FISC-001 | Legal entity + fiscal profile (entidade configurável/versionada) | ROADMAP | ✗ ✗ ✗ ✗ ✗ | D-037/D-040; 0 tabelas |
+| FISC-002 | Habilitação/config fiscal por entidade | ROADMAP | ✗ ✗ ✗ ✗ ✗ | D-037 |
+| FISC-003 | Política de trigger fiscal (que receita SaaS gera NFS-e) | ROADMAP | ✗ ✗ ✗ ✗ ✗ | D-036 |
+| FISC-004 | Fiscal provider abstraction | ROADMAP | ✗ ✗ ✗ ✗ ✗ | não acoplar a provider único · análogo a D-032 |
+| FISC-005 | Adapter NFS-e Nacional | ROADMAP | ✗ ✗ ✗ ✗ ✗ | padrão nacional DPS/DANFSe |
+| FISC-006 | Gestão de certificado/secret | ROADMAP | ✗ ✗ ✗ ✗ ✗ | `CERTIFICATE_PURCHASE=DEFERRED` |
+| FISC-007 | DPS builder | ROADMAP | ✗ ✗ ✗ ✗ ✗ | Declaração de Prestação de Serviço |
+| FISC-008 | Fiscal outbox + idempotência | ROADMAP | ✗ ✗ ✗ ✗ ✗ | análogo ao billing_outbox |
+| FISC-009 | Reconcile fiscal | ROADMAP | ✗ ✗ ✗ ✗ ✗ | status/retry/reconciliação |
+| FISC-010 | Armazenamento XML/DANFSe | ROADMAP | ✗ ✗ ✗ ✗ ✗ | storage imutável |
+| FISC-011 | E-mail automático de NFS-e | ROADMAP | ✗ ✗ ✗ ✗ ✗ | Resend |
+| FISC-012 | Portal "Notas Fiscais" (cliente) | ROADMAP | ✗ ✗ ✗ ✗ ✗ | D-036 |
+| FISC-013 | Cancelamento/substituição de NFS-e | ROADMAP | ✗ ✗ ✗ ✗ ✗ | audit-safe |
+| FISC-014 | Produção Restrita (fiscal) | ROADMAP | ✗ ✗ ✗ ✗ ✗ | `FISCAL_LEGAL_ENTITY_GATE` |
+| FISC-015 | Primeiro piloto NFS-e production | ROADMAP | ✗ ✗ ✗ ✗ ✗ | gate comercial/fiscal |
+| FISC-016 | Recurring billing → recurring NFS-e | ROADMAP | ✗ ✗ ✗ ✗ ✗ | depende de FISC-008/009 |
+| FISC-017 | Super Admin Fiscal Health | ROADMAP | ✗ ✗ ✗ ✗ ✗ | observabilidade fiscal |
+| FISC-018 | Legal entity cutover | ROADMAP | ✗ ✗ ✗ ✗ ✗ | D-041 |
+| FISC-019 | Payment provider account por entidade | ROADMAP | ✗ ✗ ✗ ✗ ✗ | D-041; desacopla Asaas por entidade |
+| FISC-020 | Fiscal profile versioning | ROADMAP | ✗ ✗ ✗ ✗ ✗ | D-040 (SIMEI→Simples/ME) |
+
 ## CONTRACTS
 
 | ID | Item | Status | B W A D P | Evidência / Obs |
@@ -241,14 +268,18 @@ _Evidência coletada em 2026-08-19 (ver [FORENSIC_BASELINE](./FORENSIC_BASELINE.
 
 ### Contagem do inventário
 
-- **Total de itens:** 106
+> **Recalculado após o patch fiscal RBV9** (+20 itens `FISC-001..FISC-020`, todos ROADMAP/NEW). Inventário original = 106 (`RBV9-INV-001..106`); com o domínio FISCAL_INVOICING passa a **126**.
+
+- **Total de itens:** **126** (106 RBV9-INV + 20 FISC)
 - **IMPLEMENTED_VALIDATED:** 45
 - **IMPLEMENTED_NOT_VISUAL_VALIDATED:** 3
 - **PARTIAL:** 16
-- **ROADMAP_ONLY:** 33
+- **ROADMAP_ONLY:** **53** (33 originais + 20 fiscais)
 - **DEFERRED:** 3
 - **TECH_DEBT:** 6 (itens 101-106; + achados TD no FORENSIC)
 - **UNKNOWN:** 1 (perf baseline)
 - **BROKEN / STUB:** 0 / 0 (impressoras = stub intencional de segurança, fora de contagem)
+
+_Contagem por ID (autoritativa): 106 (`RBV9-INV-001..106`) + 20 (`FISC-001..020`) = **126**. A soma das categorias (45+3+16+53+3+6+1 = 127) carrega o mesmo **+1 pré-existente** do baseline original (item `RBV9-INV-094` aparece como UNKNOWN e também compõe uma faixa PARTIAL); a quirk não foi "corrigida" para não reescrever o baseline forense._
 
 _Ver: [CONTEXT_BRIDGE](./CONTEXT_BRIDGE.md) · [DECISIONS](./DECISIONS.md) · [ROADMAP](./ROADMAP.md) · [FORENSIC_BASELINE](./FORENSIC_BASELINE.md)_

@@ -26,6 +26,7 @@ Autorização efetiva em todo o sistema = **ENTITLEMENT (plano) AND PERMISSION (
 | **MAINTENANCE** | Preventiva/corretiva, OS, peças, tempo parado | FLEET | **NEW (0)** |
 | **FINANCE_OPERATIONAL** | Receita/comissão/resultado/recebíveis/centro de custo do cliente | FREIGHT_EXECUTION, LAUNCHES, FLEET | parcial; separar de SaaS |
 | **SAAS_BILLING** | Plano/trial/proposta/fatura/pagamento/inadimplência/MRR/churn | CONTRACTS, IDENTITY | maduro; Asaas desarmado |
+| **FISCAL_INVOICING** | NFS-e: entidade jurídica/perfil fiscal → outbox → provider → DPS → NFSE → reconcile → XML/DANFSe → e-mail/portal | SAAS_BILLING (evento), certificado, fiscal provider | **NEW (0)**; CNAE/regime em paralelo (não bloqueia dev) |
 | **CONTRACTS** | Template versionado → snapshot → PDF → assinatura → imutável | SAAS_BILLING, signature provider | vivo (interno); provider externo ROADMAP |
 | **SHIPPER** | Portal do embarcador: demanda/cotação/proposta/seleção | PARTNER_NETWORK, boundaries | **NEW (0)** |
 | **PARTNER_NETWORK** | Rede privada (Lite/Cliente); snapshots compartilhados sem acesso a tenant | SHIPPER, ORG_SCOPE | **NEW (0)** |
@@ -110,6 +111,24 @@ Ordem ajustada por dependência técnica objetiva: FLEET é pré-requisito de PL
 
 ---
 
+## Parte D — Track fiscal NFS-e (patch fiscal RBV9)
+
+> Domínio `FISCAL_INVOICING` (D-036..D-041). Arquitetura-alvo (cadeia): **LEGAL_ENTITY → FISCAL_PROFILE → SAAS_BILLING_EVENT → FISCAL_OUTBOX → FISCAL_PROVIDER → DPS → NFSE → RECONCILE → XML/DANFSe → EMAIL/PORTAL**. A entidade jurídica desacopla também: payment provider account, fiscal provider, contratos, certificado e vigência (D-041). A adequação fiscal (CNAE/regime/contador) do owner corre **em paralelo** e **não bloqueia a Onda 1**.
+
+| Fase | Descrição | Status |
+|------|-----------|--------|
+| **NFSE-0A** | Diagnóstico / documentos | **COMPLETE** (este patch) |
+| **NFSE-0B** | CNAE / regime / contador | **EXTERNAL_BLOCKED** (owner, em paralelo) |
+| **NFSE-1** | Arquitetura / provider abstraction (FISC-001..004) | **READY** |
+| **NFSE-2** | DPS / outbox / reconcile (FISC-007..009, 016) | **READY** |
+| **NFSE-3** | XML / PDF / e-mail / portal (FISC-005, 010..012) | **READY** |
+| **NFSE-4** | Produção Restrita (FISC-014) | **FUTURE_GATE** (`FISCAL_LEGAL_ENTITY_GATE`) |
+| **NFSE-5** | Primeira NFS-e real (FISC-015) | **COMMERCIAL/FISCAL_GATE** (`COMMERCIAL_PAID_GO_LIVE_GATE`) |
+
+**Ordem de execução:** o track fiscal é independente da Onda 1. Pode iniciar NFSE-1..3 (arquitetura/código sem emissão real) a qualquer momento sem tocar produção; NFSE-4/5 ficam atrás dos gates. Certificado (FISC-006) = `CERTIFICATE_PURCHASE=DEFERRED`.
+
+---
+
 ## Gates de decisão (resumo)
 
 | Gate | Bloqueia | Libera com |
@@ -117,6 +136,8 @@ Ordem ajustada por dependência técnica objetiva: FLEET é pré-requisito de PL
 | `FINAL_ASAAS_PRODUCTION_ACTIVATION_GATE` | cobrança real | autorização + allowlist única + runbook |
 | `OPERATIONAL_SCOPE_ENFORCEMENT_GATE` | enforcement de escopo P1 | dados operacionais reais + validação |
 | `INFRA_MIGRATION_GATE` | migração Hostinger | 1–3 pilotos + benchmark latência/custo/operação |
+| `FISCAL_LEGAL_ENTITY_GATE` | emissão fiscal real (NFSE-4/5) | adequação CNAE/regime + alinhamento contábil |
+| `COMMERCIAL_PAID_GO_LIVE_GATE` | go-live comercial pago | `FISCAL_LEGAL_ENTITY_GATE` + `FINAL_ASAAS_PRODUCTION_ACTIVATION_GATE` |
 
 ---
 

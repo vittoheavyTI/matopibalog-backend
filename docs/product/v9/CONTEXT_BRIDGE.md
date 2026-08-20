@@ -17,7 +17,7 @@
 
 | | |
 |---|---|
-| `origin/main` | `2c36450ba8efaae0dd24f0ca533cf571d20e8841` (2026-08-18, PR #432 / F5B-2) |
+| `origin/main` | avança com o merge de RBV9: PR #433 (runbook Asaas, merge `0b557b4`) + **este PR #434** (Rebaseline V9 + patch fiscal). Baseline anterior: `2c36450` (PR #432 / F5B-2). O SHA definitivo pós-merge = `MAIN_BASELINE_V9` (ver relatório da macrofrente). |
 | Deploy produção | Railway `matopibalog-backend` deploy `2ff32276` **SUCCESS** |
 | Health | **HTTP 200** `{"status":"UP"}` em `https://api.matopibalog.com.br/health` |
 | Banco | Supabase `rjahjogidyndphdxevom` · 62 tabelas públicas · RLS 100% |
@@ -36,7 +36,13 @@ Matopiba vira **frota/operação-centric** (D-001): o eixo é o **veículo/compo
 
 ## Macrofrente atual
 
-**RBV9 — Rebaseline V9** (docs-only, read-only). Este PR entrega inventário + decisões + ledger + arquitetura + roadmap + este handoff. **Nenhum código/dado/env de produção alterado.**
+**`CURRENT_MACROFRONT = ONDA1_REALTIME_LANCAMENTOS_AUDIT_SAFE`.**
+
+A **RBV9 — Rebaseline V9** (docs-only) está **concluída** e inclui o **patch fiscal V9** (domínio `FISCAL_INVOICING`, decisões D-036..D-041, ledger FISC-001..020, track NFS-e). **Nenhum código/dado/env de produção alterado por estes docs.** A próxima macrofrente **funcional** é a **Onda 1 — Realtime + Lançamentos audit-safe**.
+
+### Nota fiscal (não bloqueante)
+
+Adequação de **CNAE/CNPJ/regime** do owner corre **em paralelo** e **NÃO bloqueia** o desenvolvimento técnico (`CNAE_BLOCKS_TECH_DEVELOPMENT=false`; `FISCAL_TECH_BUILD_ALLOWED=true`). O que fica bloqueado é a **emissão fiscal real** e o **go-live comercial pago** — gates `FISCAL_LEGAL_ENTITY_GATE` e `COMMERCIAL_PAID_GO_LIVE_GATE`. Entidade jurídica atual = **provisória**; troca futura = **cutover** (D-041). Certificado = `DEFERRED`.
 
 ## Como retomar em outro chat
 
