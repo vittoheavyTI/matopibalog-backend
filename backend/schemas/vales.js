@@ -2,7 +2,9 @@ const { z } = require('zod');
 
 const createValeSchema = z.object({
   valor: z.coerce.number({ invalid_type_error: 'Valor deve ser um número.' }).positive('Valor do vale deve ser maior que zero.'),
-  descricao: z.string().max(300).optional(),
+  // Onda 1 (§11): descrição/observação obrigatória no create manual (paridade
+  // web↔app; backend é a autoridade). Registros históricos podem ter descricao nula.
+  descricao: z.string().min(2, 'Descrição é obrigatória.').max(300),
   quem_pagou: z.enum(['proprietario', 'motorista']).optional(),
   posto: z.string().max(200).optional(),
   litros: z.coerce.number().nonnegative().optional(),

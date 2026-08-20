@@ -7,6 +7,9 @@ const createAbastecimentoSchema = z.object({
   arla_litros: z.coerce.number().nonnegative().optional(),
   arla_valor: z.coerce.number().nonnegative().optional(),
   posto: z.string().max(200).optional(),
+  // Onda 1 (§11): observação obrigatória no create manual (paridade web↔app;
+  // backend é a autoridade). Registros históricos permanecem sem este campo.
+  observacao: z.string().min(2, 'Observação é obrigatória.').max(300),
   frete_id: z.string().uuid('ID do frete inválido.').optional().nullable(),
   motorista_id: z.string().uuid('ID do motorista inválido.').optional(),
   // Idempotência: id gerado pelo app por tentativa de lançamento. Opcional —

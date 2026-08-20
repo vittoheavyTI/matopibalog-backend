@@ -137,6 +137,11 @@ app.get('/health', (req, res) => {
   res.status(200).json({ status: 'UP', timestamp: new Date().toISOString() });
 });
 
+// Stream SSE (realtime) montado ANTES do apiLimiter: uma conexão SSE é uma única
+// requisição de longa duração e um reconnect não pode ser penalizado pelo balde de
+// rate limit. A autenticação/tenant continua garantida pelo próprio router.
+app.use('/realtime', require('./routes/realtime'));
+
 app.use(apiLimiter);
 app.use('/auth/login', loginLimiter);
 app.use(['/auth/refresh', '/auth/mobile/refresh'], refreshLimiter);

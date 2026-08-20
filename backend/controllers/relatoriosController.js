@@ -167,7 +167,11 @@ exports.getFichaViagem = async (req, res) => {
       : motorista.empresas?.tipo;
     const comissao = calcularComissao(freteBruto, motorista.percentual_comissao, empresaTipo);
 
+    // Onda 1 (§15): lançamento CANCELADO nunca compõe o consolidado; REJEITADO nunca
+    // conta como válido. PENDENTE mantém a regra atual (compõe a ficha por seleção).
+    const ESTADO_NAO_COMPOE = new Set(['cancelado', 'rejeitado']);
     [...abastecimentos, ...despesas, ...vales].forEach(d => {
+      if (ESTADO_NAO_COMPOE.has(String(d.status || ''))) return;
       if (d.quem_pagou === 'proprietario') {
         deducoes += parseFloat(d.valor || d.valor_total || 0);
       }
