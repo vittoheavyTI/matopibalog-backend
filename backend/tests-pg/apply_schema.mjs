@@ -30,6 +30,7 @@ const arquivos = [
   join(migrations, '069_portal_cliente_governanca_entitlements.sql'), // Portal cliente: catálogo estrutura/ERP/SSO
   join(migrations, '070_lancamentos_audit_safe_realtime.sql'), // Onda 1: lançamentos audit-safe + RPC transição CAS
   join(migrations, '071_lancamento_status_cancelado_check.sql'), // hotfix: relaxa CHECK status p/ incluir 'cancelado'
+  join(migrations, '072_permissions_templates_overrides.sql'), // P2: permissões templates+overrides
 ];
 
 const client = new pg.Client({ connectionString: CONN });
@@ -41,7 +42,7 @@ try {
     await client.query(sql);
     console.log('ok');
   }
-  console.log('Schema de teste aplicado (pré-bootstrap + 058 + 060 + 061 + 062 + 064 + 065 + 066 + 067 + 068 + 069 + 070 + 071).');
+  console.log('Schema de teste aplicado (pré-bootstrap + 058 + 060 + 061 + 062 + 064 + 065 + 066 + 067 + 068 + 069 + 070 + 071 + 072).');
 } finally {
   await client.end();
 }

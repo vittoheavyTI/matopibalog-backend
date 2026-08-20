@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Users, FileText, Truck, ChevronLeft, ChevronRight, Upload, X, Check, Trash2, Settings, UserCircle, Receipt, History, Building2, DollarSign, Bell, Plug, ClipboardList, Ticket, TrendingUp, TowerControl, Boxes, FileSignature, CreditCard, Network } from 'lucide-react';
+import { LayoutDashboard, Users, FileText, Truck, ChevronLeft, ChevronRight, Upload, X, Check, Trash2, Settings, UserCircle, Receipt, History, Building2, DollarSign, Bell, Plug, ClipboardList, Ticket, TrendingUp, TowerControl, Boxes, FileSignature, CreditCard, Network, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useContratacaoStatus } from '../hooks/useContratacaoStatus';
 import { usePortalGovernanca } from '../hooks/usePortalGovernanca';
@@ -177,6 +177,11 @@ export const Sidebar: React.FC = () => {
     { titulo: 'Cadastros', itens: [
       { to: '/motoristas', icon: Users, label: 'Motoristas' },
       { to: '/admins', icon: UserCircle, label: 'Usuários' },
+      // P2 — Perfis e Permissões: exige permissions.manage efetiva (fallback admin
+      // legado quando o modelo V9 ainda não popularizou effective_permissions).
+      ...(((user?.effective_permissions?.['permissions.manage'] === true)
+        || (!user?.effective_permissions && user?.role === 'admin'))
+        ? [{ to: '/perfis-permissoes', icon: ShieldCheck, label: 'Perfis e Permissões' }] : []),
     ] },
     ...(user?.role === 'admin' ? [{ titulo: 'Financeiro', itens: [
       { to: '/minhas-faturas', icon: Receipt, label: 'Faturas / Regularização' },

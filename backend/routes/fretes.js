@@ -8,6 +8,7 @@ const freteLocalizacaoController = require('../controllers/freteLocalizacaoContr
 const trackingCredentialController = require('../controllers/trackingCredentialController');
 const { verifyToken, isAdmin } = require('../middlewares/auth');
 const { verificarEmpresa } = require('../middlewares/tenant');
+const { requirePermission } = require('../middlewares/requirePermission');
 const { verificarPlano } = require('../middlewares/verificarPlano');
 const { criarGuardTelemetria, exigirTracking } = require('../middlewares/trackingCredential');
 const validate = require('../middlewares/validate');
@@ -37,7 +38,10 @@ router.use('/localizacao/sessao', telemetriaSessao);
 router.use(verifyToken, verificarEmpresa, verificarPlano);
 
 router.get('/', fretesController.getAll);
-router.post('/', validate(createFreteSchema), fretesController.create);
+// P2 — criar frete exige freight.create (admin/operador têm por padrão; motorista
+// = false por padrão → fecha o gap de auto-criação por motorista). requirePermission
+// libera super-admin e não altera o comportamento de quem já podia (admin).
+router.post('/', requirePermission('freight.create'), validate(createFreteSchema), fretesController.create);
 // Emissão da credencial de rastreamento — SEMPRE sob sessão SEC-1 (guard global acima).
 router.post('/localizacao/credencial', trackingCredentialController.emitir);
 router.post('/:id/correcao-financeira', validate(correcaoFinanceiraFreteSchema), fretesController.corrigirFinanceiro);

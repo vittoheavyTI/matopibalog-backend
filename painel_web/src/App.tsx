@@ -15,6 +15,7 @@ import { TorreControle } from './pages/TorreControle';
 import { GerenciamentoViagens } from './pages/GerenciamentoViagens';
 import { ResumoMotorista } from './pages/ResumoMotorista';
 import { Usuarios } from './pages/Usuarios';
+import { PerfisPermissoes } from './pages/PerfisPermissoes';
 import { Configuracoes } from './pages/Configuracoes';
 import { Integracoes } from './pages/Integracoes';
 import { Operacional } from './pages/Operacional';
@@ -87,6 +88,7 @@ const AppRoutes = () => {
         <Route path="relatorios/acerto-motoristas" element={<AcertoMotoristas />} />
         <Route path="relatorios/torre-controle" element={<TorreControle />} />
         <Route path="admins" element={<Usuarios />} />
+        <Route path="perfis-permissoes" element={<PerfisPermissoes />} />
         <Route path="operacional" element={<Operacional />} />
         <Route path="painel-administrativo">
           <Route index element={<Navigate to="visao-geral" replace />} />
