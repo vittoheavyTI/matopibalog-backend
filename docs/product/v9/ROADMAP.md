@@ -79,12 +79,12 @@ Ordem ajustada por dependência técnica objetiva: FLEET é pré-requisito de PL
 
 ### ONDA 1 — Qualidade do produto atual _(transversal, baixo risco)_
 - **E1.1 Realtime** (RBV9-INV-053/093, D-017/D-027): ✅ **entregue** — SSE autenticado backend-mediated (`/realtime/stream` + `realtimeBus`) para lançamentos; web (fetch stream) e app (http stream) refazem fetch canônico; reconnect/visibility/resume. Escala horizontal DEFERRED (RBV9-INV-107). _Notificações/torre ficam para ondas seguintes._
-- **E1.2 Lançamentos audit-safe** (RBV9-INV-052, D-018/D-019): ✅ **entregue** (aguardando migration gate) — máquina de estados + RPC transacional (row lock + CAS) + ledger append-only `lancamento_eventos` + motivo obrigatório em rejeição/cancelamento. Migration 070 **não aplicada em prod**.
+- **E1.2 Lançamentos audit-safe** (RBV9-INV-052, D-018/D-019): ✅ **DEPLOYADO** — máquina de estados + RPC transacional (row lock + CAS) + ledger append-only `lancamento_eventos` + motivo obrigatório em rejeição/cancelamento. **Migration 070 aplicada+rastreada em prod** (`20260820033844`, mecanismo canônico, 0 escrita de negócio).
 - **E1.3 Separação financeira** (RBV9-INV-055, D-035): pendente (próxima).
 - **E1.4 Scanner + viewer PDF-first** (RBV9-INV-044/047, D-016): pendente.
 - **E1.5 Permissões templates+overrides** (RBV9-INV-018, D-006/D-008/D-010) — **próxima epic** (fundação para dashboards por papel, D-007).
 - **E1.6 Paridade painel↔app** (RBV9-INV-054, D-020): ✅ **entregue** (abastecimento: arla/odômetro/preço-litro/observação; observação obrigatória no create web+app). UX/máscaras/sidebar (RBV9-INV-098/099) seguem pendentes.
-- **Dependências:** E1.5 antes de D-007/D-011. **Gate:** sem regressão nos fluxos vivos; CI verde; **migration 070 aplicada só com autorização do owner** (`READY_FOR_OWNER_MIGRATION_GATE`).
+- **Dependências:** E1.5 antes de D-007/D-011. **Estado:** Onda 1 (E1.1/E1.2/E1.6 + E1.6A) **DEPLOYADA em produção** (PR #435, `MERGE_SHA=f43f009`, migration 070 aplicada+rastreada, CI verde, sem regressão) — `AWAITING_OWNER_VISUAL_VALIDATION`. **Próxima epic: E1.5 Permissões (templates+overrides).**
 
 ### ONDA 2 — Fundação Frota
 - **E2.1 fleet_assets + composições + membros** (RBV9-INV-033/034, D-001..D-003).
