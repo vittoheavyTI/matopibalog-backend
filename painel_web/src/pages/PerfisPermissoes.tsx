@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import api from '../api';
+import { UsuariosPermissoes } from './UsuariosPermissoes';
 
 // P2 — Perfis e Permissões (templates da empresa + visibility policy do motorista).
 // A empresa define o PADRÃO por perfil; usuários herdam; overrides individuais
@@ -38,6 +39,7 @@ export function PerfisPermissoes() {
   const [saving, setSaving] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
+  const [tab, setTab] = useState<'perfis' | 'usuarios'>('perfis');
 
   const carregar = async () => {
     setLoading(true); setErro(null);
@@ -102,10 +104,23 @@ export function PerfisPermissoes() {
         acima das permissões.
       </p>
 
+      <div className="mt-4 flex gap-2 border-b border-gray-200 dark:border-gray-700">
+        {(['perfis', 'usuarios'] as const).map((t) => (
+          <button key={t} onClick={() => { setTab(t); setSelected(null); }}
+            className={`px-3 py-2 text-sm -mb-px border-b-2 ${tab === t ? 'border-green-600 text-green-700 dark:text-green-400 font-medium' : 'border-transparent text-gray-500'}`}>
+            {t === 'perfis' ? 'Perfis' : 'Usuários e exceções'}
+          </button>
+        ))}
+      </div>
+
       {erro && <div className="mt-4 rounded bg-red-50 text-red-700 px-4 py-2 text-sm">{erro}</div>}
       {ok && <div className="mt-4 rounded bg-green-50 text-green-700 px-4 py-2 text-sm">{ok}</div>}
 
-      {!selected && (
+      {tab === 'usuarios' && (
+        <UsuariosPermissoes permissions={permissions} templates={templates} visModes={visModes} />
+      )}
+
+      {tab === 'perfis' && !selected && (
         <>
           <div className="mt-6 grid gap-3 sm:grid-cols-2">
             {visiveis.map((t) => (
@@ -133,7 +148,7 @@ export function PerfisPermissoes() {
         </>
       )}
 
-      {selected && (
+      {tab === 'perfis' && selected && (
         <div className="mt-6">
           <button onClick={() => setSelected(null)} className="text-sm text-gray-500 hover:text-gray-700">← Voltar aos perfis</button>
           <h2 className="mt-2 text-xl font-semibold text-gray-800 dark:text-gray-100">{selected.display_name}</h2>
