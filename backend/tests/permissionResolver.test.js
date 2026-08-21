@@ -148,6 +148,40 @@ test('driver autônomo: visibilidade financeira = full por padrão (preserva efe
   assert.equal(overrideCommission.driverFinancialVisibility, DRIVER_FINANCIAL_VISIBILITY.COMMISSION_ONLY);
 });
 
+// ── P2.9: LAUNCH transitions + REPORTS por template (features existentes) ─────
+test('launch approve/reject/cancel: operador NÃO; gerente_frota e administrador SIM', () => {
+  const op = computeEffectivePermissions({ user: { tipo: 'operador' }, template: tpl('operador') });
+  for (const k of ['launch.approve', 'launch.reject', 'launch.cancel']) assert.equal(hasPermission(op, k), false, `operador não deve ${k}`);
+  assert.equal(hasPermission(op, 'launch.create'), true);
+
+  const gf = computeEffectivePermissions({ user: { tipo: 'admin' }, template: tpl('gerente_frota') });
+  for (const k of ['launch.approve', 'launch.reject', 'launch.cancel']) assert.equal(hasPermission(gf, k), true, `gerente_frota deve ${k}`);
+
+  const adm = computeEffectivePermissions({ user: { tipo: 'admin' }, template: tpl('administrador') });
+  for (const k of ['launch.approve', 'launch.reject', 'launch.cancel']) assert.equal(hasPermission(adm, k), true);
+});
+
+test('reports: operador tem operational mas NÃO financial; financeiro/administrador têm financial', () => {
+  const op = computeEffectivePermissions({ user: { tipo: 'operador' }, template: tpl('operador') });
+  assert.equal(hasPermission(op, 'reports.operational.view'), true);
+  assert.equal(hasPermission(op, 'reports.financial.view'), false);
+
+  const fin = computeEffectivePermissions({ user: { tipo: 'admin' }, template: tpl('financeiro') });
+  assert.equal(hasPermission(fin, 'reports.financial.view'), true);
+  assert.equal(hasPermission(fin, 'launch.approve'), false); // financeiro não aprova lançamentos
+
+  const adm = computeEffectivePermissions({ user: { tipo: 'admin' }, template: tpl('administrador') });
+  assert.equal(hasPermission(adm, 'reports.financial.view'), true);
+  assert.equal(hasPermission(adm, 'reports.operational.view'), true);
+});
+
+test('users.view: administrador SIM; motorista NÃO (feature existente enforced)', () => {
+  const adm = computeEffectivePermissions({ user: { tipo: 'admin' }, template: tpl('administrador') });
+  assert.equal(hasPermission(adm, 'users.view'), true);
+  const mot = computeEffectivePermissions({ user: { tipo: 'motorista' }, template: tpl('motorista'), legacyDriver: {} });
+  assert.equal(hasPermission(mot, 'users.view'), false);
+});
+
 // ── LEGADO: preservação de efetivo (admin coarse) ────────────────────────────
 test('admin com template administrador mantém governança independentemente de overrides de menu .view', () => {
   const eff = computeEffectivePermissions({

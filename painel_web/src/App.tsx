@@ -85,8 +85,8 @@ const AppRoutes = () => {
         <Route path="relatorios" element={<Relatorios />} />
         <Route path="relatorios/viagens" element={<GerenciamentoViagens />} />
         <Route path="relatorios/resumo" element={<ResumoMotorista />} />
-        <Route path="relatorios/rentabilidade" element={<PermissionRoute permission="finance.operational.view"><Rentabilidade /></PermissionRoute>} />
-        <Route path="relatorios/acerto-motoristas" element={<PermissionRoute permission="finance.operational.view"><AcertoMotoristas /></PermissionRoute>} />
+        <Route path="relatorios/rentabilidade" element={<PermissionRoute permission="reports.financial.view"><Rentabilidade /></PermissionRoute>} />
+        <Route path="relatorios/acerto-motoristas" element={<PermissionRoute permission="reports.financial.view"><AcertoMotoristas /></PermissionRoute>} />
         <Route path="relatorios/torre-controle" element={<TorreControle />} />
         <Route path="admins" element={<Usuarios />} />
         <Route path="perfis-permissoes" element={<PermissionRoute permission="permissions.manage"><PerfisPermissoes /></PermissionRoute>} />

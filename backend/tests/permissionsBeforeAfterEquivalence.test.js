@@ -23,6 +23,8 @@ const CAPS = [
   'users.view', 'company.settings.view', 'drivers.view', 'reports.operational.view',
   'users.manage', 'permissions.manage', 'finance.operational.view', 'finance.operational.manage',
   'freight.view', 'freight.create', 'freight.finish', 'launch.view', 'launch.create', 'documents.view',
+  // P2.9 — features EXISTENTES agora enforced (launch transitions + relatórios financeiros).
+  'launch.approve', 'launch.reject', 'launch.cancel', 'reports.financial.view',
 ];
 
 function bool(v, def) { return (v === undefined || v === null) ? def : v === true; }
@@ -37,10 +39,12 @@ function legacyEffective(p) {
     e['company.settings.view'] = bool(menu.configuracoes, true);
     e['drivers.view'] = bool(menu.motoristas, true);
     e['reports.operational.view'] = bool(menu.relatorios, true);
-    // governança + operação + financeiro operacional: admin sempre teve.
+    // governança + operação + financeiro operacional + transições + relatórios
+    // financeiros: admin coarse (role='admin') sempre pôde no modelo legado.
     for (const k of ['users.manage', 'permissions.manage', 'finance.operational.view',
       'finance.operational.manage', 'freight.view', 'freight.create', 'freight.finish',
-      'launch.view', 'launch.create', 'documents.view']) e[k] = true;
+      'launch.view', 'launch.create', 'launch.approve', 'launch.reject', 'launch.cancel',
+      'documents.view', 'reports.financial.view']) e[k] = true;
   } else if (p.tipo === 'motorista') {
     for (const k of CAPS) e[k] = false;
     e['freight.view'] = true; e['launch.view'] = true; e['launch.create'] = true; e['documents.view'] = true;

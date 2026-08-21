@@ -164,30 +164,35 @@ export const Sidebar: React.FC = () => {
   // comercial (a aba "Plano e contratação" continua dentro dela).
   type GrupoNav = { titulo: string; itens: { to: string; icon: typeof LayoutDashboard; label: string }[] };
 
-  // P2 — financeiro operacional (Rentabilidade/Acerto) exige finance.operational.view
-  // efetiva (fallback admin legado quando o modelo V9 ainda não popularizou o efetivo).
-  const podeFinanceiroOperacional = (user?.effective_permissions?.['finance.operational.view'] === true)
-    || (!user?.effective_permissions && user?.role === 'admin');
+  // P2.9 — gate de menu por permissão efetiva V9 (backend é a autoridade real; isto só
+  // esconde itens). Fallback: admin legado enxerga tudo até o efetivo ser populado.
+  const can = (key: string): boolean =>
+    user?.is_super_admin === true
+    || (user?.effective_permissions
+      ? user.effective_permissions[key] === true
+      : user?.role === 'admin');
 
   const gruposCliente: GrupoNav[] = [
     { titulo: 'Operação', itens: [
       { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
       { to: '/relatorios/viagens', icon: Truck, label: 'Gerenciamento de Fretes' },
-      { to: '/relatorios/torre-controle', icon: TowerControl, label: 'Torre de Controle' },
+      ...(can('reports.operational.view') ? [
+        { to: '/relatorios/torre-controle', icon: TowerControl, label: 'Torre de Controle' },
+      ] : []),
       { to: '/relatorios/resumo', icon: History, label: 'Histórico de Fretes' },
       { to: '/relatorios', icon: FileText, label: 'Relatórios' },
-      ...(podeFinanceiroOperacional ? [
+      // Rentabilidade/Acerto são RELATÓRIOS FINANCEIROS → reports.financial.view.
+      ...(can('reports.financial.view') ? [
         { to: '/relatorios/rentabilidade', icon: TrendingUp, label: 'Rentabilidade' },
         { to: '/relatorios/acerto-motoristas', icon: Receipt, label: 'Acerto de Motoristas' },
       ] : []),
     ] },
     { titulo: 'Cadastros', itens: [
       { to: '/motoristas', icon: Users, label: 'Motoristas' },
-      { to: '/admins', icon: UserCircle, label: 'Usuários' },
-      // P2 — Perfis e Permissões: exige permissions.manage efetiva (fallback admin
-      // legado quando o modelo V9 ainda não popularizou effective_permissions).
-      ...(((user?.effective_permissions?.['permissions.manage'] === true)
-        || (!user?.effective_permissions && user?.role === 'admin'))
+      // Usuários (lista) exige users.view; administração (mutations) exige users.manage.
+      ...(can('users.view') ? [{ to: '/admins', icon: UserCircle, label: 'Usuários' }] : []),
+      // Perfis e Permissões: exige permissions.manage (distinto de users.manage).
+      ...(can('permissions.manage')
         ? [{ to: '/perfis-permissoes', icon: ShieldCheck, label: 'Perfis e Permissões' }] : []),
     ] },
     ...(user?.role === 'admin' ? [{ titulo: 'Financeiro', itens: [

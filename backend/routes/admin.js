@@ -27,8 +27,10 @@ router.get('/plano-uso', verificarEmpresa, adminController.getPlanoUso);
 // permissions.manage, que gere templates/overrides em routes/permissions.js). Assim,
 // um usuário com permissions.manage=true e users.manage=false pode editar perfis mas
 // NÃO criar/editar/remover usuários. Admin tem ambos via template; super-admin passa.
-// Leitura (getUsuarios) permanece isAdmin (users.view fica p/ etapa futura de UI).
-router.get('/usuarios', verificarEmpresa, adminController.getUsuarios);
+// P2.9 — LEITURA exige users.view (feature existente; legacyMenuKey 'usuarios'). A
+// migration 6a reproduz o menu legado desligado como override DENY users.view → a API
+// passa a refletir a intenção do menu (admin tem por padrão; super-admin passa).
+router.get('/usuarios', verificarEmpresa, requirePermission('users.view'), adminController.getUsuarios);
 router.post('/usuarios', verificarEmpresa, verificarPlano, requirePermission('users.manage'), adminController.createUsuario);
 router.put('/usuarios/:id', verificarEmpresa, verificarPlano, requirePermission('users.manage'), adminController.updateUsuario);
 router.delete('/usuarios/:id', verificarEmpresa, verificarPlano, requirePermission('users.manage'), adminController.deleteUsuario);
