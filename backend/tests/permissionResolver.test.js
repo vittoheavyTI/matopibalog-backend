@@ -182,6 +182,79 @@ test('users.view: administrador SIM; motorista NÃO (feature existente enforced)
   assert.equal(hasPermission(mot, 'users.view'), false);
 });
 
+// ── P2.10: DELEGAÇÃO real (template não é decorativo) ────────────────────────
+test('delegação drivers.view: operador inherit=false → template ALLOW=true → override DENY=false → remove=true', () => {
+  // baseline operador NÃO tem drivers.manage nem drivers.view? operador TEM drivers.view.
+  // Para provar delegação, começamos de um template SEM a key e a empresa concede.
+  const semDrivers = tpl('operador');
+  delete semDrivers.permissions['drivers.view'];
+  const A = computeEffectivePermissions({ user: { tipo: 'operador' }, template: semDrivers });
+  assert.equal(hasPermission(A, 'drivers.view'), false, 'inherit sem a key → deny');
+
+  const comDrivers = tpl('operador');
+  comDrivers.permissions['drivers.view'] = true; // empresa concede no template
+  const B = computeEffectivePermissions({ user: { tipo: 'operador' }, template: comDrivers });
+  assert.equal(hasPermission(B, 'drivers.view'), true, 'template ALLOW → concede');
+
+  const C = computeEffectivePermissions({ user: { tipo: 'operador' }, template: comDrivers, overrides: { 'drivers.view': 'deny' } });
+  assert.equal(hasPermission(C, 'drivers.view'), false, 'override DENY protege');
+
+  const D = computeEffectivePermissions({ user: { tipo: 'operador' }, template: comDrivers });
+  assert.equal(hasPermission(D, 'drivers.view'), true, 'remover override → volta a herdar');
+});
+
+// ── P2.10: NEGATIVE ADMIN OVERRIDE (isAdmin NÃO fura o V9) ────────────────────
+test('negative admin override: administrador com DENY em drivers.manage/company.settings.manage/finance.saas.view → NEGADO mesmo tipo=admin', () => {
+  for (const k of ['drivers.manage', 'company.settings.manage', 'finance.saas.view']) {
+    const eff = computeEffectivePermissions({
+      user: { tipo: 'admin' }, template: tpl('administrador'), overrides: { [k]: 'deny' },
+    });
+    assert.equal(hasPermission(eff, k), false, `override DENY ${k} deve negar mesmo para admin`);
+    assert.equal(eff.source[k], 'override');
+  }
+  // governança (users.manage/permissions.manage) segue protegida pela guarda de DB
+  // (último admin), não por este caminho — aqui só provamos que o override vence o template.
+});
+
+test('autônomo: finance.saas.view = true por bypass (dono vê faturas SaaS da própria empresa)', () => {
+  const auto = computeEffectivePermissions({ user: { tipo: 'motorista', empresa_tipo: 'autonomo' }, template: tpl('motorista'), legacyDriver: {} });
+  assert.equal(hasPermission(auto, 'finance.saas.view'), true);
+  const vinc = computeEffectivePermissions({ user: { tipo: 'motorista', empresa_tipo: 'transportadora' }, template: tpl('motorista'), legacyDriver: {} });
+  assert.equal(hasPermission(vinc, 'finance.saas.view'), false, 'motorista de empresa não vê faturas SaaS');
+});
+
+// ── P2.10: ESTRUTURA OPERACIONAL — autoridade em camadas (ENTITLEMENT ∧ PERMISSÃO) ──
+// A rota /operacional aplica: verifyToken → verificarEmpresa → entitlement → requirePermission.
+// O resolver espelha a mesma álgebra (defesa em profundidade): entitlement DENY vence tudo;
+// com entitlement ALLOW, a permissão efetiva decide; override DENY nega mesmo para admin.
+test('estrutura_operacional: entitlement DENY nega mesmo admin com template ALLOW (entitlement > permissão)', () => {
+  const eff = computeEffectivePermissions({
+    user: { tipo: 'admin' }, template: tpl('administrador'),
+    entitlements: { estrutura_operacional: false },
+  });
+  assert.equal(hasPermission(eff, 'estrutura_operacional.gerenciar'), false);
+  assert.equal(eff.source['estrutura_operacional.gerenciar'], 'entitlement_denied');
+});
+
+test('estrutura_operacional: entitlement ALLOW + admin template ALLOW → concede', () => {
+  const eff = computeEffectivePermissions({
+    user: { tipo: 'admin' }, template: tpl('administrador'),
+    entitlements: { estrutura_operacional: true },
+  });
+  assert.equal(hasPermission(eff, 'estrutura_operacional.gerenciar'), true);
+  assert.equal(eff.source['estrutura_operacional.gerenciar'], 'template');
+});
+
+test('estrutura_operacional: NEGATIVE ADMIN OVERRIDE — entitlement ALLOW mas override DENY → NEGADO mesmo tipo=admin', () => {
+  const eff = computeEffectivePermissions({
+    user: { tipo: 'admin' }, template: tpl('administrador'),
+    entitlements: { estrutura_operacional: true },
+    overrides: { 'estrutura_operacional.gerenciar': 'deny' },
+  });
+  assert.equal(hasPermission(eff, 'estrutura_operacional.gerenciar'), false, 'isAdmin não fura o override DENY');
+  assert.equal(eff.source['estrutura_operacional.gerenciar'], 'override');
+});
+
 // ── LEGADO: preservação de efetivo (admin coarse) ────────────────────────────
 test('admin com template administrador mantém governança independentemente de overrides de menu .view', () => {
   const eff = computeEffectivePermissions({

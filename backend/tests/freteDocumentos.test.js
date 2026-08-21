@@ -95,6 +95,26 @@ async function upload(reqOver, cenario) {
   return { res, chamadas };
 }
 
+// P2.10 — o gate empresarial de upload exige documents.manage EFETIVA. O controller
+// resolve via require lazy de '../middlewares/requirePermission'; para testar o gate
+// sem I/O real, pré-populamos o require.cache desse módulo com um ensureEffective
+// controlável e restauramos ao final (robusto contra o timing do Module._load).
+const permPath = require.resolve('../middlewares/requirePermission');
+function stubEnsureEffective(effective) {
+  const original = require.cache[permPath];
+  require.cache[permPath] = {
+    id: permPath, filename: permPath, loaded: true, exports: {
+      ensureEffective: async () => ({ permissions: effective || {} }),
+    },
+  };
+  return function restaurar() {
+    if (original) require.cache[permPath] = original; else delete require.cache[permPath];
+  };
+}
+
+const userAdminPropria = { uid: 'adm-1', role: 'admin', is_super_admin: false };
+const userSuperAdmin = { uid: 'sa-1', role: 'admin', is_super_admin: true };
+
 test('upload: motorista dono anexa PDF -> 201, row com empresa_id/frete_id derivados e bucket privado', async () => {
   const { res, chamadas } = await upload({}, { frete: FRETE, count: 0 });
   assert.equal(res.statusCode, 201);
@@ -135,6 +155,39 @@ test('upload: admin de OUTRA empresa -> 403 (isolamento) sem upload', async () =
   const { res, chamadas } = await upload({ user: userAdminOutra, empresa_id: 'emp-OUTRA' }, { frete: FRETE, count: 0 });
   assert.equal(res.statusCode, 403);
   assert.equal(chamadas.uploads.length, 0);
+});
+
+// ── P2.10: documentos = ação CONTEXTUAL do motorista vs. gestão EMPRESARIAL ──
+test('upload: admin da PRÓPRIA empresa SEM documents.manage -> 403 (gate empresarial)', async () => {
+  const restaurar = stubEnsureEffective({ 'documents.manage': false });
+  try {
+    const { res, chamadas } = await upload({ user: userAdminPropria, empresa_id: 'emp-1' }, { frete: FRETE, count: 0 });
+    assert.equal(res.statusCode, 403);
+    assert.equal(res.body.permission, 'documents.manage');
+    assert.equal(chamadas.uploads.length, 0);
+  } finally { restaurar(); }
+});
+
+test('upload: admin da PRÓPRIA empresa COM documents.manage -> 201 (gestão empresarial)', async () => {
+  const restaurar = stubEnsureEffective({ 'documents.manage': true });
+  try {
+    const { res } = await upload({ user: userAdminPropria, empresa_id: 'emp-1' }, { frete: FRETE, count: 0 });
+    assert.equal(res.statusCode, 201);
+  } finally { restaurar(); }
+});
+
+test('upload: motorista dono NÃO precisa de documents.manage -> 201 (acesso contextual preservado)', async () => {
+  // Sem stub: se o controller tentasse exigir documents.manage do motorista, quebraria.
+  const { res } = await upload({ user: userMotoristaDono, empresa_id: 'emp-1' }, { frete: FRETE, count: 0 });
+  assert.equal(res.statusCode, 201);
+});
+
+test('upload: super-admin ignora o gate documents.manage -> 201', async () => {
+  const restaurar = stubEnsureEffective({ 'documents.manage': false });
+  try {
+    const { res } = await upload({ user: userSuperAdmin, empresa_id: 'emp-1' }, { frete: FRETE, count: 0 });
+    assert.equal(res.statusCode, 201);
+  } finally { restaurar(); }
 });
 
 test('upload: motorista NÃO dono -> 403', async () => {

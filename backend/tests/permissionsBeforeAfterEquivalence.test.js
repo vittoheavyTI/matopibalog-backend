@@ -25,6 +25,8 @@ const CAPS = [
   'freight.view', 'freight.create', 'freight.finish', 'launch.view', 'launch.create', 'documents.view',
   // P2.9 — features EXISTENTES agora enforced (launch transitions + relatórios financeiros).
   'launch.approve', 'launch.reject', 'launch.cancel', 'reports.financial.view',
+  // P2.10 — capabilities que deixaram de ser coarse-isAdmin e viraram efetivas.
+  'company.settings.manage', 'freight.manage', 'documents.manage', 'drivers.manage', 'finance.saas.view',
 ];
 
 function bool(v, def) { return (v === undefined || v === null) ? def : v === true; }
@@ -40,11 +42,12 @@ function legacyEffective(p) {
     e['drivers.view'] = bool(menu.motoristas, true);
     e['reports.operational.view'] = bool(menu.relatorios, true);
     // governança + operação + financeiro operacional + transições + relatórios
-    // financeiros: admin coarse (role='admin') sempre pôde no modelo legado.
+    // financeiros + gestão (P2.10): admin coarse (role='admin') sempre pôde no legado.
     for (const k of ['users.manage', 'permissions.manage', 'finance.operational.view',
       'finance.operational.manage', 'freight.view', 'freight.create', 'freight.finish',
       'launch.view', 'launch.create', 'launch.approve', 'launch.reject', 'launch.cancel',
-      'documents.view', 'reports.financial.view']) e[k] = true;
+      'documents.view', 'reports.financial.view',
+      'company.settings.manage', 'freight.manage', 'documents.manage', 'drivers.manage', 'finance.saas.view']) e[k] = true;
   } else if (p.tipo === 'motorista') {
     for (const k of CAPS) e[k] = false;
     e['freight.view'] = true; e['launch.view'] = true; e['launch.create'] = true; e['documents.view'] = true;
@@ -52,6 +55,9 @@ function legacyEffective(p) {
     e['freight.finish'] = (p.empresa_tipo === 'autonomo') || bool(p.pode_finalizar_viagem, false);
     // create legado: motorista podia criar frete implicitamente (auto-criação).
     e['freight.create'] = true;
+    // finance.saas.view: só o AUTÔNOMO (dono do negócio) via /me/faturas contextual.
+    // Motorista de empresa NÃO acessava faturas SaaS (rota /me/faturas é autônomo-only).
+    e['finance.saas.view'] = (p.empresa_tipo === 'autonomo');
   }
   return e;
 }

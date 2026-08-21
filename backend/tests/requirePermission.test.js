@@ -75,3 +75,17 @@ test('finance.operational: VIEW=false → nem lê', async () => {
   assert.equal(r.passou, false);
   assert.equal(r.resp.s, 403);
 });
+
+// P2.10 — negative admin override: role='admin' mas capability efetiva FALSE → 403.
+// Prova que o middleware NÃO usa isAdmin como bypass (só super_admin + efetivo).
+test('admin com drivers.manage efetivo FALSE → 403 (isAdmin não fura o V9)', async () => {
+  const r = await rodar(carregar({ 'drivers.manage': false })('drivers.manage'), { uid: 'a1', role: 'admin' });
+  assert.equal(r.passou, false);
+  assert.equal(r.resp.s, 403);
+});
+
+// P2.10 — delegação: role='operador' com a capability efetiva TRUE → passa.
+test('operador com drivers.view efetivo TRUE → next() (delegação funciona)', async () => {
+  const r = await rodar(carregar({ 'drivers.view': true })('drivers.view'), { uid: 'o1', role: 'operador' });
+  assert.equal(r.passou, true);
+});
