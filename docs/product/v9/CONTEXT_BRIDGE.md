@@ -1,7 +1,7 @@
 # Matopiba Log — CONTEXT BRIDGE V9
 
 > **Handoff compacto.** Leia este arquivo primeiro ao retomar em outro chat/agente. Os detalhes estão nos 4 documentos linkados no fim.
-> Atualizado: **2026-08-19** (macrofrente RBV9, docs-only).
+> Atualizado: **2026-08-21** (P2 + E1.3 fechados em produção).
 
 ---
 
@@ -17,8 +17,8 @@
 
 | | |
 |---|---|
-| `origin/main` | **`569fde7`** (PR #437 / hotfix Onda 1 — migration 071 `cancelado` no CHECK + SSE na tela de detalhe do app). Marcos anteriores: `f43f009` (PR #435 / Onda 1 realtime+audit-safe, migration 070), `865b4b8` (PR #436 / docs-close Onda 1), `6c3cc4e` (RBV9+fiscal, PRs #433/#434), `2c36450` (PR #432 / F5B-2). |
-| Deploy produção | Railway `matopibalog-backend` deploy `2ff32276` **SUCCESS** |
+| `origin/main` | **`b695102`** (PR #441 / E1.3 separação financeira operacional x SaaS). Marcos anteriores: `d9e0c30` (PR #442 / close P2 pós-Railway), `e718eb3` (PR #440 / P2), `569fde7` (PR #437 / hotfix Onda 1). |
+| Deploy produção | Railway `matopibalog-backend` deploy `de93df0c-8524-4a50-8be1-5bfb7130bcc3` **SUCCESS** (`commitHash=b695102`, `numReplicas=1`) |
 | Health | **HTTP 200** `{"status":"UP"}` em `https://api.matopibalog.com.br/health` |
 | Banco | Supabase `rjahjogidyndphdxevom` · 62 tabelas públicas · RLS 100% |
 | Asaas | **DESARMADO**: sem `ASAAS_API_KEY`, provider=fake, production=false, allowlist vazia, outbox=false, `billing_outbox`=0. **Não reativar sem autorização.** |
@@ -36,9 +36,11 @@ Matopiba vira **frota/operação-centric** (D-001): o eixo é o **veículo/compo
 
 ## Macrofrente atual
 
-**`CURRENT_MACROFRONT = E1.3_RELEASE_CLOSURE`**. P2 / E1.5 = tecnicamente CLOSED; próximo release na fila é o PR #441 (E1.3). Onda 1 = tecnicamente CLOSED (ver §Estado da Onda 1); validação de aparelho no `MOBILE_RELEASE_TRAIN_M1`.
+**`CURRENT_MACROFRONT = E1.4A_DOCUMENTS_FOUNDATION_SECURITY_WEB`**. P2 / E1.5 = tecnicamente CLOSED; E1.3 = CLOSED em produção. Onda 1 = tecnicamente CLOSED (ver §Estado da Onda 1); validação de aparelho no `MOBILE_RELEASE_TRAIN_M1`.
 
 **P2 — Permissões (templates+overrides) CLOSED técnico.** Migration **072** (aditiva/idempotente, hash `4069b0e0…46ce5`) foi **aplicada+rastreada em produção** (`20260821043352`) e o backend **e718eb36103de1aea233e2a868cf37b7b4f51e38** foi implantado no Railway após regularização do billing (`DEPLOYMENT=987c7a52-b240-4bd4-a855-24318ba8c72b`, `SUCCESS`, `numReplicas=1`, health 200). Frontend P2 no GitHub Pages também está em `e718eb3`. Pós-deploy read-only: `/health` 200; `/auth/me`, `/admin/permissions/templates` e `/realtime/stream` sem auth retornam 401; logs novos sem 500/uncaught/unhandled/permission/RLS inesperado. Sanity P2: templates provisionados sem `stable_key` duplicada por empresa; usuários ativos com `permission_template_id`; governança efetiva preservada no recorte operacional; Asaas permaneceu inerte (`ASAAS_API_KEY` ausente, allowlist vazia, outbox off). App: código P2 pronto, mas **validação física = `DEFERRED_TO_MOBILE_RELEASE_TRAIN_M1`** (**DEFERRED ≠ PASS**). `P2_TECHNICAL_STATUS=CLOSED`.
+
+**E1.3 — Separação financeira operacional x SaaS CLOSED.** PR #441 foi mergeado (`MERGE_SHA=b69510230a03d9d5dd6a4d1d71cbf5c1b64802b2`) e deployado em produção no Railway (`DEPLOYMENT=de93df0c-8524-4a50-8be1-5bfb7130bcc3`, `SUCCESS`, `numReplicas=1`) e no GitHub Pages (`Deploy to GitHub Pages` success no mesmo SHA). Validação: Backend CI, Frontend CI e SEC-1 Browser E2E verdes em PR e `main`; backend local `1631/1631`; web local `116/116` + `tsc -b && vite build`; health 200; `/auth/me`, `/admin/permissions/templates` e `/realtime/stream` sem auth retornam 401; logs HTTP 5xx novos vazios. Boundary D-035: `Dashboard.tsx` operacional não renderiza KPIs SaaS nem busca `/painel-admin/empresas`; MRR/trial/inadimplência ficam em `PainelVisaoGeral` (`/painel-administrativo/visao-geral`, `SuperAdminRoute`) com a mesma fonte e regra histórica `suspenso`/`bloqueado`/`expirado`. `E13_IMPLEMENTED_IN_PR=true`; `E13_DEPLOYED=true`; `E13_PRODUCTION_VALIDATED=true`.
 
 A **RBV9 — Rebaseline V9** (docs-only) está **concluída** e inclui o **patch fiscal V9** (domínio `FISCAL_INVOICING`, decisões D-036..D-041, ledger FISC-001..020, track NFS-e). **Nenhum código/dado/env de produção alterado por estes docs.**
 
