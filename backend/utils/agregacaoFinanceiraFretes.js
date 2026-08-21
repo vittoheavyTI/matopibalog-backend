@@ -17,7 +17,27 @@
 const STATUS_FRETE_RECEITA_REALIZADA = 'finalizado';
 const STATUS_FRETE_EXCLUIDOS = ['cancelado'];
 
+// ── Regras de STATUS de LANÇAMENTO (despesa / abastecimento / vale) ───────────
+// E1.3 (D-035 / RBV9-INV-055): fonte ÚNICA das regras de status de lançamento do
+// financeiro OPERACIONAL, para dashboard, relatórios, rentabilidade e acerto não
+// repetirem literais (o que causava divergência de KPI entre telas). Não muda a
+// regra vigente — apenas centraliza os mesmos valores num único lugar.
+//   * EFETIVADO   = 'aprovado' | 'finalizado' → entra nos agregados/realizado.
+//   * NÃO COMPÕE  = 'cancelado' | 'rejeitado' → nunca entra em consolidado/ficha.
+//     (Onda 1 §15: cancelado nunca compõe; rejeitado nunca conta como válido.)
+// 'pendente' fica FORA do efetivado (regra específica de cada tela decide se exibe).
+const STATUS_LANCAMENTO_EFETIVADO = ['aprovado', 'finalizado'];
+const STATUS_LANCAMENTO_NAO_COMPOE = ['cancelado', 'rejeitado'];
+
 const statusDe = (frete) => (frete && frete.status != null ? String(frete.status) : '');
+
+// Predicados de lançamento (mesmo parse seguro dos fretes).
+const statusLancamentoDe = (lancamento) =>
+  (lancamento && lancamento.status != null ? String(lancamento.status) : '');
+const lancamentoEfetivado = (lancamento) =>
+  STATUS_LANCAMENTO_EFETIVADO.includes(statusLancamentoDe(lancamento));
+const lancamentoNaoCompoe = (lancamento) =>
+  STATUS_LANCAMENTO_NAO_COMPOE.includes(statusLancamentoDe(lancamento));
 
 // Conta como receita realizada? Somente 'finalizado' (ativo/pendente/cancelado → false).
 const freteContaComoReceita = (frete) => statusDe(frete) === STATUS_FRETE_RECEITA_REALIZADA;
@@ -45,8 +65,12 @@ const somarReceitaRealizada = (fretes) =>
 module.exports = {
   STATUS_FRETE_RECEITA_REALIZADA,
   STATUS_FRETE_EXCLUIDOS,
+  STATUS_LANCAMENTO_EFETIVADO,
+  STATUS_LANCAMENTO_NAO_COMPOE,
   freteContaComoReceita,
   freteEstaCancelado,
   lancamentoVinculadoAFreteCancelado,
+  lancamentoEfetivado,
+  lancamentoNaoCompoe,
   somarReceitaRealizada,
 };

@@ -1,6 +1,8 @@
 const { calcularComissao } = require('./comissao');
+// E1.3 (D-035): regra de "lançamento efetivado" da fonte única (mesmos valores).
+const { STATUS_LANCAMENTO_EFETIVADO: LANCAMENTO_EFETIVADO_KEYS } = require('./agregacaoFinanceiraFretes');
 
-const STATUS_LANCAMENTO_EFETIVADO = new Set(['aprovado', 'finalizado']);
+const STATUS_LANCAMENTO_EFETIVADO = new Set(LANCAMENTO_EFETIVADO_KEYS);
 const STATUS_FRETE_FINALIZADO = 'finalizado';
 const TIPO_ITEM = {
   CREDITO: 'credito',
