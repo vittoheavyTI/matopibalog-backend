@@ -1,13 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
-import { formatCurrency, getActiveRecurringContracts, getContractMonthlyPrice } from '../utils';
+import { formatCurrency } from '../utils';
 import {
   DollarSign, AlertCircle, FileText, Check, X,
   Save, Edit, Unlock, Lock, ChevronLeft, Plus, Fuel, TrendingUp,
-  Building2, Clock, AlertTriangle
 } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import api, { newClientRequestId } from '../api';
 import { EVENTO_NOTIFICACOES_NOVAS } from '../components/NotificacoesDropdown';
 import { PlanoBloqueadoCard } from '../components/PlanoBloqueadoCard';
@@ -89,9 +87,6 @@ export const Dashboard: React.FC = () => {
   const [despesas, setDespesas] = useState<any[]>([]);
   const [abastecimentos, setAbastecimentos] = useState<any[]>([]);
   const [vales, setVales] = useState<any[]>([]);
-  // Empresas da plataforma (só super-admin) — alimenta a seção Receita/Trial/Alertas
-  // fundida da antiga página "Visão Geral". Reaproveita a mesma query /painel-admin/empresas.
-  const [empresasPainel, setEmpresasPainel] = useState<any[]>([]);
   // Loading da lista "Motoristas em Frete" (rápida, independente).
   const [loadingEmViagem, setLoadingEmViagem] = useState(true);
 
@@ -155,14 +150,6 @@ export const Dashboard: React.FC = () => {
     // FINANCEIRO). O financeiro empresarial vive na área financeira (Acerto de
     // Motoristas / Rentabilidade), protegida por finance.operational.view. Assim, o
     // dashboard operacional não faz chamada financeira desnecessária para ninguém.
-
-    // Super-admin: empresas da plataforma para a seção Receita/Trial/Alertas.
-    // Independente e tolerante — falha não bloqueia o resto do Dashboard.
-    if (isSuperAdmin) {
-      api.get('/painel-admin/empresas')
-        .then(r => setEmpresasPainel(r.data || []))
-        .catch(() => setEmpresasPainel([]));
-    }
 
     await Promise.allSettled([motoristasEmViagemPromise]);
   };
@@ -514,20 +501,6 @@ export const Dashboard: React.FC = () => {
       })
     : motoristasEmViagem;
 
-  // Derivados da fusão da "Visão Geral" (só super-admin): MRR contratado,
-  // empresas em trial, ativas e inadimplentes/bloqueadas.
-  const empresasTrial = empresasPainel.filter((e: any) => e.status === 'trial');
-  const empresasAtivas = empresasPainel.filter((e: any) => e.status === 'ativo');
-  const empresasInadimplentes = empresasPainel.filter((e: any) => ['suspenso', 'bloqueado', 'expirado'].includes(e.status));
-  // Escalável: ordena por MRR desc e mostra só o Top 8 no gráfico (labels legíveis).
-  // "Ver todas" leva a Assinaturas quando houver mais que 8.
-  const empresasComMrr = getActiveRecurringContracts(empresasPainel)
-    .sort((a: any, b: any) => getContractMonthlyPrice(b) - getContractMonthlyPrice(a));
-  const receitaChart = empresasComMrr.slice(0, 8).map((e: any) => ({
-    nome: e.nome && e.nome.length > 10 ? e.nome.substring(0, 10) + '…' : (e.nome || '?'),
-    receita: getContractMonthlyPrice(e),
-  }));
-
   if (planoBloqueadoMsg) {
     return <div className="pt-10"><PlanoBloqueadoCard message={planoBloqueadoMsg} onRegularizar={() => navigate('/minhas-faturas')} /></div>;
   }
@@ -536,7 +509,7 @@ export const Dashboard: React.FC = () => {
     <div className="space-y-5 pb-10">
       {!selectedMot && (
         <div className="flex justify-between items-center gap-3 animate-fade-in">
-          <h2 className="text-2xl font-bold text-gray-800">{isSuperAdmin ? 'Visão Geral da Plataforma' : 'Dashboard'}</h2>
+          <h2 className="text-2xl font-bold text-gray-800">Dashboard</h2>
           <p className="text-xs text-gray-500 text-right">Visão do mês atual • Para outros períodos, use Relatórios ou Histórico</p>
         </div>
       )}
@@ -547,74 +520,8 @@ export const Dashboard: React.FC = () => {
           Rentabilidade, protegidas por finance.operational.view. O dashboard
           operacional foca em operação/fretes/status/motoristas/pendências. */}
 
-      {/* Seção b/c da fusão da "Visão Geral": MRR por Empresa + Trial + Alertas (só super-admin). */}
-      {!selectedMot && isSuperAdmin && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 animate-fade-in">
-          <div className="lg:col-span-2 bg-white rounded-xl border border-gray-100 shadow-sm p-4">
-            <div className="flex items-start justify-between mb-3">
-              <div>
-                <h3 className="font-bold text-gray-800 text-sm flex items-center"><TrendingUp size={16} className="mr-1.5 text-green-600" /> MRR por Empresa</h3>
-                <p className="text-xs text-gray-400">Top 8 por mensalidade recorrente · {empresasComMrr.length} contrato(s) · {empresasAtivas.length} ativa(s)</p>
-              </div>
-              {empresasComMrr.length > 8 && (
-                <button onClick={() => navigate('/painel-administrativo/financeiro?aba=visao-geral')} className="text-xs font-semibold text-green-700 hover:underline flex-shrink-0">Ver todas →</button>
-              )}
-            </div>
-            {receitaChart.length === 0 ? (
-              <div className="h-44 flex items-center justify-center bg-gray-50 rounded-lg border border-dashed border-gray-200">
-                <p className="text-sm text-gray-400">Nenhuma assinatura ativa com mensalidade</p>
-              </div>
-            ) : (
-              <div className="h-44">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={receitaChart} margin={{ top: 4, right: 8, left: 0, bottom: 4 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
-                    <XAxis dataKey="nome" tick={{ fontSize: 11, fill: '#6b7280' }} interval={0} angle={-20} textAnchor="end" height={44} />
-                    <YAxis tick={{ fontSize: 11, fill: '#6b7280' }} tickFormatter={(v: number) => `R$${v}`} width={56} />
-                    <Tooltip formatter={(v: any) => [formatCurrency(Number(v)), 'MRR contratado']} labelStyle={{ fontWeight: 700 }} />
-                    <Bar dataKey="receita" fill="#15803d" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-          </div>
-          <div className="space-y-4">
-            <button onClick={() => navigate('/painel-administrativo/financeiro?aba=assinaturas')} className="block w-full text-left bg-white rounded-xl border border-gray-100 shadow-sm p-4 hover:border-amber-200 hover:shadow transition-all">
-              <h3 className="font-bold text-gray-800 text-sm mb-2 flex items-center justify-between">
-                <span className="flex items-center"><Clock size={15} className="mr-1.5 text-amber-500" /> Empresas em Trial</span>
-                <span className="text-[10px] font-bold text-amber-600 bg-amber-100 px-2 py-0.5 rounded-full">{empresasTrial.length}</span>
-              </h3>
-              {empresasTrial.length === 0 ? (
-                <p className="text-sm text-gray-400 py-2">Nenhuma empresa em trial.</p>
-              ) : (
-                <div className="space-y-1.5 max-h-32 overflow-auto">
-                  {empresasTrial.slice(0, 5).map((e: any, i: number) => (
-                    <div key={i} className="flex items-center justify-between px-3 py-2 bg-amber-50 rounded-lg">
-                      <span className="text-sm font-medium text-gray-700 truncate">{e.nome}</span>
-                      <span className="text-[10px] font-bold text-amber-600 flex-shrink-0 ml-2">Trial</span>
-                    </div>
-                  ))}
-                  {empresasTrial.length > 5 && <p className="text-xs text-amber-700 font-semibold px-1 pt-1">+{empresasTrial.length - 5} — ver em Assinaturas</p>}
-                </div>
-              )}
-            </button>
-            <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
-              <h3 className="font-bold text-gray-800 text-sm mb-2 flex items-center"><AlertTriangle size={15} className="mr-1.5 text-red-500" /> Alertas</h3>
-              <div className="space-y-1.5">
-                <button onClick={() => navigate('/painel-administrativo/empresas')} className="flex items-center gap-2 w-full px-3 py-2 bg-blue-50 hover:bg-blue-100 rounded-lg text-sm text-gray-700 transition-colors">
-                  <Building2 size={15} className="text-blue-500 flex-shrink-0" /> <span className="flex-1 text-left">{empresasAtivas.length} empresa(s) ativa(s)</span>
-                </button>
-                <button onClick={() => navigate('/painel-administrativo/financeiro?aba=assinaturas')} className="flex items-center gap-2 w-full px-3 py-2 bg-yellow-50 hover:bg-yellow-100 rounded-lg text-sm text-gray-700 transition-colors">
-                  <Clock size={15} className="text-yellow-500 flex-shrink-0" /> <span className="flex-1 text-left">{empresasTrial.length} em período de teste</span>
-                </button>
-                <button onClick={() => navigate('/painel-administrativo/financeiro?aba=alertas')} className="flex items-center gap-2 w-full px-3 py-2 bg-red-50 hover:bg-red-100 rounded-lg text-sm text-gray-700 transition-colors">
-                  <AlertTriangle size={15} className="text-red-500 flex-shrink-0" /> <span className="flex-1 text-left">{empresasInadimplentes.length} suspensa(s)/bloqueada(s)</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* E1.3 · F-04 (D-035): indicadores comerciais da plataforma ficam na
+          superfície SaaS dedicada de super-admin, não no dashboard operacional. */}
 
       <div className="space-y-4">
         {!selectedMot && (
