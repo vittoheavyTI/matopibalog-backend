@@ -17,9 +17,9 @@
 // realizado). Frete cancelado é excluído ANTES daqui pelo chamador.
 
 const { calcularComissao } = require('./comissao');
-const { freteContaComoReceita } = require('./agregacaoFinanceiraFretes');
+// E1.3 (D-035): status de frete E de lançamento vêm da fonte única.
+const { freteContaComoReceita, STATUS_LANCAMENTO_EFETIVADO } = require('./agregacaoFinanceiraFretes');
 
-const STATUS_LANCAMENTO_EFETIVADO = ['aprovado', 'finalizado'];
 const TIPO_DESPESA_PEDAGIO = 'pedagio';
 
 // Arredondamento monetário (2 casas) — evita erro de ponto flutuante ao compor.

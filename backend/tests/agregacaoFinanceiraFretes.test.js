@@ -4,9 +4,13 @@ const assert = require('node:assert/strict');
 const {
   STATUS_FRETE_RECEITA_REALIZADA,
   STATUS_FRETE_EXCLUIDOS,
+  STATUS_LANCAMENTO_EFETIVADO,
+  STATUS_LANCAMENTO_NAO_COMPOE,
   freteContaComoReceita,
   freteEstaCancelado,
   lancamentoVinculadoAFreteCancelado,
+  lancamentoEfetivado,
+  lancamentoNaoCompoe,
   somarReceitaRealizada,
 } = require('../utils/agregacaoFinanceiraFretes');
 
@@ -77,6 +81,37 @@ test('lançamento SOLTO (sem frete_id) → nunca excluído por este critério', 
   assert.equal(lancamentoVinculadoAFreteCancelado({ frete_id: null }, cancelados), false);
   assert.equal(lancamentoVinculadoAFreteCancelado({ frete_id: '' }, cancelados), false);
   assert.equal(lancamentoVinculadoAFreteCancelado({}, cancelados), false);
+});
+
+// ─── E1.3 (D-035): fonte ÚNICA das regras de status de LANÇAMENTO ────────────
+test('E1.3 constantes de lançamento: efetivado=[aprovado,finalizado]; não compõe=[cancelado,rejeitado]', () => {
+  assert.deepEqual(STATUS_LANCAMENTO_EFETIVADO, ['aprovado', 'finalizado']);
+  assert.deepEqual(STATUS_LANCAMENTO_NAO_COMPOE, ['cancelado', 'rejeitado']);
+});
+
+test('lancamentoEfetivado: aprovado/finalizado → true; pendente/cancelado/rejeitado/ausente → false', () => {
+  assert.equal(lancamentoEfetivado({ status: 'aprovado' }), true);
+  assert.equal(lancamentoEfetivado({ status: 'finalizado' }), true);
+  assert.equal(lancamentoEfetivado({ status: 'pendente' }), false);
+  assert.equal(lancamentoEfetivado({ status: 'cancelado' }), false);
+  assert.equal(lancamentoEfetivado({ status: 'rejeitado' }), false);
+  assert.equal(lancamentoEfetivado({}), false);
+  assert.equal(lancamentoEfetivado(null), false);
+});
+
+test('lancamentoNaoCompoe: cancelado/rejeitado → true; aprovado/finalizado/pendente → false', () => {
+  assert.equal(lancamentoNaoCompoe({ status: 'cancelado' }), true);
+  assert.equal(lancamentoNaoCompoe({ status: 'rejeitado' }), true);
+  assert.equal(lancamentoNaoCompoe({ status: 'aprovado' }), false);
+  assert.equal(lancamentoNaoCompoe({ status: 'finalizado' }), false);
+  assert.equal(lancamentoNaoCompoe({ status: 'pendente' }), false);
+  assert.equal(lancamentoNaoCompoe({}), false);
+});
+
+test('E1.3 fonte única == valores legados que estavam espalhados nos consumidores', () => {
+  // Equivalência com os literais que antes viviam em dashboard/rentabilidade/acerto/relatorios.
+  assert.deepEqual([...STATUS_LANCAMENTO_EFETIVADO].sort(), ['aprovado', 'finalizado'].sort());
+  assert.deepEqual([...STATUS_LANCAMENTO_NAO_COMPOE].sort(), ['cancelado', 'rejeitado'].sort());
 });
 
 test('regressão Q4: R$5.512 de deduções vinculadas a fretes cancelados não vazam', () => {

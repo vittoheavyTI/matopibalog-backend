@@ -3,6 +3,7 @@ const { calcularComissao } = require('../utils/comissao');
 const {
   STATUS_FRETE_RECEITA_REALIZADA,
   STATUS_FRETE_EXCLUIDOS,
+  STATUS_LANCAMENTO_EFETIVADO,
   lancamentoVinculadoAFreteCancelado,
 } = require('../utils/agregacaoFinanceiraFretes');
 
@@ -88,15 +89,15 @@ exports.getSummary = async (req, res) => {
       // são preservados. Os fretes cancelados em si já estão fora (fretes acima filtra 'finalizado').
       comFiltroEmpresa(supabase.from('fretes').select('id').eq('status', STATUS_FRETE_EXCLUIDOS[0])),
       // 2. Deduções e abastecimentos FINALIZADOS (pagos pelo proprietário)
-      comFiltroEmpresa(supabase.from('despesas').select('valor, motorista_id, frete_id').eq('quem_pagou', 'proprietario').in('status', ['aprovado', 'finalizado']).gte('data', dataInicio).lte('data', dataFim)),
-      comFiltroEmpresa(supabase.from('abastecimentos').select('valor_total, motorista_id, frete_id').eq('quem_pagou', 'proprietario').in('status', ['aprovado', 'finalizado']).gte('data', dataInicio).lte('data', dataFim)),
-      comFiltroEmpresa(supabase.from('abastecimentos').select('litros, motorista_id, frete_id').in('status', ['aprovado', 'finalizado']).gte('data', dataInicio).lte('data', dataFim)),
-      comFiltroEmpresa(supabase.from('vales').select('valor, motorista_id, frete_id').eq('quem_pagou', 'proprietario').in('status', ['aprovado', 'finalizado']).gte('data', dataInicio).lte('data', dataFim)),
+      comFiltroEmpresa(supabase.from('despesas').select('valor, motorista_id, frete_id').eq('quem_pagou', 'proprietario').in('status', STATUS_LANCAMENTO_EFETIVADO).gte('data', dataInicio).lte('data', dataFim)),
+      comFiltroEmpresa(supabase.from('abastecimentos').select('valor_total, motorista_id, frete_id').eq('quem_pagou', 'proprietario').in('status', STATUS_LANCAMENTO_EFETIVADO).gte('data', dataInicio).lte('data', dataFim)),
+      comFiltroEmpresa(supabase.from('abastecimentos').select('litros, motorista_id, frete_id').in('status', STATUS_LANCAMENTO_EFETIVADO).gte('data', dataInicio).lte('data', dataFim)),
+      comFiltroEmpresa(supabase.from('vales').select('valor, motorista_id, frete_id').eq('quem_pagou', 'proprietario').in('status', STATUS_LANCAMENTO_EFETIVADO).gte('data', dataInicio).lte('data', dataFim)),
       // [PR2A] Lançamentos pagos pelo MOTORISTA — usados SÓ para gasto do autônomo.
       // Não entram em nenhum campo antigo nem em deducoes_vinculado.
-      comFiltroEmpresaUuid(supabase.from('despesas').select('valor, motorista_id, frete_id').eq('quem_pagou', 'motorista').in('status', ['aprovado', 'finalizado']).gte('data', dataInicio).lte('data', dataFim)),
-      comFiltroEmpresaUuid(supabase.from('abastecimentos').select('valor_total, motorista_id, frete_id').eq('quem_pagou', 'motorista').in('status', ['aprovado', 'finalizado']).gte('data', dataInicio).lte('data', dataFim)),
-      comFiltroEmpresaUuid(supabase.from('vales').select('valor, motorista_id, frete_id').eq('quem_pagou', 'motorista').in('status', ['aprovado', 'finalizado']).gte('data', dataInicio).lte('data', dataFim))
+      comFiltroEmpresaUuid(supabase.from('despesas').select('valor, motorista_id, frete_id').eq('quem_pagou', 'motorista').in('status', STATUS_LANCAMENTO_EFETIVADO).gte('data', dataInicio).lte('data', dataFim)),
+      comFiltroEmpresaUuid(supabase.from('abastecimentos').select('valor_total, motorista_id, frete_id').eq('quem_pagou', 'motorista').in('status', STATUS_LANCAMENTO_EFETIVADO).gte('data', dataInicio).lte('data', dataFim)),
+      comFiltroEmpresaUuid(supabase.from('vales').select('valor, motorista_id, frete_id').eq('quem_pagou', 'motorista').in('status', STATUS_LANCAMENTO_EFETIVADO).gte('data', dataInicio).lte('data', dataFim))
     ]);
 
     // Checagem de erros na mesma ordem das queries (preserva o "throw na 1ª falha" → 500).

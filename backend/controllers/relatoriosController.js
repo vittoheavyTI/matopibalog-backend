@@ -1,6 +1,6 @@
 const supabase = require('../config/supabase');
 const { calcularComissao } = require('../utils/comissao');
-const { freteEstaCancelado } = require('../utils/agregacaoFinanceiraFretes');
+const { freteEstaCancelado, STATUS_LANCAMENTO_NAO_COMPOE } = require('../utils/agregacaoFinanceiraFretes');
 const { calcularRentabilidadeFrete, resumirRentabilidade } = require('../utils/rentabilidadeFrete');
 const { calcularAcertoMotoristas } = require('../utils/acertoMotorista');
 const { montarTorreControle, resumirItensTorre } = require('../utils/torreControle');
@@ -169,7 +169,7 @@ exports.getFichaViagem = async (req, res) => {
 
     // Onda 1 (§15): lançamento CANCELADO nunca compõe o consolidado; REJEITADO nunca
     // conta como válido. PENDENTE mantém a regra atual (compõe a ficha por seleção).
-    const ESTADO_NAO_COMPOE = new Set(['cancelado', 'rejeitado']);
+    const ESTADO_NAO_COMPOE = new Set(STATUS_LANCAMENTO_NAO_COMPOE);
     [...abastecimentos, ...despesas, ...vales].forEach(d => {
       if (ESTADO_NAO_COMPOE.has(String(d.status || ''))) return;
       if (d.quem_pagou === 'proprietario') {

@@ -35,6 +35,9 @@ export const PainelVisaoGeral: React.FC = () => {
   }, []);
 
   const empresasTrial = empresas.filter(e => e.status === 'trial');
+  // E1.3 · F-04 (D-035): inadimplência SaaS migrada do dashboard operacional para a
+  // superfície SaaS. MESMA fonte (/painel-admin/empresas), sem métrica nova.
+  const empresasInadimplentes = empresas.filter(e => ['suspenso', 'bloqueado', 'expirado'].includes(e.status));
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -105,7 +108,7 @@ export const PainelVisaoGeral: React.FC = () => {
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
             <h3 className="font-bold text-gray-800 mb-3 flex items-center"><AlertTriangle size={16} className="mr-1.5 text-red-500" /> Alertas</h3>
             <div className="space-y-2">
-              <div className="flex items-center space-x-2 p-2.5 bg-red-50 rounded-xl text-sm"><span className="w-2 h-2 rounded-full bg-red-500 flex-shrink-0" /><span className="text-gray-700">Empresas ativas monitoradas</span></div>
+              <div className="flex items-center space-x-2 p-2.5 bg-red-50 rounded-xl text-sm"><span className="w-2 h-2 rounded-full bg-red-500 flex-shrink-0" /><span className="text-gray-700">{empresasInadimplentes.length} suspensa(s)/bloqueada(s)</span></div>
               <div className="flex items-center space-x-2 p-2.5 bg-yellow-50 rounded-xl text-sm"><span className="w-2 h-2 rounded-full bg-yellow-500 flex-shrink-0" /><span className="text-gray-700">{empresasTrial.length} empresas em trial</span></div>
             </div>
           </div>
