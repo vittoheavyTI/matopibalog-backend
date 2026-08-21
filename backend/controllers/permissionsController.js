@@ -14,6 +14,22 @@ const {
 } = require('../services/permissions/permissionRegistry');
 const { loadEffectivePermissions } = require('../services/permissions/permissionResolver');
 
+// P2.9 — REPAIR PATH administrativo/idempotente (recovery/manutenção explícita).
+// Garante os templates baseline da PRÓPRIA empresa (tenant-scoped). NÃO é GET (não
+// repara em leitura); é POST explícito, gated por permissions.manage (router). Atômico
+// e idempotente via RPC — reaplicar não duplica.
+exports.ensureTemplates = async (req, res) => {
+  try {
+    const { ensurePermissionTemplatesForEmpresa } = require('../services/permissions/permissionProvisioning');
+    const r = await ensurePermissionTemplatesForEmpresa(supabase, req.empresa_id);
+    if (!r?.ok) return res.status(500).json({ ok: false, message: 'Falha ao provisionar perfis da empresa.' });
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('[permissions.ensureTemplates]', err?.message || err);
+    return res.status(500).json({ ok: false, message: 'Falha ao provisionar perfis da empresa.' });
+  }
+};
+
 // Catálogo canônico p/ a UI (nunca expõe permissões inexistentes).
 exports.getRegistry = async (req, res) => {
   res.status(200).json({

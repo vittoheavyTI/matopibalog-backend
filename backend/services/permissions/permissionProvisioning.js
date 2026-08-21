@@ -1,63 +1,53 @@
-// permissionProvisioning.js — Provisiona templates baseline + assignment para
-// empresas/usuários NOVOS (criados após a migration 072). Espelha o seed da 072
-// a partir do registry canônico. Idempotente e fail-safe (nunca derruba o fluxo
-// de criação; o resolver tem safety net em código de qualquer forma).
+// permissionProvisioning.js — Provisionamento de templates baseline por EMPRESA.
+//
+// AUTORIDADE (P2.9): o provisionamento é PERSISTENTE e ATÔMICO via a RPC
+// `ensure_permission_templates_for_empresa` (migration 072): uma transação da função,
+// idempotente (ON CONFLICT DO NOTHING), stable_key como identidade. É o ÚNICO caminho
+// de provisionamento (criação de empresa, recovery/manutenção, backfill). NUNCA via GET.
+//
+// permission_template_id do usuário é uma DENORMALIZAÇÃO/CACHE não-autoritativa: o
+// resolver resolve por empresa+stable_key (dual-read) quando o ponteiro é null, e a
+// ATRIBUIÇÃO DELIBERADA de template é feita pela RPC guardada
+// `atribuir_template_guardando_ultimo_admin` (atômica, com invariante de governança).
+// Por isso o set inicial do ponteiro em createUsuario/createMotorista é best-effort:
+// se falhar, o efetivo do usuário é idêntico (resolver cai no template por stable_key).
 
 'use strict';
 
-const {
-  TEMPLATE_KEYS,
-  TEMPLATE_META,
-  TEMPLATE_BASELINE_ALLOW,
-  TEMPLATE_DEFAULT_FINANCIAL_VISIBILITY,
-  LEGACY_TIPO_TO_TEMPLATE,
-} = require('./permissionRegistry');
-
-/** Semeia (idempotente) os 9 templates baseline + permissões da empresa. */
-async function provisionTemplatesForEmpresa(supabase, empresaId) {
+/**
+ * Provisiona (idempotente, ATÔMICO) os templates baseline da empresa via RPC.
+ * Repair path canônico: criação, recovery e backfill. Reaplicar não duplica.
+ * @returns {{ok:boolean, reason?:string}}
+ */
+async function ensurePermissionTemplatesForEmpresa(supabase, empresaId) {
   if (!empresaId) return { ok: false, reason: 'no_empresa' };
-  try {
-    for (const stableKey of Object.values(TEMPLATE_KEYS)) {
-      const meta = TEMPLATE_META[stableKey] || { display_name: stableKey, descricao: null };
-      const finVis = TEMPLATE_DEFAULT_FINANCIAL_VISIBILITY[stableKey] || null;
-
-      // upsert do template por (empresa_id, stable_key)
-      await supabase.from('permission_templates').upsert({
-        empresa_id: empresaId, stable_key: stableKey,
-        display_name: meta.display_name, descricao: meta.descricao || null,
-        is_system_baseline: true, editable: true, driver_financial_visibility_mode: finVis,
-      }, { onConflict: 'empresa_id,stable_key', ignoreDuplicates: true });
-
-      const { data: tpl } = await supabase.from('permission_templates')
-        .select('id').eq('empresa_id', empresaId).eq('stable_key', stableKey).maybeSingle();
-      if (!tpl) continue;
-
-      const allow = TEMPLATE_BASELINE_ALLOW[stableKey] || [];
-      if (allow.length) {
-        await supabase.from('permission_template_permissions').upsert(
-          allow.map((permission_key) => ({ template_id: tpl.id, permission_key, allowed: true })),
-          { onConflict: 'template_id,permission_key', ignoreDuplicates: true }
-        );
-      }
-    }
-    return { ok: true };
-  } catch (err) {
-    // fail-safe: não bloqueia criação; resolver usa baseline do registry.
-    console.error('[permissionProvisioning.provisionTemplatesForEmpresa]', err?.message || err);
-    return { ok: false, reason: 'error' };
+  const { error } = await supabase.rpc('ensure_permission_templates_for_empresa', {
+    p_empresa_id: empresaId,
+  });
+  if (error) {
+    console.error('[permissionProvisioning.ensure]', error.message || error);
+    return { ok: false, reason: 'rpc_error', message: error.message || String(error) };
   }
+  return { ok: true };
 }
 
-/** Atribui o template baseline por tipo legado (admin→administrador, motorista→motorista). */
+// Alias histórico (mesma semântica estrita/atômica).
+const provisionTemplatesForEmpresa = ensurePermissionTemplatesForEmpresa;
+
+/**
+ * Atribui (CACHE) o template baseline por tipo legado ao usuário. Best-effort: o
+ * ponteiro é não-autoritativo (resolver dual-read por stable_key). Se o template
+ * ainda não existir (empresa nova em recovery), garante o provisionamento e re-consulta.
+ */
 async function assignTemplateByTipo(supabase, usuarioId, empresaId, tipo) {
+  const { LEGACY_TIPO_TO_TEMPLATE } = require('./permissionRegistry');
   const stableKey = LEGACY_TIPO_TO_TEMPLATE[tipo] || null;
   if (!usuarioId || !empresaId || !stableKey) return { ok: false, reason: 'no_mapping' };
   try {
     let { data: tpl } = await supabase.from('permission_templates')
       .select('id').eq('empresa_id', empresaId).eq('stable_key', stableKey).maybeSingle();
     if (!tpl) {
-      // provisiona sob demanda (empresa nova) e re-consulta
-      await provisionTemplatesForEmpresa(supabase, empresaId);
+      await ensurePermissionTemplatesForEmpresa(supabase, empresaId);
       ({ data: tpl } = await supabase.from('permission_templates')
         .select('id').eq('empresa_id', empresaId).eq('stable_key', stableKey).maybeSingle());
     }
@@ -70,4 +60,8 @@ async function assignTemplateByTipo(supabase, usuarioId, empresaId, tipo) {
   }
 }
 
-module.exports = { provisionTemplatesForEmpresa, assignTemplateByTipo };
+module.exports = {
+  ensurePermissionTemplatesForEmpresa,
+  provisionTemplatesForEmpresa,
+  assignTemplateByTipo,
+};

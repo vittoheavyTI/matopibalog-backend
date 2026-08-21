@@ -32,6 +32,7 @@ function registrar() {
   const EMP = '72000000-0000-4000-a000-000000000001';
   const EMP2 = '72000000-0000-4000-a000-000000000002';
   const EMP3 = '72000000-0000-4000-a000-000000000003'; // exatamente 2 admins (concorrência)
+  const EMP4 = '72000000-0000-4000-a000-000000000004'; // empresa NOVA sem usuários (provisioning)
   const ADMIN1 = '72000000-0000-4000-a000-0000000000a1'; // menu usuarios=false
   const ADMIN2 = '72000000-0000-4000-a000-0000000000a2'; // admin "normal"
   const MOTO1 = '72000000-0000-4000-a000-0000000000b1';  // pode_finalizar=true
@@ -43,7 +44,7 @@ function registrar() {
   const pool = new Pool({ connectionString: CONN });
 
   before(async () => {
-    await pool.query(`INSERT INTO public.empresas (id, nome) VALUES ($1,'PG072 Emp'),($2,'PG072 Emp2'),($3,'PG072 Emp3') ON CONFLICT (id) DO NOTHING`, [EMP, EMP2, EMP3]);
+    await pool.query(`INSERT INTO public.empresas (id, nome) VALUES ($1,'PG072 Emp'),($2,'PG072 Emp2'),($3,'PG072 Emp3'),($4,'PG072 Emp4') ON CONFLICT (id) DO NOTHING`, [EMP, EMP2, EMP3, EMP4]);
     const users = [
       [ADMIN1, EMP, 'admin', 'ativo', JSON.stringify({ usuarios: false, dashboard: true, motoristas: true, relatorios: true, configuracoes: false })],
       [ADMIN2, EMP, 'admin', 'ativo', JSON.stringify({ usuarios: true, dashboard: true, motoristas: true, relatorios: true, configuracoes: true })],
@@ -73,13 +74,13 @@ function registrar() {
   });
 
   after(async () => {
-    await pool.query(`DELETE FROM public.user_permission_overrides WHERE empresa_id IN ($1,$2,$3)`, [EMP, EMP2, EMP3]);
-    await pool.query(`DELETE FROM public.permission_template_permissions WHERE template_id IN (SELECT id FROM public.permission_templates WHERE empresa_id IN ($1,$2,$3))`, [EMP, EMP2, EMP3]);
-    await pool.query(`DELETE FROM public.motoristas WHERE empresa_id IN ($1,$2,$3)`, [EMP, EMP2, EMP3]);
-    await pool.query(`UPDATE public.usuarios SET permission_template_id=NULL WHERE empresa_id IN ($1,$2,$3)`, [EMP, EMP2, EMP3]);
-    await pool.query(`DELETE FROM public.permission_templates WHERE empresa_id IN ($1,$2,$3)`, [EMP, EMP2, EMP3]);
-    await pool.query(`DELETE FROM public.usuarios WHERE empresa_id IN ($1,$2,$3)`, [EMP, EMP2, EMP3]);
-    await pool.query(`DELETE FROM public.empresas WHERE id IN ($1,$2,$3)`, [EMP, EMP2, EMP3]);
+    await pool.query(`DELETE FROM public.user_permission_overrides WHERE empresa_id IN ($1,$2,$3,$4)`, [EMP, EMP2, EMP3, EMP4]);
+    await pool.query(`DELETE FROM public.permission_template_permissions WHERE template_id IN (SELECT id FROM public.permission_templates WHERE empresa_id IN ($1,$2,$3,$4))`, [EMP, EMP2, EMP3, EMP4]);
+    await pool.query(`DELETE FROM public.motoristas WHERE empresa_id IN ($1,$2,$3,$4)`, [EMP, EMP2, EMP3, EMP4]);
+    await pool.query(`UPDATE public.usuarios SET permission_template_id=NULL WHERE empresa_id IN ($1,$2,$3,$4)`, [EMP, EMP2, EMP3, EMP4]);
+    await pool.query(`DELETE FROM public.permission_templates WHERE empresa_id IN ($1,$2,$3,$4)`, [EMP, EMP2, EMP3, EMP4]);
+    await pool.query(`DELETE FROM public.usuarios WHERE empresa_id IN ($1,$2,$3,$4)`, [EMP, EMP2, EMP3, EMP4]);
+    await pool.query(`DELETE FROM public.empresas WHERE id IN ($1,$2,$3,$4)`, [EMP, EMP2, EMP3, EMP4]);
     await pool.end();
   });
 
@@ -292,5 +293,40 @@ function registrar() {
     const nEmp2 = (await pool.query(`SELECT public.contar_governance_admins($1,NULL) n`, [EMP2])).rows[0].n;
     assert.ok(nEmp >= 2);
     assert.equal(nEmp2, 1);
+  });
+
+  // ── PROVISIONING (P2.9): ensure_permission_templates_for_empresa ─────────────
+  test('provisioning: empresa NOVA sem usuários é provisionada só via ensure (não pelo seed)', async () => {
+    // EMP4 não tem usuários → o seed da migration NÃO a provisiona.
+    const antes = (await pool.query(`SELECT count(*)::int n FROM public.permission_templates WHERE empresa_id=$1`, [EMP4])).rows[0].n;
+    assert.equal(antes, 0, 'empresa nova começa sem templates (seed não a alcança)');
+
+    await pool.query(`SELECT public.ensure_permission_templates_for_empresa($1)`, [EMP4]);
+    const depois = (await pool.query(`SELECT count(*)::int n FROM public.permission_templates WHERE empresa_id=$1`, [EMP4])).rows[0].n;
+    assert.equal(depois, 9, 'ensure provisiona os 9 templates baseline');
+
+    // baseline correto + visibility motorista
+    const admOk = (await pool.query(
+      `SELECT 1 FROM public.permission_template_permissions p JOIN public.permission_templates t ON t.id=p.template_id
+       WHERE t.empresa_id=$1 AND t.stable_key='administrador' AND p.permission_key='permissions.manage' AND p.allowed`, [EMP4])).rowCount;
+    assert.equal(admOk, 1);
+    const mv = (await pool.query(`SELECT driver_financial_visibility_mode m FROM public.permission_templates WHERE empresa_id=$1 AND stable_key='motorista'`, [EMP4])).rows[0].m;
+    assert.equal(mv, 'commission_only');
+  });
+
+  test('provisioning: ensure é IDEMPOTENTE (2x não duplica)', async () => {
+    await pool.query(`SELECT public.ensure_permission_templates_for_empresa($1)`, [EMP4]);
+    await pool.query(`SELECT public.ensure_permission_templates_for_empresa($1)`, [EMP4]);
+    const n = (await pool.query(`SELECT count(*)::int n FROM public.permission_templates WHERE empresa_id=$1`, [EMP4])).rows[0].n;
+    assert.equal(n, 9);
+    // permissões do administrador não duplicam (PK template_id+permission_key)
+    const permAdm = (await pool.query(
+      `SELECT count(*)::int n FROM public.permission_template_permissions p JOIN public.permission_templates t ON t.id=p.template_id
+       WHERE t.empresa_id=$1 AND t.stable_key='administrador'`, [EMP4])).rows[0].n;
+    assert.equal(permAdm, 28, 'administrador tem exatamente as 28 keys baseline, sem duplicar');
+  });
+
+  test('provisioning: ensure com empresa nula → erro (fail-closed)', async () => {
+    await assert.rejects(pool.query(`SELECT public.ensure_permission_templates_for_empresa(NULL)`), /empresa_id_nulo/);
   });
 }

@@ -156,6 +156,7 @@ function mockCriar(dias) {
         eq() { return b; },
         insert(payload) { state.inserted = payload; return b; },
         update() { return b; },
+        delete() { return b; },
         maybeSingle() {
           if (t === 'planos') return Promise.resolve({ data: { id: 'plano-1', dias_trial: dias }, error: null });
           return Promise.resolve({ data: null, error: null });
@@ -164,6 +165,8 @@ function mockCriar(dias) {
       };
       return b;
     },
+    // P2.9 — provisionamento atômico de templates (RPC). Sucesso por padrão.
+    async rpc() { return { data: null, error: null }; },
   };
   api._state = state;
   return api;

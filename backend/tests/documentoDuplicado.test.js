@@ -74,6 +74,8 @@ const criarSupabaseMock = ({ insertError = null } = {}) => ({
       select() { return this; },
       eq() { return this; },
       insert(payload) { this._payload = payload; return this; },
+      update() { return this; },
+      delete() { return this; },
       async maybeSingle() { return { data: null, error: null }; },
       async single() {
         if (insertError) return { data: null, error: insertError };
@@ -82,6 +84,8 @@ const criarSupabaseMock = ({ insertError = null } = {}) => ({
     };
     return chain;
   },
+  // P2.9 — provisionamento atômico de templates (RPC). Sucesso por padrão.
+  async rpc() { return { data: null, error: null }; },
 });
 
 test('criarEmpresaCompleta: insert 23505 (CNPJ) → error amigável + status 409, sem vazar', async () => {

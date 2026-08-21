@@ -13,6 +13,8 @@ router.use(verifyToken, isAdmin, verificarEmpresa, requirePermission('permission
 
 router.get('/registry', ctrl.getRegistry);
 router.get('/templates', ctrl.listTemplates);
+// P2.9 — repair/recovery idempotente dos templates baseline (NÃO via GET).
+router.post('/templates/ensure', ctrl.ensureTemplates);
 router.put('/templates/:id', ctrl.updateTemplate);
 router.get('/usuarios/:id', ctrl.getUserPermissions);
 router.put('/usuarios/:id/template', ctrl.assignTemplate);

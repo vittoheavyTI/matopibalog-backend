@@ -124,22 +124,26 @@ CREATE TRIGGER trg_perm_change_append_only
   FOR EACH ROW EXECUTE FUNCTION public.permission_change_events_append_only();
 
 -- ===========================================================================
--- 4) SEED idempotente dos templates baseline por EMPRESA
+-- 4) PROVISIONAMENTO baseline por EMPRESA — FUNÇÃO CANÔNICA (repair path)
 -- ---------------------------------------------------------------------------
--- Espelha backend/services/permissions/permissionRegistry.js (TEMPLATE_BASELINE_ALLOW).
--- Se o registry mudar, este seed deve ser revisto (pgtest cobre a paridade).
-DO $seed$
+-- ensure_permission_templates_for_empresa é a AUTORIDADE do provisionamento baseline:
+-- ATÔMICA (uma transação da função) e IDEMPOTENTE (ON CONFLICT DO NOTHING). Usada
+-- em: criação de empresa (empresaService), recovery/manutenção explícita e backfill
+-- (o seed abaixo). Reaplicar não duplica; stable_key é a identidade. NUNCA via GET.
+-- Espelha backend/services/permissions/permissionRegistry.js (pgtest cobre paridade).
+CREATE OR REPLACE FUNCTION public.ensure_permission_templates_for_empresa(p_empresa_id uuid)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $ensure$
 DECLARE
-  v_emp uuid;
   v_tpl uuid;
-  -- baseline: array de (stable_key, display_name, descricao, allow_keys[], fin_vis)
   r RECORD;
 BEGIN
-  FOR v_emp IN
-    SELECT DISTINCT empresa_id FROM public.usuarios WHERE empresa_id IS NOT NULL
-  LOOP
-    FOR r IN
-      SELECT * FROM (VALUES
+  IF p_empresa_id IS NULL THEN RAISE EXCEPTION 'empresa_id_nulo'; END IF;
+  FOR r IN
+    SELECT * FROM (VALUES
         ('administrador','Administrador','Administra o tenant: usuários, permissões, configurações, operação, relatórios e financeiro.',
           ARRAY['company.settings.view','company.settings.manage','users.view','users.manage','permissions.manage','freight.view','freight.create','freight.manage','freight.finish','launch.view','launch.create','launch.approve','launch.reject','launch.cancel','documents.view','documents.manage','drivers.view','drivers.manage','fleet.view','fleet.manage','finance.operational.view','finance.operational.manage','finance.saas.view','reports.operational.view','reports.financial.view','estrutura_operacional.gerenciar','integracoes_erp.gerenciar','acesso_corporativo_sso.gerenciar'], NULL::text),
         ('operador','Operador','Operação do dia a dia: fretes, documentos e lançamentos. Sem financeiro nem administração.',
@@ -163,11 +167,11 @@ BEGIN
       -- template (idempotente por empresa+stable_key)
       INSERT INTO public.permission_templates
         (empresa_id, stable_key, display_name, descricao, is_system_baseline, editable, driver_financial_visibility_mode)
-      VALUES (v_emp, r.stable_key, r.display_name, r.descricao, true, true, r.fin_vis)
+      VALUES (p_empresa_id, r.stable_key, r.display_name, r.descricao, true, true, r.fin_vis)
       ON CONFLICT (empresa_id, stable_key) DO NOTHING;
 
       SELECT id INTO v_tpl FROM public.permission_templates
-        WHERE empresa_id = v_emp AND stable_key = r.stable_key;
+        WHERE empresa_id = p_empresa_id AND stable_key = r.stable_key;
 
       -- permissões allow do baseline (idempotente). NÃO sobrescreve edições futuras
       -- da empresa: só insere o que faltar.
@@ -175,6 +179,17 @@ BEGIN
       SELECT v_tpl, k, true FROM unnest(r.allow_keys) AS k
       ON CONFLICT (template_id, permission_key) DO NOTHING;
     END LOOP;
+END;
+$ensure$;
+
+-- SEED/BACKFILL: provisiona (idempotente) todas as empresas existentes chamando a
+-- função canônica. Empresas NOVAS são provisionadas no fluxo de criação (backend).
+DO $seed$
+DECLARE v_emp uuid;
+BEGIN
+  FOR v_emp IN SELECT DISTINCT empresa_id FROM public.usuarios WHERE empresa_id IS NOT NULL
+  LOOP
+    PERFORM public.ensure_permission_templates_for_empresa(v_emp);
   END LOOP;
 END
 $seed$;
@@ -694,6 +709,7 @@ DO $gfn$
 DECLARE sig text;
 BEGIN
   FOREACH sig IN ARRAY ARRAY[
+    'public.ensure_permission_templates_for_empresa(uuid)',
     'public.p2_effective_permission(uuid, text)',
     'public.eh_governance_admin(uuid, uuid)',
     'public.contar_governance_admins(uuid, uuid)',
@@ -713,6 +729,7 @@ $gfn$;
 -- ===========================================================================
 -- ROLLBACK (documentação — NÃO executar sem gate):
 --   DROP FUNCTION IF EXISTS public.atualizar_template_permissions_guardando_governanca(uuid,uuid,text[],text[],uuid);
+--   DROP FUNCTION IF EXISTS public.ensure_permission_templates_for_empresa(uuid);
 --   DROP FUNCTION IF EXISTS public.contar_governance_admins(uuid,uuid);
 --   DROP FUNCTION IF EXISTS public.eh_governance_admin(uuid,uuid);
 --   DROP FUNCTION IF EXISTS public.p2_effective_permission(uuid,text);

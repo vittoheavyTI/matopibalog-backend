@@ -135,6 +135,28 @@ async function criarEmpresaCompleta(opts) {
     return { empresa: null, error: 'Erro ao criar empresa.', status: 500 };
   }
 
+  // P2.9 — provisionamento ESTRITO dos templates baseline da empresa NOVA (ponto único
+  // de criação: register autônomo, registerEmpresa e painel-admin passam por aqui).
+  // ATÔMICO/idempotente via RPC. Uma empresa NÃO é considerada totalmente provisionada
+  // sem seus templates: se o provisionamento FALHA, COMPENSAMOS (removemos a empresa
+  // recém-criada — ainda sem usuários/motoristas neste ponto) e retornamos ERRO. Sem
+  // sucesso silencioso. Roda ANTES de marcar plano.ja_utilizado para a compensação ser
+  // apenas o DELETE da empresa. O resolver mantém safety net p/ tenants LEGADOS, mas ele
+  // não transforma falha de provisioning de empresa NOVA em sucesso administrativo.
+  try {
+    const { ensurePermissionTemplatesForEmpresa } = require('./permissions/permissionProvisioning');
+    const prov = await ensurePermissionTemplatesForEmpresa(supabase, empresa.id);
+    if (!prov?.ok) throw new Error(prov?.message || prov?.reason || 'provisionamento_falhou');
+  } catch (e) {
+    console.error('[empresaService] Provisionamento de templates FALHOU — compensando (delete empresa):', e.message || e);
+    try {
+      await supabase.from('empresas').delete().eq('id', empresa.id);
+    } catch (delErr) {
+      console.error('[empresaService] Falha na compensação (delete empresa) — estado a reconciliar:', delErr.message || delErr, 'empresa_id=', empresa.id);
+    }
+    return { empresa: null, error: 'Não foi possível concluir o provisionamento de permissões da empresa. Tente novamente.', status: 500 };
+  }
+
   // Marca durável de "plano já utilizado" (base do critério de exclusão de plano
   // — frente #6). Ponto único de atribuição de empresas.plano_id. Não-fatal:
   // falha aqui não desfaz o cadastro (a rede de segurança do DELETE recontagem
@@ -145,21 +167,6 @@ async function criarEmpresaCompleta(opts) {
     } catch (e) {
       console.error('[empresaService] Falha ao marcar plano.ja_utilizado (não-fatal):', e.message || e);
     }
-  }
-
-  // P2 — provisiona os templates de permissão baseline da empresa NOVA (ponto único
-  // de criação de empresa: register autônomo, registerEmpresa e painel-admin passam
-  // por aqui). Persistente e idempotente. Não-fatal: se falhar, o resolver tem safety
-  // net em código (baselineTemplateFromRegistry) e o provisionamento pode ser refeito;
-  // nunca desfaz o cadastro. NÃO é write-on-read — roda só na CRIAÇÃO.
-  try {
-    const { provisionTemplatesForEmpresa } = require('./permissions/permissionProvisioning');
-    const r = await provisionTemplatesForEmpresa(supabase, empresa.id);
-    if (!r?.ok) {
-      console.error(`[empresaService] Provisionamento de templates falhou para ${empresa.id} (não-fatal): ${r?.reason || 'desconhecido'}`);
-    }
-  } catch (e) {
-    console.error('[empresaService] Erro ao provisionar templates de permissão (não-fatal):', e.message || e);
   }
 
   console.log(
