@@ -188,18 +188,22 @@ export const Sidebar: React.FC = () => {
       ] : []),
     ] },
     { titulo: 'Cadastros', itens: [
-      { to: '/motoristas', icon: Users, label: 'Motoristas' },
+      // Motoristas (lista) exige drivers.view; gestão exige drivers.manage (backend).
+      ...(can('drivers.view') ? [{ to: '/motoristas', icon: Users, label: 'Motoristas' }] : []),
       // Usuários (lista) exige users.view; administração (mutations) exige users.manage.
       ...(can('users.view') ? [{ to: '/admins', icon: UserCircle, label: 'Usuários' }] : []),
       // Perfis e Permissões: exige permissions.manage (distinto de users.manage).
       ...(can('permissions.manage')
         ? [{ to: '/perfis-permissoes', icon: ShieldCheck, label: 'Perfis e Permissões' }] : []),
     ] },
-    ...(user?.role === 'admin' ? [{ titulo: 'Financeiro', itens: [
+    // Faturas SaaS / Regularização da própria empresa → finance.saas.view (admin por
+    // template; autônomo dono por bypass). Distinto do financeiro operacional dos fretes.
+    ...(can('finance.saas.view') ? [{ titulo: 'Financeiro', itens: [
       { to: '/minhas-faturas', icon: Receipt, label: 'Faturas / Regularização' },
     ] }] : []),
     { titulo: 'Configurações', itens: [
-      { to: '/configuracoes', icon: Settings, label: 'Configurações' },
+      // Configurações da empresa → company.settings.view.
+      ...(can('company.settings.view') ? [{ to: '/configuracoes', icon: Settings, label: 'Configurações' }] : []),
       ...(estruturaLiberada ? [{ to: '/operacional', icon: Network, label: 'Estrutura Operacional' }] : []),
     ] },
   ];
@@ -304,7 +308,7 @@ export const Sidebar: React.FC = () => {
           }}
         >
           <nav className="space-y-3">
-            {grupos.map((grupo) => (
+            {grupos.filter((grupo) => grupo.itens.length > 0).map((grupo) => (
               <div key={grupo.titulo} className="space-y-1">
                 {!compact && (
                   <p className="px-3 pt-1 text-[10px] font-bold uppercase tracking-wider text-gray-500 select-none">{grupo.titulo}</p>
