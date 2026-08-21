@@ -114,7 +114,7 @@ _Evidência coletada em 2026-08-19 (ver [FORENSIC_BASELINE](./FORENSIC_BASELINE.
 
 | ID | Item | Status | B W A D P | Evidência / Obs |
 |----|------|--------|-----------|-----------------|
-| RBV9-INV-055 | Relatórios/dashboards financeiros do cliente | IMPL_VAL | ✓ ✓ ~ ✓ ✓ | `PainelFinanceiro`, `Dashboard`, agregação de fretes |
+| RBV9-INV-055 | Relatórios/dashboards financeiros do cliente | IMPL_VAL | ✓ ✓ ~ ✓ ✓ | **E1.3 CLOSED em produção** (PR #441, `MERGE_SHA=b695102`): backend boundary `DONE` com helper canônico `agregacaoFinanceiraFretes` para receita/status de lançamentos; web boundary `DONE` removendo KPIs SaaS do `Dashboard` operacional e preservando MRR/trial/inadimplência em `PainelVisaoGeral` (`SuperAdminRoute`, `/painel-admin/empresas`, regra `suspenso`/`bloqueado`/`expirado`). Validação: backend 1631/1631, web 116/116 + build, CI main verde, deploy Railway/GitHub Pages, health 200. |
 | RBV9-INV-056 | Auditoria de correções (fretes/faturas) | IMPL_VAL | ✓ ✓ — ✓ ✓ | `fretes_correcoes_auditoria`(5), migration 065 |
 | RBV9-INV-057 | Centro de custo / filial no financeiro operacional | ROADMAP | ✗ ✗ ✗ ✗ ✗ | depende de ORG_SCOPE+FLEET |
 
