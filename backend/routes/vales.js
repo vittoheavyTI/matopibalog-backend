@@ -13,10 +13,11 @@ const acoes = criarAcoesLancamento('vale');
 
 router.use(verifyToken, verificarEmpresa, verificarPlano);
 
-router.get('/', valesController.getAll);
-router.post('/', upload.single('foto'), validate(createValeSchema), valesController.create);
-router.get('/:id', valesController.getById);
-router.patch('/:id', valesController.update);
+// P2.10 — lançamentos por permissão efetiva (motorista contextual via template + controller).
+router.get('/', requirePermission('launch.view'), valesController.getAll);
+router.post('/', requirePermission('launch.create'), upload.single('foto'), validate(createValeSchema), valesController.create);
+router.get('/:id', requirePermission('launch.view'), valesController.getById);
+router.patch('/:id', requirePermission('launch.create'), valesController.update);
 
 // Onda 1 — transições audit-safe (admin/super-admin; motivo obrigatório em rejeitar/
 // cancelar; CAS opcional). Cancelar NUNCA deleta.
@@ -24,6 +25,6 @@ router.patch('/:id', valesController.update);
 router.post('/:id/aprovar', requirePermission('launch.approve'), acoes.aprovar);
 router.post('/:id/rejeitar', requirePermission('launch.reject'), acoes.rejeitar);
 router.post('/:id/cancelar', requirePermission('launch.cancel'), acoes.cancelar);
-router.get('/:id/eventos', acoes.historico);
+router.get('/:id/eventos', requirePermission('launch.view'), acoes.historico);
 
 module.exports = router;

@@ -13,10 +13,13 @@ const acoes = criarAcoesLancamento('despesa');
 
 router.use(verifyToken, verificarEmpresa, verificarPlano);
 
-router.get('/', despesasController.getAll);
-router.post('/', upload.single('foto'), validate(createDespesaSchema), despesasController.create);
-router.get('/:id', despesasController.getById);
-router.patch('/:id', despesasController.update);
+// P2.10 — lançamentos por PERMISSÃO EFETIVA. Motorista tem launch.view/create por
+// template e o controller restringe ao próprio contexto (acesso contextual); empresarial
+// vê/cria no tenant dentro do scope. Leitura=launch.view; criação/edição=launch.create.
+router.get('/', requirePermission('launch.view'), despesasController.getAll);
+router.post('/', requirePermission('launch.create'), upload.single('foto'), validate(createDespesaSchema), despesasController.create);
+router.get('/:id', requirePermission('launch.view'), despesasController.getById);
+router.patch('/:id', requirePermission('launch.create'), despesasController.update);
 
 // Onda 1 — transições audit-safe (admin/super-admin; motivo obrigatório em rejeitar/
 // cancelar; CAS opcional via expected_version/expected_status). Cancelar NUNCA deleta.
@@ -26,6 +29,6 @@ router.patch('/:id', despesasController.update);
 router.post('/:id/aprovar', requirePermission('launch.approve'), acoes.aprovar);
 router.post('/:id/rejeitar', requirePermission('launch.reject'), acoes.rejeitar);
 router.post('/:id/cancelar', requirePermission('launch.cancel'), acoes.cancelar);
-router.get('/:id/eventos', acoes.historico);
+router.get('/:id/eventos', requirePermission('launch.view'), acoes.historico);
 
 module.exports = router;

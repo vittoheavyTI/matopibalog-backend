@@ -6,7 +6,7 @@ const freteEpodController = require('../controllers/freteEpodController');
 const freteOcorrenciasController = require('../controllers/freteOcorrenciasController');
 const freteLocalizacaoController = require('../controllers/freteLocalizacaoController');
 const trackingCredentialController = require('../controllers/trackingCredentialController');
-const { verifyToken, isAdmin } = require('../middlewares/auth');
+const { verifyToken } = require('../middlewares/auth');
 const { verificarEmpresa } = require('../middlewares/tenant');
 const { requirePermission } = require('../middlewares/requirePermission');
 const { verificarPlano } = require('../middlewares/verificarPlano');
@@ -37,7 +37,10 @@ router.use('/localizacao/sessao', telemetriaSessao);
 
 router.use(verifyToken, verificarEmpresa, verificarPlano);
 
-router.get('/', fretesController.getAll);
+// P2.10 — leitura de fretes por PERMISSÃO EFETIVA (freight.view). Motorista tem a key
+// por template e o controller restringe ao PRÓPRIO contexto (acesso contextual); admin/
+// operador/gerente veem o tenant dentro do scope. Permissão NÃO amplia scope.
+router.get('/', requirePermission('freight.view'), fretesController.getAll);
 // P2 — criar frete exige freight.create (admin/operador têm por padrão; motorista
 // = false por padrão → fecha o gap de auto-criação por motorista). requirePermission
 // libera super-admin e não altera o comportamento de quem já podia (admin).
@@ -49,23 +52,27 @@ router.post('/localizacao/credencial', trackingCredentialController.emitir);
 // administrador/financeiro; super-admin é authority separada. O controller mantém a
 // checagem isAdmin/ownership por dentro (defesa em profundidade).
 router.post('/:id/correcao-financeira', requirePermission('finance.operational.manage'), validate(correcaoFinanceiraFreteSchema), fretesController.corrigirFinanceiro);
-router.get('/:id', fretesController.getById);
+router.get('/:id', requirePermission('freight.view'), fretesController.getById);
 router.post('/:id/odometro/inicial', upload.single('foto'), fretesController.uploadOdometroInicial);
 router.post('/:id/odometro/final', upload.single('foto'), fretesController.uploadOdometroFinal);
 router.get('/:id/odometro/:tipo/url', fretesController.getOdometroSignedUrl);
 router.post('/:id/finalizar', fretesController.finalizar);
 // Documentos fiscais do frete (CTe/MDF-e/NF-e e outros). Bucket privado,
 // acesso por empresa/frete. Sem DELETE no piloto.
-router.get('/:id/documentos', freteDocumentosController.listar);
+// P2.10 — leitura de documentos por documents.view (motorista tem por template e o
+// controller restringe ao próprio frete). O UPLOAD é ação CONTEXTUAL do dono do frete
+// (motorista) OU gerência empresarial: documents.manage é exigido no controller SÓ para
+// o caller empresarial (admin/operador/gerente), preservando o comprovante do motorista.
+router.get('/:id/documentos', requirePermission('documents.view'), freteDocumentosController.listar);
 router.post('/:id/documentos', uploadDocumento.single('documento'), freteDocumentosController.upload);
-router.get('/:id/documentos/:docId/url', freteDocumentosController.getSignedUrl);
+router.get('/:id/documentos/:docId/url', requirePermission('documents.view'), freteDocumentosController.getSignedUrl);
 
 // ePOD — comprovacao de entrega digital (1 por frete). Bucket privado
 // `fretes-evidencias`. Motorista/admin registram e anexam; so admin valida.
 // Rastreamento leve: somente observacao operacional, sem alterar status.
 router.get('/:id/localizacao', freteLocalizacaoController.obter);
 router.post('/:id/localizacao', validate(localizacaoSchema), freteLocalizacaoController.registrar);
-router.post('/localizacoes/limpar-vencidas', isAdmin, freteLocalizacaoController.limparVencidas);
+router.post('/localizacoes/limpar-vencidas', requirePermission('freight.manage'), freteLocalizacaoController.limparVencidas);
 
 router.get('/:id/epod', freteEpodController.obter);
 router.post('/:id/epod', validate(registrarEpodSchema), freteEpodController.registrar);
@@ -84,7 +91,11 @@ router.patch('/:id/ocorrencias/:ocorrenciaId', validate(atualizarOcorrenciaSchem
 router.post('/:id/ocorrencias/:ocorrenciaId/evidencias', uploadDocumento.single('evidencia'), freteOcorrenciasController.uploadEvidencia);
 router.get('/:id/ocorrencias/:ocorrenciaId/evidencias/:evidId/url', freteOcorrenciasController.getEvidenciaUrl);
 
-router.patch('/:id', validate(updateFreteSchema), fretesController.update);
-router.delete('/:id', isAdmin, fretesController.delete);
+// P2.10 — edição/gestão administrativa do frete por freight.manage (não isAdmin).
+// create=freight.create, finish=freight.finish, correção=finance.operational.manage
+// (authorities distintas). O app do motorista NÃO chama PATCH/DELETE (usa odometro/
+// finalizar dedicados); o controller mantém tenant/scope/ownership.
+router.patch('/:id', requirePermission('freight.manage'), validate(updateFreteSchema), fretesController.update);
+router.delete('/:id', requirePermission('freight.manage'), fretesController.delete);
 
 module.exports = router;

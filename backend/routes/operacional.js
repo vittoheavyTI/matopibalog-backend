@@ -1,12 +1,17 @@
 const express = require('express');
 const router = express.Router();
 const operacionalController = require('../controllers/operacionalController');
-const { verifyToken, isAdmin } = require('../middlewares/auth');
+const { verifyToken } = require('../middlewares/auth');
 const { verificarEmpresa } = require('../middlewares/tenant');
+const { requirePermission } = require('../middlewares/requirePermission');
 const supabase = require('../config/supabase');
 const { carregarPortalGovernanca } = require('../services/portalGovernanceService');
 
-router.use(verifyToken, isAdmin, verificarEmpresa);
+// P2.10 — Estrutura Operacional deixa de usar coarse isAdmin. Autoridade em camadas:
+//   1) ENTITLEMENT da empresa (check detalhado abaixo, com 403 informativo);
+//   2) PERMISSÃO EFETIVA estrutura_operacional.gerenciar (delegável por template/override;
+//      o resolver também nega se o entitlement estiver ausente — defesa em profundidade).
+router.use(verifyToken, verificarEmpresa);
 
 router.use(async (req, res, next) => {
   if (req.user?.is_super_admin === true) return next();
@@ -30,6 +35,9 @@ router.use(async (req, res, next) => {
     return res.status(500).json({ message: 'Erro ao validar acesso à Estrutura Operacional.' });
   }
 });
+
+// Capability efetiva (delegação): administrador tem por template; empresa pode delegar.
+router.use(requirePermission('estrutura_operacional.gerenciar'));
 
 router.get('/contexto', operacionalController.getContexto);
 

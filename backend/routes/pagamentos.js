@@ -4,6 +4,7 @@ const axios = require('axios');
 const crypto = require('crypto');
 const supabase = require('../config/supabase');
 const { verifyToken, isAdmin, isSuperAdmin } = require('../middlewares/auth');
+const { requirePermission } = require('../middlewares/requirePermission');
 const { verificarEmpresa } = require('../middlewares/tenant');
 const { resolveAsaasApiKey } = require('../utils/asaasConfig');
 const { classificarResponsavelRegularizacao } = require('../utils/billingProfile');
@@ -573,7 +574,7 @@ router.post('/regularizacao/:empresa_id', verifyToken, isSuperAdmin, async (req,
   }
 });
 
-router.get('/cobrancas/:empresa_id', verifyToken, isAdmin, verificarEmpresa, async (req, res) => {
+router.get('/cobrancas/:empresa_id', verifyToken, verificarEmpresa, requirePermission('finance.saas.view'), async (req, res) => {
   try {
     // Admin comum: IGNORA o :empresa_id da URL e usa SEMPRE a própria empresa.
     // Super-admin: pode consultar qualquer empresa via :empresa_id.
@@ -745,7 +746,7 @@ router.post('/assinaturas/:empresa_id/sincronizar-cobrancas', verifyToken, isSup
 });
 
 // Administrador da própria conta: sincroniza suas cobranças.
-router.post('/minhas-faturas/sincronizar', verifyToken, isAdmin, verificarEmpresa, async (req, res) => {
+router.post('/minhas-faturas/sincronizar', verifyToken, verificarEmpresa, requirePermission('finance.saas.view'), async (req, res) => {
   try {
     if (await bloquearSeNaoSandbox(res)) return;
     if (!req.empresa_id) {

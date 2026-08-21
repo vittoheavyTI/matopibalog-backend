@@ -75,8 +75,10 @@ const PERMISSIONS = Object.freeze([
   { key: 'drivers.manage', category: CATEGORIES.drivers, label: 'Gerenciar motoristas', scoped: true },
 
   // ── FLEET (preparado — módulo NEW, Onda 2) ─────────────────────────────────
-  { key: 'fleet.view', category: CATEGORIES.fleet, label: 'Ver frota', scoped: true },
-  { key: 'fleet.manage', category: CATEGORIES.fleet, label: 'Gerenciar frota', scoped: true },
+  // futureModule: sem endpoint/comportamento ainda → NÃO exibir como checkbox editável
+  // na UI de templates (não é decorativo). Reexibir quando o módulo Frota existir.
+  { key: 'fleet.view', category: CATEGORIES.fleet, label: 'Ver frota', scoped: true, futureModule: true },
+  { key: 'fleet.manage', category: CATEGORIES.fleet, label: 'Gerenciar frota', scoped: true, futureModule: true },
 
   // ── FINANCE OPERACIONAL (do cliente) ───────────────────────────────────────
   { key: 'finance.operational.view', category: CATEGORIES.finance_operational, label: 'Ver financeiro operacional', scoped: true },

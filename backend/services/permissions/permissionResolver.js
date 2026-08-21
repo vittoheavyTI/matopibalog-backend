@@ -105,6 +105,14 @@ function computeEffectivePermissions(ctx = {}) {
       }
     }
 
+    // 4b) AUTÔNOMO = dono do próprio negócio: enxerga as faturas SaaS da PRÓPRIA
+    // empresa (Minhas Faturas / Regularização). Preserva o efetivo legado (a rota
+    // /me/faturas era tenant-aberta e o autônomo owner é tipo='motorista', que não
+    // tem finance.saas.view por template). Escopo continua a própria empresa (tenant).
+    if (isAutonomo && key === 'finance.saas.view') {
+      permissions[key] = true; source[key] = 'legacy'; continue;
+    }
+
     // 5) DEFAULT_DENY.
     permissions[key] = false;
     source[key] = 'default_deny';

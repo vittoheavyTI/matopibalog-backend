@@ -30,10 +30,13 @@ exports.ensureTemplates = async (req, res) => {
   }
 };
 
-// Catálogo canônico p/ a UI (nunca expõe permissões inexistentes).
+// Catálogo canônico p/ a UI (nunca expõe permissões inexistentes). P2.10 — oculta
+// capabilities de MÓDULO FUTURO (futureModule) da UI de templates: elas ainda não
+// controlam comportamento, então não devem virar checkbox decorativo. A chave técnica
+// permanece no registry (compat/baseline) e será reexibida quando o módulo existir.
 exports.getRegistry = async (req, res) => {
   res.status(200).json({
-    permissions: PERMISSIONS,
+    permissions: PERMISSIONS.filter((p) => p.futureModule !== true),
     templates_meta: TEMPLATE_META,
     ui_enabled_templates: UI_ENABLED_TEMPLATE_KEYS,
     financial_visibility_modes: DRIVER_FINANCIAL_VISIBILITY_MODES,
