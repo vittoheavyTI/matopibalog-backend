@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Users, FileText, Truck, ChevronLeft, ChevronRight, Upload, X, Check, Trash2, Settings, UserCircle, Receipt, History, Building2, DollarSign, Bell, Plug, ClipboardList, Ticket, TrendingUp, TowerControl, Boxes, FileSignature, CreditCard, Network } from 'lucide-react';
+import { LayoutDashboard, Users, FileText, Truck, ChevronLeft, ChevronRight, Upload, X, Check, Trash2, Settings, UserCircle, Receipt, History, Building2, DollarSign, Bell, Plug, ClipboardList, Ticket, TrendingUp, TowerControl, Boxes, FileSignature, CreditCard, Network, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useContratacaoStatus } from '../hooks/useContratacaoStatus';
 import { usePortalGovernanca } from '../hooks/usePortalGovernanca';
@@ -164,25 +164,46 @@ export const Sidebar: React.FC = () => {
   // comercial (a aba "Plano e contratação" continua dentro dela).
   type GrupoNav = { titulo: string; itens: { to: string; icon: typeof LayoutDashboard; label: string }[] };
 
+  // P2.9 — gate de menu por permissão efetiva V9 (backend é a autoridade real; isto só
+  // esconde itens). Fallback: admin legado enxerga tudo até o efetivo ser populado.
+  const can = (key: string): boolean =>
+    user?.is_super_admin === true
+    || (user?.effective_permissions
+      ? user.effective_permissions[key] === true
+      : user?.role === 'admin');
+
   const gruposCliente: GrupoNav[] = [
     { titulo: 'Operação', itens: [
       { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
       { to: '/relatorios/viagens', icon: Truck, label: 'Gerenciamento de Fretes' },
-      { to: '/relatorios/torre-controle', icon: TowerControl, label: 'Torre de Controle' },
+      ...(can('reports.operational.view') ? [
+        { to: '/relatorios/torre-controle', icon: TowerControl, label: 'Torre de Controle' },
+      ] : []),
       { to: '/relatorios/resumo', icon: History, label: 'Histórico de Fretes' },
       { to: '/relatorios', icon: FileText, label: 'Relatórios' },
-      { to: '/relatorios/rentabilidade', icon: TrendingUp, label: 'Rentabilidade' },
-      { to: '/relatorios/acerto-motoristas', icon: Receipt, label: 'Acerto de Motoristas' },
+      // Rentabilidade/Acerto são RELATÓRIOS FINANCEIROS → reports.financial.view.
+      ...(can('reports.financial.view') ? [
+        { to: '/relatorios/rentabilidade', icon: TrendingUp, label: 'Rentabilidade' },
+        { to: '/relatorios/acerto-motoristas', icon: Receipt, label: 'Acerto de Motoristas' },
+      ] : []),
     ] },
     { titulo: 'Cadastros', itens: [
-      { to: '/motoristas', icon: Users, label: 'Motoristas' },
-      { to: '/admins', icon: UserCircle, label: 'Usuários' },
+      // Motoristas (lista) exige drivers.view; gestão exige drivers.manage (backend).
+      ...(can('drivers.view') ? [{ to: '/motoristas', icon: Users, label: 'Motoristas' }] : []),
+      // Usuários (lista) exige users.view; administração (mutations) exige users.manage.
+      ...(can('users.view') ? [{ to: '/admins', icon: UserCircle, label: 'Usuários' }] : []),
+      // Perfis e Permissões: exige permissions.manage (distinto de users.manage).
+      ...(can('permissions.manage')
+        ? [{ to: '/perfis-permissoes', icon: ShieldCheck, label: 'Perfis e Permissões' }] : []),
     ] },
-    ...(user?.role === 'admin' ? [{ titulo: 'Financeiro', itens: [
+    // Faturas SaaS / Regularização da própria empresa → finance.saas.view (admin por
+    // template; autônomo dono por bypass). Distinto do financeiro operacional dos fretes.
+    ...(can('finance.saas.view') ? [{ titulo: 'Financeiro', itens: [
       { to: '/minhas-faturas', icon: Receipt, label: 'Faturas / Regularização' },
     ] }] : []),
     { titulo: 'Configurações', itens: [
-      { to: '/configuracoes', icon: Settings, label: 'Configurações' },
+      // Configurações da empresa → company.settings.view.
+      ...(can('company.settings.view') ? [{ to: '/configuracoes', icon: Settings, label: 'Configurações' }] : []),
       ...(estruturaLiberada ? [{ to: '/operacional', icon: Network, label: 'Estrutura Operacional' }] : []),
     ] },
   ];
@@ -287,7 +308,7 @@ export const Sidebar: React.FC = () => {
           }}
         >
           <nav className="space-y-3">
-            {grupos.map((grupo) => (
+            {grupos.filter((grupo) => grupo.itens.length > 0).map((grupo) => (
               <div key={grupo.titulo} className="space-y-1">
                 {!compact && (
                   <p className="px-3 pt-1 text-[10px] font-bold uppercase tracking-wider text-gray-500 select-none">{grupo.titulo}</p>

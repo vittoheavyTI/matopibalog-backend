@@ -42,9 +42,9 @@ _Evidência coletada em 2026-08-19 (ver [FORENSIC_BASELINE](./FORENSIC_BASELINE.
 | RBV9-INV-015 | Níveis auth (verifyToken/isAdmin/isSuperAdmin) + tenant | IMPL_VAL | ✓ ✓ ✓ ✓ ✓ | middlewares/auth.js, tenant.js |
 | RBV9-INV-016 | Catálogo de funcionalidades + entitlements por plano | IMPL_VAL | ✓ ✓ — ✓ ✓ | `funcionalidades`(21), `plano_funcionalidades`(111), migration 060 |
 | RBV9-INV-017 | Overrides por empresa (`empresa_funcionalidades`) | PARTIAL | ✓ ~ — ✓ ✓ | tabela existe, **0 linhas** |
-| RBV9-INV-018 | Templates de permissão editáveis por empresa + overrides individuais | ROADMAP | ✗ ✗ ✗ ✗ ✗ | D-006 |
-| RBV9-INV-019 | Permissões `freight.create` / `freight.finish` separadas | ROADMAP | ✗ ✗ ✗ ✗ ✗ | D-010 |
-| RBV9-INV-020 | Financeiro atribuível (nunca automático) | ROADMAP | ✗ ✗ ✗ ✗ ✗ | D-008 |
+| RBV9-INV-018 | Templates de permissão editáveis por empresa + overrides individuais | IMPL_NV | ✓ ✓ ✓ ✓ ~ | **P2 IMPLEMENTADO (code-only, migration 072 NÃO aplicada)**: `permission_templates`/`permission_template_permissions`/`user_permission_overrides` + `usuarios.permission_template_id`; registry canônico (28 chaves) + resolver único (precedência invariant→entitlement→override→template→default-deny); RPCs guardadas de governança (último admin); API `/admin/permissions/*`; web "Perfis e Permissões" (perfis + exceções por usuário). D-006. **READY_FOR_OWNER_MIGRATION_GATE.** |
+| RBV9-INV-019 | Permissões `freight.create` / `freight.finish` separadas | IMPL_NV | ✓ ✓ ✓ ✓ ~ | **P2**: `freight.finish` reescrito via resolver (bypass autônomo + dual-read `pode_finalizar_viagem` preservados → efetivo antes=depois); `freight.create` passa a exigir `requirePermission` (fecha auto-criação por motorista; motorista default=false). App gate por efetivo. D-010. Migration 072 pendente de gate. |
+| RBV9-INV-020 | Financeiro atribuível (nunca automático) | IMPL_NV | ✓ ✓ ✓ ✓ ~ | **P2**: `finance.operational.*` só por template/override explícito (nunca automático); visibilidade financeira do motorista (`commission_only`/`plus_base`/`full`) com **redação no backend** (getAll/getById); autônomo=full (preserva dono). D-008. Migration 072 pendente de gate. |
 | RBV9-INV-021 | Governança portal cliente (ERP/SSO='em_breve', Estrutura gate real) | IMPL_VAL | ✓ ✓ — ✓ ✓ | migration 069 (aplicada), PR #422 |
 
 ## FREIGHT EXECUTION (frete atual)
@@ -280,6 +280,7 @@ _Evidência coletada em 2026-08-19 (ver [FORENSIC_BASELINE](./FORENSIC_BASELINE.
 |----|------|--------|-----|
 | MOBILE-M1-001 | Validar **realtime da tela de detalhe** do frete no aparelho (`detalhe_viagem_screen` atualiza sozinho: sem pull-to-refresh, sem reabrir, sem esperar o poll de 60s) | DEFERRED_TO_MOBILE_RELEASE_TRAIN_M1 | Código pronto (Onda 1 · E1.7). Aguarda APK consolidado + teste físico. |
 | MOBILE-M1-002 | Validar **criação/aprovação/rejeição/cancelamento** de lançamentos web↔app em APK consolidado (criar no app → web sem refresh; aprovar/rejeitar/cancelar no web → app atualiza; cancelado permanece visível) | DEFERRED_TO_MOBILE_RELEASE_TRAIN_M1 | Código pronto (Onda 1 · E1.2/E1.7). Aguarda APK consolidado + teste físico. |
+| MOBILE-M1-003 | Validar no aparelho o **enforcement de permissões V9** (P2): botão finalizar frete só com `freight.finish` efetivo; **visibilidade financeira** do motorista (`commission_only` esconde o bruto do frete e mostra a comissão; `full` no autônomo); mudança de perfil/override reflete após novo login | DEFERRED_TO_MOBILE_RELEASE_TRAIN_M1 | Código pronto (P2). `analyze`/`test`/`build` do app rodam no CI/Codemagic. Aguarda APK consolidado + teste físico. |
 
 ---
 

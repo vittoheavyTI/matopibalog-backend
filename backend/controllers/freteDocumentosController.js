@@ -73,6 +73,24 @@ exports.upload = async (req, res) => {
   const frete = await buscarFreteComAcesso(req, res);
   if (!frete) return;
 
+  // P2.10 — AUTORIDADE do upload:
+  //   • motorista dono do frete → ação CONTEXTUAL (comprovante do próprio frete),
+  //     preservada sem exigir documents.manage empresarial;
+  //   • caller EMPRESARIAL (admin/operador/gerente) → exige documents.manage EFETIVA;
+  //   • super-admin → authority de plataforma.
+  const ehEmpresarial = req.user.is_super_admin !== true && req.user.role === 'admin';
+  if (ehEmpresarial) {
+    try {
+      const { ensureEffective } = require('../middlewares/requirePermission');
+      const eff = await ensureEffective(req);
+      if (!(eff && eff.permissions && eff.permissions['documents.manage'] === true)) {
+        return res.status(403).json({ message: 'Permissão insuficiente para gerenciar documentos.', permission: 'documents.manage' });
+      }
+    } catch (e) {
+      return res.status(500).json({ message: 'Erro ao verificar permissão.' });
+    }
+  }
+
   // Limite por frete (piloto: 10).
   const { count, error: countError } = await supabase
     .from('frete_documentos')

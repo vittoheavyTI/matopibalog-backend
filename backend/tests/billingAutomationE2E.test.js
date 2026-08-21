@@ -63,7 +63,11 @@ function criarDepsMemoria({ situacao, snapshot, empresa = {} } = {}) {
 
 test('E2E automático: EVENTO de negócio → outbox → worker → provider → billing local (§19/§33)', async () => {
   const outboxRepo = criarOutboxMemoria();
-  const { deps, estado } = criarDepsMemoria();
+  // 1ª mensalidade = fim do trial. Usa uma data FUTURA fixa para o teste ser
+  // determinístico em qualquer dia de execução (o cálculo faz clamp p/ >= hoje;
+  // trial no passado retornaria "hoje" e tornaria o teste dependente do calendário).
+  const TRIAL_END = '2030-06-15';
+  const { deps, estado } = criarDepsMemoria({ situacao: { situacao: 'conversao_aguardando_pagamento', trial_ends_at: `${TRIAL_END}T00:00:00.000Z` } });
   const provider = new FakeAsaasProvider();
 
   // Começa pelo EVENTO DE NEGÓCIO (não chama billing direto).
@@ -75,10 +79,10 @@ test('E2E automático: EVENTO de negócio → outbox → worker → provider →
   assert.equal(resumo.processados, 1);
   assert.equal(estado.asaas_customer_id, 'cus_000001');
   assert.equal(estado.asaas_subscription_id, 'sub_000001');
-  assert.equal(estado.next_due_date, '2026-08-20'); // 1ª mensalidade = trial_end
+  assert.equal(estado.next_due_date, TRIAL_END); // 1ª mensalidade = trial_end (futuro)
 
   // Simula pagamento via webhook → estado local pago.
-  const charge = await provider.createCharge({ customerId: estado.asaas_customer_id, value: 299.9, dueDate: '2026-08-20' });
+  const charge = await provider.createCharge({ customerId: estado.asaas_customer_id, value: 299.9, dueDate: TRIAL_END });
   const evt = provider.emitWebhook(charge.id, 'PAYMENT_RECEIVED');
   const t = aplicarEvento({ faturaAtual: { status: 'pendente' }, evento: evt });
   assert.equal(t.novoStatus, 'pago');

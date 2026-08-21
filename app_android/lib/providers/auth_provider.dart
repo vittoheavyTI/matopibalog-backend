@@ -49,6 +49,10 @@ class AuthProvider extends ChangeNotifier {
   bool _senhaTemporaria = false;
   bool _termosPendentes = false;
   int _termosPendentesCount = 0;
+  // P2 — permissões efetivas V9 (templates+overrides) + visibilidade financeira.
+  // Backend é a autoridade; isto gate botões/telas e a renderização financeira.
+  Map<String, dynamic> _effectivePermissions = const {};
+  String _driverFinancialVisibility = 'commission_only';
   LogoutRemotoResult? _ultimoLogoutRemoto;
   // Login barrado por e-mail não confirmado (backend responde 403 { naoConfirmado }).
   // A tela usa isto para oferecer o reenvio do link — não é senha errada.
@@ -70,6 +74,28 @@ class AuthProvider extends ChangeNotifier {
   bool get isLoggedIn => _status == AuthStatus.authenticated;
   bool get isMotorista => _role == 'motorista';
   LogoutRemotoResult? get ultimoLogoutRemoto => _ultimoLogoutRemoto;
+
+  // P2 — permissões efetivas / visibilidade financeira do motorista.
+  Map<String, dynamic> get effectivePermissions => _effectivePermissions;
+  String get driverFinancialVisibility => _driverFinancialVisibility;
+
+  /// Gate de UI baseado nas permissões efetivas V9. Fallback compat: sem o
+  /// payload V9, admin legado enxerga tudo; motorista cai no default-deny.
+  bool can(String permissionKey) {
+    if (_effectivePermissions.isEmpty) return _role == 'admin';
+    return _effectivePermissions[permissionKey] == true;
+  }
+
+  /// Extrai o efetivo/visibilidade de um perfil (/auth/me). Tolerante a ausência
+  /// (compat com backend/APK antigos).
+  void _aplicarPermissoesEfetivas(Map<String, dynamic> profile) {
+    final eff = profile['effective_permissions'];
+    _effectivePermissions = (eff is Map)
+        ? eff.map((k, v) => MapEntry(k.toString(), v))
+        : const {};
+    final vis = profile['driver_financial_visibility'];
+    _driverFinancialVisibility = (vis is String && vis.isNotEmpty) ? vis : 'commission_only';
+  }
 
   Future<void> tryAutoLogin() async {
     AppLogger.action('try_auto_login');
@@ -120,6 +146,7 @@ class AuthProvider extends ChangeNotifier {
       _termosPendentes = profile['termos_pendentes'] == true;
       _termosPendentesCount =
           (profile['termos_pendentes_count'] as num?)?.toInt() ?? 0;
+      _aplicarPermissoesEfetivas(profile);
       _status = AuthStatus.authenticated;
       // Registra o token de push para este aparelho (best-effort, não bloqueia).
       if (!skipExternalSideEffectsForTesting) {
@@ -305,6 +332,7 @@ class AuthProvider extends ChangeNotifier {
       _termosPendentes = profile['termos_pendentes'] == true;
       _termosPendentesCount =
           (profile['termos_pendentes_count'] as num?)?.toInt() ?? 0;
+      _aplicarPermissoesEfetivas(profile);
     }
 
     _status = AuthStatus.authenticated;

@@ -300,7 +300,19 @@ exports.getAll = async (req, res) => {
 
     const { data, error } = await query.order('data', { ascending: false });
     if (error) throw error;
-    res.status(200).json(data);
+
+    // P2 — redação financeira para motorista (visibility policy). Admin/super: sem redação.
+    let payload = data;
+    if (!isAdmin && req.user?.is_super_admin !== true && Array.isArray(data) && data.length) {
+      const { loadEffectivePermissions } = require('../services/permissions/permissionResolver');
+      const { redactFretesForDriver } = require('../services/permissions/driverFinancialRedaction');
+      const eff = await loadEffectivePermissions(supabase, {
+        uid: req.user.uid, tipo: 'motorista', empresa_id: req.empresa_id, empresa_tipo: req.user.empresa_tipo,
+      });
+      const { data: mot } = await supabase.from('motoristas').select('percentual_comissao').eq('id', req.user.uid).maybeSingle();
+      payload = redactFretesForDriver(data, eff.driverFinancialVisibility, mot?.percentual_comissao ?? null);
+    }
+    res.status(200).json(payload);
   } catch (error) {
     console.error('Erro ao listar fretes:', error);
     res.status(500).json({ message: 'Erro ao listar fretes.' });
@@ -481,11 +493,35 @@ exports.getById = async (req, res) => {
       }
     }
 
-    res.status(200).json(data);
+    const payload = await redigirFreteParaMotoristaSeAplicavel(req, data);
+    res.status(200).json(payload);
   } catch (error) {
     res.status(500).json({ message: 'Erro ao buscar frete.' });
   }
 };
+
+// P2 — VISIBILITY POLICY: se o solicitante é motorista, redige os campos
+// financeiros do frete conforme driver_financial_visibility_mode (segurança de
+// dados no backend, não só no app). Admin/super-admin recebem sem redação.
+async function redigirFreteParaMotoristaSeAplicavel(req, frete) {
+  try {
+    if (!frete) return frete;
+    if (req.user?.is_super_admin === true || req.user?.role === 'admin') return frete;
+    const { loadEffectivePermissions } = require('../services/permissions/permissionResolver');
+    const { redactFreteForDriver } = require('../services/permissions/driverFinancialRedaction');
+    const eff = await loadEffectivePermissions(supabase, {
+      uid: req.user.uid, tipo: 'motorista', empresa_id: frete.empresa_id, empresa_tipo: req.user.empresa_tipo,
+    });
+    const { data: mot } = await supabase.from('motoristas').select('percentual_comissao').eq('id', req.user.uid).maybeSingle();
+    return redactFreteForDriver(frete, eff.driverFinancialVisibility, mot?.percentual_comissao ?? null);
+  } catch (_) {
+    // fail-closed conservador: na dúvida, redige como commission_only.
+    try {
+      const { redactFreteForDriver } = require('../services/permissions/driverFinancialRedaction');
+      return redactFreteForDriver(frete, 'commission_only', null);
+    } catch { return frete; }
+  }
+}
 
 exports.uploadOdometroInicial = (req, res) => uploadOdometro(req, res, 'inicial');
 exports.uploadOdometroFinal = (req, res) => uploadOdometro(req, res, 'final');
@@ -764,17 +800,20 @@ exports.finalizar = async (req, res) => {
           return res.status(403).json({ message: 'Acesso negado.' });
         }
 
-        // Busca permissão e tipo de empresa
+        // P2 — freight.finish agora resolvido pelo modelo V9 (templates+overrides),
+        // com dual-read do legado (pode_finalizar_viagem) e bypass do autônomo
+        // preservados no resolver → EFFECTIVE_BEFORE = EFFECTIVE_AFTER.
         const { data: motData } = await supabase
           .from('motoristas')
-          .select('pode_finalizar_viagem, empresas(tipo)')
+          .select('empresas(tipo)')
           .eq('id', req.user.uid)
           .single();
-
-        const isAutonomo = motData?.empresas?.tipo === 'autonomo';
-        const podeFinalizar = motData?.pode_finalizar_viagem === true;
-
-        if (!isAutonomo && !podeFinalizar) {
+        const { loadEffectivePermissions, hasPermission } = require('../services/permissions/permissionResolver');
+        const effFinish = await loadEffectivePermissions(supabase, {
+          uid: req.user.uid, tipo: 'motorista',
+          empresa_id: frete.empresa_id, empresa_tipo: motData?.empresas?.tipo ?? null,
+        });
+        if (!hasPermission(effFinish, 'freight.finish')) {
           return res.status(403).json({
             message: 'Sua empresa não autorizou a finalização de viagens pelo app. Contate o administrador.'
           });

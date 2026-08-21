@@ -171,7 +171,10 @@ CREATE TABLE IF NOT EXISTS public.fretes (
 CREATE TABLE IF NOT EXISTS public.motoristas (
   id uuid PRIMARY KEY REFERENCES public.usuarios(id) ON DELETE CASCADE,
   empresa_id uuid NULL REFERENCES public.empresas(id) ON DELETE CASCADE,
-  placa_veiculo text NULL
+  placa_veiculo text NULL,
+  -- Coluna PRÉ-EXISTENTE em produção (flag legada de finalização pelo app),
+  -- referenciada pela migração de dados da 072 (permissions templates/overrides).
+  pode_finalizar_viagem boolean NOT NULL DEFAULT false
 );
 
 -- despesas/abastecimentos/vales: colunas PRÉ-EXISTENTES em produção que a migration

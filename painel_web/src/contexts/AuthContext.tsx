@@ -15,6 +15,11 @@ export interface User {
   empresa_tipo?: string;
   empresa_nome?: string;
   permissoes?: Record<string, boolean>;
+  // P2 — permissões efetivas V9 (templates+overrides). Fonte de verdade para
+  // menu/gates da UI; o backend continua a autoridade real.
+  effective_permissions?: Record<string, boolean>;
+  permission_template?: string | null;
+  driver_financial_visibility?: string | null;
   senha_temporaria?: boolean;
   termos_pendentes?: boolean;
   termos_pendentes_count?: number;
@@ -79,6 +84,9 @@ const mapMeToUser = (data: any): User => ({
   empresa_tipo: data.empresas?.tipo ?? undefined,
   empresa_nome: data.empresas?.nome ?? undefined,
   permissoes: data.permissoes ?? undefined,
+  effective_permissions: data.effective_permissions ?? undefined,
+  permission_template: data.permission_template ?? null,
+  driver_financial_visibility: data.driver_financial_visibility ?? null,
   // Sem isto, ao recarregar a página a flag se perderia e o usuário
   // com senha temporária burlaria a troca obrigatória (gate do ProtectedRoute).
   senha_temporaria: data.senha_temporaria ?? false,

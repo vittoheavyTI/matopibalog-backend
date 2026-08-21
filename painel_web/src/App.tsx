@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from 'r
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { SuperAdminRoute } from './components/SuperAdminRoute';
+import { PermissionRoute } from './components/PermissionRoute';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Layout } from './components/Layout';
 import { Login } from './pages/Login';
@@ -15,6 +16,7 @@ import { TorreControle } from './pages/TorreControle';
 import { GerenciamentoViagens } from './pages/GerenciamentoViagens';
 import { ResumoMotorista } from './pages/ResumoMotorista';
 import { Usuarios } from './pages/Usuarios';
+import { PerfisPermissoes } from './pages/PerfisPermissoes';
 import { Configuracoes } from './pages/Configuracoes';
 import { Integracoes } from './pages/Integracoes';
 import { Operacional } from './pages/Operacional';
@@ -83,10 +85,11 @@ const AppRoutes = () => {
         <Route path="relatorios" element={<Relatorios />} />
         <Route path="relatorios/viagens" element={<GerenciamentoViagens />} />
         <Route path="relatorios/resumo" element={<ResumoMotorista />} />
-        <Route path="relatorios/rentabilidade" element={<Rentabilidade />} />
-        <Route path="relatorios/acerto-motoristas" element={<AcertoMotoristas />} />
+        <Route path="relatorios/rentabilidade" element={<PermissionRoute permission="reports.financial.view"><Rentabilidade /></PermissionRoute>} />
+        <Route path="relatorios/acerto-motoristas" element={<PermissionRoute permission="reports.financial.view"><AcertoMotoristas /></PermissionRoute>} />
         <Route path="relatorios/torre-controle" element={<TorreControle />} />
         <Route path="admins" element={<Usuarios />} />
+        <Route path="perfis-permissoes" element={<PermissionRoute permission="permissions.manage"><PerfisPermissoes /></PermissionRoute>} />
         <Route path="operacional" element={<Operacional />} />
         <Route path="painel-administrativo">
           <Route index element={<Navigate to="visao-geral" replace />} />

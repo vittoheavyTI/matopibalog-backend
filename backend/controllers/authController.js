@@ -687,7 +687,36 @@ exports.getMe = async (req, res) => {
       console.error('[getMe] Falha ao calcular termos pendentes:', termosErr.message || termosErr);
     }
 
-    res.status(200).json({ ...data, termos_pendentes, termos_pendentes_count, trial_v2 });
+    // P2 — permissões efetivas V9 (templates+overrides). Aditivo e fail-safe:
+    // NUNCA derruba /auth/me se o modelo V9 ainda não existir no banco.
+    let effective_permissions = null;
+    let driver_financial_visibility = null;
+    let permission_template = null;
+    try {
+      const { loadEffectivePermissions } = require('../services/permissions/permissionResolver');
+      const eff = await loadEffectivePermissions(supabase, {
+        uid: data.id,
+        tipo: data.tipo,
+        is_super_admin: data.is_super_admin === true,
+        empresa_id: data.empresa_id,
+        empresa_tipo: data.empresas?.tipo ?? null,
+      });
+      effective_permissions = eff.permissions;
+      driver_financial_visibility = eff.driverFinancialVisibility;
+      permission_template = eff.templateStableKey;
+    } catch (permErr) {
+      console.error('[getMe] Falha ao calcular permissões efetivas:', permErr.message || permErr);
+    }
+
+    res.status(200).json({
+      ...data,
+      termos_pendentes,
+      termos_pendentes_count,
+      trial_v2,
+      effective_permissions,
+      driver_financial_visibility,
+      permission_template,
+    });
   } catch (error) {
     res.status(500).json({ message: 'Erro ao buscar dados do usuário.' });
   }

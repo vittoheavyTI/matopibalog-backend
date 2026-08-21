@@ -153,6 +153,7 @@ app.use('/auth', authRoutes);
 // não capturar o prefixo.
 app.use('/admin/termos', adminTermosRoutes);
 app.use('/admin/contrato-modelos', require('./routes/adminContratoModelos'));
+app.use('/admin/permissions', require('./routes/permissions'));
 app.use('/admin', adminRoutes);
 app.use('/fretes', fretesRoutes);
 app.use('/despesas', despesasRoutes);

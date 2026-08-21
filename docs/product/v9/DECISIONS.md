@@ -168,6 +168,16 @@ Legenda de impacto: **DOMÍNIO** (muda modelo de dados) · **UX** · **SEGURANÇ
 
 ---
 
+## Permissões V9 (P2 — templates+overrides)
+
+### D-042 — `freight.create` do motorista fechado por padrão (tightening de segurança)
+`POST /fretes` era acessível a qualquer usuário autenticado (motorista podia auto-criar frete para si). A P2 passa a exigir `requirePermission('freight.create')`: **admin/operador têm por padrão; motorista = false**. Isto **fecha um gap de autorização** (Section 23 permite mudança de efetivo quando é correção de segurança **explicitamente relatada** — é o caso). Empresas que queiram permitir podem ligar `freight.create` no template Motorista ou via override individual. `ENTRA_ROLE_TEMPLATE_MAPPING = FUTURE` (o template tem `stable_key` estável para mapear App Role/Group do Entra no futuro).
+
+### D-043 — Visibilidade financeira do motorista é VISIBILITY POLICY (não permission); autônomo = full
+`driver_financial_visibility_mode ∈ {commission_only, commission_plus_base, full_freight_financial}`, default **commission_only**, com **redação no backend** (omite `valor_frete`/bruto; expõe `comissao_valor`). Não é substituto de permission. **Motorista de empresa `autonomo` = `full_freight_financial` por padrão** (é o próprio dono e sempre viu o financeiro completo → preserva o efetivo); override individual ainda vence. Precedência de permissões congelada: **PLATFORM_INVARIANT → ENTITLEMENT → USER_OVERRIDE → COMPANY_TEMPLATE → DEFAULT_DENY**; scope verificado após o efetivo; permissão nunca expande scope.
+
+---
+
 ## Gates registrados
 
 | Gate | Critério de liberação |
