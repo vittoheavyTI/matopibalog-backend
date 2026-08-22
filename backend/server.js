@@ -158,6 +158,7 @@ app.use('/admin/contrato-modelos', require('./routes/adminContratoModelos'));
 app.use('/admin/diagnostics', require('./routes/diagnostics'));
 app.use('/admin/permissions', require('./routes/permissions'));
 app.use('/admin', adminRoutes);
+app.use('/fleet', require('./routes/fleet'));
 app.use('/fretes', fretesRoutes);
 app.use('/despesas', despesasRoutes);
 app.use('/abastecimentos', abastecimentosRoutes);

@@ -1,7 +1,7 @@
 # Matopiba Log — CONTEXT BRIDGE V9
 
 > **Handoff compacto.** Leia este arquivo primeiro ao retomar em outro chat/agente. Os detalhes estão nos 4 documentos linkados no fim.
-> Atualizado: **2026-08-22** (E1.5A closed em produção + início autorizado da Onda 2/Fleet).
+> Atualizado: **2026-08-22** (E1.5A closed em produção + Fleet-A em PR aguardando migration gate).
 
 ---
 
@@ -17,7 +17,7 @@
 
 | | |
 |---|---|
-| `origin/main` | **`3cda272`** (PR #447 / E1.5A Verifiability, Diagnostics & Recovery Foundation). Marcos anteriores: `a005457` (PR #446 / E1.4B), `1744d59` (PR #444 / E1.4A), `b695102` (PR #441 / E1.3), `d9e0c30` (PR #442 / close P2 pós-Railway), `e718eb3` (PR #440 / P2), `569fde7` (PR #437 / hotfix Onda 1). |
+| `origin/main` | **`9d65a85`** (docs close E1.5A pós-deploy). Marcos anteriores: `3cda272` (PR #447 / E1.5A), `a005457` (PR #446 / E1.4B), `1744d59` (PR #444 / E1.4A), `b695102` (PR #441 / E1.3), `d9e0c30` (PR #442 / close P2 pós-Railway), `e718eb3` (PR #440 / P2), `569fde7` (PR #437 / hotfix Onda 1). |
 | Deploy produção | Railway `matopibalog-backend` deploy `079a7600-e7b5-463e-aa15-e895486f89f1` **SUCCESS** (`commitHash=3cda272`, `numReplicas=1`) |
 | Health | **HTTP 200** `{"status":"UP"}` em `https://api.matopibalog.com.br/health` |
 | Banco | Supabase `rjahjogidyndphdxevom` · 69 tabelas públicas · RLS 100% |
@@ -48,6 +48,8 @@ Matopiba vira **frota/operação-centric** (D-001): o eixo é o **veículo/compo
 
 **E1.5A — Verifiability, Diagnostics & Recovery Foundation CLOSED em produção.** PR #447 mergeado (`MERGE_SHA=3cda272ec49154d77d62eed95976fef18bbd24f0`); Railway deploy `079a7600-e7b5-463e-aa15-e895486f89f1` SUCCESS (`commitHash=3cda272`, `numReplicas=1`); GitHub Pages publicado; CI main verde (Backend, SEC-1, GitHub Pages). Validação local final: backend `1656/1656`, web `116/116`, `tsc -b && vite build`. Smokes produção read-only: `/health` 200, `/admin/diagnostics` sem auth 401, `/admin/permissions/templates` sem auth 401; logs recentes sem 5xx novo. Entrega transversal sem IA/autonomia: contexto canônico de correlação (`request_id`, `correlation_id`, `operation_id`, `causation_id`), envelope sanitizado de evento/evidência, registry de invariantes, verifier, findings estruturados, repair playbook engine com `execute=DISABLED_BY_POLICY`, dry-run e primeira superfície read-only Super Admin (`/admin/diagnostics`). Reusa modelos vivos (`auth_event_audit`, `lancamento_eventos`, `frete_documento_eventos`, `billing_outbox`, webhook/outbox/reconcile) sem criar sistema paralelo. Sem migration 074, sem persistência nova de runs/findings, sem production write, sem env/secret, sem Asaas. Persistência histórica de runs/findings/playbook traces fica para decisão futura.
 
+**Onda 2 / Fleet-A — Domain/Foundation em PR, NÃO mergear antes do migration gate.** Branch `feature/onda2-fleet-foundation`; base `origin/main@9d65a85`; migration `074_fleet_foundation.sql` (`SHA256=24f8da26e115917c9a13dc620ad2e963acb8ac30f9b054423cf329b9ee00ccb8`) cria schema aditivo para `fleet_assets`, composições, vínculos temporais, documentos de ativo, odômetro, pneus e manutenção. API core `/fleet/*` usa `fleet.view`/`fleet.manage` ativos com entitlement `fleet`, `verificarPlano` e escopo operacional resolvido por request. Legado `fretes` preservado: sem `ALTER TABLE public.fretes`, sem backfill inventado, sem reescrita de fotos/KM. `MIGRATION_PRODUCTION_APPLIED=false`; `PRODUCTION_WRITES_FLEET=0`; `PRODUCTION_DEPLOYS_FLEET=0`.
+
 A **RBV9 — Rebaseline V9** (docs-only) está **concluída** e inclui o **patch fiscal V9** (domínio `FISCAL_INVOICING`, decisões D-036..D-041, ledger FISC-001..020, track NFS-e). **Nenhum código/dado/env de produção alterado por estes docs.**
 
 ### Nota fiscal (não bloqueante)
@@ -74,7 +76,7 @@ Adequação de **CNAE/CNPJ/regime** do owner corre **em paralelo** e **NÃO bloq
 
 ## Próximo passo recomendado
 
-Próximo passo recomendado: **ONDA2_FLEET_FOUNDATION**. Se a Fleet criar migration 074, preparar PR/CI/hash e parar em `READY_FOR_OWNER_MIGRATION_GATE_FLEET`; não aplicar DDL em produção sem gate explícito.
+Próximo passo recomendado: concluir o PR **FLEET-A Domain/Foundation** e parar em `READY_FOR_OWNER_MIGRATION_GATE_FLEET`; não aplicar DDL em produção sem gate explícito.
 
 ## Hard stops permanentes
 
