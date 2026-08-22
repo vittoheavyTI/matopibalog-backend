@@ -93,10 +93,10 @@ _Evidência coletada em 2026-08-19 (ver [FORENSIC_BASELINE](./FORENSIC_BASELINE.
 | ID | Item | Status | B W A D P | Evidência / Obs |
 |----|------|--------|-----------|-----------------|
 | RBV9-INV-043 | Documentos por frete (upload/storage/signed URL) | IMPL_VAL | ✓ ✓ ✓ ✓ ✓ | `frete_documentos`(16), migration 026. **E1.4A CLOSED em producao**: PR #444 mergeado (`MERGE_SHA=1744d59`), migration 073 aplicada+rastreada (`20260822041647`, SHA256 `7368bcd80009f1a21b42170d56d99f976dbca3a7aa0534ecb4d14c3f0e7dde91`) adicionou contrato v2, `client_request_id`, cancelamento logico/auditoria e participantes operacionais. Counts preservados; `comprovantes` legado intocado. |
-| RBV9-INV-044 | Scanner de documentos no app | PARTIAL | — — ~ — ~ | PR #347; aquém do alvo (crop/perspectiva/multipágina/OCR) |
+| RBV9-INV-044 | Scanner de documentos no app | IMPL_NV | ✓ ✓ ~ ✓ ✓ | **E1.4B implementada em PR mobile**: scanner on-device via `cunning_document_scanner`, multipagina, review antes do upload, reorder/remove/retake e geração local de PDF. OCR segue fora do primeiro release (`OCR_FIRST_RELEASE=false`). Validação física no aparelho fica no `MOBILE_RELEASE_TRAIN_M1`. |
 | RBV9-INV-045 | Fluxos distintos empresa→motorista / motorista→empresa | ROADMAP | ✗ ✗ ✗ ✗ ✗ | D-013 |
 | RBV9-INV-046 | Múltiplos recebedores/assinantes | PARTIAL | ✓ ~ ✗ ✓ ✓ | **Fundacao E1.4A em producao**: `frete_documento_participantes` criada com FKs/RLS tenant-aware e status/tipo; fluxos reais de retorno/ack/assinatura operacional seguem `FUTURE_B`. D-015 |
-| RBV9-INV-047 | Viewer PDF-first no app (ver antes de exportar) | PARTIAL | ✓ ✓ ✗ ~ ✓ | **E1.4A em producao** entrega preview web interno para PDF/imagem via signed URL curta, com abrir fora/salvar/compartilhar como acoes secundarias. App PDF-first e scanner avancado seguem pendentes para E1.4B. D-016 |
+| RBV9-INV-047 | Viewer PDF-first no app (ver antes de exportar) | IMPL_NV | ✓ ✓ ~ ✓ ✓ | **E1.4B implementada em PR mobile**: app busca signed URL curta no backend, baixa para temp isolado, mostra preview interno PDF/imagem e só depois oferece salvar/compartilhar/abrir externamente. URLs assinadas não viram autoridade persistida. D-016 |
 | RBV9-INV-048 | Documentos por ativo (frota) | ROADMAP | ✗ ✗ ✗ ✗ ✗ | depende de FLEET |
 
 ## LAUNCHES (despesas / abastecimento / vale / adiantamento)
@@ -281,6 +281,10 @@ _Evidência coletada em 2026-08-19 (ver [FORENSIC_BASELINE](./FORENSIC_BASELINE.
 | MOBILE-M1-001 | Validar **realtime da tela de detalhe** do frete no aparelho (`detalhe_viagem_screen` atualiza sozinho: sem pull-to-refresh, sem reabrir, sem esperar o poll de 60s) | DEFERRED_TO_MOBILE_RELEASE_TRAIN_M1 | Código pronto (Onda 1 · E1.7). Aguarda APK consolidado + teste físico. |
 | MOBILE-M1-002 | Validar **criação/aprovação/rejeição/cancelamento** de lançamentos web↔app em APK consolidado (criar no app → web sem refresh; aprovar/rejeitar/cancelar no web → app atualiza; cancelado permanece visível) | DEFERRED_TO_MOBILE_RELEASE_TRAIN_M1 | Código pronto (Onda 1 · E1.2/E1.7). Aguarda APK consolidado + teste físico. |
 | MOBILE-M1-003 | Validar no aparelho o **enforcement de permissões V9** (P2): botão finalizar frete só com `freight.finish` efetivo; **visibilidade financeira** do motorista (`commission_only` esconde o bruto do frete e mostra a comissão; `full` no autônomo); mudança de perfil/override reflete após novo login | DEFERRED_TO_MOBILE_RELEASE_TRAIN_M1 | Código pronto (P2). `analyze`/`test`/`build` do app rodam no CI/Codemagic. Aguarda APK consolidado + teste físico. |
+| MOBILE-M1-004 | Validar no aparelho o **viewer interno PDF/imagem** de documentos do frete e ePOD antes de ações externas | DEFERRED_TO_MOBILE_RELEASE_TRAIN_M1 | Código pronto (E1.4B). Aguarda APK consolidado + teste físico. |
+| MOBILE-M1-005 | Validar no aparelho o **scanner multipagina** com preview, reorder, remove, retake e PDF local | DEFERRED_TO_MOBILE_RELEASE_TRAIN_M1 | Código pronto (E1.4B). OCR fora do release inicial. |
+| MOBILE-M1-006 | Validar no aparelho **upload resiliente/idempotente** de documentos/ePOD com retry usando o mesmo `client_request_id` | DEFERRED_TO_MOBILE_RELEASE_TRAIN_M1 | Código pronto (E1.4B). Process death completo não é prometido; retry seguro ao retornar ao fluxo é o limite do M1. |
+| MOBILE-M1-007 | Validar no aparelho fluxo **preview-first** com salvar/compartilhar/abrir fora somente após prévia | DEFERRED_TO_MOBILE_RELEASE_TRAIN_M1 | Código pronto (E1.4B). Sem upload direto para Storage pelo app. |
 
 ---
 
