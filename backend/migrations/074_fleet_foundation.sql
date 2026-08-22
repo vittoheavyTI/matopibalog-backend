@@ -312,6 +312,187 @@ CREATE INDEX IF NOT EXISTS maintenance_events_asset_time_idx
 CREATE INDEX IF NOT EXISTS maintenance_events_empresa_status_idx
   ON public.maintenance_events (empresa_id, status, category);
 
+-- Tenant-consistency FKs: ids globais garantem existencia; os pares (id, empresa_id)
+-- garantem que relacionamentos Fleet nao apontem para objetos de outro tenant.
+CREATE UNIQUE INDEX IF NOT EXISTS usuarios_id_empresa_key
+  ON public.usuarios (id, empresa_id);
+CREATE UNIQUE INDEX IF NOT EXISTS fretes_id_empresa_key
+  ON public.fretes (id, empresa_id);
+CREATE UNIQUE INDEX IF NOT EXISTS fleet_assets_id_empresa_key
+  ON public.fleet_assets (id, empresa_id);
+CREATE UNIQUE INDEX IF NOT EXISTS vehicle_compositions_id_empresa_key
+  ON public.vehicle_compositions (id, empresa_id);
+CREATE UNIQUE INDEX IF NOT EXISTS tires_id_empresa_key
+  ON public.tires (id, empresa_id);
+
+DO $$ BEGIN
+  ALTER TABLE public.fleet_assets
+    ADD CONSTRAINT fleet_assets_unit_empresa_fk
+    FOREIGN KEY (unidade_operacional_id, empresa_id)
+    REFERENCES public.unidades_operacionais (id, empresa_id)
+    ON DELETE SET NULL (unidade_operacional_id);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE public.vehicle_compositions
+    ADD CONSTRAINT veh_comp_unit_empresa_fk
+    FOREIGN KEY (unidade_operacional_id, empresa_id)
+    REFERENCES public.unidades_operacionais (id, empresa_id)
+    ON DELETE SET NULL (unidade_operacional_id);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE public.vehicle_composition_members
+    ADD CONSTRAINT veh_comp_members_comp_empresa_fk
+    FOREIGN KEY (composition_id, empresa_id)
+    REFERENCES public.vehicle_compositions (id, empresa_id)
+    ON DELETE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE public.vehicle_composition_members
+    ADD CONSTRAINT veh_comp_members_asset_empresa_fk
+    FOREIGN KEY (asset_id, empresa_id)
+    REFERENCES public.fleet_assets (id, empresa_id)
+    ON DELETE RESTRICT;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE public.driver_vehicle_assignments
+    ADD CONSTRAINT driver_assign_driver_empresa_fk
+    FOREIGN KEY (driver_id, empresa_id)
+    REFERENCES public.usuarios (id, empresa_id)
+    ON DELETE RESTRICT;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE public.driver_vehicle_assignments
+    ADD CONSTRAINT driver_assign_asset_empresa_fk
+    FOREIGN KEY (asset_id, empresa_id)
+    REFERENCES public.fleet_assets (id, empresa_id)
+    ON DELETE RESTRICT;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE public.driver_vehicle_assignments
+    ADD CONSTRAINT driver_assign_comp_empresa_fk
+    FOREIGN KEY (composition_id, empresa_id)
+    REFERENCES public.vehicle_compositions (id, empresa_id)
+    ON DELETE RESTRICT;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE public.freight_vehicle_assignments
+    ADD CONSTRAINT freight_assign_frete_empresa_fk
+    FOREIGN KEY (frete_id, empresa_id)
+    REFERENCES public.fretes (id, empresa_id)
+    ON DELETE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE public.freight_vehicle_assignments
+    ADD CONSTRAINT freight_assign_asset_empresa_fk
+    FOREIGN KEY (asset_id, empresa_id)
+    REFERENCES public.fleet_assets (id, empresa_id)
+    ON DELETE RESTRICT;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE public.freight_vehicle_assignments
+    ADD CONSTRAINT freight_assign_comp_empresa_fk
+    FOREIGN KEY (composition_id, empresa_id)
+    REFERENCES public.vehicle_compositions (id, empresa_id)
+    ON DELETE RESTRICT;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE public.freight_vehicle_assignments
+    ADD CONSTRAINT freight_assign_primary_driver_empresa_fk
+    FOREIGN KEY (primary_driver_id, empresa_id)
+    REFERENCES public.usuarios (id, empresa_id)
+    ON DELETE SET NULL (primary_driver_id);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE public.freight_vehicle_assignments
+    ADD CONSTRAINT freight_assign_secondary_driver_empresa_fk
+    FOREIGN KEY (secondary_driver_id, empresa_id)
+    REFERENCES public.usuarios (id, empresa_id)
+    ON DELETE SET NULL (secondary_driver_id);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE public.asset_documents
+    ADD CONSTRAINT asset_docs_asset_empresa_fk
+    FOREIGN KEY (asset_id, empresa_id)
+    REFERENCES public.fleet_assets (id, empresa_id)
+    ON DELETE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE public.odometer_events
+    ADD CONSTRAINT odometer_asset_empresa_fk
+    FOREIGN KEY (asset_id, empresa_id)
+    REFERENCES public.fleet_assets (id, empresa_id)
+    ON DELETE RESTRICT;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE public.odometer_events
+    ADD CONSTRAINT odometer_frete_empresa_fk
+    FOREIGN KEY (frete_id, empresa_id)
+    REFERENCES public.fretes (id, empresa_id)
+    ON DELETE SET NULL (frete_id);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE public.tires
+    ADD CONSTRAINT tires_current_asset_empresa_fk
+    FOREIGN KEY (current_asset_id, empresa_id)
+    REFERENCES public.fleet_assets (id, empresa_id)
+    ON DELETE SET NULL (current_asset_id);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE public.tire_installations
+    ADD CONSTRAINT tire_inst_tire_empresa_fk
+    FOREIGN KEY (tire_id, empresa_id)
+    REFERENCES public.tires (id, empresa_id)
+    ON DELETE RESTRICT;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE public.tire_installations
+    ADD CONSTRAINT tire_inst_asset_empresa_fk
+    FOREIGN KEY (asset_id, empresa_id)
+    REFERENCES public.fleet_assets (id, empresa_id)
+    ON DELETE RESTRICT;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE public.tire_events
+    ADD CONSTRAINT tire_events_tire_empresa_fk
+    FOREIGN KEY (tire_id, empresa_id)
+    REFERENCES public.tires (id, empresa_id)
+    ON DELETE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE public.tire_events
+    ADD CONSTRAINT tire_events_asset_empresa_fk
+    FOREIGN KEY (asset_id, empresa_id)
+    REFERENCES public.fleet_assets (id, empresa_id)
+    ON DELETE SET NULL (asset_id);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE public.maintenance_events
+    ADD CONSTRAINT maintenance_asset_empresa_fk
+    FOREIGN KEY (asset_id, empresa_id)
+    REFERENCES public.fleet_assets (id, empresa_id)
+    ON DELETE RESTRICT;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
 ALTER TABLE public.fleet_assets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.vehicle_compositions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.vehicle_composition_members ENABLE ROW LEVEL SECURITY;
