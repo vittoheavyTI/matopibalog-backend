@@ -16,7 +16,7 @@ Autorização efetiva em todo o sistema = **ENTITLEMENT (plano) AND PERMISSION (
 | **IDENTITY** | Autenticação, sessões, SSO/Entra, break-glass | — | SEC-1 vivo; SSO ROADMAP |
 | **ORG_SCOPE** | Grupo → Região → Filial → Operação; memberships | IDENTITY | schema vivo, inerte |
 | **PERMISSIONS/ENTITLEMENTS** | Templates + overrides + invariantes; funcionalidades por plano | IDENTITY, ORG_SCOPE | entitlements vivos; templates ROADMAP |
-| **FLEET** | Ativos, composições, documentos de ativo, odômetro, pneus, manutenção | ORG_SCOPE | **FLEET-A em PR / migration gate** |
+| **FLEET** | Ativos, composições, documentos de ativo, odômetro, pneus, manutenção | ORG_SCOPE | **FLEET-A foundation CLOSED; Fleet-B pendente** |
 | **DRIVERS** | Motoristas, vínculo temporal a veículos, visibilidade financeira | FLEET, PERMISSIONS | cadastro vivo; vínculo NEW |
 | **FREIGHT_PLANNING** | Oportunidade → custo/rota previstos → aprovação | FLEET, ROUTE, ORG_SCOPE | **NEW (0)** |
 | **DISPATCH** | Designação direta / oferta a elegíveis; lock concorrência-safe | PLANNING, DRIVERS, FLEET | **NEW (0)** |
@@ -110,8 +110,8 @@ Ordem ajustada por dependência técnica objetiva: FLEET é pré-requisito de PL
 _Itens mobile de macrofrentes futuras (ex.: enforcement de `freight.create`/`freight.finish` e visibilidade financeira do motorista da P2) entram nesta seção como `MOBILE-M1-NNN`._
 
 ### ONDA 2 — Fundação Frota
-- **FLEET-A Domain/Foundation**: **em PR, aguardando owner migration gate** — migration 074 aditiva cria ativos, composições, vínculos temporais, documentos de ativo, odômetro, pneus e manutenção; backend expõe API core `/fleet/*` com `ENTITLEMENT AND PERMISSION AND SCOPE`; legado de `fretes` preservado. Certificação G0 adicionou FKs compostas tenant-safe e PG test específico para RLS/grants, tenant, temporalidade e concorrência. `MIGRATION_074_SHA256=a01ab82c7f7db1b2bb9eebb24db367b02a2d0aa1545f0259f065a110ea1cfec3`; `MIGRATION_PRODUCTION_APPLIED=false`. Ver [ONDA2_FLEET_FOUNDATION](./ONDA2_FLEET_FOUNDATION.md).
-- **E2.1 fleet_assets + composições + membros** (RBV9-INV-033/034, D-001..D-003): coberto por FLEET-A, pendente migration gate/produção.
+- **FLEET-A Domain/Foundation**: ✅ **CLOSED em produção** — migration 074 aplicada uma vez via `apply_migration` e rastreada (`20260822142407 074_fleet_foundation`, SHA256 `a01ab82c7f7db1b2bb9eebb24db367b02a2d0aa1545f0259f065a110ea1cfec3`), PR #449 mergeado (`MERGE_SHA=d682d4ed958929d46cbd556a118d71fa5c04c2bc`) e backend Railway `e2615ac7-4cdb-498e-ba5f-de8f64300a83` SUCCESS (`commitHash=d682d4ed958929d46cbd556a118d71fa5c04c2bc`, `numReplicas=1`). Cria ativos, composições, vínculos temporais, documentos de ativo, odômetro, pneus e manutenção; backend expõe API core `/fleet/*` com `ENTITLEMENT AND PERMISSION AND SCOPE`; legado de `fretes` preservado sem backfill. Smokes read-only: `/health` 200, `/fleet/assets` 401 sem auth, `/fleet/compositions` 401 sem auth. `FLEET_OVERALL_STATUS=OPEN_FLEET_B_PENDING`. Ver [ONDA2_FLEET_FOUNDATION](./ONDA2_FLEET_FOUNDATION.md).
+- **E2.1 fleet_assets + composições + membros** (RBV9-INV-033/034, D-001..D-003): foundation coberta por FLEET-A em produção; UX/workflows completos ficam para Fleet-B.
 - **E2.2 Vínculo temporal motorista↔composição + handoff** (RBV9-INV-035/028, D-002): vínculo motorista↔ativo/composição coberto por FLEET-A; handoff UX/fluxo operacional fica para slice posterior.
 - **E2.3 Snapshot de composição no frete + check-in/out** (RBV9-INV-026/027, D-011/D-012): `freight_vehicle_assignments` coberto por FLEET-A; check-in/out formal fica posterior.
 - **E2.4 Documentos de ativo + vencimentos** (RBV9-INV-036/048, D-013): fundação `asset_documents` coberta por FLEET-A; UI/document flow posterior.

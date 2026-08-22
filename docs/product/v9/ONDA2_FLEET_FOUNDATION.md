@@ -1,10 +1,10 @@
 # ONDA 2 — Fleet Foundation / FLEET-A
 
-> Status em PR: `READY_FOR_OWNER_MIGRATION_GATE_FLEET`.
+> Status: `FLEET_A_FOUNDATION_DEPLOYED`.
 
 ## Escopo
 
-Fleet-A cria a fundacao backend/db para frota sem aplicar DDL em producao:
+Fleet-A criou e implantou a fundacao backend/db para frota:
 
 - `fleet_assets`;
 - `vehicle_compositions`;
@@ -18,16 +18,23 @@ Fleet-A cria a fundacao backend/db para frota sem aplicar DDL em producao:
 - `tire_events`;
 - `maintenance_events`.
 
-O modelo e `FLEET/COMPOSITION-CENTRIC`: ativo/composicao e o eixo fisico; motorista e vinculo temporal. O modelo legado de `fretes` continua funcionando e a migration nao altera `public.fretes`.
+O modelo e `FLEET/COMPOSITION-CENTRIC`: ativo/composicao e o eixo fisico; motorista e vinculo temporal. O modelo legado de `fretes` continua funcionando e a migration nao reescreve dados legados.
 
 ## Migration Gate
 
 - `MIGRATION_REQUIRED=true`
 - `MIGRATION_FILE=backend/migrations/074_fleet_foundation.sql`
 - `MIGRATION_074_SHA256=a01ab82c7f7db1b2bb9eebb24db367b02a2d0aa1545f0259f065a110ea1cfec3`
-- `MIGRATION_PRODUCTION_APPLIED=false`
+- `MIGRATION_PRODUCTION_APPLIED=true`
+- `MIGRATION_074_TRACKING=20260822142407 074_fleet_foundation`
+- `PR449_MERGE_SHA=d682d4ed958929d46cbd556a118d71fa5c04c2bc`
+- `BACKEND_DEPLOY_ID=e2615ac7-4cdb-498e-ba5f-de8f64300a83`
+- `BACKEND_DEPLOY_SHA=d682d4ed958929d46cbd556a118d71fa5c04c2bc`
+- `RAILWAY_REPLICAS=1`
+- `PRODUCTION_HEALTH=/health 200`
+- `PRODUCTION_SMOKE=/fleet/assets 401; /fleet/compositions 401 sem auth`
 
-Precheck esperado antes de qualquer aplicacao futura:
+Gate executado antes da aplicacao:
 
 - confirmar hash exato acima;
 - aplicar em ambiente novo/fresh;
@@ -36,6 +43,19 @@ Precheck esperado antes de qualquer aplicacao futura:
 - validar FKs compostas `(id, empresa_id)` para impedir referencia cross-tenant;
 - confirmar que nao ha rewrite/backfill automatico de dados legados;
 - confirmar que `fretes` legado continua operando sem Fleet.
+
+Postchecks de producao:
+
+- 11 tabelas Fleet presentes com RLS habilitado;
+- 32 indices esperados presentes;
+- 21 constraints compostas esperadas presentes;
+- 11 policies tenant-aware presentes;
+- `anon` sem privilegios nas tabelas Fleet;
+- `authenticated` e `service_role` com grants previstos;
+- todas as novas tabelas Fleet iniciaram com `COUNT=0`;
+- DML de governanca/catalogo: 1 funcionalidade `fleet` + 7 mapeamentos de plano `incluida`;
+- entitlement projetado apos apply: `included=17`, `optional=0`, `unavailable=17`, `unknown=0`;
+- nenhum backfill, asset, composition, assignment, pneu, manutencao, odometro ou documento real criado.
 
 ## Authority
 
@@ -54,7 +74,8 @@ Fleet usa a regra congelada:
 - Odometro novo nasce em `odometer_events`, preservando fotos/KM legados em `fretes`.
 - Pneus e manutencao entram como fundacao de dados, sem analytics avancada.
 - Nenhum dado financeiro operacional e duplicado; custos futuros devem se conectar ao dominio financeiro existente.
-- Sem Asaas, sem env/secret, sem production write e sem production deploy para Fleet.
+- Sem Asaas, sem env/secret e sem escrita de dado operacional Fleet em producao.
+- `FLEET_OVERALL_STATUS=OPEN_FLEET_B_PENDING`: upload/viewer de documentos de ativo, UX de pneus, UX de manutencao, fluxos mobile e operacao completa ficam para Fleet-B/fatias futuras.
 
 ## Validacao Local
 

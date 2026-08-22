@@ -1,7 +1,7 @@
 # Matopiba Log — CONTEXT BRIDGE V9
 
 > **Handoff compacto.** Leia este arquivo primeiro ao retomar em outro chat/agente. Os detalhes estão nos 4 documentos linkados no fim.
-> Atualizado: **2026-08-22** (E1.5A closed em produção + Fleet-A em PR aguardando migration gate).
+> Atualizado: **2026-08-22** (Fleet-A foundation closed em produção; Fleet-B pendente).
 
 ---
 
@@ -48,7 +48,7 @@ Matopiba vira **frota/operação-centric** (D-001): o eixo é o **veículo/compo
 
 **E1.5A — Verifiability, Diagnostics & Recovery Foundation CLOSED em produção.** PR #447 mergeado (`MERGE_SHA=3cda272ec49154d77d62eed95976fef18bbd24f0`); Railway deploy `079a7600-e7b5-463e-aa15-e895486f89f1` SUCCESS (`commitHash=3cda272`, `numReplicas=1`); GitHub Pages publicado; CI main verde (Backend, SEC-1, GitHub Pages). Validação local final: backend `1656/1656`, web `116/116`, `tsc -b && vite build`. Smokes produção read-only: `/health` 200, `/admin/diagnostics` sem auth 401, `/admin/permissions/templates` sem auth 401; logs recentes sem 5xx novo. Entrega transversal sem IA/autonomia: contexto canônico de correlação (`request_id`, `correlation_id`, `operation_id`, `causation_id`), envelope sanitizado de evento/evidência, registry de invariantes, verifier, findings estruturados, repair playbook engine com `execute=DISABLED_BY_POLICY`, dry-run e primeira superfície read-only Super Admin (`/admin/diagnostics`). Reusa modelos vivos (`auth_event_audit`, `lancamento_eventos`, `frete_documento_eventos`, `billing_outbox`, webhook/outbox/reconcile) sem criar sistema paralelo. Sem migration 074, sem persistência nova de runs/findings, sem production write, sem env/secret, sem Asaas. Persistência histórica de runs/findings/playbook traces fica para decisão futura.
 
-**Onda 2 / Fleet-A — Domain/Foundation em PR, NÃO mergear antes do migration gate.** Branch `feature/onda2-fleet-foundation`; base `origin/main@9d65a85`; migration `074_fleet_foundation.sql` (`SHA256=a01ab82c7f7db1b2bb9eebb24db367b02a2d0aa1545f0259f065a110ea1cfec3`) cria schema aditivo para `fleet_assets`, composições, vínculos temporais, documentos de ativo, odômetro, pneus e manutenção. Certificação G0 adicionou FKs compostas `(id, empresa_id)` para consistência tenant no banco e PG test dedicado (`fleet_foundation_074.pgtest.mjs`) para RLS/grants, tenant isolation, temporalidade e concorrência. API core `/fleet/*` usa `fleet.view`/`fleet.manage` ativos com entitlement `fleet`, `verificarPlano` e escopo operacional resolvido por request. Legado `fretes` preservado: sem `ALTER TABLE public.fretes`, sem backfill inventado, sem reescrita de fotos/KM. `MIGRATION_PRODUCTION_APPLIED=false`; `PRODUCTION_WRITES_FLEET=0`; `PRODUCTION_DEPLOYS_FLEET=0`.
+**Onda 2 / Fleet-A — Domain/Foundation CLOSED em produção.** OWNER MIGRATION GATE executado em 2026-08-22: migration `074_fleet_foundation.sql` aplicada uma vez via `apply_migration` após hash autorizado `a01ab82c7f7db1b2bb9eebb24db367b02a2d0aa1545f0259f065a110ea1cfec3`, tracking confirmado (`20260822142407 074_fleet_foundation`), 11 tabelas Fleet criadas com RLS/policies/grants, 32 índices esperados, 21 constraints compostas tenant-safe e `COUNT=0` em todas as entidades Fleet de negócio. DML restrito a governança/catálogo: funcionalidade `fleet` + 7 mapeamentos de plano; entitlement após apply `included=17`, `optional=0`, `unavailable=17`, `unknown=0`; overrides Fleet reais preservados em 0. PR #449 mergeado (`MERGE_SHA=d682d4ed958929d46cbd556a118d71fa5c04c2bc`); backend Railway `e2615ac7-4cdb-498e-ba5f-de8f64300a83` SUCCESS (`commitHash=d682d4ed958929d46cbd556a118d71fa5c04c2bc`, `numReplicas=1`); main checks verdes. API core `/fleet/*` usa `fleet.view`/`fleet.manage` ativos com entitlement `fleet`, `verificarPlano` e escopo operacional resolvido por request; smokes read-only: `/health` 200, `/fleet/assets` 401 sem auth, `/fleet/compositions` 401 sem auth; logs sem novo 5xx. Legado `fretes` preservado: sem backfill inventado, sem reescrita de fotos/KM, sem asset/composition real criado. `FLEET_A_TECHNICAL_STATUS=CLOSED`; `FLEET_OVERALL_STATUS=OPEN_FLEET_B_PENDING`; `PRODUCTION_FLEET_BUSINESS_WRITES=0`; `ENV_CHANGED=false`; `ASAAS_TOUCHED=false`.
 
 A **RBV9 — Rebaseline V9** (docs-only) está **concluída** e inclui o **patch fiscal V9** (domínio `FISCAL_INVOICING`, decisões D-036..D-041, ledger FISC-001..020, track NFS-e). **Nenhum código/dado/env de produção alterado por estes docs.**
 
@@ -76,7 +76,7 @@ Adequação de **CNAE/CNPJ/regime** do owner corre **em paralelo** e **NÃO bloq
 
 ## Próximo passo recomendado
 
-Próximo passo recomendado: concluir o PR **FLEET-A Domain/Foundation** e parar em `READY_FOR_OWNER_MIGRATION_GATE_FLEET`; não aplicar DDL em produção sem gate explícito.
+Próximo passo recomendado: revisar o foundation entregue e desenhar a experiência operacional da **Fleet-B** antes de ampliar UI/app. Não iniciar Fleet-B sem novo prompt/gate.
 
 ## Hard stops permanentes
 
