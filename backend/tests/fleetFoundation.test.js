@@ -9,6 +9,7 @@ const {
   buildAssetPayload,
   buildCompositionPayload,
   createAsset,
+  databaseError,
   listAssets,
   targetPayload,
 } = require('../services/fleet/fleetService');
@@ -99,6 +100,16 @@ test('fleet domain rejects invalid target ambiguity and invalid enums', () => {
   );
 });
 
+test('fleet database errors are mapped to operational messages', () => {
+  const duplicate = databaseError({ code: '23505', message: 'duplicate key value violates unique constraint' });
+  assert.equal(duplicate.status, 409);
+  assert.equal(duplicate.code, 'fleet_conflict');
+
+  const foreignKey = databaseError({ code: '23503', message: 'violates foreign key constraint' });
+  assert.equal(foreignKey.status, 422);
+  assert.equal(foreignKey.code, 'fleet_reference_not_found');
+});
+
 test('fleet writes reject operational units outside resolved scope before database write', async () => {
   const forbiddenScope = {
     mode: 'LIMITED',
@@ -169,7 +180,9 @@ test('fleet router is protected by auth, tenant, plan and effective permissions'
   const escopoTemSelecaoInvalida = function escopoTemSelecaoInvalida() { return false; };
   const permissions = [];
   const controller = {
+    visaoOperacional: function visaoOperacional(_req, res) { res.json({}); },
     listarAtivos: function listarAtivos(_req, res) { res.json({}); },
+    detalharAtivo: function detalharAtivo(_req, res) { res.json({}); },
     criarAtivo: function criarAtivo(_req, res) { res.json({}); },
     atualizarAtivo: function atualizarAtivo(_req, res) { res.json({}); },
     listarComposicoes: function listarComposicoes(_req, res) { res.json({}); },
@@ -179,6 +192,17 @@ test('fleet router is protected by auth, tenant, plan and effective permissions'
     criarVinculoMotorista: function criarVinculoMotorista(_req, res) { res.json({}); },
     encerrarVinculoMotorista: function encerrarVinculoMotorista(_req, res) { res.json({}); },
     criarVinculoFrete: function criarVinculoFrete(_req, res) { res.json({}); },
+    listarPneus: function listarPneus(_req, res) { res.json({}); },
+    criarPneu: function criarPneu(_req, res) { res.json({}); },
+    instalarPneu: function instalarPneu(_req, res) { res.json({}); },
+    removerInstalacaoPneu: function removerInstalacaoPneu(_req, res) { res.json({}); },
+    criarEventoPneu: function criarEventoPneu(_req, res) { res.json({}); },
+    listarManutencoes: function listarManutencoes(_req, res) { res.json({}); },
+    criarManutencao: function criarManutencao(_req, res) { res.json({}); },
+    listarOdometros: function listarOdometros(_req, res) { res.json({}); },
+    criarOdometro: function criarOdometro(_req, res) { res.json({}); },
+    listarDocumentosAtivo: function listarDocumentosAtivo(_req, res) { res.json({}); },
+    criarDocumentoAtivo: function criarDocumentoAtivo(_req, res) { res.json({}); },
   };
 
   Module._load = function (request, parent, isMain) {
@@ -218,8 +242,21 @@ test('fleet router is protected by auth, tenant, plan and effective permissions'
   assert.equal(getAssets.stack[0].handle.permissionKey, 'fleet.view');
   assert.equal(getAssets.stack[1].handle, controller.listarAtivos);
 
+  const getOverview = router.stack.find((layer) => layer.route?.path === '/overview' && layer.route.methods.get).route;
+  assert.equal(getOverview.stack[0].handle.permissionKey, 'fleet.view');
+  assert.equal(getOverview.stack[1].handle, controller.visaoOperacional);
+
+  const getAssetDetail = router.stack.find((layer) => layer.route?.path === '/assets/:id' && layer.route.methods.get).route;
+  assert.equal(getAssetDetail.stack[0].handle.permissionKey, 'fleet.view');
+
   const postAssets = router.stack.find((layer) => layer.route?.path === '/assets' && layer.route.methods.post).route;
   assert.equal(postAssets.stack[0].handle.permissionKey, 'fleet.manage');
+
+  const postTires = router.stack.find((layer) => layer.route?.path === '/tires' && layer.route.methods.post).route;
+  assert.equal(postTires.stack[0].handle.permissionKey, 'fleet.manage');
+
+  const getMaintenance = router.stack.find((layer) => layer.route?.path === '/maintenance' && layer.route.methods.get).route;
+  assert.equal(getMaintenance.stack[0].handle.permissionKey, 'fleet.view');
 
   assert.ok(permissions.includes('fleet.view'));
   assert.ok(permissions.includes('fleet.manage'));
