@@ -11,10 +11,10 @@ function carregarController(cenario = {}) {
   const chamadas = { inserts: [], updates: [], uploads: [], signed: [], removes: [] };
 
   function builder(tabela) {
-    const st = { count: false, insert: false, update: false, select: false };
+    const st = { count: false, insert: false, update: false, select: false, eqs: {} };
     const b = {
       select(_c, opts) { st.select = true; if (opts && opts.count) st.count = true; return b; },
-      eq() { return b; },
+      eq(col, val) { st.eqs[col] = val; return b; },
       neq() { return b; },
       order() { return b; },
       insert(p) { st.insert = true; chamadas.inserts.push({ tabela, payload: p }); return b; },
@@ -38,6 +38,7 @@ function carregarController(cenario = {}) {
     if (tabela === 'frete_epod_evidencias') {
       if (st.insert) { const p = chamadas.inserts.at(-1).payload; return { data: { id: p.id, nome_arquivo: p.nome_arquivo, mime: p.mime, status: 'pendente', created_at: 't' }, error: null }; }
       if (st.update) return { data: cenario.evidAlvo ?? null, error: null }; // validarEvidencia
+      if (st.eqs.client_request_id) return { data: cenario.existingEvidencia ?? null, error: null };
       return { data: cenario.evid ?? null, error: cenario.evid ? null : { message: 'nf' } }; // getEvidenciaUrl
     }
     if (tabela === 'notificacoes') return { data: cenario.notifExistente ?? { id: 'n1' }, error: null };
@@ -193,7 +194,19 @@ test('uploadEvidencia: com ePOD → 201 bucket privado + recompute', async () =>
   const res = resMock(); await controller.uploadEvidencia(req({ file: fileMock() }), res);
   assert.equal(res.statusCode, 201);
   assert.equal(chamadas.uploads[0].bucket, 'fretes-evidencias');
+  const ins = chamadas.inserts.find((i) => i.tabela === 'frete_epod_evidencias').payload;
+  assert.equal(ins.client_request_id, null);
   assert.ok(chamadas.updates.some((u) => u.tabela === 'frete_epod' && u.payload.status === 'registrado'));
+});
+
+test('uploadEvidencia: client_request_id repetido retorna existente sem upload', async () => {
+  const existente = { id: 'ev-1', nome_arquivo: 'canhoto.jpg', mime: 'image/jpeg', status: 'pendente', client_request_id: 'epod-req-1234' };
+  const { controller, chamadas } = carregarController({ frete: FRETE, epod: EPOD, existingEvidencia: existente });
+  const res = resMock();
+  await controller.uploadEvidencia(req({ file: fileMock(), body: { client_request_id: 'epod-req-1234' } }), res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.idempotent, true);
+  assert.equal(chamadas.uploads.length, 0);
 });
 test('uploadEvidencia: MIME inválido → 415', async () => {
   const { controller } = carregarController({ frete: FRETE, epod: EPOD });
@@ -272,10 +285,12 @@ test('aprovarPendentes: motorista → 403', async () => {
 
 // ── getEvidenciaUrl ─────────────────────────────────────────────────────────
 test('getEvidenciaUrl: → url assinada TTL 300', async () => {
-  const { controller, chamadas } = carregarController({ frete: FRETE, evid: { id: 'e1', storage_path: 'emp-1/fretes/frete-1/epod/e1.jpg' } });
+  const { controller, chamadas } = carregarController({ frete: FRETE, evid: { id: 'e1', storage_path: 'emp-1/fretes/frete-1/epod/e1.jpg', mime: 'image/jpeg', nome_arquivo: 'e1.jpg' } });
   const res = resMock();
   await controller.getEvidenciaUrl(req({ params: { id: 'frete-1', evidId: 'e1' } }), res);
   assert.equal(res.statusCode, 200);
+  assert.equal(res.body.mime, 'image/jpeg');
+  assert.equal(res.body.expires_in, 300);
   assert.equal(chamadas.signed[0].ttl, 300);
 });
 test('getEvidenciaUrl: inexistente → 404', async () => {

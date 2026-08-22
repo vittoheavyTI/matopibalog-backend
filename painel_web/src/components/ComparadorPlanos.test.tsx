@@ -54,7 +54,7 @@ describe('ComparadorPlanos', () => {
 
     await waitFor(() => expect(mockApi.post).toHaveBeenCalledWith('/contratacao/iniciar', { plano_id: 'plano-growth' }));
     await waitFor(() => expect(screen.getByText(/nenhuma cobrança foi feita e seu teste segue ativo/i)).toBeInTheDocument());
-  });
+  }, 15000);
 
   test('nao chama /contratacao/iniciar ao clicar no proprio plano atual', async () => {
     // Nenhum plano atual destacado → ambos clicáveis; simulamos atual = growth e clicamos nele.

@@ -17,6 +17,7 @@ import { PlanoBloqueadoCard } from '../components/PlanoBloqueadoCard';
 import { EVENTO_NOTIFICACOES_NOVAS } from '../components/NotificacoesDropdown';
 import { FreteEpodOcorrencias } from '../components/FreteEpodOcorrencias';
 import { FreteLocalizacao } from '../components/FreteLocalizacao';
+import { ArquivoPreviewModal, type ArquivoPreview } from '../components/ArquivoPreviewModal';
 
 const gvFmt = (d: any, fmt: string) => {
   if (!d) return '-';
@@ -115,6 +116,7 @@ export const GerenciamentoViagens: React.FC = () => {
   // download via signed URL de TTL curto.
   const [docsPorFrete, setDocsPorFrete] = useState<Record<string, any[]>>({});
   const [docsCarregando, setDocsCarregando] = useState<Set<string>>(new Set());
+  const [arquivoPreview, setArquivoPreview] = useState<ArquivoPreview | null>(null);
   const [tipoDocumentoNovoFrete, setTipoDocumentoNovoFrete] = useState<TipoDocumentoFrete>('cte');
   const [documentosNovoFrete, setDocumentosNovoFrete] = useState<DocumentoFretePendente[]>([]);
   const documentoNovoFreteInputRef = useRef<HTMLInputElement | null>(null);
@@ -152,6 +154,9 @@ export const GerenciamentoViagens: React.FC = () => {
   const enviarDocumentoFrete = async (freteId: string, doc: DocumentoFretePendente) => {
     const form = new FormData();
     form.append('tipo', doc.tipo);
+    form.append('client_request_id', doc.id);
+    form.append('document_contract_version', '2');
+    if (doc.tipo === 'outro') form.append('nome_documento', doc.file.name);
     form.append('documento', doc.file);
     return api.post(`/fretes/${freteId}/documentos`, form, { timeout: 120000 }); // upload (ate ~10MB/conexao lenta): 120s, override do default de 30s
   };
@@ -356,12 +361,19 @@ export const GerenciamentoViagens: React.FC = () => {
     return () => { cancelado = true; };
   }, [freteQuery, fretes, docsPorFrete, carregarDocumentosFrete]);
 
-  // Abre o documento numa nova aba via signed URL (gerada só na hora, TTL curto).
+  // Preview interno via signed URL curta. O backend continua sendo a autoridade do
+  // path privado; abrir fora/salvar ficam dentro do modal.
   const abrirDocumento = async (freteId: string, docId: string) => {
     try {
       const res = await api.get('/fretes/' + freteId + '/documentos/' + docId + '/url');
       const url = res.data?.url;
-      if (url) window.open(url, '_blank', 'noopener,noreferrer');
+      if (url) {
+        setArquivoPreview({
+          url,
+          nome: res.data?.nome_documento || res.data?.nome_arquivo || 'Documento',
+          mime: res.data?.mime || null,
+        });
+      }
     } catch {
       /* link indisponível/expirado: usuário pode tentar novamente */
     }
@@ -413,13 +425,13 @@ export const GerenciamentoViagens: React.FC = () => {
               <li key={d.id} className="flex items-center justify-between gap-2 text-xs bg-gray-50 rounded px-2 py-1">
                 <span className="truncate text-gray-700">
                   <span className="font-semibold">{rotuloTipoDoc(d.tipo)}</span>
-                  {d.nome_arquivo ? ' · ' + d.nome_arquivo : ''}
+                  {d.nome_documento || d.nome_arquivo ? ' · ' + (d.nome_documento || d.nome_arquivo) : ''}
                 </span>
                 <button
                   onClick={() => abrirDocumento(freteId, d.id)}
                   className="text-blue-600 hover:underline font-semibold whitespace-nowrap"
                 >
-                  Baixar
+                  Ver
                 </button>
               </li>
             ))}
@@ -2249,6 +2261,7 @@ export const GerenciamentoViagens: React.FC = () => {
           </div>
         </div>
       )}
+      <ArquivoPreviewModal arquivo={arquivoPreview} onClose={() => setArquivoPreview(null)} />
     </div>
   );
 };

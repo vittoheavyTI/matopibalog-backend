@@ -66,6 +66,7 @@ router.post('/:id/finalizar', fretesController.finalizar);
 router.get('/:id/documentos', requirePermission('documents.view'), freteDocumentosController.listar);
 router.post('/:id/documentos', uploadDocumento.single('documento'), freteDocumentosController.upload);
 router.get('/:id/documentos/:docId/url', requirePermission('documents.view'), freteDocumentosController.getSignedUrl);
+router.delete('/:id/documentos/:docId', freteDocumentosController.cancelar);
 
 // ePOD — comprovacao de entrega digital (1 por frete). Bucket privado
 // `fretes-evidencias`. Motorista/admin registram e anexam; so admin valida.
