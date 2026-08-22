@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import api from '../api';
 import { useAuth } from '../contexts/AuthContext';
+import { ArquivoPreviewModal, type ArquivoPreview } from './ArquivoPreviewModal';
 
 // Painel de ePOD (comprovação de entrega) + ocorrências logísticas de UM frete.
 // Autocontido: busca os próprios dados ao montar (só monta quando o frete é
@@ -125,6 +126,7 @@ export const FreteEpodOcorrencias: React.FC<{ freteId: string }> = ({ freteId })
   const [epod, setEpod] = useState<Epod | null>(null);
   const [evidencias, setEvidencias] = useState<Evidencia[]>([]);
   const [ocorrencias, setOcorrencias] = useState<Ocorrencia[]>([]);
+  const [arquivoPreview, setArquivoPreview] = useState<ArquivoPreview | null>(null);
 
   // silent=true (polling/refetch pós-ação) não pisca o "Carregando"; só um discreto
   // indicador "atualizando". A primeira carga usa o spinner cheio.
@@ -163,7 +165,13 @@ export const FreteEpodOcorrencias: React.FC<{ freteId: string }> = ({ freteId })
   const abrirEvidencia = async (url: string) => {
     try {
       const res = await api.get(url);
-      if (res.data?.url) window.open(res.data.url, '_blank', 'noopener,noreferrer');
+      if (res.data?.url) {
+        setArquivoPreview({
+          url: res.data.url,
+          nome: res.data?.nome_arquivo || 'Evidencia',
+          mime: res.data?.mime || null,
+        });
+      }
     } catch { /* link indisponível: tentar de novo */ }
   };
 
@@ -189,6 +197,7 @@ export const FreteEpodOcorrencias: React.FC<{ freteId: string }> = ({ freteId })
       <BlocoOcorrencias
         freteId={freteId} ocorrencias={ocorrencias} ehAdmin={ehAdmin} onMudou={() => carregar(true)}
       />
+      <ArquivoPreviewModal arquivo={arquivoPreview} onClose={() => setArquivoPreview(null)} />
     </div>
   );
 };

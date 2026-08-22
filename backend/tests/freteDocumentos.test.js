@@ -9,12 +9,14 @@ function carregarController(cenario = {}) {
   const chamadas = { inserts: [], uploads: [], signed: [], removes: [] };
 
   function builder(tabela) {
-    const state = { count: false, inserting: false };
+    const state = { count: false, inserting: false, updating: false, eqs: {} };
     const b = {
       select(_cols, opts) { if (opts && opts.count) state.count = true; return b; },
-      eq() { return b; },
+      eq(col, val) { state.eqs[col] = val; return b; },
+      neq() { return b; },
       order() { return b; },
       insert(payload) { state.inserting = true; chamadas.inserts.push({ tabela, payload }); return b; },
+      update(payload) { state.updating = true; chamadas.inserts.push({ tabela: `${tabela}:update`, payload }); return b; },
       async single() {
         if (tabela === 'fretes') {
           return cenario.frete
@@ -24,7 +26,7 @@ function carregarController(cenario = {}) {
         if (tabela === 'frete_documentos' && state.inserting) {
           if (cenario.insertError) return { data: null, error: { message: 'insert falhou' } };
           const p = chamadas.inserts[chamadas.inserts.length - 1].payload;
-          return { data: { id: p.id, tipo: p.tipo, nome_arquivo: p.nome_arquivo, mime: p.mime, tamanho_bytes: p.tamanho_bytes, created_at: '2026-07-13T00:00:00Z' }, error: null };
+          return { data: { ...p, created_at: '2026-07-13T00:00:00Z', updated_at: '2026-07-13T00:00:00Z' }, error: null };
         }
         // getSignedUrl: busca o doc pelo id+frete_id
         if (tabela === 'frete_documentos') {
@@ -33,6 +35,18 @@ function carregarController(cenario = {}) {
             : { data: null, error: { message: 'not found' } };
         }
         return { data: null, error: null };
+      },
+      async maybeSingle() {
+        if (tabela === 'frete_documentos' && state.eqs.client_request_id) {
+          return { data: cenario.existingDoc || null, error: cenario.idemError || null };
+        }
+        if (tabela === 'frete_documentos' && state.updating) {
+          const p = chamadas.inserts[chamadas.inserts.length - 1].payload;
+          return cenario.cancelDoc === null
+            ? { data: null, error: null }
+            : { data: { id: state.eqs.id || 'd1', frete_id: 'frete-1', empresa_id: 'emp-1', status: p.status, created_at: 't' }, error: cenario.cancelError || null };
+        }
+        return b.single();
       },
       then(resolve) {
         if (state.count) return resolve({ count: cenario.count ?? 0, error: cenario.countError || null });
@@ -123,9 +137,35 @@ test('upload: motorista dono anexa PDF -> 201, row com empresa_id/frete_id deriv
   assert.equal(ins.frete_id, 'frete-1');
   assert.equal(ins.tipo, 'cte');
   assert.equal(ins.criado_por, 'mot-1');
+  assert.equal(ins.document_contract_version, 1);
   assert.match(ins.storage_path, /^emp-1\/fretes\/frete-1\/documentos\/.+\.pdf$/);
   assert.equal(chamadas.uploads[0].bucket, 'fretes-documentos'); // NUNCA comprovantes
   assert.equal(chamadas.uploads[0].opts.upsert, false);
+});
+
+test('upload: contrato v2 exige metadata para tipo outro', async () => {
+  const { res, chamadas } = await upload({ body: { tipo: 'outro', document_contract_version: '2' } }, { frete: FRETE, count: 0 });
+  assert.equal(res.statusCode, 422);
+  assert.equal(chamadas.uploads.length, 0);
+});
+
+test('upload: contrato v2 aceita Outro com nome e grava client_request_id', async () => {
+  const { res, chamadas } = await upload({
+    body: { tipo: 'outro', document_contract_version: '2', nome_documento: 'Canhoto assinado', client_request_id: 'doc-req-1234' },
+  }, { frete: FRETE, count: 0 });
+  assert.equal(res.statusCode, 201);
+  const ins = chamadas.inserts.find((i) => i.tabela === 'frete_documentos').payload;
+  assert.equal(ins.document_contract_version, 2);
+  assert.equal(ins.nome_documento, 'Canhoto assinado');
+  assert.equal(ins.client_request_id, 'doc-req-1234');
+});
+
+test('upload: client_request_id repetido retorna existente sem novo upload', async () => {
+  const existente = { id: 'doc-1', tipo: 'cte', nome_arquivo: 'doc.pdf', mime: 'application/pdf', client_request_id: 'doc-req-1234' };
+  const { res, chamadas } = await upload({ body: { tipo: 'cte', client_request_id: 'doc-req-1234' } }, { frete: FRETE, existingDoc: existente });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.idempotent, true);
+  assert.equal(chamadas.uploads.length, 0);
 });
 
 test('upload: tipo inválido -> 400 sem upload', async () => {
@@ -209,11 +249,13 @@ test('listar: motorista dono recebe a lista do frete', async () => {
 });
 
 test('getSignedUrl: doc do frete -> url assinada; TTL curto no bucket privado', async () => {
-  const { controller, chamadas } = carregarController({ frete: FRETE, doc: { id: 'd1', storage_path: 'emp-1/fretes/frete-1/documentos/d1.pdf' } });
+  const { controller, chamadas } = carregarController({ frete: FRETE, doc: { id: 'd1', storage_path: 'emp-1/fretes/frete-1/documentos/d1.pdf', mime: 'application/pdf', nome_arquivo: 'd1.pdf' } });
   const res = resMock();
   await controller.getSignedUrl({ params: { id: 'frete-1', docId: 'd1' }, user: userMotoristaDono, empresa_id: 'emp-1' }, res);
   assert.equal(res.statusCode, 200);
   assert.match(res.body.url, /^https:\/\/signed\.example\//);
+  assert.equal(res.body.mime, 'application/pdf');
+  assert.equal(res.body.expires_in, 300);
   assert.equal(chamadas.signed[0].bucket, 'fretes-documentos');
   assert.equal(chamadas.signed[0].ttl, 300);
 });
@@ -223,4 +265,12 @@ test('getSignedUrl: doc inexistente/de outro frete -> 404', async () => {
   const res = resMock();
   await controller.getSignedUrl({ params: { id: 'frete-1', docId: 'x' }, user: userMotoristaDono, empresa_id: 'emp-1' }, res);
   assert.equal(res.statusCode, 404);
+});
+
+test('cancelar: faz cancelamento logico e registra status', async () => {
+  const { controller } = carregarController({ frete: FRETE });
+  const res = resMock();
+  await controller.cancelar({ params: { id: 'frete-1', docId: 'd1' }, body: { motivo: 'duplicado' }, user: userMotoristaDono, empresa_id: 'emp-1', headers: {} }, res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.status, 'cancelado');
 });

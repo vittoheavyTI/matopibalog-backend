@@ -23,7 +23,13 @@ const EXTENSAO_POR_MIME = {
 const COLUNAS_EPOD =
   'id, frete_id, status, comprovado_em, recebido_por, observacao, latitude, longitude, assinatura_path, criado_por, validado_por, validado_em, motivo_rejeicao, created_at, updated_at';
 const COLUNAS_EVIDENCIA =
-  'id, nome_arquivo, mime, tamanho_bytes, status, validado_por, validado_em, rejeitado_por, rejeitado_em, motivo_rejeicao, created_at';
+  'id, nome_arquivo, mime, tamanho_bytes, status, client_request_id, validado_por, validado_em, rejeitado_por, rejeitado_em, motivo_rejeicao, created_at';
+
+const normalizarClientRequestId = (v) => {
+  if (v === undefined || v === null) return null;
+  const s = String(v).trim();
+  return s && /^[A-Za-z0-9._:-]{8,120}$/.test(s) ? s : null;
+};
 
 // Status GERAL do ePOD DERIVADO das evidências (PURO — testável).
 // Regras (macrofrente ePOD v2 — a evidência rejeitada PERMANECE no histórico,
@@ -263,6 +269,19 @@ exports.uploadEvidencia = async (req, res) => {
   if (epodError) return res.status(500).json({ message: 'Erro ao localizar a comprovação.' });
   if (!epod) return res.status(404).json({ message: 'Registre a comprovação antes de anexar evidências.' });
 
+  const clientRequestId = normalizarClientRequestId(req.body?.client_request_id);
+  if (clientRequestId) {
+    const { data: existente, error: idemError } = await supabase
+      .from('frete_epod_evidencias')
+      .select(COLUNAS_EVIDENCIA)
+      .eq('epod_id', epod.id)
+      .eq('criado_por', req.user.uid)
+      .eq('client_request_id', clientRequestId)
+      .maybeSingle();
+    if (idemError) return res.status(500).json({ message: 'Erro ao verificar idempotência da evidência.' });
+    if (existente) return res.status(200).json({ ...existente, idempotent: true });
+  }
+
   const { count, error: countError } = await supabase
     .from('frete_epod_evidencias')
     .select('id', { count: 'exact', head: true })
@@ -296,11 +315,22 @@ exports.uploadEvidencia = async (req, res) => {
       mime: req.file.mimetype,
       tamanho_bytes: req.file.size,
       criado_por: req.user.uid,
+      client_request_id: clientRequestId,
     })
     .select(COLUNAS_EVIDENCIA)
     .single();
   if (insertError) {
     await supabase.storage.from(BUCKET_EVIDENCIAS).remove([storagePath]).catch(() => {});
+    if (insertError.code === '23505' && clientRequestId) {
+      const { data: existente } = await supabase
+        .from('frete_epod_evidencias')
+        .select(COLUNAS_EVIDENCIA)
+        .eq('epod_id', epod.id)
+        .eq('criado_por', req.user.uid)
+        .eq('client_request_id', clientRequestId)
+        .maybeSingle();
+      if (existente) return res.status(200).json({ ...existente, idempotent: true });
+    }
     console.error('[freteEpod:uploadEvidencia] Falha ao inserir metadados', insertError.message);
     return res.status(500).json({ message: 'Erro ao registrar a evidência.' });
   }
@@ -321,7 +351,7 @@ exports.getEvidenciaUrl = async (req, res) => {
   if (!frete) return;
   const { data: evid, error } = await supabase
     .from('frete_epod_evidencias')
-    .select('id, storage_path')
+    .select('id, storage_path, mime, nome_arquivo')
     .eq('id', req.params.evidId)
     .eq('frete_id', frete.id) // a evidencia tem que pertencer ao frete acessado
     .maybeSingle();
@@ -331,7 +361,12 @@ exports.getEvidenciaUrl = async (req, res) => {
     .from(BUCKET_EVIDENCIAS)
     .createSignedUrl(evid.storage_path, SIGNED_URL_TTL_SECONDS);
   if (urlError) return res.status(500).json({ message: 'Erro ao gerar o link da evidência.' });
-  res.json({ url: data?.signedUrl || data?.signedURL || null });
+  res.json({
+    url: data?.signedUrl || data?.signedURL || null,
+    mime: evid.mime || null,
+    nome_arquivo: evid.nome_arquivo || null,
+    expires_in: SIGNED_URL_TTL_SECONDS,
+  });
 };
 
 exports.BUCKET_EVIDENCIAS = BUCKET_EVIDENCIAS;
