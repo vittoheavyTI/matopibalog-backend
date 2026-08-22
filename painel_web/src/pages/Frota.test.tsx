@@ -1,5 +1,5 @@
-import { describe, test, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { Frota } from './Frota';
 
 vi.mock('../api', () => ({
@@ -44,6 +44,10 @@ beforeEach(() => {
     if (url === '/admin/motoristas') return Promise.resolve({ data: [{ id: 'driver-1', usuarios: { nome: 'Ana Motorista' } }] });
     return Promise.resolve({ data: [] });
   });
+});
+
+afterEach(() => {
+  cleanup();
 });
 
 describe('Frota operacional', () => {
