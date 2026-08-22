@@ -20,6 +20,7 @@ import { PerfisPermissoes } from './pages/PerfisPermissoes';
 import { Configuracoes } from './pages/Configuracoes';
 import { Integracoes } from './pages/Integracoes';
 import { Operacional } from './pages/Operacional';
+import { Frota } from './pages/Frota';
 import { PainelVisaoGeral } from './pages/PainelVisaoGeral';
 import { PainelEmpresas } from './pages/PainelEmpresas';
 import { PainelPlanos } from './pages/PainelPlanos';
@@ -91,6 +92,7 @@ const AppRoutes = () => {
         <Route path="admins" element={<Usuarios />} />
         <Route path="perfis-permissoes" element={<PermissionRoute permission="permissions.manage"><PerfisPermissoes /></PermissionRoute>} />
         <Route path="operacional" element={<Operacional />} />
+        <Route path="frota" element={<PermissionRoute permission="fleet.view"><Frota /></PermissionRoute>} />
         <Route path="painel-administrativo">
           <Route index element={<Navigate to="visao-geral" replace />} />
           <Route path="visao-geral" element={<SuperAdminRoute><PainelVisaoGeral /></SuperAdminRoute>} />

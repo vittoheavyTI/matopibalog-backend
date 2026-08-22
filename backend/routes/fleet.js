@@ -32,9 +32,14 @@ async function resolverEscopoFleet(req, res, next) {
 
 router.use(verifyToken, verificarEmpresa, verificarPlano, resolverEscopoFleet);
 
+router.get('/overview', requirePermission('fleet.view'), controller.visaoOperacional);
+
 router.get('/assets', requirePermission('fleet.view'), controller.listarAtivos);
+router.get('/assets/:id', requirePermission('fleet.view'), controller.detalharAtivo);
 router.post('/assets', requirePermission('fleet.manage'), controller.criarAtivo);
 router.patch('/assets/:id', requirePermission('fleet.manage'), controller.atualizarAtivo);
+router.get('/assets/:id/documents', requirePermission('fleet.view'), controller.listarDocumentosAtivo);
+router.post('/assets/:id/documents', requirePermission('fleet.manage'), controller.criarDocumentoAtivo);
 
 router.get('/compositions', requirePermission('fleet.view'), controller.listarComposicoes);
 router.post('/compositions', requirePermission('fleet.manage'), controller.criarComposicao);
@@ -45,5 +50,17 @@ router.post('/driver-assignments', requirePermission('fleet.manage'), controller
 router.patch('/driver-assignments/:id/end', requirePermission('fleet.manage'), controller.encerrarVinculoMotorista);
 
 router.post('/freight-assignments', requirePermission('fleet.manage'), controller.criarVinculoFrete);
+
+router.get('/tires', requirePermission('fleet.view'), controller.listarPneus);
+router.post('/tires', requirePermission('fleet.manage'), controller.criarPneu);
+router.post('/tires/:id/installations', requirePermission('fleet.manage'), controller.instalarPneu);
+router.patch('/tire-installations/:id/remove', requirePermission('fleet.manage'), controller.removerInstalacaoPneu);
+router.post('/tires/:id/events', requirePermission('fleet.manage'), controller.criarEventoPneu);
+
+router.get('/maintenance', requirePermission('fleet.view'), controller.listarManutencoes);
+router.post('/maintenance', requirePermission('fleet.manage'), controller.criarManutencao);
+
+router.get('/odometer-events', requirePermission('fleet.view'), controller.listarOdometros);
+router.post('/odometer-events', requirePermission('fleet.manage'), controller.criarOdometro);
 
 module.exports = router;

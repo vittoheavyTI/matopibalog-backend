@@ -11,10 +11,28 @@ function responderErro(res, error) {
   return res.status(500).json({ message: 'Erro ao processar frota.' });
 }
 
+const visaoOperacional = async (req, res) => {
+  try {
+    const dados = await fleet.getOverview(supabase, { empresaId: req.empresa_id, query: req.query, operationalScope: req.operationalScope });
+    return res.json(dados);
+  } catch (error) {
+    return responderErro(res, error);
+  }
+};
+
 const listarAtivos = async (req, res) => {
   try {
     const itens = await fleet.listAssets(supabase, { empresaId: req.empresa_id, query: req.query, operationalScope: req.operationalScope });
     return res.json({ itens });
+  } catch (error) {
+    return responderErro(res, error);
+  }
+};
+
+const detalharAtivo = async (req, res) => {
+  try {
+    const item = await fleet.getAssetDetail(supabase, { empresaId: req.empresa_id, assetId: req.params.id, operationalScope: req.operationalScope });
+    return res.json(item);
   } catch (error) {
     return responderErro(res, error);
   }
@@ -112,8 +130,109 @@ const criarVinculoFrete = async (req, res) => {
   }
 };
 
+const listarPneus = async (req, res) => {
+  try {
+    const itens = await fleet.listTires(supabase, { empresaId: req.empresa_id, query: req.query, operationalScope: req.operationalScope });
+    return res.json({ itens });
+  } catch (error) {
+    return responderErro(res, error);
+  }
+};
+
+const criarPneu = async (req, res) => {
+  try {
+    const item = await fleet.createTire(supabase, { empresaId: req.empresa_id, user: req.user, body: req.body || {}, operationalScope: req.operationalScope });
+    return res.status(201).json(item);
+  } catch (error) {
+    return responderErro(res, error);
+  }
+};
+
+const instalarPneu = async (req, res) => {
+  try {
+    const item = await fleet.installTire(supabase, { empresaId: req.empresa_id, user: req.user, tireId: req.params.id, body: req.body || {}, operationalScope: req.operationalScope });
+    return res.status(201).json(item);
+  } catch (error) {
+    return responderErro(res, error);
+  }
+};
+
+const removerInstalacaoPneu = async (req, res) => {
+  try {
+    const item = await fleet.removeTireInstallation(supabase, { empresaId: req.empresa_id, installationId: req.params.id, body: req.body || {}, operationalScope: req.operationalScope });
+    return res.json(item);
+  } catch (error) {
+    return responderErro(res, error);
+  }
+};
+
+const criarEventoPneu = async (req, res) => {
+  try {
+    const item = await fleet.createTireEvent(supabase, { empresaId: req.empresa_id, user: req.user, tireId: req.params.id, body: req.body || {}, operationalScope: req.operationalScope });
+    return res.status(201).json(item);
+  } catch (error) {
+    return responderErro(res, error);
+  }
+};
+
+const listarManutencoes = async (req, res) => {
+  try {
+    const itens = await fleet.listMaintenanceEvents(supabase, { empresaId: req.empresa_id, query: req.query, operationalScope: req.operationalScope });
+    return res.json({ itens });
+  } catch (error) {
+    return responderErro(res, error);
+  }
+};
+
+const criarManutencao = async (req, res) => {
+  try {
+    const item = await fleet.createMaintenanceEvent(supabase, { empresaId: req.empresa_id, user: req.user, body: req.body || {}, operationalScope: req.operationalScope });
+    return res.status(201).json(item);
+  } catch (error) {
+    return responderErro(res, error);
+  }
+};
+
+const listarOdometros = async (req, res) => {
+  try {
+    const itens = await fleet.listOdometerEvents(supabase, { empresaId: req.empresa_id, query: req.query, operationalScope: req.operationalScope });
+    return res.json({ itens });
+  } catch (error) {
+    return responderErro(res, error);
+  }
+};
+
+const criarOdometro = async (req, res) => {
+  try {
+    const item = await fleet.createOdometerEvent(supabase, { empresaId: req.empresa_id, user: req.user, body: req.body || {}, operationalScope: req.operationalScope });
+    return res.status(201).json(item);
+  } catch (error) {
+    return responderErro(res, error);
+  }
+};
+
+const listarDocumentosAtivo = async (req, res) => {
+  try {
+    const itens = await fleet.listDocuments(supabase, { empresaId: req.empresa_id, assetId: req.params.id, operationalScope: req.operationalScope });
+    return res.json({ itens });
+  } catch (error) {
+    return responderErro(res, error);
+  }
+};
+
+const criarDocumentoAtivo = async (req, res) => {
+  try {
+    const item = await fleet.createAssetDocument(supabase, { empresaId: req.empresa_id, user: req.user, assetId: req.params.id, body: req.body || {}, operationalScope: req.operationalScope });
+    return res.status(201).json(item);
+  } catch (error) {
+    return responderErro(res, error);
+  }
+};
+
 module.exports = {
+  visaoOperacional,
   listarAtivos,
+  detalharAtivo,
   criarAtivo,
   atualizarAtivo,
   listarComposicoes,
@@ -123,4 +242,15 @@ module.exports = {
   criarVinculoMotorista,
   encerrarVinculoMotorista,
   criarVinculoFrete,
+  listarPneus,
+  criarPneu,
+  instalarPneu,
+  removerInstalacaoPneu,
+  criarEventoPneu,
+  listarManutencoes,
+  criarManutencao,
+  listarOdometros,
+  criarOdometro,
+  listarDocumentosAtivo,
+  criarDocumentoAtivo,
 };

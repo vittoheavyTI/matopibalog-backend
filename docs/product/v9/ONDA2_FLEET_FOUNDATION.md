@@ -1,6 +1,6 @@
-# ONDA 2 — Fleet Foundation / FLEET-A
+# ONDA 2 — Fleet Foundation / FLEET-A + Fleet-B
 
-> Status: `FLEET_A_FOUNDATION_DEPLOYED`.
+> Status: `FLEET_A_FOUNDATION_DEPLOYED`; `FLEET_B_OPERATIONAL_EXPERIENCE_IMPLEMENTED_IN_PR`.
 
 ## Escopo
 
@@ -75,11 +75,39 @@ Fleet usa a regra congelada:
 - Pneus e manutencao entram como fundacao de dados, sem analytics avancada.
 - Nenhum dado financeiro operacional e duplicado; custos futuros devem se conectar ao dominio financeiro existente.
 - Sem Asaas, sem env/secret e sem escrita de dado operacional Fleet em producao.
-- `FLEET_OVERALL_STATUS=OPEN_FLEET_B_PENDING`: upload/viewer de documentos de ativo, UX de pneus, UX de manutencao, fluxos mobile e operacao completa ficam para Fleet-B/fatias futuras.
+- `FLEET_OVERALL_STATUS=FLEET_B_OPERATIONAL_EXPERIENCE_IMPLEMENTED_IN_PR`: Fleet-B entrega a primeira experiencia web operacional sem migration 075. Fluxos mobile, analytics avancada de pneus/manutencao e validacao visual do owner seguem pendentes.
+
+## Fleet-B — experiencia operacional web
+
+Fleet-B transforma a fundacao em uma superficie web utilizavel em `/frota`, preservando autoridade `ENTITLEMENT AND PERMISSION AND SCOPE`:
+
+- rota web `/frota` protegida por `PermissionRoute permission="fleet.view"`;
+- acoes de escrita exibidas apenas com `fleet.manage`;
+- menu do cliente mostra "Frota" somente para quem tem `fleet.view`;
+- backend adiciona `/fleet/overview` e leituras/acoes guiadas para ativos, composicoes, vinculo temporal de motorista, pneus, manutencao, odometro e documentos de ativo;
+- experiencia organizada por Resumo Operacional, Pendencias, Composicoes, Ativos, Pneus e Manutencoes;
+- empty state orienta cadastrar o primeiro ativo e montar composicao;
+- erros de conflitos/FKs/checks de frota sao traduzidos para mensagens operacionais;
+- documentos de ativo nesta fatia registram referencia/caminho em `asset_documents`; sem Storage/env novo e sem upload direto para producao;
+- legado de `fretes` permanece intacto, sem backfill e sem fabricacao de ativos/composicoes historicas.
+
+Sem migration nova:
+
+- `MIGRATION_075_CREATED=false`
+- `PRODUCTION_DDL_WRITES=0`
+- `PRODUCTION_BUSINESS_WRITES=0`
+- `ENV_CHANGED=false`
+- `ASAAS_TOUCHED=false`
+- `OWNER_VISUAL_VALIDATION=PENDING`
 
 ## Validacao Local
 
 - Fleet focused tests: PASS.
-- Backend full: PASS `1664/1664` no checkpoint de certificacao G0.
+- Backend full apos Fleet-B: PASS `1665/1665`.
+- Web build apos Fleet-B: PASS `tsc -b && vite build`.
+- Web Vitest apos Fleet-B: PASS `118/118`.
+- SEC-1 local: SKIPPED pela configuracao Playwright local (`1 skipped`, sem falha).
+- PG CI: nao requerido nesta fatia porque nao houve schema/migration 075.
+- Backend full Fleet-A checkpoint: PASS `1664/1664` no checkpoint de certificacao G0.
 - PG CI: `backend/tests-pg/fleet_foundation_074.pgtest.mjs` cobre aplicacao 073 -> 074, idempotencia da 074, RLS/grants, FKs tenant-safe, integridade temporal e concorrencia em Postgres 16 efemero.
 - PG/local DB: exige ambiente Supabase/Postgres local configurado; se indisponivel, manter gate owner para aplicacao controlada.
