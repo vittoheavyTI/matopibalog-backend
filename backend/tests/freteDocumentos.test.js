@@ -7,6 +7,7 @@ const controllerPath = require.resolve('../controllers/freteDocumentosController
 // Carrega o controller com um supabase mockado e configurável por cenário.
 function carregarController(cenario = {}) {
   const chamadas = { inserts: [], uploads: [], signed: [], removes: [] };
+  let idempotencyLookups = 0;
 
   function builder(tabela) {
     const state = { count: false, inserting: false, updating: false, eqs: {} };
@@ -24,7 +25,10 @@ function carregarController(cenario = {}) {
             : { data: null, error: { message: 'not found' } };
         }
         if (tabela === 'frete_documentos' && state.inserting) {
-          if (cenario.insertError) return { data: null, error: { message: 'insert falhou' } };
+          if (cenario.insertError) {
+            const error = cenario.insertError === true ? { message: 'insert falhou' } : cenario.insertError;
+            return { data: null, error };
+          }
           const p = chamadas.inserts[chamadas.inserts.length - 1].payload;
           return { data: { ...p, created_at: '2026-07-13T00:00:00Z', updated_at: '2026-07-13T00:00:00Z' }, error: null };
         }
@@ -38,7 +42,11 @@ function carregarController(cenario = {}) {
       },
       async maybeSingle() {
         if (tabela === 'frete_documentos' && state.eqs.client_request_id) {
-          return { data: cenario.existingDoc || null, error: cenario.idemError || null };
+          idempotencyLookups += 1;
+          const data = idempotencyLookups > 1 && Object.prototype.hasOwnProperty.call(cenario, 'existingDocAfterInsert')
+            ? cenario.existingDocAfterInsert
+            : cenario.existingDoc;
+          return { data: data || null, error: cenario.idemError || null };
         }
         if (tabela === 'frete_documentos' && state.updating) {
           const p = chamadas.inserts[chamadas.inserts.length - 1].payload;
@@ -166,6 +174,51 @@ test('upload: client_request_id repetido retorna existente sem novo upload', asy
   assert.equal(res.statusCode, 200);
   assert.equal(res.body.idempotent, true);
   assert.equal(chamadas.uploads.length, 0);
+});
+
+test('upload: replay com payload diferente retorna existente e nao sobrescreve', async () => {
+  const existente = { id: 'doc-1', tipo: 'cte', nome_arquivo: 'original.pdf', mime: 'application/pdf', client_request_id: 'doc-req-1234' };
+  const { res, chamadas } = await upload({ body: { tipo: 'mdfe', client_request_id: 'doc-req-1234' } }, { frete: FRETE, existingDoc: existente });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.id, 'doc-1');
+  assert.equal(res.body.tipo, 'cte');
+  assert.equal(res.body.idempotent, true);
+  assert.equal(chamadas.uploads.length, 0);
+  assert.equal(chamadas.inserts.some((i) => i.tabela === 'frete_documentos'), false);
+});
+
+test('upload: falha no storage nao tenta inserir metadata', async () => {
+  const { res, chamadas } = await upload({}, { frete: FRETE, count: 0, uploadError: { message: 'storage indisponivel' } });
+  assert.equal(res.statusCode, 502);
+  assert.equal(chamadas.uploads.length, 1);
+  assert.equal(chamadas.inserts.some((i) => i.tabela === 'frete_documentos'), false);
+});
+
+test('upload: storage ok + DB falha remove somente o path enviado', async () => {
+  const { res, chamadas } = await upload({}, { frete: FRETE, count: 0, insertError: true });
+  assert.equal(res.statusCode, 500);
+  assert.equal(chamadas.uploads.length, 1);
+  assert.deepEqual(chamadas.removes, [[chamadas.uploads[0].path]]);
+});
+
+test('upload: unique race 23505 consulta existente e remove objeto recem-enviado', async () => {
+  const existente = { id: 'doc-1', tipo: 'cte', nome_arquivo: 'doc.pdf', mime: 'application/pdf', client_request_id: 'doc-req-1234' };
+  const { res, chamadas } = await upload(
+    { body: { tipo: 'cte', client_request_id: 'doc-req-1234' } },
+    { frete: FRETE, count: 0, existingDoc: null, insertError: { code: '23505', message: 'duplicate key' } },
+  );
+  assert.equal(res.statusCode, 500);
+  assert.deepEqual(chamadas.removes, [[chamadas.uploads[0].path]]);
+  assert.equal(res.body.message, 'Erro ao registrar o documento.');
+
+  const retry = await upload(
+    { body: { tipo: 'cte', client_request_id: 'doc-req-1234' } },
+    { frete: FRETE, count: 0, existingDoc: null, existingDocAfterInsert: existente, insertError: { code: '23505', message: 'duplicate key' } },
+  );
+  assert.equal(retry.res.statusCode, 200);
+  assert.equal(retry.res.body.idempotent, true);
+  assert.equal(retry.chamadas.uploads.length, 1);
+  assert.deepEqual(retry.chamadas.removes, [[retry.chamadas.uploads[0].path]]);
 });
 
 test('upload: tipo inválido -> 400 sem upload', async () => {
