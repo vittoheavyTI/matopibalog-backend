@@ -96,6 +96,7 @@ const allowedOrigins = [
 // (conta autenticada é rastreável/bloqueável). Chave em middlewares/rateLimitKey.
 const { chaveRateLimit } = require('./middlewares/rateLimitKey');
 const { criarRefreshLimiter } = require('./middlewares/authRateLimit');
+const { attachCorrelationContext } = require('./middlewares/correlationContext');
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 600,
@@ -126,7 +127,7 @@ app.use(cors({
   // X-Client-Platform (E1.6A): assinatura de contrato novo do cliente. X-Operational-*:
   // headers de escopo operacional já emitidos pelo web (só quando ORG_SCOPE ativa) —
   // incluídos para o preflight não bloquear quando forem usados.
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Client-Platform', 'X-Operational-Group-Id', 'X-Operational-Unit-Id'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Client-Platform', 'X-Request-Id', 'X-Correlation-Id', 'X-Operation-Id', 'X-Causation-Id', 'X-Operational-Group-Id', 'X-Operational-Unit-Id'],
   credentials: true,
 }));
 
@@ -135,6 +136,7 @@ app.use(cors({
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ limit: '2mb', extended: true }));
 app.use(cookieParser());
+app.use(attachCorrelationContext);
 
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'UP', timestamp: new Date().toISOString() });
@@ -153,6 +155,7 @@ app.use('/auth', authRoutes);
 // não capturar o prefixo.
 app.use('/admin/termos', adminTermosRoutes);
 app.use('/admin/contrato-modelos', require('./routes/adminContratoModelos'));
+app.use('/admin/diagnostics', require('./routes/diagnostics'));
 app.use('/admin/permissions', require('./routes/permissions'));
 app.use('/admin', adminRoutes);
 app.use('/fretes', fretesRoutes);

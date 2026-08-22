@@ -178,6 +178,43 @@ Legenda de impacto: **DOMÍNIO** (muda modelo de dados) · **UX** · **SEGURANÇ
 
 ---
 
+## Verificabilidade, automação guiada e IA
+
+### D-044 — Toda feature é avaliada também pela carga de trabalho humano evitada
+Toda funcionalidade nova deve responder, além de valor/risco/custo: **quanto trabalho o sistema evita que o usuário precise fazer?** Happy path deve ser automático ou guiado; atenção humana fica concentrada em exceções e decisões.
+
+### D-045 — Automação importante precisa ser verificável e explicável
+Automação relevante deve expor `what/why/evidence/result`: o que foi verificado, por que a decisão foi tomada, quais evidências foram usadas e qual resultado foi produzido. Automação opaca não vira autoridade.
+
+### D-046 — IA não é authority; IA atua somente via tools Matopiba
+Modelos de IA não decidem permissão, escopo, tenant, dinheiro, fiscal, segurança ou mutação crítica. IA futura só poderá agir chamando tools Matopiba que aplicam as mesmas regras determinísticas do sistema.
+
+### D-047 — Tools de IA usam entitlement, permission, scope, invariants e risk policy
+Toda tool futura consumida por IA deve obedecer **ENTITLEMENT AND PERMISSION AND SCOPE**, validar invariantes objetivas e respeitar política de risco/confirmação. IA nunca eleva risco nem amplia escopo.
+
+### D-048 — Repair Playbooks seguem CHECK → DIAGNOSE → DRY_RUN → REPAIR → VERIFY → AUDIT
+Correções assistidas devem ter contrato explícito, dry-run antes de mutação, idempotência declarada, política de confirmação, estratégia de rollback/compensação quando aplicável e auditoria da execução. Reparos de produção ficam bloqueados por gate até decisão específica.
+
+### D-049 — Operation Campaign será unidade de planejamento de escoamento
+`Operation Campaign` é a futura unidade de planejamento para múltiplos fretes de uma safra/janela de escoamento, acima do frete individual e antes de dispatch/execução.
+
+### D-050 — Operation Orchestrator é determinístico e separado do modelo de IA
+O orquestrador operacional futuro calcula planos/ações por regras determinísticas e invariantes auditáveis. IA pode auxiliar proposta/explicação, mas não substitui o orquestrador como autoridade.
+
+### D-051 — AI Provider Gateway evita acoplamento a provider/modelo específico
+Qualquer integração futura com IA deve passar por gateway/provider abstraction, com troca de provider/modelo sem reescrever domínio, permissões ou auditoria.
+
+### D-052 — Modo Assistido voice/multimodal é direção oficial de acessibilidade
+Voice/multimodal é direção oficial para reduzir esforço do usuário, principalmente em app/campo. Deve respeitar o mesmo modelo de permissão, confirmação e evidência.
+
+### D-053 — App Version Policy precede maturidade de distribuição Google Play
+Antes de depender de Play Store como canal maduro, o produto precisa de política de versão: versão mínima suportada, versão recomendada, severidade, notas de release e update in-app oficial (`flexible`/`immediate`).
+
+### D-054 — E1.5 é a fundação horizontal de verificabilidade, diagnóstico e recuperação
+Antes da expansão pesada da Onda 2, Matopiba deve ter contratos canônicos para correlação, envelope de evento/evidência, invariantes, verifier, findings, playbooks, dry-run e superfície read-only de diagnóstico.
+
+---
+
 ## Gates registrados
 
 | Gate | Critério de liberação |

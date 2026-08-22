@@ -1,7 +1,7 @@
 # Matopiba Log — CONTEXT BRIDGE V9
 
 > **Handoff compacto.** Leia este arquivo primeiro ao retomar em outro chat/agente. Os detalhes estão nos 4 documentos linkados no fim.
-> Atualizado: **2026-08-22** (P2 + E1.3 + E1.4A fechados em produção).
+> Atualizado: **2026-08-22** (E1.4B code closed + E1.5A implementada em PR).
 
 ---
 
@@ -17,7 +17,7 @@
 
 | | |
 |---|---|
-| `origin/main` | **`1744d59`** (PR #444 / E1.4A Documents foundation/security/web). Marcos anteriores: `b695102` (PR #441 / E1.3), `d9e0c30` (PR #442 / close P2 pós-Railway), `e718eb3` (PR #440 / P2), `569fde7` (PR #437 / hotfix Onda 1). |
+| `origin/main` | **`a005457`** (PR #446 / E1.4B mobile document experience). Marcos anteriores: `1744d59` (PR #444 / E1.4A), `b695102` (PR #441 / E1.3), `d9e0c30` (PR #442 / close P2 pós-Railway), `e718eb3` (PR #440 / P2), `569fde7` (PR #437 / hotfix Onda 1). |
 | Deploy produção | Railway `matopibalog-backend` deploy `96453b4b-5052-43bd-be22-ec1ab4afd078` **SUCCESS** (`commitHash=1744d59`, `numReplicas=1`) |
 | Health | **HTTP 200** `{"status":"UP"}` em `https://api.matopibalog.com.br/health` |
 | Banco | Supabase `rjahjogidyndphdxevom` · 69 tabelas públicas · RLS 100% |
@@ -26,7 +26,7 @@
 
 ## Direção do produto (congelada em DECISIONS.md)
 
-Matopiba vira **frota/operação-centric** (D-001): o eixo é o **veículo/composição** (D-002/D-003), motorista tem **vínculo temporal**. Frota/pneus/manutenção, planejamento+dispatch de frete, Route Intelligence, Portal do Embarcador, rede de parceiros, ERP Integration Hub e SSO/Entra ID são a expansão. Realtime e performance são requisitos **sistêmicos**. Financeiro operacional do cliente é **separado** do financeiro SaaS. Nenhum backlog desaparece (`DEFERRED ≠ DONE`).
+Matopiba vira **frota/operação-centric** (D-001): o eixo é o **veículo/composição** (D-002/D-003), motorista tem **vínculo temporal**. Toda feature passa a ser avaliada também por **quanto trabalho humano evita**; happy path deve ser automático/guiado e atenção humana fica nas exceções. Frota/pneus/manutenção, Operation Campaign, Operation Orchestrator, planejamento+dispatch, Route Intelligence, Portal do Embarcador, rede de parceiros, ERP Integration Hub, AI Provider Gateway, modo assistido voice/multimodal e SSO/Entra ID são a expansão. Realtime, verificabilidade e performance são requisitos **sistêmicos**. Financeiro operacional do cliente é **separado** do financeiro SaaS. Nenhum backlog desaparece (`DEFERRED ≠ DONE`).
 
 ## O que existe vs o que é novo (resumo)
 
@@ -36,7 +36,7 @@ Matopiba vira **frota/operação-centric** (D-001): o eixo é o **veículo/compo
 
 ## Macrofrente atual
 
-**`CURRENT_MACROFRONT = E1.4B_MOBILE_DOCUMENT_EXPERIENCE_IMPLEMENTED_IN_PR`**. P2 / E1.5 = CLOSED; E1.3 = CLOSED em produção; E1.4A = CLOSED em produção. E1.4B está implementada em branch/PR mobile, sem migration 074, sem production write, sem APK e sem device validation. Onda 1 = tecnicamente CLOSED (ver §Estado da Onda 1); validação de aparelho no `MOBILE_RELEASE_TRAIN_M1`.
+**`CURRENT_MACROFRONT = E1.5A_VERIFIABILITY_DIAGNOSTICS_RECOVERY_FOUNDATION_IMPLEMENTED_IN_PR`**. P2 = CLOSED; E1.3 = CLOSED em produção; E1.4A = CLOSED em produção; **E1.4B = CODE CLOSED** no PR #446 (`MERGE_SHA=a00545770e88c6d13d7d6158b66077e973ba89d8`). E1.5A implementa a fundação horizontal read-only de verificabilidade/diagnóstico/recuperação, sem migration 074, sem production write, sem repair production e sem IA como autoridade. Onda 1 = tecnicamente CLOSED (ver §Estado da Onda 1); validação de aparelho no `MOBILE_RELEASE_TRAIN_M1`.
 
 **P2 — Permissões (templates+overrides) CLOSED técnico.** Migration **072** (aditiva/idempotente, hash `4069b0e0…46ce5`) foi **aplicada+rastreada em produção** (`20260821043352`) e o backend **e718eb36103de1aea233e2a868cf37b7b4f51e38** foi implantado no Railway após regularização do billing (`DEPLOYMENT=987c7a52-b240-4bd4-a855-24318ba8c72b`, `SUCCESS`, `numReplicas=1`, health 200). Frontend P2 no GitHub Pages também está em `e718eb3`. Pós-deploy read-only: `/health` 200; `/auth/me`, `/admin/permissions/templates` e `/realtime/stream` sem auth retornam 401; logs novos sem 500/uncaught/unhandled/permission/RLS inesperado. Sanity P2: templates provisionados sem `stable_key` duplicada por empresa; usuários ativos com `permission_template_id`; governança efetiva preservada no recorte operacional; Asaas permaneceu inerte (`ASAAS_API_KEY` ausente, allowlist vazia, outbox off). App: código P2 pronto, mas **validação física = `DEFERRED_TO_MOBILE_RELEASE_TRAIN_M1`** (**DEFERRED ≠ PASS**). `P2_TECHNICAL_STATUS=CLOSED`.
 
@@ -44,7 +44,9 @@ Matopiba vira **frota/operação-centric** (D-001): o eixo é o **veículo/compo
 
 **E1.4A — Documents foundation/security/web CLOSED.** OWNER MIGRATION GATE executado em 2026-08-22: migration 073 aplicada uma vez via `apply_migration` apos hash autorizado `7368bcd80009f1a21b42170d56d99f976dbca3a7aa0534ecb4d14c3f0e7dde91`, tracking confirmado (`20260822041647 073_documents_foundation_security_web`), counts preservados (`frete_documentos 16->16`, `frete_epod_evidencias 10->10`, `frete_ocorrencia_evidencias 0->0`, novas tabelas 0). PR #444 mergeado (`MERGE_SHA=1744d59bfd6e731452e85fbb01d3c2daa482a6a9`); Railway deploy `96453b4b-5052-43bd-be22-ec1ab4afd078` SUCCESS (`numReplicas=1`, healthcheck `/health`), GitHub Pages publicado no mesmo SHA, main checks verdes. Entrega: contrato v2 para `outro`, idempotencia via `client_request_id`, auditoria upload/cancel, fundacao de participantes com RLS e preview web PDF/imagem via signed URL curta. `comprovantes` legado permaneceu publico/intocado; sem backfill/storage write/env/Asaas. `E14A_TECHNICAL_STATUS=CLOSED`; `E14_OVERALL_STATUS=OPEN_E1.4B_PENDING`; app/device validation fica no `MOBILE_RELEASE_TRAIN_M1`.
 
-**E1.4B — Mobile document experience IMPLEMENTED_IN_PR.** Entrega mobile sobre a foundation 073: viewer interno PDF/imagem no app, signed URL curta com refresh em expiração, temp file isolado/cleanup de antigos, scanner on-device multipagina, review com reorder/remove/retake, PDF local, contrato v2 de `outro` na UI e upload idempotente/resiliente com `client_request_id` estável em documentos/ePOD. Sem backend schema change, sem migration 074, sem produção, sem Storage direto pelo app, sem Asaas, sem APK. `RECIPIENT_SIGNER_UI=DEFERRED_FUTURE_B2`; `DEVICE_VALIDATION=DEFERRED_TO_MOBILE_RELEASE_TRAIN_M1`.
+**E1.4B — Mobile document experience CODE CLOSED.** PR #446 mergeado em `main` (`MERGE_SHA=a00545770e88c6d13d7d6158b66077e973ba89d8`); checks de `main` verdes para Flutter CI, App CI Flutter Android e GitHub Pages. Entrega mobile sobre a foundation 073: viewer interno PDF/imagem no app, signed URL curta com refresh em expiração, temp file isolado/cleanup de antigos, scanner on-device multipagina, review com reorder/remove/retake, PDF local, contrato v2 de `outro` na UI e upload idempotente/resiliente com `client_request_id` estável em documentos/ePOD. Sem backend schema change, sem migration 074, sem Storage direto pelo app, sem Asaas, sem APK/Play Store. `RECIPIENT_SIGNER_UI=DEFERRED_FUTURE_B2`; `DEVICE_VALIDATION=DEFERRED_TO_MOBILE_RELEASE_TRAIN_M1`.
+
+**E1.5A — Verifiability, Diagnostics & Recovery Foundation IMPLEMENTED_IN_PR.** Entrega transversal sem IA/autonomia: contexto canônico de correlação (`request_id`, `correlation_id`, `operation_id`, `causation_id`), envelope sanitizado de evento/evidência, registry de invariantes, verifier, findings estruturados, repair playbook engine com `execute=DISABLED_BY_POLICY`, dry-run e primeira superfície read-only Super Admin (`/admin/diagnostics`). Reusa modelos vivos (`auth_event_audit`, `lancamento_eventos`, `frete_documento_eventos`, `billing_outbox`, webhook/outbox/reconcile) sem criar sistema paralelo. Sem migration 074, sem persistência nova de runs/findings, sem production write, sem env/secret, sem Asaas.
 
 A **RBV9 — Rebaseline V9** (docs-only) está **concluída** e inclui o **patch fiscal V9** (domínio `FISCAL_INVOICING`, decisões D-036..D-041, ledger FISC-001..020, track NFS-e). **Nenhum código/dado/env de produção alterado por estes docs.**
 
@@ -72,7 +74,7 @@ Adequação de **CNAE/CNPJ/regime** do owner corre **em paralelo** e **NÃO bloq
 
 ## Próximo passo recomendado
 
-Próxima macrofrente recomendada: **E1.4B mobile** — validar/entregar o lado app do scanner/viewer PDF-first sem reabrir E1.4A, sem gerar APK intermediário e respeitando o `MOBILE_RELEASE_TRAIN_M1`.
+Próximo passo recomendado: **revisão final da E1.5A**. Não iniciar Onda 2/Fleet antes do review arquitetural desta foundation transversal.
 
 ## Hard stops permanentes
 

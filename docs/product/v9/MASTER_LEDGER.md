@@ -93,10 +93,10 @@ _Evidência coletada em 2026-08-19 (ver [FORENSIC_BASELINE](./FORENSIC_BASELINE.
 | ID | Item | Status | B W A D P | Evidência / Obs |
 |----|------|--------|-----------|-----------------|
 | RBV9-INV-043 | Documentos por frete (upload/storage/signed URL) | IMPL_VAL | ✓ ✓ ✓ ✓ ✓ | `frete_documentos`(16), migration 026. **E1.4A CLOSED em producao**: PR #444 mergeado (`MERGE_SHA=1744d59`), migration 073 aplicada+rastreada (`20260822041647`, SHA256 `7368bcd80009f1a21b42170d56d99f976dbca3a7aa0534ecb4d14c3f0e7dde91`) adicionou contrato v2, `client_request_id`, cancelamento logico/auditoria e participantes operacionais. Counts preservados; `comprovantes` legado intocado. |
-| RBV9-INV-044 | Scanner de documentos no app | IMPL_NV | ✓ ✓ ~ ✓ ✓ | **E1.4B implementada em PR mobile**: scanner on-device via `cunning_document_scanner`, multipagina, review antes do upload, reorder/remove/retake e geração local de PDF. OCR segue fora do primeiro release (`OCR_FIRST_RELEASE=false`). Validação física no aparelho fica no `MOBILE_RELEASE_TRAIN_M1`. |
+| RBV9-INV-044 | Scanner de documentos no app | IMPL_NV | ✓ ✓ ✓ ✓ ✓ | **E1.4B CODE CLOSED**: PR #446 mergeado (`MERGE_SHA=a00545770e88c6d13d7d6158b66077e973ba89d8`). Scanner on-device via `cunning_document_scanner`, multipagina, review antes do upload, reorder/remove/retake e geração local de PDF. OCR segue fora do primeiro release (`OCR_FIRST_RELEASE=false`). Validação física no aparelho fica no `MOBILE_RELEASE_TRAIN_M1`. |
 | RBV9-INV-045 | Fluxos distintos empresa→motorista / motorista→empresa | ROADMAP | ✗ ✗ ✗ ✗ ✗ | D-013 |
 | RBV9-INV-046 | Múltiplos recebedores/assinantes | PARTIAL | ✓ ~ ✗ ✓ ✓ | **Fundacao E1.4A em producao**: `frete_documento_participantes` criada com FKs/RLS tenant-aware e status/tipo; fluxos reais de retorno/ack/assinatura operacional seguem `FUTURE_B`. D-015 |
-| RBV9-INV-047 | Viewer PDF-first no app (ver antes de exportar) | IMPL_NV | ✓ ✓ ~ ✓ ✓ | **E1.4B implementada em PR mobile**: app busca signed URL curta no backend, baixa para temp isolado, mostra preview interno PDF/imagem e só depois oferece salvar/compartilhar/abrir externamente. URLs assinadas não viram autoridade persistida. D-016 |
+| RBV9-INV-047 | Viewer PDF-first no app (ver antes de exportar) | IMPL_NV | ✓ ✓ ✓ ✓ ✓ | **E1.4B CODE CLOSED**: app busca signed URL curta no backend, baixa para temp isolado, mostra preview interno PDF/imagem e só depois oferece salvar/compartilhar/abrir externamente. URLs assinadas não viram autoridade persistida; app não acessa Supabase Storage diretamente. D-016 |
 | RBV9-INV-048 | Documentos por ativo (frota) | ROADMAP | ✗ ✗ ✗ ✗ ✗ | depende de FLEET |
 
 ## LAUNCHES (despesas / abastecimento / vale / adiantamento)
@@ -214,8 +214,9 @@ _Evidência coletada em 2026-08-19 (ver [FORENSIC_BASELINE](./FORENSIC_BASELINE.
 | ID | Item | Status | B W A D P | Evidência / Obs |
 |----|------|--------|-----------|-----------------|
 | RBV9-INV-087 | Auditoria por domínio (auth, contratos, fretes, funcionalidades, escopo) | PARTIAL | ✓ ~ — ✓ ✓ | vários `*_auditoria` / `*_eventos`; não unificado |
-| RBV9-INV-088 | Modelo de eventos unificado (entity/action/actor/source/metadata) | ROADMAP | ✗ ✗ ✗ ✗ ✗ | D-021 |
+| RBV9-INV-088 | Modelo de eventos unificado (entity/action/actor/source/metadata) | PARTIAL | ✓ ✗ ✗ ✓ ✗ | E1.5A adiciona envelope canônico em código (`event_id`, `event_type`, `domain`, `empresa_id`, `entity`, correlação, ator, source, metadata sanitizada, evidence_refs`) sem migration/persistência nova. D-021/D-045/D-054 |
 | RBV9-INV-089 | Envelope Digital (unidade formal de fechamento) | ROADMAP | ✗ ✗ ✗ ✗ ✗ | D-022 |
+| RBV9-INV-109 | Verifiability, Diagnostics & Recovery Foundation | IMPL_NV | ✓ ✗ ✗ ✗ ✗ | E1.5A: contexto canônico de correlação, registry de invariantes, verifier, findings estruturados, repair playbook engine com `execute=DISABLED_BY_POLICY`, dry-run e rota Super Admin read-only `/admin/diagnostics`. Sem migration 074, sem repair production, sem IA como authority. D-044..D-054 |
 
 ## REPORTING / PDF
 
@@ -285,14 +286,15 @@ _Evidência coletada em 2026-08-19 (ver [FORENSIC_BASELINE](./FORENSIC_BASELINE.
 | MOBILE-M1-005 | Validar no aparelho o **scanner multipagina** com preview, reorder, remove, retake e PDF local | DEFERRED_TO_MOBILE_RELEASE_TRAIN_M1 | Código pronto (E1.4B). OCR fora do release inicial. |
 | MOBILE-M1-006 | Validar no aparelho **upload resiliente/idempotente** de documentos/ePOD com retry usando o mesmo `client_request_id` | DEFERRED_TO_MOBILE_RELEASE_TRAIN_M1 | Código pronto (E1.4B). Process death completo não é prometido; retry seguro ao retornar ao fluxo é o limite do M1. |
 | MOBILE-M1-007 | Validar no aparelho fluxo **preview-first** com salvar/compartilhar/abrir fora somente após prévia | DEFERRED_TO_MOBILE_RELEASE_TRAIN_M1 | Código pronto (E1.4B). Sem upload direto para Storage pelo app. |
+| MOBILE-M1-008 | Definir/validar **App Version Policy e in-app update**: latest/recommended/minimum version, severity, release notes e update oficial Play (`flexible`/`immediate`) | ROADMAP_NOT_IMPLEMENTED | Direção congelada em D-053. Não implementado nesta fase; requisito antes de maturidade Google Play. |
 
 ---
 
 ### Contagem do inventário
 
-> **Recalculado após o patch fiscal RBV9** (+20 `FISC-001..020`, ROADMAP/NEW) **e a Onda 1 / E1.6A** (+`RBV9-INV-107` realtime horizontal scale, +`RBV9-INV-108` legacy observation enforcement; transições de status de 052/053/054/093). Inventário: 108 (`RBV9-INV`) + 20 (`FISC`) = **128**.
+> **Recalculado após o patch fiscal RBV9** (+20 `FISC-001..020`, ROADMAP/NEW), a Onda 1 / E1.6A (+`RBV9-INV-107` realtime horizontal scale, +`RBV9-INV-108` legacy observation enforcement) e E1.5A (+`RBV9-INV-109` verifiability foundation). Inventário: 109 (`RBV9-INV`) + 20 (`FISC`) = **129**.
 
-- **Total de itens:** **128** (108 RBV9-INV + 20 FISC)
+- **Total de itens:** **129** (109 RBV9-INV + 20 FISC)
 - **IMPLEMENTED_VALIDATED:** 45
 - **IMPLEMENTED_NOT_VISUAL_VALIDATED:** 6 (+3 da Onda 1: RBV9-INV-052/053/054 — aguardam migration gate + validação visual)
 - **PARTIAL:** 15 (RBV9-INV-052/054 saíram de PARTIAL; RBV9-INV-093 entrou)
