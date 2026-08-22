@@ -1,7 +1,7 @@
 # Matopiba Log — CONTEXT BRIDGE V9
 
 > **Handoff compacto.** Leia este arquivo primeiro ao retomar em outro chat/agente. Os detalhes estão nos 4 documentos linkados no fim.
-> Atualizado: **2026-08-22** (E1.4B code closed + E1.5A implementada em PR).
+> Atualizado: **2026-08-22** (E1.5A closed em produção + início autorizado da Onda 2/Fleet).
 
 ---
 
@@ -17,8 +17,8 @@
 
 | | |
 |---|---|
-| `origin/main` | **`a005457`** (PR #446 / E1.4B mobile document experience). Marcos anteriores: `1744d59` (PR #444 / E1.4A), `b695102` (PR #441 / E1.3), `d9e0c30` (PR #442 / close P2 pós-Railway), `e718eb3` (PR #440 / P2), `569fde7` (PR #437 / hotfix Onda 1). |
-| Deploy produção | Railway `matopibalog-backend` deploy `96453b4b-5052-43bd-be22-ec1ab4afd078` **SUCCESS** (`commitHash=1744d59`, `numReplicas=1`) |
+| `origin/main` | **`3cda272`** (PR #447 / E1.5A Verifiability, Diagnostics & Recovery Foundation). Marcos anteriores: `a005457` (PR #446 / E1.4B), `1744d59` (PR #444 / E1.4A), `b695102` (PR #441 / E1.3), `d9e0c30` (PR #442 / close P2 pós-Railway), `e718eb3` (PR #440 / P2), `569fde7` (PR #437 / hotfix Onda 1). |
+| Deploy produção | Railway `matopibalog-backend` deploy `079a7600-e7b5-463e-aa15-e895486f89f1` **SUCCESS** (`commitHash=3cda272`, `numReplicas=1`) |
 | Health | **HTTP 200** `{"status":"UP"}` em `https://api.matopibalog.com.br/health` |
 | Banco | Supabase `rjahjogidyndphdxevom` · 69 tabelas públicas · RLS 100% |
 | Asaas | **DESARMADO**: sem `ASAAS_API_KEY`, provider=fake, production=false, allowlist vazia, outbox=false, `billing_outbox`=0. **Não reativar sem autorização.** |
@@ -36,7 +36,7 @@ Matopiba vira **frota/operação-centric** (D-001): o eixo é o **veículo/compo
 
 ## Macrofrente atual
 
-**`CURRENT_MACROFRONT = E1.5A_VERIFIABILITY_DIAGNOSTICS_RECOVERY_FOUNDATION_IMPLEMENTED_IN_PR`**. P2 = CLOSED; E1.3 = CLOSED em produção; E1.4A = CLOSED em produção; **E1.4B = CODE CLOSED** no PR #446 (`MERGE_SHA=a00545770e88c6d13d7d6158b66077e973ba89d8`). E1.5A implementa a fundação horizontal read-only de verificabilidade/diagnóstico/recuperação, sem migration 074, sem production write, sem repair production e sem IA como autoridade. Onda 1 = tecnicamente CLOSED (ver §Estado da Onda 1); validação de aparelho no `MOBILE_RELEASE_TRAIN_M1`.
+**`CURRENT_MACROFRONT = ONDA2_FLEET_FOUNDATION`**. P2 = CLOSED; E1.3 = CLOSED em produção; E1.4A = CLOSED em produção; **E1.4B = CODE CLOSED** no PR #446 (`MERGE_SHA=a00545770e88c6d13d7d6158b66077e973ba89d8`); **E1.5A = CLOSED em produção** no PR #447 (`MERGE_SHA=3cda272ec49154d77d62eed95976fef18bbd24f0`). Onda 1 = tecnicamente CLOSED (ver §Estado da Onda 1); validação de aparelho no `MOBILE_RELEASE_TRAIN_M1`.
 
 **P2 — Permissões (templates+overrides) CLOSED técnico.** Migration **072** (aditiva/idempotente, hash `4069b0e0…46ce5`) foi **aplicada+rastreada em produção** (`20260821043352`) e o backend **e718eb36103de1aea233e2a868cf37b7b4f51e38** foi implantado no Railway após regularização do billing (`DEPLOYMENT=987c7a52-b240-4bd4-a855-24318ba8c72b`, `SUCCESS`, `numReplicas=1`, health 200). Frontend P2 no GitHub Pages também está em `e718eb3`. Pós-deploy read-only: `/health` 200; `/auth/me`, `/admin/permissions/templates` e `/realtime/stream` sem auth retornam 401; logs novos sem 500/uncaught/unhandled/permission/RLS inesperado. Sanity P2: templates provisionados sem `stable_key` duplicada por empresa; usuários ativos com `permission_template_id`; governança efetiva preservada no recorte operacional; Asaas permaneceu inerte (`ASAAS_API_KEY` ausente, allowlist vazia, outbox off). App: código P2 pronto, mas **validação física = `DEFERRED_TO_MOBILE_RELEASE_TRAIN_M1`** (**DEFERRED ≠ PASS**). `P2_TECHNICAL_STATUS=CLOSED`.
 
@@ -46,7 +46,7 @@ Matopiba vira **frota/operação-centric** (D-001): o eixo é o **veículo/compo
 
 **E1.4B — Mobile document experience CODE CLOSED.** PR #446 mergeado em `main` (`MERGE_SHA=a00545770e88c6d13d7d6158b66077e973ba89d8`); checks de `main` verdes para Flutter CI, App CI Flutter Android e GitHub Pages. Entrega mobile sobre a foundation 073: viewer interno PDF/imagem no app, signed URL curta com refresh em expiração, temp file isolado/cleanup de antigos, scanner on-device multipagina, review com reorder/remove/retake, PDF local, contrato v2 de `outro` na UI e upload idempotente/resiliente com `client_request_id` estável em documentos/ePOD. Sem backend schema change, sem migration 074, sem Storage direto pelo app, sem Asaas, sem APK/Play Store. `RECIPIENT_SIGNER_UI=DEFERRED_FUTURE_B2`; `DEVICE_VALIDATION=DEFERRED_TO_MOBILE_RELEASE_TRAIN_M1`.
 
-**E1.5A — Verifiability, Diagnostics & Recovery Foundation IMPLEMENTED_IN_PR.** Entrega transversal sem IA/autonomia: contexto canônico de correlação (`request_id`, `correlation_id`, `operation_id`, `causation_id`), envelope sanitizado de evento/evidência, registry de invariantes, verifier, findings estruturados, repair playbook engine com `execute=DISABLED_BY_POLICY`, dry-run e primeira superfície read-only Super Admin (`/admin/diagnostics`). Reusa modelos vivos (`auth_event_audit`, `lancamento_eventos`, `frete_documento_eventos`, `billing_outbox`, webhook/outbox/reconcile) sem criar sistema paralelo. Sem migration 074, sem persistência nova de runs/findings, sem production write, sem env/secret, sem Asaas.
+**E1.5A — Verifiability, Diagnostics & Recovery Foundation CLOSED em produção.** PR #447 mergeado (`MERGE_SHA=3cda272ec49154d77d62eed95976fef18bbd24f0`); Railway deploy `079a7600-e7b5-463e-aa15-e895486f89f1` SUCCESS (`commitHash=3cda272`, `numReplicas=1`); GitHub Pages publicado; CI main verde (Backend, SEC-1, GitHub Pages). Validação local final: backend `1656/1656`, web `116/116`, `tsc -b && vite build`. Smokes produção read-only: `/health` 200, `/admin/diagnostics` sem auth 401, `/admin/permissions/templates` sem auth 401; logs recentes sem 5xx novo. Entrega transversal sem IA/autonomia: contexto canônico de correlação (`request_id`, `correlation_id`, `operation_id`, `causation_id`), envelope sanitizado de evento/evidência, registry de invariantes, verifier, findings estruturados, repair playbook engine com `execute=DISABLED_BY_POLICY`, dry-run e primeira superfície read-only Super Admin (`/admin/diagnostics`). Reusa modelos vivos (`auth_event_audit`, `lancamento_eventos`, `frete_documento_eventos`, `billing_outbox`, webhook/outbox/reconcile) sem criar sistema paralelo. Sem migration 074, sem persistência nova de runs/findings, sem production write, sem env/secret, sem Asaas. Persistência histórica de runs/findings/playbook traces fica para decisão futura.
 
 A **RBV9 — Rebaseline V9** (docs-only) está **concluída** e inclui o **patch fiscal V9** (domínio `FISCAL_INVOICING`, decisões D-036..D-041, ledger FISC-001..020, track NFS-e). **Nenhum código/dado/env de produção alterado por estes docs.**
 
@@ -74,7 +74,7 @@ Adequação de **CNAE/CNPJ/regime** do owner corre **em paralelo** e **NÃO bloq
 
 ## Próximo passo recomendado
 
-Próximo passo recomendado: **revisão final da E1.5A**. Não iniciar Onda 2/Fleet antes do review arquitetural desta foundation transversal.
+Próximo passo recomendado: **ONDA2_FLEET_FOUNDATION**. Se a Fleet criar migration 074, preparar PR/CI/hash e parar em `READY_FOR_OWNER_MIGRATION_GATE_FLEET`; não aplicar DDL em produção sem gate explícito.
 
 ## Hard stops permanentes
 

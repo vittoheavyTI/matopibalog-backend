@@ -216,7 +216,7 @@ _Evidência coletada em 2026-08-19 (ver [FORENSIC_BASELINE](./FORENSIC_BASELINE.
 | RBV9-INV-087 | Auditoria por domínio (auth, contratos, fretes, funcionalidades, escopo) | PARTIAL | ✓ ~ — ✓ ✓ | vários `*_auditoria` / `*_eventos`; não unificado |
 | RBV9-INV-088 | Modelo de eventos unificado (entity/action/actor/source/metadata) | PARTIAL | ✓ ✗ ✗ ✓ ✗ | E1.5A adiciona envelope canônico em código (`event_id`, `event_type`, `domain`, `empresa_id`, `entity`, correlação, ator, source, metadata sanitizada, evidence_refs`) sem migration/persistência nova. D-021/D-045/D-054 |
 | RBV9-INV-089 | Envelope Digital (unidade formal de fechamento) | ROADMAP | ✗ ✗ ✗ ✗ ✗ | D-022 |
-| RBV9-INV-109 | Verifiability, Diagnostics & Recovery Foundation | IMPL_NV | ✓ ✗ ✗ ✗ ✗ | E1.5A: contexto canônico de correlação, registry de invariantes, verifier, findings estruturados, repair playbook engine com `execute=DISABLED_BY_POLICY`, dry-run e rota Super Admin read-only `/admin/diagnostics`. Sem migration 074, sem repair production, sem IA como authority. D-044..D-054 |
+| RBV9-INV-109 | Verifiability, Diagnostics & Recovery Foundation | IMPL_VAL | ✓ ✗ ✗ ✗ ✓ | **E1.5A CLOSED em produção**: PR #447 mergeado (`MERGE_SHA=3cda272`), Railway `079a7600-e7b5-463e-aa15-e895486f89f1` SUCCESS (`commitHash=3cda272`, `numReplicas=1`), CI main verde, health/smokes anon 401 e logs sem 5xx novo. Contexto canônico de correlação, registry de invariantes, verifier, findings estruturados, repair playbook engine com `execute=DISABLED_BY_POLICY`, dry-run e rota Super Admin read-only `/admin/diagnostics`. Sem migration 074, sem repair production, sem IA como authority. Persistência histórica de runs/findings fica como decisão futura. D-044..D-054 |
 
 ## REPORTING / PDF
 
@@ -295,8 +295,8 @@ _Evidência coletada em 2026-08-19 (ver [FORENSIC_BASELINE](./FORENSIC_BASELINE.
 > **Recalculado após o patch fiscal RBV9** (+20 `FISC-001..020`, ROADMAP/NEW), a Onda 1 / E1.6A (+`RBV9-INV-107` realtime horizontal scale, +`RBV9-INV-108` legacy observation enforcement) e E1.5A (+`RBV9-INV-109` verifiability foundation). Inventário: 109 (`RBV9-INV`) + 20 (`FISC`) = **129**.
 
 - **Total de itens:** **129** (109 RBV9-INV + 20 FISC)
-- **IMPLEMENTED_VALIDATED:** 45
-- **IMPLEMENTED_NOT_VISUAL_VALIDATED:** 6 (+3 da Onda 1: RBV9-INV-052/053/054 — aguardam migration gate + validação visual)
+- **IMPLEMENTED_VALIDATED:** 46
+- **IMPLEMENTED_NOT_VISUAL_VALIDATED:** 5 (+3 da Onda 1: RBV9-INV-052/053/054 — aguardam migration gate + validação visual)
 - **PARTIAL:** 15 (RBV9-INV-052/054 saíram de PARTIAL; RBV9-INV-093 entrou)
 - **ROADMAP_ONLY:** **51** (RBV9-INV-053 saiu de ROADMAP)
 - **DEFERRED:** 5 (+RBV9-INV-107 realtime horizontal scale; +RBV9-INV-108 legacy observation enforcement)
