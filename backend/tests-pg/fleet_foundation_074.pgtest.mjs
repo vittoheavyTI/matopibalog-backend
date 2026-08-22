@@ -351,21 +351,22 @@ function registrar() {
     try {
       await c1.query('BEGIN');
       await c2.query('BEGIN');
-      const results = await Promise.allSettled([
-        c1.query(
-          `INSERT INTO public.vehicle_composition_members (empresa_id, composition_id, asset_id, member_role)
-           VALUES ($1,$2,$3,'primary_power')`,
-          [EMP_A, COMP_C, ASSET_C],
-        ),
+      await c1.query(
+        `INSERT INTO public.vehicle_composition_members (empresa_id, composition_id, asset_id, member_role)
+         VALUES ($1,$2,$3,'primary_power')`,
+        [EMP_A, COMP_C, ASSET_C],
+      );
+      await c2.query(`SET LOCAL lock_timeout = '500ms'`);
+      await assert.rejects(
         c2.query(
           `INSERT INTO public.vehicle_composition_members (empresa_id, composition_id, asset_id, member_role)
            VALUES ($1,$2,$3,'primary_power')`,
           [EMP_A, COMP_D, ASSET_C],
         ),
-      ]);
-      await Promise.allSettled([c1.query('COMMIT'), c2.query('COMMIT')]);
-      assert.equal(results.filter((r) => r.status === 'fulfilled').length, 1);
-      assert.equal(results.filter((r) => r.status === 'rejected').length, 1);
+        /lock timeout|vehicle_composition_members_active_asset_key|duplicate key/i,
+      );
+      await c1.query('COMMIT');
+      await c2.query('ROLLBACK');
       const { rows } = await pool.query(
         `SELECT count(*)::int AS n FROM public.vehicle_composition_members
          WHERE asset_id=$1 AND valid_until IS NULL`,
