@@ -1,5 +1,7 @@
 'use strict';
 
+const crypto = require('crypto');
+
 const {
   canAccessUnit,
   deriveUnitForWrite,
@@ -15,6 +17,17 @@ const MAINTENANCE_TYPES = Object.freeze(['preventive', 'corrective']);
 const MAINTENANCE_CATEGORIES = Object.freeze(['engine', 'transmission', 'oil', 'filters', 'brake', 'suspension', 'electrical', 'tires', 'other']);
 const MAINTENANCE_STATUS = Object.freeze(['open', 'scheduled', 'completed', 'cancelled']);
 const ODOMETER_EVENT_TYPES = Object.freeze(['check_in', 'check_out', 'manual', 'correction']);
+const DOCUMENT_STATUS = Object.freeze(['active', 'expired', 'cancelled']);
+const FLEET_DOCUMENTS_BUCKET = 'fretes-documentos';
+const SIGNED_URL_TTL_SECONDS = 300;
+const DOCUMENT_EXTENSION_BY_MIME = Object.freeze({
+  'application/pdf': 'pdf',
+  'text/xml': 'xml',
+  'application/xml': 'xml',
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+});
 
 class FleetError extends Error {
   constructor(status, message, code = 'fleet_error') {
@@ -177,6 +190,7 @@ function buildTirePayload(input, { partial = false } = {}) {
   if (!partial || input.purchase_value !== undefined) payload.purchase_value = finiteNumber(input.purchase_value, 'purchase_value');
   if (!partial || input.status !== undefined) payload.status = enumValue(input.status, TIRE_STATUS, 'status', 'stock');
   if (!partial || input.current_asset_id !== undefined) payload.current_asset_id = text(input.current_asset_id);
+  if (!partial || input.unidade_operacional_id !== undefined) payload.unidade_operacional_id = text(input.unidade_operacional_id);
   if (!partial || input.metadata !== undefined) payload.metadata = metadata(input.metadata);
   return payload;
 }
@@ -202,19 +216,56 @@ function buildMaintenancePayload(input) {
 }
 
 function buildDocumentPayload(input) {
-  const storagePath = text(input.storage_path);
-  if (!storagePath) throw new FleetError(422, 'storage_path obrigatório.', 'missing_storage_path');
   const documentType = text(input.document_type);
   if (!documentType) throw new FleetError(422, 'document_type obrigatório.', 'missing_document_type');
+  const storagePath = text(input.storage_path);
   return {
     document_category: 'VEHICLE_DOCUMENT',
     document_type: documentType,
     storage_path: storagePath,
-    status: enumValue(input.status, ['active', 'expired', 'cancelled'], 'status', 'active'),
+    status: enumValue(input.status, DOCUMENT_STATUS, 'status', 'active'),
     issued_at: dateText(input.issued_at),
     expires_at: dateText(input.expires_at),
     client_request_id: text(input.client_request_id),
+    nome_arquivo: text(input.nome_arquivo),
+    nome_documento: text(input.nome_documento),
+    descricao: text(input.descricao),
+    mime: text(input.mime),
+    tamanho_bytes: positiveInteger(input.tamanho_bytes, 'tamanho_bytes'),
+    file_sha256: text(input.file_sha256),
+    document_contract_version: positiveInteger(input.document_contract_version, 'document_contract_version') || 1,
+    source: text(input.source),
+    request_id: text(input.request_id),
+    correlation_id: text(input.correlation_id),
   };
+}
+
+function extensionForDocument(file) {
+  const byMime = DOCUMENT_EXTENSION_BY_MIME[file?.mimetype];
+  if (byMime) return byMime;
+  const original = text(file?.originalname);
+  const match = original && original.match(/\.([a-z0-9]{1,8})$/i);
+  return match ? match[1].toLowerCase() : 'bin';
+}
+
+function sha256Buffer(buffer) {
+  return crypto.createHash('sha256').update(buffer).digest('hex');
+}
+
+function buildFleetDocumentStoragePath(empresaId, assetId, documentId, file) {
+  return `${empresaId}/fleet/assets/${assetId}/documents/${documentId}.${extensionForDocument(file)}`;
+}
+
+function ensureFleetDocumentStoragePath(storagePath, empresaId, assetId) {
+  const expectedPrefix = `${empresaId}/fleet/assets/${assetId}/documents/`;
+  if (!String(storagePath || '').startsWith(expectedPrefix)) {
+    throw new FleetError(422, 'storage_path fora do domínio de documentos Fleet.', 'invalid_storage_path');
+  }
+}
+
+function normalizeClientRequestId(value) {
+  const out = text(value);
+  return out ? out.slice(0, 180) : null;
 }
 
 function broadScope(scope) {
@@ -496,15 +547,11 @@ async function listActiveFreightAssignments(supabase, { empresaId, assetIds = nu
 
 async function listTires(supabase, { empresaId, query = {}, operationalScope = null }) {
   requireEmpresa(empresaId);
-  let q = supabase.from('tires').select('*, tire_installations(*)').eq('empresa_id', empresaId).order('created_at', { ascending: false });
+  let q = supabase.from('tires').select('*, tire_installations(*), tire_events(*)').eq('empresa_id', empresaId).order('created_at', { ascending: false });
   if (query.status) q = q.eq('status', query.status);
   const search = sanitizeSearchFilter(query.q);
   if (search) q = q.or(`fire_number.ilike.%${search}%,brand.ilike.%${search}%,model.ilike.%${search}%,size.ilike.%${search}%`);
-  const scopedIds = await accessibleAssetIds(supabase, empresaId, operationalScope);
-  if (scopedIds !== null) {
-    if (!scopedIds.length) return [];
-    q = q.in('current_asset_id', scopedIds);
-  }
+  q = applyOperationalScope(q, operationalScope);
   const { data, error } = await q;
   throwDatabaseError(error);
   return data || [];
@@ -516,6 +563,9 @@ async function createTire(supabase, { empresaId, user, body, operationalScope = 
   if (payload.current_asset_id) {
     const asset = await requireByEmpresa(supabase, 'fleet_assets', empresaId, payload.current_asset_id, 'asset');
     ensureUnitAccess(operationalScope, asset.unidade_operacional_id);
+    payload.unidade_operacional_id = asset.unidade_operacional_id;
+  } else {
+    payload.unidade_operacional_id = deriveScopedUnit(operationalScope, payload.unidade_operacional_id);
   }
   const { data, error } = await supabase.from('tires').insert(payload).select('*').single();
   throwDatabaseError(error);
@@ -541,7 +591,12 @@ async function installTire(supabase, { empresaId, user, tireId, body, operationa
   if (!payload.position_label) throw new FleetError(422, 'position_label obrigatório.', 'missing_position');
   const { data, error } = await supabase.from('tire_installations').insert(payload).select('*').single();
   throwDatabaseError(error);
-  const { error: updateError } = await supabase.from('tires').update({ status: 'installed', current_asset_id: assetId, updated_at: new Date().toISOString() }).eq('id', tireId).eq('empresa_id', empresaId);
+  const { error: updateError } = await supabase.from('tires').update({
+    status: 'installed',
+    current_asset_id: assetId,
+    unidade_operacional_id: asset.unidade_operacional_id,
+    updated_at: new Date().toISOString(),
+  }).eq('id', tireId).eq('empresa_id', empresaId);
   throwDatabaseError(updateError);
   return data;
 }
@@ -565,7 +620,12 @@ async function removeTireInstallation(supabase, { empresaId, installationId, bod
     .select('*')
     .maybeSingle();
   throwDatabaseError(error);
-  const { error: updateError } = await supabase.from('tires').update({ status: 'stock', current_asset_id: null, updated_at: new Date().toISOString() }).eq('id', current.tire_id).eq('empresa_id', empresaId);
+  const { error: updateError } = await supabase.from('tires').update({
+    status: 'stock',
+    current_asset_id: null,
+    unidade_operacional_id: asset.unidade_operacional_id,
+    updated_at: new Date().toISOString(),
+  }).eq('id', current.tire_id).eq('empresa_id', empresaId);
   throwDatabaseError(updateError);
   return data;
 }
@@ -639,9 +699,107 @@ async function createAssetDocument(supabase, { empresaId, user, assetId, body, o
   const asset = await requireByEmpresa(supabase, 'fleet_assets', empresaId, assetId, 'asset');
   ensureUnitAccess(operationalScope, asset.unidade_operacional_id);
   const payload = { ...buildDocumentPayload(body), empresa_id: empresaId, asset_id: assetId, created_by: actorId(user) };
+  if (!payload.storage_path) throw new FleetError(422, 'Arquivo obrigatório.', 'missing_file');
+  ensureFleetDocumentStoragePath(payload.storage_path, empresaId, assetId);
   const { data, error } = await supabase.from('asset_documents').insert(payload).select('*').single();
   throwDatabaseError(error);
   return data;
+}
+
+async function findExistingDocumentByRequest(supabase, { assetId, createdBy, clientRequestId }) {
+  if (!clientRequestId || !createdBy) return null;
+  const { data, error } = await supabase
+    .from('asset_documents')
+    .select('*')
+    .eq('asset_id', assetId)
+    .eq('created_by', createdBy)
+    .eq('client_request_id', clientRequestId)
+    .maybeSingle();
+  throwDatabaseError(error);
+  return data || null;
+}
+
+async function uploadAssetDocument(supabase, { empresaId, user, assetId, body, file, operationalScope = null, correlation = null }) {
+  requireEmpresa(empresaId);
+  if (!file?.buffer) throw new FleetError(422, 'Arquivo obrigatório.', 'missing_file');
+  const asset = await requireByEmpresa(supabase, 'fleet_assets', empresaId, assetId, 'asset');
+  ensureUnitAccess(operationalScope, asset.unidade_operacional_id);
+  const createdBy = actorId(user);
+  const clientRequestId = normalizeClientRequestId(body?.client_request_id);
+  const existing = await findExistingDocumentByRequest(supabase, { assetId, createdBy, clientRequestId });
+  if (existing) return existing;
+
+  const documentId = crypto.randomUUID();
+  const storagePath = buildFleetDocumentStoragePath(empresaId, assetId, documentId, file);
+  const documentType = text(body?.document_type);
+  const contractVersion = documentType === 'outro' ? 2 : 1;
+  const nomeDocumento = text(body?.nome_documento);
+  const descricao = text(body?.descricao);
+  if (!documentType) throw new FleetError(422, 'document_type obrigatório.', 'missing_document_type');
+  if (documentType === 'outro' && !nomeDocumento && !descricao) {
+    throw new FleetError(422, 'Informe nome ou descrição para documento do tipo outro.', 'missing_document_metadata');
+  }
+
+  const upload = await supabase.storage
+    .from(FLEET_DOCUMENTS_BUCKET)
+    .upload(storagePath, file.buffer, { contentType: file.mimetype, upsert: false });
+  if (upload.error) throw databaseError(upload.error);
+
+  const payload = { ...buildDocumentPayload(body), empresa_id: empresaId, asset_id: assetId, created_by: actorId(user) };
+  Object.assign(payload, {
+    id: documentId,
+    storage_path: storagePath,
+    nome_arquivo: text(file.originalname) || `${documentId}.${extensionForDocument(file)}`,
+    nome_documento: nomeDocumento,
+    descricao,
+    mime: text(file.mimetype),
+    tamanho_bytes: file.size || file.buffer.length,
+    file_sha256: sha256Buffer(file.buffer),
+    document_contract_version: contractVersion,
+    source: text(body?.source) || 'web',
+    client_request_id: clientRequestId,
+    request_id: text(correlation?.request_id),
+    correlation_id: text(correlation?.correlation_id),
+  });
+
+  const { data, error } = await supabase.from('asset_documents').insert(payload).select('*').single();
+  if (error) {
+    await supabase.storage.from(FLEET_DOCUMENTS_BUCKET).remove([storagePath]).catch(() => {});
+    if (error.code === '23505') {
+      const retry = await findExistingDocumentByRequest(supabase, { assetId, createdBy, clientRequestId });
+      if (retry) return retry;
+    }
+    throwDatabaseError(error);
+  }
+  return data;
+}
+
+async function createAssetDocumentSignedUrl(supabase, { empresaId, assetId, documentId, operationalScope = null }) {
+  requireEmpresa(empresaId);
+  const asset = await requireByEmpresa(supabase, 'fleet_assets', empresaId, assetId, 'asset');
+  ensureUnitAccess(operationalScope, asset.unidade_operacional_id);
+  const { data: doc, error } = await supabase
+    .from('asset_documents')
+    .select('*')
+    .eq('id', documentId)
+    .eq('asset_id', assetId)
+    .eq('empresa_id', empresaId)
+    .maybeSingle();
+  throwDatabaseError(error);
+  if (!doc) throw new FleetError(404, 'Documento de ativo não encontrado.', 'asset_document_not_found');
+  if (doc.status === 'cancelled') throw new FleetError(409, 'Documento cancelado não pode ser visualizado.', 'asset_document_cancelled');
+  const signed = await supabase.storage
+    .from(FLEET_DOCUMENTS_BUCKET)
+    .createSignedUrl(doc.storage_path, SIGNED_URL_TTL_SECONDS);
+  if (signed.error) throw databaseError(signed.error);
+  return {
+    id: doc.id,
+    url: signed.data?.signedUrl || signed.data?.signedURL,
+    mime: doc.mime,
+    nome_arquivo: doc.nome_arquivo,
+    nome_documento: doc.nome_documento,
+    expires_in: SIGNED_URL_TTL_SECONDS,
+  };
 }
 
 async function listOdometerEvents(supabase, { empresaId, query = {}, operationalScope = null }) {
@@ -747,24 +905,104 @@ async function getOverview(supabase, { empresaId, query = {}, operationalScope =
   };
 }
 
+async function listTargetRows(supabase, table, empresaId, predicate) {
+  const { data, error } = await supabase
+    .from(table)
+    .select('*')
+    .eq('empresa_id', empresaId)
+    .order('created_at', { ascending: false })
+    .limit(200);
+  throwDatabaseError(error);
+  return (data || []).filter(predicate);
+}
+
 async function getAssetDetail(supabase, { empresaId, assetId, operationalScope = null }) {
   requireEmpresa(empresaId);
   const asset = await oneByEmpresa(supabase, 'fleet_assets', empresaId, assetId, '*');
   if (!asset) throw new FleetError(404, 'Ativo não encontrado no tenant.', 'asset_not_found');
   ensureUnitAccess(operationalScope, asset.unidade_operacional_id);
-  const [documents, odometers, maintenance, tires] = await Promise.all([
+  const { data: memberships, error: membershipError } = await supabase
+    .from('vehicle_composition_members')
+    .select('*, vehicle_compositions(*)')
+    .eq('empresa_id', empresaId)
+    .eq('asset_id', assetId)
+    .order('created_at', { ascending: false });
+  throwDatabaseError(membershipError);
+  const compositionIds = [...new Set((memberships || []).map((member) => member.composition_id).filter(Boolean))];
+  const [documents, odometers, maintenance, tires, driverAssignments, freightAssignments] = await Promise.all([
     listDocuments(supabase, { empresaId, assetId, operationalScope }),
     listOdometerEvents(supabase, { empresaId, query: { asset_id: assetId }, operationalScope }),
     listMaintenanceEvents(supabase, { empresaId, query: { asset_id: assetId }, operationalScope }),
     listTires(supabase, { empresaId, operationalScope }),
+    listTargetRows(supabase, 'driver_vehicle_assignments', empresaId, (row) => row.asset_id === assetId || compositionIds.includes(row.composition_id)),
+    listTargetRows(supabase, 'freight_vehicle_assignments', empresaId, (row) => row.asset_id === assetId || compositionIds.includes(row.composition_id)),
   ]);
   return {
     asset,
+    composition_memberships: memberships || [],
+    current_compositions: (memberships || []).filter((member) => !member.valid_until),
+    driver_assignments: driverAssignments,
+    freight_assignments: freightAssignments,
     documents,
     odometers,
     maintenance,
     tires: tires.filter((tire) => tire.current_asset_id === assetId),
+    legacy_bridge: {
+      status: 'not_inferred',
+      message: 'Fretes legados sem vínculo Fleet explícito não são inferidos por placa.',
+    },
   };
+}
+
+async function getCompositionDetail(supabase, { empresaId, compositionId, operationalScope = null }) {
+  requireEmpresa(empresaId);
+  const composition = await oneByEmpresa(supabase, 'vehicle_compositions', empresaId, compositionId, '*');
+  if (!composition) throw new FleetError(404, 'Composição não encontrada no tenant.', 'composition_not_found');
+  ensureUnitAccess(operationalScope, composition.unidade_operacional_id);
+  const { data: members, error } = await supabase
+    .from('vehicle_composition_members')
+    .select('*, fleet_assets(*)')
+    .eq('empresa_id', empresaId)
+    .eq('composition_id', compositionId)
+    .order('position_order', { ascending: true });
+  throwDatabaseError(error);
+  const [driverAssignments, freightAssignments] = await Promise.all([
+    listTargetRows(supabase, 'driver_vehicle_assignments', empresaId, (row) => row.composition_id === compositionId),
+    listTargetRows(supabase, 'freight_vehicle_assignments', empresaId, (row) => row.composition_id === compositionId),
+  ]);
+  return {
+    composition,
+    members: members || [],
+    driver_assignments: driverAssignments,
+    freight_assignments: freightAssignments,
+    legacy_bridge: {
+      status: 'not_inferred',
+      message: 'Fretes legados sem vínculo Fleet explícito não são inferidos por placa.',
+    },
+  };
+}
+
+async function driverHandoff(supabase, { empresaId, user, body, operationalScope = null, correlation = null }) {
+  requireEmpresa(empresaId);
+  const driverId = text(body.driver_id);
+  if (!driverId) throw new FleetError(422, 'driver_id obrigatório.', 'missing_driver');
+  await requireDriver(supabase, empresaId, driverId);
+  const target = targetPayload(body);
+  const targetRow = await requireTarget(supabase, empresaId, target);
+  ensureUnitAccess(operationalScope, targetRow.unidade_operacional_id);
+  const { data, error } = await supabase.rpc('fleet_driver_handoff', {
+    p_empresa_id: empresaId,
+    p_driver_id: driverId,
+    p_asset_id: target.asset_id,
+    p_composition_id: target.composition_id,
+    p_valid_from: text(body.valid_from) || null,
+    p_reason: text(body.reason ?? body.ended_reason),
+    p_actor_id: actorId(user),
+    p_request_id: text(correlation?.request_id),
+    p_correlation_id: text(correlation?.correlation_id),
+  });
+  throwDatabaseError(error);
+  return Array.isArray(data) ? data[0] : data;
 }
 
 module.exports = {
@@ -788,11 +1026,13 @@ module.exports = {
   createAsset,
   updateAsset,
   listCompositions,
+  getCompositionDetail,
   createComposition,
   addCompositionMember,
   endCompositionMember,
   createDriverAssignment,
   endDriverAssignment,
+  driverHandoff,
   createFreightAssignment,
   listTires,
   createTire,
@@ -803,6 +1043,10 @@ module.exports = {
   createMaintenanceEvent,
   listDocuments,
   createAssetDocument,
+  uploadAssetDocument,
+  createAssetDocumentSignedUrl,
   listOdometerEvents,
   createOdometerEvent,
+  FLEET_DOCUMENTS_BUCKET,
+  SIGNED_URL_TTL_SECONDS,
 };

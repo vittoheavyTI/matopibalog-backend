@@ -14,6 +14,10 @@ function facts(overrides = {}) {
     sampleDocumentoUploads: async () => [],
     sampleDocumentoEventos: async () => [],
     sampleBillingOutbox: async () => [],
+    sampleFleetCompositionMembers: async () => [],
+    sampleFleetDriverAssignments: async () => [],
+    sampleFleetAssets: async () => [],
+    sampleFleetCompositions: async () => [],
     ...overrides,
   };
 }
@@ -27,7 +31,7 @@ test('default verifier returns PASS with compatible empty mature-domain samples'
   });
   assert.equal(run.status, 'PASS');
   assert.equal(run.findings.length, 0);
-  assert.equal(run.results.length, 5);
+  assert.equal(run.results.length, 8);
 });
 
 test('default verifier returns FAIL findings for objective contract drift', async () => {
@@ -45,6 +49,24 @@ test('default verifier returns FAIL findings for objective contract drift', asyn
   assert.equal(run.status, 'FAIL');
   assert.ok(run.findings.some((f) => f.invariant_key === 'auth.audit.secret_free.v1'));
   assert.ok(run.findings.some((f) => f.invariant_key === 'launch.events.audit_shape.v1'));
+});
+
+test('fleet invariants detect active assignment conflicts', async () => {
+  const run = await verifyTarget({
+    target: { domain: 'fleet' },
+    context: {
+      facts: facts({
+        sampleFleetDriverAssignments: async () => [
+          { id: 'a1', empresa_id: 'e1', driver_id: 'd1', asset_id: 'asset-1', assignment_status: 'active', valid_until: null },
+          { id: 'a2', empresa_id: 'e1', driver_id: 'd1', asset_id: 'asset-2', assignment_status: 'active', valid_until: null },
+        ],
+      }),
+    },
+    registry: createDefaultInvariantRegistry(),
+    now: () => '2026-08-22T00:00:00.000Z',
+  });
+  assert.equal(run.status, 'FAIL');
+  assert.ok(run.findings.some((f) => f.invariant_key === 'fleet.driver_assignment.no_active_conflict.v1'));
 });
 
 test('verifier supports multiple findings and stable invariant keys', async () => {

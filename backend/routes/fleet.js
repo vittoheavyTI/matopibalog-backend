@@ -9,6 +9,7 @@ const {
   resolverEscopoOperacional,
   escopoTemSelecaoInvalida,
 } = require('../services/operationalScopeService');
+const uploadDocumento = require('../middlewares/uploadDocumento');
 const controller = require('../controllers/fleetController');
 
 const router = express.Router();
@@ -39,14 +40,17 @@ router.get('/assets/:id', requirePermission('fleet.view'), controller.detalharAt
 router.post('/assets', requirePermission('fleet.manage'), controller.criarAtivo);
 router.patch('/assets/:id', requirePermission('fleet.manage'), controller.atualizarAtivo);
 router.get('/assets/:id/documents', requirePermission('fleet.view'), controller.listarDocumentosAtivo);
-router.post('/assets/:id/documents', requirePermission('fleet.manage'), controller.criarDocumentoAtivo);
+router.get('/assets/:id/documents/:documentId/url', requirePermission('fleet.view'), controller.urlDocumentoAtivo);
+router.post('/assets/:id/documents', requirePermission('fleet.manage'), uploadDocumento.single('documento'), controller.criarDocumentoAtivo);
 
 router.get('/compositions', requirePermission('fleet.view'), controller.listarComposicoes);
+router.get('/compositions/:id', requirePermission('fleet.view'), controller.detalharComposicao);
 router.post('/compositions', requirePermission('fleet.manage'), controller.criarComposicao);
 router.post('/compositions/:id/members', requirePermission('fleet.manage'), controller.adicionarMembroComposicao);
 router.patch('/compositions/:id/members/:memberId/end', requirePermission('fleet.manage'), controller.encerrarMembroComposicao);
 
 router.post('/driver-assignments', requirePermission('fleet.manage'), controller.criarVinculoMotorista);
+router.post('/driver-handoffs', requirePermission('fleet.manage'), controller.trocarMotorista);
 router.patch('/driver-assignments/:id/end', requirePermission('fleet.manage'), controller.encerrarVinculoMotorista);
 
 router.post('/freight-assignments', requirePermission('fleet.manage'), controller.criarVinculoFrete);

@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   Boxes,
   ClipboardList,
+  Eye,
   FileText,
   Gauge,
   Plus,
@@ -10,10 +11,13 @@ import {
   Search,
   ShieldCheck,
   Truck,
+  Trash2,
   UserRoundCheck,
   Wrench,
+  X,
 } from 'lucide-react';
 import api from '../api';
+import { ArquivoPreviewModal, type ArquivoPreview } from '../components/ArquivoPreviewModal';
 import { usePermissions } from '../hooks/usePermissions';
 
 type Asset = {
@@ -46,7 +50,15 @@ type TireInstallation = {
   id: string;
   asset_id: string;
   position_label: string;
+  installed_at?: string | null;
   removed_at?: string | null;
+};
+
+type TireEvent = {
+  id: string;
+  event_type: string;
+  occurred_at?: string | null;
+  reason?: string | null;
 };
 
 type Tire = {
@@ -58,6 +70,7 @@ type Tire = {
   status: string;
   current_asset_id?: string | null;
   tire_installations?: TireInstallation[];
+  tire_events?: TireEvent[];
 };
 
 type Maintenance = {
@@ -80,6 +93,9 @@ type FleetDocument = {
   storage_path: string;
   status: string;
   expires_at?: string | null;
+  nome_arquivo?: string | null;
+  nome_documento?: string | null;
+  mime?: string | null;
 };
 
 type DriverAssignment = {
@@ -87,6 +103,47 @@ type DriverAssignment = {
   driver_id: string;
   asset_id?: string | null;
   composition_id?: string | null;
+  assignment_status?: string | null;
+  valid_from?: string | null;
+  valid_until?: string | null;
+};
+
+type FreightAssignment = {
+  id: string;
+  frete_id: string;
+  asset_id?: string | null;
+  composition_id?: string | null;
+  assignment_status?: string | null;
+  assigned_from?: string | null;
+};
+
+type OdometerEvent = {
+  id: string;
+  asset_id: string;
+  event_type: string;
+  reading_km: number;
+  occurred_at?: string | null;
+};
+
+type AssetDetail = {
+  asset: Asset;
+  current_compositions?: CompositionMember[];
+  composition_memberships?: CompositionMember[];
+  driver_assignments?: DriverAssignment[];
+  freight_assignments?: FreightAssignment[];
+  documents?: FleetDocument[];
+  odometers?: OdometerEvent[];
+  maintenance?: Maintenance[];
+  tires?: Tire[];
+  legacy_bridge?: { message?: string };
+};
+
+type CompositionDetail = {
+  composition: Composition;
+  members?: (CompositionMember & { fleet_assets?: Asset })[];
+  driver_assignments?: DriverAssignment[];
+  freight_assignments?: FreightAssignment[];
+  legacy_bridge?: { message?: string };
 };
 
 type Overview = {
@@ -108,6 +165,8 @@ type Overview = {
   maintenance: Maintenance[];
   documents: FleetDocument[];
   driver_assignments: DriverAssignment[];
+  freight_assignments?: FreightAssignment[];
+  odometers?: OdometerEvent[];
 };
 
 type Motorista = { id: string; nome: string };
@@ -170,6 +229,8 @@ const emptyOverview: Overview = {
   maintenance: [],
   documents: [],
   driver_assignments: [],
+  freight_assignments: [],
+  odometers: [],
 };
 
 const apiMessage = (error: unknown, fallback: string) => {
@@ -211,15 +272,19 @@ export const Frota: React.FC = () => {
   const [assetType, setAssetType] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
   const [erro, setErro] = useState('');
   const [toast, setToast] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
+  const [assetDetail, setAssetDetail] = useState<AssetDetail | null>(null);
+  const [compositionDetail, setCompositionDetail] = useState<CompositionDetail | null>(null);
+  const [arquivoPreview, setArquivoPreview] = useState<ArquivoPreview | null>(null);
   const [panel, setPanel] = useState('asset');
   const [assetForm, setAssetForm] = useState({ asset_type: 'tractor', internal_identifier: '', plate: '', brand: '', model: '' });
   const [compositionForm, setCompositionForm] = useState({ code: '', name: '', asset_id: '', member_role: 'primary_power' });
   const [driverForm, setDriverForm] = useState({ driver_id: '', target_type: 'composition', target_id: '' });
   const [tireForm, setTireForm] = useState({ fire_number: '', brand: '', model: '', size: '', current_asset_id: '', position_label: '' });
-  const [maintenanceForm, setMaintenanceForm] = useState({ asset_id: '', maintenance_type: 'preventive', category: 'other', status: 'open', supplier: '', notes: '' });
-  const [documentForm, setDocumentForm] = useState({ asset_id: '', document_type: '', storage_path: '', expires_at: '' });
+  const [maintenanceForm, setMaintenanceForm] = useState({ asset_id: '', maintenance_type: 'preventive', category: 'other', status: 'open', supplier: '', work_order: '', cost: '', odometer_km: '', scheduled_at: '', completed_at: '', downtime_minutes: '', notes: '' });
+  const [documentForm, setDocumentForm] = useState({ asset_id: '', document_type: '', nome_documento: '', descricao: '', expires_at: '', file: null as File | null });
   const [odometerForm, setOdometerForm] = useState({ asset_id: '', reading_km: '', event_type: 'manual' });
 
   const assetById = useMemo(() => {
@@ -289,6 +354,50 @@ export const Frota: React.FC = () => {
     }
   };
 
+  const abrirAtivo = async (assetId: string) => {
+    setDetailLoading(true);
+    setCompositionDetail(null);
+    try {
+      const { data } = await api.get(`/fleet/assets/${assetId}`);
+      setAssetDetail(data);
+    } catch (error) {
+      setToast({ kind: 'error', text: apiMessage(error, 'Nao foi possivel abrir o detalhe do ativo.') });
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
+  const abrirComposicao = async (compositionId: string) => {
+    setDetailLoading(true);
+    setAssetDetail(null);
+    try {
+      const { data } = await api.get(`/fleet/compositions/${compositionId}`);
+      setCompositionDetail(data);
+    } catch (error) {
+      setToast({ kind: 'error', text: apiMessage(error, 'Nao foi possivel abrir a composicao.') });
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
+  const fecharDetalhe = () => {
+    setAssetDetail(null);
+    setCompositionDetail(null);
+  };
+
+  const visualizarDocumento = async (documento: FleetDocument) => {
+    try {
+      const { data } = await api.get(`/fleet/assets/${documento.asset_id}/documents/${documento.id}/url`);
+      setArquivoPreview({
+        url: data.url,
+        nome: data.nome_documento || data.nome_arquivo || documento.nome_documento || documento.nome_arquivo || documento.document_type,
+        mime: data.mime || documento.mime,
+      });
+    } catch (error) {
+      setToast({ kind: 'error', text: apiMessage(error, 'Nao foi possivel gerar a pre-visualizacao.') });
+    }
+  };
+
   const criarAtivo = (event: React.FormEvent) => {
     event.preventDefault();
     void runMutation(async () => {
@@ -318,9 +427,9 @@ export const Frota: React.FC = () => {
       ? { driver_id: driverForm.driver_id, asset_id: driverForm.target_id }
       : { driver_id: driverForm.driver_id, composition_id: driverForm.target_id };
     void runMutation(async () => {
-      await api.post('/fleet/driver-assignments', payload);
+      await api.post('/fleet/driver-handoffs', payload);
       setDriverForm({ driver_id: '', target_type: 'composition', target_id: '' });
-    }, 'Motorista atribuido.');
+    }, 'Motorista trocado com fechamento dos vinculos anteriores.');
   };
 
   const registrarPneu = (event: React.FormEvent) => {
@@ -347,20 +456,24 @@ export const Frota: React.FC = () => {
     event.preventDefault();
     void runMutation(async () => {
       await api.post('/fleet/maintenance', maintenanceForm);
-      setMaintenanceForm({ asset_id: '', maintenance_type: 'preventive', category: 'other', status: 'open', supplier: '', notes: '' });
+      setMaintenanceForm({ asset_id: '', maintenance_type: 'preventive', category: 'other', status: 'open', supplier: '', work_order: '', cost: '', odometer_km: '', scheduled_at: '', completed_at: '', downtime_minutes: '', notes: '' });
     }, 'Manutencao registrada.');
   };
 
   const registrarDocumento = (event: React.FormEvent) => {
     event.preventDefault();
     void runMutation(async () => {
-      await api.post(`/fleet/assets/${documentForm.asset_id}/documents`, {
-        document_type: documentForm.document_type,
-        storage_path: documentForm.storage_path,
-        expires_at: documentForm.expires_at || undefined,
-      });
-      setDocumentForm({ asset_id: '', document_type: '', storage_path: '', expires_at: '' });
-    }, 'Documento vinculado ao ativo.');
+      if (!documentForm.file) throw new Error('missing_file');
+      const formData = new FormData();
+      formData.append('document_type', documentForm.document_type);
+      formData.append('documento', documentForm.file);
+      if (documentForm.nome_documento) formData.append('nome_documento', documentForm.nome_documento);
+      if (documentForm.descricao) formData.append('descricao', documentForm.descricao);
+      if (documentForm.expires_at) formData.append('expires_at', documentForm.expires_at);
+      formData.append('client_request_id', `fleet-doc:${documentForm.asset_id}:${Date.now()}`);
+      await api.post(`/fleet/assets/${documentForm.asset_id}/documents`, formData);
+      setDocumentForm({ asset_id: '', document_type: '', nome_documento: '', descricao: '', expires_at: '', file: null });
+    }, 'Documento enviado ao ativo.');
   };
 
   const registrarOdometro = (event: React.FormEvent) => {
@@ -369,6 +482,12 @@ export const Frota: React.FC = () => {
       await api.post('/fleet/odometer-events', odometerForm);
       setOdometerForm({ asset_id: '', reading_km: '', event_type: 'manual' });
     }, 'Odometro registrado.');
+  };
+
+  const removerPneu = (installationId: string) => {
+    void runMutation(async () => {
+      await api.patch(`/fleet/tire-installations/${installationId}/remove`, { removal_reason: 'remocao_web' });
+    }, 'Pneu removido da posicao.');
   };
 
   const tabs = [
@@ -583,22 +702,36 @@ export const Frota: React.FC = () => {
               <select value={maintenanceForm.category} onChange={(event) => setMaintenanceForm({ ...maintenanceForm, category: event.target.value })} className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm">
                 {Object.entries(maintenanceCategoryLabel).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
               </select>
+              <select value={maintenanceForm.status} onChange={(event) => setMaintenanceForm({ ...maintenanceForm, status: event.target.value })} className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm">
+                <option value="open">Aberta</option>
+                <option value="scheduled">Agendada</option>
+                <option value="completed">Concluida</option>
+                <option value="cancelled">Cancelada</option>
+              </select>
+              <input value={maintenanceForm.work_order} onChange={(event) => setMaintenanceForm({ ...maintenanceForm, work_order: event.target.value })} placeholder="OS" className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
               <input value={maintenanceForm.supplier} onChange={(event) => setMaintenanceForm({ ...maintenanceForm, supplier: event.target.value })} placeholder="Fornecedor" className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
-              <input value={maintenanceForm.notes} onChange={(event) => setMaintenanceForm({ ...maintenanceForm, notes: event.target.value })} placeholder="Observacao" className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+              <input type="number" min="0" step="0.01" value={maintenanceForm.cost} onChange={(event) => setMaintenanceForm({ ...maintenanceForm, cost: event.target.value })} placeholder="Custo" className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+              <input type="number" min="0" step="0.1" value={maintenanceForm.odometer_km} onChange={(event) => setMaintenanceForm({ ...maintenanceForm, odometer_km: event.target.value })} placeholder="Km" className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+              <input type="datetime-local" value={maintenanceForm.scheduled_at} onChange={(event) => setMaintenanceForm({ ...maintenanceForm, scheduled_at: event.target.value })} className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+              <input type="datetime-local" value={maintenanceForm.completed_at} onChange={(event) => setMaintenanceForm({ ...maintenanceForm, completed_at: event.target.value })} className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+              <input type="number" min="0" step="1" value={maintenanceForm.downtime_minutes} onChange={(event) => setMaintenanceForm({ ...maintenanceForm, downtime_minutes: event.target.value })} placeholder="Parada min" className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+              <input value={maintenanceForm.notes} onChange={(event) => setMaintenanceForm({ ...maintenanceForm, notes: event.target.value })} placeholder="Observacao" className="rounded-lg border border-gray-300 px-3 py-2 text-sm md:col-span-2" />
               <button disabled={saving} className="inline-flex items-center justify-center gap-2 rounded-lg bg-green-700 px-4 py-2 text-sm font-semibold text-white hover:bg-green-800 disabled:opacity-60"><Wrench size={16} /> Registrar</button>
             </form>
           )}
 
           {panel === 'document' && (
-            <form onSubmit={registrarDocumento} className="grid gap-3 md:grid-cols-5">
+            <form onSubmit={registrarDocumento} className="grid gap-3 md:grid-cols-6">
               <select required value={documentForm.asset_id} onChange={(event) => setDocumentForm({ ...documentForm, asset_id: event.target.value })} className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm">
                 <option value="">Ativo</option>
                 {overview.assets.map((asset) => <option key={asset.id} value={asset.id}>{assetLabel(asset)}</option>)}
               </select>
               <input required value={documentForm.document_type} onChange={(event) => setDocumentForm({ ...documentForm, document_type: event.target.value })} placeholder="Tipo de documento" className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
-              <input required value={documentForm.storage_path} onChange={(event) => setDocumentForm({ ...documentForm, storage_path: event.target.value })} placeholder="Link ou caminho do arquivo" className="rounded-lg border border-gray-300 px-3 py-2 text-sm md:col-span-2" />
+              <input value={documentForm.nome_documento} onChange={(event) => setDocumentForm({ ...documentForm, nome_documento: event.target.value })} placeholder="Nome do documento" className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+              <input value={documentForm.descricao} onChange={(event) => setDocumentForm({ ...documentForm, descricao: event.target.value })} placeholder="Descricao" className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
               <input type="date" value={documentForm.expires_at} onChange={(event) => setDocumentForm({ ...documentForm, expires_at: event.target.value })} className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
-              <button disabled={saving} className="inline-flex items-center justify-center gap-2 rounded-lg bg-green-700 px-4 py-2 text-sm font-semibold text-white hover:bg-green-800 disabled:opacity-60 md:col-span-5"><FileText size={16} /> Vincular documento</button>
+              <input required type="file" accept=".pdf,.xml,image/jpeg,image/png,image/webp" onChange={(event) => setDocumentForm({ ...documentForm, file: event.target.files?.[0] || null })} className="rounded-lg border border-gray-300 px-3 py-2 text-sm" />
+              <button disabled={saving} className="inline-flex items-center justify-center gap-2 rounded-lg bg-green-700 px-4 py-2 text-sm font-semibold text-white hover:bg-green-800 disabled:opacity-60 md:col-span-6"><FileText size={16} /> Enviar documento</button>
             </form>
           )}
 
@@ -629,7 +762,7 @@ export const Frota: React.FC = () => {
           {overview.compositions.length === 0 ? (
             <p className="p-6 text-sm text-gray-500">Nenhuma composicao cadastrada.</p>
           ) : overview.compositions.map((composition) => (
-            <div key={composition.id} className="grid gap-3 px-4 py-3 md:grid-cols-[1.1fr_1.2fr_1fr] md:items-center">
+            <div key={composition.id} className="grid gap-3 px-4 py-3 md:grid-cols-[1.1fr_1.2fr_1fr_auto] md:items-center">
               <div>
                 <p className="font-bold text-gray-900">{composition.code}</p>
                 <p className="text-sm text-gray-500">{composition.name || 'Sem nome operacional'}</p>
@@ -638,6 +771,9 @@ export const Frota: React.FC = () => {
                 {(composition.vehicle_composition_members || []).filter((member) => !member.valid_until).length} ativo(s) vinculados
               </p>
               <p className="text-sm font-semibold text-gray-700">{activeDriverFor({ composition_id: composition.id })}</p>
+              <button type="button" onClick={() => { void abrirComposicao(composition.id); }} className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50">
+                <Eye size={16} /> Detalhar
+              </button>
             </div>
           ))}
         </div>
@@ -651,7 +787,7 @@ export const Frota: React.FC = () => {
           {overview.assets.length === 0 ? (
             <p className="p-6 text-sm text-gray-500">Nenhum ativo encontrado.</p>
           ) : overview.assets.map((asset) => (
-            <div key={asset.id} className="grid gap-3 px-4 py-3 md:grid-cols-[1.2fr_1fr_1fr_1fr] md:items-center">
+            <div key={asset.id} className="grid gap-3 px-4 py-3 md:grid-cols-[1.2fr_1fr_1fr_1fr_auto] md:items-center">
               <div>
                 <p className="font-bold text-gray-900">{assetLabel(asset)}</p>
                 <p className="text-sm text-gray-500">{assetTypeLabel[asset.asset_type] || asset.asset_type}</p>
@@ -659,6 +795,9 @@ export const Frota: React.FC = () => {
               <p className="text-sm text-gray-700">{[asset.brand, asset.model].filter(Boolean).join(' ') || '-'}</p>
               <p className="text-sm font-semibold text-gray-700">{statusLabel[asset.status] || asset.status}</p>
               <p className="text-sm text-gray-600">{activeDriverFor({ asset_id: asset.id })}</p>
+              <button type="button" onClick={() => { void abrirAtivo(asset.id); }} className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50">
+                <Eye size={16} /> Detalhar
+              </button>
             </div>
           ))}
         </div>
@@ -680,6 +819,21 @@ export const Frota: React.FC = () => {
                 </div>
                 <p className="mt-1 text-sm text-gray-600">{[tire.brand, tire.model, tire.size].filter(Boolean).join(' - ') || '-'}</p>
                 <p className="mt-1 text-xs text-gray-500">Ativo atual: {assetLabel(assetById.get(tire.current_asset_id || ''))}</p>
+                <div className="mt-2 space-y-1">
+                  {(tire.tire_installations || []).slice(0, 3).map((installation) => (
+                    <div key={installation.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600">
+                      <span>{assetLabel(assetById.get(installation.asset_id))} / {installation.position_label} / {installation.removed_at ? `removido em ${shortDate(installation.removed_at)}` : 'instalado'}</span>
+                      {canManage && !installation.removed_at && (
+                        <button type="button" onClick={() => removerPneu(installation.id)} className="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-2 py-1 font-semibold text-gray-700 hover:bg-gray-100">
+                          <Trash2 size={13} /> Remover
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  {(tire.tire_events || []).slice(0, 2).map((event) => (
+                    <p key={event.id} className="text-xs text-gray-500">{event.event_type} em {shortDate(event.occurred_at)}{event.reason ? ` - ${event.reason}` : ''}</p>
+                  ))}
+                </div>
               </div>
             ))}
           </div>
@@ -705,6 +859,111 @@ export const Frota: React.FC = () => {
           </div>
         </section>
       </div>
+
+      {(assetDetail || compositionDetail || detailLoading) && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-3" role="dialog" aria-modal="true">
+          <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-lg bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
+              <div>
+                <p className="text-lg font-bold text-gray-900">
+                  {assetDetail ? assetLabel(assetDetail.asset) : compositionDetail?.composition.code || 'Detalhe'}
+                </p>
+                <p className="text-xs font-semibold text-gray-500">
+                  {assetDetail ? 'Ativo Fleet' : 'Composicao Fleet'}
+                </p>
+              </div>
+              <button type="button" onClick={fecharDetalhe} className="rounded-lg p-2 text-gray-600 hover:bg-gray-100" aria-label="Fechar">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="overflow-y-auto p-4">
+              {detailLoading && <p className="text-sm font-semibold text-gray-500">Carregando detalhe...</p>}
+
+              {assetDetail && !detailLoading && (
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <section className="rounded-lg border border-gray-200 p-4">
+                    <h3 className="font-bold text-gray-900">Operacao</h3>
+                    <dl className="mt-3 grid gap-2 text-sm">
+                      <div className="flex justify-between gap-3"><dt className="text-gray-500">Status</dt><dd className="font-semibold text-gray-800">{statusLabel[assetDetail.asset.status] || assetDetail.asset.status}</dd></div>
+                      <div className="flex justify-between gap-3"><dt className="text-gray-500">Tipo</dt><dd className="font-semibold text-gray-800">{assetTypeLabel[assetDetail.asset.asset_type] || assetDetail.asset.asset_type}</dd></div>
+                      <div className="flex justify-between gap-3"><dt className="text-gray-500">Motorista atual</dt><dd className="font-semibold text-gray-800">{activeDriverFor({ asset_id: assetDetail.asset.id })}</dd></div>
+                      <div className="flex justify-between gap-3"><dt className="text-gray-500">Composicao atual</dt><dd className="font-semibold text-gray-800">{assetDetail.current_compositions?.length || 0}</dd></div>
+                    </dl>
+                  </section>
+
+                  <section className="rounded-lg border border-gray-200 p-4">
+                    <h3 className="font-bold text-gray-900">Documentos</h3>
+                    <div className="mt-3 space-y-2">
+                      {(assetDetail.documents || []).length === 0 ? <p className="text-sm text-gray-500">Nenhum documento.</p> : assetDetail.documents?.map((documento) => (
+                        <div key={documento.id} className="flex items-center justify-between gap-3 rounded-lg bg-gray-50 px-3 py-2">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-gray-800">{documento.nome_documento || documento.nome_arquivo || documento.document_type}</p>
+                            <p className="text-xs text-gray-500">{documento.expires_at ? `Vence em ${shortDate(documento.expires_at)}` : statusLabel[documento.status] || documento.status}</p>
+                          </div>
+                          <button type="button" onClick={() => { void visualizarDocumento(documento); }} className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-100">
+                            <Eye size={14} /> Ver
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+
+                  <section className="rounded-lg border border-gray-200 p-4">
+                    <h3 className="font-bold text-gray-900">Odometro</h3>
+                    <div className="mt-3 space-y-2">
+                      {(assetDetail.odometers || []).length === 0 ? <p className="text-sm text-gray-500">Sem leituras.</p> : assetDetail.odometers?.slice(0, 6).map((item) => (
+                        <p key={item.id} className="rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-700">{Number(item.reading_km).toLocaleString('pt-BR')} km / {item.event_type} / {shortDate(item.occurred_at)}</p>
+                      ))}
+                    </div>
+                  </section>
+
+                  <section className="rounded-lg border border-gray-200 p-4">
+                    <h3 className="font-bold text-gray-900">Pneus e manutencao</h3>
+                    <div className="mt-3 space-y-2 text-sm text-gray-700">
+                      {(assetDetail.tires || []).slice(0, 5).map((tire) => <p key={tire.id} className="rounded-lg bg-gray-50 px-3 py-2">{tire.fire_number} / {statusLabel[tire.status] || tire.status}</p>)}
+                      {(assetDetail.maintenance || []).slice(0, 5).map((item) => <p key={item.id} className="rounded-lg bg-gray-50 px-3 py-2">{maintenanceCategoryLabel[item.category] || item.category} / {statusLabel[item.status] || item.status} / {shortDate(item.created_at)}</p>)}
+                      {!(assetDetail.tires || []).length && !(assetDetail.maintenance || []).length && <p className="text-gray-500">Sem pneus ou manutencoes no detalhe.</p>}
+                    </div>
+                  </section>
+
+                  <section className="rounded-lg border border-gray-200 p-4 lg:col-span-2">
+                    <h3 className="font-bold text-gray-900">Vinculos e fretes</h3>
+                    <div className="mt-3 grid gap-2 md:grid-cols-2">
+                      {(assetDetail.driver_assignments || []).slice(0, 5).map((item) => <p key={item.id} className="rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-700">{driverById.get(item.driver_id) || item.driver_id} / {statusLabel[item.assignment_status || ''] || item.assignment_status || '-'} / {shortDate(item.valid_from)}</p>)}
+                      {(assetDetail.freight_assignments || []).slice(0, 5).map((item) => <p key={item.id} className="rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-700">Frete {item.frete_id} / {statusLabel[item.assignment_status || ''] || item.assignment_status || '-'} / {shortDate(item.assigned_from)}</p>)}
+                    </div>
+                    <p className="mt-3 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">{assetDetail.legacy_bridge?.message}</p>
+                  </section>
+                </div>
+              )}
+
+              {compositionDetail && !detailLoading && (
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <section className="rounded-lg border border-gray-200 p-4">
+                    <h3 className="font-bold text-gray-900">Ativos da composicao</h3>
+                    <div className="mt-3 space-y-2">
+                      {(compositionDetail.members || []).length === 0 ? <p className="text-sm text-gray-500">Sem membros vinculados.</p> : compositionDetail.members?.map((member) => (
+                        <p key={member.id} className="rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-700">{assetLabel(member.fleet_assets || assetById.get(member.asset_id))} / {member.member_role} / {member.valid_until ? `encerrado em ${shortDate(member.valid_until)}` : 'ativo'}</p>
+                      ))}
+                    </div>
+                  </section>
+                  <section className="rounded-lg border border-gray-200 p-4">
+                    <h3 className="font-bold text-gray-900">Motoristas e fretes</h3>
+                    <div className="mt-3 space-y-2">
+                      {(compositionDetail.driver_assignments || []).slice(0, 5).map((item) => <p key={item.id} className="rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-700">{driverById.get(item.driver_id) || item.driver_id} / {statusLabel[item.assignment_status || ''] || item.assignment_status || '-'}</p>)}
+                      {(compositionDetail.freight_assignments || []).slice(0, 5).map((item) => <p key={item.id} className="rounded-lg bg-gray-50 px-3 py-2 text-sm text-gray-700">Frete {item.frete_id} / {statusLabel[item.assignment_status || ''] || item.assignment_status || '-'}</p>)}
+                      {!(compositionDetail.driver_assignments || []).length && !(compositionDetail.freight_assignments || []).length && <p className="text-sm text-gray-500">Sem vinculos recentes.</p>}
+                    </div>
+                  </section>
+                  <p className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 lg:col-span-2">{compositionDetail.legacy_bridge?.message}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <ArquivoPreviewModal arquivo={arquivoPreview} onClose={() => setArquivoPreview(null)} />
     </div>
   );
 };
