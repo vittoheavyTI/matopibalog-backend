@@ -6,12 +6,12 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config.dart';
 import '../models/plano_publico.dart';
 import '../models/fatura.dart';
 import 'app_logger.dart';
+import 'document_viewer_service.dart';
 
 /// Erro de carregamento (GET) com mensagem já pronta para o usuário. Serve para
 /// o caminho da Home distinguir "erro real" (403/500/rede/timeout) de "lista
@@ -32,8 +32,8 @@ enum SessionPersistence { persistent, memoryOnly }
 /// independente do access token de UI (sobrevive à rotação/expiração deste).
 class TrackingCredential {
   final String credential;
-  final int expiresAtMs;     // validade nominal (epoch millis; 0 = desconhecido)
-  final int maxExpiresAtMs;  // teto absoluto (epoch millis)
+  final int expiresAtMs; // validade nominal (epoch millis; 0 = desconhecido)
+  final int maxExpiresAtMs; // teto absoluto (epoch millis)
   const TrackingCredential({
     required this.credential,
     required this.expiresAtMs,
@@ -442,7 +442,8 @@ class ApiService {
     return request.timeout(timeout);
   }
 
-  static Future<Map<String, String>> _headersCom(Map<String, String>? extra) async {
+  static Future<Map<String, String>> _headersCom(
+      Map<String, String>? extra) async {
     final headers = await _getHeaders();
     if (extra != null) headers.addAll(extra);
     return headers;
@@ -1295,7 +1296,9 @@ class ApiService {
 
   /// Identificador ESTÁVEL do dispositivo (device binding). Gera e persiste na 1ª vez.
   static Future<String> currentDeviceId() async {
-    if (_deviceIdCache != null && _deviceIdCache!.isNotEmpty) return _deviceIdCache!;
+    if (_deviceIdCache != null && _deviceIdCache!.isNotEmpty) {
+      return _deviceIdCache!;
+    }
     var id = await _secureStorage.read(key: _deviceIdKey);
     if (id == null || id.isEmpty) {
       final rnd = Random.secure();
@@ -1371,13 +1374,16 @@ class ApiService {
   ///   credential → credencial válida recebida.
   ///   failed → timeout/rede/5xx/409/403/payload inválido → o chamador NÃO pode iniciar
   ///            com access token; deve falhar de forma observável e permitir retry.
-  static Future<TrackingCredentialResult> issueTrackingCredential({String? reason}) async {
+  static Future<TrackingCredentialResult> issueTrackingCredential(
+      {String? reason}) async {
     try {
       final deviceId = await currentDeviceId();
       // X-Tracking-Reason é DIAGNÓSTICO (correlação de log server-side). O backend só o usa para
       // log sanitizado — nunca para autorização/escopo. Ausente/desconhecido → 'unknown' no backend.
       final headers = <String, String>{'X-Tracking-Device': deviceId};
-      if (reason != null && reason.isNotEmpty) headers['X-Tracking-Reason'] = reason;
+      if (reason != null && reason.isNotEmpty) {
+        headers['X-Tracking-Reason'] = reason;
+      }
       final response = await _authenticatedJsonRequest(
         'POST',
         Uri.parse('$_baseUrl/fretes/localizacao/credencial'),
@@ -1385,18 +1391,25 @@ class ApiService {
         retryAfterAuthResponse: true,
         extraHeaders: headers,
       );
-      AppLogger.api('ApiService', 'POST /fretes/localizacao/credencial', response.statusCode);
+      AppLogger.api('ApiService', 'POST /fretes/localizacao/credencial',
+          response.statusCode);
       if (response.statusCode == 201) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         final cred = (data['credential'] ?? '').toString();
         if (cred.isEmpty) {
           return const TrackingCredentialResult(TrackingIssueOutcome.failed);
         }
-        final expMs = DateTime.tryParse((data['expires_at'] ?? '').toString())?.millisecondsSinceEpoch ?? 0;
-        final maxMs = DateTime.tryParse((data['max_expires_at'] ?? '').toString())?.millisecondsSinceEpoch ?? 0;
+        final expMs = DateTime.tryParse((data['expires_at'] ?? '').toString())
+                ?.millisecondsSinceEpoch ??
+            0;
+        final maxMs =
+            DateTime.tryParse((data['max_expires_at'] ?? '').toString())
+                    ?.millisecondsSinceEpoch ??
+                0;
         return TrackingCredentialResult(
           TrackingIssueOutcome.credential,
-          TrackingCredential(credential: cred, expiresAtMs: expMs, maxExpiresAtMs: maxMs),
+          TrackingCredential(
+              credential: cred, expiresAtMs: expMs, maxExpiresAtMs: maxMs),
         );
       }
       // SÓ 404 = feature OFF (legacy deliberado). Todo o resto é FALHA (fail-closed).
@@ -1620,12 +1633,15 @@ class ApiService {
     final isValor = field == 'valor_tonelada_km' || field == 'valor_frete';
     final sufixo = field == 'valor_tonelada_km' ? '/t·km' : '';
     final prefixo = isValor ? 'R\$ ' : '';
-    final detalheValor = atual == null ? '' : '\nValor atual: $prefixo$atual$sufixo.';
-    final detalheLimite = max == null ? '' : '\nLimite operacional atual: $prefixo$max$sufixo.';
+    final detalheValor =
+        atual == null ? '' : '\nValor atual: $prefixo$atual$sufixo.';
+    final detalheLimite =
+        max == null ? '' : '\nLimite operacional atual: $prefixo$max$sufixo.';
     return 'Este frete possui um dado financeiro legado que precisa ser corrigido no painel por um administrador antes da finalização.\nCampo: $campo.$detalheValor$detalheLimite';
   }
 
-  static Future<Map<String, dynamic>> createFrete(Map<String, dynamic> data) async {
+  static Future<Map<String, dynamic>> createFrete(
+      Map<String, dynamic> data) async {
     try {
       final response = await http
           .post(
@@ -1741,8 +1757,12 @@ class ApiService {
   static Future<Map<String, dynamic>> uploadDocumentoFrete(
     String freteId,
     String tipo,
-    String filePath,
-  ) async {
+    String filePath, {
+    String? clientRequestId,
+    int? documentContractVersion,
+    String? nomeDocumento,
+    String? descricao,
+  }) async {
     try {
       final contentType = _contentTypeDocumento(filePath);
       if (contentType == null) {
@@ -1759,6 +1779,19 @@ class ApiService {
       request.headers.addAll(await _getHeaders());
       request.headers.remove('Content-Type');
       request.fields['tipo'] = tipo;
+      if (clientRequestId != null && clientRequestId.trim().isNotEmpty) {
+        request.fields['client_request_id'] = clientRequestId.trim();
+      }
+      if (documentContractVersion != null) {
+        request.fields['document_contract_version'] =
+            documentContractVersion.toString();
+      }
+      if (nomeDocumento != null && nomeDocumento.trim().isNotEmpty) {
+        request.fields['nome_documento'] = nomeDocumento.trim();
+      }
+      if (descricao != null && descricao.trim().isNotEmpty) {
+        request.fields['descricao'] = descricao.trim();
+      }
       request.files.add(
         await http.MultipartFile.fromPath(
           'documento',
@@ -1773,7 +1806,7 @@ class ApiService {
         'POST /fretes/$freteId/documentos',
         response.statusCode,
       );
-      if (response.statusCode == 201) {
+      if (response.statusCode == 200 || response.statusCode == 201) {
         Map<String, dynamic> body = {};
         try {
           body = jsonDecode(bodyText) as Map<String, dynamic>;
@@ -1785,10 +1818,10 @@ class ApiService {
         final json = jsonDecode(bodyText);
         msg = json['message'] ?? json['error'] ?? msg;
       } catch (_) {}
-      return {'ok': false, 'message': msg};
+      return {'ok': false, 'status': response.statusCode, 'message': msg};
     } catch (e) {
       AppLogger.error('ApiService', 'POST documento frete exception', e);
-      return {'ok': false, 'message': _mensagemErroRede(e)};
+      return {'ok': false, 'status': 0, 'message': _mensagemErroRede(e)};
     }
   }
 
@@ -1821,29 +1854,44 @@ class ApiService {
   /// Retorna null em falha.
   static Future<String?> baixarDocumentoParaTemp(
     String url,
-    String nomeArquivo,
-  ) async {
+    String nomeArquivo, {
+    String scope = 'documentos',
+  }) async {
+    final result = await baixarDocumentoParaTempResult(
+      url,
+      nomeArquivo,
+      scope: scope,
+    );
+    return result.path;
+  }
+
+  static Future<DocumentDownloadResult> baixarDocumentoParaTempResult(
+    String url,
+    String nomeArquivo, {
+    String scope = 'documentos',
+  }) async {
     try {
-      final response = await http.get(Uri.parse(url)).timeout(_timeoutUpload);
+      final response =
+          await _httpClient.get(Uri.parse(url)).timeout(_timeoutUpload);
       if (response.statusCode != 200) {
         AppLogger.warning(
           'ApiService',
           'download documento status ${response.statusCode}',
         );
-        return null;
+        return DocumentDownloadResult(statusCode: response.statusCode);
       }
-      final dir = await getTemporaryDirectory();
-      // Sanitiza o nome para não escapar da pasta temp nem quebrar o path.
-      final nomeSeguro = nomeArquivo.replaceAll(
-        RegExp(r'[^A-Za-z0-9._-]'),
-        '_',
+      const temp = DocumentTempFileManager();
+      await temp.cleanupOld(scope: scope);
+      final file = await temp.writeBytes(
+        bytes: response.bodyBytes,
+        fileName: nomeArquivo,
+        scope: scope,
       );
-      final file = File('${dir.path}/$nomeSeguro');
-      await file.writeAsBytes(response.bodyBytes);
-      return file.path;
+      return DocumentDownloadResult(
+          path: file.path, statusCode: response.statusCode);
     } catch (e) {
       AppLogger.error('ApiService', 'download documento temp exception', e);
-      return null;
+      return const DocumentDownloadResult(statusCode: null);
     }
   }
 
@@ -1929,8 +1977,9 @@ class ApiService {
   /// Mesmo padrão de multipart dos documentos (campo 'evidencia'). Retorna {ok, message?}.
   static Future<Map<String, dynamic>> uploadEvidenciaEpod(
     String freteId,
-    String filePath,
-  ) async {
+    String filePath, {
+    String? clientRequestId,
+  }) async {
     try {
       final contentType = _contentTypeDocumento(filePath);
       if (contentType == null) {
@@ -1946,6 +1995,9 @@ class ApiService {
       );
       request.headers.addAll(await _getHeaders());
       request.headers.remove('Content-Type');
+      if (clientRequestId != null && clientRequestId.trim().isNotEmpty) {
+        request.fields['client_request_id'] = clientRequestId.trim();
+      }
       request.files.add(
         await http.MultipartFile.fromPath(
           'evidencia',
@@ -1960,7 +2012,7 @@ class ApiService {
         'POST /fretes/$freteId/epod/evidencias',
         response.statusCode,
       );
-      if (response.statusCode == 201) {
+      if (response.statusCode == 200 || response.statusCode == 201) {
         Map<String, dynamic> body = {};
         try {
           body = jsonDecode(bodyText) as Map<String, dynamic>;
@@ -1972,10 +2024,10 @@ class ApiService {
         final json = jsonDecode(bodyText);
         msg = json['message'] ?? json['error'] ?? msg;
       } catch (_) {}
-      return {'ok': false, 'message': msg};
+      return {'ok': false, 'status': response.statusCode, 'message': msg};
     } catch (e) {
       AppLogger.error('ApiService', 'POST evidencia epod exception', e);
-      return {'ok': false, 'message': _mensagemErroRede(e)};
+      return {'ok': false, 'status': 0, 'message': _mensagemErroRede(e)};
     }
   }
 

@@ -30,6 +30,10 @@ dependencies:
   # compartilhamento nativa (WhatsApp, visualizadores etc.). path_provider já
   # está declarado abaixo.
   share_plus: ^10.1.4
+  # E1.4B mobile: preview interno de PDF e geração local de PDF multipágina
+  # a partir do scanner antes do upload.
+  pdf: ^3.11.1
+  printing: ^5.13.4
   uuid: ^4.3.3
   intl: ^0.18.1
   # Abre invoice_url (página de cobrança Asaas) e bank_slip_url (boleto) no

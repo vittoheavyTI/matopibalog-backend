@@ -5,12 +5,21 @@ import '../services/api_service.dart';
 import '../services/app_logger.dart';
 import '../services/realtime_service.dart';
 import '../services/document_scanner_service.dart';
+import '../services/document_upload_service.dart';
 import '../services/location_tracking_service.dart';
 import '../widgets/foto_preview.dart';
+import 'document_preview_screen.dart';
+import 'document_scan_review_screen.dart';
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:share_plus/share_plus.dart';
+
+class _DocumentoOutroMetadata {
+  final String? nomeDocumento;
+  final String? descricao;
+
+  const _DocumentoOutroMetadata({this.nomeDocumento, this.descricao});
+}
 
 class DetalheViagemScreen extends StatefulWidget {
   final Map<String, dynamic> frete;
@@ -21,7 +30,8 @@ class DetalheViagemScreen extends StatefulWidget {
   State<DetalheViagemScreen> createState() => _DetalheViagemScreenState();
 }
 
-class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsBindingObserver {
+class _DetalheViagemScreenState extends State<DetalheViagemScreen>
+    with WidgetsBindingObserver {
   List<dynamic> _despesas = [];
   List<dynamic> _abastecimentos = [];
   List<dynamic> _vales = [];
@@ -60,10 +70,15 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _frete = widget.frete;
-    AppLogger.action('screen_open', params: {'tela': 'detalhe_frete', 'frete_id': _frete['id']?.toString()});
+    AppLogger.action('screen_open', params: {
+      'tela': 'detalhe_frete',
+      'frete_id': _frete['id']?.toString()
+    });
     _fetchDetalhes();
     _pollTimer = Timer.periodic(const Duration(seconds: 60), (_) {
-      if (mounted && _emPrimeiroPlano && !_enviandoEpod && !_enviandoDoc) _fetchDetalhes(silent: true);
+      if (mounted && _emPrimeiroPlano && !_enviandoEpod && !_enviandoDoc) {
+        _fetchDetalhes(silent: true);
+      }
     });
     // Garante o stream ativo (idempotente) e assina os eventos. Filtra pelo frete
     // desta tela quando o evento traz freight_id; eventos sintéticos (reconnect/resume)
@@ -75,7 +90,9 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
       if (fid != null && freteId != null && fid.toString() != freteId) return;
       _realtimeDebounce?.cancel();
       _realtimeDebounce = Timer(const Duration(milliseconds: 350), () {
-        if (mounted && !_enviandoEpod && !_enviandoDoc) _fetchDetalhes(silent: true);
+        if (mounted && !_enviandoEpod && !_enviandoDoc) {
+          _fetchDetalhes(silent: true);
+        }
       });
     });
   }
@@ -94,22 +111,34 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
     WidgetsBinding.instance.removeObserver(this);
     _pollTimer?.cancel();
     _realtimeDebounce?.cancel();
-    _realtimeSub?.cancel(); // não para o RealtimeService (compartilhado com a home)
+    _realtimeSub
+        ?.cancel(); // não para o RealtimeService (compartilhado com a home)
     super.dispose();
   }
 
   // silent=true (polling / após envio) não pisca o spinner nem troca a tela pelo
   // banner de erro; só atualiza os dados em segundo plano.
   Future<void> _fetchDetalhes({bool silent = false}) async {
-    if (!silent) setState(() { _loading = true; _error = ''; });
+    if (!silent) {
+      setState(() {
+        _loading = true;
+        _error = '';
+      });
+    }
     final freteId = _frete['id']?.toString() ?? '';
     if (freteId.isEmpty) {
-      if (!silent) setState(() { _loading = false; });
+      if (!silent) {
+        setState(() {
+          _loading = false;
+        });
+      }
       return;
     }
     try {
-      final despesas = ApiService.getListComFiltro('despesas', {'frete_id': freteId});
-      final abast = ApiService.getListComFiltro('abastecimentos', {'frete_id': freteId});
+      final despesas =
+          ApiService.getListComFiltro('despesas', {'frete_id': freteId});
+      final abast =
+          ApiService.getListComFiltro('abastecimentos', {'frete_id': freteId});
       final vales = ApiService.getListComFiltro('vales', {'frete_id': freteId});
       final documentos = ApiService.getDocumentosFrete(freteId);
       // ePOD retorna Map (não List) — awaited À PARTE do Future.wait das listas.
@@ -140,7 +169,10 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
     } catch (e) {
       AppLogger.error('DetalheFrete', 'fetchDetalhes', e);
       if (mounted && !silent) {
-        setState(() { _error = 'Erro ao carregar detalhes.'; _loading = false; });
+        setState(() {
+          _error = 'Erro ao carregar detalhes.';
+          _loading = false;
+        });
       }
     }
   }
@@ -166,7 +198,9 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
 
   bool get _podeRastrearViagem {
     final status = (_frete['status'] ?? '').toString();
-    return status == 'ativo' || status == 'em_viagem' || status == 'em_andamento';
+    return status == 'ativo' ||
+        status == 'em_viagem' ||
+        status == 'em_andamento';
   }
 
   Future<void> _alternarRastreamento() async {
@@ -175,7 +209,8 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
     }
 
     if (!_podeRastrearViagem) {
-      setState(() => _rastreamentoMensagem = 'Compartilhamento disponivel somente durante uma viagem ativa.');
+      setState(() => _rastreamentoMensagem =
+          'Compartilhamento disponivel somente durante uma viagem ativa.');
       return;
     }
 
@@ -244,11 +279,16 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
               children: [
                 Row(
                   children: [
-                    Icon(Icons.location_on_outlined, color: Colors.amber.shade800),
+                    Icon(Icons.location_on_outlined,
+                        color: Colors.amber.shade800),
                     const SizedBox(width: 8),
-                    const Expanded(child: Text('Localizacao precisa de atencao', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold))),
+                    const Expanded(
+                        child: Text('Localizacao precisa de atencao',
+                            style: TextStyle(
+                                fontSize: 15, fontWeight: FontWeight.bold))),
                     TextButton(
-                      onPressed: _alterandoRastreamento ? null : _alternarRastreamento,
+                      onPressed:
+                          _alterandoRastreamento ? null : _alternarRastreamento,
                       child: const Text('Ativar'),
                     ),
                   ],
@@ -260,7 +300,8 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
                 if (_rastreamentoMensagem.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(top: 8),
-                    child: Text(_rastreamentoMensagem, style: const TextStyle(fontSize: 12)),
+                    child: Text(_rastreamentoMensagem,
+                        style: const TextStyle(fontSize: 12)),
                   ),
                 if (_alterandoRastreamento)
                   const Padding(
@@ -297,8 +338,9 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
     // Sem fallback de 12%: percentual ausente/desconhecido → 0% (nunca assume 12).
     // Usado só no ramo vinculado; autônomo tem cálculo próprio (faturamento−gastos).
     return double.tryParse(
-      _perfilCache?['motoristas']?['percentual_comissao']?.toString() ?? '',
-    ) ?? 0.0;
+          _perfilCache?['motoristas']?['percentual_comissao']?.toString() ?? '',
+        ) ??
+        0.0;
   }
 
   /// Converte valor para quilômetro inteiro positivo. Aceita int, double ou
@@ -331,7 +373,8 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Text('Informe a quilometragem para registrar a média de consumo.'),
+                const Text(
+                    'Informe a quilometragem para registrar a média de consumo.'),
                 const SizedBox(height: 12),
                 if (precisaKmInicial)
                   TextField(
@@ -341,7 +384,7 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
                   )
                 else ...[
                   Text('KM inicial registrado: $kmInicialExistente',
-                    style: const TextStyle(fontWeight: FontWeight.w600)),
+                      style: const TextStyle(fontWeight: FontWeight.w600)),
                   const SizedBox(height: 8),
                 ],
                 TextField(
@@ -351,7 +394,8 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
                 ),
                 if (erro != null) ...[
                   const SizedBox(height: 8),
-                  Text(erro!, style: const TextStyle(color: Colors.red, fontSize: 13)),
+                  Text(erro!,
+                      style: const TextStyle(color: Colors.red, fontSize: 13)),
                 ],
               ],
             ),
@@ -365,11 +409,13 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
                   final kmFim = _parseKm(kmFimCtrl.text.trim());
                   final kmIni = _parseKm(kmIniCtrl.text.trim());
                   if (kmFim == null) {
-                    setLocal(() => erro = 'KM final inválido. Use apenas números.');
+                    setLocal(
+                        () => erro = 'KM final inválido. Use apenas números.');
                     return;
                   }
                   if (precisaKmInicial && kmIni == null) {
-                    setLocal(() => erro = 'KM inicial inválido. Use apenas números.');
+                    setLocal(() =>
+                        erro = 'KM inicial inválido. Use apenas números.');
                     return;
                   }
                   final int kmIniEfetivo;
@@ -379,7 +425,8 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
                     kmIniEfetivo = kmInicialExistente;
                   }
                   if (kmFim <= kmIniEfetivo) {
-                    setLocal(() => erro = 'KM final deve ser maior que o KM inicial.');
+                    setLocal(() =>
+                        erro = 'KM final deve ser maior que o KM inicial.');
                     return;
                   }
                   final result = <String, int>{'km_final': kmFim};
@@ -402,21 +449,25 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
     // Compatibilidade: a foto final é obrigatória no novo fluxo (que possui
     // foto inicial). Fretes legados sem path inicial continuam finalizáveis.
     File? fotoFinal;
-    final exigeFotoFinal = _frete['foto_odometro_inicial_path'] != null
-        && _frete['foto_odometro_inicial_path'].toString().isNotEmpty
-        && (_frete['foto_odometro_final_path'] == null
-            || _frete['foto_odometro_final_path'].toString().isEmpty);
+    final exigeFotoFinal = _frete['foto_odometro_inicial_path'] != null &&
+        _frete['foto_odometro_inicial_path'].toString().isNotEmpty &&
+        (_frete['foto_odometro_final_path'] == null ||
+            _frete['foto_odometro_final_path'].toString().isEmpty);
     if (exigeFotoFinal) {
       try {
         final picked = await ImagePicker().pickImage(
-          source: ImageSource.camera, imageQuality: 75, maxWidth: 1800, maxHeight: 1800,
+          source: ImageSource.camera,
+          imageQuality: 75,
+          maxWidth: 1800,
+          maxHeight: 1800,
         );
         if (picked == null) return;
         fotoFinal = File(picked.path);
       } catch (e) {
         AppLogger.error('DetalheFrete', 'erro_foto_odometro_final', e);
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Erro ao acessar a câmera.')));
+          ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Erro ao acessar a câmera.')));
         }
         return;
       }
@@ -432,11 +483,14 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
     setState(() => _finalizando = true);
     try {
       if (fotoFinal != null) {
-        final upload = await ApiService.uploadFotoOdometro(freteId, 'final', fotoFinal.path);
+        final upload = await ApiService.uploadFotoOdometro(
+            freteId, 'final', fotoFinal.path);
         if (!mounted) return;
         if (upload['ok'] != true) {
-          final msg = upload['message']?.toString() ?? 'Erro ao enviar foto do odômetro final.';
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+          final msg = upload['message']?.toString() ??
+              'Erro ao enviar foto do odômetro final.';
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(msg)));
           return;
         }
         setState(() => _frete['foto_odometro_final_path'] = upload['path']);
@@ -466,7 +520,8 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
       } else {
         final msg = result?['message'] ?? 'Erro ao finalizar.';
         AppLogger.warning('DetalheFrete', 'finalizar falhou: $msg');
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(msg)));
       }
     } catch (e) {
       AppLogger.error('DetalheFrete', 'finalizarFrete exception', e);
@@ -475,7 +530,8 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
     }
   }
 
-  double _soma(List<dynamic> items, String campo, {String? filtroStatus, String? quemPagou}) {
+  double _soma(List<dynamic> items, String campo,
+      {String? filtroStatus, String? quemPagou}) {
     double total = 0.0;
     for (final item in items) {
       if (filtroStatus != null && item['status'] != filtroStatus) continue;
@@ -515,7 +571,8 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
           children: [
             const Padding(
               padding: EdgeInsets.all(16),
-              child: Text('Tipo do documento', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              child: Text('Tipo do documento',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             ),
             for (final o in opcoes)
               ListTile(
@@ -533,7 +590,8 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
   // Origem do arquivo do documento: scanner, câmera (foto na hora), galeria ou
   // arquivo do dispositivo/drive (PDF/XML/imagem). Retorna
   // 'scan'|'camera'|'galeria'|'arquivo' ou null se o usuário fechar a folha.
-  Future<String?> _escolherOrigemDocumento({String titulo = 'Anexar documento'}) {
+  Future<String?> _escolherOrigemDocumento(
+      {String titulo = 'Anexar documento'}) {
     return showModalBottomSheet<String>(
       context: context,
       builder: (ctx) => SafeArea(
@@ -542,18 +600,23 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
           children: [
             Padding(
               padding: const EdgeInsets.all(16),
-              child: Text(titulo, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              child: Text(titulo,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 16)),
             ),
             ListTile(
               leading: const Icon(Icons.photo_camera_outlined),
               title: const Text('Tirar foto agora'),
-              subtitle: const Text('Mais rápido', style: TextStyle(fontSize: 11)),
+              subtitle:
+                  const Text('Mais rápido', style: TextStyle(fontSize: 11)),
               onTap: () => Navigator.pop(ctx, 'camera'),
             ),
             ListTile(
               leading: const Icon(Icons.document_scanner_outlined),
               title: const Text('Escanear documento'),
-              subtitle: const Text('Detecta as bordas; pode levar alguns segundos', style: TextStyle(fontSize: 11)),
+              subtitle: const Text(
+                  'Detecta as bordas; pode levar alguns segundos',
+                  style: TextStyle(fontSize: 11)),
               onTap: () => Navigator.pop(ctx, 'scan'),
             ),
             ListTile(
@@ -579,20 +642,25 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
   // pois aqui o upload é imediato (não há formulário para revisar antes).
   Future<String?> _selecionarImagemDocumento(ImageSource source) async {
     if (source == ImageSource.camera) {
-      return capturarFotoManualComPreview(context, imageQuality: 75, maxLado: 1800);
+      return capturarFotoManualComPreview(context,
+          imageQuality: 75, maxLado: 1800);
     }
     try {
       final picked = await ImagePicker().pickImage(
-        source: source, imageQuality: 75, maxWidth: 1800, maxHeight: 1800,
+        source: source,
+        imageQuality: 75,
+        maxWidth: 1800,
+        maxHeight: 1800,
       );
       return picked?.path;
     } catch (e) {
       AppLogger.error('DetalheFrete', 'image_picker documento', e);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(source == ImageSource.camera
-              ? 'Erro ao acessar a câmera.'
-              : 'Erro ao acessar a galeria.')),
+          SnackBar(
+              content: Text(source == ImageSource.camera
+                  ? 'Erro ao acessar a câmera.'
+                  : 'Erro ao acessar a galeria.')),
         );
       }
       return null;
@@ -612,19 +680,21 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
       AppLogger.error('DetalheFrete', 'file_picker', e);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Não foi possível abrir o seletor de arquivos.')),
+          const SnackBar(
+              content: Text('Não foi possível abrir o seletor de arquivos.')),
         );
       }
       return null;
     }
   }
 
-  // Escaneia como PDF quando o plugin suportar. Cancelamento volta sem mensagem.
-  Future<List<String>?> _escanearDocumento() async {
+  Future<DocumentScanReviewResult?> _escanearMultipaginaParaPdf({
+    required String fileName,
+  }) async {
     if (mounted) setState(() => _enviandoDoc = true);
     final resultado = await DocumentScannerService.escanearDocumento(
       maxPaginas: 10,
-      comoPdf: true,
+      comoPdf: false,
     );
     if (!mounted) return null;
     setState(() => _enviandoDoc = false);
@@ -639,26 +709,137 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
       );
       return null;
     }
-    return resultado.caminhos;
+    final review = await Navigator.push<DocumentScanReviewResult>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => DocumentScanReviewScreen(
+          initialPages: resultado.caminhos,
+          fileName: fileName,
+        ),
+      ),
+    );
+    return review;
+  }
+
+  Future<_DocumentoOutroMetadata?> _coletarMetadataOutro() async {
+    final nomeCtrl = TextEditingController();
+    final descCtrl = TextEditingController();
+    try {
+      while (mounted) {
+        final ok = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Documento Outro'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nomeCtrl,
+                  decoration:
+                      const InputDecoration(labelText: 'Nome do documento'),
+                  textCapitalization: TextCapitalization.sentences,
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: descCtrl,
+                  decoration: const InputDecoration(labelText: 'Descrição'),
+                  maxLines: 2,
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancelar'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Continuar'),
+              ),
+            ],
+          ),
+        );
+        if (!mounted) return null;
+        if (ok != true) return null;
+        final nome = nomeCtrl.text.trim();
+        final desc = descCtrl.text.trim();
+        if (nome.isNotEmpty || desc.isNotEmpty) {
+          return _DocumentoOutroMetadata(
+            nomeDocumento: nome.isEmpty ? null : nome,
+            descricao: desc.isEmpty ? null : desc,
+          );
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('Informe nome ou descrição para documento Outro.')),
+        );
+      }
+      return null;
+    } finally {
+      nomeCtrl.dispose();
+      descCtrl.dispose();
+    }
+  }
+
+  String _nomeArquivo(String caminho, String fallback) {
+    final nome = caminho.split(RegExp(r'[\\/]')).last.trim();
+    return nome.isEmpty ? fallback : nome;
+  }
+
+  Future<void> _previewLocal(String caminho, {String? mime}) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => DocumentPreviewScreen.local(
+          title: 'Prévia',
+          fileName: _nomeArquivo(caminho, 'documento'),
+          localPath: caminho,
+          mime: mime,
+        ),
+      ),
+    );
   }
 
   // Envia os documentos selecionados para o frete e atualiza a lista.
   // Reaproveitado pelas quatro origens (scanner/câmera/galeria/arquivo); o
   // scanner pode devolver mais de uma página.
-  Future<void> _enviarDocumentos(String tipo, List<String> caminhos) async {
+  Future<void> _enviarDocumentos(
+    String tipo,
+    List<String> caminhos, {
+    _DocumentoOutroMetadata? metadata,
+  }) async {
     if (caminhos.isEmpty) return;
     setState(() => _enviandoDoc = true);
     final freteId = _frete['id']?.toString() ?? '';
 
     var enviados = 0;
     String? ultimaMensagemErro;
+    DocumentUploadController? retryController;
     for (final caminho in caminhos) {
-      final res = await ApiService.uploadDocumentoFrete(freteId, tipo, caminho);
+      final controller = DocumentUploadController(
+        DocumentUploadOperation.create(caminho),
+      );
+      final op = await controller.upload(
+        uploader: (filePath, clientRequestId) =>
+            ApiService.uploadDocumentoFrete(
+          freteId,
+          tipo,
+          filePath,
+          clientRequestId: clientRequestId,
+          documentContractVersion: 2,
+          nomeDocumento: metadata?.nomeDocumento,
+          descricao: metadata?.descricao,
+        ),
+      );
       if (!mounted) return;
-      if (res['ok'] == true) {
+      if (op.state == DocumentUploadState.success) {
         enviados++;
       } else {
-        ultimaMensagemErro = res['message']?.toString() ?? 'Erro ao anexar documento.';
+        ultimaMensagemErro =
+            op.lastFailure?.message ?? 'Erro ao anexar documento.';
+        if (op.state == DocumentUploadState.retryableError) {
+          retryController ??= controller;
+        }
       }
     }
 
@@ -666,18 +847,64 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
     setState(() => _enviandoDoc = false);
     if (enviados == caminhos.length) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(enviados == 1 ? 'Documento anexado.' : '$enviados documentos anexados.')),
+        SnackBar(
+            content: Text(enviados == 1
+                ? 'Documento anexado.'
+                : '$enviados documentos anexados.')),
       );
       _fetchDetalhes();
     } else if (enviados > 0) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$enviados de ${caminhos.length} documentos anexados. Reenvie os demais.')),
+        SnackBar(
+            content: Text(
+                '$enviados de ${caminhos.length} documentos anexados. Reenvie os demais.')),
       );
       _fetchDetalhes();
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(ultimaMensagemErro ?? 'Erro ao anexar documento.')),
+        SnackBar(
+          content: Text(ultimaMensagemErro ?? 'Erro ao anexar documento.'),
+          action: retryController == null
+              ? null
+              : SnackBarAction(
+                  label: 'Tentar novamente',
+                  onPressed: () => _retryDocumento(
+                    tipo: tipo,
+                    metadata: metadata,
+                    controller: retryController!,
+                  ),
+                ),
+        ),
       );
+    }
+  }
+
+  Future<void> _retryDocumento({
+    required String tipo,
+    required DocumentUploadController controller,
+    _DocumentoOutroMetadata? metadata,
+  }) async {
+    if (_enviandoDoc) return;
+    final freteId = _frete['id']?.toString() ?? '';
+    setState(() => _enviandoDoc = true);
+    final op = await controller.upload(
+      uploader: (filePath, clientRequestId) => ApiService.uploadDocumentoFrete(
+        freteId,
+        tipo,
+        filePath,
+        clientRequestId: clientRequestId,
+        documentContractVersion: 2,
+        nomeDocumento: metadata?.nomeDocumento,
+        descricao: metadata?.descricao,
+      ),
+    );
+    if (!mounted) return;
+    setState(() => _enviandoDoc = false);
+    if (op.state == DocumentUploadState.success) {
+      _snack('Documento anexado.');
+      _fetchDetalhes();
+    } else {
+      _snack(op.lastFailure?.message ?? 'Erro ao anexar documento.');
     }
   }
 
@@ -686,6 +913,8 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
   Future<void> _anexarDocumento() async {
     final tipo = await _escolherTipoDocumento();
     if (tipo == null || !mounted) return;
+    final metadata = tipo == 'outro' ? await _coletarMetadataOutro() : null;
+    if (tipo == 'outro' && metadata == null) return;
 
     final origem = await _escolherOrigemDocumento();
     if (origem == null || !mounted) return;
@@ -693,7 +922,10 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
     List<String>? caminhos;
     switch (origem) {
       case 'scan':
-        caminhos = await _escanearDocumento();
+        final review = await _escanearMultipaginaParaPdf(
+          fileName: '${tipo}_${DateTime.now().millisecondsSinceEpoch}.pdf',
+        );
+        caminhos = review == null ? null : [review.pdfPath];
         break;
       case 'camera':
         final caminho = await _selecionarImagemDocumento(ImageSource.camera);
@@ -707,14 +939,17 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
         final caminho = await _selecionarArquivoDocumento();
         if (caminho != null) caminhos = [caminho];
     }
-    if (caminhos == null || caminhos.isEmpty || !mounted) return; // cancelou ou erro
+    if (caminhos == null || caminhos.isEmpty || !mounted) {
+      return; // cancelou ou erro
+    }
 
-    await _enviarDocumentos(tipo, caminhos);
+    await _previewLocal(caminhos.first);
+    if (!mounted) return;
+    await _enviarDocumentos(tipo, caminhos, metadata: metadata);
   }
 
-  // Ao tocar num documento: busca a signed URL (bucket privado), baixa para um
-  // arquivo temporário e abre a folha de compartilhamento nativa (WhatsApp,
-  // visualizador de PDF/imagem etc.). Não altera o anexo já existente.
+  // Ao tocar num documento: busca signed URL curta, baixa para temp e abre
+  // preview interno antes das ações secundárias.
   Future<void> _abrirCompartilharDocumento(Map<String, dynamic> doc) async {
     if (_abrindoDocId != null) return; // já há um download em andamento
     final docId = doc['id']?.toString() ?? '';
@@ -723,30 +958,21 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
 
     setState(() => _abrindoDocId = docId);
     try {
-      final url = await ApiService.getDocumentoUrl(freteId, docId);
-      if (!mounted) return;
-      if (url == null || url.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Não foi possível gerar o link do documento.')),
-        );
-        return;
-      }
-
       final nome = doc['nome_arquivo']?.toString();
-      final nomeArquivo = (nome != null && nome.trim().isNotEmpty) ? nome.trim() : 'documento_$docId';
-      final caminho = await ApiService.baixarDocumentoParaTemp(url, nomeArquivo);
-      if (!mounted) return;
-      if (caminho == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Não foi possível baixar o documento.')),
-        );
-        return;
-      }
-
-      final mime = doc['mime']?.toString();
-      await Share.shareXFiles(
-        [XFile(caminho, mimeType: mime, name: nomeArquivo)],
-        subject: nomeArquivo,
+      final nomeArquivo = (nome != null && nome.trim().isNotEmpty)
+          ? nome.trim()
+          : 'documento_$docId';
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => DocumentPreviewScreen.remote(
+            title: nomeArquivo,
+            fileName: nomeArquivo,
+            mime: doc['mime']?.toString(),
+            tempScope: 'frete_${freteId}_documentos',
+            signedUrlProvider: () => ApiService.getDocumentoUrl(freteId, docId),
+          ),
+        ),
       );
     } catch (e) {
       AppLogger.error('DetalheFrete', 'abrir/compartilhar documento', e);
@@ -768,11 +994,15 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
   // ── Comprovação de entrega (ePOD, sem expor o termo ao motorista) ───────────
   // Captura foto/canhoto (scanner/câmera/galeria/arquivo). Retorna caminhos ou null.
   Future<List<String>?> _capturarComprovante() async {
-    final origem = await _escolherOrigemDocumento(titulo: 'Adicionar comprovante');
+    final origem =
+        await _escolherOrigemDocumento(titulo: 'Adicionar comprovante');
     if (origem == null || !mounted) return null;
     switch (origem) {
       case 'scan':
-        return _escanearDocumento();
+        final review = await _escanearMultipaginaParaPdf(
+          fileName: 'comprovante_${DateTime.now().millisecondsSinceEpoch}.pdf',
+        );
+        return review == null ? null : [review.pdfPath];
       case 'camera':
         final c = await _selecionarImagemDocumento(ImageSource.camera);
         return c == null ? null : [c];
@@ -798,20 +1028,26 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
           children: [
             TextField(
               controller: recebidoCtrl,
-              decoration: const InputDecoration(labelText: 'Quem recebeu (opcional)'),
+              decoration:
+                  const InputDecoration(labelText: 'Quem recebeu (opcional)'),
               textCapitalization: TextCapitalization.words,
             ),
             const SizedBox(height: 8),
             TextField(
               controller: obsCtrl,
-              decoration: const InputDecoration(labelText: 'Observação (opcional)'),
+              decoration:
+                  const InputDecoration(labelText: 'Observação (opcional)'),
               maxLines: 2,
             ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
-          ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Continuar')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar')),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Continuar')),
         ],
       ),
     );
@@ -846,7 +1082,8 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
           await _fetchDetalhes(silent: true);
           if (!mounted) return;
         } else {
-          _snack(reg['message']?.toString() ?? 'Erro ao registrar a comprovação.');
+          _snack(
+              reg['message']?.toString() ?? 'Erro ao registrar a comprovação.');
           return;
         }
       }
@@ -854,7 +1091,8 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
 
     final caminhos = await _capturarComprovante();
     if (caminhos == null || caminhos.isEmpty || !mounted) {
-      _fetchDetalhes(silent: true); // comprovação pode ter sido registrada sem evidência
+      _fetchDetalhes(
+          silent: true); // comprovação pode ter sido registrada sem evidência
       return;
     }
 
@@ -862,12 +1100,21 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
     var enviadas = 0;
     String? erro;
     for (final caminho in caminhos) {
-      final res = await ApiService.uploadEvidenciaEpod(freteId, caminho);
+      final controller = DocumentUploadController(
+        DocumentUploadOperation.create(caminho),
+      );
+      final op = await controller.upload(
+        uploader: (filePath, clientRequestId) => ApiService.uploadEvidenciaEpod(
+          freteId,
+          filePath,
+          clientRequestId: clientRequestId,
+        ),
+      );
       if (!mounted) return;
-      if (res['ok'] == true) {
+      if (op.state == DocumentUploadState.success) {
         enviadas++;
       } else {
-        erro = res['message']?.toString();
+        erro = op.lastFailure?.message;
       }
     }
     if (!mounted) return;
@@ -882,7 +1129,7 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
     _fetchDetalhes(silent: true);
   }
 
-  // Abre/compartilha uma evidência (signed URL → arquivo temp → folha nativa).
+  // Abre uma evidência com preview interno antes das ações secundárias.
   Future<void> _abrirEvidenciaEpod(Map<String, dynamic> ev) async {
     if (_abrindoEvidId != null) return;
     final evidId = ev['id']?.toString() ?? '';
@@ -890,23 +1137,22 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
     final freteId = _frete['id']?.toString() ?? '';
     setState(() => _abrindoEvidId = evidId);
     try {
-      final url = await ApiService.getEvidenciaEpodUrl(freteId, evidId);
-      if (!mounted) return;
-      if (url == null || url.isEmpty) {
-        _snack('Não foi possível gerar o link do comprovante.');
-        return;
-      }
       final nome = ev['nome_arquivo']?.toString();
-      final nomeArquivo = (nome != null && nome.trim().isNotEmpty) ? nome.trim() : 'evidencia_$evidId';
-      final caminho = await ApiService.baixarDocumentoParaTemp(url, nomeArquivo);
-      if (!mounted) return;
-      if (caminho == null) {
-        _snack('Não foi possível baixar o comprovante.');
-        return;
-      }
-      await Share.shareXFiles(
-        [XFile(caminho, mimeType: ev['mime']?.toString(), name: nomeArquivo)],
-        subject: nomeArquivo,
+      final nomeArquivo = (nome != null && nome.trim().isNotEmpty)
+          ? nome.trim()
+          : 'evidencia_$evidId';
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => DocumentPreviewScreen.remote(
+            title: nomeArquivo,
+            fileName: nomeArquivo,
+            mime: ev['mime']?.toString(),
+            tempScope: 'frete_${freteId}_epod',
+            signedUrlProvider: () =>
+                ApiService.getEvidenciaEpodUrl(freteId, evidId),
+          ),
+        ),
       );
     } catch (e) {
       AppLogger.error('DetalheFrete', 'abrir evidencia epod', e);
@@ -951,17 +1197,22 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
           children: [
             Row(
               children: [
-                const Icon(Icons.assignment_turned_in_outlined, color: Color(0xFF1B5E20)),
+                const Icon(Icons.assignment_turned_in_outlined,
+                    color: Color(0xFF1B5E20)),
                 const SizedBox(width: 8),
                 const Expanded(
                   child: Text('Comprovante de entrega',
-                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                      style:
+                          TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
                 ),
                 if (temComprovacao) ...[
                   Icon(statusIcone, size: 16, color: statusCor),
                   const SizedBox(width: 4),
                   Text(statusTexto,
-                      style: TextStyle(color: statusCor, fontWeight: FontWeight.w600, fontSize: 12)),
+                      style: TextStyle(
+                          color: statusCor,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 12)),
                 ],
               ],
             ),
@@ -970,34 +1221,48 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 6),
                 child: Text('Entrega ainda não comprovada.',
-                    style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+                    style:
+                        TextStyle(color: Colors.grey.shade600, fontSize: 13)),
               )
             else ...[
               if ((epod['recebido_por']?.toString() ?? '').isNotEmpty)
-                Text('Recebido por: ${epod['recebido_por']}', style: const TextStyle(fontSize: 13)),
+                Text('Recebido por: ${epod['recebido_por']}',
+                    style: const TextStyle(fontSize: 13)),
               if ((epod['observacao']?.toString() ?? '').isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(top: 2),
-                  child: Text('Observação: ${epod['observacao']}', style: const TextStyle(fontSize: 13)),
+                  child: Text('Observação: ${epod['observacao']}',
+                      style: const TextStyle(fontSize: 13)),
                 ),
-              if (status == 'rejeitado' && (epod['motivo_rejeicao']?.toString() ?? '').isNotEmpty)
+              if (status == 'rejeitado' &&
+                  (epod['motivo_rejeicao']?.toString() ?? '').isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(top: 4),
                   child: Text('Motivo: ${epod['motivo_rejeicao']}',
-                      style: TextStyle(fontSize: 13, color: Colors.red.shade700)),
+                      style:
+                          TextStyle(fontSize: 13, color: Colors.red.shade700)),
                 ),
               const SizedBox(height: 6),
               Text('Arquivos enviados (${_evidenciasEpod.length})',
-                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600, fontWeight: FontWeight.w600)),
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey.shade600,
+                      fontWeight: FontWeight.w600)),
               ..._evidenciasEpod.map((e) {
                 final m = e as Map<String, dynamic>;
                 final id = m['id']?.toString() ?? '';
                 final abrindo = _abrindoEvidId == id;
                 final st = m['status']?.toString() ?? 'pendente';
-                final stTxt = st == 'aprovada' ? 'Aprovada' : st == 'rejeitada' ? 'Rejeitada' : 'Pendente';
+                final stTxt = st == 'aprovada'
+                    ? 'Aprovada'
+                    : st == 'rejeitada'
+                        ? 'Rejeitada'
+                        : 'Pendente';
                 final stCor = st == 'aprovada'
                     ? const Color(0xFF1B5E20)
-                    : st == 'rejeitada' ? Colors.red.shade700 : Colors.orange.shade800;
+                    : st == 'rejeitada'
+                        ? Colors.red.shade700
+                        : Colors.orange.shade800;
                 final motivo = m['motivo_rejeicao']?.toString() ?? '';
                 return ListTile(
                   contentPadding: EdgeInsets.zero,
@@ -1007,15 +1272,27 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
                   subtitle: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(stTxt, style: TextStyle(color: stCor, fontWeight: FontWeight.w600, fontSize: 12)),
+                      Text(stTxt,
+                          style: TextStyle(
+                              color: stCor,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 12)),
                       if (st == 'rejeitada' && motivo.isNotEmpty)
-                        Text('Motivo: $motivo', style: TextStyle(color: Colors.red.shade700, fontSize: 11)),
+                        Text('Motivo: $motivo',
+                            style: TextStyle(
+                                color: Colors.red.shade700, fontSize: 11)),
                     ],
                   ),
                   trailing: abrindo
-                      ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Icon(Icons.ios_share, color: Color(0xFF1B5E20), size: 20),
-                  onTap: _abrindoEvidId != null ? null : () => _abrirEvidenciaEpod(m),
+                      ? const SizedBox(
+                          height: 18,
+                          width: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.ios_share,
+                          color: Color(0xFF1B5E20), size: 20),
+                  onTap: _abrindoEvidId != null
+                      ? null
+                      : () => _abrirEvidenciaEpod(m),
                 );
               }),
             ],
@@ -1024,16 +1301,23 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
               width: double.infinity,
               child: ElevatedButton.icon(
                 icon: _enviandoEpod
-                    ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : Icon(temComprovacao ? Icons.add_a_photo_outlined : Icons.assignment_turned_in_outlined),
-                label: Text(_enviandoEpod
-                    ? 'Enviando…'
-                    : 'Adicionar comprovante'),
+                    ? const SizedBox(
+                        height: 16,
+                        width: 16,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white))
+                    : Icon(temComprovacao
+                        ? Icons.add_a_photo_outlined
+                        : Icons.assignment_turned_in_outlined),
+                label:
+                    Text(_enviandoEpod ? 'Enviando…' : 'Adicionar comprovante'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF1B5E20),
                   foregroundColor: Colors.white,
                 ),
-                onPressed: _enviandoEpod || limiteArquivosAtingido ? null : _comprovarEntrega,
+                onPressed: _enviandoEpod || limiteArquivosAtingido
+                    ? null
+                    : _comprovarEntrega,
               ),
             ),
             Padding(
@@ -1042,10 +1326,10 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
                 limiteArquivosAtingido
                     ? 'Limite de 10 arquivos atingido para este comprovante.'
                     : !temComprovacao
-                    ? 'Registre a entrega com foto/canhoto. O administrador valida no painel.'
-                    : status == 'rejeitado'
-                        ? 'Comprovação rejeitada. Envie um novo arquivo.'
-                        : 'Novos arquivos são anexados a esta comprovação. O administrador valida cada um no painel.',
+                        ? 'Registre a entrega com foto/canhoto. O administrador valida no painel.'
+                        : status == 'rejeitado'
+                            ? 'Comprovação rejeitada. Envie um novo arquivo.'
+                            : 'Novos arquivos são anexados a esta comprovação. O administrador valida cada um no painel.',
                 style: TextStyle(color: Colors.grey.shade500, fontSize: 11),
               ),
             ),
@@ -1085,11 +1369,15 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
           children: [
             Row(
               children: [
-                const Icon(Icons.folder_open_outlined, color: Color(0xFF1B5E20)),
+                const Icon(Icons.folder_open_outlined,
+                    color: Color(0xFF1B5E20)),
                 const SizedBox(width: 8),
-                const Text('Documentos', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                const Text('Documentos',
+                    style:
+                        TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
                 const Spacer(),
-                Text('${_documentos.length}', style: TextStyle(color: Colors.grey.shade600)),
+                Text('${_documentos.length}',
+                    style: TextStyle(color: Colors.grey.shade600)),
               ],
             ),
             const Divider(),
@@ -1097,7 +1385,8 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 6),
                 child: Text('Nenhum documento anexado.',
-                    style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+                    style:
+                        TextStyle(color: Colors.grey.shade600, fontSize: 13)),
               )
             else
               ..._documentos.map((d) {
@@ -1108,14 +1397,20 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
                   contentPadding: EdgeInsets.zero,
                   dense: true,
                   leading: Icon(iconePorMime(m['mime']?.toString())),
-                  title: Text(m['nome_arquivo']?.toString() ?? rotuloTipo(m['tipo']?.toString())),
+                  title: Text(m['nome_arquivo']?.toString() ??
+                      rotuloTipo(m['tipo']?.toString())),
                   subtitle: Text(rotuloTipo(m['tipo']?.toString())),
                   trailing: abrindo
                       ? const SizedBox(
-                          height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Icon(Icons.ios_share, color: Color(0xFF1B5E20), size: 20),
+                          height: 18,
+                          width: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.ios_share,
+                          color: Color(0xFF1B5E20), size: 20),
                   // Um download por vez: desabilita o toque enquanto outro abre.
-                  onTap: _abrindoDocId != null ? null : () => _abrirCompartilharDocumento(m),
+                  onTap: _abrindoDocId != null
+                      ? null
+                      : () => _abrirCompartilharDocumento(m),
                 );
               }),
             const SizedBox(height: 6),
@@ -1123,7 +1418,10 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
               width: double.infinity,
               child: OutlinedButton.icon(
                 icon: _enviandoDoc
-                    ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                    ? const SizedBox(
+                        height: 16,
+                        width: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2))
                     : const Icon(Icons.attach_file),
                 label: Text(_enviandoDoc ? 'Processando…' : 'Anexar documento'),
                 onPressed: _enviandoDoc ? null : _anexarDocumento,
@@ -1131,7 +1429,8 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
             ),
             Padding(
               padding: const EdgeInsets.only(top: 6),
-              child: Text('PDF, XML ou imagem. Toque no documento para abrir ou compartilhar.',
+              child: Text(
+                  'PDF, XML ou imagem. Toque no documento para abrir ou compartilhar.',
                   style: TextStyle(color: Colors.grey.shade500, fontSize: 11)),
             ),
           ],
@@ -1147,16 +1446,20 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
     final destino = f['destino'] ?? '-';
 
     return Scaffold(
-      appBar: AppBar(title: Text('$origem → $destino', overflow: TextOverflow.ellipsis)),
+      appBar: AppBar(
+          title: Text('$origem → $destino', overflow: TextOverflow.ellipsis)),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error.isNotEmpty
-              ? Center(child: Column(
+              ? Center(
+                  child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Text(_error),
                     const SizedBox(height: 12),
-                    ElevatedButton(onPressed: _fetchDetalhes, child: const Text('Tentar novamente')),
+                    ElevatedButton(
+                        onPressed: _fetchDetalhes,
+                        child: const Text('Tentar novamente')),
                   ],
                 ))
               : RefreshIndicator(
@@ -1174,7 +1477,8 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
                           const SizedBox(height: 12),
                         ],
                         if (_abastecimentos.isNotEmpty) ...[
-                          _secaoLancamentos('Abastecimentos', _abastecimentos, 'valor_total'),
+                          _secaoLancamentos(
+                              'Abastecimentos', _abastecimentos, 'valor_total'),
                           const SizedBox(height: 12),
                         ],
                         if (_vales.isNotEmpty) ...[
@@ -1185,7 +1489,8 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
                         const SizedBox(height: 12),
                         _secaoComprovacao(),
                         const SizedBox(height: 12),
-                        if (_deveMostrarSecaoRastreamento(LocationTrackingService.snapshot.value)) ...[
+                        if (_deveMostrarSecaoRastreamento(
+                            LocationTrackingService.snapshot.value)) ...[
                           _secaoRastreamento(),
                           const SizedBox(height: 12),
                         ],
@@ -1196,24 +1501,33 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
                             height: 48,
                             child: ElevatedButton.icon(
                               icon: _finalizando
-                                  ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                  ? const SizedBox(
+                                      height: 18,
+                                      width: 18,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2, color: Colors.white))
                                   : const Icon(Icons.check_circle_outline),
                               label: const Text('FINALIZAR FRETE'),
-                              style: ElevatedButton.styleFrom(backgroundColor: Colors.green.shade700),
+                              style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.green.shade700),
                               onPressed: _finalizando ? null : _finalizarFrete,
                             ),
                           )
-                        else if (_frete['status'] != 'finalizado' && _frete['status'] != 'cancelado')
+                        else if (_frete['status'] != 'finalizado' &&
+                            _frete['status'] != 'cancelado')
                           Padding(
                             padding: const EdgeInsets.symmetric(vertical: 8),
                             child: Row(
                               children: [
-                                Icon(Icons.lock_outline, color: Colors.grey.shade500, size: 14),
+                                Icon(Icons.lock_outline,
+                                    color: Colors.grey.shade500, size: 14),
                                 const SizedBox(width: 6),
                                 Expanded(
                                   child: Text(
                                     'Finalização pelo app não autorizada. Contate o administrador.',
-                                    style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+                                    style: TextStyle(
+                                        color: Colors.grey.shade600,
+                                        fontSize: 13),
                                   ),
                                 ),
                               ],
@@ -1232,7 +1546,8 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
         ? DateFormat('dd/MM/yyyy').format(DateTime.parse(f['data']))
         : '--';
     final status = f['status'] ?? 'pendente';
-    final valorFrete = double.tryParse(f['valor_frete']?.toString() ?? '0') ?? 0.0;
+    final valorFrete =
+        double.tryParse(f['valor_frete']?.toString() ?? '0') ?? 0.0;
 
     return Card(
       child: Padding(
@@ -1242,9 +1557,12 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
           children: [
             Row(
               children: [
-                const Icon(Icons.local_shipping_outlined, color: Color(0xFF1B5E20)),
+                const Icon(Icons.local_shipping_outlined,
+                    color: Color(0xFF1B5E20)),
                 const SizedBox(width: 8),
-                const Text('Dados do Frete', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                const Text('Dados do Frete',
+                    style:
+                        TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                 const Spacer(),
                 _badge(status),
               ],
@@ -1259,14 +1577,16 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
             // quando o campo veio na resposta (não redigido).
             if (f['valor_frete'] != null)
               _linhaDado('Valor', 'R\$ ${valorFrete.toStringAsFixed(2)}'),
-            if (f['quem_recebeu'] != null) _linhaDado('Quem recebeu', f['quem_recebeu']),
+            if (f['quem_recebeu'] != null)
+              _linhaDado('Quem recebeu', f['quem_recebeu']),
           ],
         ),
       ),
     );
   }
 
-  Widget _secaoLancamentos(String titulo, List<dynamic> items, String campoValor) {
+  Widget _secaoLancamentos(
+      String titulo, List<dynamic> items, String campoValor) {
     final aprovados = items.where((i) => i['status'] == 'aprovado').toList();
     final pendentes = items.where((i) => i['status'] == 'pendente').toList();
     final rejeitados = items.where((i) => i['status'] == 'rejeitado').toList();
@@ -1277,7 +1597,9 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(titulo, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+            Text(titulo,
+                style:
+                    const TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
             const Divider(),
             if (aprovados.isNotEmpty)
               _subSecao('Aprovados', aprovados, campoValor, Colors.green),
@@ -1291,17 +1613,22 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
     );
   }
 
-  Widget _subSecao(String label, List<dynamic> items, String campoValor, Color cor) {
+  Widget _subSecao(
+      String label, List<dynamic> items, String campoValor, Color cor) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 4),
-          child: Text(label, style: TextStyle(color: cor, fontSize: 13, fontWeight: FontWeight.w600)),
+          child: Text(label,
+              style: TextStyle(
+                  color: cor, fontSize: 13, fontWeight: FontWeight.w600)),
         ),
         ...items.map((item) {
-          final val = double.tryParse(item[campoValor]?.toString() ?? '0') ?? 0.0;
-          final desc = item['descricao'] ?? item['posto'] ?? item['tipo'] ?? '-';
+          final val =
+              double.tryParse(item[campoValor]?.toString() ?? '0') ?? 0.0;
+          final desc =
+              item['descricao'] ?? item['posto'] ?? item['tipo'] ?? '-';
           final obs = item['obs_resolucao'] as String?;
           return Padding(
             padding: const EdgeInsets.only(left: 8, bottom: 6),
@@ -1310,8 +1637,11 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
               children: [
                 Row(
                   children: [
-                    Expanded(child: Text(desc, style: const TextStyle(fontSize: 14))),
-                    Text('R\$ ${val.toStringAsFixed(2)}', style: TextStyle(fontSize: 14, color: cor)),
+                    Expanded(
+                        child:
+                            Text(desc, style: const TextStyle(fontSize: 14))),
+                    Text('R\$ ${val.toStringAsFixed(2)}',
+                        style: TextStyle(fontSize: 14, color: cor)),
                   ],
                 ),
                 if (obs != null && obs.isNotEmpty)
@@ -1319,7 +1649,10 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
                     padding: const EdgeInsets.only(top: 2),
                     child: Text(
                       'Obs: $obs',
-                      style: TextStyle(fontSize: 13, color: Colors.grey.shade600, fontStyle: FontStyle.italic),
+                      style: TextStyle(
+                          fontSize: 13,
+                          color: Colors.grey.shade600,
+                          fontStyle: FontStyle.italic),
                     ),
                   ),
               ],
@@ -1360,22 +1693,27 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
       );
     }
 
-    final valorFrete = double.tryParse(f['valor_frete']?.toString() ?? '0') ?? 0.0;
+    final valorFrete =
+        double.tryParse(f['valor_frete']?.toString() ?? '0') ?? 0.0;
 
     // Alinhado com FinanceProvider: vinculado só deduz lancamentos pagos pelo
     // proprietario (quem_pagou == 'proprietario'); autonomo deduz todos.
     final quemPagouFilter = _isAutonomo ? null : 'proprietario';
-    final despesasAprov = _soma(_despesas, 'valor', filtroStatus: 'aprovado', quemPagou: quemPagouFilter);
-    final abastAprov = _soma(_abastecimentos, 'valor_total', filtroStatus: 'aprovado', quemPagou: quemPagouFilter);
-    final valesAprov = _soma(_vales, 'valor', filtroStatus: 'aprovado', quemPagou: quemPagouFilter);
+    final despesasAprov = _soma(_despesas, 'valor',
+        filtroStatus: 'aprovado', quemPagou: quemPagouFilter);
+    final abastAprov = _soma(_abastecimentos, 'valor_total',
+        filtroStatus: 'aprovado', quemPagou: quemPagouFilter);
+    final valesAprov = _soma(_vales, 'valor',
+        filtroStatus: 'aprovado', quemPagou: quemPagouFilter);
     final totalDeducoes = despesasAprov + abastAprov + valesAprov;
 
     final pendentes = _despesas.where((i) => i['status'] == 'pendente').length +
         _abastecimentos.where((i) => i['status'] == 'pendente').length +
         _vales.where((i) => i['status'] == 'pendente').length;
-    final rejeitados = _despesas.where((i) => i['status'] == 'rejeitado').length +
-        _abastecimentos.where((i) => i['status'] == 'rejeitado').length +
-        _vales.where((i) => i['status'] == 'rejeitado').length;
+    final rejeitados =
+        _despesas.where((i) => i['status'] == 'rejeitado').length +
+            _abastecimentos.where((i) => i['status'] == 'rejeitado').length +
+            _vales.where((i) => i['status'] == 'rejeitado').length;
 
     if (_isAutonomo) {
       // Autônomo: Faturamento - Despesas = Resultado
@@ -1387,15 +1725,23 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text('Resumo do Frete', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.onSurface)),
+              Text('Resumo do Frete',
+                  style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(context).colorScheme.onSurface)),
               const Divider(),
               _linhaResumo('Valor do Frete', valorFrete),
-              _linhaResumo('Despesas aprovadas', -despesasAprov, color: Colors.red),
-              _linhaResumo('Abastecimentos aprovados', -abastAprov, color: Colors.red),
+              _linhaResumo('Despesas aprovadas', -despesasAprov,
+                  color: Colors.red),
+              _linhaResumo('Abastecimentos aprovados', -abastAprov,
+                  color: Colors.red),
               if (valesAprov > 0)
                 _linhaResumo('Vales aprovados', -valesAprov, color: Colors.red),
               const Divider(),
-              _linhaResumo('Resultado', resultado, color: resultado >= 0 ? Colors.green : Colors.red, bold: true),
+              _linhaResumo('Resultado', resultado,
+                  color: resultado >= 0 ? Colors.green : Colors.red,
+                  bold: true),
               _avisosPendentes(pendentes, rejeitados),
             ],
           ),
@@ -1413,7 +1759,8 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
     // P2 — visibilidade financeira: quando o backend redige o valor bruto do frete
     // (commission_only), ele fornece `comissao_valor` já calculada. Preferimos esse
     // valor para o motorista ver a própria comissão sem expor o bruto.
-    final comissaoBackend = double.tryParse(f['comissao_valor']?.toString() ?? '');
+    final comissaoBackend =
+        double.tryParse(f['comissao_valor']?.toString() ?? '');
     final comissao = comissaoBackend ?? (valorFrete * (pct / 100));
     final reembolso = _somaPorPagador(_despesas, 'valor', 'motorista') +
         _somaPorPagador(_abastecimentos, 'valor_total', 'motorista');
@@ -1427,16 +1774,24 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text('Resumo do Frete', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.onSurface)),
+            Text('Resumo do Frete',
+                style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Theme.of(context).colorScheme.onSurface)),
             const Divider(),
             _linhaResumo('Valor do Frete', valorFrete),
             _linhaResumo('Comissão ($pct%)', comissao, color: Colors.blue),
             if (reembolso > 0)
-              _linhaResumo('Reembolso (pago por você)', reembolso, color: Colors.green),
+              _linhaResumo('Reembolso (pago por você)', reembolso,
+                  color: Colors.green),
             if (adiantamentos > 0)
-              _linhaResumo('Vales / adiantamentos', -adiantamentos, color: Colors.red),
+              _linhaResumo('Vales / adiantamentos', -adiantamentos,
+                  color: Colors.red),
             const Divider(),
-            _linhaResumo('Saldo Líquido', saldoLiquido, color: saldoLiquido >= 0 ? Colors.green : Colors.red, bold: true),
+            _linhaResumo('Saldo Líquido', saldoLiquido,
+                color: saldoLiquido >= 0 ? Colors.green : Colors.red,
+                bold: true),
             _avisosPendentes(pendentes, rejeitados),
           ],
         ),
@@ -1452,9 +1807,12 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
             padding: const EdgeInsets.only(top: 8),
             child: Row(
               children: [
-                Icon(Icons.warning_amber_outlined, color: Colors.orange.shade700, size: 16),
+                Icon(Icons.warning_amber_outlined,
+                    color: Colors.orange.shade700, size: 16),
                 const SizedBox(width: 4),
-                Text('$pendentes lançamento(s) pendente(s)', style: TextStyle(color: Colors.orange.shade700, fontSize: 13)),
+                Text('$pendentes lançamento(s) pendente(s)',
+                    style:
+                        TextStyle(color: Colors.orange.shade700, fontSize: 13)),
               ],
             ),
           ),
@@ -1465,7 +1823,8 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
               children: [
                 const Icon(Icons.cancel_outlined, color: Colors.red, size: 16),
                 const SizedBox(width: 4),
-                Text('$rejeitados lançamento(s) rejeitado(s)', style: const TextStyle(color: Colors.red, fontSize: 13)),
+                Text('$rejeitados lançamento(s) rejeitado(s)',
+                    style: const TextStyle(color: Colors.red, fontSize: 13)),
               ],
             ),
           ),
@@ -1473,13 +1832,17 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
     );
   }
 
-  Widget _linhaResumo(String label, double valor, {Color? color, bool bold = false}) {
+  Widget _linhaResumo(String label, double valor,
+      {Color? color, bool bold = false}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: TextStyle(fontWeight: bold ? FontWeight.bold : FontWeight.normal, fontSize: 14)),
+          Text(label,
+              style: TextStyle(
+                  fontWeight: bold ? FontWeight.bold : FontWeight.normal,
+                  fontSize: 14)),
           Text(
             'R\$ ${valor.abs().toStringAsFixed(2)}',
             style: TextStyle(
@@ -1494,13 +1857,17 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
   }
 
   Widget _linhaDado(String label, String valor) {
-    final corLabel = Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.75);
+    final corLabel =
+        Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.75);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(width: 130, child: Text(label, style: TextStyle(color: corLabel, fontSize: 15))),
+          SizedBox(
+              width: 130,
+              child:
+                  Text(label, style: TextStyle(color: corLabel, fontSize: 15))),
           Expanded(child: Text(valor, style: const TextStyle(fontSize: 15))),
         ],
       ),
@@ -1511,17 +1878,25 @@ class _DetalheViagemScreenState extends State<DetalheViagemScreen> with WidgetsB
     final color = _corStatus(status);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(color: color.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(6)),
-      child: Text(status, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600)),
+      decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(6)),
+      child: Text(status,
+          style: TextStyle(
+              color: color, fontSize: 12, fontWeight: FontWeight.w600)),
     );
   }
 
   Color _corStatus(String status) {
     switch (status) {
-      case 'finalizado': return Colors.green;
-      case 'em_viagem': return Colors.blue;
-      case 'cancelado': return Colors.red;
-      default: return Colors.orange;
+      case 'finalizado':
+        return Colors.green;
+      case 'em_viagem':
+        return Colors.blue;
+      case 'cancelado':
+        return Colors.red;
+      default:
+        return Colors.orange;
     }
   }
 }
