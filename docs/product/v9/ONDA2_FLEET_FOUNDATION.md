@@ -24,7 +24,7 @@ O modelo e `FLEET/COMPOSITION-CENTRIC`: ativo/composicao e o eixo fisico; motori
 
 - `MIGRATION_REQUIRED=true`
 - `MIGRATION_FILE=backend/migrations/074_fleet_foundation.sql`
-- `MIGRATION_074_SHA256=24f8da26e115917c9a13dc620ad2e963acb8ac30f9b054423cf329b9ee00ccb8`
+- `MIGRATION_074_SHA256=a01ab82c7f7db1b2bb9eebb24db367b02a2d0aa1545f0259f065a110ea1cfec3`
 - `MIGRATION_PRODUCTION_APPLIED=false`
 
 Precheck esperado antes de qualquer aplicacao futura:
@@ -33,6 +33,7 @@ Precheck esperado antes de qualquer aplicacao futura:
 - aplicar em ambiente novo/fresh;
 - aplicar em upgrade 073 -> 074;
 - validar RLS, grants, FKs, checks e indices unicos parciais;
+- validar FKs compostas `(id, empresa_id)` para impedir referencia cross-tenant;
 - confirmar que nao ha rewrite/backfill automatico de dados legados;
 - confirmar que `fretes` legado continua operando sem Fleet.
 
@@ -45,6 +46,7 @@ Fleet usa a regra congelada:
 - Entitlement tecnico/comercial: funcionalidade `fleet`.
 - Permissions ativas: `fleet.view`, `fleet.manage`, ambas scoped e sem `futureModule`.
 - Scope: rotas `/fleet/*` resolvem escopo operacional e o service valida unidade/tenant antes de consultar ou escrever.
+- Tenant consistency: a migration tambem cria indices unicos `(id, empresa_id)` e FKs compostas nos relacionamentos Fleet para que o banco rejeite referencias cross-tenant mesmo quando o backend usa `service_role`.
 
 ## Boundaries
 
@@ -57,6 +59,6 @@ Fleet usa a regra congelada:
 ## Validacao Local
 
 - Fleet focused tests: PASS.
-- Backend full: PASS no checkpoint antes do fechamento do PR; reexecutar apos qualquer mudanca na migration ou service.
+- Backend full: PASS `1664/1664` no checkpoint de certificacao G0.
+- PG CI: `backend/tests-pg/fleet_foundation_074.pgtest.mjs` cobre aplicacao 073 -> 074, idempotencia da 074, RLS/grants, FKs tenant-safe, integridade temporal e concorrencia em Postgres 16 efemero.
 - PG/local DB: exige ambiente Supabase/Postgres local configurado; se indisponivel, manter gate owner para aplicacao controlada.
-

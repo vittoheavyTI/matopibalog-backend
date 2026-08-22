@@ -32,7 +32,12 @@ function normalizedPlate(value) {
 
 function sanitizeSearchFilter(value) {
   const out = text(value);
-  return out ? out.replace(/[,%()]/g, ' ').replace(/\s+/g, ' ').trim() : null;
+  if (!out) return null;
+  const cleaned = out
+    .replace(/[,%()'"\\\x00-\x1F\x7F]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned ? cleaned.slice(0, 100) : null;
 }
 
 function finiteNumber(value, field) {

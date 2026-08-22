@@ -9,6 +9,7 @@ const {
   buildAssetPayload,
   buildCompositionPayload,
   createAsset,
+  listAssets,
   targetPayload,
 } = require('../services/fleet/fleetService');
 const { PERMISSION_BY_KEY } = require('../services/permissions/permissionRegistry');
@@ -124,6 +125,34 @@ test('fleet writes reject operational units outside resolved scope before databa
     }),
     (err) => err instanceof FleetError && err.code === 'operational_unit_forbidden',
   );
+});
+
+test('fleet search filter sanitizes PostgREST syntax characters and caps length', async () => {
+  const calls = [];
+  const query = {
+    select() { return this; },
+    eq(...args) { calls.push(['eq', ...args]); return this; },
+    order(...args) { calls.push(['order', ...args]); return this; },
+    or(filter) { calls.push(['or', filter]); return this; },
+    then(resolve) { resolve({ data: [], error: null }); },
+  };
+  const supabase = {
+    from(table) {
+      calls.push(['from', table]);
+      return query;
+    },
+  };
+
+  await listAssets(supabase, {
+    empresaId: 'empresa-1',
+    query: { q: `abc,def)'"\n\t${'x'.repeat(200)}` },
+    operationalScope: { mode: 'LEGACY_COMPANY' },
+  });
+
+  const [, filter] = calls.find((c) => c[0] === 'or');
+  assert.doesNotMatch(filter, /['"()\\\n\r\t]/);
+  assert.match(filter, /abc def/);
+  assert.ok(filter.length < 520);
 });
 
 test('fleet router is protected by auth, tenant, plan and effective permissions', () => {
