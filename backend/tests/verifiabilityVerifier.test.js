@@ -69,6 +69,45 @@ test('fleet invariants detect active assignment conflicts', async () => {
   assert.ok(run.findings.some((f) => f.invariant_key === 'fleet.driver_assignment.no_active_conflict.v1'));
 });
 
+test('fleet invariants detect duplicated active composition memberships', async () => {
+  const run = await verifyTarget({
+    target: { domain: 'fleet' },
+    context: {
+      facts: facts({
+        sampleFleetCompositionMembers: async () => [
+          { id: 'm1', empresa_id: 'tenant-a', composition_id: 'c1', asset_id: 'asset-1', valid_until: null },
+          { id: 'm2', empresa_id: 'tenant-a', composition_id: 'c2', asset_id: 'asset-1', valid_until: null },
+          { id: 'm3', empresa_id: 'tenant-b', composition_id: 'c3', asset_id: 'asset-2', valid_until: '2026-08-22T00:00:00.000Z' },
+        ],
+      }),
+    },
+    registry: createDefaultInvariantRegistry(),
+    now: () => '2026-08-22T00:00:00.000Z',
+  });
+  assert.equal(run.status, 'FAIL');
+  assert.ok(run.findings.some((f) => f.invariant_key === 'fleet.composition.unique_active_asset.v1'));
+});
+
+test('fleet invariants detect tenant-inconsistent assignment targets', async () => {
+  const run = await verifyTarget({
+    target: { domain: 'fleet' },
+    context: {
+      facts: facts({
+        sampleFleetDriverAssignments: async () => [
+          { id: 'a1', empresa_id: 'tenant-a', driver_id: 'd1', asset_id: 'asset-b', assignment_status: 'active', valid_until: null },
+          { id: 'a2', empresa_id: 'tenant-a', driver_id: 'd2', composition_id: 'comp-a', assignment_status: 'ended', valid_until: '2026-08-22T00:00:00.000Z' },
+        ],
+        sampleFleetAssets: async () => [{ id: 'asset-b', empresa_id: 'tenant-b' }],
+        sampleFleetCompositions: async () => [{ id: 'comp-a', empresa_id: 'tenant-a' }],
+      }),
+    },
+    registry: createDefaultInvariantRegistry(),
+    now: () => '2026-08-22T00:00:00.000Z',
+  });
+  assert.equal(run.status, 'FAIL');
+  assert.ok(run.findings.some((f) => f.invariant_key === 'fleet.assignment.tenant_consistency.v1'));
+});
+
 test('verifier supports multiple findings and stable invariant keys', async () => {
   const registry = createInvariantRegistry([
     {
