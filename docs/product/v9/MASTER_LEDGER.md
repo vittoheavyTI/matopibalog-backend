@@ -72,13 +72,13 @@ _Evidência coletada em 2026-08-19 (ver [FORENSIC_BASELINE](./FORENSIC_BASELINE.
 
 | ID | Item | Status | B W A D P | Evidência / Obs |
 |----|------|--------|-----------|-----------------|
-| RBV9-INV-033 | `fleet_assets` (caminhão/cavalo/reboque/dolly/implemento) | ROADMAP | ✗ ✗ ✗ ✗ ✗ | **0 tabelas** · D-001..D-003 |
-| RBV9-INV-034 | Composições veiculares + membros | ROADMAP | ✗ ✗ ✗ ✗ ✗ | D-003 |
-| RBV9-INV-035 | Vínculo temporal motorista↔veículo/composição | ROADMAP | ✗ ✗ ✗ ✗ ✗ | D-002 |
-| RBV9-INV-036 | Documentos de ativo + vencimentos | ROADMAP | ✗ ✗ ✗ ✗ ✗ | §13 |
-| RBV9-INV-037 | Odômetro como eventos | ROADMAP | ✗ ✗ ✗ ✗ ✗ | hoje é campo no frete (RBV9-INV-023) |
-| RBV9-INV-038 | Pneus (nº de fogo, posição, KM, recapagens, custo/km) | ROADMAP | ✗ ✗ ✗ ✗ ✗ | D-005; §14 |
-| RBV9-INV-039 | Manutenção (preventiva/corretiva, OS, peças, tempo parado) | ROADMAP | ✗ ✗ ✗ ✗ ✗ | §15 |
+| RBV9-INV-033 | `fleet_assets` (caminhão/cavalo/reboque/dolly/implemento) | IMPL_NV | ✓ ✗ ✗ ~ ✗ | **FLEET-A em PR, migration gate pendente**: migration 074 cria `fleet_assets` com tenant, unidade operacional, tipo, placa, identificador interno, marca/modelo/ano/status/capacidade/metadata; API `/fleet/assets`; sem produção aplicada. |
+| RBV9-INV-034 | Composições veiculares + membros | IMPL_NV | ✓ ✗ ✗ ~ ✗ | FLEET-A em PR: `vehicle_compositions` + `vehicle_composition_members`, vigência temporal, uniqueness ativa por asset/par; composition-centric. `MIGRATION_PRODUCTION_APPLIED=false`. |
+| RBV9-INV-035 | Vínculo temporal motorista↔veículo/composição | IMPL_NV | ✓ ✗ ✗ ~ ✗ | FLEET-A em PR: `driver_vehicle_assignments`, alvo exclusivo asset/composition, vigência e índices únicos ativos; motorista deixa de ser eixo físico primário. |
+| RBV9-INV-036 | Documentos de ativo + vencimentos | IMPL_NV | ✓ ✗ ✗ ~ ✗ | FLEET-A em PR: `asset_documents` com `document_category='VEHICLE_DOCUMENT'`; storage/UI ficam para slice posterior. |
+| RBV9-INV-037 | Odômetro como eventos | IMPL_NV | ✓ ✗ ✗ ~ ✗ | FLEET-A em PR: `odometer_events` vinculado a asset/frete, preservando campos/fotos legados de `fretes` sem rewrite. |
+| RBV9-INV-038 | Pneus (nº de fogo, posição, KM, recapagens, custo/km) | IMPL_NV | ✓ ✗ ✗ ~ ✗ | FLEET-A em PR: `tires`, `tire_installations`, `tire_events` para fundação; analytics/custo por km/alertas posteriores. |
+| RBV9-INV-039 | Manutenção (preventiva/corretiva, OS, peças, tempo parado) | IMPL_NV | ✓ ✗ ✗ ~ ✗ | FLEET-A em PR: `maintenance_events` com preventiva/corretiva, categoria, OS, fornecedor, custo, KM e downtime; experiência web/app posterior. |
 
 ## DRIVERS
 
@@ -97,7 +97,7 @@ _Evidência coletada em 2026-08-19 (ver [FORENSIC_BASELINE](./FORENSIC_BASELINE.
 | RBV9-INV-045 | Fluxos distintos empresa→motorista / motorista→empresa | ROADMAP | ✗ ✗ ✗ ✗ ✗ | D-013 |
 | RBV9-INV-046 | Múltiplos recebedores/assinantes | PARTIAL | ✓ ~ ✗ ✓ ✓ | **Fundacao E1.4A em producao**: `frete_documento_participantes` criada com FKs/RLS tenant-aware e status/tipo; fluxos reais de retorno/ack/assinatura operacional seguem `FUTURE_B`. D-015 |
 | RBV9-INV-047 | Viewer PDF-first no app (ver antes de exportar) | IMPL_NV | ✓ ✓ ✓ ✓ ✓ | **E1.4B CODE CLOSED**: app busca signed URL curta no backend, baixa para temp isolado, mostra preview interno PDF/imagem e só depois oferece salvar/compartilhar/abrir externamente. URLs assinadas não viram autoridade persistida; app não acessa Supabase Storage diretamente. D-016 |
-| RBV9-INV-048 | Documentos por ativo (frota) | ROADMAP | ✗ ✗ ✗ ✗ ✗ | depende de FLEET |
+| RBV9-INV-048 | Documentos por ativo (frota) | IMPL_NV | ✓ ✗ ✗ ~ ✗ | FLEET-A em PR: fundação `asset_documents` pronta para `VEHICLE_DOCUMENT`; fluxo documental visual fica posterior. |
 
 ## LAUNCHES (despesas / abastecimento / vale / adiantamento)
 

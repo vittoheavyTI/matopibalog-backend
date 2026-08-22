@@ -264,6 +264,7 @@ async function carregarEntitlements(supabase, { empresaId, user } = {}) {
       estrutura_operacional: ent.estrutura_operacional?.permitido === true,
       integracoes_erp: ent.integracoes_erp?.permitido === true,
       acesso_corporativo_sso: ent.acesso_corporativo_sso?.permitido === true,
+      fleet: ent.fleet?.permitido === true,
     };
   } catch (_) {
     return {};
