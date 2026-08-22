@@ -47,6 +47,14 @@ CREATE INDEX IF NOT EXISTS asset_documents_contract_status_idx
 ALTER TABLE public.tires
   ADD COLUMN IF NOT EXISTS unidade_operacional_id UUID NULL;
 
+UPDATE public.tires t
+   SET unidade_operacional_id = a.unidade_operacional_id
+  FROM public.fleet_assets a
+ WHERE t.current_asset_id = a.id
+   AND t.empresa_id = a.empresa_id
+   AND t.unidade_operacional_id IS NULL
+   AND a.unidade_operacional_id IS NOT NULL;
+
 DO $$ BEGIN
   ALTER TABLE public.tires
     ADD CONSTRAINT tires_unit_empresa_fk
@@ -62,6 +70,10 @@ ALTER TABLE public.driver_vehicle_assignments
   ADD COLUMN IF NOT EXISTS source TEXT NULL,
   ADD COLUMN IF NOT EXISTS request_id TEXT NULL,
   ADD COLUMN IF NOT EXISTS correlation_id TEXT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS driver_vehicle_assignments_handoff_request_key
+  ON public.driver_vehicle_assignments (empresa_id, COALESCE(created_by, '00000000-0000-0000-0000-000000000000'::uuid), request_id)
+  WHERE request_id IS NOT NULL;
 
 DO $$ BEGIN
   ALTER TABLE public.driver_vehicle_assignments
@@ -88,6 +100,7 @@ AS $$
 DECLARE
   v_assignment public.driver_vehicle_assignments%ROWTYPE;
   v_effective_from TIMESTAMPTZ := COALESCE(p_valid_from, now());
+  v_request_id TEXT := NULLIF(trim(p_request_id), '');
 BEGIN
   IF p_empresa_id IS NULL THEN
     RAISE EXCEPTION 'empresa_id obrigatorio' USING ERRCODE = '23514';
@@ -125,6 +138,20 @@ BEGIN
   PERFORM pg_advisory_xact_lock(hashtextextended(p_empresa_id::TEXT || ':driver:' || p_driver_id::TEXT, 0));
   PERFORM pg_advisory_xact_lock(hashtextextended(p_empresa_id::TEXT || ':target:' || COALESCE(p_asset_id::TEXT, p_composition_id::TEXT), 0));
 
+  IF v_request_id IS NOT NULL THEN
+    SELECT *
+      INTO v_assignment
+      FROM public.driver_vehicle_assignments d
+     WHERE d.empresa_id = p_empresa_id
+       AND COALESCE(d.created_by, '00000000-0000-0000-0000-000000000000'::uuid) = COALESCE(p_actor_id, '00000000-0000-0000-0000-000000000000'::uuid)
+       AND d.request_id = v_request_id
+     LIMIT 1;
+
+    IF FOUND THEN
+      RETURN v_assignment;
+    END IF;
+  END IF;
+
   UPDATE public.driver_vehicle_assignments d
      SET assignment_status = 'ended',
          valid_until = GREATEST(v_effective_from, d.valid_from + interval '1 millisecond'),
@@ -143,7 +170,7 @@ BEGIN
      valid_from, created_by, ended_reason, source, request_id, correlation_id)
   VALUES
     (p_empresa_id, p_driver_id, p_asset_id, p_composition_id, 'active',
-     v_effective_from, p_actor_id, NULL, 'web', NULLIF(trim(p_request_id), ''), NULLIF(trim(p_correlation_id), ''))
+     v_effective_from, p_actor_id, NULL, 'web', v_request_id, NULLIF(trim(p_correlation_id), ''))
   RETURNING * INTO v_assignment;
 
   RETURN v_assignment;
@@ -151,5 +178,6 @@ END;
 $$;
 
 REVOKE ALL ON FUNCTION public.fleet_driver_handoff(UUID,UUID,UUID,UUID,TIMESTAMPTZ,TEXT,UUID,TEXT,TEXT) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.fleet_driver_handoff(UUID,UUID,UUID,UUID,TIMESTAMPTZ,TEXT,UUID,TEXT,TEXT) TO authenticated;
+REVOKE ALL ON FUNCTION public.fleet_driver_handoff(UUID,UUID,UUID,UUID,TIMESTAMPTZ,TEXT,UUID,TEXT,TEXT) FROM authenticated;
+REVOKE ALL ON FUNCTION public.fleet_driver_handoff(UUID,UUID,UUID,UUID,TIMESTAMPTZ,TEXT,UUID,TEXT,TEXT) FROM anon;
 GRANT EXECUTE ON FUNCTION public.fleet_driver_handoff(UUID,UUID,UUID,UUID,TIMESTAMPTZ,TEXT,UUID,TEXT,TEXT) TO service_role;

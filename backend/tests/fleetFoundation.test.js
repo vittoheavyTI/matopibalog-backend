@@ -319,7 +319,10 @@ test('migration 075 prepares fleet operational closure behind owner gate', () =>
   assert.match(sql, /CONSTRAINT tires_unit_empresa_fk/);
   assert.match(sql, /CREATE OR REPLACE FUNCTION public\.fleet_driver_handoff/);
   assert.match(sql, /pg_advisory_xact_lock/);
+  assert.match(sql, /driver_vehicle_assignments_handoff_request_key/);
   assert.match(sql, /GRANT EXECUTE ON FUNCTION public\.fleet_driver_handoff/);
+  assert.match(sql, /REVOKE ALL ON FUNCTION public\.fleet_driver_handoff\(UUID,UUID,UUID,UUID,TIMESTAMPTZ,TEXT,UUID,TEXT,TEXT\) FROM authenticated/);
+  assert.doesNotMatch(sql, /GRANT EXECUTE ON FUNCTION public\.fleet_driver_handoff\(UUID,UUID,UUID,UUID,TIMESTAMPTZ,TEXT,UUID,TEXT,TEXT\) TO authenticated/);
   assert.doesNotMatch(sql, /\bDROP\s+TABLE\b|\bTRUNCATE\b|\bDELETE\s+FROM\b/i);
   assert.doesNotMatch(sql, /ALTER TABLE\s+public\.fretes/i);
   assert.doesNotMatch(sql, /storage\.policies|CREATE POLICY .*storage/i);
