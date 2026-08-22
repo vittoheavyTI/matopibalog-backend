@@ -1,7 +1,7 @@
 # Matopiba Log — CONTEXT BRIDGE V9
 
 > **Handoff compacto.** Leia este arquivo primeiro ao retomar em outro chat/agente. Os detalhes estão nos 4 documentos linkados no fim.
-> Atualizado: **2026-08-21** (P2 + E1.3 fechados em produção).
+> Atualizado: **2026-08-22** (P2 + E1.3 + E1.4A fechados em produção).
 
 ---
 
@@ -17,10 +17,10 @@
 
 | | |
 |---|---|
-| `origin/main` | **`b695102`** (PR #441 / E1.3 separação financeira operacional x SaaS). Marcos anteriores: `d9e0c30` (PR #442 / close P2 pós-Railway), `e718eb3` (PR #440 / P2), `569fde7` (PR #437 / hotfix Onda 1). |
-| Deploy produção | Railway `matopibalog-backend` deploy `de93df0c-8524-4a50-8be1-5bfb7130bcc3` **SUCCESS** (`commitHash=b695102`, `numReplicas=1`) |
+| `origin/main` | **`1744d59`** (PR #444 / E1.4A Documents foundation/security/web). Marcos anteriores: `b695102` (PR #441 / E1.3), `d9e0c30` (PR #442 / close P2 pós-Railway), `e718eb3` (PR #440 / P2), `569fde7` (PR #437 / hotfix Onda 1). |
+| Deploy produção | Railway `matopibalog-backend` deploy `96453b4b-5052-43bd-be22-ec1ab4afd078` **SUCCESS** (`commitHash=1744d59`, `numReplicas=1`) |
 | Health | **HTTP 200** `{"status":"UP"}` em `https://api.matopibalog.com.br/health` |
-| Banco | Supabase `rjahjogidyndphdxevom` · 62 tabelas públicas · RLS 100% |
+| Banco | Supabase `rjahjogidyndphdxevom` · 69 tabelas públicas · RLS 100% |
 | Asaas | **DESARMADO**: sem `ASAAS_API_KEY`, provider=fake, production=false, allowlist vazia, outbox=false, `billing_outbox`=0. **Não reativar sem autorização.** |
 | Crons | 3 (faturas mensal, expirarTrials dry-run, inadimplência dry-run) — todos SUCCESS/inertes |
 
@@ -36,11 +36,13 @@ Matopiba vira **frota/operação-centric** (D-001): o eixo é o **veículo/compo
 
 ## Macrofrente atual
 
-**`CURRENT_MACROFRONT = E1.4A_DOCUMENTS_FOUNDATION_SECURITY_WEB`**. P2 / E1.5 = tecnicamente CLOSED; E1.3 = CLOSED em produção. Onda 1 = tecnicamente CLOSED (ver §Estado da Onda 1); validação de aparelho no `MOBILE_RELEASE_TRAIN_M1`.
+**`CURRENT_MACROFRONT = E1.4A_DOCUMENTS_FOUNDATION_SECURITY_WEB_CLOSED`**. P2 / E1.5 = CLOSED; E1.3 = CLOSED em produção; E1.4A = CLOSED em produção. Não iniciar E1.4B neste handoff; próxima macrofrente recomendada = E1.4B mobile. Onda 1 = tecnicamente CLOSED (ver §Estado da Onda 1); validação de aparelho no `MOBILE_RELEASE_TRAIN_M1`.
 
 **P2 — Permissões (templates+overrides) CLOSED técnico.** Migration **072** (aditiva/idempotente, hash `4069b0e0…46ce5`) foi **aplicada+rastreada em produção** (`20260821043352`) e o backend **e718eb36103de1aea233e2a868cf37b7b4f51e38** foi implantado no Railway após regularização do billing (`DEPLOYMENT=987c7a52-b240-4bd4-a855-24318ba8c72b`, `SUCCESS`, `numReplicas=1`, health 200). Frontend P2 no GitHub Pages também está em `e718eb3`. Pós-deploy read-only: `/health` 200; `/auth/me`, `/admin/permissions/templates` e `/realtime/stream` sem auth retornam 401; logs novos sem 500/uncaught/unhandled/permission/RLS inesperado. Sanity P2: templates provisionados sem `stable_key` duplicada por empresa; usuários ativos com `permission_template_id`; governança efetiva preservada no recorte operacional; Asaas permaneceu inerte (`ASAAS_API_KEY` ausente, allowlist vazia, outbox off). App: código P2 pronto, mas **validação física = `DEFERRED_TO_MOBILE_RELEASE_TRAIN_M1`** (**DEFERRED ≠ PASS**). `P2_TECHNICAL_STATUS=CLOSED`.
 
 **E1.3 — Separação financeira operacional x SaaS CLOSED.** PR #441 foi mergeado (`MERGE_SHA=b69510230a03d9d5dd6a4d1d71cbf5c1b64802b2`) e deployado em produção no Railway (`DEPLOYMENT=de93df0c-8524-4a50-8be1-5bfb7130bcc3`, `SUCCESS`, `numReplicas=1`) e no GitHub Pages (`Deploy to GitHub Pages` success no mesmo SHA). Validação: Backend CI, Frontend CI e SEC-1 Browser E2E verdes em PR e `main`; backend local `1631/1631`; web local `116/116` + `tsc -b && vite build`; health 200; `/auth/me`, `/admin/permissions/templates` e `/realtime/stream` sem auth retornam 401; logs HTTP 5xx novos vazios. Boundary D-035: `Dashboard.tsx` operacional não renderiza KPIs SaaS nem busca `/painel-admin/empresas`; MRR/trial/inadimplência ficam em `PainelVisaoGeral` (`/painel-administrativo/visao-geral`, `SuperAdminRoute`) com a mesma fonte e regra histórica `suspenso`/`bloqueado`/`expirado`. `E13_IMPLEMENTED_IN_PR=true`; `E13_DEPLOYED=true`; `E13_PRODUCTION_VALIDATED=true`.
+
+**E1.4A — Documents foundation/security/web CLOSED.** OWNER MIGRATION GATE executado em 2026-08-22: migration 073 aplicada uma vez via `apply_migration` apos hash autorizado `7368bcd80009f1a21b42170d56d99f976dbca3a7aa0534ecb4d14c3f0e7dde91`, tracking confirmado (`20260822041647 073_documents_foundation_security_web`), counts preservados (`frete_documentos 16->16`, `frete_epod_evidencias 10->10`, `frete_ocorrencia_evidencias 0->0`, novas tabelas 0). PR #444 mergeado (`MERGE_SHA=1744d59bfd6e731452e85fbb01d3c2daa482a6a9`); Railway deploy `96453b4b-5052-43bd-be22-ec1ab4afd078` SUCCESS (`numReplicas=1`, healthcheck `/health`), GitHub Pages publicado no mesmo SHA, main checks verdes. Entrega: contrato v2 para `outro`, idempotencia via `client_request_id`, auditoria upload/cancel, fundacao de participantes com RLS e preview web PDF/imagem via signed URL curta. `comprovantes` legado permaneceu publico/intocado; sem backfill/storage write/env/Asaas. `E14A_TECHNICAL_STATUS=CLOSED`; `E14_OVERALL_STATUS=OPEN_E1.4B_PENDING`; app/device validation fica no `MOBILE_RELEASE_TRAIN_M1`.
 
 A **RBV9 — Rebaseline V9** (docs-only) está **concluída** e inclui o **patch fiscal V9** (domínio `FISCAL_INVOICING`, decisões D-036..D-041, ledger FISC-001..020, track NFS-e). **Nenhum código/dado/env de produção alterado por estes docs.**
 
@@ -68,7 +70,7 @@ Adequação de **CNAE/CNPJ/regime** do owner corre **em paralelo** e **NÃO bloq
 
 ## Próximo passo recomendado
 
-Após o migration gate da Onda 1: **Permissões (templates editáveis por empresa + overrides individuais)** — RBV9-INV-018, D-006/D-008/D-010; transversal, destrava dashboards por papel (D-007) e check-in/out (Onda 2). Ver ROADMAP §ONDA 1 (E1.5) e §Primeira macrofrente.
+Próxima macrofrente recomendada: **E1.4B mobile** — validar/entregar o lado app do scanner/viewer PDF-first sem reabrir E1.4A, sem gerar APK intermediário e respeitando o `MOBILE_RELEASE_TRAIN_M1`.
 
 ## Hard stops permanentes
 
