@@ -92,11 +92,11 @@ _Evidência coletada em 2026-08-19 (ver [FORENSIC_BASELINE](./FORENSIC_BASELINE.
 
 | ID | Item | Status | B W A D P | Evidência / Obs |
 |----|------|--------|-----------|-----------------|
-| RBV9-INV-043 | Documentos por frete (upload/storage/signed URL) | IMPL_VAL | ✓ ✓ ✓ ✓ ✓ | `frete_documentos`(16), migration 026. **E1.4A em PR** adiciona contrato v2, `client_request_id`, cancelamento logico/auditoria e participantes operacionais via migration 073 (**pendente OWNER_MIGRATION_GATE_E14A**, nao aplicada em producao). |
+| RBV9-INV-043 | Documentos por frete (upload/storage/signed URL) | IMPL_VAL | ✓ ✓ ✓ ✓ ✓ | `frete_documentos`(16), migration 026. **E1.4A CLOSED em producao**: PR #444 mergeado (`MERGE_SHA=1744d59`), migration 073 aplicada+rastreada (`20260822041647`, SHA256 `7368bcd80009f1a21b42170d56d99f976dbca3a7aa0534ecb4d14c3f0e7dde91`) adicionou contrato v2, `client_request_id`, cancelamento logico/auditoria e participantes operacionais. Counts preservados; `comprovantes` legado intocado. |
 | RBV9-INV-044 | Scanner de documentos no app | PARTIAL | — — ~ — ~ | PR #347; aquém do alvo (crop/perspectiva/multipágina/OCR) |
 | RBV9-INV-045 | Fluxos distintos empresa→motorista / motorista→empresa | ROADMAP | ✗ ✗ ✗ ✗ ✗ | D-013 |
-| RBV9-INV-046 | Múltiplos recebedores/assinantes | ROADMAP | ✗ ✗ ✗ ✗ ✗ | D-015 |
-| RBV9-INV-047 | Viewer PDF-first no app (ver antes de exportar) | PARTIAL | ✗ ~ ✗ ✗ ✗ | **E1.4A em PR** entrega preview web interno para PDF/imagem via signed URL curta; app PDF-first e scanner avancado seguem pendentes. D-016 |
+| RBV9-INV-046 | Múltiplos recebedores/assinantes | PARTIAL | ✓ ~ ✗ ✓ ✓ | **Fundacao E1.4A em producao**: `frete_documento_participantes` criada com FKs/RLS tenant-aware e status/tipo; fluxos reais de retorno/ack/assinatura operacional seguem `FUTURE_B`. D-015 |
+| RBV9-INV-047 | Viewer PDF-first no app (ver antes de exportar) | PARTIAL | ✓ ✓ ✗ ~ ✓ | **E1.4A em producao** entrega preview web interno para PDF/imagem via signed URL curta, com abrir fora/salvar/compartilhar como acoes secundarias. App PDF-first e scanner avancado seguem pendentes para E1.4B. D-016 |
 | RBV9-INV-048 | Documentos por ativo (frota) | ROADMAP | ✗ ✗ ✗ ✗ ✗ | depende de FLEET |
 
 ## LAUNCHES (despesas / abastecimento / vale / adiantamento)
