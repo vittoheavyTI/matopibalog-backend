@@ -45,6 +45,15 @@ test('fleet permission requires entitlement before template or override can allo
   });
   assert.equal(hasPermission(allowed, 'fleet.view'), true);
   assert.equal(hasPermission(allowed, 'fleet.manage'), true);
+
+  const overrideDeny = computeEffectivePermissions({
+    user: { tipo: 'admin' },
+    template: { permissions: { 'fleet.manage': true } },
+    overrides: { 'fleet.manage': 'deny' },
+    entitlements: { fleet: true },
+  });
+  assert.equal(hasPermission(overrideDeny, 'fleet.manage'), false);
+  assert.equal(overrideDeny.source['fleet.manage'], 'override');
 });
 
 test('asset payload normalizes plate and supports first release asset types', () => {
