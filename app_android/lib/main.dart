@@ -12,6 +12,7 @@ import 'screens/termos_pendentes_screen.dart';
 import 'services/offline_sync.dart';
 import 'services/push_service.dart';
 import 'services/location_tracking_service.dart';
+import 'widgets/app_update_gate.dart';
 
 /// Navigator global — permite ao PushService abrir a tela de Notificações ao
 /// tocar num push, mesmo fora da árvore de widgets.
@@ -184,7 +185,10 @@ class MatopibaLogApp extends StatelessWidget {
         ),
       ),
       themeMode: context.watch<ThemeProvider>().themeMode,
-      home: const SplashScreen(),
+      // Gate de versão (MOBILE-M1-008): envolve o home para que uma atualização
+      // OBRIGATÓRIA bloqueie o app mesmo antes do login. Recommended/optional
+      // apenas avisam. Fallback seguro: falha de rede não bloqueia.
+      home: const AppUpdateGate(child: SplashScreen()),
     );
   }
 }
