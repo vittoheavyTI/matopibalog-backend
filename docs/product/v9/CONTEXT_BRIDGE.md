@@ -1,7 +1,7 @@
 # Matopiba Log — CONTEXT BRIDGE V9
 
 > **Handoff compacto.** Leia este arquivo primeiro ao retomar em outro chat/agente. Os detalhes estão nos 4 documentos linkados no fim.
-> Atualizado: **2026-08-23** (Mobile M1 closed, Campaign 077 gate pending, Systemic Quality closed).
+> Atualizado: **2026-08-23** (Mobile M1 closed, Systemic Quality closed, Commercial V2 closed, Campaign-A closed).
 
 ---
 
@@ -17,8 +17,8 @@
 
 | | |
 |---|---|
-| Current docs baseline | **`35b840281a711bc2a0264358662e548cc6ecc1fa`** (PR #459 / Systemic Quality reports). Marcos recentes: `a257e0f6b50e1d7d9f6f64113df768cdc6f7339f` (PR #458 / Mobile M1), `cdf6b4ca62d84d2cb651ff2de0a8134c5bc2a715` (PR #455 / Operation Campaign architecture), `787cdcbbc927ca8ff621173b24df1fa0fa1d5126` (PR #453 / Fleet final closure). |
-| Deploy produção | Railway `matopibalog-backend` deploy `f81f64f0-2809-4619-82e3-1d833b33b697` **SUCCESS** (`commitHash=35b840281a711bc2a0264358662e548cc6ecc1fa`) |
+| Current docs baseline | **`35839e135992908eb6ee4753dfd9a1dda2d14efe`** (PR #462 / AI Copilot read-only já presente em `main`). Marcos recentes: `32d8fe3e8824d1a8bc5be89ad6f5cdf86ae5c316` (PR #457 / Operation Campaign-A closure), `4faa735b5b1760fb159fbf9436f7d8eef0665b0e` (PR #460 / Commercial V2), `35b840281a711bc2a0264358662e548cc6ecc1fa` (PR #459 / Systemic Quality reports), `a257e0f6b50e1d7d9f6f64113df768cdc6f7339f` (PR #458 / Mobile M1). |
+| Deploy produção | Último deploy Campaign-A validado: Railway `matopibalog-backend` deploy `5c858732-f34e-443c-b6b7-68306331e852` **SUCCESS** (`commitHash=32d8fe3e8824d1a8bc5be89ad6f5cdf86ae5c316`). Não inferir deploy do PR #462 sem verificação própria. |
 | Health | **HTTP 200** `{"status":"UP"}` em `https://api.matopibalog.com.br/health` |
 | Banco | Supabase `rjahjogidyndphdxevom` · 78 tabelas públicas após 076 · RLS 100% |
 | Asaas | **DESARMADO**: sem `ASAAS_API_KEY`, provider=fake, production=false, allowlist vazia, outbox=false, `billing_outbox`=0. **Não reativar sem autorização.** |
@@ -36,7 +36,7 @@ Matopiba vira **frota/operação-centric** (D-001): o eixo é o **veículo/compo
 
 ## Macrofrente atual
 
-**`CURRENT_MACROFRONT = CAMPAIGN_A_077_OWNER_GATE_PENDING_AFTER_SYSTEMIC_CLOSURE`**. P2/E1.3/E1.4A/E1.5A/Fleet final closure estão CLOSED em produção. **Mobile M1 = CLOSED técnico** no PR #458 (`MERGE_SHA=a257e0f6b50e1d7d9f6f64113df768cdc6f7339f`), com validações físicas/publicação Play ainda deferidas. **Systemic Quality = CLOSED em produção** no PR #459 (`MERGE_SHA=35b840281a711bc2a0264358662e548cc6ecc1fa`). **Operation Campaign-A NÃO está closed**: PR #457 segue aberto; 076 está aplicada/rastreada uma vez; 077 corretiva está pronta para owner gate, mas não aplicada.
+**`CURRENT_MACROFRONT = CAMPAIGN_B_MATERIALIZATION_PROGRESS_READY_TO_START`**. P2/E1.3/E1.4A/E1.5A/Fleet final closure estão CLOSED em produção. **Mobile M1 = CLOSED técnico** no PR #458 (`MERGE_SHA=a257e0f6b50e1d7d9f6f64113df768cdc6f7339f`), com validações físicas/publicação Play ainda deferidas. **Systemic Quality = CLOSED em produção** no PR #459 (`MERGE_SHA=35b840281a711bc2a0264358662e548cc6ecc1fa`). **Commercial V2 = CLOSED** no PR #460 (`MERGE_SHA=4faa735b5b1760fb159fbf9436f7d8eef0665b0e`). **Operation Campaign-A = CLOSED técnico em produção** no PR #457 (`FINAL_HEAD=45079e8151cde514bc4577dccb656c14419df35e`, `MERGE_SHA=32d8fe3e8824d1a8bc5be89ad6f5cdf86ae5c316`), com 076/077 aplicadas e rastreadas uma vez.
 
 **P2 — Permissões (templates+overrides) CLOSED técnico.** Migration **072** (aditiva/idempotente, hash `4069b0e0…46ce5`) foi **aplicada+rastreada em produção** (`20260821043352`) e o backend **e718eb36103de1aea233e2a868cf37b7b4f51e38** foi implantado no Railway após regularização do billing (`DEPLOYMENT=987c7a52-b240-4bd4-a855-24318ba8c72b`, `SUCCESS`, `numReplicas=1`, health 200). Frontend P2 no GitHub Pages também está em `e718eb3`. Pós-deploy read-only: `/health` 200; `/auth/me`, `/admin/permissions/templates` e `/realtime/stream` sem auth retornam 401; logs novos sem 500/uncaught/unhandled/permission/RLS inesperado. Sanity P2: templates provisionados sem `stable_key` duplicada por empresa; usuários ativos com `permission_template_id`; governança efetiva preservada no recorte operacional; Asaas permaneceu inerte (`ASAAS_API_KEY` ausente, allowlist vazia, outbox off). App: código P2 pronto, mas **validação física = `DEFERRED_TO_MOBILE_RELEASE_TRAIN_M1`** (**DEFERRED ≠ PASS**). `P2_TECHNICAL_STATUS=CLOSED`.
 
@@ -54,7 +54,7 @@ Matopiba vira **frota/operação-centric** (D-001): o eixo é o **veículo/compo
 
 **Mobile M1 — CLOSED técnico.** PR #458 mergeado (`MERGE_SHA=a257e0f6b50e1d7d9f6f64113df768cdc6f7339f`). Implementou gate de versão/app update policy e fechou o trem técnico sem alterar o estado dos deferred físicos: validação em aparelho, APK oficial e publicação Play seguem pendentes do owner.
 
-**Onda 3 / Operation Campaign-A — BLOCKED_ONLY_BY_OWNER_MIGRATION_GATE_077.** PR #457 está aberto, não mergeado e não deployado. Migration 076 está aplicada e rastreada uma vez em produção (`20260823111859 076_operation_campaign_foundation`, SHA256 `C7CA4533B9A26B5CCDB04EA9C9913B986432ECC17E8D76D07F302F21C3EFCD94`). Pós-check production-vs-HEAD congelado encontrou drift count 1: `campaign_exceptions_plan_campaign_fk` está em produção como `(plan_version_id, empresa_id)` e no HEAD canônico como `(plan_version_id, campaign_id, empresa_id)`. Migration 077 (`077_operation_campaign_076_payload_reconciliation.sql`, SHA256 `11C5D07AC4A2E03DBCA738945C5CF37EEB73370738E4C7B06ADEA8B7025AB5E1`) foi criada e certificada no PR #457, mas `MIGRATION_077_PRODUCTION_APPLIED=false`. Campaign-A não materializou fretes, não criou mapping comercial e não está closed.
+**Onda 3 / Operation Campaign-A — CLOSED técnico em produção.** Migration 076 está aplicada e rastreada uma vez em produção (`20260823111859 076_operation_campaign_foundation`, SHA256 `C7CA4533B9A26B5CCDB04EA9C9913B986432ECC17E8D76D07F302F21C3EFCD94`). Migration 077 (`077_operation_campaign_076_payload_reconciliation.sql`, SHA256 `11C5D07AC4A2E03DBCA738945C5CF37EEB73370738E4C7B06ADEA8B7025AB5E1`) foi aplicada uma vez (`20260823220632`) e reconciliou o FK `campaign_exceptions_plan_campaign_fk` para `(plan_version_id, campaign_id, empresa_id)`. PR #457 mergeado (`FINAL_HEAD=45079e8151cde514bc4577dccb656c14419df35e`, `MERGE_SHA=32d8fe3e8824d1a8bc5be89ad6f5cdf86ae5c316`) e deployado no Railway (`DEPLOYMENT=5c858732-f34e-443c-b6b7-68306331e852`, SUCCESS). Validações: CI completo verde em PR/main, FK pós-check PASS, schema canônico PASS, `/health` 200, rotas protegidas anon retornam 401, logs sem erro novo de Campaign/DB/FK/permission. Campaign-A não materializou fretes, não criou mapping comercial e encerra em `APPROVED_PLAN` (`CAMPAIGN_A_FREIGHT_WRITES=0`).
 
 **Systemic Quality — CLOSED em produção.** PR #459 mergeado (`MERGE_SHA=35b840281a711bc2a0264358662e548cc6ecc1fa`) a partir de `SYSTEMIC_BASE_SHA=a257e0f6b50e1d7d9f6f64113df768cdc6f7339f`. Corrigiu relatórios schema-free: rentabilidade exclui cancelados antes do limite e acerto busca finalizados antes do limite. Validação: PR CI Backend/SEC-1 verdes; main Backend/SEC-1/GitHub Pages verdes; Railway deploy `f81f64f0-2809-4619-82e3-1d833b33b697` SUCCESS; `/health` 200; logs de deploy sem erro novo.
 
@@ -86,7 +86,7 @@ Adequação de **CNAE/CNPJ/regime** do owner corre **em paralelo** e **NÃO bloq
 
 ## Próximo passo recomendado
 
-Próximo passo recomendado: aguardar autorização explícita `OWNER_MIGRATION_GATE_CAMPAIGN_077`. Não aplicar 077, não mergear #457 e não deployar Campaign sem esse gate. Não iniciar outra frente enquanto Campaign-A estiver pendente desse owner gate.
+Próximo passo recomendado: iniciar Campaign-B para materialização controlada, progresso operacional e preparação de dispatch. Produção permanece read-only durante certificação; se uma migration 078 for necessária, preparar/certificar em PR e parar no owner gate 078. A autorização anterior cobriu somente a 077.
 
 ## Hard stops permanentes
 
