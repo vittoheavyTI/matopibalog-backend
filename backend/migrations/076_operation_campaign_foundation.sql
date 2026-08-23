@@ -85,6 +85,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS campaign_operational_units_campaign_unit_key
   ON public.campaign_operational_units (campaign_id, unidade_operacional_id);
 CREATE UNIQUE INDEX IF NOT EXISTS campaign_operational_units_id_empresa_key
   ON public.campaign_operational_units (id, empresa_id);
+CREATE UNIQUE INDEX IF NOT EXISTS campaign_operational_units_campaign_unit_empresa_key
+  ON public.campaign_operational_units (campaign_id, unidade_operacional_id, empresa_id);
 CREATE INDEX IF NOT EXISTS campaign_operational_units_empresa_unit_idx
   ON public.campaign_operational_units (empresa_id, unidade_operacional_id);
 
@@ -113,6 +115,8 @@ CREATE TABLE IF NOT EXISTS public.campaign_locations (
 
 CREATE UNIQUE INDEX IF NOT EXISTS campaign_locations_id_empresa_key
   ON public.campaign_locations (id, empresa_id);
+CREATE UNIQUE INDEX IF NOT EXISTS campaign_locations_id_campaign_empresa_key
+  ON public.campaign_locations (id, campaign_id, empresa_id);
 CREATE INDEX IF NOT EXISTS campaign_locations_campaign_kind_idx
   ON public.campaign_locations (campaign_id, kind, priority, created_at);
 CREATE INDEX IF NOT EXISTS campaign_locations_empresa_unit_idx
@@ -138,6 +142,10 @@ CREATE TABLE IF NOT EXISTS public.campaign_demands (
 
 CREATE UNIQUE INDEX IF NOT EXISTS campaign_demands_id_empresa_key
   ON public.campaign_demands (id, empresa_id);
+CREATE UNIQUE INDEX IF NOT EXISTS campaign_demands_id_campaign_empresa_key
+  ON public.campaign_demands (id, campaign_id, empresa_id);
+CREATE UNIQUE INDEX IF NOT EXISTS campaign_demands_trip_context_key
+  ON public.campaign_demands (id, origin_location_id, destination_location_id, campaign_id, empresa_id);
 CREATE INDEX IF NOT EXISTS campaign_demands_campaign_idx
   ON public.campaign_demands (campaign_id, origin_location_id, destination_location_id);
 
@@ -176,6 +184,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS campaign_plan_versions_client_request_key
   WHERE client_request_id IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS campaign_plan_versions_id_empresa_key
   ON public.campaign_plan_versions (id, empresa_id);
+CREATE UNIQUE INDEX IF NOT EXISTS campaign_plan_versions_id_campaign_empresa_key
+  ON public.campaign_plan_versions (id, campaign_id, empresa_id);
 
 CREATE TABLE IF NOT EXISTS public.campaign_plan_scenarios (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -196,6 +206,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS campaign_plan_scenarios_plan_key
   ON public.campaign_plan_scenarios (plan_version_id, scenario_key);
 CREATE UNIQUE INDEX IF NOT EXISTS campaign_plan_scenarios_id_empresa_key
   ON public.campaign_plan_scenarios (id, empresa_id);
+CREATE UNIQUE INDEX IF NOT EXISTS campaign_plan_scenarios_id_campaign_empresa_key
+  ON public.campaign_plan_scenarios (id, campaign_id, empresa_id);
+CREATE UNIQUE INDEX IF NOT EXISTS campaign_plan_scenarios_id_plan_campaign_empresa_key
+  ON public.campaign_plan_scenarios (id, plan_version_id, campaign_id, empresa_id);
 
 CREATE TABLE IF NOT EXISTS public.campaign_planned_trips (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -222,6 +236,10 @@ CREATE TABLE IF NOT EXISTS public.campaign_planned_trips (
 
 CREATE UNIQUE INDEX IF NOT EXISTS campaign_planned_trips_id_empresa_key
   ON public.campaign_planned_trips (id, empresa_id);
+CREATE UNIQUE INDEX IF NOT EXISTS campaign_planned_trips_id_campaign_empresa_key
+  ON public.campaign_planned_trips (id, campaign_id, empresa_id);
+CREATE UNIQUE INDEX IF NOT EXISTS campaign_planned_trips_id_plan_campaign_empresa_key
+  ON public.campaign_planned_trips (id, plan_version_id, campaign_id, empresa_id);
 CREATE INDEX IF NOT EXISTS campaign_planned_trips_plan_idx
   ON public.campaign_planned_trips (plan_version_id, status, created_at);
 
@@ -291,9 +309,25 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
   ALTER TABLE public.operation_campaigns
-    ADD CONSTRAINT operation_campaigns_approved_plan_empresa_fk
-    FOREIGN KEY (approved_plan_version_id, empresa_id)
-    REFERENCES public.campaign_plan_versions (id, empresa_id)
+    ADD CONSTRAINT operation_campaigns_updated_by_empresa_fk
+    FOREIGN KEY (updated_by, empresa_id)
+    REFERENCES public.usuarios (id, empresa_id)
+    ON DELETE SET NULL (updated_by);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE public.operation_campaigns
+    ADD CONSTRAINT operation_campaigns_cancelled_by_empresa_fk
+    FOREIGN KEY (cancelled_by, empresa_id)
+    REFERENCES public.usuarios (id, empresa_id)
+    ON DELETE SET NULL (cancelled_by);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE public.operation_campaigns
+    ADD CONSTRAINT operation_campaigns_approved_plan_campaign_fk
+    FOREIGN KEY (approved_plan_version_id, id, empresa_id)
+    REFERENCES public.campaign_plan_versions (id, campaign_id, empresa_id)
     ON DELETE SET NULL (approved_plan_version_id);
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
@@ -314,6 +348,14 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
+  ALTER TABLE public.campaign_operational_units
+    ADD CONSTRAINT campaign_units_created_by_empresa_fk
+    FOREIGN KEY (created_by, empresa_id)
+    REFERENCES public.usuarios (id, empresa_id)
+    ON DELETE SET NULL (created_by);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
   ALTER TABLE public.campaign_locations
     ADD CONSTRAINT campaign_locations_campaign_empresa_fk
     FOREIGN KEY (campaign_id, empresa_id)
@@ -330,6 +372,22 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
+  ALTER TABLE public.campaign_locations
+    ADD CONSTRAINT campaign_locations_unit_campaign_fk
+    FOREIGN KEY (campaign_id, unidade_operacional_id, empresa_id)
+    REFERENCES public.campaign_operational_units (campaign_id, unidade_operacional_id, empresa_id)
+    ON DELETE SET NULL (unidade_operacional_id);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE public.campaign_locations
+    ADD CONSTRAINT campaign_locations_created_by_empresa_fk
+    FOREIGN KEY (created_by, empresa_id)
+    REFERENCES public.usuarios (id, empresa_id)
+    ON DELETE SET NULL (created_by);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
   ALTER TABLE public.campaign_demands
     ADD CONSTRAINT campaign_demands_campaign_empresa_fk
     FOREIGN KEY (campaign_id, empresa_id)
@@ -339,18 +397,26 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
   ALTER TABLE public.campaign_demands
-    ADD CONSTRAINT campaign_demands_origin_empresa_fk
-    FOREIGN KEY (origin_location_id, empresa_id)
-    REFERENCES public.campaign_locations (id, empresa_id)
+    ADD CONSTRAINT campaign_demands_origin_campaign_fk
+    FOREIGN KEY (origin_location_id, campaign_id, empresa_id)
+    REFERENCES public.campaign_locations (id, campaign_id, empresa_id)
     ON DELETE RESTRICT;
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
   ALTER TABLE public.campaign_demands
-    ADD CONSTRAINT campaign_demands_destination_empresa_fk
-    FOREIGN KEY (destination_location_id, empresa_id)
-    REFERENCES public.campaign_locations (id, empresa_id)
+    ADD CONSTRAINT campaign_demands_destination_campaign_fk
+    FOREIGN KEY (destination_location_id, campaign_id, empresa_id)
+    REFERENCES public.campaign_locations (id, campaign_id, empresa_id)
     ON DELETE RESTRICT;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE public.campaign_demands
+    ADD CONSTRAINT campaign_demands_created_by_empresa_fk
+    FOREIGN KEY (created_by, empresa_id)
+    REFERENCES public.usuarios (id, empresa_id)
+    ON DELETE SET NULL (created_by);
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
@@ -362,50 +428,74 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
+  ALTER TABLE public.campaign_plan_versions
+    ADD CONSTRAINT campaign_plan_versions_generated_by_empresa_fk
+    FOREIGN KEY (generated_by, empresa_id)
+    REFERENCES public.usuarios (id, empresa_id)
+    ON DELETE SET NULL (generated_by);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE public.campaign_plan_versions
+    ADD CONSTRAINT campaign_plan_versions_approved_by_empresa_fk
+    FOREIGN KEY (approved_by, empresa_id)
+    REFERENCES public.usuarios (id, empresa_id)
+    ON DELETE SET NULL (approved_by);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE public.campaign_plan_versions
+    ADD CONSTRAINT campaign_plan_versions_superseded_by_campaign_fk
+    FOREIGN KEY (superseded_by, campaign_id, empresa_id)
+    REFERENCES public.campaign_plan_versions (id, campaign_id, empresa_id)
+    ON DELETE SET NULL (superseded_by);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
   ALTER TABLE public.campaign_plan_scenarios
-    ADD CONSTRAINT campaign_scenarios_plan_empresa_fk
-    FOREIGN KEY (plan_version_id, empresa_id)
-    REFERENCES public.campaign_plan_versions (id, empresa_id)
+    ADD CONSTRAINT campaign_scenarios_plan_campaign_fk
+    FOREIGN KEY (plan_version_id, campaign_id, empresa_id)
+    REFERENCES public.campaign_plan_versions (id, campaign_id, empresa_id)
     ON DELETE CASCADE;
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
   ALTER TABLE public.campaign_planned_trips
-    ADD CONSTRAINT campaign_trips_plan_empresa_fk
-    FOREIGN KEY (plan_version_id, empresa_id)
-    REFERENCES public.campaign_plan_versions (id, empresa_id)
+    ADD CONSTRAINT campaign_trips_plan_campaign_fk
+    FOREIGN KEY (plan_version_id, campaign_id, empresa_id)
+    REFERENCES public.campaign_plan_versions (id, campaign_id, empresa_id)
     ON DELETE CASCADE;
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
   ALTER TABLE public.campaign_planned_trips
-    ADD CONSTRAINT campaign_trips_scenario_empresa_fk
-    FOREIGN KEY (scenario_id, empresa_id)
-    REFERENCES public.campaign_plan_scenarios (id, empresa_id)
+    ADD CONSTRAINT campaign_trips_scenario_plan_campaign_fk
+    FOREIGN KEY (scenario_id, plan_version_id, campaign_id, empresa_id)
+    REFERENCES public.campaign_plan_scenarios (id, plan_version_id, campaign_id, empresa_id)
     ON DELETE CASCADE;
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
   ALTER TABLE public.campaign_planned_trips
-    ADD CONSTRAINT campaign_trips_origin_empresa_fk
-    FOREIGN KEY (origin_location_id, empresa_id)
-    REFERENCES public.campaign_locations (id, empresa_id)
+    ADD CONSTRAINT campaign_trips_origin_campaign_fk
+    FOREIGN KEY (origin_location_id, campaign_id, empresa_id)
+    REFERENCES public.campaign_locations (id, campaign_id, empresa_id)
     ON DELETE RESTRICT;
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
   ALTER TABLE public.campaign_planned_trips
-    ADD CONSTRAINT campaign_trips_destination_empresa_fk
-    FOREIGN KEY (destination_location_id, empresa_id)
-    REFERENCES public.campaign_locations (id, empresa_id)
+    ADD CONSTRAINT campaign_trips_destination_campaign_fk
+    FOREIGN KEY (destination_location_id, campaign_id, empresa_id)
+    REFERENCES public.campaign_locations (id, campaign_id, empresa_id)
     ON DELETE RESTRICT;
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
   ALTER TABLE public.campaign_planned_trips
-    ADD CONSTRAINT campaign_trips_demand_empresa_fk
-    FOREIGN KEY (demand_id, empresa_id)
-    REFERENCES public.campaign_demands (id, empresa_id)
+    ADD CONSTRAINT campaign_trips_demand_context_fk
+    FOREIGN KEY (demand_id, origin_location_id, destination_location_id, campaign_id, empresa_id)
+    REFERENCES public.campaign_demands (id, origin_location_id, destination_location_id, campaign_id, empresa_id)
     ON DELETE SET NULL (demand_id);
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
@@ -426,10 +516,18 @@ DO $$ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
+  ALTER TABLE public.campaign_planned_trips
+    ADD CONSTRAINT campaign_trips_driver_empresa_fk
+    FOREIGN KEY (candidate_driver_id, empresa_id)
+    REFERENCES public.usuarios (id, empresa_id)
+    ON DELETE SET NULL (candidate_driver_id);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
   ALTER TABLE public.campaign_approvals
-    ADD CONSTRAINT campaign_approvals_plan_empresa_fk
-    FOREIGN KEY (plan_version_id, empresa_id)
-    REFERENCES public.campaign_plan_versions (id, empresa_id)
+    ADD CONSTRAINT campaign_approvals_plan_campaign_fk
+    FOREIGN KEY (plan_version_id, campaign_id, empresa_id)
+    REFERENCES public.campaign_plan_versions (id, campaign_id, empresa_id)
     ON DELETE RESTRICT;
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
@@ -443,18 +541,42 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
   ALTER TABLE public.campaign_exceptions
-    ADD CONSTRAINT campaign_exceptions_plan_empresa_fk
-    FOREIGN KEY (plan_version_id, empresa_id)
-    REFERENCES public.campaign_plan_versions (id, empresa_id)
+    ADD CONSTRAINT campaign_exceptions_plan_campaign_fk
+    FOREIGN KEY (plan_version_id, campaign_id, empresa_id)
+    REFERENCES public.campaign_plan_versions (id, campaign_id, empresa_id)
     ON DELETE CASCADE;
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
   ALTER TABLE public.campaign_exceptions
-    ADD CONSTRAINT campaign_exceptions_trip_empresa_fk
-    FOREIGN KEY (planned_trip_id, empresa_id)
-    REFERENCES public.campaign_planned_trips (id, empresa_id)
+    ADD CONSTRAINT campaign_exceptions_trip_campaign_fk
+    FOREIGN KEY (planned_trip_id, campaign_id, empresa_id)
+    REFERENCES public.campaign_planned_trips (id, campaign_id, empresa_id)
     ON DELETE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE public.campaign_exceptions
+    ADD CONSTRAINT campaign_exceptions_trip_plan_campaign_fk
+    FOREIGN KEY (planned_trip_id, plan_version_id, campaign_id, empresa_id)
+    REFERENCES public.campaign_planned_trips (id, plan_version_id, campaign_id, empresa_id)
+    ON DELETE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE public.campaign_exceptions
+    ADD CONSTRAINT campaign_exceptions_acknowledged_by_empresa_fk
+    FOREIGN KEY (acknowledged_by, empresa_id)
+    REFERENCES public.usuarios (id, empresa_id)
+    ON DELETE SET NULL (acknowledged_by);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE public.campaign_exceptions
+    ADD CONSTRAINT campaign_exceptions_resolved_by_empresa_fk
+    FOREIGN KEY (resolved_by, empresa_id)
+    REFERENCES public.usuarios (id, empresa_id)
+    ON DELETE SET NULL (resolved_by);
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 ALTER TABLE public.operation_campaigns ENABLE ROW LEVEL SECURITY;
