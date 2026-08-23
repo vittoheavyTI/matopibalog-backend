@@ -265,9 +265,9 @@ O sistema deve explicar com evidencia: capacidade insuficiente, motoristas em co
 
 `DOMAIN + PLANNING + VERSIONING + APPROVAL + VERIFIABILITY`.
 
-Inclui schema 076, state machines, planner deterministic V1, capacity calculation, multi-origin demand, plan versions/scenarios, approval, permissions, scope, entitlement, invariants, backend API e web create/review inicial.
+Inclui schema 076, state machines, planner deterministic V1, capacity calculation, multi-origin/multi-unit demand, plan versions/scenarios, planned trips, approval, permissions, scope, entitlement, invariants, backend API e web create/review inicial.
 
-Nao inclui materializacao massiva em fretes reais se a seguranca exigir separar. Se materializacao minima entrar em A, deve ser idempotente e atras de approval.
+Nao inclui materializacao em fretes reais. Campaign-A termina em `APPROVED_PLAN`; bulk materialization, refs em `fretes`, dispatch, execution/progress e replanning apos execucao ficam para Campaign-B.
 
 ### CAMPAIGN-B
 
@@ -275,31 +275,19 @@ Nao inclui materializacao massiva em fretes reais se a seguranca exigir separar.
 
 Inclui bulk materialization, refs em fretes, assignment/dispatch-ready, progress, exceptions, replanning, realtime e dashboard operacional. Dispatch offers atomicos podem virar B2 se ficarem grandes.
 
-## Owner Decisions
+## Owner Decisions Congeladas
 
-`OWNER_DECISION_REQUIRED_1`
+- `CAMPAIGN_ENTITLEMENT_KEY=operation_campaign`.
+- `OPERATION_CAMPAIGN_COMMERCIAL_MAPPING=DEFERRED_SEPARATE_COMMERCIAL_DECISION`.
+- `CAMPAIGN_A_END_STATE=APPROVED_PLAN`.
+- `CAMPAIGN_MULTI_UNIT_V1=SUPPORTED_WITH_ALL_UNITS_IN_EFFECTIVE_SCOPE`.
+- `OWNER_DECISIONS_REQUIRED=0` para arquitetura; mapping comercial permanece uma decisao comercial futura separada.
 
-Question: Entitlement comercial `operation_campaign` nasce incluido para os mesmos planos que `fleet` ou como add-on/opcional?
+Campaign-A congela contrato tecnico de entitlement, permission e scope, mas nao decide preco, plano comercial, add-on, billing, Asaas ou fiscal. Producao deve permanecer `DEFAULT_DENY / NOT MAPPED` para Campaign ate decisao comercial explicita.
 
-Options: `same_as_fleet` (recommended para primeiro piloto), `optional_paid`, `enterprise_only`.
+Campaign-A para em plano aprovado e verificavel. Inclui dominio, schema, demanda, locations, plan versions, scenarios, planned trips, resource snapshot, planner deterministico V1, approval, permissions/scope/entitlement contract, verifiability e UX web inicial create/review. Exclui freight materialization, criacao massiva de fretes, dispatch, ofertas a motoristas, execution tracking, progresso baseado em fretes reais e replanning apos execucao; esses itens ficam para Campaign-B.
 
-Impact: muda seed de plano na migration 076, mas nao bloqueia arquitetura.
-
-`OWNER_DECISION_REQUIRED_2`
-
-Question: Campaign-A deve materializar fretes ou parar em approved plan?
-
-Options: `approved_plan_only` (recommended), `include_minimal_materialization`, `defer_all_materialization_to_B`.
-
-Impact: controla tamanho/risco da primeira implementation.
-
-`OWNER_DECISION_REQUIRED_3`
-
-Question: Multi-unidade no primeiro release fica permitido para usuarios regionais/globais?
-
-Options: `allow_with_scope` (recommended), `single_unit_only`, `global_only`.
-
-Impact: afeta schema de associations e UX de selecao.
+Campaign V1 suporta uma ou multiplas unidades desde que o usuario tenha scope efetivo sobre todas. O schema futuro deve evitar uma unica `operation_campaigns.unidade_operacional_id` como autoridade exclusiva se isso quebrar multi-unidade; uma associacao dedicada (`campaign_operational_units`) ou derivacao segura por locations/demands/resources pode ser usada pelo implementation agent.
 
 ## Status
 
@@ -310,4 +298,4 @@ Impact: afeta schema de associations e UX de selecao.
 - `MIGRATION_REQUIRED=true`.
 - `PROPOSED_MIGRATION=076_operation_campaign_foundation.sql`.
 - `NO_PRODUCTION_DDL=true`.
-- `NEXT_STATUS=READY_FOR_OWNER_CAMPAIGN_ARCHITECTURE_DECISIONS`.
+- `NEXT_STATUS=READY_TO_START_PARALLEL_EXECUTION_V1`.
