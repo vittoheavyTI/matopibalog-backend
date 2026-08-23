@@ -5,6 +5,7 @@ const CODIGOS_PORTAL = Object.freeze({
   integracoes_erp: 'integracoes_erp',
   acesso_corporativo_sso: 'acesso_corporativo_sso',
   fleet: 'fleet',
+  operation_campaign: 'operation_campaign',
 });
 
 const PERMISSOES_PORTAL = Object.freeze({
@@ -175,7 +176,7 @@ async function carregarPortalGovernanca(supabase, { empresaId, usuarioId, user }
 
     for (const [chave, codigo] of Object.entries(CODIGOS_PORTAL)) {
       const funcionalidade = porCodigo.get(codigo) || null;
-      const papelPermitido = chave === 'fleet'
+      const papelPermitido = chave === 'fleet' || chave === 'operation_campaign'
         ? true
         : permissaoUsuario(usuario, PERMISSOES_PORTAL[chave]);
       const planoFunc = funcionalidade ? pfPorFunc.get(funcionalidade.id) : null;

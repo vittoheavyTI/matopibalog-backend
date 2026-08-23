@@ -28,7 +28,35 @@ async function ensurePermissionTemplatesForEmpresa(supabase, empresaId) {
     console.error('[permissionProvisioning.ensure]', error.message || error);
     return { ok: false, reason: 'rpc_error', message: error.message || String(error) };
   }
+  await ensureOperationCampaignTemplatePermissionsForEmpresa(supabase, empresaId);
   return { ok: true };
+}
+
+async function ensureOperationCampaignTemplatePermissionsForEmpresa(supabase, empresaId) {
+  if (!empresaId) return { ok: false, reason: 'no_empresa' };
+  try {
+    const { error } = await supabase.rpc('ensure_operation_campaign_template_permissions_for_empresa', {
+      p_empresa_id: empresaId,
+    });
+    if (!error) return { ok: true };
+    if (isMissingRpc(error)) return { ok: false, reason: 'campaign_rpc_absent' };
+    console.error('[permissionProvisioning.ensureCampaign]', error.message || error);
+    return { ok: false, reason: 'campaign_rpc_error', message: error.message || String(error) };
+  } catch (err) {
+    if (/ensure_permission_templates_for_empresa|ensure_operation_campaign_template_permissions_for_empresa|assert/i.test(err?.message || '')) {
+      return { ok: false, reason: 'campaign_rpc_absent' };
+    }
+    console.error('[permissionProvisioning.ensureCampaign]', err?.message || err);
+    return { ok: false, reason: 'campaign_rpc_error', message: err?.message || String(err) };
+  }
+}
+
+function isMissingRpc(error) {
+  return error && (
+    error.code === '42883' ||
+    error.code === 'PGRST202' ||
+    /function .* does not exist|could not find .* function|schema cache/i.test(error.message || '')
+  );
 }
 
 // Alias histórico (mesma semântica estrita/atômica).
@@ -62,6 +90,7 @@ async function assignTemplateByTipo(supabase, usuarioId, empresaId, tipo) {
 
 module.exports = {
   ensurePermissionTemplatesForEmpresa,
+  ensureOperationCampaignTemplatePermissionsForEmpresa,
   provisionTemplatesForEmpresa,
   assignTemplateByTipo,
 };

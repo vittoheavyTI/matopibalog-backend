@@ -12,8 +12,10 @@ const Module = require('node:module');
 // ── (a) ensurePermissionTemplatesForEmpresa ──────────────────────────────────
 test('ensure: RPC ok → {ok:true}; RPC erro → {ok:false} (sem sucesso silencioso)', async () => {
   const { ensurePermissionTemplatesForEmpresa } = require('../services/permissions/permissionProvisioning');
-  const okMock = { async rpc(name, args) { assert.equal(name, 'ensure_permission_templates_for_empresa'); assert.equal(args.p_empresa_id, 'emp-1'); return { data: null, error: null }; } };
+  const names = [];
+  const okMock = { async rpc(name, args) { names.push(name); assert.equal(args.p_empresa_id, 'emp-1'); return { data: null, error: null }; } };
   assert.deepEqual(await ensurePermissionTemplatesForEmpresa(okMock, 'emp-1'), { ok: true });
+  assert.deepEqual(names, ['ensure_permission_templates_for_empresa', 'ensure_operation_campaign_template_permissions_for_empresa']);
 
   const failMock = { async rpc() { return { data: null, error: { message: 'boom' } }; } };
   const r = await ensurePermissionTemplatesForEmpresa(failMock, 'emp-1');
@@ -30,7 +32,7 @@ test('ensure (repair): idempotente — 2x retorna ok (RPC idempotente por design
   const { ensurePermissionTemplatesForEmpresa } = require('../services/permissions/permissionProvisioning');
   assert.equal((await ensurePermissionTemplatesForEmpresa(mock, 'emp-1')).ok, true);
   assert.equal((await ensurePermissionTemplatesForEmpresa(mock, 'emp-1')).ok, true);
-  assert.equal(calls, 2);
+  assert.equal(calls, 4);
 });
 
 // ── (b) criarEmpresaCompleta estrito ─────────────────────────────────────────
@@ -77,7 +79,7 @@ test('NEW_COMPANY_SUCCESS: provisiona templates (RPC) e retorna empresa sem erro
   const r = await criar({ nome: 'Empresa Nova', cnpj: '11444777000161' });
   assert.equal(r.error, null);
   assert.ok(r.empresa && r.empresa.id === 'nova-empresa');
-  assert.equal(sb._ops.rpc, 1, 'provisionou via RPC');
+  assert.equal(sb._ops.rpc, 2, 'provisionou baseline + complemento Campaign via RPC');
   assert.equal(sb._ops.deleted, null, 'não compensou');
 });
 
