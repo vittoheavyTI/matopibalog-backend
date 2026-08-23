@@ -57,7 +57,7 @@ _Evidência coletada em 2026-08-19 (ver [FORENSIC_BASELINE](./FORENSIC_BASELINE.
 | RBV9-INV-025 | Rentabilidade por viagem (read-only) | IMPL_VAL | ✓ ✓ — ✓ ✓ | PR #381, `Rentabilidade.tsx` |
 | RBV9-INV-026 | Check-in/Check-out formal (KM+foto pelo motorista) | ROADMAP | ✗ ✗ ✗ ✗ ✗ | D-011/D-012 |
 | RBV9-INV-027 | Snapshot de composição+motorista no frete | ROADMAP | ✗ ✗ ✗ ✗ ✗ | depende de FLEET |
-| RBV9-INV-028 | Handoff de motorista durante a viagem | ROADMAP | ✗ ✗ ✗ ✗ ✗ | D-002 |
+| RBV9-INV-028 | Handoff de motorista durante a viagem | IMPL_NV | ✓ ✓ ✗ ✓ ✓ | Handoff temporal de motorista fechado tecnicamente em produção pela Fleet final closure: migration 075 rastreada (`20260823012050 075_fleet_operational_closure`), RPC `fleet_driver_handoff` `SECURITY DEFINER` com `search_path=public`, execução negada a `PUBLIC`/`anon`/`authenticated` e concedida somente a `service_role`. Snapshot/check-in/out formal do frete permanece em RBV9-INV-026/027. Owner visual validation pendente. |
 
 ## FREIGHT PLANNING & DISPATCH
 
@@ -72,13 +72,13 @@ _Evidência coletada em 2026-08-19 (ver [FORENSIC_BASELINE](./FORENSIC_BASELINE.
 
 | ID | Item | Status | B W A D P | Evidência / Obs |
 |----|------|--------|-----------|-----------------|
-| RBV9-INV-033 | `fleet_assets` (caminhão/cavalo/reboque/dolly/implemento) | IMPL_NV | ✓ ✓ ✗ ✓ ✗ | **FLEET-A foundation em produção** + **Fleet-B IMPLEMENTED_IN_PR**: migration 074 rastreada (`20260822142407 074_fleet_foundation`), PR #449 mergeado (`MERGE_SHA=d682d4ed958929d46cbd556a118d71fa5c04c2bc`) e backend Railway `e2615ac7-4cdb-498e-ba5f-de8f64300a83` SUCCESS. Fleet-B expõe `/frota` e `/fleet/overview`, cadastro/lista de ativos, filtros por placa/identificador/tipo/status e empty state operacional. Owner visual validation pendente. |
-| RBV9-INV-034 | Composições veiculares + membros | IMPL_NV | ✓ ✓ ✗ ✓ ✗ | FLEET-A foundation em produção: `vehicle_compositions` + `vehicle_composition_members`, vigência temporal, uniqueness ativa por asset/par; Fleet-B lista composições, monta composição inicial e preserva authority composition-centric. |
-| RBV9-INV-035 | Vínculo temporal motorista↔veículo/composição | IMPL_NV | ✓ ✓ ✗ ✓ ✗ | FLEET-A foundation em produção: `driver_vehicle_assignments`, alvo exclusivo asset/composition, vigência e índices únicos ativos; Fleet-B atribui motorista temporalmente a ativo/composição sem tornar motorista eixo físico primário. |
-| RBV9-INV-036 | Documentos de ativo + vencimentos | IMPL_NV | ✓ ✓ ✗ ~ ✗ | FLEET-A foundation em produção: `asset_documents` com `document_category='VEHICLE_DOCUMENT'`; Fleet-B registra referencia/caminho e vencimento em `asset_documents`, alerta documentos vencidos/a vencer. Sem Storage/env novo e sem upload direto production. |
-| RBV9-INV-037 | Odômetro como eventos | IMPL_NV | ✓ ✓ ✗ ✓ ✗ | FLEET-A foundation em produção: `odometer_events` vinculado a asset/frete, preservando campos/fotos legados de `fretes` sem rewrite/backfill; Fleet-B registra leitura manual/check-in/check-out/correção como evento novo. |
-| RBV9-INV-038 | Pneus (nº de fogo, posição, KM, recapagens, custo/km) | IMPL_NV | ✓ ✓ ✗ ~ ✗ | FLEET-A foundation em produção: `tires`, `tire_installations`, `tire_events`; Fleet-B registra pneu, instalação em ativo/posição e lista estoque/instalados. Analytics/custo por km/alertas avançados posteriores. |
-| RBV9-INV-039 | Manutenção (preventiva/corretiva, OS, peças, tempo parado) | IMPL_NV | ✓ ✓ ✗ ~ ✗ | FLEET-A foundation em produção: `maintenance_events` com preventiva/corretiva, categoria, OS, fornecedor, custo, KM e downtime; Fleet-B registra e lista manutenção no painel operacional. Owner visual validation pendente. |
+| RBV9-INV-033 | `fleet_assets` (caminhão/cavalo/reboque/dolly/implemento) | IMPL_NV | ✓ ✓ ✗ ✓ ✓ | **FLEET technical closure em produção**: migration 074 rastreada (`20260822142407 074_fleet_foundation`) + migration 075 rastreada (`20260823012050 075_fleet_operational_closure`, SHA256 `6ae16676e6b67142ca0faaa78b92d65a512c67966b5ed35448148189bdf078fc`), PR #453 mergeado (`MERGE_SHA=787cdcbbc927ca8ff621173b24df1fa0fa1d5126`) e backend Railway `ee860618-4307-4e5a-8d61-7a12862f5e2d` SUCCESS. Fleet-B expõe `/frota` e `/fleet/overview`, cadastro/lista de ativos, filtros por placa/identificador/tipo/status e empty state operacional. Owner visual validation pendente. |
+| RBV9-INV-034 | Composições veiculares + membros | IMPL_NV | ✓ ✓ ✗ ✓ ✓ | FLEET technical closure em produção: `vehicle_compositions` + `vehicle_composition_members`, vigência temporal, uniqueness ativa por asset/par; Fleet-B lista composições, monta composição inicial e preserva authority composition-centric. |
+| RBV9-INV-035 | Vínculo temporal motorista↔veículo/composição | IMPL_NV | ✓ ✓ ✗ ✓ ✓ | FLEET technical closure em produção: `driver_vehicle_assignments`, alvo exclusivo asset/composition, vigência, índices únicos ativos, colunas de correlação (`request_id`, `correlation_id`, `source`) e handoff por RPC `fleet_driver_handoff` service-role-only. |
+| RBV9-INV-036 | Documentos de ativo + vencimentos | IMPL_NV | ✓ ✓ ✗ ✓ ✓ | FLEET technical closure em produção: `asset_documents` com `document_category='VEHICLE_DOCUMENT'`, contrato versionado, metadados de arquivo, upload real para bucket privado `fretes-documentos`, signed preview e alertas de vencimento. Cancelamento/substituição audit-safe fica diferido. |
+| RBV9-INV-037 | Odômetro como eventos | IMPL_NV | ✓ ✓ ✗ ✓ ✓ | FLEET technical closure em produção: `odometer_events` vinculado a asset/frete, preservando campos/fotos legados de `fretes` sem rewrite/backfill; Fleet-B registra leitura manual/check-in/check-out/correção como evento novo. |
+| RBV9-INV-038 | Pneus (nº de fogo, posição, KM, recapagens, custo/km) | IMPL_NV | ✓ ✓ ✗ ✓ ✓ | FLEET technical closure em produção: `tires`, `tire_installations`, `tire_events`; migration 075 adicionou `tires.unidade_operacional_id` com FK composta tenant-safe, índice `tires_empresa_unit_status_idx`, backfill esperado/real `0/0`, estoque por unidade e instalação. Analytics/custo por km/alertas avançados posteriores. |
+| RBV9-INV-039 | Manutenção (preventiva/corretiva, OS, peças, tempo parado) | IMPL_NV | ✓ ✓ ✗ ✓ ✓ | FLEET technical closure em produção: `maintenance_events` com preventiva/corretiva, categoria, OS, fornecedor, custo, KM e downtime; Fleet-B registra e lista manutenção no painel operacional. Experiência avançada de oficina e owner visual validation pendentes. |
 
 ## DRIVERS
 
@@ -97,7 +97,7 @@ _Evidência coletada em 2026-08-19 (ver [FORENSIC_BASELINE](./FORENSIC_BASELINE.
 | RBV9-INV-045 | Fluxos distintos empresa→motorista / motorista→empresa | ROADMAP | ✗ ✗ ✗ ✗ ✗ | D-013 |
 | RBV9-INV-046 | Múltiplos recebedores/assinantes | PARTIAL | ✓ ~ ✗ ✓ ✓ | **Fundacao E1.4A em producao**: `frete_documento_participantes` criada com FKs/RLS tenant-aware e status/tipo; fluxos reais de retorno/ack/assinatura operacional seguem `FUTURE_B`. D-015 |
 | RBV9-INV-047 | Viewer PDF-first no app (ver antes de exportar) | IMPL_NV | ✓ ✓ ✓ ✓ ✓ | **E1.4B CODE CLOSED**: app busca signed URL curta no backend, baixa para temp isolado, mostra preview interno PDF/imagem e só depois oferece salvar/compartilhar/abrir externamente. URLs assinadas não viram autoridade persistida; app não acessa Supabase Storage diretamente. D-016 |
-| RBV9-INV-048 | Documentos por ativo (frota) | IMPL_NV | ✓ ✗ ✗ ~ ✗ | FLEET-A foundation em produção: fundação `asset_documents` pronta para `VEHICLE_DOCUMENT`; fluxo documental visual fica em Fleet-B. |
+| RBV9-INV-048 | Documentos por ativo (frota) | IMPL_NV | ✓ ✓ ✗ ✓ ✓ | FLEET technical closure em produção: `asset_documents` pronto para `VEHICLE_DOCUMENT`, upload real no bucket privado `fretes-documentos`, signed preview e metadados versionados (`document_contract_version`, `file_sha256`, `mime`, `tamanho_bytes`, `request_id`, `correlation_id`, `source`). App mobile e cancelamento/substituição audit-safe ficam diferidos. |
 
 ## LAUNCHES (despesas / abastecimento / vale / adiantamento)
 
@@ -272,6 +272,7 @@ _Evidência coletada em 2026-08-19 (ver [FORENSIC_BASELINE](./FORENSIC_BASELINE.
 | ID | Item | Status | Obs |
 |----|------|--------|-----|
 | PROCESS-001 | `HOTFIX_071_APPLIED_BEFORE_OWNER_MIGRATION_GATE` — a migration 071 foi **aplicada em produção durante o diagnóstico do cancelamento (500), ANTES do PR #437 estar verde/mergeado e sem um `OWNER_MIGRATION_GATE` separado para a 071**. Resultado técnico saudável (aditiva/idempotente, reconciliada com o source-of-truth: repo `071_...sql` SHA256 `e6f3b7a4…d623fe` ≡ CHECK em prod; 070+071 rastreadas; sem terceiro hotfix SQL), mas é **desvio de processo**. | CLOSED_WITH_CORRECTIVE_ACTION | **NÃO rollbackar / NÃO reaplicar / NÃO alterar produção.** **Ação corretiva permanente:** toda migration de produção futura — inclusive hotfix — exige: (1) arquivo versionado; (2) hash; (3) PR/CI quando a situação permitir; (4) precheck; (5) `OWNER_MIGRATION_GATE` explícito; (6) `apply_migration` canônico; (7) tracking; (8) pós-check. Em incidente crítico onde o CI prévio não seja possível: **parar e solicitar `HOTFIX_PRODUCTION_GATE`** — nunca assumir autorização implícita de migration anterior. |
+| PROCESS-002 | `MIGRATION_075_APPLY_PAYLOAD_DIVERGED_FROM_GIT_BLOB` — a primeira tentativa de apply da migration 075 falhou porque o payload manual continha assinatura `TTEXT`, divergente do arquivo versionado (`TEXT`). O Git blob autorizado estava correto (`source_ttext_count=0`) e a tentativa falhou antes de tracking/objetos novos; não houve efeito parcial. | CLOSED_WITH_CORRECTIVE_ACTION | Segunda e final tentativa autorizada executada com `VERIFIED_SOURCE_TEXT_TRANSFER` a partir do full file read no HEAD `200a3ad993df8c09c12b369f385e1920dea593ab`; `SOURCE_SHA256=6ae16676e6b67142ca0faaa78b92d65a512c67966b5ed35448148189bdf078fc`; `QUERY_MANUALLY_EDITED=false`; `QUERY_RECONSTRUCTED=false`; apply result `SUCCESS`; tracking `20260823012050 075_fleet_operational_closure`; postchecks schema/RPC/backfill/logs `PASS`. Regra permanente: payload de migration deve ser transferido de fonte verificada e reconciliado contra hash/assinaturas antes de novo apply. |
 
 ## MOBILE_RELEASE_TRAIN_M1 (validações físicas do app — DEFERRED, não bloqueiam roadmap)
 
@@ -292,13 +293,13 @@ _Evidência coletada em 2026-08-19 (ver [FORENSIC_BASELINE](./FORENSIC_BASELINE.
 
 ### Contagem do inventário
 
-> **Recalculado após o patch fiscal RBV9** (+20 `FISC-001..020`, ROADMAP/NEW), a Onda 1 / E1.6A (+`RBV9-INV-107` realtime horizontal scale, +`RBV9-INV-108` legacy observation enforcement) e E1.5A (+`RBV9-INV-109` verifiability foundation). Inventário: 109 (`RBV9-INV`) + 20 (`FISC`) = **129**.
+> **Recalculado após Fleet final technical closure** (migration 075 + PR #453 + PROCESS-002). Inventário: 109 (`RBV9-INV`) + 20 (`FISC`) = **129**.
 
 - **Total de itens:** **129** (109 RBV9-INV + 20 FISC)
 - **IMPLEMENTED_VALIDATED:** 46
-- **IMPLEMENTED_NOT_VISUAL_VALIDATED:** 5 (+3 da Onda 1: RBV9-INV-052/053/054 — aguardam migration gate + validação visual)
-- **PARTIAL:** 15 (RBV9-INV-052/054 saíram de PARTIAL; RBV9-INV-093 entrou)
-- **ROADMAP_ONLY:** **51** (RBV9-INV-053 saiu de ROADMAP)
+- **IMPLEMENTED_NOT_VISUAL_VALIDATED:** 16 (inclui Fleet technical closure aguardando owner visual validation)
+- **PARTIAL:** 13
+- **ROADMAP_ONLY:** **42**
 - **DEFERRED:** 5 (+RBV9-INV-107 realtime horizontal scale; +RBV9-INV-108 legacy observation enforcement)
 - **TECH_DEBT:** 6 (itens 101-106; + achados TD no FORENSIC)
 - **UNKNOWN:** 1 (perf baseline)
