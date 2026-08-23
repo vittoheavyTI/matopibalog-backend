@@ -1,6 +1,11 @@
 const supabase = require('../config/supabase');
 const { calcularComissao } = require('../utils/comissao');
-const { freteEstaCancelado, STATUS_LANCAMENTO_NAO_COMPOE } = require('../utils/agregacaoFinanceiraFretes');
+const {
+  freteEstaCancelado,
+  STATUS_FRETE_RECEITA_REALIZADA,
+  STATUS_FRETE_EXCLUIDOS,
+  STATUS_LANCAMENTO_NAO_COMPOE,
+} = require('../utils/agregacaoFinanceiraFretes');
 const { calcularRentabilidadeFrete, resumirRentabilidade } = require('../utils/rentabilidadeFrete');
 const { calcularAcertoMotoristas } = require('../utils/acertoMotorista');
 const { montarTorreControle, resumirItensTorre } = require('../utils/torreControle');
@@ -227,6 +232,7 @@ exports.getRentabilidade = async (req, res) => {
       .from('fretes')
       .select('*, motoristas(usuarios(nome), percentual_comissao, empresas!left(tipo))');
     fretesQuery = aplicarEscopoOperacionalQuery(fretesQuery, operationalScope);
+    fretesQuery = fretesQuery.neq('status', STATUS_FRETE_EXCLUIDOS[0]);
     if (inicio) fretesQuery = fretesQuery.gte('data', inicio);
     if (fim) fretesQuery = fretesQuery.lte('data', fim);
     if (motorista_id) fretesQuery = fretesQuery.eq('motorista_id', motorista_id);
@@ -334,6 +340,7 @@ exports.getAcertoMotoristas = async (req, res) => {
       .from('fretes')
       .select('id, empresa_id, motorista_id, data, origem, destino, status, valor_frete, motoristas(usuarios(nome), percentual_comissao, empresas!left(tipo, nome))');
     fretesQuery = aplicarEscopoOperacionalQuery(fretesQuery, operationalScope);
+    fretesQuery = fretesQuery.eq('status', STATUS_FRETE_RECEITA_REALIZADA);
     if (inicio) fretesQuery = fretesQuery.gte('data', inicio);
     if (fim) fretesQuery = fretesQuery.lte('data', fim);
     if (motorista_id) fretesQuery = fretesQuery.eq('motorista_id', motorista_id);

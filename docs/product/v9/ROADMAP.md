@@ -96,6 +96,8 @@ Ordem ajustada por dependência técnica objetiva: FLEET é pré-requisito de PL
 
 > **Política (owner, 2026-08-20):** mudanças Flutter **não geram APK por macrofrente** e **não bloqueiam** o roadmap. Cada macrofrente: implementa Flutter, roda `analyze`/`test`/`build` em CI quando aplicável, mantém compatibilidade e **registra aqui** as validações físicas pendentes. O APK oficial consolidado sai por **Codemagic** (`codemagic.yaml`, workflow `android-release` → `app-release.apk`, assinado com a chave debug, sem secret novo) num ponto de release definido pelo owner. **Não instalar Android SDK / não habilitar Windows Developer Mode / não validar aparelho fora do trem.** `DEFERRED ≠ DONE`.
 
+> **Estado técnico atual (2026-08-23):** Mobile M1 foi mergeado no PR #458 (`MERGE_SHA=a257e0f6b50e1d7d9f6f64113df768cdc6f7339f`) e está `MOBILE_M1_TECHNICAL_STATUS=CLOSED`. As validações físicas/listagem Play permanecem deferidas ao owner/trem de publicação, sem reabrir o fechamento técnico.
+
 | ID | Item mobile a validar no APK consolidado | Origem | Status |
 |----|------------------------------------------|--------|--------|
 | MOBILE-M1-001 | Realtime da **tela de detalhe do frete** (`detalhe_viagem_screen`) atualiza sozinho no aparelho (sem pull-to-refresh, sem reabrir, sem esperar o poll de 60s) | Onda 1 · E1.7 | `DEFERRED_TO_MOBILE_RELEASE_TRAIN_M1` |
@@ -105,7 +107,7 @@ Ordem ajustada por dependência técnica objetiva: FLEET é pré-requisito de PL
 | MOBILE-M1-005 | Scanner on-device multipagina com review, reorder, remove, retake e geração de PDF local | E1.4B | `DEFERRED_TO_MOBILE_RELEASE_TRAIN_M1` |
 | MOBILE-M1-006 | Upload de documentos/ePOD com `client_request_id` estável, retry seguro e replay idempotente | E1.4B | `DEFERRED_TO_MOBILE_RELEASE_TRAIN_M1` |
 | MOBILE-M1-007 | Fluxo preview-first com ações secundárias de salvar/compartilhar/abrir fora após prévia | E1.4B | `DEFERRED_TO_MOBILE_RELEASE_TRAIN_M1` |
-| MOBILE-M1-008 | App Version Policy e in-app update: latest/recommended/minimum version, severity, release notes, update oficial Play (`flexible`/`immediate`) | E1.5/D-053 | `ROADMAP_NOT_IMPLEMENTED` |
+| MOBILE-M1-008 | App Version Policy e in-app update: latest/recommended/minimum version, severity, release notes, update oficial Play (`flexible`/`immediate`) | E1.5/D-053 | `TECHNICAL_CLOSED_PR_458_PLAY_PUBLICATION_DEFERRED` |
 
 _Itens mobile de macrofrentes futuras (ex.: enforcement de `freight.create`/`freight.finish` e visibilidade financeira do motorista da P2) entram nesta seção como `MOBILE-M1-NNN`._
 
@@ -122,7 +124,8 @@ _Itens mobile de macrofrentes futuras (ex.: enforcement de `freight.create`/`fre
 - **Dependências:** E2.1 é raiz de tudo. **Gate:** migração **aditiva** (nunca destrutiva); frete atual continua funcionando.
 
 ### ONDA 3 — Expansão
-- **E3.0 Operation Campaign / Operação de Escoamento** — ✅ **ARCHITECTURE_FROZEN** + **OWNER_DECISIONS_FROZEN** (docs-only, sem implementação): Campaign é objetivo operacional versionado, não `campaign_id` simples em fretes. Auditoria delta sobre Freight/Fleet/Driver/Documents/Scope/Realtime/Verifiability congelada; entitlement tecnico `operation_campaign`; mapping comercial `DEFERRED_SEPARATE_COMMERCIAL_DECISION`; Campaign-A termina em `APPROVED_PLAN` e nao materializa fretes; multi-unidade V1 suportada sob scope efetivo completo. Proposed schema V1 = `operation_campaigns`, `campaign_locations`, `campaign_demands`, `campaign_plan_versions`, `campaign_plan_scenarios`, `campaign_planned_trips`, `campaign_approvals`, `campaign_exceptions`; próxima migration proposta **076**, reservada ao Agent A e não criada nesta execucao. Ver [OPERATION_CAMPAIGN_ARCHITECTURE](./OPERATION_CAMPAIGN_ARCHITECTURE.md) e [PARALLEL_EXECUTION_BOARD](./PARALLEL_EXECUTION_BOARD.md).
+- **E3.0 Operation Campaign / Operação de Escoamento** — `BLOCKED_ONLY_BY_OWNER_MIGRATION_GATE_077`: PR #457 segue aberto, **não mergeado e não deployado**. Migration 076 foi aplicada/rastreada em produção exatamente uma vez (`20260823111859 076_operation_campaign_foundation`, SHA256 `C7CA4533B9A26B5CCDB04EA9C9913B986432ECC17E8D76D07F302F21C3EFCD94`) e o pós-check encontrou um único drift de payload em `campaign_exceptions_plan_campaign_fk` (produção `(plan_version_id, empresa_id)` vs HEAD `(plan_version_id, campaign_id, empresa_id)`). Migration 077 corretiva foi criada no PR #457, CI-certified, `OWNER_MIGRATION_GATE_CAMPAIGN_077_READY=true`, mas **não aplicada em produção**. Campaign-A continua sem escrita de frete, sem mapping comercial e sem fechamento técnico até o owner gate 077.
+- **E3.0A Systemic Quality / Reports + Performance** — ✅ **CLOSED em produção**: PR #459 mergeado (`MERGE_SHA=35b840281a711bc2a0264358662e548cc6ecc1fa`) corrigiu agregação limite-safe em relatórios (`rentabilidade` filtra cancelados antes do limite; `acerto-motoristas` busca finalizados antes do limite). Sem migration, sem Campaign, sem Flutter. Railway deploy `f81f64f0-2809-4619-82e3-1d833b33b697` SUCCESS; main CI Backend/SEC-1/GitHub Pages verde; `/health` 200.
 - **E3.1 Operation Orchestrator** — arquitetura congelada como orquestrador determinístico, separado de IA; pipeline `OBJECTIVE → NORMALIZE → VALIDATE → RESOURCE_SNAPSHOT → CAPACITY_PLAN → TRIP_PLAN → SCENARIOS → HUMAN_APPROVAL → DISPATCH_READY → FREIGHT_MATERIALIZATION → EXECUTION → VERIFY → REPLAN/EXCEPTIONS`.
 - **E3.2 Planejamento/aprovação de frete** (RBV9-INV-029, §7): passa pelo plano Campaign antes de materializar fretes; approval por `campaign.approve`, não role hardcoded.
 - **E3.3 Route Intelligence (provider abstraction)** (RBV9-INV-030, D-032): boundary mantido; Campaign-A funciona com distância manual/opcional, sem Google/TomTom.
@@ -170,8 +173,8 @@ _Itens mobile de macrofrentes futuras (ex.: enforcement de `freight.create`/`fre
 
 ## Próxima macrofrente de implementação recomendada
 
-**Parallel Execution V1**, iniciando somente com novo prompt/gate: Agent A (`Campaign-A - Domain + Planning + Versioning + Approval + Verifiability`), Agent B (`Mobile Release Train M1`), Agent C (`Systemic Quality`) e Agent R (`read-only integration reviewer`). Ver [PARALLEL_EXECUTION_BOARD](./PARALLEL_EXECUTION_BOARD.md).
+**Próximo passo recomendado:** aguardar autorização explícita `OWNER_MIGRATION_GATE_CAMPAIGN_077` para aplicar a 077 corretiva. Não iniciar Campaign-B, Route Intelligence, ERP, Fiscal automation, AI Agent ou Partner Network enquanto Campaign-A estiver nesse gate.
 
-**Por quê:** (1) Fleet e E1.5 já estão fechadas tecnicamente; (2) Campaign é o próximo salto de carga humana evitada; (3) o plano precisa nascer determinístico, versionado e auditável antes de dispatch, parceiros, rotas externas ou IA; (4) Mobile M1 e Systemic Quality podem avançar em paralelo sem schema authority.
+**Por quê:** (1) Campaign-A já está implementada no PR #457 mas depende da reconciliação 077; (2) 077 é corretiva e restrita a um FK, com produção ainda intacta; (3) Mobile M1 e Systemic Quality já fecharam tecnicamente; (4) docs não devem declarar Campaign como CLOSED enquanto #457 estiver aberto e 077 não aplicada.
 
 _Ver: [CONTEXT_BRIDGE](./CONTEXT_BRIDGE.md) · [DECISIONS](./DECISIONS.md) · [MASTER_LEDGER](./MASTER_LEDGER.md) · [FORENSIC_BASELINE](./FORENSIC_BASELINE.md) · [PARALLEL_EXECUTION_BOARD](./PARALLEL_EXECUTION_BOARD.md)_
