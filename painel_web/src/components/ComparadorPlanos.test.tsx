@@ -56,6 +56,35 @@ describe('ComparadorPlanos', () => {
     await waitFor(() => expect(screen.getByText(/nenhuma cobrança foi feita e seu teste segue ativo/i)).toBeInTheDocument());
   }, 15000);
 
+  test('ERP/SSO sem preço aprovado aparecem como "Sob proposta" — nunca R$149,90 fabricado', async () => {
+    mockGet('plano-start');
+    const snapshot = {
+      plano_atual: { id: 'plano-start', nome: 'Empresa Start', valor_mensal: 299.9, capacidade_inclusa: 5 },
+      plano_alvo: null,
+      add_ons: [
+        { codigo: 'integracoes_erp', nome: 'Integrações ERP', em_breve: true, technical_status: 'PREPARING', selecionado: true,
+          atual: { situacao: 'sob_proposta', valor_mensal: null, price_status: 'UNDER_PROPOSAL', commercial_status: 'UNDER_PROPOSAL' }, alvo: null },
+      ],
+      add_on_valor_padrao: 149.9,
+      subtotal_plano_atual: 299.9, subtotal_addons_atual: 0, total_atual: null, total_atual_incompleto: true,
+      subtotal_plano_alvo: null, subtotal_addons_alvo: null, total_alvo: null,
+      diferenca_mensal: null,
+      recomendacao: { tipo: 'sob_proposta', mensagem: 'É necessário falar com o comercial para comparar o valor final.' },
+      proxima_fatura: { texto: 'Nenhuma cobrança é gerada agora.' },
+    };
+    mockApi.post.mockImplementation((url: string) => {
+      if (url === '/contratacao/plano-preview') return Promise.resolve({ data: snapshot });
+      return Promise.resolve({ data: {} });
+    });
+
+    render(<ComparadorPlanos />);
+
+    await waitFor(() => expect(screen.getByText('Integrações ERP')).toBeInTheDocument());
+    // Mostra "Sob proposta" e NÃO um valor fabricado de R$ 149,90 na linha do add-on/total.
+    expect(screen.getAllByText(/Sob proposta/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/149,90\/mês/)).not.toBeInTheDocument();
+  }, 15000);
+
   test('nao chama /contratacao/iniciar ao clicar no proprio plano atual', async () => {
     // Nenhum plano atual destacado → ambos clicáveis; simulamos atual = growth e clicamos nele.
     mockGet('plano-growth');

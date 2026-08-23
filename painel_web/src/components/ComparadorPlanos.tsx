@@ -131,21 +131,37 @@ export const ComparadorPlanos: React.FC = () => {
 // ── Simulação de custo: plano atual × plano alvo + serviços adicionais (R$149,90) ──
 // READ-ONLY: usa POST /contratacao/plano-preview (não escreve, não cobra, não muda
 // plano). Mostra snapshot de valores, diferença e recomendação de custo-benefício.
-type AddonLinha = { codigo: string; nome: string; em_breve: boolean; selecionado: boolean; atual: { situacao: string; valor_mensal: number | null }; alvo: { situacao: string; valor_mensal: number | null } | null };
+type LinhaAddon = { situacao: string; valor_mensal: number | null; price_status?: string; commercial_status?: string };
+type AddonLinha = { codigo: string; nome: string; em_breve: boolean; technical_status?: string; selecionado: boolean; atual: LinhaAddon; alvo: LinhaAddon | null };
 type Snapshot = {
   plano_atual: { nome: string | null; valor_mensal: number | null; capacidade_inclusa: number | null };
   plano_alvo: { nome: string | null; valor_mensal: number | null } | null;
   add_ons: AddonLinha[];
   add_on_valor_padrao: number | null;
-  subtotal_plano_atual: number | null; subtotal_addons_atual: number | null; total_atual: number | null;
-  subtotal_plano_alvo: number | null; subtotal_addons_alvo: number | null; total_alvo: number | null;
+  subtotal_plano_atual: number | null; subtotal_addons_atual: number | null; total_atual: number | null; total_atual_incompleto?: boolean;
+  subtotal_plano_alvo: number | null; subtotal_addons_alvo: number | null; total_alvo: number | null; total_alvo_incompleto?: boolean;
   diferenca_mensal: number | null;
   recomendacao: { tipo: string; mensagem: string };
   proxima_fatura: { texto: string };
+  uso_atual?: { motoristas_ativos: number | null; limite: number | null; ilimitado: boolean; capacidade_inclusa: number | null; estado: string } | null;
+};
+
+// Rótulo/cor do estado de capacidade (§12) — contagem real, sem % arbitrária.
+const usoEstado: Record<string, { texto: string; cls: string }> = {
+  confortavel: { texto: 'dentro do plano', cls: 'text-green-700 bg-green-50 border-green-200' },
+  proximo: { texto: 'última vaga disponível', cls: 'text-amber-700 bg-amber-50 border-amber-200' },
+  no_limite: { texto: 'no limite do plano', cls: 'text-amber-700 bg-amber-50 border-amber-200' },
+  acima: { texto: 'acima do limite do plano', cls: 'text-red-700 bg-red-50 border-red-200' },
+  ilimitado: { texto: 'plano sem limite de motoristas', cls: 'text-gray-600 bg-gray-50 border-gray-200' },
 };
 
 const brl = (v: number | null | undefined) =>
   v == null ? '—' : v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+// Total pode ficar "sob proposta" quando um serviço selecionado não tem preço de
+// tabela (ex.: ERP/SSO) — nesse caso NÃO mostramos número (sem economia fantasma).
+const totalLabel = (v: number | null, incompleto?: boolean) =>
+  incompleto ? 'Sob proposta' : `${brl(v)}/mês`;
 
 const SimulacaoUpgrade: React.FC<{ planos: PlanoPublico[]; planoAtualId: string }> = ({ planos, planoAtualId }) => {
   const [selecionados, setSelecionados] = useState<string[]>([]);
@@ -198,6 +214,16 @@ const SimulacaoUpgrade: React.FC<{ planos: PlanoPublico[]; planoAtualId: string 
         <b> sem cobrança agora</b>. Você <b>não é obrigado</b> a trocar de plano: pode adicionar serviços ao plano atual.
       </p>
 
+      {snap?.uso_atual && (
+        <div className={`flex items-center justify-between rounded-xl border px-3.5 py-2.5 text-sm ${usoEstado[snap.uso_atual.estado]?.cls || 'text-gray-600 bg-gray-50 border-gray-200'}`}>
+          <span className="font-semibold">
+            Motoristas em uso: {snap.uso_atual.motoristas_ativos ?? '—'}
+            {snap.uso_atual.ilimitado ? '' : ` / ${snap.uso_atual.limite ?? '—'}`}
+          </span>
+          <span className="text-xs">{usoEstado[snap.uso_atual.estado]?.texto || ''}</span>
+        </div>
+      )}
+
       <div className="grid gap-3 md:grid-cols-2">
         <div className="space-y-2">
           <p className="text-xs font-bold uppercase text-gray-400">Serviços adicionais {snap?.add_on_valor_padrao != null && <span className="normal-case font-medium">(padrão {brl(snap.add_on_valor_padrao)}/mês)</span>}</p>
@@ -228,13 +254,13 @@ const SimulacaoUpgrade: React.FC<{ planos: PlanoPublico[]; planoAtualId: string 
             <tbody className="divide-y divide-gray-100">
               <tr><td className="px-3 py-2 text-gray-500">Plano atual ({snap.plano_atual.nome})</td><td className="px-3 py-2 text-right font-medium">{brl(snap.subtotal_plano_atual)}</td></tr>
               <tr><td className="px-3 py-2 text-gray-500">Serviços adicionais</td><td className="px-3 py-2 text-right font-medium">{brl(snap.subtotal_addons_atual)}</td></tr>
-              <tr className="bg-gray-50"><td className="px-3 py-2 font-bold text-gray-900">Total mantendo plano atual</td><td className="px-3 py-2 text-right font-bold text-gray-900">{brl(snap.total_atual)}/mês</td></tr>
+              <tr className="bg-gray-50"><td className="px-3 py-2 font-bold text-gray-900">Total mantendo plano atual</td><td className="px-3 py-2 text-right font-bold text-gray-900">{totalLabel(snap.total_atual, snap.total_atual_incompleto)}</td></tr>
               {snap.plano_alvo && (
                 <>
                   <tr><td className="px-3 py-2 text-gray-500">Plano alvo ({snap.plano_alvo.nome})</td><td className="px-3 py-2 text-right font-medium">{brl(snap.subtotal_plano_alvo)}</td></tr>
                   <tr><td className="px-3 py-2 text-gray-500">Serviços adicionais no alvo</td><td className="px-3 py-2 text-right font-medium">{brl(snap.subtotal_addons_alvo)}</td></tr>
-                  <tr className="bg-gray-50"><td className="px-3 py-2 font-bold text-gray-900">Total no plano alvo</td><td className="px-3 py-2 text-right font-bold text-gray-900">{brl(snap.total_alvo)}/mês</td></tr>
-                  <tr><td className="px-3 py-2 text-gray-500">Diferença mensal</td><td className={`px-3 py-2 text-right font-bold ${(snap.diferenca_mensal || 0) <= 0 ? 'text-green-700' : 'text-amber-700'}`}>{snap.diferenca_mensal != null && snap.diferenca_mensal > 0 ? '+' : ''}{brl(snap.diferenca_mensal)}</td></tr>
+                  <tr className="bg-gray-50"><td className="px-3 py-2 font-bold text-gray-900">Total no plano alvo</td><td className="px-3 py-2 text-right font-bold text-gray-900">{totalLabel(snap.total_alvo, snap.total_alvo_incompleto)}</td></tr>
+                  <tr><td className="px-3 py-2 text-gray-500">Diferença mensal</td><td className={`px-3 py-2 text-right font-bold ${(snap.diferenca_mensal || 0) <= 0 ? 'text-green-700' : 'text-amber-700'}`}>{snap.diferenca_mensal == null ? 'Sob proposta' : `${snap.diferenca_mensal > 0 ? '+' : ''}${brl(snap.diferenca_mensal)}`}</td></tr>
                 </>
               )}
             </tbody>
