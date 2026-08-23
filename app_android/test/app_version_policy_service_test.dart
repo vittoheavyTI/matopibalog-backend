@@ -45,7 +45,7 @@ void main() {
         client: MockClient((_) async => _json(200, _policyBody())),
       );
       final p = await s.fetchPolicy();
-      expect(p.severity, AppUpdateSeverity.required);
+      expect(p.severity, AppUpdateSeverity.forced);
       expect(p.precisaAtualizarObrigatorio, isTrue);
     });
 
@@ -86,7 +86,7 @@ void main() {
         ),
       );
       final p = await s.fetchPolicy();
-      expect(p.severity, AppUpdateSeverity.required);
+      expect(p.severity, AppUpdateSeverity.forced);
     });
   });
 
@@ -129,7 +129,7 @@ void main() {
     test('mapeia string do servidor', () {
       expect(
         AppVersionPolicyService.severityFromServer({'update_severity': 'required'}),
-        AppUpdateSeverity.required,
+        AppUpdateSeverity.forced,
       );
       expect(
         AppVersionPolicyService.severityFromServer({'update_severity': null}),

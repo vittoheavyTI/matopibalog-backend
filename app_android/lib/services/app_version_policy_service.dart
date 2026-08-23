@@ -17,8 +17,9 @@ enum AppUpdateSeverity {
   /// Abaixo do recommended, mas >= minimum: aviso visível, ainda pode continuar.
   recommended,
 
-  /// Abaixo do minimum suportado: bloqueio controlado.
-  required,
+  /// Abaixo do minimum suportado: bloqueio controlado (nome 'forced' evita
+  /// o identificador reservado 'required').
+  forced,
 
   /// Não foi possível decidir (versão local/política inválida ou falha de rede):
   /// fallback SEGURO = não bloquear.
@@ -34,7 +35,7 @@ AppUpdateSeverity _severityFromString(String? value) {
     case 'recommended':
       return AppUpdateSeverity.recommended;
     case 'required':
-      return AppUpdateSeverity.required;
+      return AppUpdateSeverity.forced;
     default:
       return AppUpdateSeverity.unknown;
   }
@@ -73,7 +74,7 @@ class AppVersionPolicy {
       );
 
   bool get precisaAtualizarObrigatorio =>
-      severity == AppUpdateSeverity.required;
+      severity == AppUpdateSeverity.forced;
   bool get precisaAtualizarRecomendado =>
       severity == AppUpdateSeverity.recommended;
   bool get atualizacaoOpcional => severity == AppUpdateSeverity.optional;
@@ -116,7 +117,7 @@ class AppVersionPolicy {
   }) {
     final cmpMin = compareVersions(currentVersion, minimum);
     if (cmpMin == null) return AppUpdateSeverity.unknown;
-    if (cmpMin < 0) return AppUpdateSeverity.required;
+    if (cmpMin < 0) return AppUpdateSeverity.forced;
     final cmpRec = compareVersions(currentVersion, recommended);
     if (cmpRec != null && cmpRec < 0) return AppUpdateSeverity.recommended;
     final cmpLatest = compareVersions(currentVersion, latest);
