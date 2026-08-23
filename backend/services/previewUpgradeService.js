@@ -2,21 +2,29 @@
 // plano atual e a matriz de disponibilidade; NÃO escreve, NÃO cobra, NÃO altera
 // plano/entitlement. Delega o cálculo ao serviço PURO montarSnapshotUpgrade.
 
-const { montarSnapshotUpgrade } = require('./snapshotUpgradeService');
+const { montarSnapshotUpgrade, estadoCapacidade } = require('./snapshotUpgradeService');
+const { avaliarLimiteMotoristas } = require('./planoLimiteService');
 
 // Add-ons do catálogo desta fatia (as 3 funcionalidades do portal do cliente).
 const CODIGOS_ADDON = ['estrutura_operacional', 'integracoes_erp', 'acesso_corporativo_sso'];
 
+// Carrega disponibilidade E preço específico do plano por funcionalidade.
+// Retorna { disp: Map(funcId->disponibilidade), preco: Map(funcId->centavos|null) }.
 async function carregarDisponibilidade(supabase, planoId, funcIds) {
-  const mapa = new Map();
-  if (!planoId || !funcIds.length) return mapa;
+  const disp = new Map();
+  const preco = new Map();
+  if (!planoId || !funcIds.length) return { disp, preco };
   const { data, error } = await supabase
     .from('plano_funcionalidades')
-    .select('funcionalidade_id, disponibilidade')
+    .select('funcionalidade_id, disponibilidade, preco_especifico_centavos')
     .eq('plano_id', planoId)
     .in('funcionalidade_id', funcIds);
-  if (error || !data) return mapa;
-  return new Map(data.map((pf) => [pf.funcionalidade_id, pf.disponibilidade]));
+  if (error || !data) return { disp, preco };
+  for (const pf of data) {
+    disp.set(pf.funcionalidade_id, pf.disponibilidade);
+    preco.set(pf.funcionalidade_id, Number.isFinite(pf.preco_especifico_centavos) ? pf.preco_especifico_centavos : null);
+  }
+  return { disp, preco };
 }
 
 async function carregarPreviewUpgrade(supabase, { empresaId, planoAlvoId = null, quantidade = null, addonsSelecionados = [] } = {}) {
@@ -44,30 +52,37 @@ async function carregarPreviewUpgrade(supabase, { empresaId, planoAlvoId = null,
 
   const planoAlvo = planoAlvoId ? lista.find((p) => p.id === planoAlvoId) || null : null;
 
-  // Funcionalidades add-on (id, nome, status técnico).
+  // Funcionalidades add-on (id, nome, status técnico, preço padrão APROVADO).
   const { data: funcs } = await supabase
     .from('funcionalidades')
-    .select('id, codigo, nome, status_ciclo_vida')
+    .select('id, codigo, nome, status_ciclo_vida, preco_padrao_centavos')
     .in('codigo', CODIGOS_ADDON);
   const funcionalidades = funcs || [];
   const funcIds = funcionalidades.map((f) => f.id);
   const idPorCodigo = new Map(funcionalidades.map((f) => [f.codigo, f.id]));
 
-  const dispAtualPorId = await carregarDisponibilidade(supabase, planoAtual.id, funcIds);
-  const dispAlvoPorId = planoAlvo ? await carregarDisponibilidade(supabase, planoAlvo.id, funcIds) : new Map();
+  const atualPorId = await carregarDisponibilidade(supabase, planoAtual.id, funcIds);
+  const alvoPorId = planoAlvo ? await carregarDisponibilidade(supabase, planoAlvo.id, funcIds) : { disp: new Map(), preco: new Map() };
 
-  // Converte para Map(codigo -> disponibilidade).
+  // Converte para Map(codigo -> ...).
   const dispAtual = new Map();
   const dispAlvo = new Map();
+  const precoEspecificoAtual = new Map();
+  const precoEspecificoAlvo = new Map();
   for (const f of funcionalidades) {
-    dispAtual.set(f.codigo, dispAtualPorId.get(f.id) || 'indisponivel');
-    if (planoAlvo) dispAlvo.set(f.codigo, dispAlvoPorId.get(f.id) || 'indisponivel');
+    dispAtual.set(f.codigo, atualPorId.disp.get(f.id) || 'indisponivel');
+    precoEspecificoAtual.set(f.codigo, atualPorId.preco.get(f.id) ?? null);
+    if (planoAlvo) {
+      dispAlvo.set(f.codigo, alvoPorId.disp.get(f.id) || 'indisponivel');
+      precoEspecificoAlvo.set(f.codigo, alvoPorId.preco.get(f.id) ?? null);
+    }
   }
 
   const addons = funcionalidades.map((f) => ({
     codigo: f.codigo,
     nome: f.nome,
     em_breve: f.status_ciclo_vida !== 'disponivel',
+    preco_padrao_centavos: Number.isFinite(f.preco_padrao_centavos) ? f.preco_padrao_centavos : null,
   }));
 
   const selecionados = (Array.isArray(addonsSelecionados) ? addonsSelecionados : [])
@@ -78,7 +93,8 @@ async function carregarPreviewUpgrade(supabase, { empresaId, planoAlvoId = null,
     : (planoAtual.capacidade_inclusa || planoAtual.limite_motoristas || 1);
 
   const r = montarSnapshotUpgrade({
-    planoAtual, planoAlvo, quantidade: q, addons, selecionados, dispAtual, dispAlvo,
+    planoAtual, planoAlvo, quantidade: q, addons, selecionados,
+    dispAtual, dispAlvo, precoEspecificoAtual, precoEspecificoAlvo,
   });
   if (!r.ok) return { status: 422, body: { message: 'Não foi possível montar o snapshot.', motivo: r.motivo } };
 
@@ -86,7 +102,21 @@ async function carregarPreviewUpgrade(supabase, { empresaId, planoAlvoId = null,
   const planosComparaveis = lista
     .map((p) => ({ id: p.id, nome: p.nome, preco_mensal: Number(p.preco_mensal) || 0, requer_negociacao: p.requer_negociacao === true }));
 
-  return { status: 200, body: { ...r.snapshot, planos: planosComparaveis } };
+  // Uso atual (§11/§12): motoristas ativos × limite do plano, via autoridade
+  // canônica (planoLimiteService). READ-ONLY, fail-open: erro não quebra o preview.
+  let uso_atual = null;
+  try {
+    const lim = await avaliarLimiteMotoristas(supabase, empresaId);
+    uso_atual = {
+      motoristas_ativos: lim.totalAtual,
+      limite: lim.limite,
+      ilimitado: lim.ilimitado === true,
+      capacidade_inclusa: planoAtual.capacidade_inclusa ?? planoAtual.limite_motoristas ?? null,
+      estado: estadoCapacidade(lim.totalAtual, lim.limite),
+    };
+  } catch { /* fail-open: sem uso não bloqueia a comparação */ }
+
+  return { status: 200, body: { ...r.snapshot, planos: planosComparaveis, uso_atual } };
 }
 
 module.exports = { carregarPreviewUpgrade, CODIGOS_ADDON };

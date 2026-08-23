@@ -81,21 +81,52 @@ function makeSupabaseUpd(cenario) {
 }
 
 test('solicitarAddons cria pendente para novos e é idempotente para existentes', async () => {
+  // estrutura tem preço padrão APROVADO; ERP não (null).
   const funcs = [
-    { id: 'f-estrutura', codigo: 'estrutura_operacional', nome: 'Estrutura', status_ciclo_vida: 'disponivel' },
-    { id: 'f-erp', codigo: 'integracoes_erp', nome: 'ERP', status_ciclo_vida: 'em_breve' },
+    { id: 'f-estrutura', codigo: 'estrutura_operacional', nome: 'Estrutura', status_ciclo_vida: 'disponivel', preco_padrao_centavos: 14990 },
+    { id: 'f-erp', codigo: 'integracoes_erp', nome: 'ERP', status_ciclo_vida: 'em_breve', preco_padrao_centavos: null },
   ];
   const supa = makeSupabase({ funcs, existentes: [{ funcionalidade_id: 'f-erp', status: 'ativa' }] });
   const r = await solicitarAddons({ supabase: supa, empresaId: 'e1', usuarioId: 'u1', codigos: ['estrutura_operacional', 'integracoes_erp'] });
   assert.equal(r.status, 201);
   assert.deepEqual(r.body.solicitados, ['estrutura_operacional']); // erp já existia (ativa)
   assert.deepEqual(r.body.ja_existiam, ['integracoes_erp']);
-  // A linha criada é pendente, origem adicional, R$149,90, sem billing_component_id.
+  // A linha criada é pendente, origem adicional, preço da FEATURE, sem billing_component_id.
   const ins = supa._capt.inserts.find((i) => i.tabela === 'empresa_funcionalidades');
   assert.equal(ins.row.status, 'pendente');
   assert.equal(ins.row.origem, 'adicional');
-  assert.equal(ins.row.preco_mensal_centavos, ADDON_PADRAO_CENTAVOS);
+  assert.equal(ins.row.preco_mensal_centavos, 14990); // estrutura: preço padrão aprovado
   assert.equal(ins.row.billing_component_id, null);
+});
+
+test('solicitarAddons NÃO fabrica preço de ERP/SSO — grava null (sob proposta)', async () => {
+  const funcs = [
+    { id: 'f-erp', codigo: 'integracoes_erp', nome: 'ERP', status_ciclo_vida: 'em_breve', preco_padrao_centavos: null },
+    { id: 'f-sso', codigo: 'acesso_corporativo_sso', nome: 'SSO', status_ciclo_vida: 'em_breve', preco_padrao_centavos: null },
+  ];
+  const supa = makeSupabase({ funcs, existentes: [] });
+  const r = await solicitarAddons({ supabase: supa, empresaId: 'e1', codigos: ['integracoes_erp', 'acesso_corporativo_sso'] });
+  assert.equal(r.status, 201);
+  assert.deepEqual(r.body.solicitados.sort(), ['acesso_corporativo_sso', 'integracoes_erp']);
+  assert.deepEqual(r.body.sob_proposta.sort(), ['acesso_corporativo_sso', 'integracoes_erp']);
+  const inserts = supa._capt.inserts.filter((i) => i.tabela === 'empresa_funcionalidades');
+  assert.equal(inserts.length, 2);
+  for (const ins of inserts) {
+    assert.equal(ins.row.preco_mensal_centavos, null); // NUNCA 149,90 fabricado
+  }
+});
+
+test('solicitarAddons NÃO interage com billing/Asaas (faturas/billing_outbox)', async () => {
+  const funcs = [{ id: 'f-estrutura', codigo: 'estrutura_operacional', nome: 'Estrutura', status_ciclo_vida: 'disponivel', preco_padrao_centavos: 14990 }];
+  const base = makeSupabase({ funcs, existentes: [] });
+  const tabelasTocadas = [];
+  const supa = { from: (t) => { tabelasTocadas.push(t); return base.from(t); }, _capt: base._capt };
+  const r = await solicitarAddons({ supabase: supa, empresaId: 'e1', codigos: ['estrutura_operacional'] });
+  assert.equal(r.status, 201);
+  const proibidas = ['faturas', 'billing_outbox', 'cobrancas', 'asaas_webhook_events'];
+  for (const t of proibidas) {
+    assert.equal(tabelasTocadas.includes(t), false, `não deve tocar ${t}`);
+  }
 });
 
 test('solicitarAddons rejeita códigos inválidos/vazios', async () => {
