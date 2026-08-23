@@ -226,7 +226,7 @@ const SimulacaoUpgrade: React.FC<{ planos: PlanoPublico[]; planoAtualId: string 
 
       <div className="grid gap-3 md:grid-cols-2">
         <div className="space-y-2">
-          <p className="text-xs font-bold uppercase text-gray-400">Serviços adicionais {snap?.add_on_valor_padrao != null && <span className="normal-case font-medium">(padrão {brl(snap.add_on_valor_padrao)}/mês)</span>}</p>
+          <p className="text-xs font-bold uppercase text-gray-400">Serviços adicionais <span className="normal-case font-medium text-gray-400">(o valor de cada serviço aparece ao lado)</span></p>
           {(snap?.add_ons || []).map((a) => (
             <label key={a.codigo} className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm">
               <input type="checkbox" checked={selecionados.includes(a.codigo)} onChange={() => toggle(a.codigo)} disabled={a.atual.situacao === 'indisponivel' && (!a.alvo || a.alvo.situacao === 'indisponivel')} />
