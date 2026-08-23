@@ -10,16 +10,43 @@
 //
 // NÃO chama Asaas, NÃO cria cobrança/fatura, NÃO muda empresa.plano_id.
 
+// Preço de referência (apenas rótulo/legado). NÃO é aplicado cegamente: o preço
+// gravado é resolvido por funcionalidade (preço específico do plano → preço padrão
+// aprovado da feature → NULL/sob proposta). ERP/SSO sem preço aprovado gravam NULL.
 const ADDON_PADRAO_CENTAVOS = 14990;
 const CODIGOS_ADDON = ['estrutura_operacional', 'integracoes_erp', 'acesso_corporativo_sso'];
 
 async function carregarFuncionalidadesAddon(supabase) {
   const { data, error } = await supabase
     .from('funcionalidades')
-    .select('id, codigo, nome, status_ciclo_vida')
+    .select('id, codigo, nome, status_ciclo_vida, preco_padrao_centavos')
     .in('codigo', CODIGOS_ADDON);
   if (error) throw error;
   return data || [];
+}
+
+// Preço específico do plano da empresa por funcionalidade (override), quando existir.
+async function carregarPrecoEspecificoPlano(supabase, planoId, funcIds) {
+  const mapa = new Map();
+  if (!planoId || !funcIds.length) return mapa;
+  const { data, error } = await supabase
+    .from('plano_funcionalidades')
+    .select('funcionalidade_id, preco_especifico_centavos')
+    .eq('plano_id', planoId)
+    .in('funcionalidade_id', funcIds);
+  if (error || !data) return mapa;
+  for (const pf of data) {
+    mapa.set(pf.funcionalidade_id, Number.isFinite(pf.preco_especifico_centavos) ? pf.preco_especifico_centavos : null);
+  }
+  return mapa;
+}
+
+// Resolve o preço a GRAVAR na solicitação: específico do plano → padrão da feature
+// → NULL (sob proposta). NUNCA inventa preço: ERP/SSO sem preço aprovado = NULL.
+function resolverPrecoSolicitacao({ especificoCentavos, padraoCentavos }) {
+  if (Number.isFinite(especificoCentavos) && especificoCentavos > 0) return especificoCentavos;
+  if (Number.isFinite(padraoCentavos) && padraoCentavos > 0) return padraoCentavos;
+  return null;
 }
 
 // Cliente (admin/owner) solicita add-ons. Idempotente: se já existe linha
@@ -32,6 +59,15 @@ async function solicitarAddons({ supabase, empresaId, usuarioId, codigos } = {})
   const funcs = await carregarFuncionalidadesAddon(supabase);
   const porCodigo = new Map(funcs.map((f) => [f.codigo, f]));
 
+  // Plano atual da empresa (para preço específico do plano, se houver).
+  const { data: empresa } = await supabase
+    .from('empresas')
+    .select('plano_id')
+    .eq('id', empresaId)
+    .maybeSingle();
+  const funcIds = pedidos.map((c) => porCodigo.get(c)).filter(Boolean).map((f) => f.id);
+  const precoEspecifico = await carregarPrecoEspecificoPlano(supabase, empresa?.plano_id, funcIds);
+
   const { data: existentes } = await supabase
     .from('empresa_funcionalidades')
     .select('funcionalidade_id, status')
@@ -41,23 +77,30 @@ async function solicitarAddons({ supabase, empresaId, usuarioId, codigos } = {})
 
   const criadas = [];
   const idempotentes = [];
+  const sobProposta = [];
   for (const codigo of pedidos) {
     const f = porCodigo.get(codigo);
     if (!f) continue;
     if (jaTem.has(f.id)) { idempotentes.push(codigo); continue; }
+    // Preço por funcionalidade — NUNCA fabricado. ERP/SSO sem preço aprovado = NULL.
+    const preco = resolverPrecoSolicitacao({
+      especificoCentavos: precoEspecifico.get(f.id),
+      padraoCentavos: f.preco_padrao_centavos,
+    });
     const { error } = await supabase.from('empresa_funcionalidades').insert({
       empresa_id: empresaId,
       funcionalidade_id: f.id,
       status: 'pendente',
       origem: 'adicional',
-      preco_mensal_centavos: ADDON_PADRAO_CENTAVOS,
+      preco_mensal_centavos: preco, // null = sob proposta (super-admin define na aprovação)
       motivo: 'solicitacao_cliente',
       billing_component_id: null,
     });
     if (error) throw error;
     criadas.push(codigo);
+    if (preco == null) sobProposta.push(codigo);
   }
-  return { status: 201, body: { solicitados: criadas, ja_existiam: idempotentes } };
+  return { status: 201, body: { solicitados: criadas, ja_existiam: idempotentes, sob_proposta: sobProposta } };
 }
 
 // Super-admin: lista solicitações de add-on pendentes (com empresa e funcionalidade).
@@ -148,6 +191,7 @@ async function recusarSolicitacao({ supabase, id, aprovadorId, motivo = null } =
 module.exports = {
   ADDON_PADRAO_CENTAVOS,
   CODIGOS_ADDON,
+  resolverPrecoSolicitacao,
   solicitarAddons,
   listarSolicitacoes,
   aprovarSolicitacao,
