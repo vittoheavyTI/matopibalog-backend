@@ -38,7 +38,7 @@ export const AiCopilot: React.FC = () => {
     if (aberto) setTimeout(() => inputRef.current?.focus(), 50);
   }, [aberto]);
 
-  useEffect(() => { fimRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [mensagens, carregando]);
+  useEffect(() => { fimRef.current?.scrollIntoView?.({ behavior: 'smooth' }); }, [mensagens, carregando]);
 
   const enviar = useCallback(async (texto: string) => {
     const msg = texto.trim();

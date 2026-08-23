@@ -1,14 +1,23 @@
 'use strict';
 
-// Env dummy p/ permitir carregar módulos que importam config/supabase (o client
-// real nunca é usado — passamos um stub em ctx.supabase).
-process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'https://dummy.supabase.co';
-process.env.SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || 'dummy-key';
+// Intercepta config/supabase ANTES de carregar as tools, devolvendo um stub — assim
+// createClient real NÃO roda (evita "Node 20 sem WebSocket" no CI e não conecta a
+// nada). As tools recebem o supabase via ctx; o client real nunca é usado aqui.
+const Module = require('node:module');
+const originalLoad = Module._load;
+Module._load = function (request, parent, isMain) {
+  if (request === '../config/supabase' || request === '../../config/supabase' || /[\\/]config[\\/]supabase$/.test(request)) {
+    return { from: () => { throw new Error('stub supabase (não deve ser usado)'); } };
+  }
+  return originalLoad.call(this, request, parent, isMain);
+};
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const registry = require('../services/ai/toolRegistry');
 const { registerAllTools } = require('../services/ai/tools');
+
+Module._load = originalLoad; // restaura após carregar os módulos
 
 registry.clear();
 registerAllTools();
@@ -35,7 +44,7 @@ test('tools reais registradas com permissão canônica', () => {
 
 test('sem permissão → negado (handler nem roda, DB intocado)', async () => {
   for (const name of ['fleet.current.summary', 'operation.freights.attention', 'commercial.current_plan.summary']) {
-    const r = await registry.executeTool(name, {}, ctx()); // effectivePermissions vazio
+    const r = await registry.executeTool(name, {}, ctx());
     assert.equal(r.ok, false, `${name} deveria negar`);
     assert.equal(r.error, 'permission_denied');
   }
@@ -43,7 +52,6 @@ test('sem permissão → negado (handler nem roda, DB intocado)', async () => {
 
 test('commercial.current_plan.summary: com permissão usa tenant do servidor', async () => {
   let empresaConsultada = null;
-  // Stub supabase mínimo: empresas → plano ilimitado (limite null evita count).
   const supabase = {
     from(tabela) {
       const api = {
@@ -61,7 +69,7 @@ test('commercial.current_plan.summary: com permissão usa tenant do servidor', a
     ctx({ supabase, effectivePermissions: { 'company.settings.view': true } }),
   );
   assert.equal(r.ok, true);
-  assert.equal(empresaConsultada, 'empresa-A'); // tenant do servidor, não o arg
+  assert.equal(empresaConsultada, 'empresa-A');
   assert.equal(r.data.plano, 'Empresa Start');
   assert.equal(r.data.ilimitado, true);
 });
