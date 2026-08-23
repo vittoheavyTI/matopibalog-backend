@@ -10,6 +10,8 @@ const LANCAMENTO_ACTIONS = new Set(['created', 'approved', 'rejected', 'cancelle
 const DOCUMENT_STATUS = new Set(['ativo', 'cancelado']);
 const DOCUMENT_EVENT_TYPES = new Set(['uploaded', 'replaced', 'cancelled', 'acknowledged', 'returned']);
 const BILLING_OUTBOX_STATUS = new Set(['pending', 'processing', 'processed', 'failed', 'dead']);
+const CAMPAIGN_PLAN_STATUS = new Set(['GENERATED', 'READY_FOR_REVIEW', 'APPROVED', 'REJECTED', 'SUPERSEDED']);
+const CAMPAIGN_TRIP_STATUS = new Set(['PLANNED', 'UNASSIGNED', 'BLOCKED', 'CANCELLED']);
 
 function countDuplicates(rows, keyFn) {
   const seen = new Set();
@@ -233,6 +235,85 @@ function createDefaultInvariantRegistry() {
           }, checked_at));
         }
         return passResult({ sampled: assignments.length });
+      },
+    },
+    {
+      stable_key: 'campaign.plan.status_contract.v1',
+      domain: 'operation_campaign',
+      description: 'Operation campaign plans keep bounded statuses and objective plan evidence.',
+      severity: 'high',
+      remediation_policy: 'manual_review',
+      version: 1,
+      async check({ context, invariant, checked_at }) {
+        const rows = await context.facts.sampleCampaignPlanVersions();
+        const invalid = rows.filter((row) => {
+          const statusOk = CAMPAIGN_PLAN_STATUS.has(row.status);
+          const approvedEvidenceOk = row.status !== 'APPROVED' || (
+            row.result_summary && typeof row.result_summary === 'object' &&
+            row.resource_snapshot && typeof row.resource_snapshot === 'object'
+          );
+          return !statusOk || !approvedEvidenceOk || !row.generated_at;
+        });
+        if (invalid.length) {
+          return failResult(buildFinding(invariant, 'Campaign plan sample has invalid status/evidence rows.', {
+            sampled: rows.length,
+            invalid_count: invalid.length,
+          }, checked_at));
+        }
+        return passResult({ sampled: rows.length });
+      },
+    },
+    {
+      stable_key: 'campaign.trip.quantity_capacity.v1',
+      domain: 'operation_campaign',
+      description: 'Planned campaign trips keep non-negative quantity/capacity and unambiguous resource targets.',
+      severity: 'high',
+      remediation_policy: 'manual_review',
+      version: 1,
+      async check({ context, invariant, checked_at }) {
+        const rows = await context.facts.sampleCampaignPlannedTrips();
+        const invalid = rows.filter((row) => (
+          !CAMPAIGN_TRIP_STATUS.has(row.status) ||
+          Number(row.planned_quantity) < 0 ||
+          Number(row.required_capacity_kg) < 0 ||
+          Boolean(row.candidate_asset_id && row.candidate_composition_id)
+        ));
+        if (invalid.length) {
+          return failResult(buildFinding(invariant, 'Campaign planned trip sample has invalid quantity/capacity/target rows.', {
+            sampled: rows.length,
+            invalid_count: invalid.length,
+          }, checked_at));
+        }
+        return passResult({ sampled: rows.length });
+      },
+    },
+    {
+      stable_key: 'campaign.approval.tenant_plan_consistency.v1',
+      domain: 'operation_campaign',
+      description: 'Campaign approvals reference plan versions in the same tenant/campaign sample.',
+      severity: 'high',
+      remediation_policy: 'manual_review',
+      version: 1,
+      async check({ context, invariant, checked_at }) {
+        const [plans, approvals] = await Promise.all([
+          context.facts.sampleCampaignPlanVersions(),
+          context.facts.sampleCampaignApprovals(),
+        ]);
+        const planById = new Map(plans.map((plan) => [plan.id, plan]));
+        const invalid = approvals.filter((approval) => {
+          if (!['APPROVE', 'REJECT'].includes(approval.action)) return true;
+          if (!approval.actor_user_id || !approval.occurred_at) return true;
+          const plan = planById.get(approval.plan_version_id);
+          if (!plan) return false;
+          return plan.empresa_id !== approval.empresa_id || plan.campaign_id !== approval.campaign_id;
+        });
+        if (invalid.length) {
+          return failResult(buildFinding(invariant, 'Campaign approval sample has tenant/plan inconsistent rows.', {
+            sampled: approvals.length,
+            invalid_count: invalid.length,
+          }, checked_at));
+        }
+        return passResult({ sampled: approvals.length });
       },
     },
   ]);

@@ -179,6 +179,9 @@ export const Sidebar: React.FC = () => {
       ...(can('fleet.view') ? [
         { to: '/frota', icon: Boxes, label: 'Frota' },
       ] : []),
+      ...(can('campaign.view') ? [
+        { to: '/campanhas-escoamento', icon: ClipboardList, label: 'Campanhas de Escoamento' },
+      ] : []),
       ...(can('reports.operational.view') ? [
         { to: '/relatorios/torre-controle', icon: TowerControl, label: 'Torre de Controle' },
       ] : []),

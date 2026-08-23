@@ -18,6 +18,9 @@ function facts(overrides = {}) {
     sampleFleetDriverAssignments: async () => [],
     sampleFleetAssets: async () => [],
     sampleFleetCompositions: async () => [],
+    sampleCampaignPlanVersions: async () => [],
+    sampleCampaignPlannedTrips: async () => [],
+    sampleCampaignApprovals: async () => [],
     ...overrides,
   };
 }
@@ -31,7 +34,7 @@ test('default verifier returns PASS with compatible empty mature-domain samples'
   });
   assert.equal(run.status, 'PASS');
   assert.equal(run.findings.length, 0);
-  assert.equal(run.results.length, 8);
+  assert.equal(run.results.length, 11);
 });
 
 test('default verifier returns FAIL findings for objective contract drift', async () => {
@@ -106,6 +109,27 @@ test('fleet invariants detect tenant-inconsistent assignment targets', async () 
   });
   assert.equal(run.status, 'FAIL');
   assert.ok(run.findings.some((f) => f.invariant_key === 'fleet.assignment.tenant_consistency.v1'));
+});
+
+test('campaign invariants detect invalid planned trip targets and approved plan evidence', async () => {
+  const run = await verifyTarget({
+    target: { domain: 'operation_campaign' },
+    context: {
+      facts: facts({
+        sampleCampaignPlanVersions: async () => [
+          { id: 'plan-1', empresa_id: 'tenant-a', campaign_id: 'camp-1', status: 'APPROVED', result_summary: null, resource_snapshot: {}, generated_at: '2026-08-22T00:00:00.000Z' },
+        ],
+        sampleCampaignPlannedTrips: async () => [
+          { id: 'trip-1', empresa_id: 'tenant-a', campaign_id: 'camp-1', plan_version_id: 'plan-1', planned_quantity: 10, required_capacity_kg: 1000, candidate_asset_id: 'asset-1', candidate_composition_id: 'comp-1', status: 'PLANNED' },
+        ],
+      }),
+    },
+    registry: createDefaultInvariantRegistry(),
+    now: () => '2026-08-22T00:00:00.000Z',
+  });
+  assert.equal(run.status, 'FAIL');
+  assert.ok(run.findings.some((f) => f.invariant_key === 'campaign.plan.status_contract.v1'));
+  assert.ok(run.findings.some((f) => f.invariant_key === 'campaign.trip.quantity_capacity.v1'));
 });
 
 test('verifier supports multiple findings and stable invariant keys', async () => {
