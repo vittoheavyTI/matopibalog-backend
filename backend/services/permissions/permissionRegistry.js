@@ -25,6 +25,7 @@ const CATEGORIES = Object.freeze({
   documents: 'documents',
   drivers: 'drivers',
   fleet: 'fleet',
+  campaign: 'campaign',
   finance_operational: 'finance.operational',
   finance_saas: 'finance.saas',
   reports: 'reports',
@@ -77,6 +78,13 @@ const PERMISSIONS = Object.freeze([
   // ── FLEET (Onda 2) ────────────────────────────────────────────────────────
   { key: 'fleet.view', category: CATEGORIES.fleet, label: 'Ver frota', scoped: true, entitlementCodigo: 'fleet' },
   { key: 'fleet.manage', category: CATEGORIES.fleet, label: 'Gerenciar frota', scoped: true, entitlementCodigo: 'fleet' },
+
+  // ── OPERATION CAMPAIGN (Onda 3 / Campaign-A) ──────────────────────────────
+  { key: 'campaign.view', category: CATEGORIES.campaign, label: 'Ver campanhas de escoamento', scoped: true, entitlementCodigo: 'operation_campaign' },
+  { key: 'campaign.create', category: CATEGORIES.campaign, label: 'Criar campanhas de escoamento', scoped: true, entitlementCodigo: 'operation_campaign' },
+  { key: 'campaign.plan', category: CATEGORIES.campaign, label: 'Gerar plano de campanha', scoped: true, entitlementCodigo: 'operation_campaign' },
+  { key: 'campaign.approve', category: CATEGORIES.campaign, label: 'Aprovar plano de campanha', scoped: true, entitlementCodigo: 'operation_campaign' },
+  { key: 'campaign.manage', category: CATEGORIES.campaign, label: 'Gerenciar campanhas de escoamento', scoped: true, entitlementCodigo: 'operation_campaign' },
 
   // ── FINANCE OPERACIONAL (do cliente) ───────────────────────────────────────
   { key: 'finance.operational.view', category: CATEGORIES.finance_operational, label: 'Ver financeiro operacional', scoped: true },
@@ -163,6 +171,7 @@ const TEMPLATE_BASELINE_ALLOW = Object.freeze({
     'documents.view', 'documents.manage',
     'drivers.view', 'drivers.manage',
     'fleet.view', 'fleet.manage',
+    'campaign.view', 'campaign.create', 'campaign.plan', 'campaign.approve', 'campaign.manage',
     'finance.operational.view', 'finance.operational.manage',
     'finance.saas.view',
     'reports.operational.view', 'reports.financial.view',
@@ -174,6 +183,7 @@ const TEMPLATE_BASELINE_ALLOW = Object.freeze({
     'launch.view', 'launch.create',
     'documents.view', 'documents.manage',
     'drivers.view',
+    'campaign.view', 'campaign.create', 'campaign.plan',
     'reports.operational.view',
   ),
   [TEMPLATE_KEYS.GERENTE_FROTA]: _A(
@@ -183,6 +193,7 @@ const TEMPLATE_BASELINE_ALLOW = Object.freeze({
     'documents.view', 'documents.manage',
     'drivers.view', 'drivers.manage',
     'fleet.view', 'fleet.manage',
+    'campaign.view', 'campaign.create', 'campaign.plan', 'campaign.approve', 'campaign.manage',
     'reports.operational.view',
   ),
   [TEMPLATE_KEYS.GERENTE_FILIAL]: _A(
@@ -191,6 +202,7 @@ const TEMPLATE_BASELINE_ALLOW = Object.freeze({
     'launch.view', 'launch.create', 'launch.approve', 'launch.reject', 'launch.cancel',
     'documents.view', 'documents.manage',
     'drivers.view', 'drivers.manage',
+    'campaign.view', 'campaign.create', 'campaign.plan', 'campaign.approve',
     'reports.operational.view',
   ),
   [TEMPLATE_KEYS.GERENTE_REGIONAL]: _A(
@@ -199,6 +211,7 @@ const TEMPLATE_BASELINE_ALLOW = Object.freeze({
     'launch.view', 'launch.create', 'launch.approve', 'launch.reject', 'launch.cancel',
     'documents.view', 'documents.manage',
     'drivers.view', 'drivers.manage',
+    'campaign.view', 'campaign.create', 'campaign.plan', 'campaign.approve',
     'reports.operational.view',
   ),
   [TEMPLATE_KEYS.GERENTE_NACIONAL]: _A(
@@ -207,6 +220,7 @@ const TEMPLATE_BASELINE_ALLOW = Object.freeze({
     'launch.view', 'launch.create', 'launch.approve', 'launch.reject', 'launch.cancel',
     'documents.view', 'documents.manage',
     'drivers.view', 'drivers.manage',
+    'campaign.view', 'campaign.create', 'campaign.plan', 'campaign.approve',
     'reports.operational.view',
   ),
   [TEMPLATE_KEYS.FINANCEIRO]: _A(

@@ -159,6 +159,7 @@ app.use('/admin/diagnostics', require('./routes/diagnostics'));
 app.use('/admin/permissions', require('./routes/permissions'));
 app.use('/admin', adminRoutes);
 app.use('/fleet', require('./routes/fleet'));
+app.use('/operation-campaigns', require('./routes/operationCampaigns'));
 app.use('/fretes', fretesRoutes);
 app.use('/despesas', despesasRoutes);
 app.use('/abastecimentos', abastecimentosRoutes);

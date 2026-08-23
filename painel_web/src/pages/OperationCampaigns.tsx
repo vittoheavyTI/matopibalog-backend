@@ -1,0 +1,344 @@
+import { useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, CheckCircle2, ClipboardCheck, Factory, MapPin, Play, Plus, RefreshCw, Route, ShieldAlert, XCircle } from 'lucide-react';
+import api from '../api';
+
+type Unidade = { id: string; nome: string; codigo?: string | null };
+type Campaign = { id: string; reference_code: string; name: string; cargo_name: string; status: string; planning_status: string; created_at?: string };
+type PlanDetail = {
+  plan: { id: string; version_number: number; status: string; result_summary?: any };
+  planned_trips: Array<{ id: string; planned_quantity: number; quantity_unit: string; required_capacity_kg: number; status: string; candidate_asset_id?: string | null; candidate_composition_id?: string | null }>;
+  exceptions: Array<{ id: string; exception_type: string; severity: string; status: string }>;
+};
+
+const emptyCampaign = { reference_code: '', name: '', cargo_name: '', operational_unit_ids: [] as string[] };
+const emptyLocations = {
+  origin: { name: '', unidade_operacional_id: '' },
+  destination: { name: '', unidade_operacional_id: '' },
+};
+const emptyDemand = { target_quantity: 0, quantity_unit: 'ton' };
+
+function apiError(error: any) {
+  const denial = error?.response?.data?.denial;
+  if (denial === 'entitlement_denied') return 'Campanhas de escoamento ainda não estão habilitadas no contrato desta empresa.';
+  if (denial === 'permission_denied') return 'Seu perfil não tem permissão para operar campanhas de escoamento.';
+  if (denial === 'scope_denied') return 'A unidade selecionada está fora do seu escopo operacional.';
+  return error?.response?.data?.message || 'Não foi possível concluir a operação.';
+}
+
+function statusTone(status: string) {
+  if (status === 'APPROVED') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+  if (status === 'READY_FOR_REVIEW') return 'bg-amber-50 text-amber-700 border-amber-200';
+  if (status === 'CANCELLED' || status === 'REJECTED') return 'bg-rose-50 text-rose-700 border-rose-200';
+  return 'bg-slate-50 text-slate-700 border-slate-200';
+}
+
+export function OperationCampaigns() {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<{ type: 'ok' | 'error'; text: string } | null>(null);
+  const [unidades, setUnidades] = useState<Unidade[]>([]);
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [selectedId, setSelectedId] = useState('');
+  const [campaignForm, setCampaignForm] = useState(emptyCampaign);
+  const [locationsForm, setLocationsForm] = useState(emptyLocations);
+  const [demandForm, setDemandForm] = useState(emptyDemand);
+  const [plan, setPlan] = useState<PlanDetail | null>(null);
+
+  const selected = useMemo(() => campaigns.find((item) => item.id === selectedId) || campaigns[0] || null, [campaigns, selectedId]);
+  const unitOptions = unidades.filter((u) => campaignForm.operational_unit_ids.includes(u.id) || !campaignForm.operational_unit_ids.length);
+
+  async function carregar() {
+    setLoading(true);
+    setMessage(null);
+    try {
+      const [campaignRes, unidadesRes] = await Promise.all([
+        api.get('/operation-campaigns'),
+        api.get('/operation-campaigns/context').catch(() => ({ data: { unidades: [] } })),
+      ]);
+      const itens = campaignRes.data?.itens || [];
+      setCampaigns(itens);
+      setSelectedId((current) => current || itens[0]?.id || '');
+      setUnidades(Array.isArray(unidadesRes.data?.unidades) ? unidadesRes.data.unidades : []);
+    } catch (error) {
+      setMessage({ type: 'error', text: apiError(error) });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    carregar();
+  }, []);
+
+  async function criarCampanha(event: React.FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    setMessage(null);
+    try {
+      const { data } = await api.post('/operation-campaigns', {
+        ...campaignForm,
+        client_request_id: `web-${Date.now()}`,
+      });
+      setCampaigns((items) => [data, ...items.filter((item) => item.id !== data.id)]);
+      setSelectedId(data.id);
+      setCampaignForm(emptyCampaign);
+      setMessage({ type: 'ok', text: 'Campanha criada.' });
+    } catch (error) {
+      setMessage({ type: 'error', text: apiError(error) });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function salvarBase(event: React.FormEvent) {
+    event.preventDefault();
+    if (!selected) return;
+    setSaving(true);
+    setMessage(null);
+    try {
+      const locationsPayload = [
+        { kind: 'origin', name: locationsForm.origin.name, unidade_operacional_id: locationsForm.origin.unidade_operacional_id || null, location_type: 'operational', priority: 10 },
+        { kind: 'destination', name: locationsForm.destination.name, unidade_operacional_id: locationsForm.destination.unidade_operacional_id || null, location_type: 'operational', priority: 20 },
+      ];
+      const { data: locRes } = await api.put(`/operation-campaigns/${selected.id}/locations`, { locations: locationsPayload });
+      const origem = locRes.itens.find((item: any) => item.kind === 'origin');
+      const destino = locRes.itens.find((item: any) => item.kind === 'destination');
+      await api.put(`/operation-campaigns/${selected.id}/demands`, {
+        demands: [{
+          origin_location_id: origem.id,
+          destination_location_id: destino.id,
+          cargo_name: selected.cargo_name,
+          target_quantity: Number(demandForm.target_quantity || 0),
+          quantity_unit: demandForm.quantity_unit,
+        }],
+      });
+      setMessage({ type: 'ok', text: 'Locais e demanda salvos.' });
+    } catch (error) {
+      setMessage({ type: 'error', text: apiError(error) });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function gerarPlano() {
+    if (!selected) return;
+    setSaving(true);
+    setMessage(null);
+    try {
+      const { data } = await api.post(`/operation-campaigns/${selected.id}/plans`, { client_request_id: `plan-${Date.now()}` });
+      setPlan(data);
+      await carregar();
+      setMessage({ type: 'ok', text: 'Plano pronto para revisão.' });
+    } catch (error) {
+      setMessage({ type: 'error', text: apiError(error) });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function aprovarPlano() {
+    if (!selected || !plan) return;
+    setSaving(true);
+    setMessage(null);
+    try {
+      const { data } = await api.post(`/operation-campaigns/${selected.id}/plans/${plan.plan.id}/approve`, { client_request_id: `approve-${Date.now()}` });
+      setPlan(data);
+      await carregar();
+      setMessage({ type: 'ok', text: 'Plano aprovado. Nenhum frete foi criado.' });
+    } catch (error) {
+      setMessage({ type: 'error', text: apiError(error) });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function toggleUnit(id: string) {
+    setCampaignForm((current) => ({
+      ...current,
+      operational_unit_ids: current.operational_unit_ids.includes(id)
+        ? current.operational_unit_ids.filter((unitId) => unitId !== id)
+        : [...current.operational_unit_ids, id],
+    }));
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-50 px-4 py-5 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-7xl space-y-5">
+        <div className="flex flex-col gap-3 border-b border-slate-200 pb-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h1 className="text-2xl font-semibold text-slate-900">Campanhas de Escoamento</h1>
+            <p className="text-sm text-slate-500">Planeje capacidade própria até o plano aprovado, sem gerar fretes.</p>
+          </div>
+          <button onClick={carregar} disabled={loading || saving} className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-60">
+            <RefreshCw size={16} /> Atualizar
+          </button>
+        </div>
+
+        {message && (
+          <div className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${message.type === 'ok' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-rose-200 bg-rose-50 text-rose-700'}`}>
+            {message.type === 'ok' ? <CheckCircle2 size={16} /> : <ShieldAlert size={16} />}
+            <span>{message.text}</span>
+          </div>
+        )}
+
+        <div className="grid gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
+          <section className="space-y-4">
+            <form onSubmit={criarCampanha} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-800"><Plus size={16} /> Nova campanha</div>
+              <div className="space-y-3">
+                <input required placeholder="Código de referência" value={campaignForm.reference_code} onChange={(e) => setCampaignForm({ ...campaignForm, reference_code: e.target.value })} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                <input required placeholder="Nome" value={campaignForm.name} onChange={(e) => setCampaignForm({ ...campaignForm, name: e.target.value })} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                <input required placeholder="Carga" value={campaignForm.cargo_name} onChange={(e) => setCampaignForm({ ...campaignForm, cargo_name: e.target.value })} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold uppercase text-slate-500">Unidades</p>
+                  <div className="max-h-36 space-y-1 overflow-auto rounded-lg border border-slate-200 p-2">
+                    {unidades.map((unidade) => (
+                      <label key={unidade.id} className="flex items-center gap-2 rounded-md px-2 py-1 text-sm text-slate-700 hover:bg-slate-50">
+                        <input type="checkbox" checked={campaignForm.operational_unit_ids.includes(unidade.id)} onChange={() => toggleUnit(unidade.id)} className="h-4 w-4 rounded border-slate-300" />
+                        <span>{unidade.nome}</span>
+                      </label>
+                    ))}
+                    {!unidades.length && <p className="px-2 py-3 text-sm text-slate-500">Unidades indisponíveis para seleção.</p>}
+                  </div>
+                </div>
+                <button disabled={saving || loading} className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-60">
+                  <ClipboardCheck size={16} /> Criar
+                </button>
+              </div>
+            </form>
+
+            <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+              <div className="mb-2 text-sm font-semibold text-slate-800">Em andamento</div>
+              <div className="space-y-2">
+                {campaigns.map((item) => (
+                  <button key={item.id} onClick={() => { setSelectedId(item.id); setPlan(null); }} className={`w-full rounded-lg border px-3 py-2 text-left text-sm transition ${selected?.id === item.id ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200 hover:bg-slate-50'}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold text-slate-900">{item.reference_code}</span>
+                      <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${statusTone(item.status)}`}>{item.status}</span>
+                    </div>
+                    <p className="mt-1 text-slate-600">{item.name}</p>
+                  </button>
+                ))}
+                {!campaigns.length && <p className="px-2 py-4 text-center text-sm text-slate-500">{loading ? 'Carregando...' : 'Nenhuma campanha encontrada.'}</p>}
+              </div>
+            </div>
+          </section>
+
+          <section className="space-y-4">
+            {selected ? (
+              <>
+                <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-500">{selected.reference_code}</p>
+                      <h2 className="text-xl font-semibold text-slate-900">{selected.name}</h2>
+                      <p className="text-sm text-slate-500">{selected.cargo_name}</p>
+                    </div>
+                    <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${statusTone(selected.status)}`}>{selected.planning_status}</span>
+                  </div>
+                </div>
+
+                <form onSubmit={salvarBase} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="mb-4 grid gap-3 md:grid-cols-3">
+                    <label className="space-y-1 text-sm font-medium text-slate-700">
+                      <span className="flex items-center gap-1"><MapPin size={15} /> Origem</span>
+                      <input required value={locationsForm.origin.name} onChange={(e) => setLocationsForm({ ...locationsForm, origin: { ...locationsForm.origin, name: e.target.value } })} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                    </label>
+                    <label className="space-y-1 text-sm font-medium text-slate-700">
+                      <span className="flex items-center gap-1"><Factory size={15} /> Destino</span>
+                      <input required value={locationsForm.destination.name} onChange={(e) => setLocationsForm({ ...locationsForm, destination: { ...locationsForm.destination, name: e.target.value } })} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                    </label>
+                    <label className="space-y-1 text-sm font-medium text-slate-700">
+                      <span>Quantidade</span>
+                      <div className="flex gap-2">
+                        <input required type="number" min="0" step="0.001" value={demandForm.target_quantity} onChange={(e) => setDemandForm({ ...demandForm, target_quantity: Number(e.target.value) })} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                        <select value={demandForm.quantity_unit} onChange={(e) => setDemandForm({ ...demandForm, quantity_unit: e.target.value })} className="rounded-lg border border-slate-300 px-3 py-2 text-sm">
+                          <option value="ton">t</option>
+                          <option value="kg">kg</option>
+                        </select>
+                      </div>
+                    </label>
+                  </div>
+                  {!!unitOptions.length && (
+                    <div className="mb-4 grid gap-3 md:grid-cols-2">
+                      <select value={locationsForm.origin.unidade_operacional_id} onChange={(e) => setLocationsForm({ ...locationsForm, origin: { ...locationsForm.origin, unidade_operacional_id: e.target.value } })} className="rounded-lg border border-slate-300 px-3 py-2 text-sm">
+                        <option value="">Unidade da origem</option>
+                        {unitOptions.map((u) => <option key={u.id} value={u.id}>{u.nome}</option>)}
+                      </select>
+                      <select value={locationsForm.destination.unidade_operacional_id} onChange={(e) => setLocationsForm({ ...locationsForm, destination: { ...locationsForm.destination, unidade_operacional_id: e.target.value } })} className="rounded-lg border border-slate-300 px-3 py-2 text-sm">
+                        <option value="">Unidade do destino</option>
+                        {unitOptions.map((u) => <option key={u.id} value={u.id}>{u.nome}</option>)}
+                      </select>
+                    </div>
+                  )}
+                  <div className="flex flex-wrap gap-2">
+                    <button disabled={saving} className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-60"><CheckCircle2 size={16} /> Salvar base</button>
+                    <button type="button" onClick={gerarPlano} disabled={saving} className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"><Play size={16} /> Gerar plano</button>
+                  </div>
+                </form>
+
+                <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="mb-3 flex items-center justify-between">
+                    <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-800"><Route size={16} /> Plano</h3>
+                    {plan?.plan.status === 'READY_FOR_REVIEW' && (
+                      <button onClick={aprovarPlano} disabled={saving} className="inline-flex items-center gap-2 rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-60"><ClipboardCheck size={16} /> Aprovar</button>
+                    )}
+                  </div>
+                  {plan ? (
+                    <div className="space-y-4">
+                      <div className="grid gap-3 md:grid-cols-4">
+                        <Metric label="Versão" value={`v${plan.plan.version_number}`} />
+                        <Metric label="Viagens" value={String(plan.plan.result_summary?.planned_trips || plan.planned_trips.length)} />
+                        <Metric label="Bloqueios" value={String(plan.plan.result_summary?.hard_exceptions || 0)} />
+                        <Metric label="Alertas" value={String(plan.plan.result_summary?.warning_exceptions || plan.exceptions.length)} />
+                      </div>
+                      <div className="overflow-hidden rounded-lg border border-slate-200">
+                        <table className="w-full text-left text-sm">
+                          <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="px-3 py-2">Qtd.</th><th className="px-3 py-2">Capacidade</th><th className="px-3 py-2">Recurso</th><th className="px-3 py-2">Status</th></tr></thead>
+                          <tbody>
+                            {plan.planned_trips.map((trip) => (
+                              <tr key={trip.id} className="border-t border-slate-100">
+                                <td className="px-3 py-2">{Number(trip.planned_quantity).toLocaleString('pt-BR')} {trip.quantity_unit}</td>
+                                <td className="px-3 py-2">{Number(trip.required_capacity_kg).toLocaleString('pt-BR')} kg</td>
+                                <td className="px-3 py-2">{trip.candidate_composition_id ? 'Composição' : trip.candidate_asset_id ? 'Ativo' : 'Sem alocação'}</td>
+                                <td className="px-3 py-2">{trip.status}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      {!!plan.exceptions.length && (
+                        <div className="space-y-2">
+                          {plan.exceptions.map((item) => (
+                            <div key={item.id} className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                              <AlertTriangle size={16} /> {item.severity}: {item.exception_type}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-5 text-sm text-slate-500">
+                      <XCircle size={16} /> Gere um plano para revisar capacidade, viagens planejadas e exceções.
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : (
+              <div className="rounded-lg border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">Selecione ou crie uma campanha para começar.</div>
+            )}
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+      <p className="text-xs font-semibold uppercase text-slate-500">{label}</p>
+      <p className="mt-1 text-lg font-semibold text-slate-900">{value}</p>
+    </div>
+  );
+}

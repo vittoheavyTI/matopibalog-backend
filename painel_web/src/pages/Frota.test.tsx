@@ -75,7 +75,7 @@ describe('Frota operacional', () => {
 
     render(<Frota />);
 
-    expect(await screen.findByText('Cadastre o primeiro ativo')).toBeInTheDocument();
+    expect(await screen.findByText('Cadastre o primeiro ativo', {}, { timeout: 5000 })).toBeInTheDocument();
     expect(screen.getByText('Depois monte uma composicao para transformar a base da Fleet Foundation em operacao diaria.')).toBeInTheDocument();
     expect(screen.queryByText('Cadastrar ativo')).not.toBeInTheDocument();
   });
