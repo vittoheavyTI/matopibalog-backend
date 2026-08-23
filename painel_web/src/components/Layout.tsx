@@ -4,6 +4,7 @@ import { Sidebar } from './Sidebar';
 import { SessionTimeoutWatcher } from './SessionTimeoutWatcher';
 import { NotificacoesDropdown } from './NotificacoesDropdown';
 import { OperationalContextSelector } from './OperationalContextSelector';
+import { AiCopilot } from './AiCopilot';
 import { useAuth } from '../contexts/AuthContext';
 import { useContratacaoStatus } from '../hooks/useContratacaoStatus';
 import api from '../api';
@@ -259,6 +260,9 @@ export const Layout: React.FC = () => {
           <Outlet />
         </main>
       </div>
+
+      {/* Copiloto Operacional (AI V1) — read-only; não bloqueia a navegação. */}
+      <AiCopilot />
     </div>
   );
 };
