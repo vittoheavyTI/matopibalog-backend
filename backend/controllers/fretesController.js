@@ -3,6 +3,7 @@ const notificacaoService = require('../services/notificacaoService');
 const { calcularComissao } = require('../utils/comissao');
 const { normalizarModalidade, calcularValorToneladaKm } = require('../utils/calculoFrete');
 const { validarLimitesFrete } = require('../utils/limitesFrete');
+const { createFreight, FreightCreationError } = require('../services/freights/freightCreationService');
 const {
   prepararCorrecaoFinanceira,
   contemCampoFinanceiro,
@@ -320,139 +321,45 @@ exports.getAll = async (req, res) => {
 };
 
 exports.create = async (req, res) => {
-  const { origem, destino, km_inicial, km_final, valor_frete, quem_recebeu, toneladas, valor_tonelada_km, odometro_obrigatorio } = req.body;
-  // Modalidade: ausente/desconhecida → 'valor_fixo' (comportamento histórico e
-  // compatível com app/APK antigos que não enviam o campo).
-  const modalidade = normalizarModalidade(req.body.modalidade_calculo) || 'valor_fixo';
-  const motorista_id = req.user.role === 'admin'
-    ? (req.body.motorista_id || req.user.uid)
-    : req.user.uid;
-
   try {
-    // 1. Validar status
-    const isAtivo = await checkMotoristaStatus(motorista_id);
-    if (!isAtivo) return res.status(403).json({ message: 'Motorista não aprovado ou bloqueado.' });
-
-    // 2. Buscar dados do motorista (placa e comissão) em uma única consulta
-    const { data: motData, error: motError } = await supabase
-      .from('motoristas')
-      .select('placa_veiculo, percentual_comissao, empresa_id, unidade_operacional_id')
-      .eq('id', motorista_id)
-      .single();
-
-    if (motError || !motData) throw motError || new Error('Dados do motorista não encontrados');
-
-    // 2b. Definir quem_recebeu por tipo de empresa (TAC vs CLT):
-    //  - autonomo (TAC) → SEMPRE 'motorista' (recebe direto, é dono do veículo); o body NÃO
-    //    sobrescreve — defense-in-depth contra requisição forjada (espelha a trava do frontend).
-    //  - transportadora (CLT) / vinculado → respeita o body; default 'proprietario' se ausente.
-    // Lookup do tipo sempre executado; se falhar, fallback leniente + log (mantém comportamento atual).
-    let quemRecebeuFinal = quem_recebeu;
-    const { data: empData, error: empError } = await supabase
-      .from('empresas')
-      .select('tipo')
-      .eq('id', motData.empresa_id)
-      .single();
-    if (empError || !empData) {
-      console.warn('[fretesController:create] lookup tipo empresa falhou; fallback leniente:', empError?.message);
-    }
-    if (empData?.tipo === 'autonomo') {
-      quemRecebeuFinal = 'motorista';
-    } else if (!quemRecebeuFinal) {
-      quemRecebeuFinal = 'proprietario';
-    }
-
-    // Valor do frete por modalidade:
-    //  - valor_fixo: usa o valor_frete digitado.
-    //  - tonelada_km: DERIVADO = toneladas * (km_final - km_inicial) * valor_tonelada_km.
-    //    Na criação o km_final normalmente ainda não existe → o valor real ainda não
-    //    é calculável. Como a coluna fretes.valor_frete é NOT NULL (sem CHECK > 0,
-    //    confirmado no schema de produção), gravamos 0 PROVISÓRIO nesse caso — nunca
-    //    null (o null quebrava o INSERT com 23502). O valor definitivo é calculado na
-    //    finalização (ou no update, quando o km_final for informado). Se ambos os KMs
-    //    já vierem no create, calcula desde já. valor_frete do body é ignorado aqui.
-    let valorFreteFinal = valor_frete !== undefined ? Number(valor_frete) : null;
-    if (modalidade === 'tonelada_km') {
-      const calc = calcularValorToneladaKm({
-        toneladas,
-        valorToneladaKm: valor_tonelada_km,
-        kmInicial: km_inicial,
-        kmFinal: km_final,
-      });
-      valorFreteFinal = calc !== null ? calc : 0;
-    }
-
-    // Trava de sanidade operacional: barra valores absurdos (ex.: R$150/t·km no lugar
-    // de R$0,15) ANTES de gravar. Valida os campos de tonelada/km, a ordem dos KMs e o
-    // valor final (derivado ou fixo). Reprova → 422, sem insert.
-    const limite = validarLimitesFrete({
-      modalidade,
-      valorFrete: valorFreteFinal,
-      toneladas,
-      valorToneladaKm: valor_tonelada_km,
-      kmInicial: km_inicial,
-      kmFinal: km_final,
+    const result = await createFreight(supabase, {
+      user: req.user,
+      body: req.body,
+      resolveOperationalUnit: async ({ motorista }) => {
+        if (req.user.role !== 'admin') return motorista.unidade_operacional_id || null;
+        const scope = await resolverEscopoOperacional(req, { empresaId: motorista.empresa_id });
+        if (escopoTemSelecaoInvalida(scope)) {
+          throw new FreightCreationError('Unidade operacional selecionada fora do seu escopo.', {
+            status: 403,
+            code: 'operational_unit_selection_invalid',
+          });
+        }
+        const unitDecision = deriveUnitForWrite({
+          scope,
+          requestedUnitId: req.body.unidade_operacional_id,
+          motoristaUnitId: motorista.unidade_operacional_id,
+        });
+        if (!unitDecision.ok) {
+          throw new FreightCreationError('Unidade operacional nao autorizada para este frete.', {
+            status: 403,
+            code: unitDecision.reason,
+            details: { error: unitDecision.reason, message: 'Unidade operacional nao autorizada para este frete.' },
+          });
+        }
+        return unitDecision.unidade_operacional_id;
+      },
     });
-    if (!limite.ok) return res.status(422).json(respostaLimiteFrete(limite));
 
-    // Comissão só para VINCULADO (empresa.tipo conhecido e ≠ 'autonomo'). Autônomo e
-    // tipo desconhecido → 0 (nunca assume 12%). Campo comissao_calculada mantido no
-    // contrato da resposta, apenas zerado quando não há comissão fixa (inclui
-    // tonelada_km ainda sem valor calculado).
-    const comissao = calcularComissao(valorFreteFinal, motData.percentual_comissao, empData?.tipo);
-    let unidadeOperacionalId = motData.unidade_operacional_id || null;
-    if (req.user.role === 'admin') {
-      const scope = await resolverEscopoOperacional(req, { empresaId: motData.empresa_id });
-      if (escopoTemSelecaoInvalida(scope)) {
-        return res.status(403).json({ message: 'Unidade operacional selecionada fora do seu escopo.' });
-      }
-      const unitDecision = deriveUnitForWrite({
-        scope,
-        requestedUnitId: req.body.unidade_operacional_id,
-        motoristaUnitId: motData.unidade_operacional_id,
-      });
-      if (!unitDecision.ok) {
-        return res.status(403).json({ error: unitDecision.reason, message: 'Unidade operacional nao autorizada para este frete.' });
-      }
-      unidadeOperacionalId = unitDecision.unidade_operacional_id;
-    }
-
-    // 3. Inserir frete. Campos de tonelada/km só são gravados na modalidade
-    // tonelada_km; no valor_fixo ficam null para não sujar o registro.
-    const { data, error } = await supabase
-      .from('fretes')
-      .insert({
-        motorista_id,
-        empresa_id: motData.empresa_id,
-        unidade_operacional_id: unidadeOperacionalId,
-        origem,
-        destino,
-        km_inicial,
-        valor_frete: valorFreteFinal,
-        modalidade_calculo: modalidade,
-        toneladas: modalidade === 'tonelada_km' && toneladas !== undefined ? Number(toneladas) : null,
-        valor_tonelada_km: modalidade === 'tonelada_km' && valor_tonelada_km !== undefined ? Number(valor_tonelada_km) : null,
-        quem_recebeu: quemRecebeuFinal,
-        placa: motData.placa_veiculo,
-        // Novo fluxo de odômetro: o frete só fica ativo depois que a foto
-        // inicial é enviada. Registros antigos já ativos/finalizados não mudam.
-        status: odometro_obrigatorio === true ? 'pendente' : 'ativo'
-      })
-      .select()
-      .single();
-
-    if (error) {
-      console.error('[fretesController:create] Erro ao inserir frete:', error);
-      throw error;
-    }
-
-    // Notificação de frete criado (best-effort): avisa o motorista dono e os admins
-    // da empresa (exceto o autor). Não bloqueia a criação; em falha, apenas loga para
-    // dar observabilidade (antes o erro era engolido em silêncio).
+    const { data, comissao } = result;
     notificacaoService.notificarFreteCriado(data, { actorId: req.user?.uid })
       .catch((e) => console.warn('[fretesController:create] notificarFreteCriado falhou:', e?.message || e));
     res.status(201).json({ ...data, comissao_calculada: comissao });
   } catch (error) {
+    if (error instanceof FreightCreationError) {
+      if (error.details?.error === 'frete_operational_limit') return res.status(error.status).json(error.details);
+      if (error.details?.message) return res.status(error.status).json(error.details);
+      return res.status(error.status).json({ message: error.message });
+    }
     console.error(error);
     // Violação de restrição do banco (NOT NULL / CHECK) → 400 com mensagem em
     // português, em vez do genérico "Erro ao criar frete." que escondia a causa.

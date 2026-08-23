@@ -67,6 +67,8 @@ router.get('/:campaignId/plans/:planId', requireCampaignPermission('campaign.vie
 router.post('/:campaignId/plans/:planId/approve', requireCampaignPermission('campaign.approve'), controller.aprovarPlano);
 router.post('/:campaignId/plans/:planId/reject', requireCampaignPermission('campaign.approve'), controller.rejeitarPlano);
 router.post('/:campaignId/plans/:planId/verify', requireCampaignPermission('campaign.view'), controller.verificarPlano);
+router.get('/:campaignId/plans/:planId/materialization-preview', requireCampaignPermission('campaign.manage'), controller.preverMaterializacao);
+router.post('/:campaignId/plans/:planId/materialize', requireCampaignPermission('campaign.manage'), controller.materializarPlano);
 router.post('/:campaignId/cancel', requireCampaignPermission('campaign.manage'), controller.cancelarCampanha);
 
 module.exports = router;

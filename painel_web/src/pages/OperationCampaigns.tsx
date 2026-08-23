@@ -9,6 +9,10 @@ type PlanDetail = {
   planned_trips: Array<{ id: string; planned_quantity: number; quantity_unit: string; required_capacity_kg: number; status: string; candidate_asset_id?: string | null; candidate_composition_id?: string | null }>;
   exceptions: Array<{ id: string; exception_type: string; severity: string; status: string }>;
 };
+type MaterializationPreview = {
+  summary: { requested: number; already_materialized: number; ready: number; created?: number; blocked: number; failed?: number; retryable?: number };
+  items: Array<{ planned_trip_id: string; status: string; frete_id?: string; reason?: string; retryable?: boolean }>;
+};
 
 const emptyCampaign = { reference_code: '', name: '', cargo_name: '', operational_unit_ids: [] as string[] };
 const emptyLocations = {
@@ -16,6 +20,7 @@ const emptyLocations = {
   destination: { name: '', unidade_operacional_id: '' },
 };
 const emptyDemand = { target_quantity: 0, quantity_unit: 'ton' };
+const emptyMaterialization = { modalidade_calculo: 'valor_fixo', valor_frete: '', valor_tonelada_km: '' };
 
 function apiError(error: any) {
   const denial = error?.response?.data?.denial;
@@ -43,6 +48,8 @@ export function OperationCampaigns() {
   const [locationsForm, setLocationsForm] = useState(emptyLocations);
   const [demandForm, setDemandForm] = useState(emptyDemand);
   const [plan, setPlan] = useState<PlanDetail | null>(null);
+  const [materializationForm, setMaterializationForm] = useState(emptyMaterialization);
+  const [materializationPreview, setMaterializationPreview] = useState<MaterializationPreview | null>(null);
 
   const selected = useMemo(() => campaigns.find((item) => item.id === selectedId) || campaigns[0] || null, [campaigns, selectedId]);
   const unitOptions = unidades.filter((u) => campaignForm.operational_unit_ids.includes(u.id) || !campaignForm.operational_unit_ids.length);
@@ -127,6 +134,7 @@ export function OperationCampaigns() {
     try {
       const { data } = await api.post(`/operation-campaigns/${selected.id}/plans`, { client_request_id: `plan-${Date.now()}` });
       setPlan(data);
+      setMaterializationPreview(null);
       await carregar();
       setMessage({ type: 'ok', text: 'Plano pronto para revisão.' });
     } catch (error) {
@@ -143,8 +151,9 @@ export function OperationCampaigns() {
     try {
       const { data } = await api.post(`/operation-campaigns/${selected.id}/plans/${plan.plan.id}/approve`, { client_request_id: `approve-${Date.now()}` });
       setPlan(data);
+      setMaterializationPreview(null);
       await carregar();
-      setMessage({ type: 'ok', text: 'Plano aprovado. Nenhum frete foi criado.' });
+      setMessage({ type: 'ok', text: 'Plano aprovado.' });
     } catch (error) {
       setMessage({ type: 'error', text: apiError(error) });
     } finally {
@@ -159,6 +168,54 @@ export function OperationCampaigns() {
         ? current.operational_unit_ids.filter((unitId) => unitId !== id)
         : [...current.operational_unit_ids, id],
     }));
+  }
+
+  function materializationPayload() {
+    const payload: any = {
+      modalidade_calculo: materializationForm.modalidade_calculo,
+      client_request_id: `materialize-${Date.now()}`,
+    };
+    if (materializationForm.modalidade_calculo === 'tonelada_km') {
+      payload.valor_tonelada_km = Number(materializationForm.valor_tonelada_km || 0);
+    } else {
+      payload.valor_frete = Number(materializationForm.valor_frete || 0);
+    }
+    return payload;
+  }
+
+  async function carregarPreviewMaterializacao() {
+    if (!selected || !plan) return;
+    setSaving(true);
+    setMessage(null);
+    try {
+      const { data } = await api.get(`/operation-campaigns/${selected.id}/plans/${plan.plan.id}/materialization-preview`);
+      setMaterializationPreview(data);
+      setMessage({ type: 'ok', text: 'Preview de materialização pronto.' });
+    } catch (error) {
+      setMessage({ type: 'error', text: apiError(error) });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function materializarFretes() {
+    if (!selected || !plan || !materializationPreview) return;
+    const ready = materializationPreview.summary.ready || 0;
+    const existing = materializationPreview.summary.already_materialized || 0;
+    const blocked = materializationPreview.summary.blocked || 0;
+    const ok = window.confirm(`Materializar ${ready} frete(s), manter ${existing} já existente(s) e deixar ${blocked} bloqueado(s)?`);
+    if (!ok) return;
+    setSaving(true);
+    setMessage(null);
+    try {
+      const { data } = await api.post(`/operation-campaigns/${selected.id}/plans/${plan.plan.id}/materialize`, materializationPayload());
+      setMaterializationPreview(data);
+      setMessage({ type: 'ok', text: `${data.summary.created || 0} frete(s) materializado(s).` });
+    } catch (error) {
+      setMessage({ type: 'error', text: apiError(error) });
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -292,6 +349,41 @@ export function OperationCampaigns() {
                         <Metric label="Bloqueios" value={String(plan.plan.result_summary?.hard_exceptions || 0)} />
                         <Metric label="Alertas" value={String(plan.plan.result_summary?.warning_exceptions || plan.exceptions.length)} />
                       </div>
+                      {plan.plan.status === 'APPROVED' && (
+                        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+                          <div className="grid gap-3 md:grid-cols-[160px_1fr_auto_auto] md:items-end">
+                            <label className="space-y-1 text-sm font-medium text-emerald-900">
+                              <span>Modalidade</span>
+                              <select value={materializationForm.modalidade_calculo} onChange={(e) => { setMaterializationForm({ ...materializationForm, modalidade_calculo: e.target.value }); setMaterializationPreview(null); }} className="w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm">
+                                <option value="valor_fixo">Valor fixo</option>
+                                <option value="tonelada_km">Tonelada/km</option>
+                              </select>
+                            </label>
+                            {materializationForm.modalidade_calculo === 'tonelada_km' ? (
+                              <label className="space-y-1 text-sm font-medium text-emerald-900">
+                                <span>Valor por t/km</span>
+                                <input type="number" min="0" step="0.0001" value={materializationForm.valor_tonelada_km} onChange={(e) => { setMaterializationForm({ ...materializationForm, valor_tonelada_km: e.target.value }); setMaterializationPreview(null); }} className="w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm" />
+                              </label>
+                            ) : (
+                              <label className="space-y-1 text-sm font-medium text-emerald-900">
+                                <span>Valor por frete</span>
+                                <input type="number" min="0" step="0.01" value={materializationForm.valor_frete} onChange={(e) => { setMaterializationForm({ ...materializationForm, valor_frete: e.target.value }); setMaterializationPreview(null); }} className="w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm" />
+                              </label>
+                            )}
+                            <button type="button" onClick={carregarPreviewMaterializacao} disabled={saving} className="inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-300 bg-white px-3 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-100 disabled:opacity-60"><RefreshCw size={16} /> Preview</button>
+                            <button type="button" onClick={materializarFretes} disabled={saving || !materializationPreview || !materializationPreview.summary.ready} className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-60"><Play size={16} /> Materializar fretes</button>
+                          </div>
+                          {materializationPreview && (
+                            <div className="mt-3 grid gap-2 md:grid-cols-5">
+                              <Metric label="Prontos" value={String(materializationPreview.summary.ready || 0)} />
+                              <Metric label="Existentes" value={String(materializationPreview.summary.already_materialized || 0)} />
+                              <Metric label="Criados" value={String(materializationPreview.summary.created || 0)} />
+                              <Metric label="Bloqueados" value={String(materializationPreview.summary.blocked || 0)} />
+                              <Metric label="Falhas" value={String(materializationPreview.summary.failed || 0)} />
+                            </div>
+                          )}
+                        </div>
+                      )}
                       <div className="overflow-hidden rounded-lg border border-slate-200">
                         <table className="w-full text-left text-sm">
                           <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="px-3 py-2">Qtd.</th><th className="px-3 py-2">Capacidade</th><th className="px-3 py-2">Recurso</th><th className="px-3 py-2">Status</th></tr></thead>
