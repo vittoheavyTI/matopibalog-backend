@@ -292,8 +292,6 @@ CREATE INDEX IF NOT EXISTS campaign_exceptions_campaign_status_idx
 -- Tenant-consistency FKs.
 CREATE UNIQUE INDEX IF NOT EXISTS usuarios_id_empresa_key
   ON public.usuarios (id, empresa_id);
-CREATE UNIQUE INDEX IF NOT EXISTS unidades_operacionais_id_empresa_key
-  ON public.unidades_operacionais (id, empresa_id);
 CREATE UNIQUE INDEX IF NOT EXISTS fleet_assets_id_empresa_key
   ON public.fleet_assets (id, empresa_id);
 CREATE UNIQUE INDEX IF NOT EXISTS vehicle_compositions_id_empresa_key

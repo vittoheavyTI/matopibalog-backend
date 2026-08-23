@@ -519,6 +519,46 @@ function registrar() {
     );
   });
 
+  test('076 usa unique existente de unidades_operacionais sem criar indice redundante', async () => {
+    const uniquePairs = await pool.query(
+      `SELECT cls.relname AS index_name,
+              pg_get_indexdef(idx.indexrelid) AS indexdef
+         FROM pg_index idx
+         JOIN pg_class cls ON cls.oid = idx.indexrelid
+        WHERE idx.indrelid = 'public.unidades_operacionais'::regclass
+          AND idx.indisunique = true
+          AND (
+            SELECT array_agg(att.attname ORDER BY key_ord.ord)
+              FROM unnest(idx.indkey) WITH ORDINALITY AS key_ord(attnum, ord)
+              JOIN pg_attribute att
+                ON att.attrelid = idx.indrelid
+               AND att.attnum = key_ord.attnum
+          ) = ARRAY['id','empresa_id']::name[]
+        ORDER BY cls.relname`,
+    );
+    assert.equal(uniquePairs.rows.length, 1);
+    assert.match(uniquePairs.rows[0].indexdef, /UNIQUE INDEX .* ON public\.unidades_operacionais .* \(id, empresa_id\)/);
+
+    const redundant = await pool.query(
+      `SELECT to_regclass('public.unidades_operacionais_id_empresa_key') AS redundant_index`,
+    );
+    assert.equal(redundant.rows[0].redundant_index, null);
+
+    const unitFks = await pool.query(
+      `SELECT conname, convalidated
+         FROM pg_constraint
+        WHERE contype = 'f'
+          AND conrelid IN ('public.campaign_operational_units'::regclass, 'public.campaign_locations'::regclass)
+          AND confrelid = 'public.unidades_operacionais'::regclass
+        ORDER BY conname`,
+    );
+    assert.deepEqual(unitFks.rows, [
+      { conname: 'campaign_locations_unit_campaign_fk', convalidated: true },
+      { conname: 'campaign_locations_unit_empresa_fk', convalidated: true },
+      { conname: 'campaign_units_unit_empresa_fk', convalidated: true },
+    ]);
+  });
+
   test('unidades sao tenant-safe e location.unit pertence a campaign', async () => {
     await expectFkReject(
       `INSERT INTO public.campaign_operational_units (empresa_id, campaign_id, unidade_operacional_id, created_by)
