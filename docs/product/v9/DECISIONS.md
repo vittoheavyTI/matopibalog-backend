@@ -215,6 +215,31 @@ Antes da expansão pesada da Onda 2, Matopiba deve ter contratos canônicos para
 
 ---
 
+## Operation Campaign / Operacao de Escoamento
+
+### D-055 — Campaign e objetivo operacional versionado, nao agrupamento de fretes
+`Operation Campaign` representa demanda/restricoes/recursos e existe antes dos fretes executaveis. Frete continua sendo a autoridade de execucao; Campaign coordena plano, cenarios, aprovacao, progresso e excecoes.
+
+### D-056 — Planejamento e execucao sao dominios separados
+Campaign gera `plan_version`, `scenario` e `planned_trip` antes de materializar frete. Plano aprovado e imutavel; replanejamento cria nova versao e preserva fretes ja executados.
+
+### D-057 — Planner V1 e deterministico e baseado em snapshot de recursos
+Mesmos inputs, snapshot e rules version produzem o mesmo plano. O planner usa Fleet real como fonte de capacidade, salva assumptions suficientes para replay e gera relatorio verificavel com demanda, capacidade, warnings e demanda nao alocada.
+
+### D-058 — Materializacao em fretes exige aprovacao e idempotencia
+Viagens planejadas so viram `fretes` apos aprovacao explicita. Materializacao em lote deve ser transacional ou reconciliavel, com idempotencia por planned trip/request; e proibido loop frontend que crie dezenas de fretes sem reconciliacao.
+
+### D-059 — Campaign tem authorization propria
+Campaign deve nascer com entitlement `operation_campaign` e permissions estaveis `campaign.view`, `campaign.create`, `campaign.plan`, `campaign.approve`, `campaign.dispatch` e `campaign.manage`, sempre sob `ENTITLEMENT AND PERMISSION AND SCOPE`. Fleet permission nao autoriza Campaign por implicacao.
+
+### D-060 — Campaign pode ser multi-unidade somente dentro do escopo efetivo
+Uma Campaign pode envolver multiplas origens/unidades quando o usuario tem escopo regional/global correspondente. Tenant vem do contexto autenticado; `empresa_id` e obrigatorio e FKs compostas protegem referencias cross-tenant.
+
+### D-061 — Route, partner, shipper, dispatch e IA ficam em boundaries explicitos
+Campaign-A nao integra provider de rota, marketplace, parceiro real, portal do embarcador, dispatch por oferta ou AI Agent. RouteProvider, Partner Network, Shipper Portal, Dispatch e AI tools sao contratos futuros; nenhum deles vira authority do planner inicial.
+
+---
+
 ## Gates registrados
 
 | Gate | Critério de liberação |
