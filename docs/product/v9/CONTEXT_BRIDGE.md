@@ -17,8 +17,8 @@
 
 | | |
 |---|---|
-| Current docs baseline | **`32d8fe3e8824d1a8bc5be89ad6f5cdf86ae5c316`** (PR #457 / Operation Campaign-A closure). Marcos recentes: `4faa735b5b1760fb159fbf9436f7d8eef0665b0e` (PR #460 / Commercial V2), `35b840281a711bc2a0264358662e548cc6ecc1fa` (PR #459 / Systemic Quality reports), `a257e0f6b50e1d7d9f6f64113df768cdc6f7339f` (PR #458 / Mobile M1), `787cdcbbc927ca8ff621173b24df1fa0fa1d5126` (PR #453 / Fleet final closure). |
-| Deploy produção | Railway `matopibalog-backend` deploy `5c858732-f34e-443c-b6b7-68306331e852` **SUCCESS** (`commitHash=32d8fe3e8824d1a8bc5be89ad6f5cdf86ae5c316`) |
+| Current docs baseline | **`35839e135992908eb6ee4753dfd9a1dda2d14efe`** (PR #462 / AI Copilot read-only já presente em `main`). Marcos recentes: `32d8fe3e8824d1a8bc5be89ad6f5cdf86ae5c316` (PR #457 / Operation Campaign-A closure), `4faa735b5b1760fb159fbf9436f7d8eef0665b0e` (PR #460 / Commercial V2), `35b840281a711bc2a0264358662e548cc6ecc1fa` (PR #459 / Systemic Quality reports), `a257e0f6b50e1d7d9f6f64113df768cdc6f7339f` (PR #458 / Mobile M1). |
+| Deploy produção | Último deploy Campaign-A validado: Railway `matopibalog-backend` deploy `5c858732-f34e-443c-b6b7-68306331e852` **SUCCESS** (`commitHash=32d8fe3e8824d1a8bc5be89ad6f5cdf86ae5c316`). Não inferir deploy do PR #462 sem verificação própria. |
 | Health | **HTTP 200** `{"status":"UP"}` em `https://api.matopibalog.com.br/health` |
 | Banco | Supabase `rjahjogidyndphdxevom` · 78 tabelas públicas após 076 · RLS 100% |
 | Asaas | **DESARMADO**: sem `ASAAS_API_KEY`, provider=fake, production=false, allowlist vazia, outbox=false, `billing_outbox`=0. **Não reativar sem autorização.** |
