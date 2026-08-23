@@ -177,6 +177,9 @@ app.use('/pagamentos', require('./routes/pagamentos'));
 app.use('/notificacoes', notificacoesRoutes);
 app.use('/push', require('./routes/push'));
 app.use('/termos', termosRoutes);
+// Politica de versao do app (MOBILE-M1-008 / D-053) — rota publica read-only, sem
+// banco. Serve latest/recommended/minimum + severity ao cliente Flutter.
+app.use('/app', require('./routes/appVersion'));
 
 // Tratamento de erros de upload (multer). Mapeia tamanho/MIME para respostas
 // JSON controladas; erros não relacionados seguem para o próximo handler.
