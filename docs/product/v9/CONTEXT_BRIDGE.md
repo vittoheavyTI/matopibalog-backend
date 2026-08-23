@@ -1,7 +1,7 @@
 # Matopiba Log — CONTEXT BRIDGE V9
 
 > **Handoff compacto.** Leia este arquivo primeiro ao retomar em outro chat/agente. Os detalhes estão nos 4 documentos linkados no fim.
-> Atualizado: **2026-08-23** (Fleet final technical closure closed em produção; owner visual validation pendente).
+> Atualizado: **2026-08-23** (Operation Campaign audit/architecture frozen; sem implementação).
 
 ---
 
@@ -17,7 +17,7 @@
 
 | | |
 |---|---|
-| Fleet closure code baseline | **`787cdcbbc927ca8ff621173b24df1fa0fa1d5126`** (PR #453 / Fleet final closure). Marcos anteriores: `d682d4e` (PR #449 / Fleet-A), `3cda272` (PR #447 / E1.5A), `a005457` (PR #446 / E1.4B), `1744d59` (PR #444 / E1.4A), `b695102` (PR #441 / E1.3), `569fde7` (PR #437 / hotfix Onda 1). |
+| Current docs baseline | **`988bf3e5e8831f4833255e38293581002c052f88`** (PR #454 / Fleet docs closure). Marcos anteriores: `787cdcbbc927ca8ff621173b24df1fa0fa1d5126` (PR #453 / Fleet final closure), `d682d4e` (PR #449 / Fleet-A), `3cda272` (PR #447 / E1.5A), `a005457` (PR #446 / E1.4B), `1744d59` (PR #444 / E1.4A), `b695102` (PR #441 / E1.3), `569fde7` (PR #437 / hotfix Onda 1). |
 | Deploy produção | Railway `matopibalog-backend` deploy `ee860618-4307-4e5a-8d61-7a12862f5e2d` **SUCCESS** (`commitHash=787cdcbbc927ca8ff621173b24df1fa0fa1d5126`, `numReplicas=1`) |
 | Health | **HTTP 200** `{"status":"UP"}` em `https://api.matopibalog.com.br/health` |
 | Banco | Supabase `rjahjogidyndphdxevom` · 69 tabelas públicas · RLS 100% |
@@ -30,13 +30,13 @@ Matopiba vira **frota/operação-centric** (D-001): o eixo é o **veículo/compo
 
 ## O que existe vs o que é novo (resumo)
 
-- **Maduro/vivo (REUSE_AS_IS):** auth/SEC-1, entitlements por plano, SaaS billing/Asaas/contratos/promoções, ePOD/ocorrências, rastreamento leve, notificações/push, relatórios PDF com branding.
+- **Maduro/vivo (REUSE_AS_IS):** auth/SEC-1, entitlements por plano, SaaS billing/Asaas/contratos/promoções, ePOD/ocorrências, rastreamento leve, notificações/push, relatórios PDF com branding e Fleet technical closure.
 - **Refatorar/ativar:** lançamentos (audit-safe + realtime), separação financeira, ORG_SCOPE (grupos/filiais existem mas **inertes, 0 dados**), permissões (templates+overrides), auditoria unificada.
-- **NEW (0 no banco):** **Frota/Veículos/Composições/Pneus/Manutenção**, Planejamento/Dispatch, Route Intelligence, Embarcador/Parceiros/Marketplace, ERP Hub, SSO/Entra.
+- **NEW (0 no banco):** Operation Campaign, Planejamento/Dispatch, Route Intelligence, Embarcador/Parceiros/Marketplace, ERP Hub, SSO/Entra.
 
 ## Macrofrente atual
 
-**`CURRENT_MACROFRONT = ONDA2_FLEET_TECHNICAL_CLOSURE_CLOSED`**. P2 = CLOSED; E1.3 = CLOSED em produção; E1.4A = CLOSED em produção; **E1.4B = CODE CLOSED** no PR #446 (`MERGE_SHA=a00545770e88c6d13d7d6158b66077e973ba89d8`); **E1.5A = CLOSED em produção** no PR #447 (`MERGE_SHA=3cda272ec49154d77d62eed95976fef18bbd24f0`); **Fleet final closure = CLOSED em produção** no PR #453 (`MERGE_SHA=787cdcbbc927ca8ff621173b24df1fa0fa1d5126`). Onda 1 = tecnicamente CLOSED (ver §Estado da Onda 1); validação de aparelho no `MOBILE_RELEASE_TRAIN_M1`.
+**`CURRENT_MACROFRONT = ONDA3_OPERATION_CAMPAIGN_ARCHITECTURE_FROZEN`**. P2 = CLOSED; E1.3 = CLOSED em produção; E1.4A = CLOSED em produção; **E1.4B = CODE CLOSED**; **E1.5A = CLOSED em produção**; **Fleet final closure = CLOSED em produção** no PR #453 (`MERGE_SHA=787cdcbbc927ca8ff621173b24df1fa0fa1d5126`). Onda 1 = tecnicamente CLOSED; validação de aparelho no `MOBILE_RELEASE_TRAIN_M1`. Operation Campaign está **somente arquitetada/auditada**, sem implementação e sem migration 076 criada.
 
 **P2 — Permissões (templates+overrides) CLOSED técnico.** Migration **072** (aditiva/idempotente, hash `4069b0e0…46ce5`) foi **aplicada+rastreada em produção** (`20260821043352`) e o backend **e718eb36103de1aea233e2a868cf37b7b4f51e38** foi implantado no Railway após regularização do billing (`DEPLOYMENT=987c7a52-b240-4bd4-a855-24318ba8c72b`, `SUCCESS`, `numReplicas=1`, health 200). Frontend P2 no GitHub Pages também está em `e718eb3`. Pós-deploy read-only: `/health` 200; `/auth/me`, `/admin/permissions/templates` e `/realtime/stream` sem auth retornam 401; logs novos sem 500/uncaught/unhandled/permission/RLS inesperado. Sanity P2: templates provisionados sem `stable_key` duplicada por empresa; usuários ativos com `permission_template_id`; governança efetiva preservada no recorte operacional; Asaas permaneceu inerte (`ASAAS_API_KEY` ausente, allowlist vazia, outbox off). App: código P2 pronto, mas **validação física = `DEFERRED_TO_MOBILE_RELEASE_TRAIN_M1`** (**DEFERRED ≠ PASS**). `P2_TECHNICAL_STATUS=CLOSED`.
 
@@ -51,6 +51,8 @@ Matopiba vira **frota/operação-centric** (D-001): o eixo é o **veículo/compo
 **Onda 2 / Fleet-A — Domain/Foundation CLOSED em produção.** OWNER MIGRATION GATE executado em 2026-08-22: migration `074_fleet_foundation.sql` aplicada uma vez via `apply_migration` após hash autorizado `a01ab82c7f7db1b2bb9eebb24db367b02a2d0aa1545f0259f065a110ea1cfec3`, tracking confirmado (`20260822142407 074_fleet_foundation`), 11 tabelas Fleet criadas com RLS/policies/grants, 32 índices esperados, 21 constraints compostas tenant-safe e `COUNT=0` em todas as entidades Fleet de negócio. DML restrito a governança/catálogo: funcionalidade `fleet` + 7 mapeamentos de plano; entitlement após apply `included=17`, `optional=0`, `unavailable=17`, `unknown=0`; overrides Fleet reais preservados em 0. PR #449 mergeado (`MERGE_SHA=d682d4ed958929d46cbd556a118d71fa5c04c2bc`); backend Railway `e2615ac7-4cdb-498e-ba5f-de8f64300a83` SUCCESS (`commitHash=d682d4ed958929d46cbd556a118d71fa5c04c2bc`, `numReplicas=1`); main checks verdes. API core `/fleet/*` usa `fleet.view`/`fleet.manage` ativos com entitlement `fleet`, `verificarPlano` e escopo operacional resolvido por request; smokes read-only: `/health` 200, `/fleet/assets` 401 sem auth, `/fleet/compositions` 401 sem auth; logs sem novo 5xx. Legado `fretes` preservado: sem backfill inventado, sem reescrita de fotos/KM, sem asset/composition real criado. `FLEET_A_TECHNICAL_STATUS=CLOSED`; `PRODUCTION_FLEET_BUSINESS_WRITES=0`; `ENV_CHANGED=false`; `ASAAS_TOUCHED=false`.
 
 **Onda 2 / Fleet Final Closure — CLOSED em produção.** Migration 075 aplicada+rastreada (`20260823012050 075_fleet_operational_closure`, SHA256 `6ae16676e6b67142ca0faaa78b92d65a512c67966b5ed35448148189bdf078fc`) via `VERIFIED_SOURCE_TEXT_TRANSFER` do blob autorizado; a primeira tentativa falhou por divergência de payload (`TTEXT`) sem tracking/efeito parcial e foi registrada como `PROCESS-002`. PR #453 mergeado (`MERGE_SHA=787cdcbbc927ca8ff621173b24df1fa0fa1d5126`); Railway deploy `ee860618-4307-4e5a-8d61-7a12862f5e2d` SUCCESS; GitHub Pages publicado; CI main verde. Web `/frota` segue protegida por `fleet.view`, ações por `fleet.manage`; backend cobre `/fleet/overview` e endpoints guiados. Fechados tecnicamente: asset document upload/preview no bucket privado `fretes-documentos`, RPC `fleet_driver_handoff` service-role-only, colunas de correlação, contrato versionado de documento, `tires.unidade_operacional_id` e estoque por unidade. Backfill esperado/real `0/0`; sem fabricação de legado, sem Asaas, sem env novo, sem Storage write fora do fluxo autorizado. Validação: backend `1669/1669`, web `118/118`, PG `163/163`, `/health` 200, `/fleet/assets` 401 sem auth, logs novos sem erro. `OWNER_VISUAL_VALIDATION=PENDING`; `FLEET_OVERALL_TECHNICAL_STATUS=CLOSED`.
+
+**Onda 3 / Operation Campaign — ARCHITECTURE_FROZEN.** Auditoria delta read-only confirmou `campaign_table_count=0`, migrations relevantes apenas 074/075 e proxima migration proposta `076_operation_campaign_foundation.sql` (nao criada). Campaign foi congelada como objetivo operacional versionado, nao agrupamento de fretes: `operation_campaigns` + locations/demands/plan versions/scenarios/planned trips/approvals/exceptions. Planner V1 deterministico usa Fleet real como capacity source, salva resource snapshot e exige human approval antes de materializacao. Boundaries: route provider optional/manual fallback, dispatch separado, partner/shipper futuros por snapshot, IA sem authority. Ver [OPERATION_CAMPAIGN_ARCHITECTURE](./OPERATION_CAMPAIGN_ARCHITECTURE.md).
 
 A **RBV9 — Rebaseline V9** (docs-only) está **concluída** e inclui o **patch fiscal V9** (domínio `FISCAL_INVOICING`, decisões D-036..D-041, ledger FISC-001..020, track NFS-e). **Nenhum código/dado/env de produção alterado por estes docs.**
 
@@ -78,7 +80,7 @@ Adequação de **CNAE/CNPJ/regime** do owner corre **em paralelo** e **NÃO bloq
 
 ## Próximo passo recomendado
 
-Próximo passo recomendado: manter **owner visual validation** da Frota como pendente até inspeção humana e, só com novo prompt/gate, abrir a próxima macrofrente (**Operation Campaign / Escoamento Assistido**) começando por arquitetura/auditoria. Não iniciar Planning/Dispatch/Fleet-C nem Operation Campaign sem autorização explícita.
+Próximo passo recomendado: owner decidir os pontos de Campaign architecture marcados no documento novo e, só com novo prompt/gate, iniciar **Campaign-A**. Não criar migration 076 nem implementar Campaign nesta task.
 
 ## Hard stops permanentes
 
@@ -86,4 +88,4 @@ Não reativar Asaas production, não escrever em produção, não ativar enforce
 
 ---
 
-**Documentos canônicos V9:** [DECISIONS](./DECISIONS.md) · [MASTER_LEDGER](./MASTER_LEDGER.md) · [ROADMAP](./ROADMAP.md) · [FORENSIC_BASELINE](./FORENSIC_BASELINE.md)
+**Documentos canônicos V9:** [DECISIONS](./DECISIONS.md) · [MASTER_LEDGER](./MASTER_LEDGER.md) · [ROADMAP](./ROADMAP.md) · [FORENSIC_BASELINE](./FORENSIC_BASELINE.md) · [OPERATION_CAMPAIGN_ARCHITECTURE](./OPERATION_CAMPAIGN_ARCHITECTURE.md)

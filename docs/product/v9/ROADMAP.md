@@ -62,8 +62,8 @@ Comparação: histórico/V8 × sistema real × alvo V9. Classificação de cada 
 | Auditoria unificada + Envelope Digital | **REUSE_WITH_REFACTOR** → parte NEW | Médio | AUDIT model |
 | Realtime sistêmico | **REPLACE** (polling → push/subscription) | Médio | infra realtime |
 | Scanner do app | **REUSE_WITH_REFACTOR** | Baixo | viewer PDF-first |
-| Frota/Veículos/Composições/Pneus/Manutenção | **NEW** | — | ORG_SCOPE |
-| Planejamento/Route Intelligence/Dispatch | **NEW** | — | FLEET |
+| Frota/Veículos/Composições/Pneus/Manutenção | **REUSE_AS_IS** | Baixo | ORG_SCOPE |
+| Planejamento/Operation Campaign/Route Intelligence/Dispatch | **NEW** | — | FLEET + Verifiability |
 | Embarcador/Rede de parceiros/Marketplace | **NEW** | — | boundaries |
 | ERP Integration Hub | **NEW** | — | modelo canônico |
 | SSO/Entra ID/SCIM/SAML | **NEW** | — | IDENTITY provider |
@@ -122,11 +122,11 @@ _Itens mobile de macrofrentes futuras (ex.: enforcement de `freight.create`/`fre
 - **Dependências:** E2.1 é raiz de tudo. **Gate:** migração **aditiva** (nunca destrutiva); frete atual continua funcionando.
 
 ### ONDA 3 — Expansão
-- **E3.0 Operation Campaign / Escoamento Assistido** — unidade de planejamento de escoamento sobre múltiplos fretes; depende de E1.5 + FLEET.
-- **E3.1 Operation Orchestrator** — orquestrador determinístico separado de IA; propõe ações sobre Campaign/Freight Planning com invariantes verificáveis.
-- **E3.2 Planejamento/aprovação de frete** (RBV9-INV-029, §7).
-- **E3.3 Route Intelligence (provider abstraction)** (RBV9-INV-030, D-032).
-- **E3.4 Dispatch (designação + oferta a elegíveis)** (RBV9-INV-031/032, D-033).
+- **E3.0 Operation Campaign / Operação de Escoamento** — ✅ **ARCHITECTURE_FROZEN** (docs-only, sem implementação): Campaign é objetivo operacional versionado, não `campaign_id` simples em fretes. Auditoria delta sobre Freight/Fleet/Driver/Documents/Scope/Realtime/Verifiability congelada; proposed schema V1 = `operation_campaigns`, `campaign_locations`, `campaign_demands`, `campaign_plan_versions`, `campaign_plan_scenarios`, `campaign_planned_trips`, `campaign_approvals`, `campaign_exceptions`; próxima migration proposta **076**, não criada. Ver [OPERATION_CAMPAIGN_ARCHITECTURE](./OPERATION_CAMPAIGN_ARCHITECTURE.md).
+- **E3.1 Operation Orchestrator** — arquitetura congelada como orquestrador determinístico, separado de IA; pipeline `OBJECTIVE → NORMALIZE → VALIDATE → RESOURCE_SNAPSHOT → CAPACITY_PLAN → TRIP_PLAN → SCENARIOS → HUMAN_APPROVAL → DISPATCH_READY → FREIGHT_MATERIALIZATION → EXECUTION → VERIFY → REPLAN/EXCEPTIONS`.
+- **E3.2 Planejamento/aprovação de frete** (RBV9-INV-029, §7): passa pelo plano Campaign antes de materializar fretes; approval por `campaign.approve`, não role hardcoded.
+- **E3.3 Route Intelligence (provider abstraction)** (RBV9-INV-030, D-032): boundary mantido; Campaign-A funciona com distância manual/opcional, sem Google/TomTom.
+- **E3.4 Dispatch (designação + oferta a elegíveis)** (RBV9-INV-031/032, D-033): Campaign decide necessidade; Dispatch decide executor. Oferta/aceite concorrência-safe fica para Campaign-B/B2.
 - **E3.5 Portal do Embarcador** (RBV9-INV-081, D-024).
 - **E3.6 Rede privada de parceiros** (RBV9-INV-082, D-025/D-026).
 - **E3.7 ERP Integration Hub + census de prospects** (RBV9-INV-085/086, D-023).
@@ -168,10 +168,10 @@ _Itens mobile de macrofrentes futuras (ex.: enforcement de `freight.create`/`fre
 
 ---
 
-## Primeira macrofrente de implementação recomendada
+## Próxima macrofrente de implementação recomendada
 
-**E1.5 Verifiability, Diagnostics & Recovery Foundation**, antes da expansão pesada da Onda 2.
+**Campaign-A - Domain + Planning + Versioning + Approval + Verifiability**, após decisão do owner sobre entitlement comercial, escopo multi-unidade inicial e limite de materialização.
 
-**Por quê:** (1) verificabilidade é transversal e reduz retrabalho antes de FLEET/Operation Campaign/Dispatch; (2) automações futuras precisam explicar `what/why/evidence/result`; (3) repair e IA futura só podem avançar sobre tools determinísticas, dry-run e política de risco; (4) a fundação atual é read-only e não exige migration/produção.
+**Por quê:** (1) Fleet e E1.5 já estão fechadas tecnicamente; (2) Campaign é o próximo salto de carga humana evitada; (3) o plano precisa nascer determinístico, versionado e auditável antes de dispatch, parceiros, rotas externas ou IA.
 
 _Ver: [CONTEXT_BRIDGE](./CONTEXT_BRIDGE.md) · [DECISIONS](./DECISIONS.md) · [MASTER_LEDGER](./MASTER_LEDGER.md) · [FORENSIC_BASELINE](./FORENSIC_BASELINE.md)_

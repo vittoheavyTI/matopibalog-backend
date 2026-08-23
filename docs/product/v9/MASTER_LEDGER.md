@@ -63,10 +63,10 @@ _Evidência coletada em 2026-08-19 (ver [FORENSIC_BASELINE](./FORENSIC_BASELINE.
 
 | ID | Item | Status | B W A D P | Evidência / Obs |
 |----|------|--------|-----------|-----------------|
-| RBV9-INV-029 | Planejamento/oportunidade → aprovação → designação | ROADMAP | ✗ ✗ ✗ ✗ ✗ | §7 do prompt; 0 tabelas |
-| RBV9-INV-030 | Route Intelligence (provider abstraction, pedágio, combustível previsto) | ROADMAP | ✗ ✗ ✗ ✗ ✗ | D-032; 0 tabelas |
-| RBV9-INV-031 | Dispatch estilo Uber (oferta/aceite/expira, lock concorrência-safe) | ROADMAP | ✗ ✗ ✗ ✗ ✗ | D-033 |
-| RBV9-INV-032 | Elegibilidade de candidatos (filial/região/vínculo/docs) | ROADMAP | ✗ ✗ ✗ ✗ ✗ | D-033 |
+| RBV9-INV-029 | Planejamento/oportunidade → aprovação → designação | ROADMAP | ✗ ✗ ✗ ✗ ✗ | **Operation Campaign architecture frozen**: Campaign modelada como objetivo operacional versionado antes de fretes; planned trips, scenarios, approval e verifiability definidos em [OPERATION_CAMPAIGN_ARCHITECTURE](./OPERATION_CAMPAIGN_ARCHITECTURE.md). Sem implementação, sem migration 076 criada, 0 tabelas Campaign em produção. |
+| RBV9-INV-030 | Route Intelligence (provider abstraction, pedágio, combustível previsto) | ROADMAP | ✗ ✗ ✗ ✗ ✗ | D-032 preservada; Campaign-A usa `RouteProvider` futuro como boundary e funciona com distância manual/opcional. Sem Google/TomTom, sem env, 0 tabelas. |
+| RBV9-INV-031 | Dispatch estilo Uber (oferta/aceite/expira, lock concorrência-safe) | ROADMAP | ✗ ✗ ✗ ✗ ✗ | D-033 preservada; Campaign prepara necessidade/viagens, Dispatch decide executor. Oferta para elegíveis e first valid acceptance atomico ficam para Campaign-B/B2. |
+| RBV9-INV-032 | Elegibilidade de candidatos (filial/região/vínculo/docs) | ROADMAP | ✗ ✗ ✗ ✗ ✗ | Arquitetura Campaign define eligibility determinística com tenant, scope, status, disponibilidade temporal, documentos, manutenção, vínculo e compatibilidade de composição. Não implementado. |
 
 ## FLEET (frota / veículos / composições / pneus / manutenção)
 
@@ -197,8 +197,8 @@ _Evidência coletada em 2026-08-19 (ver [FORENSIC_BASELINE](./FORENSIC_BASELINE.
 
 | ID | Item | Status | B W A D P | Evidência / Obs |
 |----|------|--------|-----------|-----------------|
-| RBV9-INV-081 | Portal do Embarcador (demanda/cotação/proposta) | ROADMAP | ✗ ✗ ✗ ✗ ✗ | D-024; 0 tabelas |
-| RBV9-INV-082 | Rede privada de parceiros (Lite/Cliente, boundaries de tenant) | ROADMAP | ✗ ✗ ✗ ✗ ✗ | D-025/D-026 |
+| RBV9-INV-081 | Portal do Embarcador (demanda/cotação/proposta) | ROADMAP | ✗ ✗ ✗ ✗ ✗ | D-024; Campaign pode futuramente ser originada/acompanhada por embarcador via snapshot/contract, mas Shipper Portal não entra em Campaign-A. 0 tabelas. |
+| RBV9-INV-082 | Rede privada de parceiros (Lite/Cliente, boundaries de tenant) | ROADMAP | ✗ ✗ ✗ ✗ ✗ | D-025/D-026; Campaign produz `capacity_gap` estruturado, Partner Network resolve depois. Parceiro nunca acessa tenant do embarcador. |
 | RBV9-INV-083 | Marketplace público | ROADMAP | ✗ ✗ ✗ ✗ ✗ | posterior (D-025) |
 
 ## ERP / INTEGRATION HUB
@@ -214,7 +214,7 @@ _Evidência coletada em 2026-08-19 (ver [FORENSIC_BASELINE](./FORENSIC_BASELINE.
 | ID | Item | Status | B W A D P | Evidência / Obs |
 |----|------|--------|-----------|-----------------|
 | RBV9-INV-087 | Auditoria por domínio (auth, contratos, fretes, funcionalidades, escopo) | PARTIAL | ✓ ~ — ✓ ✓ | vários `*_auditoria` / `*_eventos`; não unificado |
-| RBV9-INV-088 | Modelo de eventos unificado (entity/action/actor/source/metadata) | PARTIAL | ✓ ✗ ✗ ✓ ✗ | E1.5A adiciona envelope canônico em código (`event_id`, `event_type`, `domain`, `empresa_id`, `entity`, correlação, ator, source, metadata sanitizada, evidence_refs`) sem migration/persistência nova. D-021/D-045/D-054 |
+| RBV9-INV-088 | Modelo de eventos unificado (entity/action/actor/source/metadata) | PARTIAL | ✓ ✗ ✗ ✓ ✗ | E1.5A adiciona envelope canônico em código (`event_id`, `event_type`, `domain`, `empresa_id`, `entity`, correlação, ator, source, metadata sanitizada, evidence_refs`) sem migration/persistência nova. Campaign architecture reutiliza esse envelope para `campaign.created`, `campaign.plan.generated`, `campaign.plan.approved`, `campaign.trip.materialized`, `campaign.progress.changed`, `campaign.exception.created`, `campaign.completed`. D-021/D-045/D-054/D-057. |
 | RBV9-INV-089 | Envelope Digital (unidade formal de fechamento) | ROADMAP | ✗ ✗ ✗ ✗ ✗ | D-022 |
 | RBV9-INV-109 | Verifiability, Diagnostics & Recovery Foundation | IMPL_VAL | ✓ ✗ ✗ ✗ ✓ | **E1.5A CLOSED em produção**: PR #447 mergeado (`MERGE_SHA=3cda272`), Railway `079a7600-e7b5-463e-aa15-e895486f89f1` SUCCESS (`commitHash=3cda272`, `numReplicas=1`), CI main verde, health/smokes anon 401 e logs sem 5xx novo. Contexto canônico de correlação, registry de invariantes, verifier, findings estruturados, repair playbook engine com `execute=DISABLED_BY_POLICY`, dry-run e rota Super Admin read-only `/admin/diagnostics`. Sem migration 074, sem repair production, sem IA como authority. Persistência histórica de runs/findings fica como decisão futura. D-044..D-054 |
 
@@ -223,7 +223,7 @@ _Evidência coletada em 2026-08-19 (ver [FORENSIC_BASELINE](./FORENSIC_BASELINE.
 | ID | Item | Status | B W A D P | Evidência / Obs |
 |----|------|--------|-----------|-----------------|
 | RBV9-INV-090 | Relatórios PDF com branding/logo + filtros padronizados | IMPL_VAL | ✓ ✓ — ✓ ✓ | PR #366, `relatorioBranding.ts` |
-| RBV9-INV-091 | Produtos de relatório-alvo (Envelope, fechamento, espelho, histórico veículo/manutenção, consumo) | ROADMAP | ✗ ✗ ✗ ✗ ✗ | D-029; dependem de FLEET/Envelope |
+| RBV9-INV-091 | Produtos de relatório-alvo (Envelope, fechamento, espelho, histórico veículo/manutenção, consumo) | ROADMAP | ✗ ✗ ✗ ✗ ✗ | D-029; Campaign adiciona relatório/PDF futuro de plano, execução, progresso, exceções, variance e auditoria. Não implementado; depende de Campaign-B/Envelope. |
 
 ## NOTIFICATIONS
 
