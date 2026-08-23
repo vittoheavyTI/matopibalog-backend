@@ -1,7 +1,7 @@
 # Matopiba Log — CONTEXT BRIDGE V9
 
 > **Handoff compacto.** Leia este arquivo primeiro ao retomar em outro chat/agente. Os detalhes estão nos 4 documentos linkados no fim.
-> Atualizado: **2026-08-23** (Operation Campaign audit/architecture frozen; sem implementação).
+> Atualizado: **2026-08-23** (Parallel Execution Board V1 frozen; sem implementação).
 
 ---
 
@@ -17,7 +17,7 @@
 
 | | |
 |---|---|
-| Current docs baseline | **`988bf3e5e8831f4833255e38293581002c052f88`** (PR #454 / Fleet docs closure). Marcos anteriores: `787cdcbbc927ca8ff621173b24df1fa0fa1d5126` (PR #453 / Fleet final closure), `d682d4e` (PR #449 / Fleet-A), `3cda272` (PR #447 / E1.5A), `a005457` (PR #446 / E1.4B), `1744d59` (PR #444 / E1.4A), `b695102` (PR #441 / E1.3), `569fde7` (PR #437 / hotfix Onda 1). |
+| Current docs baseline | **`cdf6b4ca62d84d2cb651ff2de0a8134c5bc2a715`** (PR #455 / Operation Campaign architecture). Marcos anteriores: `988bf3e5e8831f4833255e38293581002c052f88` (PR #454 / Fleet docs closure), `787cdcbbc927ca8ff621173b24df1fa0fa1d5126` (PR #453 / Fleet final closure), `d682d4e` (PR #449 / Fleet-A), `3cda272` (PR #447 / E1.5A), `a005457` (PR #446 / E1.4B), `1744d59` (PR #444 / E1.4A), `b695102` (PR #441 / E1.3), `569fde7` (PR #437 / hotfix Onda 1). |
 | Deploy produção | Railway `matopibalog-backend` deploy `ee860618-4307-4e5a-8d61-7a12862f5e2d` **SUCCESS** (`commitHash=787cdcbbc927ca8ff621173b24df1fa0fa1d5126`, `numReplicas=1`) |
 | Health | **HTTP 200** `{"status":"UP"}` em `https://api.matopibalog.com.br/health` |
 | Banco | Supabase `rjahjogidyndphdxevom` · 69 tabelas públicas · RLS 100% |
@@ -36,7 +36,7 @@ Matopiba vira **frota/operação-centric** (D-001): o eixo é o **veículo/compo
 
 ## Macrofrente atual
 
-**`CURRENT_MACROFRONT = ONDA3_OPERATION_CAMPAIGN_ARCHITECTURE_FROZEN`**. P2 = CLOSED; E1.3 = CLOSED em produção; E1.4A = CLOSED em produção; **E1.4B = CODE CLOSED**; **E1.5A = CLOSED em produção**; **Fleet final closure = CLOSED em produção** no PR #453 (`MERGE_SHA=787cdcbbc927ca8ff621173b24df1fa0fa1d5126`). Onda 1 = tecnicamente CLOSED; validação de aparelho no `MOBILE_RELEASE_TRAIN_M1`. Operation Campaign está **somente arquitetada/auditada**, sem implementação e sem migration 076 criada.
+**`CURRENT_MACROFRONT = PARALLEL_EXECUTION_BOARD_V1_FROZEN`**. P2 = CLOSED; E1.3 = CLOSED em produção; E1.4A = CLOSED em produção; **E1.4B = CODE CLOSED**; **E1.5A = CLOSED em produção**; **Fleet final closure = CLOSED em produção** no PR #453 (`MERGE_SHA=787cdcbbc927ca8ff621173b24df1fa0fa1d5126`). Onda 1 = tecnicamente CLOSED; validação de aparelho no `MOBILE_RELEASE_TRAIN_M1`. Operation Campaign está **somente arquitetada/auditada**, com owner decisions congeladas, sem implementação e sem migration 076 criada.
 
 **P2 — Permissões (templates+overrides) CLOSED técnico.** Migration **072** (aditiva/idempotente, hash `4069b0e0…46ce5`) foi **aplicada+rastreada em produção** (`20260821043352`) e o backend **e718eb36103de1aea233e2a868cf37b7b4f51e38** foi implantado no Railway após regularização do billing (`DEPLOYMENT=987c7a52-b240-4bd4-a855-24318ba8c72b`, `SUCCESS`, `numReplicas=1`, health 200). Frontend P2 no GitHub Pages também está em `e718eb3`. Pós-deploy read-only: `/health` 200; `/auth/me`, `/admin/permissions/templates` e `/realtime/stream` sem auth retornam 401; logs novos sem 500/uncaught/unhandled/permission/RLS inesperado. Sanity P2: templates provisionados sem `stable_key` duplicada por empresa; usuários ativos com `permission_template_id`; governança efetiva preservada no recorte operacional; Asaas permaneceu inerte (`ASAAS_API_KEY` ausente, allowlist vazia, outbox off). App: código P2 pronto, mas **validação física = `DEFERRED_TO_MOBILE_RELEASE_TRAIN_M1`** (**DEFERRED ≠ PASS**). `P2_TECHNICAL_STATUS=CLOSED`.
 
@@ -52,7 +52,9 @@ Matopiba vira **frota/operação-centric** (D-001): o eixo é o **veículo/compo
 
 **Onda 2 / Fleet Final Closure — CLOSED em produção.** Migration 075 aplicada+rastreada (`20260823012050 075_fleet_operational_closure`, SHA256 `6ae16676e6b67142ca0faaa78b92d65a512c67966b5ed35448148189bdf078fc`) via `VERIFIED_SOURCE_TEXT_TRANSFER` do blob autorizado; a primeira tentativa falhou por divergência de payload (`TTEXT`) sem tracking/efeito parcial e foi registrada como `PROCESS-002`. PR #453 mergeado (`MERGE_SHA=787cdcbbc927ca8ff621173b24df1fa0fa1d5126`); Railway deploy `ee860618-4307-4e5a-8d61-7a12862f5e2d` SUCCESS; GitHub Pages publicado; CI main verde. Web `/frota` segue protegida por `fleet.view`, ações por `fleet.manage`; backend cobre `/fleet/overview` e endpoints guiados. Fechados tecnicamente: asset document upload/preview no bucket privado `fretes-documentos`, RPC `fleet_driver_handoff` service-role-only, colunas de correlação, contrato versionado de documento, `tires.unidade_operacional_id` e estoque por unidade. Backfill esperado/real `0/0`; sem fabricação de legado, sem Asaas, sem env novo, sem Storage write fora do fluxo autorizado. Validação: backend `1669/1669`, web `118/118`, PG `163/163`, `/health` 200, `/fleet/assets` 401 sem auth, logs novos sem erro. `OWNER_VISUAL_VALIDATION=PENDING`; `FLEET_OVERALL_TECHNICAL_STATUS=CLOSED`.
 
-**Onda 3 / Operation Campaign — ARCHITECTURE_FROZEN.** Auditoria delta read-only confirmou `campaign_table_count=0`, migrations relevantes apenas 074/075 e proxima migration proposta `076_operation_campaign_foundation.sql` (nao criada). Campaign foi congelada como objetivo operacional versionado, nao agrupamento de fretes: `operation_campaigns` + locations/demands/plan versions/scenarios/planned trips/approvals/exceptions. Planner V1 deterministico usa Fleet real como capacity source, salva resource snapshot e exige human approval antes de materializacao. Boundaries: route provider optional/manual fallback, dispatch separado, partner/shipper futuros por snapshot, IA sem authority. Ver [OPERATION_CAMPAIGN_ARCHITECTURE](./OPERATION_CAMPAIGN_ARCHITECTURE.md).
+**Onda 3 / Operation Campaign — ARCHITECTURE_FROZEN + OWNER_DECISIONS_FROZEN.** Auditoria delta read-only confirmou `campaign_table_count=0`, migrations relevantes apenas 074/075 e proxima migration proposta `076_operation_campaign_foundation.sql` (nao criada, reservada ao Agent A). Campaign foi congelada como objetivo operacional versionado, nao agrupamento de fretes: `operation_campaigns` + locations/demands/plan versions/scenarios/planned trips/approvals/exceptions. Owner decisions: `CAMPAIGN_ENTITLEMENT_KEY=operation_campaign`; `OPERATION_CAMPAIGN_COMMERCIAL_MAPPING=DEFERRED_SEPARATE_COMMERCIAL_DECISION`; `CAMPAIGN_A_END_STATE=APPROVED_PLAN`; `CAMPAIGN_MULTI_UNIT_V1=SUPPORTED_WITH_ALL_UNITS_IN_EFFECTIVE_SCOPE`. Campaign-A nao materializa fretes nem decide mapping comercial. Ver [OPERATION_CAMPAIGN_ARCHITECTURE](./OPERATION_CAMPAIGN_ARCHITECTURE.md).
+
+**Parallel Execution Board V1 — FROZEN.** Batch V1 preparado para `AGENT_A_NAME=CAMPAIGN_A_WRITER`, `AGENT_B_NAME=MOBILE_M1_WRITER`, `AGENT_C_NAME=SYSTEMIC_QUALITY_WRITER` e `AGENT_R_NAME=PARALLEL_INTEGRATION_REVIEWER`. `PARALLEL_BATCH_V1_BASE_SHA=cdf6b4ca62d84d2cb651ff2de0a8134c5bc2a715`; `PARALLEL_WRITER_LIMIT=3`; `CANONICAL_DOC_OWNER=ORCHESTRATOR/INTEGRATOR`; `PRODUCTION_SCHEMA_MAX_CONCURRENT=1`; `PRODUCTION_SENSITIVE_WRITE_MAX_CONCURRENT=1`. Agent A e o unico writer autorizado para migration 076; Agents B/C sao schema-free; Agent R e read-only. Ver [PARALLEL_EXECUTION_BOARD](./PARALLEL_EXECUTION_BOARD.md).
 
 A **RBV9 — Rebaseline V9** (docs-only) está **concluída** e inclui o **patch fiscal V9** (domínio `FISCAL_INVOICING`, decisões D-036..D-041, ledger FISC-001..020, track NFS-e). **Nenhum código/dado/env de produção alterado por estes docs.**
 
@@ -80,7 +82,7 @@ Adequação de **CNAE/CNPJ/regime** do owner corre **em paralelo** e **NÃO bloq
 
 ## Próximo passo recomendado
 
-Próximo passo recomendado: owner decidir os pontos de Campaign architecture marcados no documento novo e, só com novo prompt/gate, iniciar **Campaign-A**. Não criar migration 076 nem implementar Campaign nesta task.
+Próximo passo recomendado: com novo prompt explícito, iniciar os agentes definidos no [PARALLEL_EXECUTION_BOARD](./PARALLEL_EXECUTION_BOARD.md). Não criar migration 076 nem implementar Campaign fora do Agent A e do owner migration gate.
 
 ## Hard stops permanentes
 
@@ -88,4 +90,4 @@ Não reativar Asaas production, não escrever em produção, não ativar enforce
 
 ---
 
-**Documentos canônicos V9:** [DECISIONS](./DECISIONS.md) · [MASTER_LEDGER](./MASTER_LEDGER.md) · [ROADMAP](./ROADMAP.md) · [FORENSIC_BASELINE](./FORENSIC_BASELINE.md) · [OPERATION_CAMPAIGN_ARCHITECTURE](./OPERATION_CAMPAIGN_ARCHITECTURE.md)
+**Documentos canônicos V9:** [DECISIONS](./DECISIONS.md) · [MASTER_LEDGER](./MASTER_LEDGER.md) · [ROADMAP](./ROADMAP.md) · [FORENSIC_BASELINE](./FORENSIC_BASELINE.md) · [OPERATION_CAMPAIGN_ARCHITECTURE](./OPERATION_CAMPAIGN_ARCHITECTURE.md) · [PARALLEL_EXECUTION_BOARD](./PARALLEL_EXECUTION_BOARD.md)

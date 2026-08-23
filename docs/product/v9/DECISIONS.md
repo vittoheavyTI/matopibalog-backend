@@ -238,6 +238,21 @@ Uma Campaign pode envolver multiplas origens/unidades quando o usuario tem escop
 ### D-061 — Route, partner, shipper, dispatch e IA ficam em boundaries explicitos
 Campaign-A nao integra provider de rota, marketplace, parceiro real, portal do embarcador, dispatch por oferta ou AI Agent. RouteProvider, Partner Network, Shipper Portal, Dispatch e AI tools sao contratos futuros; nenhum deles vira authority do planner inicial.
 
+### D-062 — Operation Campaign tem entitlement tecnico proprio e mapping comercial diferido
+`CAMPAIGN_ENTITLEMENT_KEY=operation_campaign`. Campaign nao e subfeature implicita de Fleet, Freight ou Reports. Autorizacao futura = **ENTITLEMENT AND PERMISSION AND SCOPE**. `OPERATION_CAMPAIGN_COMMERCIAL_MAPPING=DEFERRED_SEPARATE_COMMERCIAL_DECISION`; seeds comerciais de producao ficam `DEFAULT_DENY / NOT MAPPED` ate decisao comercial explicita.
+
+### D-063 — Campaign-A termina em Approved Plan, sem materializar fretes
+`CAMPAIGN_A_END_STATE=APPROVED_PLAN`. Campaign-A inclui dominio, schema, demanda, locations, plan versions, scenarios, planned trips, resource snapshot, planner deterministico V1, aprovacao, permissions/scope/entitlement contract, verificabilidade e UX web inicial de create/review. Exclui materializacao de fretes, criacao massiva de fretes, dispatch, ofertas a motoristas, execution tracking, progresso baseado em fretes reais e replanning apos execucao; esses itens ficam para Campaign-B.
+
+### D-064 — Campaign multi-unidade e suportada sob escopo efetivo completo
+`CAMPAIGN_MULTI_UNIT_V1=SUPPORTED_WITH_ALL_UNITS_IN_EFFECTIVE_SCOPE`. Campaign pode envolver uma ou varias unidades operacionais se o usuario tiver scope efetivo sobre todas. A autoridade continua sendo entitlement + permission + scope; nao usar roles hardcoded. O schema nao deve depender de uma unica `operation_campaigns.unidade_operacional_id` como autoridade exclusiva se isso quebrar multi-unidade.
+
+### D-065 — Parallel Execution V1 usa tres writers isolados e um reviewer read-only
+`PARALLEL_EXECUTION_V1=3_WRITER_AGENTS_PLUS_1_READ_ONLY_REVIEWER_PLUS_OWNER_ORCHESTRATOR`. Batch V1 prepara Agent A (`CAMPAIGN_A_WRITER`), Agent B (`MOBILE_M1_WRITER`), Agent C (`SYSTEMIC_QUALITY_WRITER`) e Agent R (`PARALLEL_INTEGRATION_REVIEWER`). Main nao e workspace de desenvolvimento; branches/worktrees isolados sao obrigatorios; reviewer nao escreve produto.
+
+### D-066 — Migration 076 fica em single-flight com Agent A; docs canonicos tem owner unico
+`MIGRATION_076_OWNER=AGENT_A`; `076_operation_campaign_foundation.sql` fica reservado para Campaign-A. Agent B e Agent C nao tem autoridade de schema e nao podem criar/alterar migrations 076/077/078. `PRODUCTION_SCHEMA_WRITER_COUNT<=1`, `PRODUCTION_DDL_MAX_CONCURRENT=1` e `PRODUCTION_SENSITIVE_WRITE_MAX_CONCURRENT=1`. `CANONICAL_DOC_OWNER=ORCHESTRATOR/INTEGRATOR` para `DECISIONS`, `ROADMAP`, `MASTER_LEDGER` e `CONTEXT_BRIDGE`.
+
 ---
 
 ## Gates registrados

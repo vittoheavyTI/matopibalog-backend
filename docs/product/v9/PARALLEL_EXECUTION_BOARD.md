@@ -1,0 +1,240 @@
+# Matopiba Log V9 - Parallel Execution Board V1
+
+> Status: `PARALLEL_EXECUTION_BOARD_V1_FROZEN=true`; `DOCS_ONLY=true`; `NO_PRODUCT_IMPLEMENTATION=true`; `NO_PRODUCTION_DDL=true`; `NO_PRODUCTION_WRITES=true`.
+> Base: `PARALLEL_BATCH_V1_BASE_SHA=cdf6b4ca62d84d2cb651ff2de0a8134c5bc2a715` (`origin/main`, PR #455 Operation Campaign architecture frozen).
+
+## Objetivo
+
+Preparar a execucao paralela da proxima onda sem iniciar implementacao. Este board congela ownership, branches, worktrees, zonas proibidas, authority de migration, gates, dependencias, ordem de integracao e contrato de handoff para tres writer agents isolados e um reviewer/integrator read-only.
+
+## Owner Decisions Congeladas
+
+| Campo | Valor congelado | Efeito |
+|---|---|---|
+| `CAMPAIGN_ENTITLEMENT_KEY` | `operation_campaign` | Campaign tem entitlement tecnico proprio; nao herda autorizacao de Fleet, Freight ou Reports por implicacao. |
+| `OPERATION_CAMPAIGN_COMMERCIAL_MAPPING` | `DEFERRED_SEPARATE_COMMERCIAL_DECISION` | Seeds comerciais de producao ficam `DEFAULT_DENY / NOT MAPPED` ate decisao comercial explicita. |
+| `CAMPAIGN_A_END_STATE` | `APPROVED_PLAN` | Campaign-A termina com plano aprovado e verificavel, pronto para materializacao futura; nao escreve `fretes`. |
+| `CAMPAIGN_MULTI_UNIT_V1` | `SUPPORTED_WITH_ALL_UNITS_IN_EFFECTIVE_SCOPE` | Campaign pode envolver uma ou varias unidades, desde que o usuario tenha scope efetivo sobre todas elas. |
+
+Autorizacao futura de Campaign = `ENTITLEMENT AND PERMISSION AND SCOPE`. Nao usar role hardcoded como autoridade.
+
+## Modelo De Execucao
+
+- `PARALLEL_EXECUTION_V1=3_WRITER_AGENTS_PLUS_1_READ_ONLY_REVIEWER_PLUS_OWNER_ORCHESTRATOR`.
+- `PARALLEL_WRITER_LIMIT=3`.
+- `CANONICAL_DOC_OWNER=ORCHESTRATOR/INTEGRATOR`.
+- `PRODUCTION_SCHEMA_WRITER_COUNT<=1`.
+- `PRODUCTION_SCHEMA_MAX_CONCURRENT=1`.
+- `PRODUCTION_SENSITIVE_WRITE_MAX_CONCURRENT=1`.
+- `MAIN_POLICY=main_nao_e_workspace_de_desenvolvimento`.
+
+Writers A/B/C nao editam normalmente os documentos canonicos `docs/product/v9/ROADMAP.md`, `MASTER_LEDGER.md`, `CONTEXT_BRIDGE.md` e `DECISIONS.md`. Mudancas canonicas passam pelo orchestrator/integrator.
+
+## Execution Board
+
+| Batch | Agent | Macrofront | Branch | Worktree | Base SHA | Schema authority | Status | PR | Migration | Gate | Integration order |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| V1 | `AGENT_A_NAME=CAMPAIGN_A_WRITER` | Campaign-A foundation | `feature/operation-campaign-foundation` | `worktree-campaign-a` | `cdf6b4ca62d84d2cb651ff2de0a8134c5bc2a715` | `MIGRATION_076_OWNER=AGENT_A` | `READY_FOR_PROMPT` | `TBD` | `076_operation_campaign_foundation.sql` reserved | Owner migration gate required before prod apply | Dependency-aware; may wait for migration gate |
+| V1 | `AGENT_B_NAME=MOBILE_M1_WRITER` | Mobile Release Train M1 | `feature/mobile-release-train-m1` | `worktree-mobile-m1` | `cdf6b4ca62d84d2cb651ff2de0a8134c5bc2a715` | `NONE` | `READY_FOR_PROMPT` | `TBD` | `NONE_ALLOWED` | Schema request must stop and report | May merge before A if independent and clean |
+| V1 | `AGENT_C_NAME=SYSTEMIC_QUALITY_WRITER` | Reports/performance/systemic quality | `feature/systemic-quality-reports-performance` | `worktree-systemic-quality` | `cdf6b4ca62d84d2cb651ff2de0a8134c5bc2a715` | `NONE` | `READY_FOR_PROMPT` | `TBD` | `NONE_ALLOWED` | Schema request must document/defer | May merge before A if independent and clean |
+| V1 | `AGENT_R_NAME=PARALLEL_INTEGRATION_REVIEWER` | Cross-front review/integration | read-only | read-only | `cdf6b4ca62d84d2cb651ff2de0a8134c5bc2a715` | `NONE` | `READY_FOR_PROMPT` | review only | `NONE_ALLOWED` | No product writes | Reviews all PRs; recommends order |
+
+## Agent Ownership
+
+### Agent A - Campaign-A Writer
+
+Owns Campaign-A domain, schema, planner, approval, verifiability, permissions/scope integration and initial web create/review UX.
+
+Owned areas:
+
+- Campaign backend domain/routes/controllers/services.
+- Campaign database schema and PG tests.
+- Campaign web pages/components for create/review/approve.
+- Campaign verifier rules and evidence contracts.
+- Campaign permission, entitlement and scope integration.
+
+Allowed end state: `APPROVED_PLAN`. Agent A must not materialize freight, bulk-create `fretes`, implement dispatch offers, execution tracking, progress from real freights, or replanning after execution.
+
+Forbidden areas: Campaign-B, freight bulk materialization, dispatch offers, partner network, RouteProvider vendor integration, AI agent, Flutter Campaign, billing, Asaas, fiscal. No production migration without separate owner gate.
+
+### Agent B - Mobile M1 Writer
+
+Owns Flutter/mobile release train M1, mobile test infra, Codemagic config when needed, app version/update client UX and existing M1 experiences.
+
+Schema authority: `AGENT_B_SCHEMA_AUTHORITY=NONE`. Agent B cannot create/alter schema, edit migration 076, apply DDL, or implement Campaign backend. If schema is needed, stop the subitem and report `MIGRATION_REQUEST_PENDING`.
+
+### Agent C - Systemic Quality Writer
+
+Owns reports, PDF/report parity, performance, N+1, pagination, query efficiency, systemic diagnostics, read-only verifier coverage, benchmark harness and operational quality.
+
+Schema authority: `AGENT_C_SCHEMA_AUTHORITY=NONE`. Agent C cannot create migrations or alter tables. If schema is needed, document/defer and do not create 077.
+
+Forbidden areas: Campaign schema/planner, Flutter ownership, billing/fiscal/Asaas, Freight authority rewrite.
+
+### Agent R - Parallel Integration Reviewer
+
+Read-only reviewer/integrator. May read all branches/PRs, inspect diffs, CI, migrations and dependencies, run isolated read-only checks/tests, produce review and recommend merge order.
+
+Cannot edit implementation, fix code, create migration, commit product code, force push, or resolve conflicts silently.
+
+## File Ownership Matrix
+
+| Area/file family | Owner | Shared/critical policy |
+|---|---|---|
+| `docs/product/v9/DECISIONS.md` | Orchestrator/Integrator | Writers do not edit during normal implementation. |
+| `docs/product/v9/ROADMAP.md` | Orchestrator/Integrator | Updated after integration, not inside writer scope. |
+| `docs/product/v9/MASTER_LEDGER.md` | Orchestrator/Integrator | Canonical backlog status remains serial. |
+| `docs/product/v9/CONTEXT_BRIDGE.md` | Orchestrator/Integrator | Handoff updated by integrator only. |
+| Campaign backend/domain/web/tests | Agent A | B/C must not implement Campaign backend or schema. |
+| Flutter/app release train | Agent B | A/C must not own Flutter M1. A must not build Campaign mobile in Batch V1. |
+| Reports/performance/diagnostics | Agent C | C does not build Campaign reports in Batch V1. |
+| Permission resolver/core | Shared critical | Serialize edits; if multiple agents need it, extract common PR or owner gate. |
+| Verifier framework core | Shared critical | Serialize edits; Campaign-specific rules may live under Agent A ownership. |
+| Freight core authority | No writer owner in Batch V1 | Keep stable; Campaign-A avoids Freight mutation because end state is approved plan. |
+| Fleet authority | Stable dependency | Campaign-A may read/use Fleet; no opportunistic refactor. |
+
+## Authority Collision Matrix
+
+| Authority | Batch V1 rule |
+|---|---|
+| Campaign schema | Agent A only. |
+| Migration 076 | Reserved to Agent A: `076_operation_campaign_foundation.sql`. |
+| Migration 077/078 | Not available to B/C in Batch V1. |
+| Production DDL | Max one concurrent writer; owner gate required. |
+| Production sensitive writes | Max one concurrent sensitive writer; owner gate required. |
+| Permission resolver/core | Shared critical; serialize if touched. |
+| Verifier core | Shared critical; serialize if touched. |
+| Freight core | Stable; no Batch V1 owner. |
+| Billing/Asaas | Forbidden in Batch V1. |
+| Fiscal | Forbidden in Batch V1; not a fourth writer. |
+
+## Dependency Graph
+
+```text
+Fleet/Freight authority (stable) -> Campaign-A reads capacity/scope inputs
+E1.5 Verifiability (stable) -> Campaign-A adds Campaign rules
+Existing backend contracts -> Mobile M1 consumes existing APIs
+Stable domains -> Systemic Quality improves reports/perf without Campaign-specific work
+Agent R -> observes A/B/C and recommends integration order
+```
+
+Campaign-A has no dependency on B/C. Mobile M1 has no dependency on Campaign-A. Systemic Quality has no Campaign-specific dependency.
+
+## Migration Single-Flight
+
+- `MIGRATION_RESERVED=076_operation_campaign_foundation.sql`.
+- `MIGRATION_076_OWNER=AGENT_A`.
+- `PRODUCTION_SCHEMA_WRITER_COUNT<=1`.
+- Agent B/C cannot create 076/077/078.
+- Schema need outside Agent A becomes `MIGRATION_REQUEST_PENDING`.
+- Even Agent A has no automatic production migration authority.
+
+Future production flow for 076:
+
+1. Code and tests complete in Agent A branch.
+2. PG/local/CI pass.
+3. PR review complete.
+4. Migration hash/source frozen.
+5. G0 precheck complete.
+6. Owner migration gate explicit.
+7. Apply once via verified source text.
+8. Tracking and schema postcheck complete.
+9. Merge/deploy only after gates pass.
+
+Process rule: `PROCESS-002` applies to all future production migrations. Full-file read, source hash, signature validation, no manual SQL reconstruction, apply once, tracking and postcheck.
+
+## Drift And Merge Policy
+
+Before each writer PR merge, fetch main and record:
+
+- `BASE_SHA`.
+- `CURRENT_MAIN`.
+- `OWN_HEAD`.
+- `DIRTY_STATE`.
+
+Classify drift as one of:
+
+- `NO_RELEVANT_DRIFT`.
+- `SAFE_REBASE_REQUIRED`.
+- `CONTRACT_REVIEW_REQUIRED`.
+- `BLOCKING_CONFLICT`.
+
+Rebase/merge main only when authorized by future prompt and conflict-free; rerun affected tests after any base movement. Integration order is dependency-aware, not chronological. B or C may merge before A. A may wait on migration gate.
+
+## Review Checkpoints
+
+- After each agent findings/scope pass.
+- Before each PR merge.
+- Before migration 076 owner gate.
+- After all Batch V1 merges.
+
+Agent R watches API contracts, permissions, entitlement assumptions, schema assumptions, shared types, storage contracts, realtime event changes and verifier framework collisions.
+
+## Cross-Front Final Testing
+
+Final integration should include:
+
+- Backend full suite.
+- Web full suite/build.
+- Flutter validation for touched mobile scope.
+- PG suite where applicable.
+- SEC-1.
+- Read-only production smoke.
+
+## Completion Contract
+
+Each writer must report:
+
+```text
+AGENT=
+MACROFRONT=
+BASE_SHA=
+FINAL_HEAD=
+PR=
+FILES_CHANGED=
+SHARED_CORE_FILES_CHANGED=
+MIGRATION_REQUIRED=
+MIGRATION_FILE=
+TESTS=
+CI=
+BLOCKERS=
+HIGHS=
+MEDIUMS=
+DEFERRED=
+PRODUCTION_WRITES=
+ENV_CHANGED=
+ASAAS_TOUCHED=
+READY_FOR_INTEGRATION_REVIEW=
+```
+
+## Stop Contract
+
+Any writer must stop and report before continuing if it hits:
+
+- Scope expansion beyond assigned macrofront.
+- Schema conflict or need outside assigned authority.
+- Security authority unclear.
+- Tenant/scope boundary unclear.
+- Unexpected production write.
+- Shared-core collision that cannot be isolated.
+
+## Prompt Pack Registry
+
+Prompt IDs are reserved, but implementation prompts are not generated in this execution:
+
+- `PROMPT_A=CAMPAIGN_A_IMPLEMENTATION`.
+- `PROMPT_B=MOBILE_M1_IMPLEMENTATION`.
+- `PROMPT_C=SYSTEMIC_QUALITY_IMPLEMENTATION`.
+- `PROMPT_R=PARALLEL_INTEGRATION_REVIEWER`.
+
+## Status
+
+- `AGENT_A_STATUS=READY_FOR_PROMPT`.
+- `AGENT_B_STATUS=READY_FOR_PROMPT`.
+- `AGENT_C_STATUS=READY_FOR_PROMPT`.
+- `AGENT_R_STATUS=READY_FOR_PROMPT`.
+- `OWNER_VISUAL_VALIDATION=PENDING`.
+- `BLOCKERS_OPEN=0`.
+- `HIGHS_OPEN=0`.
+- `NEXT_STATUS=READY_TO_START_PARALLEL_EXECUTION_V1`.
+

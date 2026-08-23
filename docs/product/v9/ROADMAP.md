@@ -122,7 +122,7 @@ _Itens mobile de macrofrentes futuras (ex.: enforcement de `freight.create`/`fre
 - **Dependências:** E2.1 é raiz de tudo. **Gate:** migração **aditiva** (nunca destrutiva); frete atual continua funcionando.
 
 ### ONDA 3 — Expansão
-- **E3.0 Operation Campaign / Operação de Escoamento** — ✅ **ARCHITECTURE_FROZEN** (docs-only, sem implementação): Campaign é objetivo operacional versionado, não `campaign_id` simples em fretes. Auditoria delta sobre Freight/Fleet/Driver/Documents/Scope/Realtime/Verifiability congelada; proposed schema V1 = `operation_campaigns`, `campaign_locations`, `campaign_demands`, `campaign_plan_versions`, `campaign_plan_scenarios`, `campaign_planned_trips`, `campaign_approvals`, `campaign_exceptions`; próxima migration proposta **076**, não criada. Ver [OPERATION_CAMPAIGN_ARCHITECTURE](./OPERATION_CAMPAIGN_ARCHITECTURE.md).
+- **E3.0 Operation Campaign / Operação de Escoamento** — ✅ **ARCHITECTURE_FROZEN** + **OWNER_DECISIONS_FROZEN** (docs-only, sem implementação): Campaign é objetivo operacional versionado, não `campaign_id` simples em fretes. Auditoria delta sobre Freight/Fleet/Driver/Documents/Scope/Realtime/Verifiability congelada; entitlement tecnico `operation_campaign`; mapping comercial `DEFERRED_SEPARATE_COMMERCIAL_DECISION`; Campaign-A termina em `APPROVED_PLAN` e nao materializa fretes; multi-unidade V1 suportada sob scope efetivo completo. Proposed schema V1 = `operation_campaigns`, `campaign_locations`, `campaign_demands`, `campaign_plan_versions`, `campaign_plan_scenarios`, `campaign_planned_trips`, `campaign_approvals`, `campaign_exceptions`; próxima migration proposta **076**, reservada ao Agent A e não criada nesta execucao. Ver [OPERATION_CAMPAIGN_ARCHITECTURE](./OPERATION_CAMPAIGN_ARCHITECTURE.md) e [PARALLEL_EXECUTION_BOARD](./PARALLEL_EXECUTION_BOARD.md).
 - **E3.1 Operation Orchestrator** — arquitetura congelada como orquestrador determinístico, separado de IA; pipeline `OBJECTIVE → NORMALIZE → VALIDATE → RESOURCE_SNAPSHOT → CAPACITY_PLAN → TRIP_PLAN → SCENARIOS → HUMAN_APPROVAL → DISPATCH_READY → FREIGHT_MATERIALIZATION → EXECUTION → VERIFY → REPLAN/EXCEPTIONS`.
 - **E3.2 Planejamento/aprovação de frete** (RBV9-INV-029, §7): passa pelo plano Campaign antes de materializar fretes; approval por `campaign.approve`, não role hardcoded.
 - **E3.3 Route Intelligence (provider abstraction)** (RBV9-INV-030, D-032): boundary mantido; Campaign-A funciona com distância manual/opcional, sem Google/TomTom.
@@ -170,8 +170,8 @@ _Itens mobile de macrofrentes futuras (ex.: enforcement de `freight.create`/`fre
 
 ## Próxima macrofrente de implementação recomendada
 
-**Campaign-A - Domain + Planning + Versioning + Approval + Verifiability**, após decisão do owner sobre entitlement comercial, escopo multi-unidade inicial e limite de materialização.
+**Parallel Execution V1**, iniciando somente com novo prompt/gate: Agent A (`Campaign-A - Domain + Planning + Versioning + Approval + Verifiability`), Agent B (`Mobile Release Train M1`), Agent C (`Systemic Quality`) e Agent R (`read-only integration reviewer`). Ver [PARALLEL_EXECUTION_BOARD](./PARALLEL_EXECUTION_BOARD.md).
 
-**Por quê:** (1) Fleet e E1.5 já estão fechadas tecnicamente; (2) Campaign é o próximo salto de carga humana evitada; (3) o plano precisa nascer determinístico, versionado e auditável antes de dispatch, parceiros, rotas externas ou IA.
+**Por quê:** (1) Fleet e E1.5 já estão fechadas tecnicamente; (2) Campaign é o próximo salto de carga humana evitada; (3) o plano precisa nascer determinístico, versionado e auditável antes de dispatch, parceiros, rotas externas ou IA; (4) Mobile M1 e Systemic Quality podem avançar em paralelo sem schema authority.
 
-_Ver: [CONTEXT_BRIDGE](./CONTEXT_BRIDGE.md) · [DECISIONS](./DECISIONS.md) · [MASTER_LEDGER](./MASTER_LEDGER.md) · [FORENSIC_BASELINE](./FORENSIC_BASELINE.md)_
+_Ver: [CONTEXT_BRIDGE](./CONTEXT_BRIDGE.md) · [DECISIONS](./DECISIONS.md) · [MASTER_LEDGER](./MASTER_LEDGER.md) · [FORENSIC_BASELINE](./FORENSIC_BASELINE.md) · [PARALLEL_EXECUTION_BOARD](./PARALLEL_EXECUTION_BOARD.md)_
