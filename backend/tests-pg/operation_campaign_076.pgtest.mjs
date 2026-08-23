@@ -548,8 +548,11 @@ function registrar() {
       `SELECT conname, convalidated
          FROM pg_constraint
         WHERE contype = 'f'
-          AND conrelid IN ('public.campaign_operational_units'::regclass, 'public.campaign_locations'::regclass)
-          AND confrelid = 'public.unidades_operacionais'::regclass
+          AND conname IN (
+            'campaign_locations_unit_campaign_fk',
+            'campaign_locations_unit_empresa_fk',
+            'campaign_units_unit_empresa_fk'
+          )
         ORDER BY conname`,
     );
     assert.deepEqual(unitFks.rows, [
