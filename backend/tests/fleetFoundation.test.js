@@ -186,10 +186,12 @@ test('fleet router is protected by auth, tenant, plan and effective permissions'
     criarAtivo: function criarAtivo(_req, res) { res.json({}); },
     atualizarAtivo: function atualizarAtivo(_req, res) { res.json({}); },
     listarComposicoes: function listarComposicoes(_req, res) { res.json({}); },
+    detalharComposicao: function detalharComposicao(_req, res) { res.json({}); },
     criarComposicao: function criarComposicao(_req, res) { res.json({}); },
     adicionarMembroComposicao: function adicionarMembroComposicao(_req, res) { res.json({}); },
     encerrarMembroComposicao: function encerrarMembroComposicao(_req, res) { res.json({}); },
     criarVinculoMotorista: function criarVinculoMotorista(_req, res) { res.json({}); },
+    trocarMotorista: function trocarMotorista(_req, res) { res.json({}); },
     encerrarVinculoMotorista: function encerrarVinculoMotorista(_req, res) { res.json({}); },
     criarVinculoFrete: function criarVinculoFrete(_req, res) { res.json({}); },
     listarPneus: function listarPneus(_req, res) { res.json({}); },
@@ -203,6 +205,7 @@ test('fleet router is protected by auth, tenant, plan and effective permissions'
     criarOdometro: function criarOdometro(_req, res) { res.json({}); },
     listarDocumentosAtivo: function listarDocumentosAtivo(_req, res) { res.json({}); },
     criarDocumentoAtivo: function criarDocumentoAtivo(_req, res) { res.json({}); },
+    urlDocumentoAtivo: function urlDocumentoAtivo(_req, res) { res.json({}); },
   };
 
   Module._load = function (request, parent, isMain) {
@@ -258,6 +261,14 @@ test('fleet router is protected by auth, tenant, plan and effective permissions'
   const getMaintenance = router.stack.find((layer) => layer.route?.path === '/maintenance' && layer.route.methods.get).route;
   assert.equal(getMaintenance.stack[0].handle.permissionKey, 'fleet.view');
 
+  const postDriverHandoff = router.stack.find((layer) => layer.route?.path === '/driver-handoffs' && layer.route.methods.post).route;
+  assert.equal(postDriverHandoff.stack[0].handle.permissionKey, 'fleet.manage');
+  assert.equal(postDriverHandoff.stack[1].handle, controller.trocarMotorista);
+
+  const getDocumentUrl = router.stack.find((layer) => layer.route?.path === '/assets/:id/documents/:documentId/url' && layer.route.methods.get).route;
+  assert.equal(getDocumentUrl.stack[0].handle.permissionKey, 'fleet.view');
+  assert.equal(getDocumentUrl.stack[1].handle, controller.urlDocumentoAtivo);
+
   assert.ok(permissions.includes('fleet.view'));
   assert.ok(permissions.includes('fleet.manage'));
 });
@@ -296,4 +307,23 @@ test('migration 074 is additive, tenant-scoped and keeps legacy freight fields i
   assert.doesNotMatch(sql, /\bauth\.role\s*\(/i);
   assert.doesNotMatch(sql, /\bDROP\s+TABLE\b|\bTRUNCATE\b|\bDELETE\s+FROM\b/i);
   assert.doesNotMatch(sql, /ALTER TABLE\s+public\.fretes/i);
+});
+
+test('migration 075 prepares fleet operational closure behind owner gate', () => {
+  const sql = fs.readFileSync(path.join(__dirname, '..', 'migrations', '075_fleet_operational_closure.sql'), 'utf8');
+
+  assert.match(sql, /OWNER_MIGRATION_GATE_FLEET_075/);
+  assert.match(sql, /ALTER TABLE public\.asset_documents[\s\S]*ADD COLUMN IF NOT EXISTS nome_arquivo/);
+  assert.match(sql, /ADD COLUMN IF NOT EXISTS file_sha256 TEXT NULL/);
+  assert.match(sql, /ALTER TABLE public\.tires[\s\S]*ADD COLUMN IF NOT EXISTS unidade_operacional_id UUID NULL/);
+  assert.match(sql, /CONSTRAINT tires_unit_empresa_fk/);
+  assert.match(sql, /CREATE OR REPLACE FUNCTION public\.fleet_driver_handoff/);
+  assert.match(sql, /pg_advisory_xact_lock/);
+  assert.match(sql, /driver_vehicle_assignments_handoff_request_key/);
+  assert.match(sql, /GRANT EXECUTE ON FUNCTION public\.fleet_driver_handoff/);
+  assert.match(sql, /REVOKE ALL ON FUNCTION public\.fleet_driver_handoff\(UUID,UUID,UUID,UUID,TIMESTAMPTZ,TEXT,UUID,TEXT,TEXT\) FROM authenticated/);
+  assert.doesNotMatch(sql, /GRANT EXECUTE ON FUNCTION public\.fleet_driver_handoff\(UUID,UUID,UUID,UUID,TIMESTAMPTZ,TEXT,UUID,TEXT,TEXT\) TO authenticated/);
+  assert.doesNotMatch(sql, /\bDROP\s+TABLE\b|\bTRUNCATE\b|\bDELETE\s+FROM\b/i);
+  assert.doesNotMatch(sql, /ALTER TABLE\s+public\.fretes/i);
+  assert.doesNotMatch(sql, /storage\.policies|CREATE POLICY .*storage/i);
 });

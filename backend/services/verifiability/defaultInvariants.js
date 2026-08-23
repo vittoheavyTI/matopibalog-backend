@@ -11,6 +11,18 @@ const DOCUMENT_STATUS = new Set(['ativo', 'cancelado']);
 const DOCUMENT_EVENT_TYPES = new Set(['uploaded', 'replaced', 'cancelled', 'acknowledged', 'returned']);
 const BILLING_OUTBOX_STATUS = new Set(['pending', 'processing', 'processed', 'failed', 'dead']);
 
+function countDuplicates(rows, keyFn) {
+  const seen = new Set();
+  const duplicates = new Set();
+  for (const row of rows || []) {
+    const key = keyFn(row);
+    if (!key) continue;
+    if (seen.has(key)) duplicates.add(key);
+    seen.add(key);
+  }
+  return duplicates.size;
+}
+
 function containsSecretLikeValue(row) {
   return Object.entries(row || {}).some(([key, value]) => {
     if (value == null) return false;
@@ -148,6 +160,79 @@ function createDefaultInvariantRegistry() {
           }, checked_at));
         }
         return passResult({ sampled: rows.length });
+      },
+    },
+    {
+      stable_key: 'fleet.composition.unique_active_asset.v1',
+      domain: 'fleet',
+      description: 'Each fleet asset can have at most one active composition membership.',
+      severity: 'high',
+      remediation_policy: 'manual_review',
+      version: 1,
+      async check({ context, invariant, checked_at }) {
+        const rows = await context.facts.sampleFleetCompositionMembers();
+        const active = rows.filter((row) => !row.valid_until);
+        const duplicateCount = countDuplicates(active, (row) => row.asset_id);
+        if (duplicateCount) {
+          return failResult(buildFinding(invariant, 'Fleet composition membership sample has duplicated active assets.', {
+            sampled: rows.length,
+            duplicate_count: duplicateCount,
+          }, checked_at));
+        }
+        return passResult({ sampled: rows.length });
+      },
+    },
+    {
+      stable_key: 'fleet.driver_assignment.no_active_conflict.v1',
+      domain: 'fleet',
+      description: 'Active fleet driver assignments do not conflict by driver, asset or composition.',
+      severity: 'high',
+      remediation_policy: 'manual_review',
+      version: 1,
+      async check({ context, invariant, checked_at }) {
+        const rows = await context.facts.sampleFleetDriverAssignments();
+        const active = rows.filter((row) => row.assignment_status === 'active' && !row.valid_until);
+        const duplicateDrivers = countDuplicates(active, (row) => row.driver_id);
+        const duplicateAssets = countDuplicates(active, (row) => row.asset_id);
+        const duplicateCompositions = countDuplicates(active, (row) => row.composition_id);
+        const conflictCount = duplicateDrivers + duplicateAssets + duplicateCompositions;
+        if (conflictCount) {
+          return failResult(buildFinding(invariant, 'Fleet driver assignment sample has active conflicts.', {
+            sampled: rows.length,
+            duplicate_drivers: duplicateDrivers,
+            duplicate_assets: duplicateAssets,
+            duplicate_compositions: duplicateCompositions,
+          }, checked_at));
+        }
+        return passResult({ sampled: rows.length });
+      },
+    },
+    {
+      stable_key: 'fleet.assignment.tenant_consistency.v1',
+      domain: 'fleet',
+      description: 'Fleet assignment targets stay inside the same tenant as assets and compositions.',
+      severity: 'high',
+      remediation_policy: 'manual_review',
+      version: 1,
+      async check({ context, invariant, checked_at }) {
+        const [assignments, assets, compositions] = await Promise.all([
+          context.facts.sampleFleetDriverAssignments(),
+          context.facts.sampleFleetAssets(),
+          context.facts.sampleFleetCompositions(),
+        ]);
+        const assetTenant = new Map(assets.map((asset) => [asset.id, asset.empresa_id]));
+        const compositionTenant = new Map(compositions.map((composition) => [composition.id, composition.empresa_id]));
+        const invalid = assignments.filter((row) => (
+          (row.asset_id && assetTenant.get(row.asset_id) && assetTenant.get(row.asset_id) !== row.empresa_id) ||
+          (row.composition_id && compositionTenant.get(row.composition_id) && compositionTenant.get(row.composition_id) !== row.empresa_id)
+        ));
+        if (invalid.length) {
+          return failResult(buildFinding(invariant, 'Fleet assignment sample has tenant-inconsistent targets.', {
+            sampled: assignments.length,
+            invalid_count: invalid.length,
+          }, checked_at));
+        }
+        return passResult({ sampled: assignments.length });
       },
     },
   ]);

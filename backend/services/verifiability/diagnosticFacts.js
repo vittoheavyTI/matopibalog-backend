@@ -31,6 +31,18 @@ function createSupabaseDiagnosticFacts(supabase) {
     async sampleBillingOutbox() {
       return selectLimited('billing_outbox', 'event_type,dedupe_key,status,attempts,max_attempts,created_at', 50);
     },
+    async sampleFleetCompositionMembers() {
+      return selectLimited('vehicle_composition_members', 'id,empresa_id,composition_id,asset_id,valid_until,created_at', 200);
+    },
+    async sampleFleetDriverAssignments() {
+      return selectLimited('driver_vehicle_assignments', 'id,empresa_id,driver_id,asset_id,composition_id,assignment_status,valid_until,created_at', 200);
+    },
+    async sampleFleetAssets() {
+      return selectLimited('fleet_assets', 'id,empresa_id,unidade_operacional_id,status,created_at', 200);
+    },
+    async sampleFleetCompositions() {
+      return selectLimited('vehicle_compositions', 'id,empresa_id,unidade_operacional_id,status,created_at', 200);
+    },
   };
 }
 

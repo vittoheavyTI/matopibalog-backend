@@ -2,6 +2,7 @@
 
 const supabase = require('../config/supabase');
 const fleet = require('../services/fleet/fleetService');
+const { buildCorrelationContext } = require('../services/verifiability/correlationContext');
 
 function responderErro(res, error) {
   if (error instanceof fleet.FleetError) {
@@ -65,6 +66,19 @@ const listarComposicoes = async (req, res) => {
   }
 };
 
+const detalharComposicao = async (req, res) => {
+  try {
+    const item = await fleet.getCompositionDetail(supabase, {
+      empresaId: req.empresa_id,
+      compositionId: req.params.id,
+      operationalScope: req.operationalScope,
+    });
+    return res.json(item);
+  } catch (error) {
+    return responderErro(res, error);
+  }
+};
+
 const criarComposicao = async (req, res) => {
   try {
     const item = await fleet.createComposition(supabase, { empresaId: req.empresa_id, user: req.user, body: req.body || {}, operationalScope: req.operationalScope });
@@ -106,6 +120,21 @@ const encerrarMembroComposicao = async (req, res) => {
 const criarVinculoMotorista = async (req, res) => {
   try {
     const item = await fleet.createDriverAssignment(supabase, { empresaId: req.empresa_id, user: req.user, body: req.body || {}, operationalScope: req.operationalScope });
+    return res.status(201).json(item);
+  } catch (error) {
+    return responderErro(res, error);
+  }
+};
+
+const trocarMotorista = async (req, res) => {
+  try {
+    const item = await fleet.driverHandoff(supabase, {
+      empresaId: req.empresa_id,
+      user: req.user,
+      body: req.body || {},
+      operationalScope: req.operationalScope,
+      correlation: req.correlation || buildCorrelationContext({ headers: req.headers }),
+    });
     return res.status(201).json(item);
   } catch (error) {
     return responderErro(res, error);
@@ -222,8 +251,32 @@ const listarDocumentosAtivo = async (req, res) => {
 
 const criarDocumentoAtivo = async (req, res) => {
   try {
-    const item = await fleet.createAssetDocument(supabase, { empresaId: req.empresa_id, user: req.user, assetId: req.params.id, body: req.body || {}, operationalScope: req.operationalScope });
+    const item = req.file
+      ? await fleet.uploadAssetDocument(supabase, {
+        empresaId: req.empresa_id,
+        user: req.user,
+        assetId: req.params.id,
+        body: req.body || {},
+        file: req.file,
+        operationalScope: req.operationalScope,
+        correlation: req.correlation || buildCorrelationContext({ headers: req.headers }),
+      })
+      : await fleet.createAssetDocument(supabase, { empresaId: req.empresa_id, user: req.user, assetId: req.params.id, body: req.body || {}, operationalScope: req.operationalScope });
     return res.status(201).json(item);
+  } catch (error) {
+    return responderErro(res, error);
+  }
+};
+
+const urlDocumentoAtivo = async (req, res) => {
+  try {
+    const item = await fleet.createAssetDocumentSignedUrl(supabase, {
+      empresaId: req.empresa_id,
+      assetId: req.params.id,
+      documentId: req.params.documentId,
+      operationalScope: req.operationalScope,
+    });
+    return res.json(item);
   } catch (error) {
     return responderErro(res, error);
   }
@@ -236,10 +289,12 @@ module.exports = {
   criarAtivo,
   atualizarAtivo,
   listarComposicoes,
+  detalharComposicao,
   criarComposicao,
   adicionarMembroComposicao,
   encerrarMembroComposicao,
   criarVinculoMotorista,
+  trocarMotorista,
   encerrarVinculoMotorista,
   criarVinculoFrete,
   listarPneus,
@@ -253,4 +308,5 @@ module.exports = {
   criarOdometro,
   listarDocumentosAtivo,
   criarDocumentoAtivo,
+  urlDocumentoAtivo,
 };
