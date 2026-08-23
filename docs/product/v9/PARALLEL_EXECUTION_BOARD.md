@@ -1,7 +1,7 @@
 # Matopiba Log V9 - Parallel Execution Board V1
 
-> Status: `PARALLEL_EXECUTION_BOARD_V1_EXECUTED=true`; `CAMPAIGN_A_077_OWNER_GATE_PENDING=true`; `MOBILE_M1_TECHNICAL_STATUS=CLOSED`; `SYSTEMIC_QUALITY_TECHNICAL_STATUS=CLOSED`.
-> Base original: `PARALLEL_BATCH_V1_BASE_SHA=cdf6b4ca62d84d2cb651ff2de0a8134c5bc2a715` (`origin/main`, PR #455 Operation Campaign architecture frozen). Current reconciled main after Systemic: `35b840281a711bc2a0264358662e548cc6ecc1fa`.
+> Status: `PARALLEL_EXECUTION_BOARD_V1_EXECUTED=true`; `CAMPAIGN_A_TECHNICAL_STATUS=CLOSED`; `MOBILE_M1_TECHNICAL_STATUS=CLOSED`; `SYSTEMIC_QUALITY_TECHNICAL_STATUS=CLOSED`.
+> Base original: `PARALLEL_BATCH_V1_BASE_SHA=cdf6b4ca62d84d2cb651ff2de0a8134c5bc2a715` (`origin/main`, PR #455 Operation Campaign architecture frozen). Current reconciled main after Campaign-A closure: `32d8fe3e8824d1a8bc5be89ad6f5cdf86ae5c316`.
 
 ## Objetivo
 
@@ -34,10 +34,10 @@ Writers A/B/C nao editam normalmente os documentos canonicos `docs/product/v9/RO
 
 | Batch | Agent | Macrofront | Branch | Worktree | Base SHA | Schema authority | Status | PR | Migration | Gate | Integration order |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| V1 | `AGENT_A_NAME=CAMPAIGN_A_WRITER` | Campaign-A foundation | `feature/operation-campaign-foundation` | `worktree-campaign-a` | reconciled with `a257e0f6b50e1d7d9f6f64113df768cdc6f7339f` | `MIGRATION_076_OWNER=AGENT_A`; `MIGRATION_077_OWNER=CAMPAIGN_A_WRITER` | `READY_FOR_OWNER_MIGRATION_GATE_CAMPAIGN_077` | #457 open | 076 applied/tracked once; 077 corrective created, not applied | Owner migration gate required before 077 prod apply | Do not merge/deploy Campaign before 077 owner gate |
+| V1 | `AGENT_A_NAME=CAMPAIGN_A_WRITER` | Campaign-A foundation | `feature/operation-campaign-foundation` | `worktree-campaign-a` | reconciled with `4faa735b5b1760fb159fbf9436f7d8eef0665b0e` | `MIGRATION_076_OWNER=AGENT_A`; `MIGRATION_077_OWNER=CAMPAIGN_A_WRITER` | `CLOSED_IN_PRODUCTION` | #457 merged (`32d8fe3e8824d1a8bc5be89ad6f5cdf86ae5c316`) | 076 applied/tracked once; 077 applied/tracked once (`20260823220632`) | Gate 077 executed and closed; no 078 authorization | Merged/deployed after 077, CI and read-only smokes |
 | V1 | `AGENT_B_NAME=MOBILE_M1_WRITER` | Mobile Release Train M1 | `feature/mobile-release-train-m1` | `worktree-mobile-m1` | `cdf6b4ca62d84d2cb651ff2de0a8134c5bc2a715` | `NONE` | `CLOSED_TECHNICAL` | #458 merged (`a257e0f6b50e1d7d9f6f64113df768cdc6f7339f`) | `NONE_ALLOWED` | Physical validation/Play publication deferred | Merged before A; backend overlap reconciled safely |
 | V1 | `AGENT_C_NAME=SYSTEMIC_QUALITY_WRITER` | Reports/performance/systemic quality | `feature/systemic-quality-reports-performance` | `worktree-systemic-quality` | `a257e0f6b50e1d7d9f6f64113df768cdc6f7339f` | `NONE` | `CLOSED_IN_PRODUCTION` | #459 merged (`35b840281a711bc2a0264358662e548cc6ecc1fa`) | `NONE_ALLOWED` | No schema required | Railway deploy `f81f64f0-2809-4619-82e3-1d833b33b697` SUCCESS |
-| V1 | `AGENT_R_NAME=PARALLEL_INTEGRATION_REVIEWER` | Cross-front review/integration | read-only | read-only | `cdf6b4ca62d84d2cb651ff2de0a8134c5bc2a715` | `NONE` | `READY_FOR_PROMPT` | review only | `NONE_ALLOWED` | No product writes | Reviews all PRs; recommends order |
+| V1 | `AGENT_R_NAME=PARALLEL_INTEGRATION_REVIEWER` | Cross-front review/integration | read-only | read-only | `cdf6b4ca62d84d2cb651ff2de0a8134c5bc2a715` | `NONE` | `COMPLETED` | review only | `NONE_ALLOWED` | No product writes | Reviewed integration order through Campaign-A closure |
 
 ## Agent Ownership
 
@@ -229,12 +229,12 @@ Prompt IDs are reserved, but implementation prompts are not generated in this ex
 
 ## Status
 
-- `AGENT_A_STATUS=READY_FOR_PROMPT`.
-- `AGENT_B_STATUS=READY_FOR_PROMPT`.
-- `AGENT_C_STATUS=READY_FOR_PROMPT`.
-- `AGENT_R_STATUS=READY_FOR_PROMPT`.
+- `AGENT_A_STATUS=CLOSED_IN_PRODUCTION`.
+- `AGENT_B_STATUS=CLOSED_TECHNICAL`.
+- `AGENT_C_STATUS=CLOSED_IN_PRODUCTION`.
+- `AGENT_R_STATUS=COMPLETED`.
 - `OWNER_VISUAL_VALIDATION=PENDING`.
 - `BLOCKERS_OPEN=0`.
 - `HIGHS_OPEN=0`.
-- `NEXT_STATUS=READY_TO_START_PARALLEL_EXECUTION_V1`.
+- `NEXT_STATUS=CAMPAIGN_B_MATERIALIZATION_PROGRESS_READY_TO_START`.
 

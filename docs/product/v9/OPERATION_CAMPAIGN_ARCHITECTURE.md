@@ -1,7 +1,13 @@
 # ONDA 3 - Operation Campaign / Operacao de Escoamento
 
-> Status: `CAMPAIGN_AUDIT_FINDINGS_FROZEN=true`; `ARCHITECTURE_ONLY=true`; `NO_PRODUCTION_DDL=true`; `NO_CAMPAIGN_IMPLEMENTATION=true`.
-> Baseline auditado em 2026-08-23 sobre `origin/main=988bf3e5e8831f4833255e38293581002c052f88`.
+> Status: `CAMPAIGN_AUDIT_FINDINGS_FROZEN=true`; `CAMPAIGN_A_TECHNICAL_STATUS=CLOSED`; `CAMPAIGN_A_END_STATE=APPROVED_PLAN`; `CAMPAIGN_A_FREIGHT_WRITES=0`.
+> Baseline auditado em 2026-08-23 sobre `origin/main=988bf3e5e8831f4833255e38293581002c052f88`; implementado em produção no PR #457 (`MERGE_SHA=32d8fe3e8824d1a8bc5be89ad6f5cdf86ae5c316`).
+
+## Status de implementacao
+
+Campaign-A foi implementada, validada e deployada em producao em 2026-08-23. Migration 076 esta aplicada/rastreada uma vez (`20260823111859`, SHA256 `C7CA4533B9A26B5CCDB04EA9C9913B986432ECC17E8D76D07F302F21C3EFCD94`) e migration 077 esta aplicada/rastreada uma vez (`20260823220632`, SHA256 `11C5D07AC4A2E03DBCA738945C5CF37EEB73370738E4C7B06ADEA8B7025AB5E1`), reconciliando somente o FK `campaign_exceptions_plan_campaign_fk` para `(plan_version_id, campaign_id, empresa_id)`.
+
+O limite de Campaign-A permanece o mesmo desta arquitetura: dominio, schema, demanda, locations, plan versions, scenarios, planned trips, resource snapshot, planner deterministico V1, approval, permissions/scope/entitlement, verifiability e UX web inicial. Materializacao em `fretes`, progresso operacional, dispatch prep e qualquer migration 078 pertencem a Campaign-B; producao nao deve receber DDL 078 sem novo owner gate explicito.
 
 ## Objetivo
 
@@ -21,8 +27,8 @@ A unidade de trabalho deixa de ser "criar frete manualmente" e passa a ser "decl
 - `PRODUCTION_HEALTH=200`.
 - `OWNER_VISUAL_VALIDATION=PENDING`.
 - Campaign tables em producao: `0`.
-- Ultima migration real no repo: `075_fleet_operational_closure.sql`.
-- Proxima migration proposta, sem criar nesta execucao: `076_operation_campaign_foundation.sql`.
+- Campaign migrations aplicadas/rastreadas: `076_operation_campaign_foundation.sql` e `077_operation_campaign_076_payload_reconciliation.sql`.
+- Proxima migration possivel, somente se Campaign-B exigir schema e com novo owner gate: `078_operation_campaign_materialization.sql`.
 
 ## Auditoria Delta
 
@@ -295,7 +301,8 @@ Campaign V1 suporta uma ou multiplas unidades desde que o usuario tenha scope ef
 - `HIGHS=0` para arquitetura; riscos altos foram modelados com mitigacao antes de implementation.
 - `MEDIUMS`: product/cargo authority, location normalization, composition capacity aggregation, route fallback, owner visual validation.
 - `LOWS`: naming final de UI, relatorio PDF futuro.
-- `MIGRATION_REQUIRED=true`.
-- `PROPOSED_MIGRATION=076_operation_campaign_foundation.sql`.
-- `NO_PRODUCTION_DDL=true`.
-- `NEXT_STATUS=READY_TO_START_PARALLEL_EXECUTION_V1`.
+- `MIGRATION_REQUIRED=true` para Campaign-A ja executada.
+- `APPLIED_MIGRATION_076=20260823111859 076_operation_campaign_foundation`.
+- `APPLIED_MIGRATION_077=20260823220632 077_operation_campaign_076_payload_reconciliation`.
+- `NO_ADDITIONAL_PRODUCTION_DDL_AUTHORIZED=true`.
+- `NEXT_STATUS=CAMPAIGN_B_MATERIALIZATION_PROGRESS_READY_TO_START`.
