@@ -179,6 +179,9 @@ app.use('/termos', termosRoutes);
 // Politica de versao do app (MOBILE-M1-008 / D-053) — rota publica read-only, sem
 // banco. Serve latest/recommended/minimum + severity ao cliente Flutter.
 app.use('/app', require('./routes/appVersion'));
+// AI Copilot V1 — assistente operacional read-only, tool-mediated. Default inerte
+// (AI_PROVIDER_MODE=disabled); nunca escreve negócio nem acessa DB pelo LLM.
+app.use('/ai', require('./routes/ai'));
 
 // Tratamento de erros de upload (multer). Mapeia tamanho/MIME para respostas
 // JSON controladas; erros não relacionados seguem para o próximo handler.
