@@ -21,6 +21,8 @@ function facts(overrides = {}) {
     sampleCampaignPlanVersions: async () => [],
     sampleCampaignPlannedTrips: async () => [],
     sampleCampaignApprovals: async () => [],
+    sampleDispatchRounds: async () => [],
+    sampleDispatchOffers: async () => [],
     ...overrides,
   };
 }
@@ -34,7 +36,7 @@ test('default verifier returns PASS with compatible empty mature-domain samples'
   });
   assert.equal(run.status, 'PASS');
   assert.equal(run.findings.length, 0);
-  assert.equal(run.results.length, 11);
+  assert.equal(run.results.length, 16); // 11 pre-existentes + 5 Dispatch V1 (§63)
 });
 
 test('default verifier returns FAIL findings for objective contract drift', async () => {
@@ -130,6 +132,91 @@ test('campaign invariants detect invalid planned trip targets and approved plan 
   assert.equal(run.status, 'FAIL');
   assert.ok(run.findings.some((f) => f.invariant_key === 'campaign.plan.status_contract.v1'));
   assert.ok(run.findings.some((f) => f.invariant_key === 'campaign.trip.quantity_capacity.v1'));
+});
+
+test('dispatch invariants detect two ACCEPTED offers for the same round (DISPATCH_ONE_WINNER)', async () => {
+  const run = await verifyTarget({
+    target: { domain: 'operation_campaign' },
+    context: {
+      facts: facts({
+        sampleDispatchOffers: async () => [
+          { id: 'o1', empresa_id: 'e1', round_id: 'r1', driver_id: 'd1', status: 'ACCEPTED', responded_at: '2026-08-22T00:00:00.000Z' },
+          { id: 'o2', empresa_id: 'e1', round_id: 'r1', driver_id: 'd2', status: 'ACCEPTED', responded_at: '2026-08-22T00:00:00.000Z' },
+        ],
+      }),
+    },
+    registry: createDefaultInvariantRegistry(),
+    now: () => '2026-08-22T00:00:00.000Z',
+  });
+  assert.equal(run.status, 'FAIL');
+  assert.ok(run.findings.some((f) => f.invariant_key === 'dispatch.round.one_winner.v1'));
+});
+
+test('dispatch invariants detect two OPEN rounds for the same planned trip (DISPATCH_ONE_ACTIVE_ASSIGNMENT)', async () => {
+  const run = await verifyTarget({
+    target: { domain: 'operation_campaign' },
+    context: {
+      facts: facts({
+        sampleDispatchRounds: async () => [
+          { id: 'r1', empresa_id: 'e1', planned_trip_id: 't1', status: 'OPEN' },
+          { id: 'r2', empresa_id: 'e1', planned_trip_id: 't1', status: 'OPEN' },
+        ],
+      }),
+    },
+    registry: createDefaultInvariantRegistry(),
+    now: () => '2026-08-22T00:00:00.000Z',
+  });
+  assert.equal(run.status, 'FAIL');
+  assert.ok(run.findings.some((f) => f.invariant_key === 'dispatch.round.one_active_per_trip.v1'));
+});
+
+test('dispatch invariants detect winner mismatch against the planned trip candidate (DISPATCH_WINNER_HAS_CANONICAL_ASSIGNMENT)', async () => {
+  const run = await verifyTarget({
+    target: { domain: 'operation_campaign' },
+    context: {
+      facts: facts({
+        sampleDispatchRounds: async () => [{ id: 'r1', empresa_id: 'e1', planned_trip_id: 't1', status: 'ASSIGNED', winner_offer_id: 'o1' }],
+        sampleDispatchOffers: async () => [{ id: 'o1', empresa_id: 'e1', round_id: 'r1', driver_id: 'driver-vencedor', status: 'ACCEPTED' }],
+        sampleCampaignPlannedTrips: async () => [{ id: 't1', empresa_id: 'e1', candidate_driver_id: 'driver-diferente', status: 'PLANNED', planned_quantity: 10, required_capacity_kg: 1000 }],
+      }),
+    },
+    registry: createDefaultInvariantRegistry(),
+    now: () => '2026-08-22T00:00:00.000Z',
+  });
+  assert.equal(run.status, 'FAIL');
+  assert.ok(run.findings.some((f) => f.invariant_key === 'dispatch.winner.canonical_assignment.v1'));
+});
+
+test('dispatch invariants detect accept after round expiry (DISPATCH_NO_ACCEPT_AFTER_EXPIRY)', async () => {
+  const run = await verifyTarget({
+    target: { domain: 'operation_campaign' },
+    context: {
+      facts: facts({
+        sampleDispatchRounds: async () => [{ id: 'r1', empresa_id: 'e1', planned_trip_id: 't1', status: 'ASSIGNED', expires_at: '2026-08-22T00:00:00.000Z' }],
+        sampleDispatchOffers: async () => [{ id: 'o1', empresa_id: 'e1', round_id: 'r1', driver_id: 'd1', status: 'ACCEPTED', responded_at: '2026-08-22T00:10:00.000Z' }],
+      }),
+    },
+    registry: createDefaultInvariantRegistry(),
+    now: () => '2026-08-22T00:00:00.000Z',
+  });
+  assert.equal(run.status, 'FAIL');
+  assert.ok(run.findings.some((f) => f.invariant_key === 'dispatch.offer.no_accept_after_expiry.v1'));
+});
+
+test('dispatch invariants detect tenant mismatch between offer and round (DISPATCH_RECIPIENT_TENANT_MATCH)', async () => {
+  const run = await verifyTarget({
+    target: { domain: 'operation_campaign' },
+    context: {
+      facts: facts({
+        sampleDispatchRounds: async () => [{ id: 'r1', empresa_id: 'tenant-a', planned_trip_id: 't1', status: 'OPEN' }],
+        sampleDispatchOffers: async () => [{ id: 'o1', empresa_id: 'tenant-b', round_id: 'r1', driver_id: 'd1', status: 'PENDING' }],
+      }),
+    },
+    registry: createDefaultInvariantRegistry(),
+    now: () => '2026-08-22T00:00:00.000Z',
+  });
+  assert.equal(run.status, 'FAIL');
+  assert.ok(run.findings.some((f) => f.invariant_key === 'dispatch.offer.tenant_match.v1'));
 });
 
 test('verifier supports multiple findings and stable invariant keys', async () => {

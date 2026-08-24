@@ -68,6 +68,14 @@ function createSupabaseDiagnosticFacts(supabase) {
     async sampleCampaignApprovals() {
       return selectLimitedOptional('campaign_approvals', 'id,empresa_id,campaign_id,plan_version_id,action,actor_user_id,occurred_at', 200);
     },
+    // Dispatch V1 (migration 079) — optional: schema pode nao existir ainda em producao
+    // (owner migration gate pendente); selectLimitedOptional degrada para [] nesse caso.
+    async sampleDispatchRounds() {
+      return selectLimitedOptional('dispatch_rounds', 'id,empresa_id,campaign_id,plan_version_id,planned_trip_id,mode,status,expires_at,winner_offer_id,created_at,closed_at', 200);
+    },
+    async sampleDispatchOffers() {
+      return selectLimitedOptional('dispatch_offers', 'id,empresa_id,round_id,driver_id,asset_id,composition_id,status,responded_at,created_at', 500);
+    },
   };
 }
 

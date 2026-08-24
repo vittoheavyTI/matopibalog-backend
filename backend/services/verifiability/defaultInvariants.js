@@ -316,6 +316,140 @@ function createDefaultInvariantRegistry() {
         return passResult({ sampled: approvals.length });
       },
     },
+    // ---- Dispatch V1 (migration 079, §63) ------------------------------------
+    // Diagnostico read-only: revalida em amostra as MESMAS garantias que a RPC
+    // atomica ja impoe no banco (unique indexes + advisory lock). Nunca corrige
+    // nada (repair fica DISABLED_BY_POLICY, §64) — so aponta drift objetivo.
+    {
+      stable_key: 'dispatch.round.one_winner.v1',
+      domain: 'operation_campaign',
+      description: 'DISPATCH_ONE_WINNER: at most one ACCEPTED offer per dispatch round.',
+      severity: 'high',
+      remediation_policy: 'manual_review',
+      version: 1,
+      async check({ context, invariant, checked_at }) {
+        const rows = await context.facts.sampleDispatchOffers();
+        const accepted = rows.filter((row) => row.status === 'ACCEPTED');
+        const duplicateCount = countDuplicates(accepted, (row) => row.round_id);
+        if (duplicateCount) {
+          return failResult(buildFinding(invariant, 'Dispatch offer sample has more than one ACCEPTED offer for the same round.', {
+            sampled: rows.length,
+            duplicate_count: duplicateCount,
+          }, checked_at));
+        }
+        return passResult({ sampled: rows.length });
+      },
+    },
+    {
+      stable_key: 'dispatch.round.one_active_per_trip.v1',
+      domain: 'operation_campaign',
+      description: 'DISPATCH_ONE_ACTIVE_ASSIGNMENT: at most one OPEN dispatch round per planned trip.',
+      severity: 'high',
+      remediation_policy: 'manual_review',
+      version: 1,
+      async check({ context, invariant, checked_at }) {
+        const rows = await context.facts.sampleDispatchRounds();
+        const open = rows.filter((row) => row.status === 'OPEN');
+        const duplicateCount = countDuplicates(open, (row) => row.planned_trip_id);
+        if (duplicateCount) {
+          return failResult(buildFinding(invariant, 'Dispatch round sample has more than one OPEN round for the same planned trip.', {
+            sampled: rows.length,
+            duplicate_count: duplicateCount,
+          }, checked_at));
+        }
+        return passResult({ sampled: rows.length });
+      },
+    },
+    {
+      stable_key: 'dispatch.winner.canonical_assignment.v1',
+      domain: 'operation_campaign',
+      description: 'DISPATCH_WINNER_HAS_CANONICAL_ASSIGNMENT: an ASSIGNED round\'s winner matches the planned trip\'s candidate_driver_id.',
+      severity: 'high',
+      remediation_policy: 'manual_review',
+      version: 1,
+      async check({ context, invariant, checked_at }) {
+        const [rounds, offers, trips] = await Promise.all([
+          context.facts.sampleDispatchRounds(),
+          context.facts.sampleDispatchOffers(),
+          context.facts.sampleCampaignPlannedTrips(),
+        ]);
+        const offerById = new Map(offers.map((o) => [o.id, o]));
+        const tripById = new Map(trips.map((t) => [t.id, t]));
+        const assigned = rounds.filter((r) => r.status === 'ASSIGNED' && r.winner_offer_id);
+        const invalid = assigned.filter((round) => {
+          const winner = offerById.get(round.winner_offer_id);
+          const trip = tripById.get(round.planned_trip_id);
+          // Amostras independentes/paginadas: ausencia de uma das duas linhas na
+          // amostra atual nao e evidencia de inconsistencia (sem falso positivo).
+          if (!winner || !trip) return false;
+          return trip.candidate_driver_id !== winner.driver_id
+            || (winner.asset_id && trip.candidate_asset_id !== winner.asset_id)
+            || (winner.composition_id && trip.candidate_composition_id !== winner.composition_id);
+        });
+        if (invalid.length) {
+          return failResult(buildFinding(invariant, 'Assigned dispatch round winner does not match the planned trip candidate fields.', {
+            sampled: assigned.length,
+            invalid_count: invalid.length,
+          }, checked_at));
+        }
+        return passResult({ sampled: assigned.length });
+      },
+    },
+    {
+      stable_key: 'dispatch.offer.no_accept_after_expiry.v1',
+      domain: 'operation_campaign',
+      description: 'DISPATCH_NO_ACCEPT_AFTER_EXPIRY: no offer was accepted after its round\'s expiration.',
+      severity: 'high',
+      remediation_policy: 'manual_review',
+      version: 1,
+      async check({ context, invariant, checked_at }) {
+        const [rounds, offers] = await Promise.all([
+          context.facts.sampleDispatchRounds(),
+          context.facts.sampleDispatchOffers(),
+        ]);
+        const roundById = new Map(rounds.map((r) => [r.id, r]));
+        const accepted = offers.filter((o) => o.status === 'ACCEPTED' && o.responded_at);
+        const invalid = accepted.filter((offer) => {
+          const round = roundById.get(offer.round_id);
+          if (!round || !round.expires_at) return false;
+          return new Date(offer.responded_at).getTime() > new Date(round.expires_at).getTime();
+        });
+        if (invalid.length) {
+          return failResult(buildFinding(invariant, 'Dispatch offer was accepted after its round expiration.', {
+            sampled: accepted.length,
+            invalid_count: invalid.length,
+          }, checked_at));
+        }
+        return passResult({ sampled: accepted.length });
+      },
+    },
+    {
+      stable_key: 'dispatch.offer.tenant_match.v1',
+      domain: 'operation_campaign',
+      description: 'DISPATCH_RECIPIENT_TENANT_MATCH: dispatch offers stay inside the same tenant as their round.',
+      severity: 'high',
+      remediation_policy: 'manual_review',
+      version: 1,
+      async check({ context, invariant, checked_at }) {
+        const [rounds, offers] = await Promise.all([
+          context.facts.sampleDispatchRounds(),
+          context.facts.sampleDispatchOffers(),
+        ]);
+        const roundById = new Map(rounds.map((r) => [r.id, r]));
+        const invalid = offers.filter((offer) => {
+          const round = roundById.get(offer.round_id);
+          if (!round) return false; // amostra independente/paginada — sem falso positivo
+          return round.empresa_id !== offer.empresa_id;
+        });
+        if (invalid.length) {
+          return failResult(buildFinding(invariant, 'Dispatch offer sample has tenant-inconsistent rows against their round.', {
+            sampled: offers.length,
+            invalid_count: invalid.length,
+          }, checked_at));
+        }
+        return passResult({ sampled: offers.length });
+      },
+    },
   ]);
 }
 
