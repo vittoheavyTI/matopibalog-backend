@@ -36,12 +36,14 @@ function ctx(overrides = {}) {
 
 test('tools reais registradas com permissão canônica', () => {
   const names = registry.listTools().map((t) => t.name).sort();
-  assert.deepEqual(names, ['commercial.current_plan.summary', 'fleet.current.summary', 'operation.campaign.progress', 'operation.command_center.summary', 'operation.freights.attention', 'route.estimate']);
+  assert.deepEqual(names, ['commercial.current_plan.summary', 'fleet.current.summary', 'operation.campaign.progress', 'operation.command_center.summary', 'operation.dispatch.status', 'operation.freights.attention', 'route.estimate']);
   assert.equal(registry.getTool('fleet.current.summary').requiredPermission, 'fleet.view');
   assert.equal(registry.getTool('operation.freights.attention').requiredPermission, 'freight.view');
   assert.equal(registry.getTool('commercial.current_plan.summary').requiredPermission, 'company.settings.view');
   assert.equal(registry.getTool('operation.campaign.progress').requiredPermission, 'campaign.view');
   assert.equal(registry.getTool('operation.campaign.progress').requiredEntitlement, 'operation_campaign');
+  assert.equal(registry.getTool('operation.dispatch.status').requiredPermission, 'campaign.view');
+  assert.equal(registry.getTool('operation.dispatch.status').requiredEntitlement, 'operation_campaign');
 });
 
 test('sem permissão → negado (handler nem roda, DB intocado)', async () => {

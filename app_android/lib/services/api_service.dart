@@ -1544,6 +1544,96 @@ class ApiService {
     }
   }
 
+  // DISPATCH V1 (ofertas de despacho recebidas pelo motorista)
+  /// Extrai a mensagem de erro do corpo (message/error), com fallback específico da ação.
+  static String _mensagemErroDispatch(http.Response response, String fallback) {
+    try {
+      final decoded = jsonDecode(response.body);
+      if (decoded is Map) {
+        final msg = decoded['message'] ?? decoded['error'];
+        if (msg is String && msg.trim().isNotEmpty) return msg.trim();
+      }
+    } catch (_) {
+      /* corpo não-JSON: usa mensagem genérica */
+    }
+    return fallback;
+  }
+
+  /// Ofertas de despacho do PRÓPRIO motorista (identidade do token). [status] opcional
+  /// filtra por PENDING/ACCEPTED/DECLINED/EXPIRED/LOST/CANCELLED.
+  static Future<List<dynamic>> getMinhasOfertasDispatch({String? status}) async {
+    try {
+      final params = <String, String>{};
+      if (status != null) params['status'] = status;
+      final uri = Uri.parse(
+        '$_baseUrl/dispatch/my-offers',
+      ).replace(queryParameters: params.isEmpty ? null : params);
+      final response = await _getAutenticado(uri);
+      AppLogger.api('ApiService', 'GET /dispatch/my-offers', response.statusCode);
+      if (response.statusCode == 200) {
+        final body = jsonDecode(response.body);
+        final itens = body is Map ? body['itens'] : null;
+        return itens is List ? itens : [];
+      }
+      throw ApiException(
+        _mensagemErroDispatch(
+          response,
+          'Não foi possível carregar suas ofertas agora. Tente novamente em instantes.',
+        ),
+        statusCode: response.statusCode,
+      );
+    } catch (e) {
+      AppLogger.error('ApiService', 'GET /dispatch/my-offers exception', e);
+      rethrow;
+    }
+  }
+
+  /// Aceita uma oferta de despacho própria. Primeiro aceite válido vence — um 409 aqui
+  /// significa que outro motorista aceitou primeiro (ou a oferta expirou/foi cancelada).
+  static Future<Map<String, dynamic>> aceitarOfertaDispatch(String offerId) async {
+    final response = await _postJsonAutenticado(
+      Uri.parse('$_baseUrl/dispatch/offers/$offerId/accept'),
+      retryAfterAuthResponse: true,
+    );
+    AppLogger.api(
+      'ApiService',
+      'POST /dispatch/offers/$offerId/accept',
+      response.statusCode,
+    );
+    if (response.statusCode == 200) return jsonDecode(response.body);
+    throw ApiException(
+      _mensagemErroDispatch(
+        response,
+        'Não foi possível aceitar esta oferta agora. Ela pode ter expirado ou já ter sido aceita por outro motorista.',
+      ),
+      statusCode: response.statusCode,
+    );
+  }
+
+  static Future<Map<String, dynamic>> recusarOfertaDispatch(
+    String offerId, {
+    String? motivo,
+  }) async {
+    final response = await _postJsonAutenticado(
+      Uri.parse('$_baseUrl/dispatch/offers/$offerId/decline'),
+      body: motivo != null ? {'reason': motivo} : null,
+      retryAfterAuthResponse: true,
+    );
+    AppLogger.api(
+      'ApiService',
+      'POST /dispatch/offers/$offerId/decline',
+      response.statusCode,
+    );
+    if (response.statusCode == 200) return jsonDecode(response.body);
+    throw ApiException(
+      _mensagemErroDispatch(
+        response,
+        'Não foi possível recusar esta oferta agora.',
+      ),
+      statusCode: response.statusCode,
+    );
+  }
+
   // PUSH (FCM)
   /// Registra/atualiza o token FCM do aparelho no backend (após login / refresh).
   /// Best-effort: retorna false em qualquer falha, sem lançar.

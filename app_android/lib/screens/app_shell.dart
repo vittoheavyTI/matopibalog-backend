@@ -18,6 +18,7 @@ import 'perfil_screen.dart';
 import 'situacao_comercial_screen.dart';
 import 'notificacoes_screen.dart';
 import 'minhas_faturas_screen.dart';
+import 'dispatch_ofertas_screen.dart';
 
 class AppShell extends StatefulWidget {
   const AppShell({super.key});
@@ -268,6 +269,17 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               onTap: () {
                 AppLogger.action('menu_nav', params: {'destino': 'historico'});
                 _navegarPara(context, const HistoricoScreen());
+              },
+            ),
+            // Dispatch V1: ofertas de viagem recebidas (accept/decline). Aparece para
+            // qualquer motorista — se a empresa não tiver habilitado campanhas de
+            // escoamento (entitlement operation_campaign), a tela só mostra vazio.
+            ListTile(
+              leading: const Icon(Icons.local_shipping_outlined),
+              title: const Text('Ofertas de viagem'),
+              onTap: () {
+                AppLogger.action('menu_nav', params: {'destino': 'dispatch_ofertas'});
+                _navegarPara(context, const DispatchOfertasScreen());
               },
             ),
             // Faturas só para AUTÔNOMO (dono do próprio negócio). Motorista

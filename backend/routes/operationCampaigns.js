@@ -73,4 +73,13 @@ router.get('/:campaignId/plans/:planId/materialization-preview', requireCampaign
 router.post('/:campaignId/plans/:planId/materialize', requireCampaignPermission('campaign.manage'), controller.materializarPlano);
 router.post('/:campaignId/cancel', requireCampaignPermission('campaign.manage'), controller.cancelarCampanha);
 
+// Dispatch V1 (§43): campaign.dispatch é mais restritiva que campaign.manage — decide
+// quem executa a operação (designação/oferta real), não só planeja. Leitura de status da
+// rodada usa campaign.view (mesmo nível de /progress).
+router.get('/:campaignId/plans/:planId/trips/:tripId/dispatch/candidates', requireCampaignPermission('campaign.manage'), controller.previaDispatch);
+router.post('/:campaignId/plans/:planId/trips/:tripId/dispatch/direct-assign', requireCampaignPermission('campaign.dispatch'), controller.designarDireto);
+router.post('/:campaignId/plans/:planId/trips/:tripId/dispatch/rounds', requireCampaignPermission('campaign.dispatch'), controller.criarRodadaOferta);
+router.get('/:campaignId/plans/:planId/trips/:tripId/dispatch/rounds/:roundId', requireCampaignPermission('campaign.view'), controller.obterRodada);
+router.post('/:campaignId/plans/:planId/trips/:tripId/dispatch/rounds/:roundId/cancel', requireCampaignPermission('campaign.dispatch'), controller.cancelarRodada);
+
 module.exports = router;

@@ -467,11 +467,18 @@ type Progress = {
   window: { state: string; planned_start: string | null; planned_end: string | null } | null;
   updated_at: string;
 };
+type EligibilityCandidate = { driver_id: string | null; asset_id: string | null; composition_id: string | null; eligibility: string; reasons: string[]; warnings: string[]; capacity_match: string; documents_status: string; maintenance_status: string; assignment_status: string; route_compatibility: string; capacity_kg: number | null };
 type EligibilityResult = {
   summary: { total_candidates: number; eligible: number; eligible_with_warnings: number; ineligible: number; has_any_eligible: boolean };
-  candidates: Array<{ driver_id: string | null; asset_id: string | null; composition_id: string | null; eligibility: string; reasons: string[]; warnings: string[]; capacity_match: string; documents_status: string; maintenance_status: string; assignment_status: string; route_compatibility: string; capacity_kg: number | null }>;
+  candidates: EligibilityCandidate[];
   truncated: boolean;
 };
+type DispatchOffer = { id: string; driver_id: string; asset_id: string | null; composition_id: string | null; status: string };
+type DispatchRound = { id: string; mode: string; status: string; expires_at: string | null; winner_offer_id: string | null };
+
+function candidateKey(c: { driver_id: string | null; asset_id: string | null; composition_id: string | null }) {
+  return `${c.driver_id || ''}:${c.asset_id || ''}:${c.composition_id || ''}`;
+}
 
 const HEALTH_LABEL: Record<string, string> = {
   ON_TRACK: 'No prazo', ATTENTION: 'Atenção', CRITICAL: 'Crítico', COMPLETED: 'Concluída', NO_EXECUTION_YET: 'Sem execução ainda',
@@ -506,6 +513,12 @@ function CampaignExecution({ campaignId }: { campaignId: string }) {
   const [eligTrip, setEligTrip] = useState<TripDetail | null>(null);
   const [elig, setElig] = useState<EligibilityResult | null>(null);
   const [eligLoading, setEligLoading] = useState(false);
+  const [selecionados, setSelecionados] = useState<Set<string>>(new Set());
+  const [dispatchForm, setDispatchForm] = useState({ modalidade_calculo: 'valor_fixo', valor_frete: '', valor_tonelada_km: '', validade_minutos: '60' });
+  const [dispatchAcao, setDispatchAcao] = useState<string | null>(null); // chave do candidato em ação, ou 'oferta'
+  const [dispatchErro, setDispatchErro] = useState<string | null>(null);
+  const [dispatchRound, setDispatchRound] = useState<DispatchRound | null>(null);
+  const [dispatchOffers, setDispatchOffers] = useState<DispatchOffer[]>([]);
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const carregar = useCallback(async () => {
@@ -541,6 +554,7 @@ function CampaignExecution({ campaignId }: { campaignId: string }) {
   async function verElegibilidade(trip: TripDetail) {
     if (!progress?.approved_plan) return;
     setEligTrip(trip); setElig(null); setEligLoading(true);
+    setSelecionados(new Set()); setDispatchErro(null); setDispatchRound(null); setDispatchOffers([]);
     try {
       const { data } = await api.get(`/operation-campaigns/${campaignId}/plans/${progress.approved_plan.id}/trips/${trip.planned_trip_id}/eligibility`);
       setElig(data);
@@ -549,6 +563,86 @@ function CampaignExecution({ campaignId }: { campaignId: string }) {
     } finally {
       setEligLoading(false);
     }
+  }
+
+  function dispatchBasePath() {
+    return `/operation-campaigns/${campaignId}/plans/${progress?.approved_plan?.id}/trips/${eligTrip?.planned_trip_id}/dispatch`;
+  }
+
+  function materializationOptionsPayload() {
+    const payload: Record<string, unknown> = { modalidade_calculo: dispatchForm.modalidade_calculo };
+    if (dispatchForm.modalidade_calculo === 'tonelada_km') payload.valor_tonelada_km = Number(dispatchForm.valor_tonelada_km || 0);
+    else payload.valor_frete = Number(dispatchForm.valor_frete || 0);
+    return payload;
+  }
+
+  // Designação direta (§10/§30): UM candidato hoje elegível. O backend revalida a
+  // elegibilidade no momento da mutação — o botão nunca é a autoridade, só o convite.
+  async function designarDireto(c: EligibilityCandidate) {
+    if (!eligTrip) return;
+    const key = candidateKey(c);
+    setDispatchAcao(key); setDispatchErro(null);
+    try {
+      const { data } = await api.post(`${dispatchBasePath()}/direct-assign`, {
+        driver_id: c.driver_id, asset_id: c.asset_id, composition_id: c.composition_id,
+        materialization_options: materializationOptionsPayload(),
+      });
+      setDispatchRound(data.round); setDispatchOffers(data.offers || []);
+      setDispatchErro(data.materialization_error ? `Designado, mas a materialização falhou: ${data.materialization_error.message} Tente novamente em instantes.` : null);
+      carregar();
+    } catch (err) {
+      setDispatchErro(apiError(err));
+    } finally {
+      setDispatchAcao(null);
+    }
+  }
+
+  // Rodada de oferta (§11/§13): candidatos selecionados (ou todos os elegíveis, se
+  // nenhum for marcado). O vencedor só é decidido depois, quando um motorista aceitar.
+  async function criarOferta() {
+    if (!eligTrip || !elig) return;
+    setDispatchAcao('oferta'); setDispatchErro(null);
+    try {
+      const marcados = elig.candidates.filter((c) => selecionados.has(candidateKey(c)));
+      const recipients = marcados.length
+        ? marcados.map((c) => ({ driver_id: c.driver_id, asset_id: c.asset_id, composition_id: c.composition_id }))
+        : undefined;
+      const minutos = Math.max(1, Number(dispatchForm.validade_minutos || 60));
+      const expiresAt = new Date(Date.now() + minutos * 60000).toISOString();
+      const { data } = await api.post(`${dispatchBasePath()}/rounds`, {
+        recipients, expires_at: expiresAt, materialization_options: materializationOptionsPayload(),
+      });
+      setDispatchRound(data.round); setDispatchOffers(data.offers || []);
+      setSelecionados(new Set());
+      if (data.excluded_requested_recipients?.length) {
+        setDispatchErro(`${data.excluded_requested_recipients.length} candidato(s) selecionado(s) não estava(m) mais elegível(is) e foi(ram) excluído(s) da oferta.`);
+      }
+    } catch (err) {
+      setDispatchErro(apiError(err));
+    } finally {
+      setDispatchAcao(null);
+    }
+  }
+
+  async function cancelarOferta() {
+    if (!eligTrip || !dispatchRound) return;
+    setDispatchAcao('cancelar'); setDispatchErro(null);
+    try {
+      const { data } = await api.post(`${dispatchBasePath()}/rounds/${dispatchRound.id}/cancel`, {});
+      setDispatchRound(data.round); setDispatchOffers(data.offers || []);
+    } catch (err) {
+      setDispatchErro(apiError(err));
+    } finally {
+      setDispatchAcao(null);
+    }
+  }
+
+  function alternarSelecao(key: string) {
+    setSelecionados((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
   }
 
   if (loading) {
@@ -664,7 +758,7 @@ function CampaignExecution({ campaignId }: { campaignId: string }) {
                         <Link to={`/relatorios/viagens?frete=${encodeURIComponent(trip.frete_id)}`} className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 hover:underline"><ExternalLink size={12} /> Frete</Link>
                       )}
                       {(trip.readiness === 'BLOCKED' || trip.materialization === 'NOT_MATERIALIZED') && trip.materialization !== 'NOT_APPLICABLE' && (
-                        <button onClick={() => verElegibilidade(trip)} className="inline-flex items-center gap-1 text-xs font-medium text-slate-700 hover:underline"><Users size={12} /> Ver elegibilidade</button>
+                        <button onClick={() => verElegibilidade(trip)} className="inline-flex items-center gap-1 text-xs font-medium text-slate-700 hover:underline"><Users size={12} /> Despachar</button>
                       )}
                     </div>
                   </td>
@@ -681,27 +775,90 @@ function CampaignExecution({ campaignId }: { campaignId: string }) {
       {eligTrip && (
         <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
           <div className="mb-2 flex items-center justify-between">
-            <h4 className="flex items-center gap-2 text-sm font-semibold text-slate-800"><Users size={15} /> Elegibilidade — {eligTrip.origem || '—'} → {eligTrip.destino || '—'}</h4>
+            <h4 className="flex items-center gap-2 text-sm font-semibold text-slate-800"><Users size={15} /> Despacho — {eligTrip.origem || '—'} → {eligTrip.destino || '—'}</h4>
             <button onClick={() => { setEligTrip(null); setElig(null); }} className="text-xs text-slate-500 hover:underline">Fechar</button>
           </div>
           {eligLoading && <p className="text-sm text-slate-500">Calculando candidatos…</p>}
-          {!eligLoading && elig && (
+          {dispatchErro && <p className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">{dispatchErro}</p>}
+
+          {dispatchRound && (
+            <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
+              <p className="font-semibold">
+                {dispatchRound.mode === 'DIRECT' ? 'Designação direta' : 'Rodada de oferta'} — {dispatchRound.status === 'ASSIGNED' ? 'designado' : dispatchRound.status === 'OPEN' ? 'aguardando resposta' : dispatchRound.status === 'CANCELLED' ? 'cancelada' : dispatchRound.status.toLowerCase()}
+              </p>
+              {dispatchRound.status === 'OPEN' && (
+                <>
+                  <p className="mt-1">{dispatchOffers.filter((o) => o.status === 'PENDING').length} oferta(s) pendente(s) de {dispatchOffers.length}. Válida até {dispatchRound.expires_at ? new Date(dispatchRound.expires_at).toLocaleString('pt-BR') : '—'}.</p>
+                  <button onClick={cancelarOferta} disabled={dispatchAcao === 'cancelar'} className="mt-2 inline-flex items-center gap-1 rounded-lg border border-rose-300 bg-white px-2 py-1 text-xs font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-60">
+                    <XCircle size={12} /> {dispatchAcao === 'cancelar' ? 'Cancelando…' : 'Cancelar rodada'}
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+
+          {!eligLoading && elig && !(dispatchRound && dispatchRound.status !== 'CANCELLED') && (
             <>
               <p className="mb-2 text-xs text-slate-500">{elig.summary.eligible} elegível(is), {elig.summary.eligible_with_warnings} com alertas, {elig.summary.ineligible} inelegível(is){elig.truncated ? ' (lista limitada)' : ''}.</p>
+
+              <div className="mb-3 grid grid-cols-2 gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2 sm:grid-cols-4">
+                <label className="text-xs text-slate-600 sm:col-span-1">
+                  <span>Modalidade</span>
+                  <select value={dispatchForm.modalidade_calculo} onChange={(e) => setDispatchForm({ ...dispatchForm, modalidade_calculo: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm">
+                    <option value="valor_fixo">Valor fixo</option>
+                    <option value="tonelada_km">Tonelada/km</option>
+                  </select>
+                </label>
+                {dispatchForm.modalidade_calculo === 'tonelada_km' ? (
+                  <label className="text-xs text-slate-600">
+                    <span>Valor por tonelada/km</span>
+                    <input type="number" min="0" step="0.0001" value={dispatchForm.valor_tonelada_km} onChange={(e) => setDispatchForm({ ...dispatchForm, valor_tonelada_km: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm" />
+                  </label>
+                ) : (
+                  <label className="text-xs text-slate-600">
+                    <span>Valor por frete</span>
+                    <input type="number" min="0" step="0.01" value={dispatchForm.valor_frete} onChange={(e) => setDispatchForm({ ...dispatchForm, valor_frete: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm" />
+                  </label>
+                )}
+                <label className="text-xs text-slate-600">
+                  <span>Validade da oferta (min)</span>
+                  <input type="number" min="1" step="1" value={dispatchForm.validade_minutos} onChange={(e) => setDispatchForm({ ...dispatchForm, validade_minutos: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm" />
+                </label>
+                <div className="flex items-end">
+                  <button onClick={criarOferta} disabled={dispatchAcao !== null} className="inline-flex w-full items-center justify-center gap-1 rounded-lg bg-emerald-700 px-2 py-1.5 text-xs font-semibold text-white hover:bg-emerald-800 disabled:opacity-60">
+                    {dispatchAcao === 'oferta' ? 'Criando…' : selecionados.size ? `Ofertar a ${selecionados.size} selecionado(s)` : 'Ofertar a todos elegíveis'}
+                  </button>
+                </div>
+              </div>
+
               <div className="space-y-2">
-                {elig.candidates.map((c, i) => (
-                  <div key={`${c.driver_id}-${c.asset_id || c.composition_id}-${i}`} className="rounded-lg border border-slate-200 px-3 py-2 text-sm">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="font-medium text-slate-800">{c.composition_id ? 'Composição' : 'Ativo'} · motorista {c.driver_id ? c.driver_id.slice(0, 8) : '—'}</span>
-                      <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${c.eligibility === 'ELIGIBLE' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : c.eligibility === 'ELIGIBLE_WITH_WARNINGS' ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-rose-200 bg-rose-50 text-rose-700'}`}>{ELIG_LABEL[c.eligibility] || c.eligibility}</span>
+                {elig.candidates.map((c, i) => {
+                  const key = candidateKey(c);
+                  const podeDespachar = c.eligibility === 'ELIGIBLE' || c.eligibility === 'ELIGIBLE_WITH_WARNINGS';
+                  return (
+                    <div key={`${key}-${i}`} className="rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="flex items-center gap-2 font-medium text-slate-800">
+                          {podeDespachar && (
+                            <input type="checkbox" checked={selecionados.has(key)} onChange={() => alternarSelecao(key)} className="h-3.5 w-3.5 rounded border-slate-300" aria-label="Selecionar para oferta" />
+                          )}
+                          {c.composition_id ? 'Composição' : 'Ativo'} · motorista {c.driver_id ? c.driver_id.slice(0, 8) : '—'}
+                        </span>
+                        <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${c.eligibility === 'ELIGIBLE' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : c.eligibility === 'ELIGIBLE_WITH_WARNINGS' ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-rose-200 bg-rose-50 text-rose-700'}`}>{ELIG_LABEL[c.eligibility] || c.eligibility}</span>
+                      </div>
+                      <p className="mt-1 text-xs text-slate-500">
+                        Capacidade: {c.capacity_match} · Documentos: {c.documents_status} · Manutenção: {c.maintenance_status} · Rota: {c.route_compatibility}
+                      </p>
+                      {!!c.reasons.length && <p className="mt-1 text-xs text-rose-600">Bloqueios: {c.reasons.join(', ')}</p>}
+                      {!!c.warnings.length && <p className="mt-1 text-xs text-amber-600">Alertas: {c.warnings.join(', ')}</p>}
+                      {podeDespachar && (
+                        <button onClick={() => designarDireto(c)} disabled={dispatchAcao !== null} className="mt-2 inline-flex items-center gap-1 rounded-lg border border-emerald-300 bg-white px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-60">
+                          <Play size={12} /> {dispatchAcao === key ? 'Designando…' : 'Designar diretamente'}
+                        </button>
+                      )}
                     </div>
-                    <p className="mt-1 text-xs text-slate-500">
-                      Capacidade: {c.capacity_match} · Documentos: {c.documents_status} · Manutenção: {c.maintenance_status} · Rota: {c.route_compatibility}
-                    </p>
-                    {!!c.reasons.length && <p className="mt-1 text-xs text-rose-600">Bloqueios: {c.reasons.join(', ')}</p>}
-                    {!!c.warnings.length && <p className="mt-1 text-xs text-amber-600">Alertas: {c.warnings.join(', ')}</p>}
-                  </div>
-                ))}
+                  );
+                })}
                 {!elig.candidates.length && <p className="text-sm text-slate-500">Nenhum candidato encontrado no escopo.</p>}
               </div>
             </>

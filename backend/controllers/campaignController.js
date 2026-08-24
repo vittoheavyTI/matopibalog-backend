@@ -5,6 +5,7 @@ const campaign = require('../services/campaign/campaignService');
 const campaignMaterialization = require('../services/campaign/campaignMaterializationService');
 const campaignProgress = require('../services/campaign/campaignProgressService');
 const dispatchEligibility = require('../services/campaign/dispatchEligibilityService');
+const dispatchService = require('../services/campaign/dispatchService');
 const { buildCorrelationContext } = require('../services/verifiability/correlationContext');
 
 function responderErro(res, error) {
@@ -224,6 +225,103 @@ const obterElegibilidade = async (req, res) => {
   }
 };
 
+// GET /:campaignId/plans/:planId/trips/:tripId/dispatch/candidates — mesma prévia de
+// elegibilidade do §eligibility, exposta também sob /dispatch para a UI de designação
+// (§51 — preview antes de designar/ofertar).
+const previaDispatch = async (req, res) => {
+  try {
+    const item = await dispatchService.previewCandidates(supabase, {
+      empresaId: req.empresa_id,
+      campaignId: req.params.campaignId,
+      planId: req.params.planId,
+      tripId: req.params.tripId,
+      operationalScope: req.operationalScope,
+      limit: req.query?.limit,
+    });
+    return res.json(item);
+  } catch (error) {
+    return responderErro(res, error);
+  }
+};
+
+// POST /:campaignId/plans/:planId/trips/:tripId/dispatch/direct-assign — designação
+// direta a UM candidato hoje elegível. Revalida no momento da mutação; converge para o
+// Frete canônico. Nunca oferta/expira/concorre — decisão do manager é imediata.
+const designarDireto = async (req, res) => {
+  try {
+    const body = req.body || {};
+    const item = await dispatchService.directAssign(supabase, {
+      empresaId: req.empresa_id,
+      campaignId: req.params.campaignId,
+      planId: req.params.planId,
+      tripId: req.params.tripId,
+      driverId: body.driver_id,
+      assetId: body.asset_id || null,
+      compositionId: body.composition_id || null,
+      materializationOptions: body.materialization_options || body,
+      user: req.user,
+      operationalScope: req.operationalScope,
+      correlation: correlation(req),
+    });
+    return res.status(201).json(item);
+  } catch (error) {
+    return responderErro(res, error);
+  }
+};
+
+// POST /:campaignId/plans/:planId/trips/:tripId/dispatch/rounds — cria rodada de oferta
+// (mode=OFFER). "recipients" opcional: subconjunto explícito do manager, interceptado
+// com quem está REALMENTE elegível agora (§12); vazio = todos os elegíveis.
+const criarRodadaOferta = async (req, res) => {
+  try {
+    const body = req.body || {};
+    const item = await dispatchService.createOfferRound(supabase, {
+      empresaId: req.empresa_id,
+      campaignId: req.params.campaignId,
+      planId: req.params.planId,
+      tripId: req.params.tripId,
+      requestedRecipients: Array.isArray(body.recipients) ? body.recipients : null,
+      expiresAt: body.expires_at,
+      materializationOptions: body.materialization_options || body,
+      user: req.user,
+      operationalScope: req.operationalScope,
+      correlation: correlation(req),
+    });
+    return res.status(201).json(item);
+  } catch (error) {
+    return responderErro(res, error);
+  }
+};
+
+// GET /:campaignId/plans/:planId/trips/:tripId/dispatch/rounds/:roundId — status da
+// rodada (histórico de ofertas, vencedor se houver).
+const obterRodada = async (req, res) => {
+  try {
+    const item = await dispatchService.getRound(supabase, {
+      empresaId: req.empresa_id,
+      roundId: req.params.roundId,
+    });
+    return res.json(item);
+  } catch (error) {
+    return responderErro(res, error);
+  }
+};
+
+// POST /:campaignId/plans/:planId/trips/:tripId/dispatch/rounds/:roundId/cancel
+const cancelarRodada = async (req, res) => {
+  try {
+    const item = await dispatchService.cancelRound(supabase, {
+      empresaId: req.empresa_id,
+      roundId: req.params.roundId,
+      actorId: req.user?.uid || req.user?.id || null,
+      reason: req.body?.reason || null,
+    });
+    return res.json(item);
+  } catch (error) {
+    return responderErro(res, error);
+  }
+};
+
 module.exports = {
   obterContexto,
   obterProgresso,
@@ -242,4 +340,9 @@ module.exports = {
   verificarPlano,
   preverMaterializacao,
   materializarPlano,
+  previaDispatch,
+  designarDireto,
+  criarRodadaOferta,
+  obterRodada,
+  cancelarRodada,
 };
