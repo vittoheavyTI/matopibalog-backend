@@ -152,6 +152,36 @@ exatamente um desfecho terminal; depois de aceita o portal não cancela; depois 
 cancelada a transportadora não aceita; replay de cancelamento é idempotente e não
 reescreve o instante original.
 
+### HIGH-04 — semântica de quantidade/unidade (bug real)
+
+O total somava quantidades **cruas**, sem normalizar unidade: `1000 kg + 1 ton`
+produzia `1001` — um número sem significado nenhum.
+
+Decisão congelada: **`SHIPPER_PORTAL_V1_QUANTITY_UNIT_MODEL=ONE_REQUEST_LEVEL_UNIT`**.
+A solicitação tem **uma** unidade canônica; todas as origens herdam dela. Se uma
+origem trouxer unidade explícita divergente, a criação é **recusada** — nunca
+reinterpretada em silêncio. Portal V1 **não** converte kg↔ton: uma solicitação,
+uma unidade, explícito (conversão é semântica do Campaign, não daqui).
+
+Também congelado: `ORIGIN_QUANTITY_REQUIRED > 0` (antes `>= 0`) — uma origem com
+quantidade zero não representa necessidade de transporte. Aplicado na validação
+da aplicação **e** no `CHECK` do banco.
+
+### PROOF-01 — a prova de concorrência estava fraca
+
+O teste anterior exigia apenas `r1.ok || r2.ok` e contagem de linhas = 1. Isso
+**não** provava o "sem 500" prometido para quem perde a corrida. Agora exige:
+ambas as chamadas com sucesso, **mesmo id**, uma solicitação, um conjunto de
+origens, `SUBMITTED`. Somado a um teste de replay com payload diferente, que
+deve devolver a solicitação **original** sem reescrever o primeiro payload.
+
+### HARDENING-01 — aceitante do convite
+
+`accepted_by` referenciava `shipper_portal_users(id)` sem provar que o usuário
+pertence ao **mesmo** embarcador do convite. Fechado com FK composta
+`(accepted_by, shipper_org_id)` e `CHECK` exigindo `accepted_by` quando
+`status='ACCEPTED'`.
+
 ## 5. Ciclo de vida da solicitação
 
 `DRAFT → SUBMITTED → {ACCEPTED | REJECTED | CHANGES_REQUESTED} | CANCELLED`
