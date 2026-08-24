@@ -111,9 +111,11 @@ function registrar(pg) {
     await pool.query(`INSERT INTO public.empresas (id, nome, status, plano_id, operational_scope_mode)
       VALUES ($1,'Transportadora A','ativo',$3,'enforced'),($2,'Transportadora B','ativo',$3,'enforced')
       ON CONFLICT (id) DO NOTHING`, [EMP_A, EMP_B, PLAN]);
-    await pool.query(`INSERT INTO public.usuarios (id, empresa_id, tipo, status, is_super_admin, nome, email)
-      VALUES ($1,$2,'admin','ativo',false,'Admin A','admin-a-080@test.local'),
-             ($3,$4,'admin','ativo',false,'Admin B','admin-b-080@test.local')
+    // O harness PG cria uma versao minima de `usuarios` (sem coluna email) —
+    // mesmo conjunto de colunas usado pelo teste do Dispatch V1.
+    await pool.query(`INSERT INTO public.usuarios (id, empresa_id, tipo, status, is_super_admin, nome)
+      VALUES ($1,$2,'admin','ativo',false,'Admin A'),
+             ($3,$4,'admin','ativo',false,'Admin B')
       ON CONFLICT (id) DO NOTHING`, [ADM_A, EMP_A, ADM_B, EMP_B]);
 
     await pool.query(`INSERT INTO public.shipper_organizations (id, nome)
