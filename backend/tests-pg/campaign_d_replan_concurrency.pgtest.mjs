@@ -142,6 +142,15 @@ function registrar(pg) {
        VALUES ($1,$2,'CAMP-D','Campanha D','Soja','APPROVED','APPROVED',$3) ON CONFLICT (id) DO NOTHING`,
       [CAMP_A, EMP_A, ADM_A],
     );
+    // campaign_locations_unit_campaign_fk exige o vínculo (campaign, unidade,
+    // empresa) explícito em campaign_operational_units antes de qualquer local
+    // que aponte para uma unidade operacional.
+    await pool.query(
+      `INSERT INTO public.campaign_operational_units (empresa_id, campaign_id, unidade_operacional_id, created_by)
+       VALUES ($1,$2,$3,$4)
+       ON CONFLICT (campaign_id, unidade_operacional_id) DO NOTHING`,
+      [EMP_A, CAMP_A, UNIT_A, ADM_A],
+    );
     await pool.query(
       `INSERT INTO public.campaign_locations (id, empresa_id, campaign_id, kind, name, unidade_operacional_id, created_by)
        VALUES ($1,$2,$3,'origin','Origem',$4,$5),($6,$2,$3,'destination','Destino',$4,$5)
