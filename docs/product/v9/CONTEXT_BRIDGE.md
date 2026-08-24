@@ -88,7 +88,7 @@ Adequação de **CNAE/CNPJ/regime** do owner corre **em paralelo** e **NÃO bloq
 
 ## Próximo passo recomendado
 
-Campaign-B (materialização), Campaign-C (progresso + elegibilidade + dispatch readiness) e **Dispatch V1** (RBV9-INV-031 — designação/oferta/aceite concorrência-safe, migration 079, PR #471 `MERGE_SHA=16418114480f7afe650efbb493e1c2ccb0450b16`) estão **fechados em produção**. Nenhuma próxima macrofrente foi autorizada pelo owner nesta rodada — Partner Network, Marketplace, ERP Hub, Fiscal e ações de escrita da IA permanecem fora de escopo até novo gate explícito. Ver [DISPATCH_V1](./DISPATCH_V1.md).
+Campaign-B (materialização), Campaign-C (progresso + elegibilidade + dispatch readiness), **Dispatch V1** (RBV9-INV-031 — designação/oferta/aceite concorrência-safe, migration 079, PR #471 `MERGE_SHA=16418114480f7afe650efbb493e1c2ccb0450b16`) e **Operation Orchestrator V1** (E3.1/E3.2 — auditoria confirmou que o pipeline já existia quase por completo; fechou `next_action` determinístico + fluxo guiado único de objetivo, schema-free) estão **fechados em produção**. Nenhuma próxima macrofrente foi autorizada pelo owner nesta rodada — Portal do Embarcador (E3.5), Partner Network, ERP Hub, Fiscal e ações de escrita da IA permanecem fora de escopo até novo gate explícito. Ver [DISPATCH_V1](./DISPATCH_V1.md) e [OPERATION_ORCHESTRATOR_V1](./OPERATION_ORCHESTRATOR_V1.md).
 
 ## Hard stops permanentes
 

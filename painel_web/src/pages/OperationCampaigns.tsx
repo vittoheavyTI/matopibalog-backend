@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Activity, AlertTriangle, CheckCircle2, ClipboardCheck, ExternalLink, Factory, MapPin, Play, Plus, RefreshCw, Route, ShieldAlert, Users, XCircle } from 'lucide-react';
+import { Activity, AlertTriangle, CheckCircle2, ChevronDown, ClipboardCheck, ExternalLink, Factory, MapPin, Play, RefreshCw, Route, ShieldAlert, Sparkles, Target, Users, XCircle } from 'lucide-react';
 import api from '../api';
 import { useLancamentosRealtime } from '../hooks/useLancamentosRealtime';
 
@@ -15,14 +15,36 @@ type MaterializationPreview = {
   summary: { requested: number; already_materialized: number; ready: number; created?: number; blocked: number; failed?: number; retryable?: number };
   items: Array<{ planned_trip_id: string; status: string; frete_id?: string; reason?: string; retryable?: boolean }>;
 };
-
-const emptyCampaign = { reference_code: '', name: '', cargo_name: '', operational_unit_ids: [] as string[] };
-const emptyLocations = {
-  origin: { name: '', unidade_operacional_id: '' },
-  destination: { name: '', unidade_operacional_id: '' },
+type Orchestration = {
+  next_action: string;
+  next_action_reason_text: string;
+  objective: { cargo_name: string; target_quantity: number; quantity_unit: string | null; origin: string | null; destination: string | null };
+  plan_summary: { plan: { id: string; version_number: number; status: string }; exceptions_open: number } | null;
 };
-const emptyDemand = { target_quantity: 0, quantity_unit: 'ton' };
+
+const emptyObjective = {
+  name: '', cargo_name: '', target_quantity: '' as number | '', quantity_unit: 'ton',
+  origin: '', destination: '', priority: 'normal', planned_start: '', planned_end: '',
+  operational_unit_ids: [] as string[],
+};
 const emptyMaterialization = { modalidade_calculo: 'valor_fixo', valor_frete: '', valor_tonelada_km: '' };
+
+// "O que preciso fazer agora?" (§35/§36) — rótulo + ação sugerida em pt-BR para
+// cada next_action determinístico devolvido por GET .../orchestration.
+const NEXT_ACTION_COPY: Record<string, { label: string; tone: 'info' | 'warning' | 'success' | 'neutral' }> = {
+  COMPLETE_MISSING_OBJECTIVE: { label: 'Complete o objetivo (origem, destino e quantidade) para o sistema planejar.', tone: 'info' },
+  GENERATE_PLAN: { label: 'Objetivo pronto — gere o plano para ver capacidade e viagens.', tone: 'info' },
+  REVIEW_CAPACITY_GAP: { label: 'A capacidade própria não cobre toda a demanda. Revise antes de aprovar.', tone: 'warning' },
+  REVIEW_BLOCKING_EXCEPTION: { label: 'Há um bloqueio que impede seguir. Revise as exceções do plano.', tone: 'warning' },
+  APPROVE_PLAN: { label: 'Plano pronto para revisão e aprovação.', tone: 'success' },
+  REPLAN_REQUIRED: { label: 'Replanejamento necessário: capacidade insuficiente para a demanda restante.', tone: 'warning' },
+  READY_FOR_DISPATCH: { label: 'Há viagens prontas para designar ou ofertar a motoristas.', tone: 'success' },
+  READY_FOR_MATERIALIZATION: { label: 'Há viagens com executor definido, prontas para virar frete.', tone: 'success' },
+  REVIEW_EXECUTION_EXCEPTION: { label: 'Há uma exceção de execução que merece revisão.', tone: 'warning' },
+  EXECUTION_IN_PROGRESS: { label: 'Operação em execução, sem pendências no momento.', tone: 'neutral' },
+  CAMPAIGN_COMPLETE: { label: 'Todas as viagens planejadas foram concluídas.', tone: 'success' },
+  CAMPAIGN_CANCELLED: { label: 'Esta campanha foi cancelada.', tone: 'neutral' },
+};
 
 function apiError(error: any) {
   const denial = error?.response?.data?.denial;
@@ -46,15 +68,14 @@ export function OperationCampaigns() {
   const [unidades, setUnidades] = useState<Unidade[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [selectedId, setSelectedId] = useState('');
-  const [campaignForm, setCampaignForm] = useState(emptyCampaign);
-  const [locationsForm, setLocationsForm] = useState(emptyLocations);
-  const [demandForm, setDemandForm] = useState(emptyDemand);
+  const [objectiveForm, setObjectiveForm] = useState(emptyObjective);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [plan, setPlan] = useState<PlanDetail | null>(null);
+  const [orchestration, setOrchestration] = useState<Orchestration | null>(null);
   const [materializationForm, setMaterializationForm] = useState(emptyMaterialization);
   const [materializationPreview, setMaterializationPreview] = useState<MaterializationPreview | null>(null);
 
   const selected = useMemo(() => campaigns.find((item) => item.id === selectedId) || campaigns[0] || null, [campaigns, selectedId]);
-  const unitOptions = unidades.filter((u) => campaignForm.operational_unit_ids.includes(u.id) || !campaignForm.operational_unit_ids.length);
 
   async function carregar() {
     setLoading(true);
@@ -79,66 +100,57 @@ export function OperationCampaigns() {
     carregar();
   }, []);
 
-  async function criarCampanha(event: React.FormEvent) {
+  // "O que preciso fazer agora?" (§35/§36): carrega a orquestração (next_action)
+  // e, se já existir um plano, o detalhe completo dele — a cada troca de
+  // campanha selecionada. Corrige de quebra o gap anterior em que reabrir uma
+  // campanha existente não recarregava o plano já gerado.
+  const carregarOrquestracao = useCallback(async (campaignId: string) => {
+    try {
+      const { data } = await api.get(`/operation-campaigns/${campaignId}/orchestration`);
+      setOrchestration(data);
+      if (data.plan_summary?.plan?.id) {
+        const { data: planData } = await api.get(`/operation-campaigns/${campaignId}/plans/${data.plan_summary.plan.id}`);
+        setPlan(planData);
+      } else {
+        setPlan(null);
+      }
+    } catch (error) {
+      setOrchestration(null);
+      setPlan(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (selected) carregarOrquestracao(selected.id);
+    else { setOrchestration(null); setPlan(null); }
+  }, [selected?.id, carregarOrquestracao]);
+
+  // Fluxo guiado (§13/§57-58): um único objetivo (nome, carga, quantidade,
+  // origem, destino) cria a campanha, os locais, a demanda e já gera o plano —
+  // em vez de 4 passos separados. Janela/prioridade/unidade ficam em "avançado".
+  async function criarObjetivo(event: React.FormEvent) {
     event.preventDefault();
     setSaving(true);
     setMessage(null);
     try {
-      const { data } = await api.post('/operation-campaigns', {
-        ...campaignForm,
-        client_request_id: `web-${Date.now()}`,
+      const { data } = await api.post('/operation-campaigns/objective', {
+        name: objectiveForm.name,
+        cargo_name: objectiveForm.cargo_name,
+        target_quantity: Number(objectiveForm.target_quantity || 0),
+        quantity_unit: objectiveForm.quantity_unit,
+        origin: objectiveForm.origin,
+        destination: objectiveForm.destination,
+        priority: objectiveForm.priority,
+        planned_start: objectiveForm.planned_start || undefined,
+        planned_end: objectiveForm.planned_end || undefined,
+        operational_unit_ids: objectiveForm.operational_unit_ids,
+        client_request_id: `objective-${Date.now()}`,
       });
-      setCampaigns((items) => [data, ...items.filter((item) => item.id !== data.id)]);
-      setSelectedId(data.id);
-      setCampaignForm(emptyCampaign);
-      setMessage({ type: 'ok', text: 'Campanha criada.' });
-    } catch (error) {
-      setMessage({ type: 'error', text: apiError(error) });
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function salvarBase(event: React.FormEvent) {
-    event.preventDefault();
-    if (!selected) return;
-    setSaving(true);
-    setMessage(null);
-    try {
-      const locationsPayload = [
-        { kind: 'origin', name: locationsForm.origin.name, unidade_operacional_id: locationsForm.origin.unidade_operacional_id || null, location_type: 'operational', priority: 10 },
-        { kind: 'destination', name: locationsForm.destination.name, unidade_operacional_id: locationsForm.destination.unidade_operacional_id || null, location_type: 'operational', priority: 20 },
-      ];
-      const { data: locRes } = await api.put(`/operation-campaigns/${selected.id}/locations`, { locations: locationsPayload });
-      const origem = locRes.itens.find((item: any) => item.kind === 'origin');
-      const destino = locRes.itens.find((item: any) => item.kind === 'destination');
-      await api.put(`/operation-campaigns/${selected.id}/demands`, {
-        demands: [{
-          origin_location_id: origem.id,
-          destination_location_id: destino.id,
-          cargo_name: selected.cargo_name,
-          target_quantity: Number(demandForm.target_quantity || 0),
-          quantity_unit: demandForm.quantity_unit,
-        }],
-      });
-      setMessage({ type: 'ok', text: 'Locais e demanda salvos.' });
-    } catch (error) {
-      setMessage({ type: 'error', text: apiError(error) });
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function gerarPlano() {
-    if (!selected) return;
-    setSaving(true);
-    setMessage(null);
-    try {
-      const { data } = await api.post(`/operation-campaigns/${selected.id}/plans`, { client_request_id: `plan-${Date.now()}` });
-      setPlan(data);
-      setMaterializationPreview(null);
-      await carregar();
-      setMessage({ type: 'ok', text: 'Plano pronto para revisão.' });
+      setCampaigns((items) => [data.campaign, ...items.filter((item) => item.id !== data.campaign.id)]);
+      setSelectedId(data.campaign.id);
+      setObjectiveForm(emptyObjective);
+      setShowAdvanced(false);
+      setMessage({ type: 'ok', text: 'Objetivo registrado — plano gerado, pronto para revisão.' });
     } catch (error) {
       setMessage({ type: 'error', text: apiError(error) });
     } finally {
@@ -154,7 +166,7 @@ export function OperationCampaigns() {
       const { data } = await api.post(`/operation-campaigns/${selected.id}/plans/${plan.plan.id}/approve`, { client_request_id: `approve-${Date.now()}` });
       setPlan(data);
       setMaterializationPreview(null);
-      await carregar();
+      await Promise.all([carregar(), carregarOrquestracao(selected.id)]);
       setMessage({ type: 'ok', text: 'Plano aprovado.' });
     } catch (error) {
       setMessage({ type: 'error', text: apiError(error) });
@@ -164,7 +176,7 @@ export function OperationCampaigns() {
   }
 
   function toggleUnit(id: string) {
-    setCampaignForm((current) => ({
+    setObjectiveForm((current) => ({
       ...current,
       operational_unit_ids: current.operational_unit_ids.includes(id)
         ? current.operational_unit_ids.filter((unitId) => unitId !== id)
@@ -242,26 +254,73 @@ export function OperationCampaigns() {
 
         <div className="grid gap-5 xl:grid-cols-[360px_minmax(0,1fr)]">
           <section className="space-y-4">
-            <form onSubmit={criarCampanha} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-              <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-800"><Plus size={16} /> Nova campanha</div>
+            <form onSubmit={criarObjetivo} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="mb-1 flex items-center gap-2 text-sm font-semibold text-slate-800"><Target size={16} /> Novo objetivo</div>
+              <p className="mb-3 text-xs text-slate-500">O que você precisa transportar, quanto, de onde para onde. O sistema monta o plano.</p>
               <div className="space-y-3">
-                <input required placeholder="Código de referência" value={campaignForm.reference_code} onChange={(e) => setCampaignForm({ ...campaignForm, reference_code: e.target.value })} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-                <input required placeholder="Nome" value={campaignForm.name} onChange={(e) => setCampaignForm({ ...campaignForm, name: e.target.value })} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-                <input required placeholder="Carga" value={campaignForm.cargo_name} onChange={(e) => setCampaignForm({ ...campaignForm, cargo_name: e.target.value })} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-                <div className="space-y-2">
-                  <p className="text-xs font-semibold uppercase text-slate-500">Unidades</p>
-                  <div className="max-h-36 space-y-1 overflow-auto rounded-lg border border-slate-200 p-2">
-                    {unidades.map((unidade) => (
-                      <label key={unidade.id} className="flex items-center gap-2 rounded-md px-2 py-1 text-sm text-slate-700 hover:bg-slate-50">
-                        <input type="checkbox" checked={campaignForm.operational_unit_ids.includes(unidade.id)} onChange={() => toggleUnit(unidade.id)} className="h-4 w-4 rounded border-slate-300" />
-                        <span>{unidade.nome}</span>
-                      </label>
-                    ))}
-                    {!unidades.length && <p className="px-2 py-3 text-sm text-slate-500">Unidades indisponíveis para seleção.</p>}
+                <input required placeholder="Nome do objetivo (ex.: Escoamento safra verão)" value={objectiveForm.name} onChange={(e) => setObjectiveForm({ ...objectiveForm, name: e.target.value })} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                <input required placeholder="O que precisa transportar (ex.: Soja)" value={objectiveForm.cargo_name} onChange={(e) => setObjectiveForm({ ...objectiveForm, cargo_name: e.target.value })} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                <label className="block space-y-1 text-sm font-medium text-slate-700">
+                  <span className="flex items-center gap-1"><MapPin size={15} /> De onde</span>
+                  <input required placeholder="Origem" value={objectiveForm.origin} onChange={(e) => setObjectiveForm({ ...objectiveForm, origin: e.target.value })} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                </label>
+                <label className="block space-y-1 text-sm font-medium text-slate-700">
+                  <span className="flex items-center gap-1"><Factory size={15} /> Para onde</span>
+                  <input required placeholder="Destino" value={objectiveForm.destination} onChange={(e) => setObjectiveForm({ ...objectiveForm, destination: e.target.value })} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                </label>
+                <label className="block space-y-1 text-sm font-medium text-slate-700">
+                  <span>Quanto</span>
+                  <div className="flex gap-2">
+                    <input required type="number" min="0" step="0.001" placeholder="Quantidade" value={objectiveForm.target_quantity} onChange={(e) => setObjectiveForm({ ...objectiveForm, target_quantity: e.target.value === '' ? '' : Number(e.target.value) })} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                    <select value={objectiveForm.quantity_unit} onChange={(e) => setObjectiveForm({ ...objectiveForm, quantity_unit: e.target.value })} className="rounded-lg border border-slate-300 px-3 py-2 text-sm">
+                      <option value="ton">t</option>
+                      <option value="kg">kg</option>
+                    </select>
                   </div>
-                </div>
+                </label>
+
+                <button type="button" onClick={() => setShowAdvanced((v) => !v)} className="flex w-full items-center justify-between rounded-lg px-1 py-1 text-xs font-semibold uppercase text-slate-500 hover:text-slate-700">
+                  <span>Avançado (janela, prioridade, unidade)</span>
+                  <ChevronDown size={14} className={showAdvanced ? 'rotate-180 transition-transform' : 'transition-transform'} />
+                </button>
+                {showAdvanced && (
+                  <div className="space-y-3 rounded-lg border border-slate-100 bg-slate-50 p-3">
+                    <div className="grid gap-2 md:grid-cols-2">
+                      <label className="space-y-1 text-xs font-medium text-slate-600">
+                        <span>Início da janela</span>
+                        <input type="date" value={objectiveForm.planned_start} onChange={(e) => setObjectiveForm({ ...objectiveForm, planned_start: e.target.value })} className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+                      </label>
+                      <label className="space-y-1 text-xs font-medium text-slate-600">
+                        <span>Fim da janela</span>
+                        <input type="date" value={objectiveForm.planned_end} onChange={(e) => setObjectiveForm({ ...objectiveForm, planned_end: e.target.value })} className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+                      </label>
+                    </div>
+                    <label className="space-y-1 text-xs font-medium text-slate-600">
+                      <span>Prioridade</span>
+                      <select value={objectiveForm.priority} onChange={(e) => setObjectiveForm({ ...objectiveForm, priority: e.target.value })} className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm">
+                        <option value="low">Baixa</option>
+                        <option value="normal">Normal</option>
+                        <option value="high">Alta</option>
+                        <option value="urgent">Urgente</option>
+                      </select>
+                    </label>
+                    <div className="space-y-1">
+                      <p className="text-xs font-semibold uppercase text-slate-500">Unidades</p>
+                      <div className="max-h-32 space-y-1 overflow-auto rounded-lg border border-slate-200 bg-white p-2">
+                        {unidades.map((unidade) => (
+                          <label key={unidade.id} className="flex items-center gap-2 rounded-md px-2 py-1 text-sm text-slate-700 hover:bg-slate-50">
+                            <input type="checkbox" checked={objectiveForm.operational_unit_ids.includes(unidade.id)} onChange={() => toggleUnit(unidade.id)} className="h-4 w-4 rounded border-slate-300" />
+                            <span>{unidade.nome}</span>
+                          </label>
+                        ))}
+                        {!unidades.length && <p className="px-2 py-3 text-sm text-slate-500">Unidades indisponíveis para seleção.</p>}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <button disabled={saving || loading} className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-60">
-                  <ClipboardCheck size={16} /> Criar
+                  <Sparkles size={16} /> Gerar plano
                 </button>
               </div>
             </form>
@@ -270,7 +329,7 @@ export function OperationCampaigns() {
               <div className="mb-2 text-sm font-semibold text-slate-800">Em andamento</div>
               <div className="space-y-2">
                 {campaigns.map((item) => (
-                  <button key={item.id} onClick={() => { setSelectedId(item.id); setPlan(null); }} className={`w-full rounded-lg border px-3 py-2 text-left text-sm transition ${selected?.id === item.id ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200 hover:bg-slate-50'}`}>
+                  <button key={item.id} onClick={() => setSelectedId(item.id)} className={`w-full rounded-lg border px-3 py-2 text-left text-sm transition ${selected?.id === item.id ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200 hover:bg-slate-50'}`}>
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-semibold text-slate-900">{item.reference_code}</span>
                       <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${statusTone(item.status)}`}>{item.status}</span>
@@ -291,50 +350,34 @@ export function OperationCampaigns() {
                     <div>
                       <p className="text-sm font-semibold text-slate-500">{selected.reference_code}</p>
                       <h2 className="text-xl font-semibold text-slate-900">{selected.name}</h2>
-                      <p className="text-sm text-slate-500">{selected.cargo_name}</p>
+                      <p className="text-sm text-slate-500">
+                        {selected.cargo_name}
+                        {orchestration?.objective?.origin && orchestration?.objective?.destination
+                          ? ` · ${orchestration.objective.origin} → ${orchestration.objective.destination}` : ''}
+                        {orchestration?.objective?.target_quantity
+                          ? ` · ${orchestration.objective.target_quantity.toLocaleString('pt-BR')} ${orchestration.objective.quantity_unit === 'kg' ? 'kg' : 't'}` : ''}
+                      </p>
                     </div>
                     <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${statusTone(selected.status)}`}>{selected.planning_status}</span>
                   </div>
                 </div>
 
-                <form onSubmit={salvarBase} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                  <div className="mb-4 grid gap-3 md:grid-cols-3">
-                    <label className="space-y-1 text-sm font-medium text-slate-700">
-                      <span className="flex items-center gap-1"><MapPin size={15} /> Origem</span>
-                      <input required value={locationsForm.origin.name} onChange={(e) => setLocationsForm({ ...locationsForm, origin: { ...locationsForm.origin, name: e.target.value } })} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-                    </label>
-                    <label className="space-y-1 text-sm font-medium text-slate-700">
-                      <span className="flex items-center gap-1"><Factory size={15} /> Destino</span>
-                      <input required value={locationsForm.destination.name} onChange={(e) => setLocationsForm({ ...locationsForm, destination: { ...locationsForm.destination, name: e.target.value } })} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-                    </label>
-                    <label className="space-y-1 text-sm font-medium text-slate-700">
-                      <span>Quantidade</span>
-                      <div className="flex gap-2">
-                        <input required type="number" min="0" step="0.001" value={demandForm.target_quantity} onChange={(e) => setDemandForm({ ...demandForm, target_quantity: Number(e.target.value) })} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-                        <select value={demandForm.quantity_unit} onChange={(e) => setDemandForm({ ...demandForm, quantity_unit: e.target.value })} className="rounded-lg border border-slate-300 px-3 py-2 text-sm">
-                          <option value="ton">t</option>
-                          <option value="kg">kg</option>
-                        </select>
+                {orchestration && (() => {
+                  const copy = NEXT_ACTION_COPY[orchestration.next_action] || { label: orchestration.next_action_reason_text, tone: 'neutral' as const };
+                  const toneClass = copy.tone === 'warning' ? 'border-amber-200 bg-amber-50 text-amber-800'
+                    : copy.tone === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                    : copy.tone === 'info' ? 'border-sky-200 bg-sky-50 text-sky-800'
+                    : 'border-slate-200 bg-slate-50 text-slate-700';
+                  return (
+                    <div className={`flex items-start gap-2 rounded-lg border px-3 py-2.5 text-sm ${toneClass}`}>
+                      <Activity size={16} className="mt-0.5 shrink-0" />
+                      <div>
+                        <p className="font-semibold">O que fazer agora</p>
+                        <p>{copy.label}</p>
                       </div>
-                    </label>
-                  </div>
-                  {!!unitOptions.length && (
-                    <div className="mb-4 grid gap-3 md:grid-cols-2">
-                      <select value={locationsForm.origin.unidade_operacional_id} onChange={(e) => setLocationsForm({ ...locationsForm, origin: { ...locationsForm.origin, unidade_operacional_id: e.target.value } })} className="rounded-lg border border-slate-300 px-3 py-2 text-sm">
-                        <option value="">Unidade da origem</option>
-                        {unitOptions.map((u) => <option key={u.id} value={u.id}>{u.nome}</option>)}
-                      </select>
-                      <select value={locationsForm.destination.unidade_operacional_id} onChange={(e) => setLocationsForm({ ...locationsForm, destination: { ...locationsForm.destination, unidade_operacional_id: e.target.value } })} className="rounded-lg border border-slate-300 px-3 py-2 text-sm">
-                        <option value="">Unidade do destino</option>
-                        {unitOptions.map((u) => <option key={u.id} value={u.id}>{u.nome}</option>)}
-                      </select>
                     </div>
-                  )}
-                  <div className="flex flex-wrap gap-2">
-                    <button disabled={saving} className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-60"><CheckCircle2 size={16} /> Salvar base</button>
-                    <button type="button" onClick={gerarPlano} disabled={saving} className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"><Play size={16} /> Gerar plano</button>
-                  </div>
-                </form>
+                  );
+                })()}
 
                 <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
                   <div className="mb-3 flex items-center justify-between">

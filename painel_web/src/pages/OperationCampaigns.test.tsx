@@ -78,6 +78,17 @@ beforeEach(() => {
   mockApi.get.mockImplementation((url: string) => {
     if (url === '/operation-campaigns') return Promise.resolve({ data: { itens: [campaign] } });
     if (url === '/operation-campaigns/context') return Promise.resolve({ data: { unidades: [] } });
+    if (url.endsWith('/orchestration')) {
+      return Promise.resolve({
+        data: {
+          next_action: 'READY_FOR_MATERIALIZATION',
+          next_action_reason_text: 'Há viagens com executor definido, prontas para virar frete.',
+          objective: { cargo_name: 'Soja', target_quantity: 10, quantity_unit: 'ton', origin: 'Fazenda', destination: 'Porto' },
+          plan_summary: { plan: { id: 'plan-1', version_number: 1, status: 'APPROVED' }, exceptions_open: 0 },
+        },
+      });
+    }
+    if (url === '/operation-campaigns/campaign-1/plans/plan-1') return Promise.resolve({ data: approvedPlan });
     if (url.endsWith('/materialization-preview')) {
       return Promise.resolve({
         data: {
@@ -114,9 +125,10 @@ describe('OperationCampaigns materializacao', () => {
     render(<MemoryRouter><OperationCampaigns /></MemoryRouter>);
 
     expect((await screen.findAllByText('CAMP-B')).length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole('button', { name: /Gerar plano/i }));
-
-    const materializeButton = await screen.findByRole('button', { name: /Materializar fretes/i });
+    // Plano aprovado carrega automaticamente ao selecionar a campanha (via
+    // GET .../orchestration + GET .../plans/:planId) — não é mais preciso
+    // clicar em "Gerar plano" para reabrir uma campanha já aprovada.
+    const materializeButton = await screen.findByRole('button', { name: /Materializar fretes/i }, { timeout: 5000 });
     expect(materializeButton).toBeDisabled();
 
     fireEvent.change(screen.getByLabelText(/Valor por frete/i), { target: { value: '500' } });
@@ -134,6 +146,59 @@ describe('OperationCampaigns materializacao', () => {
     expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('Materializar 1 frete'));
     expect(await screen.findByText('1 frete(s) materializado(s).')).toBeInTheDocument();
   }, 15000); // fluxo de várias interações/renders — folga acima do default de 5s (ambiente jsdom variável)
+});
+
+describe('Objetivo guiado (Operation Orchestrator V1)', () => {
+  test('cria objetivo com entrada mínima (nome, carga, origem, destino, quantidade) — sem distância/preço/IDs de recurso', async () => {
+    mockApi.get.mockImplementation(mockCampaignList());
+    mockApi.post.mockImplementation((url: string, body: any) => {
+      if (url === '/operation-campaigns/objective') {
+        return Promise.resolve({ data: { campaign: { ...campaign, id: 'campaign-novo', name: body.name }, plan: approvedPlan } });
+      }
+      return Promise.resolve({ data: {} });
+    });
+
+    render(<MemoryRouter><OperationCampaigns /></MemoryRouter>);
+    await screen.findByText('Novo objetivo');
+
+    fireEvent.change(screen.getByPlaceholderText(/Nome do objetivo/i), { target: { value: 'Safra Verão' } });
+    fireEvent.change(screen.getByPlaceholderText(/O que precisa transportar/i), { target: { value: 'Soja' } });
+    fireEvent.change(screen.getByPlaceholderText('Origem'), { target: { value: 'Fazenda Alfa' } });
+    fireEvent.change(screen.getByPlaceholderText('Destino'), { target: { value: 'Porto de Santos' } });
+    fireEvent.change(screen.getByPlaceholderText('Quantidade'), { target: { value: '500' } });
+    fireEvent.click(screen.getByRole('button', { name: /Gerar plano/i }));
+
+    await waitFor(() => expect(mockApi.post).toHaveBeenCalledWith('/operation-campaigns/objective', expect.objectContaining({
+      name: 'Safra Verão', cargo_name: 'Soja', origin: 'Fazenda Alfa', destination: 'Porto de Santos', target_quantity: 500,
+    })));
+    // Nenhum campo de distância/preço de diesel/ID de motorista ou veículo é exigido (§73).
+    const [, payload] = mockApi.post.mock.calls.find((call) => call[0] === '/operation-campaigns/objective')!;
+    expect(payload).not.toHaveProperty('distance_km');
+    expect(payload).not.toHaveProperty('fuel_price_per_liter');
+    expect(payload).not.toHaveProperty('candidate_driver_id');
+    expect(payload).not.toHaveProperty('candidate_asset_id');
+    expect(payload).not.toHaveProperty('number_of_trips');
+  });
+
+  test('banner "o que fazer agora" reflete o next_action retornado pela orquestração', async () => {
+    mockApi.get.mockImplementation((url: string) => {
+      if (url.endsWith('/orchestration')) {
+        return Promise.resolve({
+          data: {
+            next_action: 'REVIEW_CAPACITY_GAP',
+            next_action_reason_text: 'gap',
+            objective: { cargo_name: 'Soja', target_quantity: 500, quantity_unit: 'ton', origin: 'Fazenda Alfa', destino: 'Porto' },
+            plan_summary: null,
+          },
+        });
+      }
+      return mockCampaignList()(url);
+    });
+
+    render(<MemoryRouter><OperationCampaigns /></MemoryRouter>);
+    expect(await screen.findByText('O que fazer agora')).toBeInTheDocument();
+    expect(await screen.findByText(/capacidade própria não cobre toda a demanda/i)).toBeInTheDocument();
+  });
 });
 
 describe('CampaignExecution', () => {
