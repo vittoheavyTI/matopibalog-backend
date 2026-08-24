@@ -13,10 +13,13 @@ const {
   aplicarEscopoOperacionalQuery,
 } = require('./operationalScopeService');
 const { montarTorreControle, resumirItensTorre } = require('../utils/torreControle');
+const { listCampaigns } = require('./campaign/campaignService');
+const { getCampaignProgress } = require('./campaign/campaignProgressService');
 
 const ZERO_UUID = '00000000-0000-0000-0000-000000000000';
 const LIMITE_FRETES_PADRAO = 1000;
 const STATUS_ATIVOS_FILTRO = ['ativo', 'pendente', 'em_viagem', 'em_andamento'];
+const CAMPAIGN_ATTENTION_LIMIT = 25;
 
 function aplicarEmpresasAutorizadasQuery(query, operationalScope, fallbackEmpresaId = null) {
   const empresaIds = operationalScope?.authorized_empresa_ids || [];
@@ -104,4 +107,57 @@ async function carregarCommandCenter(supabase, {
   };
 }
 
-module.exports = { carregarCommandCenter, resumirPorCodigo, LIMITE_FRETES_PADRAO };
+// Atenção de Campaign para a Torre de Controle (§89-93). REUSA a autoridade
+// canônica campaignProgressService (§91 — nunca recalcula saúde de campanha por
+// conta própria). READ-ONLY e LIMITADO (§108 — não explode cross-product): só as
+// campanhas APROVADAS do escopo, top-N, e apenas as que estão em ATTENTION/CRITICAL
+// ou pedem replanejamento aparecem. Financeiro nunca é exposto aqui.
+async function carregarCampaignAttention(supabase, { empresaId, operationalScope, limite = CAMPAIGN_ATTENTION_LIMIT } = {}) {
+  let campaigns = [];
+  try {
+    campaigns = await listCampaigns(supabase, { empresaId, operationalScope });
+  } catch {
+    return { total_campaigns: 0, attention: [], summary_by_state: {} };
+  }
+  const aprovadas = campaigns.filter((c) => c.status === 'APPROVED').slice(0, limite);
+
+  const attention = [];
+  const summary_by_state = {};
+  for (const c of aprovadas) {
+    let progress;
+    try {
+      progress = await getCampaignProgress(supabase, { empresaId, campaignId: c.id, operationalScope });
+    } catch {
+      continue; // defensivo: uma campanha problemática não derruba a Torre
+    }
+    const state = progress.health?.state;
+    summary_by_state[state] = (summary_by_state[state] || 0) + 1;
+    const precisaAtencao = state === 'ATTENTION' || state === 'CRITICAL'
+      || (progress.replan && progress.replan.status !== 'REPLAN_NOT_NEEDED');
+    if (!precisaAtencao) continue;
+    attention.push({
+      campaign_id: progress.campaign.id,
+      reference_code: progress.campaign.reference_code,
+      name: progress.campaign.name,
+      health_state: state,
+      reason_code: progress.health?.reason_code || null,
+      replan_status: progress.replan?.status || null,
+      blocked: progress.progress.trips.blocked,
+      not_materialized: progress.progress.trips.not_materialized,
+      cancelled: progress.progress.trips.cancelled,
+    });
+  }
+
+  // Ordem determinística: CRITICAL antes de ATTENTION; depois por código.
+  const order = { CRITICAL: 0, ATTENTION: 1 };
+  attention.sort((a, b) => {
+    const oa = order[a.health_state] ?? 2;
+    const ob = order[b.health_state] ?? 2;
+    if (oa !== ob) return oa - ob;
+    return String(a.reference_code).localeCompare(String(b.reference_code));
+  });
+
+  return { total_campaigns: aprovadas.length, attention, summary_by_state };
+}
+
+module.exports = { carregarCommandCenter, carregarCampaignAttention, resumirPorCodigo, LIMITE_FRETES_PADRAO };

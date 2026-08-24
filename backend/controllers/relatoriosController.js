@@ -9,7 +9,7 @@ const {
 const { calcularRentabilidadeFrete, resumirRentabilidade } = require('../utils/rentabilidadeFrete');
 const { calcularAcertoMotoristas } = require('../utils/acertoMotorista');
 const { montarTorreControle, resumirItensTorre } = require('../utils/torreControle');
-const { carregarCommandCenter } = require('../services/commandCenterService');
+const { carregarCommandCenter, carregarCampaignAttention } = require('../services/commandCenterService');
 const { ensureEffective } = require('../middlewares/requirePermission');
 const {
   resolverEscopoOperacional,
@@ -457,11 +457,15 @@ exports.getTorreControle = async (req, res) => {
     // Capacidades para o cliente decidir o que renderizar (§30) — sem role hardcode.
     let permissions = {};
     try { permissions = (await ensureEffective(req))?.permissions || {}; } catch { permissions = {}; }
+    // campaign.view é entitlement-gated no resolver: true ⇒ permissão E entitlement
+    // operation_campaign efetivos (§92). Só então a Torre mostra atenção de Campaign.
+    const canViewCampaign = isSuperAdmin || permissions['campaign.view'] === true;
     const capabilities = {
       can_view_freight: isSuperAdmin || permissions['freight.view'] === true || permissions['reports.operational.view'] === true,
       can_view_fleet: isSuperAdmin || permissions['fleet.view'] === true,
       can_view_operational_finance: financialVisibility,
       can_view_documents: isSuperAdmin || permissions['documents.view'] === true,
+      can_view_campaign: canViewCampaign,
     };
 
     const cc = await carregarCommandCenter(supabase, {
@@ -472,6 +476,18 @@ exports.getTorreControle = async (req, res) => {
       limite: LIMITE_FRETES,
     });
 
+    // Atenção de Campaign (aditivo, capability-gated, defensivo): reusa a saúde
+    // canônica; qualquer falha não derruba a Torre de fretes.
+    let campaignAttention = null;
+    if (canViewCampaign && empresaAlvo) {
+      try {
+        campaignAttention = await carregarCampaignAttention(supabase, { empresaId: empresaAlvo, operationalScope });
+      } catch (campErr) {
+        console.error('[torre-controle] campaign attention falhou:', campErr?.message || campErr);
+        campaignAttention = null;
+      }
+    }
+
     res.status(200).json({
       generated_at: new Date().toISOString(),
       capabilities,
@@ -479,6 +495,7 @@ exports.getTorreControle = async (req, res) => {
       resumo: cc.resumo,
       attention_summary: cc.attention_summary,
       itens: cc.itens,
+      campaign_attention: campaignAttention,
       periodo: { inicio: inicio || null, fim: fim || null },
       limite_aplicado: cc.limite_aplicado,
     });

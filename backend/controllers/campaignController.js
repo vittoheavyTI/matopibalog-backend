@@ -3,6 +3,8 @@
 const supabase = require('../config/supabase');
 const campaign = require('../services/campaign/campaignService');
 const campaignMaterialization = require('../services/campaign/campaignMaterializationService');
+const campaignProgress = require('../services/campaign/campaignProgressService');
+const dispatchEligibility = require('../services/campaign/dispatchEligibilityService');
 const { buildCorrelationContext } = require('../services/verifiability/correlationContext');
 
 function responderErro(res, error) {
@@ -188,8 +190,44 @@ const materializarPlano = async (req, res) => {
   }
 };
 
+// GET /:campaignId/progress — projeção read-only do progresso operacional
+// (trips + quantidade + saúde + exceções + readiness + replan). Autoridade
+// única: campaignProgressService (§12). Nunca escreve/despacha.
+const obterProgresso = async (req, res) => {
+  try {
+    const item = await campaignProgress.getCampaignProgress(supabase, {
+      empresaId: req.empresa_id,
+      campaignId: req.params.campaignId,
+      operationalScope: req.operationalScope,
+    });
+    return res.json(item);
+  } catch (error) {
+    return responderErro(res, error);
+  }
+};
+
+// GET /:campaignId/plans/:planId/trips/:tripId/eligibility — candidatos elegíveis
+// determinísticos para UMA viagem planejada. Read-only; não oferta nem designa.
+const obterElegibilidade = async (req, res) => {
+  try {
+    const item = await dispatchEligibility.listTripEligibility(supabase, {
+      empresaId: req.empresa_id,
+      campaignId: req.params.campaignId,
+      planId: req.params.planId,
+      tripId: req.params.tripId,
+      operationalScope: req.operationalScope,
+      limit: req.query?.limit,
+    });
+    return res.json(item);
+  } catch (error) {
+    return responderErro(res, error);
+  }
+};
+
 module.exports = {
   obterContexto,
+  obterProgresso,
+  obterElegibilidade,
   listarCampanhas,
   criarCampanha,
   detalharCampanha,

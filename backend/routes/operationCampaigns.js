@@ -59,6 +59,8 @@ router.get('/context', requireCampaignPermission('campaign.view'), controller.ob
 router.get('/', requireCampaignPermission('campaign.view'), controller.listarCampanhas);
 router.post('/', requireCampaignPermission('campaign.create'), controller.criarCampanha);
 router.get('/:campaignId', requireCampaignPermission('campaign.view'), controller.detalharCampanha);
+router.get('/:campaignId/progress', requireCampaignPermission('campaign.view'), controller.obterProgresso);
+router.get('/:campaignId/plans/:planId/trips/:tripId/eligibility', requireCampaignPermission('campaign.manage'), controller.obterElegibilidade);
 router.patch('/:campaignId', requireCampaignPermission('campaign.manage'), controller.atualizarRascunho);
 router.put('/:campaignId/locations', requireCampaignPermission('campaign.manage'), controller.substituirLocais);
 router.put('/:campaignId/demands', requireCampaignPermission('campaign.manage'), controller.substituirDemandas);
