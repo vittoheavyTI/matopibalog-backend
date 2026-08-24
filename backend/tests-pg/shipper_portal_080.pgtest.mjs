@@ -355,9 +355,248 @@ function registrar(pg) {
     );
   });
 
+  // ==========================================================================
+  // OWNER REVIEW HIGH-01 — privilégio padrão do operador
+  // ==========================================================================
+
+  test('080 HIGH-01: administrador recebe manage+review; gerente_frota só review; operador NENHUMA por padrão', async () => {
+    await fullSetup();
+    // Templates canônicos por empresa (a 072 cria; aqui garantimos os 3 alvos).
+    for (const [key, nome] of [['administrador', 'Administrador'], ['gerente_frota', 'Gerente de frota'], ['operador', 'Operador']]) {
+      await pool.query(
+        `INSERT INTO public.permission_templates (empresa_id, stable_key, nome)
+         VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, [EMP_A, key, nome]);
+    }
+    await pool.query(`SELECT public.ensure_shipper_portal_template_permissions_for_empresa($1)`, [EMP_A]);
+
+    const chaves = async (stableKey) => {
+      const { rows } = await pool.query(
+        `SELECT p.permission_key FROM public.permission_template_permissions p
+         JOIN public.permission_templates t ON t.id = p.template_id
+         WHERE t.empresa_id=$1 AND t.stable_key=$2 AND p.permission_key LIKE 'shipper_portal%'
+         ORDER BY p.permission_key`, [EMP_A, stableKey]);
+      return rows.map((r) => r.permission_key);
+    };
+
+    assert.deepEqual(await chaves('administrador'), ['shipper_portal.manage', 'shipper_portal.requests.review']);
+    assert.deepEqual(await chaves('gerente_frota'), ['shipper_portal.requests.review']);
+    assert.deepEqual(await chaves('operador'), [],
+      'operador NAO pode receber permissao de portal por padrao — aceitar solicitacao inicia operacao');
+  });
+
+  test('080 HIGH-01: backfill é idempotente e não toca permissões não relacionadas ao portal', async () => {
+    await fullSetup();
+    await pool.query(
+      `INSERT INTO public.permission_templates (empresa_id, stable_key, nome)
+       VALUES ($1,'administrador','Administrador') ON CONFLICT DO NOTHING`, [EMP_A]);
+    const { rows: tpl } = await pool.query(
+      `SELECT id FROM public.permission_templates WHERE empresa_id=$1 AND stable_key='administrador'`, [EMP_A]);
+    await pool.query(
+      `INSERT INTO public.permission_template_permissions (template_id, permission_key, allowed)
+       VALUES ($1,'freight.view',true) ON CONFLICT DO NOTHING`, [tpl[0].id]);
+
+    await pool.query(`SELECT public.ensure_shipper_portal_template_permissions_for_empresa($1)`, [EMP_A]);
+    await pool.query(`SELECT public.ensure_shipper_portal_template_permissions_for_empresa($1)`, [EMP_A]);
+
+    const { rows } = await pool.query(
+      `SELECT permission_key, count(*)::int AS n FROM public.permission_template_permissions
+       WHERE template_id=$1 GROUP BY permission_key ORDER BY permission_key`, [tpl[0].id]);
+    const mapa = Object.fromEntries(rows.map((r) => [r.permission_key, r.n]));
+    assert.equal(mapa['freight.view'], 1, 'permissao nao relacionada nao pode ser duplicada nem removida');
+    assert.equal(mapa['shipper_portal.manage'], 1, 'replay nao pode duplicar');
+  });
+
+  // ==========================================================================
+  // OWNER REVIEW HIGH-02 — criação atômica (request + origens + snapshot)
+  // ==========================================================================
+
+  async function criarESubmeter(client, { orgId = ORG_X, relId = REL_AX, userId = USER_X, ref = 'SOL-A', origins, clientRequestId = null } = {}) {
+    const executor = client || pool;
+    const { rows } = await executor.query(
+      `SELECT * FROM public.shipper_request_create_and_submit($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+      [orgId, relId, userId, ref, 'Soja', 'Porto', 'ton', null, null, null,
+        JSON.stringify(origins || [{ nome: 'Fazenda A', quantidade: 300 }, { nome: 'Fazenda B', quantidade: 200 }]),
+        clientRequestId],
+    );
+    return rows[0];
+  }
+
+  test('080 HIGH-02: criação atômica grava request + origens + snapshot já em SUBMITTED', async () => {
+    await fullSetup();
+    const req = await criarESubmeter(null, { ref: 'SOL-ATOMICA' });
+    assert.equal(req.status, 'SUBMITTED');
+    assert.ok(req.submitted_snapshot, 'snapshot deve estar congelado');
+    assert.equal(Number(req.submitted_snapshot.total_quantidade), 500);
+    assert.equal(req.submitted_snapshot.origins.length, 2);
+
+    const { rows: origens } = await pool.query(
+      `SELECT nome, quantidade FROM public.shipper_transport_request_origins WHERE request_id=$1 ORDER BY ordem`, [req.id]);
+    assert.equal(origens.length, 2);
+    // Snapshot corresponde EXATAMENTE às origens gravadas (§13).
+    assert.deepEqual(req.submitted_snapshot.origins.map((o) => o.nome), origens.map((o) => o.nome));
+  });
+
+  test('080 HIGH-02: falha ao inserir origem NÃO deixa DRAFT parcial commitado', async () => {
+    await fullSetup();
+    // quantidade negativa viola o CHECK da tabela de origens → transação inteira aborta.
+    await assert.rejects(
+      criarESubmeter(null, { ref: 'SOL-FALHA', origins: [{ nome: 'Fazenda A', quantidade: 100 }, { nome: 'Fazenda B', quantidade: -5 }] }),
+      (err) => err.code === '23514',
+    );
+    const { rows } = await pool.query(
+      `SELECT count(*)::int AS n FROM public.shipper_transport_requests WHERE reference_code='SOL-FALHA'`);
+    assert.equal(rows[0].n, 0, 'nenhum rascunho parcial pode sobrar apos falha');
+    const { rows: orfas } = await pool.query(
+      `SELECT count(*)::int AS n FROM public.shipper_transport_request_origins`);
+    assert.equal(orfas[0].n, 0, 'nenhuma origem orfa pode sobrar');
+  });
+
+  test('080 HIGH-02: relacionamento revogado impede criar solicitação (transação nem começa a gravar)', async () => {
+    await fullSetup();
+    await pool.query(`UPDATE public.shipper_carrier_relationships SET status='REVOKED', revoked_at=now() WHERE id=$1`, [REL_AX]);
+    await assert.rejects(
+      criarESubmeter(null, { ref: 'SOL-REV' }),
+      (err) => /relationship_not_active/.test(err.message),
+    );
+    const { rows } = await pool.query(`SELECT count(*)::int AS n FROM public.shipper_transport_requests`);
+    assert.equal(rows[0].n, 0);
+  });
+
+  test('080 HIGH-02: usuário de OUTRO embarcador não pode criar solicitação nesta organização', async () => {
+    await fullSetup();
+    await assert.rejects(
+      criarESubmeter(null, { orgId: ORG_X, relId: REL_AX, userId: USER_Y, ref: 'SOL-XY' }),
+      (err) => /portal_user_not_in_org/.test(err.message),
+    );
+  });
+
+  test('080 HIGH-02: replay do mesmo client_request_id converge para UMA solicitação', async () => {
+    await fullSetup();
+    const a = await criarESubmeter(null, { ref: 'SOL-IDEM', clientRequestId: 'cli-1' });
+    const b = await criarESubmeter(null, { ref: 'SOL-IDEM-2', clientRequestId: 'cli-1' });
+    assert.equal(a.id, b.id, 'replay deve devolver a mesma solicitacao');
+    const { rows } = await pool.query(
+      `SELECT count(*)::int AS n FROM public.shipper_transport_requests WHERE client_request_id='cli-1'`);
+    assert.equal(rows[0].n, 1);
+    const { rows: origens } = await pool.query(
+      `SELECT count(*)::int AS n FROM public.shipper_transport_request_origins WHERE request_id=$1`, [a.id]);
+    assert.equal(origens[0].n, 2, 'replay nao pode duplicar origens');
+  });
+
+  test('080 HIGH-02: duas criações CONCORRENTES com o mesmo client_request_id convergem para UMA (sem 500)', async () => {
+    await fullSetup();
+    async function tentar() {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const row = await criarESubmeter(client, { ref: `SOL-C-${Math.random().toString(36).slice(2, 8)}`, clientRequestId: 'cli-concorrente' });
+        await client.query('COMMIT');
+        return { ok: true, id: row.id };
+      } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        return { ok: false, code: err.code, message: err.message };
+      } finally { client.release(); }
+    }
+    const [r1, r2] = await Promise.all([tentar(), tentar()]);
+    assert.ok(r1.ok || r2.ok, 'ao menos uma criacao deve ter sucesso');
+
+    const { rows } = await pool.query(
+      `SELECT count(*)::int AS n FROM public.shipper_transport_requests WHERE client_request_id='cli-concorrente'`);
+    assert.equal(rows[0].n, 1, 'nunca podem existir duas solicitacoes para o mesmo client_request_id');
+  });
+
+  // ==========================================================================
+  // OWNER REVIEW HIGH-03 — race cancel × accept
+  // ==========================================================================
+
+  test('080 HIGH-03: accept e cancel CONCORRENTES na mesma solicitação → exatamente um desfecho terminal', async () => {
+    await fullSetup();
+    const req = await criarESubmeter(null, { ref: 'SOL-RACE' });
+
+    async function aceitar() {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(`SELECT public.shipper_request_accept($1,$2,$3,$4)`,
+          [EMP_A, req.id, ADM_A, JSON.stringify({ origem: 'accept' })]);
+        await client.query('COMMIT');
+        return { ok: true, quem: 'accept' };
+      } catch (err) { await client.query('ROLLBACK').catch(() => {}); return { ok: false, quem: 'accept', message: err.message }; }
+      finally { client.release(); }
+    }
+    async function cancelar() {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(`SELECT public.shipper_request_cancel($1,$2,$3,$4)`,
+          [ORG_X, req.id, USER_X, 'desisti']);
+        await client.query('COMMIT');
+        return { ok: true, quem: 'cancel' };
+      } catch (err) { await client.query('ROLLBACK').catch(() => {}); return { ok: false, quem: 'cancel', message: err.message }; }
+      finally { client.release(); }
+    }
+
+    const [ra, rc] = await Promise.all([aceitar(), cancelar()]);
+    const vencedores = [ra, rc].filter((r) => r.ok);
+    assert.equal(vencedores.length, 1,
+      `exatamente uma decisao pode vencer (accept.ok=${ra.ok} cancel.ok=${rc.ok})`);
+
+    const { rows } = await pool.query(
+      `SELECT status FROM public.shipper_transport_requests WHERE id=$1`, [req.id]);
+    assert.ok(['ACCEPTED', 'CANCELLED'].includes(rows[0].status));
+    assert.equal(rows[0].status, vencedores[0].quem === 'accept' ? 'ACCEPTED' : 'CANCELLED',
+      'o estado final deve corresponder a quem venceu o lock');
+  });
+
+  test('080 HIGH-03: depois de ACEITA, o portal não consegue cancelar (não desfaz decisão de negócio)', async () => {
+    await fullSetup();
+    const req = await criarESubmeter(null, { ref: 'SOL-ACEITA' });
+    await pool.query(`SELECT public.shipper_request_accept($1,$2,$3,$4)`, [EMP_A, req.id, ADM_A, JSON.stringify({})]);
+    await assert.rejects(
+      pool.query(`SELECT public.shipper_request_cancel($1,$2,$3,$4)`, [ORG_X, req.id, USER_X, 'tarde demais']),
+      (err) => /request_not_cancellable/.test(err.message),
+    );
+    const { rows } = await pool.query(`SELECT status FROM public.shipper_transport_requests WHERE id=$1`, [req.id]);
+    assert.equal(rows[0].status, 'ACCEPTED');
+  });
+
+  test('080 HIGH-03: depois de CANCELADA, a transportadora não consegue aceitar', async () => {
+    await fullSetup();
+    const req = await criarESubmeter(null, { ref: 'SOL-CANC' });
+    await pool.query(`SELECT public.shipper_request_cancel($1,$2,$3,$4)`, [ORG_X, req.id, USER_X, 'desisti']);
+    await assert.rejects(
+      pool.query(`SELECT public.shipper_request_accept($1,$2,$3,$4)`, [EMP_A, req.id, ADM_A, JSON.stringify({})]),
+      (err) => /request_not_acceptable/.test(err.message),
+    );
+    const { rows } = await pool.query(`SELECT status FROM public.shipper_transport_requests WHERE id=$1`, [req.id]);
+    assert.equal(rows[0].status, 'CANCELLED');
+  });
+
+  test('080 HIGH-03: cancelar duas vezes é idempotente (não grava segunda história)', async () => {
+    await fullSetup();
+    const req = await criarESubmeter(null, { ref: 'SOL-CANC2' });
+    const { rows: r1 } = await pool.query(`SELECT * FROM public.shipper_request_cancel($1,$2,$3,$4)`, [ORG_X, req.id, USER_X, 'motivo']);
+    const { rows: r2 } = await pool.query(`SELECT * FROM public.shipper_request_cancel($1,$2,$3,$4)`, [ORG_X, req.id, USER_X, 'outro motivo']);
+    assert.equal(r1[0].status, 'CANCELLED');
+    assert.equal(r2[0].status, 'CANCELLED');
+    assert.equal(r1[0].cancelled_at.toISOString(), r2[0].cancelled_at.toISOString(),
+      'replay nao pode reescrever o instante do cancelamento');
+  });
+
+  test('080 HIGH-03: usuário de OUTRO embarcador não cancela solicitação alheia', async () => {
+    await fullSetup();
+    const req = await criarESubmeter(null, { ref: 'SOL-ALHEIA' });
+    // ORG_Y tentando cancelar solicitação de ORG_X: a própria busca já não acha.
+    await assert.rejects(
+      pool.query(`SELECT public.shipper_request_cancel($1,$2,$3,$4)`, [ORG_Y, req.id, USER_Y, 'x']),
+      (err) => /request_not_found/.test(err.message),
+    );
+  });
+
   test('080 RPCs: apenas service_role executa; anon/authenticated não recebem EXECUTE', async () => {
     await fullSetup();
-    for (const fn of ['shipper_request_accept', 'shipper_request_link_campaign']) {
+    for (const fn of ['shipper_request_accept', 'shipper_request_link_campaign',
+      'shipper_request_create_and_submit', 'shipper_request_cancel']) {
       const { rows } = await pool.query(
         `SELECT r.rolname, a.privilege_type
          FROM pg_proc p

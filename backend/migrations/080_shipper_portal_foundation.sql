@@ -398,18 +398,238 @@ BEGIN
 END;
 $$;
 
+-- ============================================================================
+-- 10. shipper_request_create_and_submit -- criacao ATOMICA (owner review HIGH-02)
+-- ============================================================================
+-- Antes, a criacao era 3 escritas independentes na aplicacao (INSERT request
+-- DRAFT -> INSERT origens -> UPDATE para SUBMITTED). Se a segunda ou a terceira
+-- falhasse, sobrava um DRAFT parcial COMMITADO -- e um retry com o mesmo
+-- client_request_id encontrava esse rascunho e devolvia uma solicitacao
+-- incompleta como se estivesse pronta. Aqui as tres viram UMA transacao.
+--
+-- O snapshot e montado DENTRO desta funcao, a partir das MESMAS origens que
+-- estao sendo gravadas: e impossivel terminar com origens A e snapshot B.
+--
+-- Idempotencia concorrente: duas chamadas com o mesmo client_request_id
+-- convergem para UMA solicitacao. Quem perde a corrida do INSERT nao recebe
+-- erro 500 -- captura a violacao de unicidade e devolve a linha vencedora.
+
+CREATE OR REPLACE FUNCTION public.shipper_request_create_and_submit(
+  p_shipper_org_id uuid,
+  p_relationship_id uuid,
+  p_portal_user_id uuid,
+  p_reference_code text,
+  p_cargo_name text,
+  p_destination_name text,
+  p_quantity_unit text,
+  p_window_start timestamptz,
+  p_window_end timestamptz,
+  p_notes text,
+  p_origins jsonb,
+  p_client_request_id text
+) RETURNS public.shipper_transport_requests
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_rel record;
+  v_request public.shipper_transport_requests;
+  v_origin jsonb;
+  v_snapshot jsonb;
+  v_total numeric := 0;
+  v_count int := 0;
+  v_ordem int := 0;
+BEGIN
+  -- Idempotencia: replay do mesmo pedido logico devolve a solicitacao existente.
+  IF p_client_request_id IS NOT NULL THEN
+    SELECT * INTO v_request FROM public.shipper_transport_requests
+      WHERE shipper_org_id = p_shipper_org_id
+        AND created_by = p_portal_user_id
+        AND client_request_id = p_client_request_id;
+    IF FOUND THEN RETURN v_request; END IF;
+  END IF;
+
+  -- Fronteira: o relacionamento precisa existir, estar ATIVO e pertencer a ESTE
+  -- embarcador. Nunca aceitamos empresa_id vindo de fora -- ele e derivado aqui.
+  SELECT * INTO v_rel FROM public.shipper_carrier_relationships
+    WHERE id = p_relationship_id AND shipper_org_id = p_shipper_org_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'relationship_not_found' USING ERRCODE = 'P0002';
+  END IF;
+  IF v_rel.status <> 'ACTIVE' THEN
+    RAISE EXCEPTION 'relationship_not_active' USING ERRCODE = '55000';
+  END IF;
+
+  -- O autor precisa pertencer ao mesmo embarcador (a FK composta tambem cobre,
+  -- mas aqui o erro fica explicito em vez de virar violacao generica).
+  IF NOT EXISTS (
+    SELECT 1 FROM public.shipper_portal_users
+    WHERE id = p_portal_user_id AND shipper_org_id = p_shipper_org_id AND status = 'active'
+  ) THEN
+    RAISE EXCEPTION 'portal_user_not_in_org' USING ERRCODE = '42501';
+  END IF;
+
+  IF p_origins IS NULL OR jsonb_array_length(p_origins) < 1 THEN
+    RAISE EXCEPTION 'origins_required' USING ERRCODE = '22023';
+  END IF;
+
+  BEGIN
+    INSERT INTO public.shipper_transport_requests (
+      empresa_id, shipper_org_id, relationship_id, reference_code, status,
+      cargo_name, destination_name, quantity_unit, window_start, window_end,
+      notes, created_by, client_request_id
+    ) VALUES (
+      v_rel.empresa_id, p_shipper_org_id, p_relationship_id, p_reference_code, 'DRAFT',
+      p_cargo_name, p_destination_name, COALESCE(p_quantity_unit, 'ton'), p_window_start, p_window_end,
+      p_notes, p_portal_user_id, p_client_request_id
+    ) RETURNING * INTO v_request;
+  EXCEPTION WHEN unique_violation THEN
+    -- Corrida com outra chamada do mesmo client_request_id: quem perdeu devolve
+    -- a linha vencedora em vez de estourar erro.
+    IF p_client_request_id IS NOT NULL THEN
+      SELECT * INTO v_request FROM public.shipper_transport_requests
+        WHERE shipper_org_id = p_shipper_org_id
+          AND created_by = p_portal_user_id
+          AND client_request_id = p_client_request_id;
+      IF FOUND THEN RETURN v_request; END IF;
+    END IF;
+    RAISE;
+  END;
+
+  FOR v_origin IN SELECT * FROM jsonb_array_elements(p_origins)
+  LOOP
+    INSERT INTO public.shipper_transport_request_origins
+      (request_id, empresa_id, nome, quantidade, quantity_unit, ordem)
+    VALUES (
+      v_request.id, v_rel.empresa_id,
+      v_origin->>'nome',
+      COALESCE((v_origin->>'quantidade')::numeric, 0),
+      COALESCE(v_origin->>'quantity_unit', 'ton'),
+      v_ordem
+    );
+    v_total := v_total + COALESCE((v_origin->>'quantidade')::numeric, 0);
+    v_count := v_count + 1;
+    v_ordem := v_ordem + 1;
+  END LOOP;
+
+  -- Snapshot derivado das origens REALMENTE gravadas nesta transacao.
+  SELECT jsonb_build_object(
+    'reference_code', v_request.reference_code,
+    'cargo_name', v_request.cargo_name,
+    'destination_name', v_request.destination_name,
+    'quantity_unit', v_request.quantity_unit,
+    'window_start', v_request.window_start,
+    'window_end', v_request.window_end,
+    'notes', v_request.notes,
+    'origins', COALESCE(jsonb_agg(jsonb_build_object(
+        'nome', o.nome, 'quantidade', o.quantidade,
+        'quantity_unit', o.quantity_unit, 'ordem', o.ordem
+      ) ORDER BY o.ordem), '[]'::jsonb),
+    'total_quantidade', v_total,
+    'snapshot_at', now()
+  ) INTO v_snapshot
+  FROM public.shipper_transport_request_origins o
+  WHERE o.request_id = v_request.id;
+
+  UPDATE public.shipper_transport_requests
+    SET status = 'SUBMITTED', submitted_at = now(), submitted_snapshot = v_snapshot, updated_at = now()
+    WHERE id = v_request.id
+    RETURNING * INTO v_request;
+
+  RETURN v_request;
+END;
+$$;
+
+-- ============================================================================
+-- 11. shipper_request_cancel -- cancelamento ATOMICO (owner review HIGH-03)
+-- ============================================================================
+-- Antes, o cancelamento lia o status e depois atualizava por id, sem condicao de
+-- estado: entre a leitura e a escrita a transportadora podia ACEITAR, e o
+-- cancelamento sobrescrevia uma decisao de negocio ja tomada. Agora o
+-- SELECT ... FOR UPDATE serializa contra shipper_request_accept -- as duas
+-- disputam a MESMA linha, entao existe exatamente um desfecho terminal.
+--
+-- Tambem valida a fronteira (§23): nao basta conhecer o id da solicitacao.
+
+CREATE OR REPLACE FUNCTION public.shipper_request_cancel(
+  p_shipper_org_id uuid,
+  p_request_id uuid,
+  p_portal_user_id uuid,
+  p_reason text
+) RETURNS public.shipper_transport_requests
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_request public.shipper_transport_requests;
+BEGIN
+  SELECT * INTO v_request FROM public.shipper_transport_requests
+    WHERE id = p_request_id AND shipper_org_id = p_shipper_org_id
+    FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'request_not_found' USING ERRCODE = 'P0002';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM public.shipper_portal_users
+    WHERE id = p_portal_user_id AND shipper_org_id = p_shipper_org_id AND status = 'active'
+  ) THEN
+    RAISE EXCEPTION 'portal_user_not_in_org' USING ERRCODE = '42501';
+  END IF;
+
+  -- Replay idempotente: cancelar de novo devolve o mesmo estado, nunca grava
+  -- uma segunda historia.
+  IF v_request.status = 'CANCELLED' THEN
+    RETURN v_request;
+  END IF;
+
+  -- Estados terminais decididos pela transportadora nao podem ser sobrescritos
+  -- por um cancelamento do portal baseado em leitura velha.
+  IF v_request.status NOT IN ('DRAFT','SUBMITTED','CHANGES_REQUESTED') THEN
+    RAISE EXCEPTION 'request_not_cancellable: %', v_request.status USING ERRCODE = '55000';
+  END IF;
+
+  UPDATE public.shipper_transport_requests
+    SET status = 'CANCELLED', cancelled_at = now(),
+        decision_reason = NULLIF(p_reason, ''), updated_at = now()
+    WHERE id = p_request_id
+    RETURNING * INTO v_request;
+  RETURN v_request;
+END;
+$$;
+
 REVOKE ALL ON FUNCTION public.shipper_request_accept(uuid,uuid,uuid,jsonb) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.shipper_request_accept(uuid,uuid,uuid,jsonb) TO service_role;
 
 REVOKE ALL ON FUNCTION public.shipper_request_link_campaign(uuid,uuid,uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.shipper_request_link_campaign(uuid,uuid,uuid) TO service_role;
 
+REVOKE ALL ON FUNCTION public.shipper_request_create_and_submit(uuid,uuid,uuid,text,text,text,text,timestamptz,timestamptz,text,jsonb,text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.shipper_request_create_and_submit(uuid,uuid,uuid,text,text,text,text,timestamptz,timestamptz,text,jsonb,text) TO service_role;
+
+REVOKE ALL ON FUNCTION public.shipper_request_cancel(uuid,uuid,uuid,text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.shipper_request_cancel(uuid,uuid,uuid,text) TO service_role;
+
 -- ============================================================================
--- 10. Permissoes de gestao do portal pela transportadora (technical DML)
+-- 12. Permissoes de gestao do portal pela transportadora (technical DML)
 -- ============================================================================
 -- Quem, DENTRO da transportadora, pode convidar embarcadores e decidir
 -- solicitacoes. Mesmo idioma da 076/079. Nao concede nada ao embarcador -- o
 -- acesso externo nunca vem de permission template, vem do relacionamento.
+--
+-- POLITICA CONGELADA (SHIPPER_PORTAL_DEFAULT_PERMISSION_POLICY_V1, owner review):
+--   administrador  -> manage + requests.review
+--   gerente_frota  -> requests.review
+--   operador       -> NENHUMA por padrao (default deny)
+--   demais         -> default deny
+--
+-- Por que 'operador' NAO recebe por padrao: aceitar uma solicitacao nao e uma
+-- acao de leitura -- ela inicia solicitacao -> Operation Orchestrator -> Campanha.
+-- Ampliar silenciosamente a autoridade padrao do operador seria uma decisao de
+-- produto que ninguem tomou. A empresa continua podendo conceder depois, pelos
+-- mecanismos que ja existem (template editavel ou override por usuario).
 
 CREATE OR REPLACE FUNCTION public.ensure_shipper_portal_template_permissions_for_empresa(p_empresa_id uuid)
 RETURNS void
@@ -431,7 +651,6 @@ BEGIN
     v_keys := CASE v_tpl.stable_key
       WHEN 'administrador' THEN ARRAY['shipper_portal.manage','shipper_portal.requests.review']
       WHEN 'gerente_frota' THEN ARRAY['shipper_portal.requests.review']
-      WHEN 'operador' THEN ARRAY['shipper_portal.requests.review']
       ELSE ARRAY[]::text[]
     END;
 
@@ -457,6 +676,8 @@ END $$;
 -- ============================================================================
 -- ROLLBACK manual (logico, nao executado automaticamente):
 --   DROP FUNCTION IF EXISTS public.ensure_shipper_portal_template_permissions_for_empresa(uuid);
+--   DROP FUNCTION IF EXISTS public.shipper_request_cancel(uuid,uuid,uuid,text);
+--   DROP FUNCTION IF EXISTS public.shipper_request_create_and_submit(uuid,uuid,uuid,text,text,text,text,timestamptz,timestamptz,text,jsonb,text);
 --   DROP FUNCTION IF EXISTS public.shipper_request_link_campaign(uuid,uuid,uuid);
 --   DROP FUNCTION IF EXISTS public.shipper_request_accept(uuid,uuid,uuid,jsonb);
 --   DROP TABLE IF EXISTS public.shipper_transport_request_origins;

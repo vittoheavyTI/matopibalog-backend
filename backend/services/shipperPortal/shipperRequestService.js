@@ -154,91 +154,92 @@ async function obterMinhaSolicitacao(supabase, { portalUserId, requestId }) {
   return projetarRequestParaPortal(row, await carregarOrigens(supabase, row.id));
 }
 
-// Criação + envio numa única ação guiada (§69): o embarcador declara a
-// necessidade e ela já entra na caixa da transportadora. Idempotente por
-// client_request_id (§115).
+// Traduz erros das RPCs do portal em mensagens acionáveis em pt-BR.
+function mapRpcError(error) {
+  const raw = String(error?.message || '');
+  const code = raw.split(':')[0].trim();
+  const mapa = {
+    relationship_not_found: { status: 404, code: 'relationship_not_found', message: 'Transportadora não encontrada para o seu acesso.' },
+    relationship_not_active: { status: 403, code: 'relationship_not_active', message: 'Seu acesso a esta transportadora foi revogado.' },
+    portal_user_not_in_org: { status: 403, code: 'portal_user_not_in_org', message: 'Seu usuário não pertence a esta empresa embarcadora.' },
+    origins_required: { status: 400, code: 'missing_origins', message: 'Informe ao menos um local de coleta.' },
+    request_not_found: { status: 404, code: 'request_not_found', message: 'Solicitação não encontrada.' },
+    request_not_cancellable: {
+      status: 409,
+      code: 'request_not_cancellable',
+      message: 'Esta solicitação já foi decidida pela transportadora e não pode mais ser cancelada por aqui. Fale com a transportadora.',
+    },
+  };
+  const known = mapa[code];
+  if (known) return new ShipperPortalError(known.message, { status: known.status, code: known.code });
+  if (error?.code === '42P01') {
+    return new ShipperPortalError('O Portal do Embarcador ainda não está disponível nesta instalação.', {
+      status: 503, code: 'shipper_portal_schema_missing',
+    });
+  }
+  return new ShipperPortalError('Não foi possível concluir a operação agora. Tente novamente em instantes.', {
+    status: 500, code: 'shipper_portal_database_error', details: { db_code: error?.code },
+  });
+}
+
+// Criação + envio numa única ação guiada (§69) e — depois do owner review —
+// numa única TRANSAÇÃO (HIGH-02). Antes eram 3 escritas independentes: se a
+// segunda ou a terceira falhasse, sobrava um DRAFT parcial commitado, e um
+// retry com o mesmo client_request_id devolvia essa solicitação incompleta como
+// se estivesse pronta. Agora a RPC faz tudo atomicamente e monta o snapshot a
+// partir das MESMAS origens gravadas.
 async function criarSolicitacao(supabase, { portalUserId, body = {} }) {
   const context = await loadPortalContext(supabase, { portalUserId });
   const relationship = requireRelationship(context, body.relationship_id || null);
   const clientRequestId = texto(body.client_request_id, 'a identificação da solicitação', { obrigatorio: false, max: 120 });
 
-  if (clientRequestId) {
-    const { data: existente, error } = await supabase
-      .from('shipper_transport_requests')
-      .select('*')
-      .eq('shipper_org_id', context.shipperOrgId)
-      .eq('created_by', portalUserId)
-      .eq('client_request_id', clientRequestId)
-      .maybeSingle();
-    throwDb(error, 'Não foi possível verificar a solicitação.');
-    if (existente) {
-      return projetarRequestParaPortal(existente, await carregarOrigens(supabase, existente.id));
-    }
-  }
-
+  // Validação/normalização continua aqui (mensagens em pt-BR acionáveis); a
+  // ATOMICIDADE é responsabilidade da RPC.
   const origens = normalizarOrigens(body.origins);
-  const payload = {
-    empresa_id: relationship.empresa_id,
-    shipper_org_id: context.shipperOrgId,
-    relationship_id: relationship.id,
-    reference_code: texto(body.reference_code, 'a referência', { obrigatorio: false, max: 60 })
+
+  const { data, error } = await supabase.rpc('shipper_request_create_and_submit', {
+    p_shipper_org_id: context.shipperOrgId,
+    p_relationship_id: relationship.id,
+    p_portal_user_id: portalUserId,
+    p_reference_code: texto(body.reference_code, 'a referência', { obrigatorio: false, max: 60 })
       || `SOL-${Date.now().toString(36).toUpperCase()}`,
-    status: 'DRAFT',
-    cargo_name: texto(body.cargo_name, 'o que será transportado'),
-    destination_name: texto(body.destination_name, 'o destino'),
-    quantity_unit: unidade(body.quantity_unit),
-    window_start: body.window_start || null,
-    window_end: body.window_end || null,
-    notes: texto(body.notes, 'as observações', { obrigatorio: false, max: 2000 }),
-    created_by: portalUserId,
-    client_request_id: clientRequestId,
-  };
-
-  const { data: criada, error: insertError } = await supabase
-    .from('shipper_transport_requests').insert(payload).select('*').single();
-  throwDb(insertError, 'Não foi possível registrar a solicitação.');
-
-  const { error: origensError } = await supabase
-    .from('shipper_transport_request_origins')
-    .insert(origens.map((o) => ({ ...o, request_id: criada.id, empresa_id: relationship.empresa_id })));
-  throwDb(origensError, 'Não foi possível registrar os locais de coleta.');
-
-  // Envia imediatamente: congela o snapshot do que foi declarado.
-  const snapshot = montarSnapshot(criada, origens);
-  const { data: enviada, error: submitError } = await supabase
-    .from('shipper_transport_requests')
-    .update({ status: 'SUBMITTED', submitted_at: new Date().toISOString(), submitted_snapshot: snapshot, updated_at: new Date().toISOString() })
-    .eq('id', criada.id)
-    .select('*')
-    .single();
-  throwDb(submitError, 'Não foi possível enviar a solicitação.');
-
-  return projetarRequestParaPortal(enviada, origens);
+    p_cargo_name: texto(body.cargo_name, 'o que será transportado'),
+    p_destination_name: texto(body.destination_name, 'o destino'),
+    p_quantity_unit: unidade(body.quantity_unit),
+    p_window_start: body.window_start || null,
+    p_window_end: body.window_end || null,
+    p_notes: texto(body.notes, 'as observações', { obrigatorio: false, max: 2000 }),
+    p_origins: origens.map((o) => ({
+      nome: o.nome, quantidade: o.quantidade, quantity_unit: o.quantity_unit,
+    })),
+    p_client_request_id: clientRequestId,
+  });
+  if (error) throw mapRpcError(error);
+  const criada = Array.isArray(data) ? data[0] : data;
+  return projetarRequestParaPortal(criada, await carregarOrigens(supabase, criada.id));
 }
 
-// Cancelamento pelo embarcador só ANTES da decisão (§41). Depois que virou
-// operação, cancelar é decisão da transportadora — o portal nunca cancela
-// Campaign/Frete diretamente.
+// Cancelamento pelo embarcador só ANTES da decisão (§41) — e, depois do owner
+// review (HIGH-03), de forma ATÔMICA. Antes lia o status e depois atualizava
+// por id sem condição de estado: entre a leitura e a escrita a transportadora
+// podia ACEITAR, e o cancelamento sobrescrevia uma decisão já tomada. A RPC usa
+// FOR UPDATE na mesma linha que shipper_request_accept disputa, então existe
+// exatamente um desfecho terminal.
 async function cancelarSolicitacao(supabase, { portalUserId, requestId, motivo }) {
   const context = await loadPortalContext(supabase, { portalUserId });
-  const row = await requireOwnedRequest(supabase, context, requestId);
-  if (!['DRAFT', 'SUBMITTED', 'CHANGES_REQUESTED'].includes(row.status)) {
-    throw new ShipperPortalError(
-      'Esta solicitação já foi decidida pela transportadora e não pode mais ser cancelada por aqui. Fale com a transportadora.',
-      { status: 409, code: 'request_not_cancellable' });
-  }
-  const { data, error } = await supabase
-    .from('shipper_transport_requests')
-    .update({
-      status: 'CANCELLED', cancelled_at: new Date().toISOString(),
-      decision_reason: texto(motivo, 'o motivo', { obrigatorio: false, max: 500 }),
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', row.id)
-    .select('*')
-    .single();
-  throwDb(error, 'Não foi possível cancelar a solicitação.');
-  return projetarRequestParaPortal(data, await carregarOrigens(supabase, row.id));
+  // Mantém a checagem de fronteira ANTES da RPC: garante 404 consistente para
+  // recurso fora do escopo (§80) sem depender só do erro do banco.
+  await requireOwnedRequest(supabase, context, requestId);
+
+  const { data, error } = await supabase.rpc('shipper_request_cancel', {
+    p_shipper_org_id: context.shipperOrgId,
+    p_request_id: requestId,
+    p_portal_user_id: portalUserId,
+    p_reason: texto(motivo, 'o motivo', { obrigatorio: false, max: 500 }),
+  });
+  if (error) throw mapRpcError(error);
+  const cancelada = Array.isArray(data) ? data[0] : data;
+  return projetarRequestParaPortal(cancelada, await carregarOrigens(supabase, requestId));
 }
 
 module.exports = {
@@ -250,4 +251,5 @@ module.exports = {
   normalizarOrigens,
   montarSnapshot,
   projetarRequestParaPortal,
+  mapRpcError,
 };

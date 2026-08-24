@@ -18,7 +18,8 @@ const { normalizarOrigens, montarSnapshot, projetarRequestParaPortal } = require
 // é justamente provar que o FILTRO de fronteira é aplicado no servidor (§78),
 // então o stub precisa honrar os filtros de verdade.
 // ============================================================================
-function makeSupabase(tabelas = {}) {
+function makeSupabase(tabelas = {}, { rpcImpl } = {}) {
+  const rpcCalls = [];
   function builder(nome) {
     const filtros = [];
     const b = {
@@ -38,7 +39,14 @@ function makeSupabase(tabelas = {}) {
     }
     return b;
   }
-  return { from: (n) => builder(n) };
+  return {
+    from: (n) => builder(n),
+    _rpcCalls: rpcCalls,
+    rpc: (name, params) => {
+      rpcCalls.push({ name, params });
+      return Promise.resolve(rpcImpl ? rpcImpl(name, params) : { data: null, error: null });
+    },
+  };
 }
 
 const ORG_X = 'org-x';
@@ -258,6 +266,65 @@ test('privacidade: projeção do portal NÃO expõe financeiro, PII de motorista
   }
   // Mas informa, de forma segura, que a operação já existe.
   assert.equal(dto.operacao_criada, true);
+});
+
+// ---- owner review: serviço delega atomicidade às RPCs ----------------------
+
+test('HIGH-02: criarSolicitacao usa a RPC atômica (não faz 3 escritas independentes)', async () => {
+  const { criarSolicitacao } = require('../services/shipperPortal/shipperRequestService');
+  const supabase = makeSupabase(fixtureBase(), {
+    rpcImpl: (name) => (name === 'shipper_request_create_and_submit'
+      ? { data: { id: 'req-novo', reference_code: 'SOL-1', status: 'SUBMITTED', cargo_name: 'Soja', destination_name: 'Porto', quantity_unit: 'ton' }, error: null }
+      : { data: null, error: { message: 'rpc_inesperada' } }),
+  });
+  const dto = await criarSolicitacao(supabase, {
+    portalUserId: USER_X,
+    body: { cargo_name: 'Soja', destination_name: 'Porto', origins: [{ nome: 'Fazenda A', quantidade: 300 }] },
+  });
+  assert.equal(dto.status, 'SUBMITTED');
+  const chamada = supabase._rpcCalls.find((c) => c.name === 'shipper_request_create_and_submit');
+  assert.ok(chamada, 'deve chamar a RPC atomica');
+  // empresa_id NUNCA vem do cliente: é derivado do relacionamento dentro da RPC.
+  assert.ok(!('p_empresa_id' in chamada.params), 'empresa_id nao pode ser parametro de entrada');
+  assert.equal(chamada.params.p_shipper_org_id, ORG_X);
+  assert.equal(chamada.params.p_portal_user_id, USER_X);
+  assert.equal(chamada.params.p_origins.length, 1);
+});
+
+test('HIGH-03: cancelarSolicitacao usa a RPC atômica e valida fronteira antes', async () => {
+  const { cancelarSolicitacao } = require('../services/shipperPortal/shipperRequestService');
+  const supabase = makeSupabase(fixtureBase(), {
+    rpcImpl: (name) => (name === 'shipper_request_cancel'
+      ? { data: { id: 'req-x', reference_code: 'SOL-X', status: 'CANCELLED', cargo_name: 'Soja', destination_name: 'Porto', quantity_unit: 'ton' }, error: null }
+      : { data: null, error: { message: 'rpc_inesperada' } }),
+  });
+  const dto = await cancelarSolicitacao(supabase, { portalUserId: USER_X, requestId: 'req-x', motivo: 'desisti' });
+  assert.equal(dto.status, 'CANCELLED');
+  const chamada = supabase._rpcCalls.find((c) => c.name === 'shipper_request_cancel');
+  assert.ok(chamada);
+  assert.equal(chamada.params.p_shipper_org_id, ORG_X);
+});
+
+test('HIGH-03: cancelar solicitação de OUTRO embarcador é bloqueado ANTES de chamar a RPC', async () => {
+  const { cancelarSolicitacao } = require('../services/shipperPortal/shipperRequestService');
+  const supabase = makeSupabase(fixtureBase());
+  await assert.rejects(
+    cancelarSolicitacao(supabase, { portalUserId: USER_X, requestId: 'req-y', motivo: 'x' }),
+    (err) => err.code === 'request_not_found' && err.status === 404,
+  );
+  assert.equal(supabase._rpcCalls.length, 0, 'nao pode nem chamar a RPC para recurso fora da fronteira');
+});
+
+test('HIGH-03: erro request_not_cancellable da RPC vira mensagem acionável em pt-BR', async () => {
+  const { cancelarSolicitacao } = require('../services/shipperPortal/shipperRequestService');
+  const supabase = makeSupabase(fixtureBase(), {
+    rpcImpl: () => ({ data: null, error: { message: 'request_not_cancellable: ACCEPTED' } }),
+  });
+  await assert.rejects(
+    cancelarSolicitacao(supabase, { portalUserId: USER_X, requestId: 'req-x', motivo: 'x' }),
+    (err) => err.code === 'request_not_cancellable' && err.status === 409
+      && /já foi decidida pela transportadora/.test(err.message),
+  );
 });
 
 test('privacidade: projeção da transportadora é whitelist (não devolve a linha crua)', () => {
