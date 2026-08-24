@@ -658,11 +658,6 @@ function registrar(pg) {
     );
   });
 
-  test('080 RPCs: apenas service_role executa; anon/authenticated não recebem EXECUTE', async () => {
-    await fullSetup();
-    for (const fn of ['shipper_request_accept', 'shipper_request_link_campaign',
-      'shipper_request_create_and_submit', 'shipper_request_cancel']) {
-
   // ==========================================================================
   // OWNER REVIEW HIGH-03 — race cancel × accept
   // ==========================================================================
