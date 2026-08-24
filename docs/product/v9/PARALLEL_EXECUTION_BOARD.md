@@ -237,5 +237,5 @@ Prompt IDs are reserved, but implementation prompts are not generated in this ex
 - `OWNER_VISUAL_VALIDATION=PENDING`.
 - `BLOCKERS_OPEN=0`.
 - `HIGHS_OPEN=0`.
-- `NEXT_STATUS=DISPATCH_V1_CLOSED` (Campaign-B materialization, Campaign-C progress/eligibility/readiness, Route Intelligence V1 e Dispatch V1 concluídos fora deste board; RBV9-INV-031 dispatch real CLOSED em produção — PR #471, migration 079. Ver [DISPATCH_V1](./DISPATCH_V1.md)).
+- `NEXT_STATUS=OPERATION_ORCHESTRATOR_V1_CLOSED` (Campaign-B materialization, Campaign-C progress/eligibility/readiness, Route Intelligence V1, Dispatch V1 e Operation Orchestrator V1 (E3.1/E3.2) concluídos fora deste board; RBV9-INV-031 dispatch real CLOSED em produção — PR #471, migration 079. Operation Orchestrator V1 fechou `next_action` determinístico + fluxo guiado de objetivo, schema-free. Ver [DISPATCH_V1](./DISPATCH_V1.md) e [OPERATION_ORCHESTRATOR_V1](./OPERATION_ORCHESTRATOR_V1.md)).
 

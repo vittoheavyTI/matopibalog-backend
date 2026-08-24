@@ -6,6 +6,7 @@ const campaignMaterialization = require('../services/campaign/campaignMaterializ
 const campaignProgress = require('../services/campaign/campaignProgressService');
 const dispatchEligibility = require('../services/campaign/dispatchEligibilityService');
 const dispatchService = require('../services/campaign/dispatchService');
+const orchestrator = require('../services/campaign/operationOrchestratorService');
 const { buildCorrelationContext } = require('../services/verifiability/correlationContext');
 
 function responderErro(res, error) {
@@ -322,10 +323,37 @@ const cancelarRodada = async (req, res) => {
   }
 };
 
+// POST /operation-campaigns/objective — fluxo guiado (§13/§57-58): um único
+// payload de objetivo (nome, carga, quantidade, origem, destino, janela) em
+// vez de 4 chamadas separadas. Reusa create->locations->demands->generatePlan
+// sem duplicar nenhuma regra (operationOrchestratorService).
+const criarObjetivo = async (req, res) => {
+  try {
+    const item = await orchestrator.createObjective(supabase, { empresaId: req.empresa_id, user: req.user, body: req.body || {}, operationalScope: req.operationalScope, correlation: correlation(req) });
+    return res.status(201).json(item);
+  } catch (error) {
+    return responderErro(res, error);
+  }
+};
+
+// GET /operation-campaigns/:campaignId/orchestration — resumo do objetivo +
+// next_action determinístico (§35/§36): "o que preciso fazer agora?". Read-only,
+// composição pura sobre campaignService + campaignProgressService.
+const obterOrquestracao = async (req, res) => {
+  try {
+    const item = await orchestrator.getCampaignOrchestration(supabase, { empresaId: req.empresa_id, campaignId: req.params.campaignId, operationalScope: req.operationalScope });
+    return res.json(item);
+  } catch (error) {
+    return responderErro(res, error);
+  }
+};
+
 module.exports = {
   obterContexto,
   obterProgresso,
   obterElegibilidade,
+  obterOrquestracao,
+  criarObjetivo,
   listarCampanhas,
   criarCampanha,
   detalharCampanha,

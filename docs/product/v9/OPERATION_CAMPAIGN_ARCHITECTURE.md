@@ -4,6 +4,7 @@
 > `CAMPAIGN_B_TECHNICAL_STATUS=CLOSED` (materialization linkage; takeover Claude 2026-08-24, PR #464 `MERGE_SHA=139105d523e9023b616f340a40d6697d7b0e4444`). Migration **078 aplicada/rastreada exatamente uma vez** em produção (`20260824013400 078_operation_campaign_materialization`, SHA256 `5DEA792CA98FE28D8A68320F80BCB92A93B240360F9A552A2F261993193543DB`), 0 business writes, `campaign_trip_freights` criada (RLS/grants padrão canônico). `CAMPAIGN_B_DISPATCH_IMPLEMENTED=false`.
 > `CAMPAIGN_C_TECHNICAL_STATUS=CLOSED` (operational progress + eligibility + dispatch readiness; takeover Claude 2026-08-24, PR #469 `MERGE_SHA=95fcded985470d059519008562a99fdb8dac3fd1`). Sem migration (`SCHEMA_CHANGES=0`) — `campaignProgressService`/`dispatchEligibilityService` derivam tudo de `campaign_planned_trips`/`campaign_trip_freights`/`fretes` já existentes. `CAMPAIGN_PROGRESS=DONE`; `RBV9-INV-032 (elegibilidade)=DONE`. Detalhe: [CAMPAIGN_C_OPERATIONAL_PROGRESS](./CAMPAIGN_C_OPERATIONAL_PROGRESS.md).
 > `DISPATCH_V1_TECHNICAL_STATUS=CLOSED` (owner execution 2026-08-24, PR #471 `MERGE_SHA=16418114480f7afe650efbb493e1c2ccb0450b16`). Migration **079 aplicada/rastreada exatamente uma vez** (`20260824164023`, SHA256 `A5F7CB3722E297A45842DE0C0813B9AE6B0248C5AB49D7F1317391EBA199D3C9`), `PRODUCTION_BUSINESS_WRITES=0`. `RBV9-INV-031 (dispatch real)=CLOSED` (era `ROADMAP`); `REAL_DISPATCH_IMPLEMENTED=true`; `OFFER_SYSTEM_IMPLEMENTED=true`. Detalhe: [DISPATCH_V1](./DISPATCH_V1.md).
+> `OPERATION_ORCHESTRATOR_V1_TECHNICAL_STATUS=CLOSED` (E3.1/E3.2). Auditoria confirmou que o pipeline determinístico já existia quase por completo em Campaign-A/B/C + Dispatch V1 (zero duplicação, zero fronteira errada); fechou `next_action` determinístico + fluxo guiado único de objetivo (`POST /operation-campaigns/objective`), schema-free. Replan pós-aprovação deferido conscientemente. Detalhe: [OPERATION_ORCHESTRATOR_V1](./OPERATION_ORCHESTRATOR_V1.md).
 > Baseline auditado em 2026-08-23 sobre `origin/main=988bf3e5e8831f4833255e38293581002c052f88`; implementado em produção no PR #457 (`MERGE_SHA=32d8fe3e8824d1a8bc5be89ad6f5cdf86ae5c316`).
 
 ## Status de implementacao
@@ -319,4 +320,5 @@ Campaign V1 suporta uma ou multiplas unidades desde que o usuario tenha scope ef
 - `CAMPAIGN_C_MIGRATION_REQUIRED=false` (progress/eligibility/readiness são projeção pura sobre schema existente).
 - `NO_ADDITIONAL_PRODUCTION_DDL_AUTHORIZED=true`.
 - `APPLIED_MIGRATION_079=20260824164023 079_dispatch_v1_atomic_offers` (Dispatch V1).
-- `NEXT_STATUS=DISPATCH_V1_CLOSED_NEXT_MACROFRONT_REQUIRES_NEW_OWNER_SCOPE` (RBV9-INV-031 CLOSED; Campaign-B/C e Dispatch V1 já fechados).
+- `OPERATION_ORCHESTRATOR_V1_MIGRATION_REQUIRED=false` (schema-free — pura composição).
+- `NEXT_STATUS=OPERATION_ORCHESTRATOR_V1_CLOSED_NEXT_MACROFRONT_REQUIRES_NEW_OWNER_SCOPE` (RBV9-INV-031 CLOSED; Campaign-B/C, Dispatch V1 e Operation Orchestrator V1 já fechados).

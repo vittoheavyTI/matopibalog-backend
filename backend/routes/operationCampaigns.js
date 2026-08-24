@@ -58,8 +58,14 @@ router.use(verifyToken, verificarEmpresa, verificarPlano, resolverEscopoCampaign
 router.get('/context', requireCampaignPermission('campaign.view'), controller.obterContexto);
 router.get('/', requireCampaignPermission('campaign.view'), controller.listarCampanhas);
 router.post('/', requireCampaignPermission('campaign.create'), controller.criarCampanha);
+// Fluxo guiado (Operation Orchestrator V1 — §13): objetivo único em vez de
+// criar+locais+demandas+plano separados. Gate = campaign.manage (é a permissão
+// mais restritiva dentre os passos que compõe; nunca concede mais do que o
+// fluxo granular já permitiria a quem tem create+manage+plan).
+router.post('/objective', requireCampaignPermission('campaign.manage'), controller.criarObjetivo);
 router.get('/:campaignId', requireCampaignPermission('campaign.view'), controller.detalharCampanha);
 router.get('/:campaignId/progress', requireCampaignPermission('campaign.view'), controller.obterProgresso);
+router.get('/:campaignId/orchestration', requireCampaignPermission('campaign.view'), controller.obterOrquestracao);
 router.get('/:campaignId/plans/:planId/trips/:tripId/eligibility', requireCampaignPermission('campaign.manage'), controller.obterElegibilidade);
 router.patch('/:campaignId', requireCampaignPermission('campaign.manage'), controller.atualizarRascunho);
 router.put('/:campaignId/locations', requireCampaignPermission('campaign.manage'), controller.substituirLocais);
