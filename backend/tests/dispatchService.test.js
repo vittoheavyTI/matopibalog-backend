@@ -152,7 +152,7 @@ const EMP = 'e1';
 
 function eligibilityFixture() {
   return {
-    operation_campaigns: [{ id: 'c1', empresa_id: EMP }],
+    operation_campaigns: [{ id: 'c1', empresa_id: EMP, status: 'APPROVED', approved_plan_version_id: 'p1' }],
     campaign_operational_units: [],
     campaign_planned_trips: [{ id: 't1', empresa_id: EMP, campaign_id: 'c1', plan_version_id: 'p1', status: 'PLANNED', required_capacity_kg: 10000, planned_quantity: 10, quantity_unit: 'ton', candidate_driver_id: null, candidate_asset_id: null, candidate_composition_id: null }],
     driver_vehicle_assignments: [{ empresa_id: EMP, driver_id: 'd1', asset_id: 'a1', composition_id: null, assignment_status: 'active', valid_until: null }],
@@ -203,6 +203,42 @@ test('directAssign: candidato pedido não elegível → rejeita ANTES de chamar 
     (err) => err instanceof CampaignError && err.code === 'candidate_no_longer_eligible',
   );
   assert.equal(supabase._calls.length, 0, 'nao deve chamar RPC nenhuma se o candidato nao passou na revalidacao');
+});
+
+test('directAssign: plano informado NÃO é mais o aprovado corrente da campanha (superado por replan) → rejeita ANTES de qualquer RPC (Campaign-D §28)', async () => {
+  const supabase = makeSupabase({
+    tableData: {
+      ...eligibilityFixture(),
+      operation_campaigns: [{ id: 'c1', empresa_id: EMP, status: 'APPROVED', approved_plan_version_id: 'p2-nova-versao' }],
+    },
+  });
+  await assert.rejects(
+    () => directAssign(supabase, {
+      empresaId: EMP, campaignId: 'c1', planId: 'p1', tripId: 't1',
+      driverId: 'd1', assetId: 'a1', compositionId: null,
+      materializationOptions: {}, user: { uid: 'admin1' }, operationalScope: LEGACY, correlation: {},
+    }),
+    (err) => err instanceof CampaignError && err.code === 'plan_not_current_approved_version',
+  );
+  assert.equal(supabase._calls.length, 0, 'nao deve chamar RPC nenhuma contra um plano superado');
+});
+
+test('createOfferRound: plano informado NÃO é mais o aprovado corrente da campanha → rejeita ANTES de qualquer RPC', async () => {
+  const supabase = makeSupabase({
+    tableData: {
+      ...eligibilityFixture(),
+      operation_campaigns: [{ id: 'c1', empresa_id: EMP, status: 'APPROVED', approved_plan_version_id: 'p2-nova-versao' }],
+    },
+  });
+  await assert.rejects(
+    () => createOfferRound(supabase, {
+      empresaId: EMP, campaignId: 'c1', planId: 'p1', tripId: 't1',
+      requestedRecipients: null, expiresAt: new Date(Date.now() + 60000).toISOString(),
+      materializationOptions: {}, user: { uid: 'admin1' }, operationalScope: LEGACY, correlation: {},
+    }),
+    (err) => err instanceof CampaignError && err.code === 'plan_not_current_approved_version',
+  );
+  assert.equal(supabase._calls.length, 0);
 });
 
 test('createOfferRound: sem destinatarios elegiveis apos intersecao -> rejeita antes da RPC', async () => {

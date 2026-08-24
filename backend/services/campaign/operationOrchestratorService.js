@@ -10,6 +10,7 @@
 
 const campaign = require('./campaignService');
 const { getCampaignProgress } = require('./campaignProgressService');
+const { estimateRoute } = require('../routeIntelligence/routeEstimateService');
 
 function finiteNumber(value) {
   if (value === null || value === undefined || value === '') return null;
@@ -33,6 +34,19 @@ function deriveNextAction({ campaign: camp, locations = [], demands = [], latest
       next_action: 'COMPLETE_MISSING_OBJECTIVE',
       reason_code: 'MISSING_OBJECTIVE_DATA',
       reason_text: 'Informe origem, destino e quantidade para o sistema poder planejar.',
+    };
+  }
+
+  // Rascunho de replan aguardando aprovação (Campaign-D §68) tem prioridade
+  // sobre o restante da leitura de progresso: enquanto ele existir, é a coisa
+  // mais acionável — progress ainda reflete a versão ANTIGA (approved_plan_
+  // version_id só muda quando este rascunho for aprovado), então checar isto
+  // primeiro evita reportar um next_action da versão que já está sendo substituída.
+  if (camp.status === 'APPROVED' && latestPlan && latestPlan.status === 'READY_FOR_REVIEW') {
+    return {
+      next_action: 'REPLAN_AWAITING_APPROVAL',
+      reason_code: 'REPLAN_DRAFT_READY',
+      reason_text: 'Há um replanejamento gerado aguardando revisão e aprovação.',
     };
   }
 
@@ -66,10 +80,13 @@ function deriveNextAction({ campaign: camp, locations = [], demands = [], latest
       };
     }
     if (progress.replan?.status === 'REPLAN_RECOMMENDED') {
+      // Agora que a AÇÃO de replan existe (Campaign-D), este sinal vira um
+      // next_action próprio — "Replanejar restante", nunca "Editar plano" (§35)
+      // — em vez do genérico REVIEW_EXECUTION_EXCEPTION.
       return {
-        next_action: 'REVIEW_EXECUTION_EXCEPTION',
+        next_action: 'REPLAN_RECOMMENDED',
         reason_code: progress.replan.reason_code,
-        reason_text: progress.replan.suggested_next_step || 'Há uma exceção de execução que merece revisão.',
+        reason_text: progress.replan.suggested_next_step || 'Há uma exceção de execução que sugere replanejar o restante.',
       };
     }
     if (progress.health?.state === 'COMPLETED') {
@@ -117,6 +134,35 @@ async function getCampaignOrchestration(supabase, { empresaId, campaignId, opera
     ? await getCampaignProgress(supabase, { empresaId, campaignId, operationalScope })
     : null;
 
+  // Route Intelligence como capacidade consumida pelo planejamento (Campaign-D
+  // §38-51): origem/destino já são conhecidos, nunca redigitados; bounded e
+  // deduplicado por par único (§65-66, no máximo 1 chamada por par distinto);
+  // provider desabilitado (padrão de produção) devolve UNAVAILABLE sem chamada
+  // externa real — planejamento nunca depende disso para funcionar (§43/§48).
+  const locationsById = new Map(detail.locations.map((l) => [l.id, l]));
+  const routePairs = new Map();
+  for (const demand of detail.demands) {
+    const origin = locationsById.get(demand.origin_location_id);
+    const destination = locationsById.get(demand.destination_location_id);
+    if (!origin || !destination) continue;
+    const key = `${origin.name}→${destination.name}`;
+    if (!routePairs.has(key)) routePairs.set(key, { origin: origin.name, destination: destination.name });
+  }
+  const routeContext = await Promise.all([...routePairs.values()].map(async (pair) => {
+    try {
+      const result = await estimateRoute({ origin: pair.origin, destination: pair.destination });
+      return {
+        origin: pair.origin, destination: pair.destination,
+        route_source: result.route_source || 'UNAVAILABLE',
+        distance_km: result.distance_km ?? null,
+        duration_minutes: result.duration_minutes ?? null,
+        warnings: result.warnings || [],
+      };
+    } catch {
+      return { origin: pair.origin, destination: pair.destination, route_source: 'UNAVAILABLE', distance_km: null, duration_minutes: null, warnings: [] };
+    }
+  }));
+
   const action = deriveNextAction({
     campaign: detail.campaign,
     locations: detail.locations,
@@ -132,11 +178,12 @@ async function getCampaignOrchestration(supabase, { empresaId, campaignId, opera
       cargo_name: detail.campaign.cargo_name,
       target_quantity: detail.demands.reduce((sum, d) => sum + (finiteNumber(d.target_quantity) || 0), 0),
       quantity_unit: detail.demands[0]?.quantity_unit || null,
-      origin: detail.locations.find((l) => l.kind === 'origin')?.name || null,
+      origins: detail.locations.filter((l) => l.kind === 'origin').map((l) => l.name),
       destination: detail.locations.find((l) => l.kind === 'destination')?.name || null,
       planned_start: detail.campaign.planned_start,
       planned_end: detail.campaign.planned_end,
     },
+    route_context: routeContext,
     next_action: action.next_action,
     next_action_reason_code: action.reason_code,
     next_action_reason_text: action.reason_text,
@@ -152,7 +199,7 @@ async function getCampaignOrchestration(supabase, { empresaId, campaignId, opera
 // delete+insert, naturalmente seguros a repetição do mesmo payload).
 function requiredObjectiveText(value, field) {
   const text = typeof value === 'string' ? value.trim() : '';
-  if (!text) throw new campaign.CampaignError(`Campo obrigatorio: ${field}.`, { code: 'missing_field', details: { field } });
+  if (!text) throw new campaign.CampaignError(`Campo obrigatório: ${field}.`, { code: 'missing_field', details: { field } });
   return text;
 }
 
@@ -188,6 +235,27 @@ async function createObjective(supabase, { empresaId, user, body = {}, operation
     return { campaign: created, plan };
   }
 
+  // Multi-origem (§52-64): origins[] é a autoridade única de quantidade — cada
+  // origem carrega a própria meta; o total é sempre DERIVADO (soma), nunca
+  // redigitado (§61). Mantém compatibilidade com o payload de origem única
+  // (name=body.origin/target_quantity=body.target_quantity) quando origins
+  // não é enviado.
+  const originsInput = Array.isArray(body.origins) && body.origins.length
+    ? body.origins
+    : [{ name: body.origin, target_quantity: body.target_quantity, quantity_unit: body.quantity_unit, unidade_operacional_id: body.origin_unidade_operacional_id }];
+  if (!originsInput.length) {
+    throw new campaign.CampaignError('Informe ao menos uma origem.', { code: 'missing_field', details: { field: 'origins' } });
+  }
+  const originNames = originsInput.map((o, idx) => requiredObjectiveText(o.name, `origins[${idx}].name`));
+  const seenNames = new Set();
+  for (const name of originNames) {
+    const key = name.trim().toLowerCase();
+    if (seenNames.has(key)) {
+      throw new campaign.CampaignError(`Origem duplicada: "${name}".`, { code: 'duplicate_origin', details: { name } });
+    }
+    seenNames.add(key);
+  }
+
   await campaign.replaceLocations(supabase, {
     empresaId,
     user,
@@ -195,15 +263,18 @@ async function createObjective(supabase, { empresaId, user, body = {}, operation
     operationalScope,
     body: {
       locations: [
-        { kind: 'origin', name: requiredObjectiveText(body.origin, 'origin'), unidade_operacional_id: body.origin_unidade_operacional_id || null, location_type: 'operational', priority: 10 },
-        { kind: 'destination', name: requiredObjectiveText(body.destination, 'destination'), unidade_operacional_id: body.destination_unidade_operacional_id || null, location_type: 'operational', priority: 20 },
+        ...originsInput.map((o, idx) => ({
+          kind: 'origin', name: originNames[idx], unidade_operacional_id: o.unidade_operacional_id || null,
+          location_type: 'operational', priority: 10 + idx,
+        })),
+        { kind: 'destination', name: requiredObjectiveText(body.destination, 'destination'), unidade_operacional_id: body.destination_unidade_operacional_id || null, location_type: 'operational', priority: 1000 },
       ],
     },
   });
 
   const detail = await campaign.getCampaign(supabase, { empresaId, campaignId: created.id, operationalScope });
-  const origin = detail.locations.find((l) => l.kind === 'origin');
   const destination = detail.locations.find((l) => l.kind === 'destination');
+  const originLocationByName = new Map(detail.locations.filter((l) => l.kind === 'origin').map((l) => [l.name, l]));
 
   await campaign.replaceDemands(supabase, {
     empresaId,
@@ -211,13 +282,13 @@ async function createObjective(supabase, { empresaId, user, body = {}, operation
     campaignId: created.id,
     operationalScope,
     body: {
-      demands: [{
-        origin_location_id: origin.id,
+      demands: originsInput.map((o, idx) => ({
+        origin_location_id: originLocationByName.get(originNames[idx]).id,
         destination_location_id: destination.id,
         cargo_name: created.cargo_name,
-        target_quantity: finiteNumber(body.target_quantity) ?? 0,
-        quantity_unit: body.quantity_unit || 'ton',
-      }],
+        target_quantity: finiteNumber(o.target_quantity) ?? 0,
+        quantity_unit: o.quantity_unit || 'ton',
+      })),
     },
   });
 

@@ -56,6 +56,33 @@ function userId(user) {
   return user?.uid || user?.id || null;
 }
 
+// Guarda de plano vigente (Campaign-D §28): a RPC dispatch_round_create valida
+// que a viagem pertence ao (campaign_id, plan_version_id) informado e está
+// PLANNED, mas não sabe se esse plan_version_id ainda é o aprovado CORRENTE da
+// campanha (isso mudou de tabela pra tabela: só operation_campaigns.
+// approved_plan_version_id carrega essa autoridade). Sem esta camada, um
+// replan aprovado (que supera a versão antiga) não impediria abrir uma NOVA
+// designação/oferta sobre uma viagem "zumbi" da versão superada. Materialização
+// já tem essa mesma guarda (campaignMaterializationService.loadApprovedContext)
+// — aqui replica a MESMA regra para nunca criar um novo compromisso de Dispatch
+// sobre um plano que não é mais a autoridade corrente. cancelRound fica de fora
+// desta guarda de propósito: cancelar uma rodada de um plano superado é limpeza,
+// nunca cria compromisso novo.
+async function assertCurrentApprovedPlan(supabase, { empresaId, campaignId, planId }) {
+  const { data: campaignRow, error } = await supabase
+    .from('operation_campaigns')
+    .select('status, approved_plan_version_id')
+    .eq('empresa_id', empresaId)
+    .eq('id', campaignId)
+    .maybeSingle();
+  if (error) throw mapRpcError(error);
+  if (!campaignRow || campaignRow.status !== 'APPROVED' || campaignRow.approved_plan_version_id !== planId) {
+    throw new CampaignError('Este plano não é mais a versão aprovada vigente da campanha — provavelmente houve um replanejamento. Recarregue a campanha e trabalhe a partir do plano atual.', {
+      status: 409, code: 'plan_not_current_approved_version',
+    });
+  }
+}
+
 async function callRpc(supabase, name, params) {
   const { data, error } = await supabase.rpc(name, params);
   if (error) throw mapRpcError(error);
@@ -172,6 +199,7 @@ async function directAssign(supabase, {
   empresaId, campaignId, planId, tripId, driverId, assetId, compositionId,
   materializationOptions, user, operationalScope, correlation,
 }) {
+  await assertCurrentApprovedPlan(supabase, { empresaId, campaignId, planId });
   const eligibility = await listTripEligibility(supabase, { empresaId, campaignId, planId, tripId, operationalScope });
   const { recipients } = intersectRecipients(
     [{ driver_id: driverId, asset_id: assetId || null, composition_id: compositionId || null }],
@@ -221,6 +249,7 @@ async function createOfferRound(supabase, {
   empresaId, campaignId, planId, tripId, requestedRecipients, expiresAt, materializationOptions,
   user, operationalScope, correlation,
 }) {
+  await assertCurrentApprovedPlan(supabase, { empresaId, campaignId, planId });
   const eligibility = await listTripEligibility(supabase, { empresaId, campaignId, planId, tripId, operationalScope });
   const { recipients, excluded } = intersectRecipients(requestedRecipients, eligibility);
   if (!recipients.length) {

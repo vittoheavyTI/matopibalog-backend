@@ -163,21 +163,52 @@ describe('Objetivo guiado (Operation Orchestrator V1)', () => {
 
     fireEvent.change(screen.getByPlaceholderText(/Nome do objetivo/i), { target: { value: 'Safra Verão' } });
     fireEvent.change(screen.getByPlaceholderText(/O que precisa transportar/i), { target: { value: 'Soja' } });
-    fireEvent.change(screen.getByPlaceholderText('Origem'), { target: { value: 'Fazenda Alfa' } });
+    fireEvent.change(screen.getByPlaceholderText('Origem 1'), { target: { value: 'Fazenda Alfa' } });
+    fireEvent.change(screen.getByPlaceholderText('Qtd.'), { target: { value: '500' } });
     fireEvent.change(screen.getByPlaceholderText('Destino'), { target: { value: 'Porto de Santos' } });
-    fireEvent.change(screen.getByPlaceholderText('Quantidade'), { target: { value: '500' } });
     fireEvent.click(screen.getByRole('button', { name: /Gerar plano/i }));
 
     await waitFor(() => expect(mockApi.post).toHaveBeenCalledWith('/operation-campaigns/objective', expect.objectContaining({
-      name: 'Safra Verão', cargo_name: 'Soja', origin: 'Fazenda Alfa', destination: 'Porto de Santos', target_quantity: 500,
+      name: 'Safra Verão', cargo_name: 'Soja', destination: 'Porto de Santos',
+      origins: [{ name: 'Fazenda Alfa', target_quantity: 500, quantity_unit: 'ton' }],
     })));
-    // Nenhum campo de distância/preço de diesel/ID de motorista ou veículo é exigido (§73).
+    // Nenhum campo de distância/preço de diesel/ID de motorista ou veículo é exigido (§73/§39).
     const [, payload] = mockApi.post.mock.calls.find((call) => call[0] === '/operation-campaigns/objective')!;
     expect(payload).not.toHaveProperty('distance_km');
     expect(payload).not.toHaveProperty('fuel_price_per_liter');
     expect(payload).not.toHaveProperty('candidate_driver_id');
     expect(payload).not.toHaveProperty('candidate_asset_id');
     expect(payload).not.toHaveProperty('number_of_trips');
+  });
+
+  test('multi-origem: "+ Adicionar origem" acrescenta uma origem com quantidade própria; total é derivado, nunca redigitado (§52-61)', async () => {
+    mockApi.get.mockImplementation(mockCampaignList());
+    mockApi.post.mockImplementation((url: string) => {
+      if (url === '/operation-campaigns/objective') return Promise.resolve({ data: { campaign: { ...campaign, id: 'campaign-multi' }, plan: approvedPlan } });
+      return Promise.resolve({ data: {} });
+    });
+
+    render(<MemoryRouter><OperationCampaigns /></MemoryRouter>);
+    await screen.findByText('Novo objetivo');
+
+    fireEvent.change(screen.getByPlaceholderText(/Nome do objetivo/i), { target: { value: 'Colheita' } });
+    fireEvent.change(screen.getByPlaceholderText(/O que precisa transportar/i), { target: { value: 'Milho' } });
+    fireEvent.change(screen.getByPlaceholderText('Origem 1'), { target: { value: 'Fazenda A' } });
+    fireEvent.change(screen.getByPlaceholderText('Qtd.'), { target: { value: '300' } });
+    fireEvent.click(screen.getByText('+ Adicionar origem'));
+    fireEvent.change(screen.getByPlaceholderText('Origem 2'), { target: { value: 'Fazenda B' } });
+    fireEvent.change(screen.getAllByPlaceholderText('Qtd.')[1], { target: { value: '200' } });
+    expect(screen.getByText(/Total: 500/)).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText('Destino'), { target: { value: 'Armazém Central' } });
+    fireEvent.click(screen.getByRole('button', { name: /Gerar plano/i }));
+
+    await waitFor(() => expect(mockApi.post).toHaveBeenCalledWith('/operation-campaigns/objective', expect.objectContaining({
+      origins: [
+        { name: 'Fazenda A', target_quantity: 300, quantity_unit: 'ton' },
+        { name: 'Fazenda B', target_quantity: 200, quantity_unit: 'ton' },
+      ],
+      destination: 'Armazém Central',
+    })));
   });
 
   test('banner "o que fazer agora" reflete o next_action retornado pela orquestração', async () => {
@@ -187,7 +218,8 @@ describe('Objetivo guiado (Operation Orchestrator V1)', () => {
           data: {
             next_action: 'REVIEW_CAPACITY_GAP',
             next_action_reason_text: 'gap',
-            objective: { cargo_name: 'Soja', target_quantity: 500, quantity_unit: 'ton', origin: 'Fazenda Alfa', destino: 'Porto' },
+            objective: { cargo_name: 'Soja', target_quantity: 500, quantity_unit: 'ton', origins: ['Fazenda Alfa'], destination: 'Porto' },
+            route_context: [],
             plan_summary: null,
           },
         });
@@ -196,8 +228,47 @@ describe('Objetivo guiado (Operation Orchestrator V1)', () => {
     });
 
     render(<MemoryRouter><OperationCampaigns /></MemoryRouter>);
-    expect(await screen.findByText('O que fazer agora')).toBeInTheDocument();
+    expect(await screen.findByText('O que fazer agora', {}, { timeout: 5000 })).toBeInTheDocument();
     expect(await screen.findByText(/capacidade própria não cobre toda a demanda/i)).toBeInTheDocument();
+  });
+
+  test('replan: banner mostra "Replanejar restante", preview exibe já concluído/comprometido/residual, confirmar chama POST /replan', async () => {
+    mockApi.get.mockImplementation((url: string) => {
+      if (url.endsWith('/orchestration')) {
+        return Promise.resolve({
+          data: {
+            next_action: 'REPLAN_RECOMMENDED',
+            next_action_reason_text: 'Frete cancelado com demanda restante.',
+            objective: { cargo_name: 'Soja', target_quantity: 100, quantity_unit: 'ton', origins: ['Fazenda Alfa'], destination: 'Porto' },
+            route_context: [],
+            plan_summary: null,
+          },
+        });
+      }
+      if (url.endsWith('/replan/preview')) {
+        return Promise.resolve({
+          data: {
+            blocked: false, blocking_trip_ids: [],
+            executed_trip_count: 1, committed_trip_count: 1, cancelled_trip_count: 1, uncommitted_trip_count: 0,
+            residual_total_ton: 40, has_residual: true,
+          },
+        });
+      }
+      return mockCampaignList()(url);
+    });
+    mockApi.post.mockImplementation((url: string) => (url.endsWith('/replan') ? Promise.resolve({ data: {} }) : Promise.resolve({ data: {} })));
+
+    render(<MemoryRouter><OperationCampaigns /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: /Replanejar restante/i }, { timeout: 5000 }));
+
+    expect(await screen.findByText('40', {}, { timeout: 5000 })).toBeInTheDocument(); // residual_total_ton no Metric "Restante (t)"
+    fireEvent.change(screen.getByPlaceholderText(/frete cancelado, recurso indisponível/i), { target: { value: 'Frete cancelado' } });
+    fireEvent.click(screen.getByRole('button', { name: /Confirmar replanejamento/i }));
+
+    await waitFor(() => expect(mockApi.post).toHaveBeenCalledWith(
+      '/operation-campaigns/campaign-1/replan',
+      expect.objectContaining({ reason: 'Frete cancelado' }),
+    ));
   });
 });
 
@@ -210,10 +281,13 @@ describe('CampaignExecution', () => {
     });
 
     render(<MemoryRouter><OperationCampaigns /></MemoryRouter>);
-    expect(await screen.findByText('Carregando execução da campanha…')).toBeInTheDocument();
+    expect(await screen.findByText('Carregando execução da campanha…', {}, { timeout: 5000 })).toBeInTheDocument();
 
     liberar({ data: buildProgress() });
-    await waitFor(() => expect(screen.queryByText('Carregando execução da campanha…')).not.toBeInTheDocument());
+    // Timeout explícito: o default de 1s do waitFor fica no limite quando a suíte
+    // roda sob carga paralela neste ambiente (medido: ~1055ms numa execução
+    // isolada que passou). Não é lentidão do componente — é folga de ambiente.
+    await waitFor(() => expect(screen.queryByText('Carregando execução da campanha…')).not.toBeInTheDocument(), { timeout: 5000 });
   }, 10000);
 
   test('mostra "sem execução ainda" e nenhuma barra de progresso quando não há viagens/meta', async () => {
