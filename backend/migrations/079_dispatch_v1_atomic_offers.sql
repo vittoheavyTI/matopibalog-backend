@@ -458,10 +458,12 @@ BEGIN
     RAISE EXCEPTION 'round_not_open: %', v_round.status USING ERRCODE = '55000';
   END IF;
   IF v_round.expires_at IS NOT NULL AND v_round.expires_at <= now() THEN
-    UPDATE public.dispatch_rounds SET status = 'EXPIRED', closed_at = now(), closed_reason = 'expired'
-      WHERE id = v_round.id;
-    UPDATE public.dispatch_offers SET status = 'EXPIRED', responded_at = now()
-      WHERE round_id = v_round.id AND status = 'PENDING';
+    -- Nao persiste EXPIRED aqui: um RAISE EXCEPTION desfaz (rollback) qualquer UPDATE
+    -- feito antes dele nesta mesma chamada, entao gravar e lancar exceptions na mesma
+    -- invocacao e contraditorio (a gravacao nunca sobreviveria). A persistencia lazy de
+    -- EXPIRED fica exclusivamente a cargo do self-heal em dispatch_round_create (S25) --
+    -- aqui so precisamos garantir, de forma correta, que o accept NUNCA seja aceito apos
+    -- o vencimento (a excecao abaixo ja cumpre isso).
     RAISE EXCEPTION 'round_expired' USING ERRCODE = '55000';
   END IF;
 

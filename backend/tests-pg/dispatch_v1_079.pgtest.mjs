@@ -526,8 +526,13 @@ function registrar(pg) {
       () => pool.query('SELECT * FROM public.dispatch_offer_accept($1,$2,$3,$4,$5)', [EMP_A, offers[0].id, DRIVER_A, 'req-expired-accept', null]),
       /round_expired/,
     );
-    const { rows: roundAfter } = await pool.query('SELECT status FROM public.dispatch_rounds WHERE id=$1', [round.id]);
-    assert.equal(roundAfter[0].status, 'EXPIRED');
+    // O accept falhou (nao materializou nada) -- a persistencia de EXPIRED e lazy
+    // (self-heal em dispatch_round_create, S25), entao o status na linha permanece o
+    // que estava antes; o que importa e que NENHUM offer virou ACCEPTED.
+    const { rows: offerAfter } = await pool.query('SELECT status FROM public.dispatch_offers WHERE id=$1', [offers[0].id]);
+    assert.equal(offerAfter[0].status, 'PENDING');
+    const { rows: tripAfter } = await pool.query('SELECT candidate_driver_id FROM public.campaign_planned_trips WHERE id=$1', [TRIP]);
+    assert.equal(tripAfter[0].candidate_driver_id, null);
   });
 
   test('079 self-heal: round expirado nao bloqueia a criacao de um novo round para a mesma viagem', async () => {
