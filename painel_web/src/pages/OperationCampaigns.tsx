@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, ClipboardCheck, Factory, MapPin, Play, Plus, RefreshCw, Route, ShieldAlert, XCircle } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { Activity, AlertTriangle, CheckCircle2, ClipboardCheck, ExternalLink, Factory, MapPin, Play, Plus, RefreshCw, Route, ShieldAlert, Users, XCircle } from 'lucide-react';
 import api from '../api';
+import { useLancamentosRealtime } from '../hooks/useLancamentosRealtime';
 
 type Unidade = { id: string; nome: string; codigo?: string | null };
 type Campaign = { id: string; reference_code: string; name: string; cargo_name: string; status: string; planning_status: string; created_at?: string };
@@ -415,6 +417,8 @@ export function OperationCampaigns() {
                     </div>
                   )}
                 </div>
+
+                {selected.status === 'APPROVED' && <CampaignExecution campaignId={selected.id} />}
               </>
             ) : (
               <div className="rounded-lg border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">Selecione ou crie uma campanha para começar.</div>
@@ -432,5 +436,278 @@ function Metric({ label, value }: { label: string; value: string }) {
       <p className="text-xs font-semibold uppercase text-slate-500">{label}</p>
       <p className="mt-1 text-lg font-semibold text-slate-900">{value}</p>
     </div>
+  );
+}
+
+// ---- Execução da campanha (progresso derivado read-only) -------------------
+type TripDetail = {
+  planned_trip_id: string;
+  origem: string | null;
+  destino: string | null;
+  planned_quantity: number | null;
+  quantity_unit: string;
+  materialization: string;
+  frete_id: string | null;
+  execution_status: string | null;
+  execution_bucket: string | null;
+  readiness: string;
+  attention: string[];
+};
+type Progress = {
+  approved_plan: { id: string; version_number: number } | null;
+  progress: {
+    trips: { planned_total: number; not_materialized: number; materialized: number; in_execution: number; completed: number; cancelled: number; blocked: number; unknown: number };
+    quantity: { unit: string; target: number; planned: number; materialized: number; completed: number; cancelled: number; remaining: number; coverage: { quantity_source: string; measured_actual_available: boolean; trips_with_quantity: number; trips_total: number; incompatible_units: boolean } };
+  };
+  trips_detail: TripDetail[];
+  readiness: { total_operational_needs: number; ready_direct: number; ready_offer: number; blocked: number; already_assigned: number; executing: number; completed: number };
+  health: { state: string; reason_code: string; reason_text: string };
+  exceptions: Array<{ type: string; severity: string; planned_trip_id?: string }>;
+  replan: { status: string; reason_code: string; suggested_next_step: string | null; remaining_quantity: number; quantity_unit: string };
+  window: { state: string; planned_start: string | null; planned_end: string | null } | null;
+  updated_at: string;
+};
+type EligibilityResult = {
+  summary: { total_candidates: number; eligible: number; eligible_with_warnings: number; ineligible: number; has_any_eligible: boolean };
+  candidates: Array<{ driver_id: string | null; asset_id: string | null; composition_id: string | null; eligibility: string; reasons: string[]; warnings: string[]; capacity_match: string; documents_status: string; maintenance_status: string; assignment_status: string; route_compatibility: string; capacity_kg: number | null }>;
+  truncated: boolean;
+};
+
+const HEALTH_LABEL: Record<string, string> = {
+  ON_TRACK: 'No prazo', ATTENTION: 'Atenção', CRITICAL: 'Crítico', COMPLETED: 'Concluída', NO_EXECUTION_YET: 'Sem execução ainda',
+};
+const HEALTH_TONE: Record<string, string> = {
+  ON_TRACK: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  COMPLETED: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  ATTENTION: 'bg-amber-50 text-amber-700 border-amber-200',
+  CRITICAL: 'bg-rose-50 text-rose-700 border-rose-200',
+  NO_EXECUTION_YET: 'bg-slate-50 text-slate-700 border-slate-200',
+};
+const READINESS_LABEL: Record<string, string> = {
+  COMPLETED: 'Concluído', ALREADY_EXECUTING: 'Em execução', ALREADY_ASSIGNED: 'Já designado',
+  READY_FOR_DIRECT_ASSIGNMENT: 'Pronto para designação', READY_FOR_OFFER_DISPATCH: 'Pronto para futura oferta', BLOCKED: 'Bloqueado',
+};
+const BUCKET_LABEL: Record<string, string> = {
+  IN_EXECUTION: 'Em execução', COMPLETED: 'Concluído', CANCELLED: 'Cancelado', UNKNOWN: 'Desconhecido',
+};
+const ELIG_LABEL: Record<string, string> = {
+  ELIGIBLE: 'Elegível', ELIGIBLE_WITH_WARNINGS: 'Elegível com alertas', INELIGIBLE: 'Inelegível', UNKNOWN: 'Indeterminado',
+};
+
+function num(n: number | null | undefined) {
+  return typeof n === 'number' ? n.toLocaleString('pt-BR') : '—';
+}
+
+function CampaignExecution({ campaignId }: { campaignId: string }) {
+  const [progress, setProgress] = useState<Progress | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [stale, setStale] = useState(false);
+  const [eligTrip, setEligTrip] = useState<TripDetail | null>(null);
+  const [elig, setElig] = useState<EligibilityResult | null>(null);
+  const [eligLoading, setEligLoading] = useState(false);
+  const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const carregar = useCallback(async () => {
+    try {
+      const { data } = await api.get(`/operation-campaigns/${campaignId}/progress`);
+      if (data && data.progress) { setProgress(data); setStale(false); setError(null); }
+    } catch (err) {
+      setStale(true);
+      setError(apiError(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [campaignId]);
+
+  useEffect(() => { setLoading(true); setProgress(null); setEligTrip(null); setElig(null); carregar(); }, [carregar]);
+
+  // Refresh direcionado ao mudar frete (SSE, coalescido) — §101/§102.
+  const onSync = useCallback(() => {
+    if (debounce.current) clearTimeout(debounce.current);
+    debounce.current = setTimeout(() => { carregar(); }, 600);
+  }, [carregar]);
+  useLancamentosRealtime(onSync, { enabled: true });
+  // Limpa o debounce pendente no unmount — sem isto, um sync agendado pouco antes de sair da
+  // tela ainda dispara carregar() (fetch + setState) num componente já desmontado.
+  useEffect(() => () => { if (debounce.current) clearTimeout(debounce.current); }, []);
+
+  // Fallback: reconciliação por polling leve (§103).
+  useEffect(() => {
+    const id = setInterval(() => { carregar(); }, 60000);
+    return () => clearInterval(id);
+  }, [carregar]);
+
+  async function verElegibilidade(trip: TripDetail) {
+    if (!progress?.approved_plan) return;
+    setEligTrip(trip); setElig(null); setEligLoading(true);
+    try {
+      const { data } = await api.get(`/operation-campaigns/${campaignId}/plans/${progress.approved_plan.id}/trips/${trip.planned_trip_id}/eligibility`);
+      setElig(data);
+    } catch (err) {
+      setError(apiError(err));
+    } finally {
+      setEligLoading(false);
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm text-sm text-slate-500">
+        <div className="flex items-center gap-2"><Activity size={16} /> Carregando execução da campanha…</div>
+      </div>
+    );
+  }
+  if (!progress) {
+    return (
+      <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm text-sm text-slate-500">
+        <div className="flex items-center gap-2"><XCircle size={16} /> Execução indisponível no momento.{error ? ` ${error}` : ''}</div>
+      </div>
+    );
+  }
+
+  const t = progress.progress.trips;
+  const q = progress.progress.quantity;
+  const health = progress.health.state;
+  const pct = q.target > 0 ? Math.min(100, Math.round((q.completed / q.target) * 100)) : null;
+
+  return (
+    <section className="space-y-4" aria-label="Execução da campanha">
+      <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-800"><Activity size={16} /> Execução da campanha</h3>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-semibold ${HEALTH_TONE[health] || HEALTH_TONE.NO_EXECUTION_YET}`}>
+              {(health === 'CRITICAL' || health === 'ATTENTION') && <AlertTriangle size={12} />}
+              {HEALTH_LABEL[health] || health}
+            </span>
+            {progress.approved_plan && <span className="text-xs text-slate-500">Plano v{progress.approved_plan.version_number}</span>}
+            {progress.window && <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-600">{progress.window.state}</span>}
+            <button onClick={carregar} className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"><RefreshCw size={13} /> Atualizar</button>
+          </div>
+        </div>
+        <p className="mt-1 text-xs text-slate-500">{progress.health.reason_text}</p>
+        <p className="mt-1 text-[11px] text-slate-400">Atualizado em {new Date(progress.updated_at).toLocaleString('pt-BR')}{stale && ' — dados podem estar desatualizados'}</p>
+      </div>
+
+      {progress.replan.status !== 'REPLAN_NOT_NEEDED' && (
+        <div className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-sm ${progress.replan.status === 'REPLAN_REQUIRED_BY_INVARIANT' ? 'border-rose-200 bg-rose-50 text-rose-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
+          <AlertTriangle size={16} className="mt-0.5" />
+          <div>
+            <p className="font-semibold">{progress.replan.status === 'REPLAN_REQUIRED_BY_INVARIANT' ? 'Replanejamento necessário' : 'Replanejamento recomendado'}</p>
+            <p>{progress.replan.suggested_next_step || progress.replan.reason_code}</p>
+            {progress.replan.remaining_quantity > 0 && <p className="text-xs">Demanda restante: {num(progress.replan.remaining_quantity)} {progress.replan.quantity_unit}</p>}
+          </div>
+        </div>
+      )}
+
+      <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
+          <Metric label="Meta" value={`${num(q.target)} ${q.unit}`} />
+          <Metric label="Planejado" value={String(t.planned_total)} />
+          <Metric label="Materializado" value={String(t.materialized)} />
+          <Metric label="Em execução" value={String(t.in_execution)} />
+          <Metric label="Concluído" value={String(t.completed)} />
+          <Metric label="Cancelado" value={String(t.cancelled)} />
+          <Metric label="Restante" value={`${num(q.remaining)} ${q.unit}`} />
+        </div>
+        {pct !== null && (
+          <div className="mt-3">
+            <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+              <div className="h-full bg-emerald-500" style={{ width: `${pct}%` }} />
+            </div>
+            <p className="mt-1 text-[11px] text-slate-500">
+              {num(q.completed)} de {num(q.target)} {q.unit} concluído(s) ({pct}%). Fonte: quantidade planejada do frete{q.coverage.incompatible_units ? ' — unidades incompatíveis, ver por dimensão' : ''}.
+            </p>
+          </div>
+        )}
+        {(t.blocked > 0 || t.not_materialized > 0 || t.unknown > 0) && (
+          <p className="mt-2 text-xs text-slate-500">
+            {t.not_materialized > 0 && <span className="mr-3">Não materializado: {t.not_materialized}</span>}
+            {t.blocked > 0 && <span className="mr-3 text-rose-600">Bloqueado (plano): {t.blocked}</span>}
+            {t.unknown > 0 && <span className="text-amber-600">Estado desconhecido: {t.unknown}</span>}
+          </p>
+        )}
+      </div>
+
+      <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="mb-2 text-sm font-semibold text-slate-800">Viagens</div>
+        <div className="overflow-x-auto rounded-lg border border-slate-200">
+          <table className="w-full min-w-[720px] text-left text-sm">
+            <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+              <tr>
+                <th className="px-3 py-2">Rota</th>
+                <th className="px-3 py-2">Qtd.</th>
+                <th className="px-3 py-2">Materialização</th>
+                <th className="px-3 py-2">Execução</th>
+                <th className="px-3 py-2">Prontidão</th>
+                <th className="px-3 py-2">Atenção</th>
+                <th className="px-3 py-2">Ações</th>
+              </tr>
+            </thead>
+            <tbody>
+              {progress.trips_detail.map((trip) => (
+                <tr key={trip.planned_trip_id} className="border-t border-slate-100">
+                  <td className="px-3 py-2 text-slate-700">{trip.origem || '—'} → {trip.destino || '—'}</td>
+                  <td className="px-3 py-2">{num(trip.planned_quantity)} {trip.quantity_unit}</td>
+                  <td className="px-3 py-2">{trip.materialization === 'MATERIALIZED' ? 'Materializado' : trip.materialization === 'NOT_APPLICABLE' ? '—' : 'Não materializado'}</td>
+                  <td className="px-3 py-2">{trip.execution_bucket ? (BUCKET_LABEL[trip.execution_bucket] || trip.execution_bucket) : '—'}</td>
+                  <td className="px-3 py-2">
+                    <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${trip.readiness === 'BLOCKED' ? 'border-rose-200 bg-rose-50 text-rose-700' : trip.readiness === 'COMPLETED' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+                      {READINESS_LABEL[trip.readiness] || trip.readiness}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 text-xs text-amber-700">{trip.attention.length ? trip.attention.join(', ') : '—'}</td>
+                  <td className="px-3 py-2">
+                    <div className="flex flex-wrap gap-2">
+                      {trip.frete_id && (
+                        <Link to={`/relatorios/viagens?frete=${encodeURIComponent(trip.frete_id)}`} className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 hover:underline"><ExternalLink size={12} /> Frete</Link>
+                      )}
+                      {(trip.readiness === 'BLOCKED' || trip.materialization === 'NOT_MATERIALIZED') && trip.materialization !== 'NOT_APPLICABLE' && (
+                        <button onClick={() => verElegibilidade(trip)} className="inline-flex items-center gap-1 text-xs font-medium text-slate-700 hover:underline"><Users size={12} /> Ver elegibilidade</button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {!progress.trips_detail.length && (
+                <tr><td colSpan={7} className="px-3 py-5 text-center text-sm text-slate-500">Nenhuma viagem planejada neste plano.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {eligTrip && (
+        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="mb-2 flex items-center justify-between">
+            <h4 className="flex items-center gap-2 text-sm font-semibold text-slate-800"><Users size={15} /> Elegibilidade — {eligTrip.origem || '—'} → {eligTrip.destino || '—'}</h4>
+            <button onClick={() => { setEligTrip(null); setElig(null); }} className="text-xs text-slate-500 hover:underline">Fechar</button>
+          </div>
+          {eligLoading && <p className="text-sm text-slate-500">Calculando candidatos…</p>}
+          {!eligLoading && elig && (
+            <>
+              <p className="mb-2 text-xs text-slate-500">{elig.summary.eligible} elegível(is), {elig.summary.eligible_with_warnings} com alertas, {elig.summary.ineligible} inelegível(is){elig.truncated ? ' (lista limitada)' : ''}.</p>
+              <div className="space-y-2">
+                {elig.candidates.map((c, i) => (
+                  <div key={`${c.driver_id}-${c.asset_id || c.composition_id}-${i}`} className="rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-medium text-slate-800">{c.composition_id ? 'Composição' : 'Ativo'} · motorista {c.driver_id ? c.driver_id.slice(0, 8) : '—'}</span>
+                      <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${c.eligibility === 'ELIGIBLE' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : c.eligibility === 'ELIGIBLE_WITH_WARNINGS' ? 'border-amber-200 bg-amber-50 text-amber-700' : 'border-rose-200 bg-rose-50 text-rose-700'}`}>{ELIG_LABEL[c.eligibility] || c.eligibility}</span>
+                    </div>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Capacidade: {c.capacity_match} · Documentos: {c.documents_status} · Manutenção: {c.maintenance_status} · Rota: {c.route_compatibility}
+                    </p>
+                    {!!c.reasons.length && <p className="mt-1 text-xs text-rose-600">Bloqueios: {c.reasons.join(', ')}</p>}
+                    {!!c.warnings.length && <p className="mt-1 text-xs text-amber-600">Alertas: {c.warnings.join(', ')}</p>}
+                  </div>
+                ))}
+                {!elig.candidates.length && <p className="text-sm text-slate-500">Nenhum candidato encontrado no escopo.</p>}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </section>
   );
 }

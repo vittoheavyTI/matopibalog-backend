@@ -778,6 +778,7 @@ module.exports = {
   planCampaign,
   replaceDemands,
   replaceLocations,
+  requireCampaign,
   requireUnitsWithinScope,
   approvePlan,
   rejectPlan,

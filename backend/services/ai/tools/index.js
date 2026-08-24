@@ -9,8 +9,9 @@ const commercialPlanSummary = require('./commercialPlanSummary');
 const operationFreightsAttention = require('./operationFreightsAttention');
 const commandCenterSummary = require('./commandCenterSummary');
 const routeEstimate = require('./routeEstimate');
+const campaignProgress = require('./campaignProgress');
 
-const ALL = [fleetCurrentSummary, commercialPlanSummary, operationFreightsAttention, commandCenterSummary, routeEstimate];
+const ALL = [fleetCurrentSummary, commercialPlanSummary, operationFreightsAttention, commandCenterSummary, routeEstimate, campaignProgress];
 
 let _registered = false;
 function registerAllTools() {

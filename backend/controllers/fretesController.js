@@ -9,6 +9,7 @@ const {
   contemCampoFinanceiro,
 } = require('../services/freteFinanceiroCorrecaoService');
 const { revogarTrackingSeSemViagemAtiva } = require('../services/auth/trackingRevocacaoHook');
+const { publicarStatusFrete } = require('../services/campaign/freightRealtimeSignal');
 const {
   resolverEscopoOperacional,
   aplicarEscopoOperacionalQuery,
@@ -845,6 +846,8 @@ exports.finalizar = async (req, res) => {
     // SEC-1: fim de viagem → se o motorista não tem mais viagem ativa, revoga suas
     // credenciais de tracking (best-effort; a validação já rejeita canonicamente).
     revogarTrackingSeSemViagemAtiva({ empresaId: frete.empresa_id, motoristaId: frete.motorista_id, motivo: 'viagem_finalizada' });
+    // Sinal realtime para refresh direcionado (Torre/Campaign). Best-effort.
+    publicarStatusFrete(data);
     res.status(200).json(data);
   } catch (error) {
     console.error('Erro ao finalizar frete:', error);
@@ -890,6 +893,8 @@ exports.delete = async (req, res) => {
     if (error) throw error;
     // SEC-1: cancelamento de viagem → revoga se o motorista não tem mais viagem ativa.
     revogarTrackingSeSemViagemAtiva({ empresaId: frete.empresa_id, motoristaId: frete.motorista_id, motivo: 'viagem_cancelada' });
+    // Sinal realtime para refresh direcionado (Torre/Campaign). Best-effort.
+    publicarStatusFrete({ id, empresa_id: frete.empresa_id, status: 'cancelado' });
     res.status(200).json({ message: 'Frete cancelado com sucesso.' });
   } catch (error) {
     res.status(500).json({ message: 'Erro ao cancelar frete.' });
