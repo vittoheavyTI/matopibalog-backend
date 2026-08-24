@@ -113,14 +113,25 @@ test('next_action: aprovado + viagem pronta para materializar -> READY_FOR_MATER
   assert.equal(r.next_action, 'READY_FOR_MATERIALIZATION');
 });
 
-test('next_action: aprovado + replan RECOMMENDED (sem pendência de despacho) -> REVIEW_EXECUTION_EXCEPTION', () => {
+test('next_action: aprovado + replan RECOMMENDED (sem pendência de despacho) -> REPLAN_RECOMMENDED', () => {
   const r = deriveNextAction({
     campaign: approvedCampaign(),
     locations: [{ kind: 'origin' }, { kind: 'destination' }],
     demands: [{ target_quantity: 10 }],
     progress: baseProgress({ replan: { status: 'REPLAN_RECOMMENDED', reason_code: 'CANCELLED_FREIGHT_REMAINING_DEMAND', suggested_next_step: 'x' } }),
   });
-  assert.equal(r.next_action, 'REVIEW_EXECUTION_EXCEPTION');
+  assert.equal(r.next_action, 'REPLAN_RECOMMENDED');
+});
+
+test('next_action: aprovado + rascunho de replan (READY_FOR_REVIEW) aguardando aprovação -> REPLAN_AWAITING_APPROVAL (tem prioridade sobre o progresso da versão antiga)', () => {
+  const r = deriveNextAction({
+    campaign: approvedCampaign(),
+    locations: [{ kind: 'origin' }, { kind: 'destination' }],
+    demands: [{ target_quantity: 10 }],
+    latestPlan: { status: 'READY_FOR_REVIEW' },
+    progress: baseProgress({ readiness: { blocked: 0, ready_offer: 5, ready_direct: 0 } }),
+  });
+  assert.equal(r.next_action, 'REPLAN_AWAITING_APPROVAL');
 });
 
 test('next_action: aprovado + em execução, sem pendências -> EXECUTION_IN_PROGRESS', () => {
@@ -253,6 +264,43 @@ test('createObjective: entrada mínima (nome, carga, quantidade, origem, destino
   assert.equal(supabase.__tables.campaign_demands[0].target_quantity, 500);
 });
 
+test('createObjective: multi-origem (§52-64) — N origens com quantidade própria criam N locais de origem + N demandas, 1 destino compartilhado', async () => {
+  const supabase = makeSupabase();
+  const result = await createObjective(supabase, {
+    empresaId: EMP, user: USER, operationalScope: SCOPE,
+    body: {
+      name: 'Colheita Multi', cargo_name: 'Soja', destination: 'Porto',
+      origins: [
+        { name: 'Fazenda A', target_quantity: 300, quantity_unit: 'ton' },
+        { name: 'Fazenda B', target_quantity: 200, quantity_unit: 'ton' },
+      ],
+      client_request_id: 'obj-multi',
+    },
+  });
+  const origins = supabase.__tables.campaign_locations.filter((l) => l.kind === 'origin');
+  const destinations = supabase.__tables.campaign_locations.filter((l) => l.kind === 'destination');
+  assert.equal(origins.length, 2);
+  assert.equal(destinations.length, 1); // 1 destino compartilhado (§55), nunca duplicado
+  assert.equal(supabase.__tables.campaign_demands.length, 2);
+  const total = supabase.__tables.campaign_demands.reduce((s, d) => s + Number(d.target_quantity), 0);
+  assert.equal(total, 500); // total sempre derivado (soma), nunca redigitado (§61)
+  assert.equal(result.campaign.name, 'Colheita Multi');
+});
+
+test('createObjective: origem duplicada é rejeitada com erro claro (§62)', async () => {
+  const supabase = makeSupabase();
+  await assert.rejects(
+    createObjective(supabase, {
+      empresaId: EMP, user: USER, operationalScope: SCOPE,
+      body: {
+        name: 'X', cargo_name: 'Soja', destination: 'Porto',
+        origins: [{ name: 'Fazenda A', target_quantity: 100 }, { name: 'fazenda a', target_quantity: 50 }],
+      },
+    }),
+    (err) => err.code === 'duplicate_origin',
+  );
+});
+
 test('createObjective: NÃO exige distância, preço de diesel, IDs de motorista/veículo ou número de viagens (§73)', async () => {
   const supabase = makeSupabase();
   const body = {
@@ -287,7 +335,7 @@ test('createObjective: campo obrigatório ausente (origem) falha com erro claro,
       empresaId: EMP, user: USER, operationalScope: SCOPE,
       body: { name: 'X', cargo_name: 'Y', target_quantity: 1, quantity_unit: 'ton', destination: 'B' },
     }),
-    (err) => err.code === 'missing_field' && err.details?.field === 'origin',
+    (err) => err.code === 'missing_field' && err.details?.field === 'origins[0].name',
   );
 });
 
@@ -301,7 +349,7 @@ test('getCampaignOrchestration: objetivo incompleto -> next_action COMPLETE_MISS
   supabase.__tables.campaign_demands = [];
   const orch = await getCampaignOrchestration(supabase, { empresaId: EMP, campaignId: created.campaign.id, operationalScope: SCOPE });
   assert.equal(orch.next_action, 'COMPLETE_MISSING_OBJECTIVE');
-  assert.equal(orch.objective.origin, 'A');
+  assert.deepEqual(orch.objective.origins, ['A']);
   assert.equal(orch.objective.destination, 'B');
 });
 

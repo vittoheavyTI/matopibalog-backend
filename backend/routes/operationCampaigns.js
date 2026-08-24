@@ -66,6 +66,11 @@ router.post('/objective', requireCampaignPermission('campaign.manage'), controll
 router.get('/:campaignId', requireCampaignPermission('campaign.view'), controller.detalharCampanha);
 router.get('/:campaignId/progress', requireCampaignPermission('campaign.view'), controller.obterProgresso);
 router.get('/:campaignId/orchestration', requireCampaignPermission('campaign.view'), controller.obterOrquestracao);
+// Replan pós-aprovação (Campaign-D §78): mesmas permissões de gerar/aprovar um
+// plano normal (campaign.plan) — nenhuma permissão nova. A aprovação em si
+// reusa o endpoint já existente /plans/:planId/approve (campaign.approve).
+router.get('/:campaignId/replan/preview', requireCampaignPermission('campaign.plan'), controller.preverReplan);
+router.post('/:campaignId/replan', requireCampaignPermission('campaign.plan'), controller.criarReplan);
 router.get('/:campaignId/plans/:planId/trips/:tripId/eligibility', requireCampaignPermission('campaign.manage'), controller.obterElegibilidade);
 router.patch('/:campaignId', requireCampaignPermission('campaign.manage'), controller.atualizarRascunho);
 router.put('/:campaignId/locations', requireCampaignPermission('campaign.manage'), controller.substituirLocais);

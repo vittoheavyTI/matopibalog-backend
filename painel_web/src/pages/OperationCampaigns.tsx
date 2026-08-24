@@ -15,16 +15,30 @@ type MaterializationPreview = {
   summary: { requested: number; already_materialized: number; ready: number; created?: number; blocked: number; failed?: number; retryable?: number };
   items: Array<{ planned_trip_id: string; status: string; frete_id?: string; reason?: string; retryable?: boolean }>;
 };
+type ReplanPreview = {
+  blocked: boolean;
+  blocking_trip_ids: string[];
+  executed_trip_count: number;
+  committed_trip_count: number;
+  cancelled_trip_count: number;
+  uncommitted_trip_count: number;
+  residual_total_ton: number;
+  has_residual: boolean;
+};
 type Orchestration = {
   next_action: string;
   next_action_reason_text: string;
-  objective: { cargo_name: string; target_quantity: number; quantity_unit: string | null; origin: string | null; destination: string | null };
+  objective: { cargo_name: string; target_quantity: number; quantity_unit: string | null; origins: string[]; destination: string | null };
+  route_context: Array<{ origin: string; destination: string; route_source: string; distance_km: number | null; duration_minutes: number | null; warnings: string[] }>;
   plan_summary: { plan: { id: string; version_number: number; status: string }; exceptions_open: number } | null;
 };
 
+type OriginEntry = { name: string; target_quantity: number | ''; quantity_unit: string };
+const emptyOriginEntry = (): OriginEntry => ({ name: '', target_quantity: '', quantity_unit: 'ton' });
 const emptyObjective = {
-  name: '', cargo_name: '', target_quantity: '' as number | '', quantity_unit: 'ton',
-  origin: '', destination: '', priority: 'normal', planned_start: '', planned_end: '',
+  name: '', cargo_name: '',
+  origins: [emptyOriginEntry()] as OriginEntry[],
+  destination: '', priority: 'normal', planned_start: '', planned_end: '',
   operational_unit_ids: [] as string[],
 };
 const emptyMaterialization = { modalidade_calculo: 'valor_fixo', valor_frete: '', valor_tonelada_km: '' };
@@ -38,6 +52,8 @@ const NEXT_ACTION_COPY: Record<string, { label: string; tone: 'info' | 'warning'
   REVIEW_BLOCKING_EXCEPTION: { label: 'Há um bloqueio que impede seguir. Revise as exceções do plano.', tone: 'warning' },
   APPROVE_PLAN: { label: 'Plano pronto para revisão e aprovação.', tone: 'success' },
   REPLAN_REQUIRED: { label: 'Replanejamento necessário: capacidade insuficiente para a demanda restante.', tone: 'warning' },
+  REPLAN_RECOMMENDED: { label: 'Uma exceção de execução sugere replanejar o restante da demanda.', tone: 'warning' },
+  REPLAN_AWAITING_APPROVAL: { label: 'Há um replanejamento gerado aguardando revisão e aprovação.', tone: 'warning' },
   READY_FOR_DISPATCH: { label: 'Há viagens prontas para designar ou ofertar a motoristas.', tone: 'success' },
   READY_FOR_MATERIALIZATION: { label: 'Há viagens com executor definido, prontas para virar frete.', tone: 'success' },
   REVIEW_EXECUTION_EXCEPTION: { label: 'Há uma exceção de execução que merece revisão.', tone: 'warning' },
@@ -74,6 +90,9 @@ export function OperationCampaigns() {
   const [orchestration, setOrchestration] = useState<Orchestration | null>(null);
   const [materializationForm, setMaterializationForm] = useState(emptyMaterialization);
   const [materializationPreview, setMaterializationPreview] = useState<MaterializationPreview | null>(null);
+  const [replanPreview, setReplanPreview] = useState<ReplanPreview | null>(null);
+  const [replanReason, setReplanReason] = useState('');
+  const [showReplan, setShowReplan] = useState(false);
 
   const selected = useMemo(() => campaigns.find((item) => item.id === selectedId) || campaigns[0] || null, [campaigns, selectedId]);
 
@@ -136,9 +155,9 @@ export function OperationCampaigns() {
       const { data } = await api.post('/operation-campaigns/objective', {
         name: objectiveForm.name,
         cargo_name: objectiveForm.cargo_name,
-        target_quantity: Number(objectiveForm.target_quantity || 0),
-        quantity_unit: objectiveForm.quantity_unit,
-        origin: objectiveForm.origin,
+        origins: objectiveForm.origins.map((o) => ({
+          name: o.name, target_quantity: Number(o.target_quantity || 0), quantity_unit: o.quantity_unit,
+        })),
         destination: objectiveForm.destination,
         priority: objectiveForm.priority,
         planned_start: objectiveForm.planned_start || undefined,
@@ -174,6 +193,62 @@ export function OperationCampaigns() {
       setSaving(false);
     }
   }
+
+  // Replan pós-aprovação (§35-37): preview read-only antes de confirmar. Nunca
+  // duplica lógica de residual/comprometido no front — só exibe o que o backend
+  // já calculou (campaignReplanService.previewReplan).
+  async function abrirReplan() {
+    if (!selected) return;
+    setShowReplan(true);
+    setSaving(true);
+    setMessage(null);
+    try {
+      const { data } = await api.get(`/operation-campaigns/${selected.id}/replan/preview`);
+      setReplanPreview(data);
+    } catch (error) {
+      setMessage({ type: 'error', text: apiError(error) });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function confirmarReplan() {
+    if (!selected || !replanReason.trim()) return;
+    setSaving(true);
+    setMessage(null);
+    try {
+      await api.post(`/operation-campaigns/${selected.id}/replan`, {
+        reason: replanReason.trim(),
+        client_request_id: `replan-${Date.now()}`,
+      });
+      setShowReplan(false);
+      setReplanPreview(null);
+      setReplanReason('');
+      await carregarOrquestracao(selected.id);
+      setMessage({ type: 'ok', text: 'Replanejamento gerado — pronto para revisão e aprovação.' });
+    } catch (error) {
+      setMessage({ type: 'error', text: apiError(error) });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // Multi-origem (§56-61): 1 origem por padrão, "+ Adicionar origem" para mais.
+  // Cada origem carrega a própria quantidade (autoridade única) — o total é
+  // sempre derivado (soma), nunca redigitado.
+  function adicionarOrigem() {
+    setObjectiveForm((current) => ({ ...current, origins: [...current.origins, emptyOriginEntry()] }));
+  }
+  function removerOrigem(index: number) {
+    setObjectiveForm((current) => ({ ...current, origins: current.origins.filter((_, i) => i !== index) }));
+  }
+  function atualizarOrigem(index: number, patch: Partial<OriginEntry>) {
+    setObjectiveForm((current) => ({
+      ...current,
+      origins: current.origins.map((o, i) => (i === index ? { ...o, ...patch } : o)),
+    }));
+  }
+  const totalOrigemQuantidade = objectiveForm.origins.reduce((sum, o) => sum + (Number(o.target_quantity) || 0), 0);
 
   function toggleUnit(id: string) {
     setObjectiveForm((current) => ({
@@ -260,23 +335,29 @@ export function OperationCampaigns() {
               <div className="space-y-3">
                 <input required placeholder="Nome do objetivo (ex.: Escoamento safra verão)" value={objectiveForm.name} onChange={(e) => setObjectiveForm({ ...objectiveForm, name: e.target.value })} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
                 <input required placeholder="O que precisa transportar (ex.: Soja)" value={objectiveForm.cargo_name} onChange={(e) => setObjectiveForm({ ...objectiveForm, cargo_name: e.target.value })} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-                <label className="block space-y-1 text-sm font-medium text-slate-700">
-                  <span className="flex items-center gap-1"><MapPin size={15} /> De onde</span>
-                  <input required placeholder="Origem" value={objectiveForm.origin} onChange={(e) => setObjectiveForm({ ...objectiveForm, origin: e.target.value })} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-                </label>
+                <div className="space-y-2">
+                  <span className="flex items-center gap-1 text-sm font-medium text-slate-700"><MapPin size={15} /> De onde (quanto em cada origem)</span>
+                  {objectiveForm.origins.map((entry, index) => (
+                    <div key={index} className="flex gap-2">
+                      <input required placeholder={`Origem ${index + 1}`} value={entry.name} onChange={(e) => atualizarOrigem(index, { name: e.target.value })} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                      <input required type="number" min="0" step="0.001" placeholder="Qtd." value={entry.target_quantity} onChange={(e) => atualizarOrigem(index, { target_quantity: e.target.value === '' ? '' : Number(e.target.value) })} className="w-24 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                      <select value={entry.quantity_unit} onChange={(e) => atualizarOrigem(index, { quantity_unit: e.target.value })} className="rounded-lg border border-slate-300 px-2 py-2 text-sm">
+                        <option value="ton">t</option>
+                        <option value="kg">kg</option>
+                      </select>
+                      {objectiveForm.origins.length > 1 && (
+                        <button type="button" onClick={() => removerOrigem(index)} aria-label={`Remover origem ${index + 1}`} className="rounded-lg border border-slate-200 px-2 text-slate-500 hover:bg-slate-100"><XCircle size={16} /></button>
+                      )}
+                    </div>
+                  ))}
+                  <button type="button" onClick={adicionarOrigem} className="text-xs font-semibold text-emerald-700 hover:underline">+ Adicionar origem</button>
+                  {objectiveForm.origins.length > 1 && (
+                    <p className="text-xs text-slate-500">Total: {totalOrigemQuantidade.toLocaleString('pt-BR')} (soma automática, não redigite)</p>
+                  )}
+                </div>
                 <label className="block space-y-1 text-sm font-medium text-slate-700">
                   <span className="flex items-center gap-1"><Factory size={15} /> Para onde</span>
                   <input required placeholder="Destino" value={objectiveForm.destination} onChange={(e) => setObjectiveForm({ ...objectiveForm, destination: e.target.value })} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-                </label>
-                <label className="block space-y-1 text-sm font-medium text-slate-700">
-                  <span>Quanto</span>
-                  <div className="flex gap-2">
-                    <input required type="number" min="0" step="0.001" placeholder="Quantidade" value={objectiveForm.target_quantity} onChange={(e) => setObjectiveForm({ ...objectiveForm, target_quantity: e.target.value === '' ? '' : Number(e.target.value) })} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-                    <select value={objectiveForm.quantity_unit} onChange={(e) => setObjectiveForm({ ...objectiveForm, quantity_unit: e.target.value })} className="rounded-lg border border-slate-300 px-3 py-2 text-sm">
-                      <option value="ton">t</option>
-                      <option value="kg">kg</option>
-                    </select>
-                  </div>
                 </label>
 
                 <button type="button" onClick={() => setShowAdvanced((v) => !v)} className="flex w-full items-center justify-between rounded-lg px-1 py-1 text-xs font-semibold uppercase text-slate-500 hover:text-slate-700">
@@ -352,14 +433,24 @@ export function OperationCampaigns() {
                       <h2 className="text-xl font-semibold text-slate-900">{selected.name}</h2>
                       <p className="text-sm text-slate-500">
                         {selected.cargo_name}
-                        {orchestration?.objective?.origin && orchestration?.objective?.destination
-                          ? ` · ${orchestration.objective.origin} → ${orchestration.objective.destination}` : ''}
+                        {orchestration?.objective?.origins?.length && orchestration?.objective?.destination
+                          ? ` · ${orchestration.objective.origins.join(', ')} → ${orchestration.objective.destination}` : ''}
                         {orchestration?.objective?.target_quantity
                           ? ` · ${orchestration.objective.target_quantity.toLocaleString('pt-BR')} ${orchestration.objective.quantity_unit === 'kg' ? 'kg' : 't'}` : ''}
                       </p>
                     </div>
                     <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${statusTone(selected.status)}`}>{selected.planning_status}</span>
                   </div>
+                  {!!orchestration?.route_context?.length && (
+                    <div className="mt-2 space-y-1 border-t border-slate-100 pt-2">
+                      {orchestration.route_context.map((r, i) => (
+                        <p key={i} className="flex items-center gap-1 text-xs text-slate-500">
+                          <Route size={12} />
+                          {r.origin} → {r.destination} · Distância: {r.distance_km != null ? `${r.distance_km.toLocaleString('pt-BR')} km` : 'não disponível'}
+                        </p>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {orchestration && (() => {
@@ -378,6 +469,46 @@ export function OperationCampaigns() {
                     </div>
                   );
                 })()}
+
+                {orchestration && !showReplan && (orchestration.next_action === 'REPLAN_RECOMMENDED' || orchestration.next_action === 'REPLAN_REQUIRED') && (
+                  <button onClick={abrirReplan} disabled={saving} className="inline-flex items-center gap-2 rounded-lg bg-amber-600 px-3 py-2 text-sm font-semibold text-white hover:bg-amber-700 disabled:opacity-60">
+                    <RefreshCw size={16} /> Replanejar restante
+                  </button>
+                )}
+
+                {showReplan && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 shadow-sm">
+                    <h3 className="mb-3 text-sm font-semibold text-amber-900">Replanejar o restante</h3>
+                    {replanPreview ? (
+                      replanPreview.blocked ? (
+                        <p className="text-sm text-amber-800">
+                          Não é possível replanejar agora: há {replanPreview.blocking_trip_ids.length} viagem(ns) em estado inconsistente que precisam de revisão antes.
+                        </p>
+                      ) : !replanPreview.has_residual ? (
+                        <p className="text-sm text-amber-800">Não há demanda residual — a meta já está totalmente executada ou comprometida.</p>
+                      ) : (
+                        <div className="space-y-3">
+                          <div className="grid gap-3 md:grid-cols-4">
+                            <Metric label="Já concluído" value={String(replanPreview.executed_trip_count)} />
+                            <Metric label="Já comprometido" value={String(replanPreview.committed_trip_count)} />
+                            <Metric label="Cancelado/liberado" value={String(replanPreview.cancelled_trip_count)} />
+                            <Metric label="Restante (t)" value={replanPreview.residual_total_ton.toLocaleString('pt-BR')} />
+                          </div>
+                          <label className="block space-y-1 text-sm font-medium text-amber-900">
+                            <span>Motivo do replanejamento</span>
+                            <input required value={replanReason} onChange={(e) => setReplanReason(e.target.value)} placeholder="Ex.: frete cancelado, recurso indisponível" className="w-full rounded-lg border border-amber-300 px-3 py-2 text-sm" />
+                          </label>
+                          <div className="flex gap-2">
+                            <button onClick={confirmarReplan} disabled={saving || !replanReason.trim()} className="inline-flex items-center gap-2 rounded-lg bg-amber-700 px-3 py-2 text-sm font-semibold text-white hover:bg-amber-800 disabled:opacity-60"><CheckCircle2 size={16} /> Confirmar replanejamento</button>
+                            <button onClick={() => { setShowReplan(false); setReplanPreview(null); }} className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-medium text-amber-800 hover:bg-amber-100">Cancelar</button>
+                          </div>
+                        </div>
+                      )
+                    ) : (
+                      <p className="text-sm text-amber-700">Carregando prévia...</p>
+                    )}
+                  </div>
+                )}
 
                 <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
                   <div className="mb-3 flex items-center justify-between">

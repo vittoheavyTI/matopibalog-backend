@@ -541,43 +541,17 @@ async function loadPlanningData(supabase, { empresaId, campaignId }) {
   };
 }
 
-async function generatePlan(supabase, { empresaId, user, campaignId, body = {}, operationalScope = null, correlation = {} }) {
-  const campaign = await requireCampaign(supabase, { empresaId, campaignId, operationalScope });
-  if (campaign.status === 'APPROVED' || campaign.status === 'CANCELLED') {
-    throw new CampaignError('Campanha ja encerrada para planejamento.', { status: 409, code: 'campaign_closed' });
-  }
-  const requestId = optionalText(body.client_request_id || body.clientRequestId);
-  if (requestId) {
-    const { data: existing, error: existingError } = await supabase
-      .from('campaign_plan_versions')
-      .select('*')
-      .eq('empresa_id', empresaId)
-      .eq('campaign_id', campaignId)
-      .eq('generated_by', userId(user))
-      .eq('client_request_id', requestId)
-      .maybeSingle();
-    throwDb(existingError);
-    if (existing) return getPlan(supabase, { empresaId, campaignId, planId: existing.id, operationalScope });
-  }
-  const data = await loadPlanningData(supabase, { empresaId, campaignId });
-  if (!data.locations.length || !data.demands.length) {
-    throw new CampaignError('Cadastre locais e demandas antes de gerar o plano.', { status: 422, code: 'campaign_incomplete' });
-  }
-  const unitIds = data.units.map((row) => row.unidade_operacional_id);
-  requireUnitsWithinScope(operationalScope, unitIds, { requireAny: true });
-  const resources = buildResourceCandidates({
-    assets: data.assets,
-    compositions: data.compositions,
-    assignments: data.assignments,
-    maintenance: data.maintenance,
-    documents: data.documents,
-    unitIds,
-  });
-  const planned = planCampaign({ campaign, locations: data.locations, demands: data.demands, resources });
+// Núcleo compartilhado de persistência de uma versão de plano (§21/§22 do
+// Campaign-D: reusar o planejador determinístico existente, nunca duplicar).
+// Usado por generatePlan (campanha em DRAFT/PLANNING, demandas completas) E por
+// campaignReplanService.generateReplan (campanha já APROVADA, demandas residuais
+// apenas) -- a única diferença entre os dois é QUAIS demandas entram no planner
+// e se o status da campanha é tocado no final (replan nunca toca, §24).
+async function persistPlanVersion(supabase, { empresaId, campaignId, planned, unitIds, requestId, user, correlation = {}, extraAssumptions = {}, extraConstraints = {} }) {
   const resourceSnapshot = {
     rules_version: planned.rules_version,
     campaign_unit_ids: unitIds,
-    resources: resources.map((r) => ({ type: r.type, id: r.id, capacity_kg: r.capacity_kg, unidade_operacional_id: r.unidade_operacional_id, driver_id: r.driver_id })),
+    resources: (planned.resourcesUsed || []).map((r) => ({ type: r.type, id: r.id, capacity_kg: r.capacity_kg, unidade_operacional_id: r.unidade_operacional_id, driver_id: r.driver_id })),
   };
   const { data: currentVersions, error: versionError } = await supabase
     .from('campaign_plan_versions')
@@ -596,8 +570,8 @@ async function generatePlan(supabase, { empresaId, user, campaignId, body = {}, 
     status: 'READY_FOR_REVIEW',
     rules_version: planned.rules_version,
     resource_snapshot: resourceSnapshot,
-    assumptions: normalizeMetadata(body.assumptions),
-    constraints: normalizeMetadata(body.constraints),
+    assumptions: normalizeMetadata(extraAssumptions),
+    constraints: normalizeMetadata(extraConstraints),
     result_summary: planned.summary,
     generated_by: userId(user),
     client_request_id: requestId,
@@ -631,6 +605,47 @@ async function generatePlan(supabase, { empresaId, user, campaignId, body = {}, 
     })));
     throwDb(exceptionError);
   }
+  return plan;
+}
+
+async function generatePlan(supabase, { empresaId, user, campaignId, body = {}, operationalScope = null, correlation = {} }) {
+  const campaign = await requireCampaign(supabase, { empresaId, campaignId, operationalScope });
+  if (campaign.status === 'APPROVED' || campaign.status === 'CANCELLED') {
+    throw new CampaignError('Campanha ja encerrada para planejamento.', { status: 409, code: 'campaign_closed' });
+  }
+  const requestId = optionalText(body.client_request_id || body.clientRequestId);
+  if (requestId) {
+    const { data: existing, error: existingError } = await supabase
+      .from('campaign_plan_versions')
+      .select('*')
+      .eq('empresa_id', empresaId)
+      .eq('campaign_id', campaignId)
+      .eq('generated_by', userId(user))
+      .eq('client_request_id', requestId)
+      .maybeSingle();
+    throwDb(existingError);
+    if (existing) return getPlan(supabase, { empresaId, campaignId, planId: existing.id, operationalScope });
+  }
+  const data = await loadPlanningData(supabase, { empresaId, campaignId });
+  if (!data.locations.length || !data.demands.length) {
+    throw new CampaignError('Cadastre locais e demandas antes de gerar o plano.', { status: 422, code: 'campaign_incomplete' });
+  }
+  const unitIds = data.units.map((row) => row.unidade_operacional_id);
+  requireUnitsWithinScope(operationalScope, unitIds, { requireAny: true });
+  const resources = buildResourceCandidates({
+    assets: data.assets,
+    compositions: data.compositions,
+    assignments: data.assignments,
+    maintenance: data.maintenance,
+    documents: data.documents,
+    unitIds,
+  });
+  const planned = planCampaign({ campaign, locations: data.locations, demands: data.demands, resources });
+  planned.resourcesUsed = resources;
+  const plan = await persistPlanVersion(supabase, {
+    empresaId, campaignId, planned, unitIds, requestId, user, correlation,
+    extraAssumptions: body.assumptions, extraConstraints: body.constraints,
+  });
   const { error: updateError } = await supabase
     .from('operation_campaigns')
     .update({ status: 'READY_FOR_REVIEW', planning_status: 'READY_FOR_REVIEW', updated_by: userId(user), updated_at: new Date().toISOString() })
@@ -701,6 +716,33 @@ async function approvePlan(supabase, { empresaId, user, campaignId, planId, body
   });
   throwDb(approvalError);
   const now = new Date().toISOString();
+  // Replan (Campaign-D §24/§25): se a campanha JA tem um plano aprovado
+  // DIFERENTE deste, este approve e a aprovacao de um replan -- supera a
+  // versao antiga PRIMEIRO (nunca a deleta/muta os dados dela, so o status
+  // + lineage via superseded_by) antes de promover a nova, respeitando o
+  // indice unico campaign_plan_versions_one_approved_key (no maximo 1 linha
+  // com status=APPROVED por campanha). Trabalho/execucao ja comprometidos na
+  // versao antiga (Fretes materializados, rodadas de despacho) nunca sao
+  // tocados aqui -- ficam ligados para sempre a planned_trip_id/plan_version_id
+  // historicos (§23).
+  const { data: campaignRow, error: campaignReadError } = await supabase
+    .from('operation_campaigns')
+    .select('approved_plan_version_id')
+    .eq('empresa_id', empresaId)
+    .eq('id', campaignId)
+    .maybeSingle();
+  throwDb(campaignReadError);
+  const previousApprovedId = campaignRow?.approved_plan_version_id || null;
+  const isReplanApproval = Boolean(previousApprovedId && previousApprovedId !== planId);
+  if (isReplanApproval) {
+    const { error: supersedeError } = await supabase
+      .from('campaign_plan_versions')
+      .update({ status: 'SUPERSEDED', superseded_by: planId })
+      .eq('empresa_id', empresaId)
+      .eq('id', previousApprovedId)
+      .eq('status', 'APPROVED');
+    throwDb(supersedeError);
+  }
   const { error: planError } = await supabase
     .from('campaign_plan_versions')
     .update({ status: 'APPROVED', approved_by: userId(user), approved_at: now })
@@ -734,7 +776,23 @@ async function rejectPlan(supabase, { empresaId, user, campaignId, planId, body 
   throwDb(approvalError);
   const { error: planError } = await supabase.from('campaign_plan_versions').update({ status: 'REJECTED' }).eq('empresa_id', empresaId).eq('id', planId);
   throwDb(planError);
-  const { error: campaignError } = await supabase.from('operation_campaigns').update({ status: 'PLANNING', planning_status: 'REJECTED', updated_by: userId(user), updated_at: new Date().toISOString() }).eq('empresa_id', empresaId).eq('id', campaignId);
+  // Replan rejeitado (§24): a campanha ja tem um plano aprovado diferente deste
+  // rascunho -- rejeitar o rascunho NUNCA deve tirar a campanha de APPROVED
+  // (isso invalidaria a execucao ja em curso sob a versao antiga). So campanhas
+  // sem plano aprovado (fluxo original, Campaign-A) voltam para PLANNING.
+  const { data: campaignRow, error: campaignReadError } = await supabase
+    .from('operation_campaigns')
+    .select('approved_plan_version_id')
+    .eq('empresa_id', empresaId)
+    .eq('id', campaignId)
+    .maybeSingle();
+  throwDb(campaignReadError);
+  const hasOtherApprovedPlan = Boolean(campaignRow?.approved_plan_version_id && campaignRow.approved_plan_version_id !== planId);
+  const { error: campaignError } = await supabase.from('operation_campaigns').update(
+    hasOtherApprovedPlan
+      ? { planning_status: 'REJECTED', updated_by: userId(user), updated_at: new Date().toISOString() }
+      : { status: 'PLANNING', planning_status: 'REJECTED', updated_by: userId(user), updated_at: new Date().toISOString() },
+  ).eq('empresa_id', empresaId).eq('id', campaignId);
   throwDb(campaignError);
   return getPlan(supabase, { empresaId, campaignId, planId, operationalScope });
 }
@@ -785,4 +843,6 @@ module.exports = {
   updateDraft,
   toKg,
   verifyCampaignPlan,
+  persistPlanVersion,
+  loadPlanningData,
 };

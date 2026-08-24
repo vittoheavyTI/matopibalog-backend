@@ -7,6 +7,7 @@ const campaignProgress = require('../services/campaign/campaignProgressService')
 const dispatchEligibility = require('../services/campaign/dispatchEligibilityService');
 const dispatchService = require('../services/campaign/dispatchService');
 const orchestrator = require('../services/campaign/operationOrchestratorService');
+const replanService = require('../services/campaign/campaignReplanService');
 const { buildCorrelationContext } = require('../services/verifiability/correlationContext');
 
 function responderErro(res, error) {
@@ -348,12 +349,49 @@ const obterOrquestracao = async (req, res) => {
   }
 };
 
+// GET /:campaignId/replan/preview — resumo read-only (§36) do que já foi
+// executado/comprometido/cancelado e quanto resta a replanejar. Nunca escreve.
+const preverReplan = async (req, res) => {
+  try {
+    const item = await replanService.previewReplan(supabase, {
+      empresaId: req.empresa_id,
+      campaignId: req.params.campaignId,
+      operationalScope: req.operationalScope,
+    });
+    return res.json(item);
+  } catch (error) {
+    return responderErro(res, error);
+  }
+};
+
+// POST /:campaignId/replan — gera uma NOVA versão de plano sobre a demanda
+// residual (§20-22). Nunca toca a versão aprovada atual; campanha continua
+// APPROVED até este rascunho ser explicitamente aprovado via o endpoint já
+// existente de aprovação de plano.
+const criarReplan = async (req, res) => {
+  try {
+    const item = await replanService.generateReplan(supabase, {
+      empresaId: req.empresa_id,
+      user: req.user,
+      campaignId: req.params.campaignId,
+      body: req.body || {},
+      operationalScope: req.operationalScope,
+      correlation: correlation(req),
+    });
+    return res.status(201).json(item);
+  } catch (error) {
+    return responderErro(res, error);
+  }
+};
+
 module.exports = {
   obterContexto,
   obterProgresso,
   obterElegibilidade,
   obterOrquestracao,
   criarObjetivo,
+  preverReplan,
+  criarReplan,
   listarCampanhas,
   criarCampanha,
   detalharCampanha,
