@@ -88,7 +88,7 @@ Adequação de **CNAE/CNPJ/regime** do owner corre **em paralelo** e **NÃO bloq
 
 ## Próximo passo recomendado
 
-Campaign-B (materialização) e Campaign-C (progresso + elegibilidade + dispatch readiness) estão **fechados**. Próximo passo recomendado: **Dispatch real** (RBV9-INV-031 — designação/oferta/aceite concorrência-safe), que **exige decisão de produto do owner + nova migration** antes de qualquer código — diferente das fatias anteriores, que foram schema-free. Até essa decisão, produção permanece read-only nesse domínio.
+Campaign-B (materialização), Campaign-C (progresso + elegibilidade + dispatch readiness) e **Dispatch V1** (RBV9-INV-031 — designação/oferta/aceite concorrência-safe, migration 079, PR #471 `MERGE_SHA=16418114480f7afe650efbb493e1c2ccb0450b16`) estão **fechados em produção**. Nenhuma próxima macrofrente foi autorizada pelo owner nesta rodada — Partner Network, Marketplace, ERP Hub, Fiscal e ações de escrita da IA permanecem fora de escopo até novo gate explícito. Ver [DISPATCH_V1](./DISPATCH_V1.md).
 
 ## Hard stops permanentes
 
