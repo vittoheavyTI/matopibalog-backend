@@ -430,6 +430,31 @@ async function materializeOne(supabase, { item, context, user, options, operatio
   }
 }
 
+// Fase 2 do Dispatch V1 (§29): a fase 1 (RPC dispatch_round_create/dispatch_offer_accept)
+// ja decidiu o vencedor atomicamente e gravou candidate_driver_id/asset/composition na
+// campaign_planned_trips. Esta funcao converge a UNICA viagem reclamada para o Frete
+// canonico reaproveitando exatamente classifyTrip/materializeOne (mesma autoridade do
+// Campaign-B) -- sem tabela de assignment paralela, sem duplicar freightCreationService.
+// Idempotente/retryable: se falhar (ex.: motorista ficou inativo entre o accept e aqui),
+// o chamador pode tentar de novo (ou o manager pode reusar "Materializar fretes" em lote).
+async function materializeSingleTrip(supabase, { empresaId, campaignId, planId, plannedTripId, user, options, operationalScope, correlation = {} }) {
+  validateMaterializationOptions(options || {});
+  const context = await loadApprovedContext(supabase, { empresaId, campaignId, planId, operationalScope });
+  const trip = context.trips.find((t) => t.id === plannedTripId);
+  if (!trip) {
+    throw new CampaignError('Viagem planejada nao encontrada no plano aprovado.', {
+      status: 404, code: 'planned_trip_not_found',
+    });
+  }
+  const resourceState = await loadResourceState(supabase, { empresaId, trips: [trip] });
+  const locationsById = new Map(context.locations.map((row) => [row.id, row]));
+  const linksByTrip = new Map(context.links.map((row) => [row.planned_trip_id, row]));
+  const item = classifyTrip({
+    trip, existingLink: linksByTrip.get(trip.id), resourceState, locationsById, operationalScope,
+  });
+  return materializeOne(supabase, { item, context, user, options: options || {}, operationalScope, correlation });
+}
+
 async function materializePlan(supabase, { empresaId, campaignId, planId, user, operationalScope, body = {}, correlation = {} }) {
   validateMaterializationOptions(body.options || body);
   const context = await loadApprovedContext(supabase, { empresaId, campaignId, planId, operationalScope });
@@ -458,6 +483,7 @@ module.exports = {
   buildFreightBodyFromTrip,
   deterministicUuid,
   materializePlan,
+  materializeSingleTrip,
   previewMaterialization,
   quantityToTon,
 };

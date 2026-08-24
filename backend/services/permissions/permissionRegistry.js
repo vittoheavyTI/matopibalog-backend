@@ -85,6 +85,8 @@ const PERMISSIONS = Object.freeze([
   { key: 'campaign.plan', category: CATEGORIES.campaign, label: 'Gerar plano de campanha', scoped: true, entitlementCodigo: 'operation_campaign' },
   { key: 'campaign.approve', category: CATEGORIES.campaign, label: 'Aprovar plano de campanha', scoped: true, entitlementCodigo: 'operation_campaign' },
   { key: 'campaign.manage', category: CATEGORIES.campaign, label: 'Gerenciar campanhas de escoamento', scoped: true, entitlementCodigo: 'operation_campaign' },
+  { key: 'campaign.dispatch', category: CATEGORIES.campaign, label: 'Designar/ofertar execução de viagens (Dispatch)', scoped: true, entitlementCodigo: 'operation_campaign' },
+  { key: 'campaign.dispatch_respond', category: CATEGORIES.campaign, label: 'Responder a ofertas de despacho recebidas (motorista)', scoped: true, entitlementCodigo: 'operation_campaign' },
 
   // ── FINANCE OPERACIONAL (do cliente) ───────────────────────────────────────
   { key: 'finance.operational.view', category: CATEGORIES.finance_operational, label: 'Ver financeiro operacional', scoped: true },
@@ -171,7 +173,7 @@ const TEMPLATE_BASELINE_ALLOW = Object.freeze({
     'documents.view', 'documents.manage',
     'drivers.view', 'drivers.manage',
     'fleet.view', 'fleet.manage',
-    'campaign.view', 'campaign.create', 'campaign.plan', 'campaign.approve', 'campaign.manage',
+    'campaign.view', 'campaign.create', 'campaign.plan', 'campaign.approve', 'campaign.manage', 'campaign.dispatch',
     'finance.operational.view', 'finance.operational.manage',
     'finance.saas.view',
     'reports.operational.view', 'reports.financial.view',
@@ -193,7 +195,7 @@ const TEMPLATE_BASELINE_ALLOW = Object.freeze({
     'documents.view', 'documents.manage',
     'drivers.view', 'drivers.manage',
     'fleet.view', 'fleet.manage',
-    'campaign.view', 'campaign.create', 'campaign.plan', 'campaign.approve', 'campaign.manage',
+    'campaign.view', 'campaign.create', 'campaign.plan', 'campaign.approve', 'campaign.manage', 'campaign.dispatch',
     'reports.operational.view',
   ),
   [TEMPLATE_KEYS.GERENTE_FILIAL]: _A(
@@ -243,6 +245,10 @@ const TEMPLATE_BASELINE_ALLOW = Object.freeze({
     'freight.view',
     'launch.view', 'launch.create',
     'documents.view',
+    // Sem legado equivalente (Dispatch V1 é capacidade nova): allow por padrão, senão
+    // nenhum motorista consegue responder a uma oferta mesmo com a empresa já habilitada
+    // via entitlement operation_campaign. Override por usuário continua disponível.
+    'campaign.dispatch_respond',
   ),
 });
 
