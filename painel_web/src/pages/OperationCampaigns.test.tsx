@@ -254,7 +254,7 @@ describe('CampaignExecution', () => {
     expect(within(table).getByText('Desconhecido')).toBeInTheDocument(); // BUCKET_LABEL.UNKNOWN
   }, 10000);
 
-  test('elegibilidade: exibe candidatos, alertas e bloqueios ao clicar em "Ver elegibilidade"', async () => {
+  test('elegibilidade: exibe candidatos, alertas e bloqueios ao clicar em "Despachar"', async () => {
     mockApi.get.mockImplementation((url: string) => {
       if (url.endsWith('/progress')) {
         return Promise.resolve({
@@ -282,7 +282,7 @@ describe('CampaignExecution', () => {
 
     render(<MemoryRouter><OperationCampaigns /></MemoryRouter>);
     const region = await screen.findByRole('region', { name: /Execução da campanha/i }, { timeout: 5000 });
-    fireEvent.click(within(region).getByRole('button', { name: /Ver elegibilidade/i }));
+    fireEvent.click(within(region).getByRole('button', { name: /Despachar/i }));
 
     expect(await within(region).findByText(/1 elegível\(is\), 1 com alertas, 0 inelegível\(is\)\./)).toBeInTheDocument();
     expect(within(region).getByText('Elegível')).toBeInTheDocument();
@@ -290,6 +290,114 @@ describe('CampaignExecution', () => {
     expect(within(region).getByText('Alertas: documento vence em breve')).toBeInTheDocument();
     expect(mockApi.get).toHaveBeenCalledWith('/operation-campaigns/campaign-1/plans/plan-1/trips/trip-1/eligibility');
   }, 10000);
+
+  function trip1EligibilityFixture() {
+    return {
+      summary: { total_candidates: 2, eligible: 1, eligible_with_warnings: 1, ineligible: 0, has_any_eligible: true },
+      candidates: [
+        { driver_id: 'driver-aaaaaaaa', asset_id: 'asset-1', composition_id: null, eligibility: 'ELIGIBLE', reasons: [], warnings: [], capacity_match: 'OK', documents_status: 'OK', maintenance_status: 'OK', assignment_status: 'FREE', route_compatibility: 'UNKNOWN', capacity_kg: 12000 },
+        { driver_id: 'driver-bbbbbbbb', asset_id: null, composition_id: 'comp-1', eligibility: 'ELIGIBLE_WITH_WARNINGS', reasons: [], warnings: ['documento vence em breve'], capacity_match: 'OK', documents_status: 'ATTENTION', maintenance_status: 'OK', assignment_status: 'FREE', route_compatibility: 'UNKNOWN', capacity_kg: 8000 },
+      ],
+      truncated: false,
+    };
+  }
+
+  test('despacho: designação direta chama direct-assign com o candidato certo e mostra o resultado', async () => {
+    mockApi.get.mockImplementation((url: string) => {
+      if (url.endsWith('/progress')) {
+        return Promise.resolve({ data: buildProgress({ trips_detail: [{ planned_trip_id: 'trip-1', origem: 'A', destino: 'B', planned_quantity: 10, quantity_unit: 'ton', materialization: 'NOT_MATERIALIZED', frete_id: null, execution_status: null, execution_bucket: null, readiness: 'BLOCKED', attention: [] }] }) });
+      }
+      if (url.endsWith('/eligibility')) return Promise.resolve({ data: trip1EligibilityFixture() });
+      return mockCampaignList()(url);
+    });
+    mockApi.post.mockImplementation((url: string) => {
+      if (url.endsWith('/dispatch/direct-assign')) {
+        return Promise.resolve({
+          data: {
+            round: { id: 'round-1', mode: 'DIRECT', status: 'ASSIGNED', expires_at: null, winner_offer_id: 'offer-1' },
+            offers: [{ id: 'offer-1', driver_id: 'driver-aaaaaaaa', asset_id: 'asset-1', composition_id: null, status: 'ACCEPTED' }],
+            materialization: { status: 'CREATED' },
+            materialization_error: null,
+          },
+        });
+      }
+      return Promise.resolve({ data: {} });
+    });
+
+    render(<MemoryRouter><OperationCampaigns /></MemoryRouter>);
+    const region = await screen.findByRole('region', { name: /Execução da campanha/i }, { timeout: 5000 });
+    fireEvent.click(within(region).getByRole('button', { name: /Despachar/i }));
+    await within(region).findByText(/1 elegível\(is\)/);
+
+    const designarBotoes = within(region).getAllByRole('button', { name: /Designar diretamente/i });
+    expect(designarBotoes.length).toBe(2);
+    fireEvent.click(designarBotoes[0]); // driver-aaaaaaaa (asset-1)
+
+    await waitFor(() => expect(mockApi.post).toHaveBeenCalledWith(
+      '/operation-campaigns/campaign-1/plans/plan-1/trips/trip-1/dispatch/direct-assign',
+      expect.objectContaining({ driver_id: 'driver-aaaaaaaa', asset_id: 'asset-1', composition_id: null }),
+    ));
+    expect(await within(region).findByText(/Designação direta/)).toBeInTheDocument();
+    expect(within(region).getByText(/designado/)).toBeInTheDocument();
+  }, 10000);
+
+  test('despacho: oferta sem seleção envia a TODOS os elegíveis e mostra a rodada aberta', async () => {
+    mockApi.get.mockImplementation((url: string) => {
+      if (url.endsWith('/progress')) {
+        return Promise.resolve({ data: buildProgress({ trips_detail: [{ planned_trip_id: 'trip-1', origem: 'A', destino: 'B', planned_quantity: 10, quantity_unit: 'ton', materialization: 'NOT_MATERIALIZED', frete_id: null, execution_status: null, execution_bucket: null, readiness: 'BLOCKED', attention: [] }] }) });
+      }
+      if (url.endsWith('/eligibility')) return Promise.resolve({ data: trip1EligibilityFixture() });
+      return mockCampaignList()(url);
+    });
+    mockApi.post.mockImplementation((url: string) => {
+      if (url.endsWith('/dispatch/rounds')) {
+        return Promise.resolve({
+          data: {
+            round: { id: 'round-2', mode: 'OFFER', status: 'OPEN', expires_at: '2026-08-24T12:00:00.000Z', winner_offer_id: null },
+            offers: [
+              { id: 'offer-1', driver_id: 'driver-aaaaaaaa', status: 'PENDING' },
+              { id: 'offer-2', driver_id: 'driver-bbbbbbbb', status: 'PENDING' },
+            ],
+            excluded_requested_recipients: [],
+          },
+        });
+      }
+      return Promise.resolve({ data: {} });
+    });
+
+    render(<MemoryRouter><OperationCampaigns /></MemoryRouter>);
+    const region = await screen.findByRole('region', { name: /Execução da campanha/i }, { timeout: 5000 });
+    fireEvent.click(within(region).getByRole('button', { name: /Despachar/i }));
+    await within(region).findByText(/1 elegível\(is\)/);
+
+    fireEvent.click(within(region).getByRole('button', { name: /Ofertar a todos elegíveis/i }));
+
+    await waitFor(() => expect(mockApi.post).toHaveBeenCalledWith(
+      '/operation-campaigns/campaign-1/plans/plan-1/trips/trip-1/dispatch/rounds',
+      expect.objectContaining({ recipients: undefined }),
+    ));
+    expect(await within(region).findByText(/Rodada de oferta/)).toBeInTheDocument();
+    expect(within(region).getByText(/2 oferta\(s\) pendente\(s\) de 2/)).toBeInTheDocument();
+
+    // Cancelar a rodada recém-criada.
+    mockApi.post.mockImplementation((url: string) => {
+      if (url.endsWith('/dispatch/rounds/round-2/cancel')) {
+        return Promise.resolve({
+          data: {
+            round: { id: 'round-2', mode: 'OFFER', status: 'CANCELLED', expires_at: '2026-08-24T12:00:00.000Z', winner_offer_id: null },
+            offers: [
+              { id: 'offer-1', driver_id: 'driver-aaaaaaaa', status: 'CANCELLED' },
+              { id: 'offer-2', driver_id: 'driver-bbbbbbbb', status: 'CANCELLED' },
+            ],
+          },
+        });
+      }
+      return Promise.resolve({ data: {} });
+    });
+    fireEvent.click(within(region).getByRole('button', { name: /Cancelar rodada/i }));
+    await waitFor(() => expect(mockApi.post).toHaveBeenCalledWith('/operation-campaigns/campaign-1/plans/plan-1/trips/trip-1/dispatch/rounds/round-2/cancel', {}));
+    expect(await within(region).findByText(/cancelada/)).toBeInTheDocument();
+  }, 12000);
 
   test('falha ao carregar progresso mostra motivo traduzido (permissão), nunca dado inventado', async () => {
     mockApi.get.mockImplementation((url: string) => {
