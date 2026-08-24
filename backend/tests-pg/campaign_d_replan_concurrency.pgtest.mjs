@@ -85,6 +85,35 @@ function registrar(pg) {
     await pool.query('DROP SCHEMA IF EXISTS public CASCADE');
     await pool.query('CREATE SCHEMA public');
     await pool.query('GRANT ALL ON SCHEMA public TO postgres');
+    await pool.query('GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role').catch(() => {});
+  }
+
+  // As policies RLS das migrations 076+ referenciam rls_is_super_admin() /
+  // rls_is_company_admin() / rls_empresa_id(), que no Supabase real existem
+  // fora da cadeia de migrations. Depois do DROP SCHEMA acima elas precisam
+  // ser recriadas ANTES de aplicar a cadeia (mesmo harness do 079).
+  async function installAuthHelpers() {
+    await pool.query('CREATE SCHEMA IF NOT EXISTS auth');
+    await pool.query(`
+      CREATE OR REPLACE FUNCTION auth.uid()
+      RETURNS uuid LANGUAGE sql STABLE
+      AS $$ SELECT NULLIF(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
+    `);
+    await pool.query(`
+      CREATE OR REPLACE FUNCTION public.rls_is_super_admin()
+      RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
+      AS $$ SELECT COALESCE((SELECT is_super_admin FROM usuarios WHERE id = auth.uid()), false) $$;
+    `);
+    await pool.query(`
+      CREATE OR REPLACE FUNCTION public.rls_is_company_admin()
+      RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
+      AS $$ SELECT COALESCE((SELECT tipo = 'admin' FROM usuarios WHERE id = auth.uid()), false) $$;
+    `);
+    await pool.query(`
+      CREATE OR REPLACE FUNCTION public.rls_empresa_id()
+      RETURNS uuid LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
+      AS $$ SELECT empresa_id FROM usuarios WHERE id = auth.uid() $$;
+    `);
   }
 
   async function seedFixtures() {
@@ -156,6 +185,7 @@ function registrar(pg) {
   test('replan concorrência: promover v2 SEM superar v1 primeiro é rejeitado pelo índice único (nunca 2 versões APPROVED)', async () => {
     await resetPublicSchema();
     await applySql(bootstrapSql);
+    await installAuthHelpers();
     await applySql(campaignChainSql);
     await seedFixtures();
 
@@ -175,6 +205,7 @@ function registrar(pg) {
   test('replan concorrência: 2 conexões concorrentes executando a sequência CORRETA (superar v1, depois aprovar v2) nunca deixam 0 nem 2 versões APPROVED', async () => {
     await resetPublicSchema();
     await applySql(bootstrapSql);
+    await installAuthHelpers();
     await applySql(campaignChainSql);
     await seedFixtures();
 
