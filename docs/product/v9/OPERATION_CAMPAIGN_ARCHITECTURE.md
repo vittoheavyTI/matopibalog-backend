@@ -1,7 +1,8 @@
 # ONDA 3 - Operation Campaign / Operacao de Escoamento
 
 > Status: `CAMPAIGN_AUDIT_FINDINGS_FROZEN=true`; `CAMPAIGN_A_TECHNICAL_STATUS=CLOSED`; `CAMPAIGN_A_END_STATE=APPROVED_PLAN`; `CAMPAIGN_A_FREIGHT_WRITES=0`.
-> `CAMPAIGN_B_TECHNICAL_STATUS=CLOSED` (materialization linkage; takeover Claude 2026-08-24, PR #464 `MERGE_SHA=139105d523e9023b616f340a40d6697d7b0e4444`). Migration **078 aplicada/rastreada exatamente uma vez** em produção (`20260824013400 078_operation_campaign_materialization`, SHA256 `5DEA792CA98FE28D8A68320F80BCB92A93B240360F9A552A2F261993193543DB`), 0 business writes, `campaign_trip_freights` criada (RLS/grants padrão canônico). `CAMPAIGN_B_DISPATCH_IMPLEMENTED=false`; `CAMPAIGN_PROGRESS=DEFERRED_NEXT_SLICE` (a implementação real entregou materialization linkage + preview + summary counts, não projeção de progresso).
+> `CAMPAIGN_B_TECHNICAL_STATUS=CLOSED` (materialization linkage; takeover Claude 2026-08-24, PR #464 `MERGE_SHA=139105d523e9023b616f340a40d6697d7b0e4444`). Migration **078 aplicada/rastreada exatamente uma vez** em produção (`20260824013400 078_operation_campaign_materialization`, SHA256 `5DEA792CA98FE28D8A68320F80BCB92A93B240360F9A552A2F261993193543DB`), 0 business writes, `campaign_trip_freights` criada (RLS/grants padrão canônico). `CAMPAIGN_B_DISPATCH_IMPLEMENTED=false`.
+> `CAMPAIGN_C_TECHNICAL_STATUS=CLOSED` (operational progress + eligibility + dispatch readiness; takeover Claude 2026-08-24, PR #469 `MERGE_SHA=95fcded985470d059519008562a99fdb8dac3fd1`). Sem migration (`SCHEMA_CHANGES=0`) — `campaignProgressService`/`dispatchEligibilityService` derivam tudo de `campaign_planned_trips`/`campaign_trip_freights`/`fretes` já existentes. `CAMPAIGN_PROGRESS=DONE`; `RBV9-INV-032 (elegibilidade)=DONE`; `REAL_DISPATCH_IMPLEMENTED=false`; `OFFER_SYSTEM_IMPLEMENTED=false`; `RBV9-INV-031 (dispatch real)` permanece `ROADMAP`. Detalhe: [CAMPAIGN_C_OPERATIONAL_PROGRESS](./CAMPAIGN_C_OPERATIONAL_PROGRESS.md).
 > Baseline auditado em 2026-08-23 sobre `origin/main=988bf3e5e8831f4833255e38293581002c052f88`; implementado em produção no PR #457 (`MERGE_SHA=32d8fe3e8824d1a8bc5be89ad6f5cdf86ae5c316`).
 
 ## Status de implementacao
@@ -282,6 +283,14 @@ Nao inclui materializacao em fretes reais. Campaign-A termina em `APPROVED_PLAN`
 
 Inclui bulk materialization, refs em fretes, assignment/dispatch-ready, progress, exceptions, replanning, realtime e dashboard operacional. Dispatch offers atomicos podem virar B2 se ficarem grandes.
 
+### CAMPAIGN-C
+
+`OPERATIONAL PROGRESS + ELIGIBILITY + DISPATCH READINESS (read-only)`.
+
+Entregue **sem migration** (0 tabela nova) — deriva tudo do plano aprovado + `campaign_trip_freights` (Campaign-B) + status canônico do Frete. Inclui `campaignProgressService` (progresso: trips/quantidade em toneladas/saúde/exceções/replanejamento, mapeamento congelado Frete→bucket de execução, sem dupla contagem), `dispatchEligibilityService` (elegibilidade determinística por viagem: driver/resource/scope/vínculo temporal como bloqueio canônico; capacidade/documentos/manutenção só como aviso; rota sempre `UNKNOWN`), integração aditiva na Torre de Controle (`campaign_attention`, capability-gated, sem financeiro), tool de IA read-only e a UI web "Execução da campanha".
+
+Não inclui: designação real, oferta a elegíveis, aceite/first-valid-acceptance atômico, expiração de oferta, lock de concorrência ou qualquer escrita em `fretes`/`campaign_trip_freights`. Isso é `RBV9-INV-031` (Dispatch real) e continua `ROADMAP`, exigindo decisão de produto do owner + nova migration antes de código.
+
 ## Owner Decisions Congeladas
 
 - `CAMPAIGN_ENTITLEMENT_KEY=operation_campaign`.
@@ -305,5 +314,7 @@ Campaign V1 suporta uma ou multiplas unidades desde que o usuario tenha scope ef
 - `MIGRATION_REQUIRED=true` para Campaign-A ja executada.
 - `APPLIED_MIGRATION_076=20260823111859 076_operation_campaign_foundation`.
 - `APPLIED_MIGRATION_077=20260823220632 077_operation_campaign_076_payload_reconciliation`.
+- `APPLIED_MIGRATION_078=20260824013400 078_operation_campaign_materialization` (Campaign-B).
+- `CAMPAIGN_C_MIGRATION_REQUIRED=false` (progress/eligibility/readiness são projeção pura sobre schema existente).
 - `NO_ADDITIONAL_PRODUCTION_DDL_AUTHORIZED=true`.
-- `NEXT_STATUS=CAMPAIGN_B_MATERIALIZATION_PROGRESS_READY_TO_START`.
+- `NEXT_STATUS=DISPATCH_REAL_REQUIRES_OWNER_PRODUCT_DECISION_AND_MIGRATION` (RBV9-INV-031; Campaign-B/C já fechados).

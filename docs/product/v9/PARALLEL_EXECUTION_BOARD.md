@@ -1,7 +1,7 @@
 # Matopiba Log V9 - Parallel Execution Board V1
 
-> Status: `PARALLEL_EXECUTION_BOARD_V1_EXECUTED=true`; `CAMPAIGN_A_TECHNICAL_STATUS=CLOSED`; `MOBILE_M1_TECHNICAL_STATUS=CLOSED`; `SYSTEMIC_QUALITY_TECHNICAL_STATUS=CLOSED`; `PORTAL_COMMERCIAL_V2=CLOSED`; `AI_COPILOT_V1=CLOSED`; `OPERATION_COMMAND_CENTER_V2=CLOSED`; `CAMPAIGN_B_TECHNICAL_STATUS=CLOSED`.
-> Takeover 2026-08-24: Codex indisponível até 2026-08-30 → Claude assumiu `CAMPAIGN_B_COMPLETION` (PR #464 mergeado, migration 078 aplicada uma vez) e atua como `CANONICAL_DOC_INTEGRATOR` temporário. Current main após Campaign-B: `139105d523e9023b616f340a40d6697d7b0e4444`.
+> Status: `PARALLEL_EXECUTION_BOARD_V1_EXECUTED=true`; `CAMPAIGN_A_TECHNICAL_STATUS=CLOSED`; `MOBILE_M1_TECHNICAL_STATUS=CLOSED`; `SYSTEMIC_QUALITY_TECHNICAL_STATUS=CLOSED`; `PORTAL_COMMERCIAL_V2=CLOSED`; `AI_COPILOT_V1=CLOSED`; `OPERATION_COMMAND_CENTER_V2=CLOSED`; `CAMPAIGN_B_TECHNICAL_STATUS=CLOSED`; `ROUTE_INTELLIGENCE_V1=CLOSED`; `CAMPAIGN_C_TECHNICAL_STATUS=CLOSED`.
+> Takeover 2026-08-24: Codex indisponível até 2026-08-30 → Claude assumiu `CAMPAIGN_B_COMPLETION` (PR #464 mergeado, migration 078 aplicada uma vez), depois `ROUTE_INTELLIGENCE_V1` (PR #467) e `CAMPAIGN_C_PROGRESS_AND_DISPATCH_READINESS` (PR #469, sem migration) fora do modelo de 3 writers paralelos (execução sequencial, solo), atuando como `CANONICAL_DOC_INTEGRATOR` temporário. Current main após Campaign-C: `95fcded985470d059519008562a99fdb8dac3fd1`.
 > Base original: `PARALLEL_BATCH_V1_BASE_SHA=cdf6b4ca62d84d2cb651ff2de0a8134c5bc2a715` (`origin/main`, PR #455 Operation Campaign architecture frozen). Current reconciled main after Campaign-A closure: `32d8fe3e8824d1a8bc5be89ad6f5cdf86ae5c316`.
 
 ## Objetivo
@@ -237,5 +237,5 @@ Prompt IDs are reserved, but implementation prompts are not generated in this ex
 - `OWNER_VISUAL_VALIDATION=PENDING`.
 - `BLOCKERS_OPEN=0`.
 - `HIGHS_OPEN=0`.
-- `NEXT_STATUS=CAMPAIGN_B_MATERIALIZATION_PROGRESS_READY_TO_START`.
+- `NEXT_STATUS=DISPATCH_REAL_REQUIRES_OWNER_PRODUCT_DECISION_AND_MIGRATION` (Campaign-B materialization, Campaign-C progress/eligibility/readiness e Route Intelligence V1 concluídos fora deste board; RBV9-INV-031 dispatch real permanece ROADMAP).
 
