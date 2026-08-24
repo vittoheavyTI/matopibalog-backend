@@ -56,8 +56,8 @@ ofertar/designar/travar/expirar nada:
 `trips_detail[].readiness` classifica cada viagem: `READY_FOR_DIRECT_ASSIGNMENT`,
 `READY_FOR_OFFER_DISPATCH`, `BLOCKED`, `ALREADY_ASSIGNED`, `ALREADY_EXECUTING`,
 `COMPLETED`. **Não existe** designação, oferta, aceite, expiração ou lock de
-concorrência — isso é Dispatch real (`RBV9-INV-031`), que continua `ROADMAP` e exige
-decisão de produto do owner + nova migration antes de qualquer código.
+concorrência — isso é Dispatch real (`RBV9-INV-031`), **CLOSED em produção** desde a
+frente Dispatch V1 (PR #471, migration 079). Ver [DISPATCH_V1](./DISPATCH_V1.md).
 
 ## 5. Torre de Controle (`commandCenterService.carregarCampaignAttention`)
 Aditivo e defensivo: reusa a **mesma** `campaignProgressService` (nunca recalcula saúde
@@ -125,4 +125,4 @@ ambiente/teste):
   campanha, e o smoke pós-deploy confirmou 401 sem auth.
 - Owner visual validation da UI web pendente (padrão desta macrofrente — não bloqueia
   o fechamento técnico).
-- Dispatch real (`RBV9-INV-031`) e Owner visual validation continuam fora de escopo.
+- Dispatch real (`RBV9-INV-031`) **CLOSED** pela frente Dispatch V1 — ver [DISPATCH_V1](./DISPATCH_V1.md). Owner visual validation continua fora de escopo.
