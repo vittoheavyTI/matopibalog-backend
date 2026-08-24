@@ -98,9 +98,70 @@ escondendo linhas no React.
 | Token de convite nunca em claro | só `token_hash`, único global |
 | Aceite concorrente não duplica operação | RPC `shipper_request_accept` com `FOR UPDATE` |
 
+## 4-bis. Correções do owner review (3 HIGHs)
+
+A revisão do owner encontrou 3 HIGHs que o meu relatório anterior não tinha
+detectado — corrigidos **antes** do gate:
+
+### HIGH-01 — privilégio padrão do operador
+
+O backfill dava `shipper_portal.requests.review` ao template `operador`. Isso
+**não era uma decisão congelada**. Aceitar uma solicitação não é leitura: inicia
+`solicitação → Operation Orchestrator → Campanha`. Política congelada agora
+(`SHIPPER_PORTAL_DEFAULT_PERMISSION_POLICY_V1`):
+
+| Template | Padrão |
+|---|---|
+| `administrador` | `manage` + `requests.review` |
+| `gerente_frota` | `requests.review` |
+| `operador` | **nenhuma** (default deny) |
+| demais | default deny |
+
+A empresa continua podendo conceder depois, pelos mecanismos que já existem
+(template editável ou override por usuário). Efeito no DML técnico: **100 → 75
+inserts**.
+
+**Invariante para PORTAL-B** (§6): `shipper_portal.requests.review` autoriza
+*revisar*. A ação de **aceitar** — que cria operação — também precisa satisfazer
+a autoridade canônica exigida por `createObjective`. Nenhuma rota pode deixar a
+permissão de portal contornar silenciosamente a autorização de Campaign.
+
+### HIGH-02 — escrita parcial na criação da solicitação
+
+Eram 3 escritas independentes: `INSERT DRAFT` → `INSERT origens` → `UPDATE
+SUBMITTED`. Se a 2ª ou a 3ª falhasse, sobrava um **DRAFT parcial commitado** — e
+um retry com o mesmo `client_request_id` encontrava esse rascunho e devolvia uma
+solicitação incompleta como se estivesse pronta.
+
+Agora é **uma transação** (`shipper_request_create_and_submit`), que também:
+- monta o snapshot a partir das **mesmas** origens gravadas (impossível terminar
+  com origens A e snapshot B);
+- deriva `empresa_id` do relacionamento **dentro** da RPC (nunca aceita do cliente);
+- converge criações concorrentes com o mesmo `client_request_id` para **uma**
+  solicitação, capturando a violação de unicidade em vez de estourar 500.
+
+### HIGH-03 — race cancel × accept
+
+O cancelamento lia o status e depois atualizava **por id, sem condição de
+estado**. Entre a leitura e a escrita, a transportadora podia aceitar — e o
+cancelamento sobrescrevia uma decisão de negócio já tomada.
+
+Agora `shipper_request_cancel` é RPC com `SELECT ... FOR UPDATE` na **mesma
+linha** que `shipper_request_accept` disputa. Resultado provado em Postgres real:
+exatamente um desfecho terminal; depois de aceita o portal não cancela; depois de
+cancelada a transportadora não aceita; replay de cancelamento é idempotente e não
+reescreve o instante original.
+
 ## 5. Ciclo de vida da solicitação
 
 `DRAFT → SUBMITTED → {ACCEPTED | REJECTED | CHANGES_REQUESTED} | CANCELLED`
+
+> **Correção de overclaim (§31/§32):** `CHANGES_REQUESTED` existe no schema e a
+> transportadora consegue defini-lo, mas **o embarcador ainda não tem como editar
+> e reenviar** a solicitação a partir desse estado. Portanto:
+> `SHIPPER_REVISION_AFTER_CHANGES_REQUESTED=PORTAL_B_REQUIRED`. O fluxo de
+> change-request **não** está completo, e não deve ser reportado como tal. Não é
+> bloqueador de migration — o schema já suporta.
 
 - **Snapshot imutável** (§31/§88): `submitted_snapshot` congela o que foi
   declarado; `accepted_snapshot` congela o que foi aceito. Editar o cadastro do

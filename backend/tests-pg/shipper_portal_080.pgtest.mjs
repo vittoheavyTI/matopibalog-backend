@@ -364,7 +364,7 @@ function registrar(pg) {
     // Templates canônicos por empresa (a 072 cria; aqui garantimos os 3 alvos).
     for (const [key, nome] of [['administrador', 'Administrador'], ['gerente_frota', 'Gerente de frota'], ['operador', 'Operador']]) {
       await pool.query(
-        `INSERT INTO public.permission_templates (empresa_id, stable_key, nome)
+        `INSERT INTO public.permission_templates (empresa_id, stable_key, display_name)
          VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, [EMP_A, key, nome]);
     }
     await pool.query(`SELECT public.ensure_shipper_portal_template_permissions_for_empresa($1)`, [EMP_A]);
@@ -387,7 +387,7 @@ function registrar(pg) {
   test('080 HIGH-01: backfill é idempotente e não toca permissões não relacionadas ao portal', async () => {
     await fullSetup();
     await pool.query(
-      `INSERT INTO public.permission_templates (empresa_id, stable_key, nome)
+      `INSERT INTO public.permission_templates (empresa_id, stable_key, display_name)
        VALUES ($1,'administrador','Administrador') ON CONFLICT DO NOTHING`, [EMP_A]);
     const { rows: tpl } = await pool.query(
       `SELECT id FROM public.permission_templates WHERE empresa_id=$1 AND stable_key='administrador'`, [EMP_A]);
