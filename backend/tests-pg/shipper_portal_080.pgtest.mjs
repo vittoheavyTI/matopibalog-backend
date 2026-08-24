@@ -326,16 +326,14 @@ function registrar(pg) {
 
   test('080 CONVITE: no máximo 1 convite PENDENTE por (relacionamento, e-mail)', async () => {
     await fullSetup();
-    const base = [EMP_A, ORG_X, REL_AX, 'contato@embarcador.test', 'hash-1', ADM_A];
-    await pool.query(
-      `INSERT INTO public.shipper_portal_invitations
+    const sql = `INSERT INTO public.shipper_portal_invitations
          (empresa_id, shipper_org_id, relationship_id, email, token_hash, created_by, expires_at)
-       VALUES ($1,$2,$3,$4,$5,$6, now() + interval '7 days')`, base);
+       VALUES ($1,$2,$3,$4,$5,$6, now() + interval '7 days')`;
+    await pool.query(sql, [EMP_A, ORG_X, REL_AX, 'contato@embarcador.test', 'hash-1', ADM_A]);
+    // Mesmo relacionamento + mesmo e-mail, token diferente: o índice único
+    // parcial (WHERE status='PENDING') deve rejeitar o segundo convite pendente.
     await assert.rejects(
-      pool.query(
-        `INSERT INTO public.shipper_portal_invitations
-           (empresa_id, shipper_org_id, relationship_id, email, token_hash, created_by, expires_at)
-         VALUES ($1,$2,$3,$4,'hash-2',$6, now() + interval '7 days')`, base),
+      pool.query(sql, [EMP_A, ORG_X, REL_AX, 'contato@embarcador.test', 'hash-2', ADM_A]),
       (err) => err.code === '23505',
     );
   });

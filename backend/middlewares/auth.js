@@ -4,12 +4,37 @@ const { criarVerifyTokenSec1 } = require('./authSession');
 
 let verifyTokenSec1Memo = null;
 
+// Portal do Embarcador (E3.5): o token do portal é assinado com o MESMO
+// JWT_SECRET (não inventamos gestão de segredo nova) e carrega a claim
+// discriminante `token_kind='shipper_portal'`. Sem esta rejeição explícita, o
+// caminho legado abaixo (jwt.verify puro) aceitaria um token externo como se
+// fosse de um operador interno. A identidade externa NUNCA vale aqui.
+const PORTAL_TOKEN_KIND = 'shipper_portal';
+
+function rejeitarTokenDePortal(decoded, res) {
+  if (decoded && decoded.token_kind === PORTAL_TOKEN_KIND) {
+    res.status(403).json({ message: 'Esta credencial é do portal do embarcador e não acessa o sistema interno.' });
+    return true;
+  }
+  return false;
+}
+
 // Middleware 1: Verifica se o usuário está logado olhando o Cookie
 const verifyToken = (req, res, next) => {
   const { cfg, sessionService } = getAuthRuntime();
   if (cfg.sessionsEnabled) {
     if (!verifyTokenSec1Memo) {
       verifyTokenSec1Memo = criarVerifyTokenSec1({ cfg, sessionService });
+    }
+    // Defesa em profundidade: mesmo com SEC-1 ligado (que valida sessão em
+    // `auth_sessions`, onde um usuário de portal nunca existe), rejeitamos o
+    // token de portal ANTES, com mensagem correta em vez de erro de sessão.
+    const authHeader = req.headers['authorization'];
+    const bruto = (authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null)
+      || (req.cookies ? req.cookies.token : null);
+    if (bruto) {
+      const semVerificar = jwt.decode(bruto);
+      if (rejeitarTokenDePortal(semVerificar, res)) return undefined;
     }
     return verifyTokenSec1Memo(req, res, next);
   }
@@ -27,8 +52,9 @@ const verifyToken = (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    if (rejeitarTokenDePortal(decoded, res)) return undefined;
     req.user = decoded; // Salva os dados do usuário para a próxima rota
-    next(); 
+    next();
   } catch (err) {
     return res.status(403).json({ error: 'Token inválido ou expirado.' });
   }
