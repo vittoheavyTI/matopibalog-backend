@@ -2,6 +2,7 @@
 
 const supabase = require('../config/supabase');
 const campaign = require('../services/campaign/campaignService');
+const campaignMaterialization = require('../services/campaign/campaignMaterializationService');
 const { buildCorrelationContext } = require('../services/verifiability/correlationContext');
 
 function responderErro(res, error) {
@@ -156,6 +157,37 @@ const verificarPlano = async (req, res) => {
   }
 };
 
+const preverMaterializacao = async (req, res) => {
+  try {
+    const item = await campaignMaterialization.previewMaterialization(supabase, {
+      empresaId: req.empresa_id,
+      campaignId: req.params.campaignId,
+      planId: req.params.planId,
+      operationalScope: req.operationalScope,
+    });
+    return res.json(item);
+  } catch (error) {
+    return responderErro(res, error);
+  }
+};
+
+const materializarPlano = async (req, res) => {
+  try {
+    const item = await campaignMaterialization.materializePlan(supabase, {
+      empresaId: req.empresa_id,
+      campaignId: req.params.campaignId,
+      planId: req.params.planId,
+      user: req.user,
+      operationalScope: req.operationalScope,
+      body: req.body || {},
+      correlation: correlation(req),
+    });
+    return res.status(201).json(item);
+  } catch (error) {
+    return responderErro(res, error);
+  }
+};
+
 module.exports = {
   obterContexto,
   listarCampanhas,
@@ -170,4 +202,6 @@ module.exports = {
   rejeitarPlano,
   cancelarCampanha,
   verificarPlano,
+  preverMaterializacao,
+  materializarPlano,
 };
