@@ -351,7 +351,50 @@ async function listMyOffers(supabase, { empresaId, driverId, status }) {
   if (status) query = query.eq('status', status);
   const { data, error } = await query;
   if (error) throw mapRpcError(error);
-  return data || [];
+  const offers = data || [];
+  if (!offers.length) return offers;
+
+  // Enriquecimento read-only de contexto (origem/destino/carga) — o motorista não
+  // consegue decidir aceitar/recusar só com IDs. Batch, sem N+1 por oferta.
+  const tripIds = [...new Set(offers.map((o) => o.dispatch_rounds?.planned_trip_id).filter(Boolean))];
+  const campaignIds = [...new Set(offers.map((o) => o.dispatch_rounds?.campaign_id).filter(Boolean))];
+  const [tripsRes, campaignsRes] = await Promise.all([
+    tripIds.length
+      ? supabase.from('campaign_planned_trips').select('id, origin_location_id, destination_location_id, planned_quantity, quantity_unit').eq('empresa_id', empresaId).in('id', tripIds)
+      : Promise.resolve({ data: [], error: null }),
+    campaignIds.length
+      ? supabase.from('operation_campaigns').select('id, reference_code, name, cargo_name').eq('empresa_id', empresaId).in('id', campaignIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (tripsRes.error) throw mapRpcError(tripsRes.error);
+  if (campaignsRes.error) throw mapRpcError(campaignsRes.error);
+  const trips = tripsRes.data || [];
+  const locationIds = [...new Set(trips.flatMap((t) => [t.origin_location_id, t.destination_location_id]).filter(Boolean))];
+  const { data: locations, error: locError } = locationIds.length
+    ? await supabase.from('campaign_locations').select('id, name').eq('empresa_id', empresaId).in('id', locationIds)
+    : { data: [], error: null };
+  if (locError) throw mapRpcError(locError);
+
+  const tripsById = new Map(trips.map((t) => [t.id, t]));
+  const locationsById = new Map((locations || []).map((l) => [l.id, l]));
+  const campaignsById = new Map((campaignsRes.data || []).map((c) => [c.id, c]));
+
+  return offers.map((offer) => {
+    const trip = tripsById.get(offer.dispatch_rounds?.planned_trip_id);
+    const campaign = campaignsById.get(offer.dispatch_rounds?.campaign_id);
+    return {
+      ...offer,
+      trip_context: trip ? {
+        origem: locationsById.get(trip.origin_location_id)?.name || null,
+        destino: locationsById.get(trip.destination_location_id)?.name || null,
+        planned_quantity: trip.planned_quantity,
+        quantity_unit: trip.quantity_unit,
+      } : null,
+      campaign_context: campaign ? {
+        reference_code: campaign.reference_code, name: campaign.name, cargo_name: campaign.cargo_name,
+      } : null,
+    };
+  });
 }
 
 // Resumo read-only por campanha, para a tool de IA (§65) e para UI de apoio: quantas

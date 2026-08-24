@@ -25,6 +25,7 @@ const {
   acceptOffer,
   declineOffer,
   cancelRound,
+  listMyOffers,
 } = require('../services/campaign/dispatchService');
 const { CampaignError } = require('../services/campaign/campaignService');
 const { PERMISSION_BY_KEY, TEMPLATE_BASELINE_ALLOW, TEMPLATE_KEYS } = require('../services/permissions/permissionRegistry');
@@ -264,6 +265,32 @@ test('acceptOffer: erro da RPC (ex.: oferta de outro motorista) propaga como Cam
     }),
     (err) => err instanceof CampaignError && err.status === 403 && err.code === 'offer_not_owned_by_driver',
   );
+});
+
+test('listMyOffers: enriquece com origem/destino/carga sem N+1 (batch por trip/campaign)', async () => {
+  const offerRow = {
+    id: 'o1', empresa_id: EMP, round_id: 'r1', driver_id: 'd1', asset_id: 'a1', status: 'PENDING', created_at: '2026-01-01',
+    dispatch_rounds: { id: 'r1', status: 'OPEN', expires_at: '2026-01-02', planned_trip_id: 't1', campaign_id: 'c1', mode: 'OFFER' },
+  };
+  const supabase = makeSupabase({
+    tableData: {
+      dispatch_offers: [offerRow],
+      campaign_planned_trips: [{ id: 't1', origin_location_id: 'loc-a', destination_location_id: 'loc-b', planned_quantity: 20, quantity_unit: 'ton' }],
+      operation_campaigns: [{ id: 'c1', reference_code: 'CAMP-1', name: 'Campanha 1', cargo_name: 'Soja' }],
+      campaign_locations: [{ id: 'loc-a', name: 'Fazenda Alfa' }, { id: 'loc-b', name: 'Porto X' }],
+    },
+  });
+  const offers = await listMyOffers(supabase, { empresaId: EMP, driverId: 'd1' });
+  assert.equal(offers.length, 1);
+  assert.equal(offers[0].trip_context.origem, 'Fazenda Alfa');
+  assert.equal(offers[0].trip_context.destino, 'Porto X');
+  assert.equal(offers[0].campaign_context.cargo_name, 'Soja');
+});
+
+test('listMyOffers: sem ofertas -> nao dispara consultas extras (early return)', async () => {
+  const supabase = makeSupabase({ tableData: { dispatch_offers: [] } });
+  const offers = await listMyOffers(supabase, { empresaId: EMP, driverId: 'd1' });
+  assert.deepEqual(offers, []);
 });
 
 test('declineOffer / cancelRound: repassam os parametros esperados para a RPC correta', async () => {
