@@ -183,6 +183,9 @@ app.use('/app', require('./routes/appVersion'));
 // AI Copilot V1 — assistente operacional read-only, tool-mediated. Default inerte
 // (AI_PROVIDER_MODE=disabled); nunca escreve negócio nem acessa DB pelo LLM.
 app.use('/ai', require('./routes/ai'));
+// Route Intelligence V1 — estimativa de rota read-only, provider-agnostic. Default
+// inerte (ROUTE_PROVIDER_MODE=disabled); entrada manual sempre funciona; sem provider real.
+app.use('/route-intelligence', require('./routes/routeIntelligence'));
 
 // Tratamento de erros de upload (multer). Mapeia tamanho/MIME para respostas
 // JSON controladas; erros não relacionados seguem para o próximo handler.
