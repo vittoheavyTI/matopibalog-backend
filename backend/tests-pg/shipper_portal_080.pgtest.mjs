@@ -483,7 +483,11 @@ function registrar(pg) {
     assert.equal(origens[0].n, 2, 'replay nao pode duplicar origens');
   });
 
-  test('080 HIGH-02: duas criações CONCORRENTES com o mesmo client_request_id convergem para UMA (sem 500)', async () => {
+  // PROOF-01 (§16): a versão anterior deste teste só exigia `r1.ok || r2.ok`,
+  // o que NÃO prova "sem 500" para quem perde a corrida. Agora exige que AMBAS
+  // as chamadas tenham sucesso, com o MESMO id, uma única solicitação e um
+  // único conjunto de origens.
+  test('080 PROOF-01: duas criações CONCORRENTES com mesmo client_request_id → AMBAS ok, mesmo id, sem erro', async () => {
     await fullSetup();
     async function tentar() {
       const client = await pool.connect();
@@ -491,19 +495,173 @@ function registrar(pg) {
         await client.query('BEGIN');
         const row = await criarESubmeter(client, { ref: `SOL-C-${Math.random().toString(36).slice(2, 8)}`, clientRequestId: 'cli-concorrente' });
         await client.query('COMMIT');
-        return { ok: true, id: row.id };
+        return { ok: true, id: row.id, status: row.status };
       } catch (err) {
         await client.query('ROLLBACK').catch(() => {});
         return { ok: false, code: err.code, message: err.message };
       } finally { client.release(); }
     }
     const [r1, r2] = await Promise.all([tentar(), tentar()]);
-    assert.ok(r1.ok || r2.ok, 'ao menos uma criacao deve ter sucesso');
+
+    assert.equal(r1.ok, true, `chamada 1 nao pode falhar: ${r1.message || ''}`);
+    assert.equal(r2.ok, true, `chamada 2 (perdedora da corrida) nao pode receber erro: ${r2.message || ''}`);
+    assert.equal(r1.id, r2.id, 'as duas chamadas devem convergir para a MESMA solicitacao');
+    assert.equal(r1.status, 'SUBMITTED');
+    assert.equal(r2.status, 'SUBMITTED');
 
     const { rows } = await pool.query(
       `SELECT count(*)::int AS n FROM public.shipper_transport_requests WHERE client_request_id='cli-concorrente'`);
     assert.equal(rows[0].n, 1, 'nunca podem existir duas solicitacoes para o mesmo client_request_id');
+    const { rows: origens } = await pool.query(
+      `SELECT count(*)::int AS n FROM public.shipper_transport_request_origins WHERE request_id=$1`, [r1.id]);
+    assert.equal(origens[0].n, 2, 'exatamente UM conjunto logico de origens');
   });
+
+  test('080 PROOF-01: replay com payload DIFERENTE devolve a solicitação ORIGINAL (não reescreve o primeiro payload)', async () => {
+    await fullSetup();
+    const primeira = await criarESubmeter(null, {
+      ref: 'SOL-ORIG', clientRequestId: 'cli-payload',
+      origins: [{ nome: 'Fazenda A', quantidade: 100 }],
+    });
+    const replay = await criarESubmeter(null, {
+      ref: 'SOL-OUTRA', clientRequestId: 'cli-payload',
+      origins: [{ nome: 'Fazenda Z', quantidade: 999 }],
+    });
+    assert.equal(replay.id, primeira.id);
+    assert.equal(replay.reference_code, 'SOL-ORIG', 'payload posterior nao pode reescrever o original');
+    const { rows } = await pool.query(
+      `SELECT nome, quantidade FROM public.shipper_transport_request_origins WHERE request_id=$1`, [primeira.id]);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].nome, 'Fazenda A');
+    assert.equal(Number(rows[0].quantidade), 100);
+  });
+
+  // ==========================================================================
+  // OWNER REVIEW HIGH-04 — uma solicitação, uma unidade
+  // ==========================================================================
+
+  test('080 HIGH-04: todas as origens gravam a unidade CANÔNICA da solicitação e o total é somável', async () => {
+    await fullSetup();
+    const { rows } = await pool.query(
+      `SELECT * FROM public.shipper_request_create_and_submit($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+      [ORG_X, REL_AX, USER_X, 'SOL-UNIT', 'Soja', 'Porto', 'kg', null, null, null,
+        JSON.stringify([{ nome: 'Fazenda A', quantidade: 1000 }, { nome: 'Fazenda B', quantidade: 500 }]), null]);
+    const req = rows[0];
+    assert.equal(req.quantity_unit, 'kg');
+    assert.equal(Number(req.submitted_snapshot.total_quantidade), 1500);
+
+    const { rows: origens } = await pool.query(
+      `SELECT DISTINCT quantity_unit FROM public.shipper_transport_request_origins WHERE request_id=$1`, [req.id]);
+    assert.equal(origens.length, 1, 'todas as origens precisam ter a MESMA unidade');
+    assert.equal(origens[0].quantity_unit, 'kg', 'origens herdam a unidade da solicitacao');
+    // Snapshot também consistente.
+    for (const o of req.submitted_snapshot.origins) {
+      assert.equal(o.quantity_unit, 'kg');
+    }
+  });
+
+  test('080 HIGH-04: unidade divergente por origem é RECUSADA (1000 kg + 1 ton nunca vira 1001)', async () => {
+    await fullSetup();
+    await assert.rejects(
+      pool.query(
+        `SELECT * FROM public.shipper_request_create_and_submit($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+        [ORG_X, REL_AX, USER_X, 'SOL-MIX', 'Soja', 'Porto', 'kg', null, null, null,
+          JSON.stringify([{ nome: 'Fazenda A', quantidade: 1000, quantity_unit: 'kg' },
+            { nome: 'Fazenda B', quantidade: 1, quantity_unit: 'ton' }]), null]),
+      (err) => /origin_unit_mismatch/.test(err.message),
+    );
+    const { rows } = await pool.query(`SELECT count(*)::int AS n FROM public.shipper_transport_requests`);
+    assert.equal(rows[0].n, 0, 'nenhuma linha pode ser gravada quando as unidades divergem');
+    const { rows: o } = await pool.query(`SELECT count(*)::int AS n FROM public.shipper_transport_request_origins`);
+    assert.equal(o[0].n, 0);
+  });
+
+  test('080 HIGH-04: quantidade ZERO é recusada e não grava nada', async () => {
+    await fullSetup();
+    await assert.rejects(
+      criarESubmeter(null, { ref: 'SOL-ZERO', origins: [{ nome: 'Fazenda A', quantidade: 100 }, { nome: 'Fazenda B', quantidade: 0 }] }),
+      (err) => /origin_quantity_must_be_positive/.test(err.message),
+    );
+    const { rows } = await pool.query(`SELECT count(*)::int AS n FROM public.shipper_transport_requests`);
+    assert.equal(rows[0].n, 0);
+  });
+
+  test('080 HIGH-04: quantidade NEGATIVA é recusada e não grava nada', async () => {
+    await fullSetup();
+    await assert.rejects(
+      criarESubmeter(null, { ref: 'SOL-NEG', origins: [{ nome: 'Fazenda A', quantidade: -5 }] }),
+      (err) => /origin_quantity_must_be_positive/.test(err.message),
+    );
+    const { rows } = await pool.query(`SELECT count(*)::int AS n FROM public.shipper_transport_requests`);
+    assert.equal(rows[0].n, 0);
+  });
+
+  test('080 HIGH-04: CHECK do banco também recusa quantidade zero (defesa em profundidade)', async () => {
+    await fullSetup();
+    const req = await criarESubmeter(null, { ref: 'SOL-CHK' });
+    await assert.rejects(
+      pool.query(
+        `INSERT INTO public.shipper_transport_request_origins (request_id, empresa_id, nome, quantidade, quantity_unit)
+         VALUES ($1,$2,'Direto',0,'ton')`, [req.id, EMP_A]),
+      (err) => err.code === '23514',
+    );
+  });
+
+  // ==========================================================================
+  // HARDENING-01 — aceitante do convite pertence ao embarcador do convite
+  // ==========================================================================
+
+  test('080 HARDENING-01: convite do embarcador X não pode ser aceito por usuário do embarcador Y', async () => {
+    await fullSetup();
+    const { rows: inv } = await pool.query(
+      `INSERT INTO public.shipper_portal_invitations
+         (empresa_id, shipper_org_id, relationship_id, email, token_hash, created_by, expires_at)
+       VALUES ($1,$2,$3,'contato@x.test','hash-hard',$4, now() + interval '7 days') RETURNING id`,
+      [EMP_A, ORG_X, REL_AX, ADM_A]);
+
+    // USER_Y pertence a ORG_Y — a FK composta deve rejeitar.
+    await assert.rejects(
+      pool.query(
+        `UPDATE public.shipper_portal_invitations
+            SET status='ACCEPTED', accepted_at=now(), accepted_by=$1 WHERE id=$2`,
+        [USER_Y, inv[0].id]),
+      (err) => err.code === '23503',
+    );
+  });
+
+  test('080 HARDENING-01: convite aceito pelo usuário do PRÓPRIO embarcador funciona', async () => {
+    await fullSetup();
+    const { rows: inv } = await pool.query(
+      `INSERT INTO public.shipper_portal_invitations
+         (empresa_id, shipper_org_id, relationship_id, email, token_hash, created_by, expires_at)
+       VALUES ($1,$2,$3,'contato@x.test','hash-ok',$4, now() + interval '7 days') RETURNING id`,
+      [EMP_A, ORG_X, REL_AX, ADM_A]);
+    const { rows } = await pool.query(
+      `UPDATE public.shipper_portal_invitations
+          SET status='ACCEPTED', accepted_at=now(), accepted_by=$1 WHERE id=$2 RETURNING status`,
+      [USER_X, inv[0].id]);
+    assert.equal(rows[0].status, 'ACCEPTED');
+  });
+
+  test('080 HARDENING-01: convite ACCEPTED sem accepted_by é recusado pelo CHECK', async () => {
+    await fullSetup();
+    const { rows: inv } = await pool.query(
+      `INSERT INTO public.shipper_portal_invitations
+         (empresa_id, shipper_org_id, relationship_id, email, token_hash, created_by, expires_at)
+       VALUES ($1,$2,$3,'c@x.test','hash-sem-user',$4, now() + interval '7 days') RETURNING id`,
+      [EMP_A, ORG_X, REL_AX, ADM_A]);
+    await assert.rejects(
+      pool.query(
+        `UPDATE public.shipper_portal_invitations SET status='ACCEPTED', accepted_at=now() WHERE id=$1`,
+        [inv[0].id]),
+      (err) => err.code === '23514',
+    );
+  });
+
+  test('080 RPCs: apenas service_role executa; anon/authenticated não recebem EXECUTE', async () => {
+    await fullSetup();
+    for (const fn of ['shipper_request_accept', 'shipper_request_link_campaign',
+      'shipper_request_create_and_submit', 'shipper_request_cancel']) {
 
   // ==========================================================================
   // OWNER REVIEW HIGH-03 — race cancel × accept

@@ -201,10 +201,66 @@ test('solicitação: multi-origem com quantidade por origem; total é derivado, 
   const origens = normalizarOrigens([
     { nome: 'Fazenda A', quantidade: 300 },
     { nome: 'Fazenda B', quantidade: 200, quantity_unit: 'ton' },
-  ]);
+  ], 'ton');
   assert.equal(origens.length, 2);
   const snap = montarSnapshot({ reference_code: 'SOL-1', cargo_name: 'Soja', destination_name: 'Porto', quantity_unit: 'ton' }, origens);
   assert.equal(snap.total_quantidade, 500);
+});
+
+// ---- HIGH-04: uma solicitação, uma unidade --------------------------------
+
+test('HIGH-04: origem com unidade DIVERGENTE da solicitação é recusada (nunca soma kg com ton)', () => {
+  assert.throws(
+    () => normalizarOrigens([
+      { nome: 'Fazenda A', quantidade: 1000, quantity_unit: 'kg' },
+      { nome: 'Fazenda B', quantidade: 1, quantity_unit: 'ton' },
+    ], 'kg'),
+    (err) => err.code === 'origin_unit_mismatch'
+      && /mesma unidade/.test(err.message),
+  );
+});
+
+test('HIGH-04: todas as origens herdam a unidade canônica da solicitação', () => {
+  const origens = normalizarOrigens([
+    { nome: 'Fazenda A', quantidade: 1000 },
+    { nome: 'Fazenda B', quantidade: 500 },
+  ], 'kg');
+  assert.deepEqual(origens.map((o) => o.quantity_unit), ['kg', 'kg']);
+  const snap = montarSnapshot({ reference_code: 'S', cargo_name: 'Soja', destination_name: 'Porto', quantity_unit: 'kg' }, origens);
+  assert.equal(snap.total_quantidade, 1500, 'soma valida: mesma unidade em todas as parcelas');
+});
+
+test('HIGH-04: quantidade zero é recusada (zero não é necessidade de transporte)', () => {
+  assert.throws(
+    () => normalizarOrigens([{ nome: 'Fazenda A', quantidade: 0 }], 'ton'),
+    (err) => err.code === 'invalid_quantity' && /maior que zero/.test(err.message),
+  );
+});
+
+test('HIGH-04: quantidade negativa é recusada', () => {
+  assert.throws(
+    () => normalizarOrigens([{ nome: 'Fazenda A', quantidade: -5 }], 'ton'),
+    (err) => err.code === 'invalid_quantity',
+  );
+});
+
+test('HIGH-04: criarSolicitacao não envia unidade por origem (autoridade é a solicitação)', async () => {
+  const { criarSolicitacao } = require('../services/shipperPortal/shipperRequestService');
+  const supabase = makeSupabase(fixtureBase(), {
+    rpcImpl: () => ({ data: { id: 'r1', reference_code: 'S', status: 'SUBMITTED', cargo_name: 'Soja', destination_name: 'Porto', quantity_unit: 'kg' }, error: null }),
+  });
+  await criarSolicitacao(supabase, {
+    portalUserId: USER_X,
+    body: {
+      cargo_name: 'Soja', destination_name: 'Porto', quantity_unit: 'kg',
+      origins: [{ nome: 'Fazenda A', quantidade: 1000 }, { nome: 'Fazenda B', quantidade: 500 }],
+    },
+  });
+  const chamada = supabase._rpcCalls.find((c) => c.name === 'shipper_request_create_and_submit');
+  assert.equal(chamada.params.p_quantity_unit, 'kg');
+  for (const o of chamada.params.p_origins) {
+    assert.ok(!('quantity_unit' in o), 'origem nao pode carregar unidade propria');
+  }
 });
 
 test('solicitação: origem duplicada é recusada com mensagem clara', () => {

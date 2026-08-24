@@ -124,7 +124,9 @@ CREATE TABLE IF NOT EXISTS public.shipper_portal_invitations (
   accepted_by UUID NULL REFERENCES public.shipper_portal_users(id) ON DELETE SET NULL,
   created_by UUID NULL REFERENCES public.usuarios(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CHECK (status <> 'ACCEPTED' OR accepted_at IS NOT NULL)
+  -- Um convite aceito precisa ter QUEM aceitou: aceite sem usuario identificado
+  -- nao e rastreavel e nao deveria existir.
+  CHECK (status <> 'ACCEPTED' OR (accepted_at IS NOT NULL AND accepted_by IS NOT NULL))
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS shipper_portal_invitations_token_key
@@ -143,6 +145,18 @@ DO $$ BEGIN
     FOREIGN KEY (relationship_id, shipper_org_id, empresa_id)
     REFERENCES public.shipper_carrier_relationships (id, shipper_org_id, empresa_id)
     ON DELETE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- HARDENING-01: quem aceita o convite precisa pertencer ao MESMO embarcador do
+-- convite. Sem esta FK composta, um usuario do embarcador Y poderia figurar como
+-- aceitante de um convite do embarcador X -- o banco nao impediria. Reusa a chave
+-- composta shipper_portal_users (id, shipper_org_id).
+DO $$ BEGIN
+  ALTER TABLE public.shipper_portal_invitations
+    ADD CONSTRAINT shipper_invitations_acceptor_org_fk
+    FOREIGN KEY (accepted_by, shipper_org_id)
+    REFERENCES public.shipper_portal_users (id, shipper_org_id)
+    ON DELETE SET NULL (accepted_by);
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- ============================================================================
@@ -240,12 +254,21 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 -- Mesma filosofia do Campaign-D: cada origem carrega a propria quantidade; o
 -- total e sempre DERIVADO, nunca redigitado.
 
+-- MODELO DE UNIDADE (SHIPPER_PORTAL_V1_QUANTITY_UNIT_MODEL=ONE_REQUEST_LEVEL_UNIT):
+-- a solicitacao tem UMA unidade canonica e TODAS as origens usam ela. A coluna
+-- quantity_unit aqui existe para deixar o dado auto-descritivo, mas nunca e
+-- escolhida por origem -- a RPC sempre grava a unidade da solicitacao. Sem isso,
+-- somar 1000 kg + 1 ton daria "1001", um numero sem significado.
+-- Portal V1 NAO converte kg<->ton: uma solicitacao, uma unidade, explicito.
+--
+-- quantidade > 0 (nao >= 0): uma origem com quantidade zero nao representa
+-- necessidade de transporte nenhuma.
 CREATE TABLE IF NOT EXISTS public.shipper_transport_request_origins (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   request_id UUID NOT NULL REFERENCES public.shipper_transport_requests(id) ON DELETE CASCADE,
   empresa_id UUID NOT NULL REFERENCES public.empresas(id) ON DELETE CASCADE,
   nome TEXT NOT NULL,
-  quantidade NUMERIC(14,3) NOT NULL CHECK (quantidade >= 0),
+  quantidade NUMERIC(14,3) NOT NULL CHECK (quantidade > 0),
   quantity_unit TEXT NOT NULL DEFAULT 'ton' CHECK (quantity_unit IN ('kg','ton','tonelada')),
   ordem INTEGER NOT NULL DEFAULT 0 CHECK (ordem >= 0),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -438,8 +461,8 @@ DECLARE
   v_origin jsonb;
   v_snapshot jsonb;
   v_total numeric := 0;
-  v_count int := 0;
   v_ordem int := 0;
+  v_unit text;
 BEGIN
   -- Idempotencia: replay do mesmo pedido logico devolve a solicitacao existente.
   IF p_client_request_id IS NOT NULL THEN
@@ -474,6 +497,25 @@ BEGIN
     RAISE EXCEPTION 'origins_required' USING ERRCODE = '22023';
   END IF;
 
+  v_unit := COALESCE(NULLIF(p_quantity_unit, ''), 'ton');
+  IF v_unit NOT IN ('kg','ton','tonelada') THEN
+    RAISE EXCEPTION 'invalid_quantity_unit' USING ERRCODE = '22023';
+  END IF;
+
+  -- HIGH-04: valida TUDO antes de gravar qualquer linha. Uma origem com unidade
+  -- divergente nao e reinterpretada silenciosamente -- e recusada, porque
+  -- adivinhar a intencao do usuario aqui produziria um total sem sentido.
+  FOR v_origin IN SELECT * FROM jsonb_array_elements(p_origins)
+  LOOP
+    IF v_origin->>'quantity_unit' IS NOT NULL
+       AND v_origin->>'quantity_unit' <> v_unit THEN
+      RAISE EXCEPTION 'origin_unit_mismatch' USING ERRCODE = '22023';
+    END IF;
+    IF COALESCE((v_origin->>'quantidade')::numeric, 0) <= 0 THEN
+      RAISE EXCEPTION 'origin_quantity_must_be_positive' USING ERRCODE = '22023';
+    END IF;
+  END LOOP;
+
   BEGIN
     INSERT INTO public.shipper_transport_requests (
       empresa_id, shipper_org_id, relationship_id, reference_code, status,
@@ -481,7 +523,7 @@ BEGIN
       notes, created_by, client_request_id
     ) VALUES (
       v_rel.empresa_id, p_shipper_org_id, p_relationship_id, p_reference_code, 'DRAFT',
-      p_cargo_name, p_destination_name, COALESCE(p_quantity_unit, 'ton'), p_window_start, p_window_end,
+      p_cargo_name, p_destination_name, v_unit, p_window_start, p_window_end,
       p_notes, p_portal_user_id, p_client_request_id
     ) RETURNING * INTO v_request;
   EXCEPTION WHEN unique_violation THEN
@@ -504,12 +546,12 @@ BEGIN
     VALUES (
       v_request.id, v_rel.empresa_id,
       v_origin->>'nome',
-      COALESCE((v_origin->>'quantidade')::numeric, 0),
-      COALESCE(v_origin->>'quantity_unit', 'ton'),
+      (v_origin->>'quantidade')::numeric,
+      v_unit,  -- SEMPRE a unidade canonica da solicitacao (nunca por origem)
       v_ordem
     );
-    v_total := v_total + COALESCE((v_origin->>'quantidade')::numeric, 0);
-    v_count := v_count + 1;
+    -- Soma valida: todas as parcelas estao provadamente na MESMA unidade.
+    v_total := v_total + (v_origin->>'quantidade')::numeric;
     v_ordem := v_ordem + 1;
   END LOOP;
 

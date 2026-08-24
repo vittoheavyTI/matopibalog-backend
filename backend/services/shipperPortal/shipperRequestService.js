@@ -24,10 +24,12 @@ function texto(value, field, { obrigatorio = true, max = 200 } = {}) {
   return s.slice(0, max);
 }
 
+// Quantidade precisa ser > 0: uma origem com zero não representa necessidade de
+// transporte nenhuma (HIGH-04).
 function numero(value, field) {
   const n = Number(value);
-  if (!Number.isFinite(n) || n < 0) {
-    throw new ShipperPortalError(`Informe uma quantidade válida para ${field}.`, {
+  if (!Number.isFinite(n) || n <= 0) {
+    throw new ShipperPortalError(`Informe uma quantidade maior que zero para ${field}.`, {
       status: 400, code: 'invalid_quantity', details: { field },
     });
   }
@@ -42,15 +44,20 @@ function unidade(value) {
   return u;
 }
 
-// Normaliza as origens do payload (multi-origem, §26): cada origem carrega a
-// própria quantidade; o total é sempre DERIVADO, nunca pedido ao usuário.
-function normalizarOrigens(input) {
+// Normaliza as origens (multi-origem, §26). Cada origem carrega a própria
+// QUANTIDADE, mas não a própria UNIDADE: a solicitação tem UMA unidade canônica
+// e todas as origens usam ela (ONE_REQUEST_LEVEL_UNIT, HIGH-04). Sem isso,
+// somar 1000 kg + 1 ton produziria "1001" — um número sem significado.
+// Se a origem trouxer unidade explícita divergente, recusamos em vez de
+// reinterpretar silenciosamente.
+function normalizarOrigens(input, unidadeSolicitacao = 'ton') {
   const lista = Array.isArray(input) && input.length ? input : null;
   if (!lista) {
     throw new ShipperPortalError('Informe ao menos um local de coleta.', {
       status: 400, code: 'missing_origins',
     });
   }
+  const canonica = unidade(unidadeSolicitacao);
   const vistos = new Set();
   return lista.map((o, idx) => {
     const nome = texto(o?.nome ?? o?.name, `o nome do local de coleta ${idx + 1}`);
@@ -61,10 +68,19 @@ function normalizarOrigens(input) {
       });
     }
     vistos.add(chave);
+
+    const unidadeInformada = o?.quantity_unit ?? o?.unidade;
+    if (unidadeInformada && unidade(unidadeInformada) !== canonica) {
+      throw new ShipperPortalError(
+        'As quantidades da solicitação precisam usar a mesma unidade. Escolha uma unidade para toda a solicitação.',
+        { status: 400, code: 'origin_unit_mismatch', details: { nome } },
+      );
+    }
+
     return {
       nome,
       quantidade: numero(o?.quantidade ?? o?.target_quantity, `o local ${nome}`),
-      quantity_unit: unidade(o?.quantity_unit ?? o?.unidade),
+      quantity_unit: canonica,
       ordem: idx,
     };
   });
@@ -163,6 +179,17 @@ function mapRpcError(error) {
     relationship_not_active: { status: 403, code: 'relationship_not_active', message: 'Seu acesso a esta transportadora foi revogado.' },
     portal_user_not_in_org: { status: 403, code: 'portal_user_not_in_org', message: 'Seu usuário não pertence a esta empresa embarcadora.' },
     origins_required: { status: 400, code: 'missing_origins', message: 'Informe ao menos um local de coleta.' },
+    invalid_quantity_unit: { status: 400, code: 'invalid_unit', message: 'Unidade de quantidade inválida. Use kg ou toneladas.' },
+    origin_unit_mismatch: {
+      status: 400,
+      code: 'origin_unit_mismatch',
+      message: 'As quantidades da solicitação precisam usar a mesma unidade. Escolha uma unidade para toda a solicitação.',
+    },
+    origin_quantity_must_be_positive: {
+      status: 400,
+      code: 'invalid_quantity',
+      message: 'Cada local de coleta precisa ter uma quantidade maior que zero.',
+    },
     request_not_found: { status: 404, code: 'request_not_found', message: 'Solicitação não encontrada.' },
     request_not_cancellable: {
       status: 409,
@@ -194,8 +221,10 @@ async function criarSolicitacao(supabase, { portalUserId, body = {} }) {
   const clientRequestId = texto(body.client_request_id, 'a identificação da solicitação', { obrigatorio: false, max: 120 });
 
   // Validação/normalização continua aqui (mensagens em pt-BR acionáveis); a
-  // ATOMICIDADE é responsabilidade da RPC.
-  const origens = normalizarOrigens(body.origins);
+  // ATOMICIDADE é responsabilidade da RPC. A unidade da SOLICITAÇÃO é a
+  // autoridade — as origens herdam dela (HIGH-04).
+  const unidadeCanonica = unidade(body.quantity_unit);
+  const origens = normalizarOrigens(body.origins, unidadeCanonica);
 
   const { data, error } = await supabase.rpc('shipper_request_create_and_submit', {
     p_shipper_org_id: context.shipperOrgId,
@@ -205,13 +234,13 @@ async function criarSolicitacao(supabase, { portalUserId, body = {} }) {
       || `SOL-${Date.now().toString(36).toUpperCase()}`,
     p_cargo_name: texto(body.cargo_name, 'o que será transportado'),
     p_destination_name: texto(body.destination_name, 'o destino'),
-    p_quantity_unit: unidade(body.quantity_unit),
+    p_quantity_unit: unidadeCanonica,
     p_window_start: body.window_start || null,
     p_window_end: body.window_end || null,
     p_notes: texto(body.notes, 'as observações', { obrigatorio: false, max: 2000 }),
-    p_origins: origens.map((o) => ({
-      nome: o.nome, quantidade: o.quantidade, quantity_unit: o.quantity_unit,
-    })),
+    // Sem quantity_unit por origem: a RPC grava a unidade canônica da
+    // solicitação em todas elas (ONE_REQUEST_LEVEL_UNIT).
+    p_origins: origens.map((o) => ({ nome: o.nome, quantidade: o.quantidade })),
     p_client_request_id: clientRequestId,
   });
   if (error) throw mapRpcError(error);
