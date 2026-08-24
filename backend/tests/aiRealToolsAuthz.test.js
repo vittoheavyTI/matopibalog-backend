@@ -36,7 +36,7 @@ function ctx(overrides = {}) {
 
 test('tools reais registradas com permissão canônica', () => {
   const names = registry.listTools().map((t) => t.name).sort();
-  assert.deepEqual(names, ['commercial.current_plan.summary', 'fleet.current.summary', 'operation.freights.attention']);
+  assert.deepEqual(names, ['commercial.current_plan.summary', 'fleet.current.summary', 'operation.command_center.summary', 'operation.freights.attention']);
   assert.equal(registry.getTool('fleet.current.summary').requiredPermission, 'fleet.view');
   assert.equal(registry.getTool('operation.freights.attention').requiredPermission, 'freight.view');
   assert.equal(registry.getTool('commercial.current_plan.summary').requiredPermission, 'company.settings.view');

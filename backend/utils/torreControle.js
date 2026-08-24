@@ -79,6 +79,7 @@ const resumirEpod = (epod, evidencias) => {
   };
 };
 
+// attention_code: categoria estruturada (§40) para filtros e IA, além do texto.
 const decidirSituacao = ({ frete, ocorrenciasAbertas, epodResumo, faltantes }) => {
   const status = statusTexto(frete.status);
   const ocorrenciaAtraso = ocorrenciasAbertas.find((o) => statusTexto(o.tipo) === 'atraso');
@@ -87,6 +88,7 @@ const decidirSituacao = ({ frete, ocorrenciasAbertas, epodResumo, faltantes }) =
   if (STATUS_CANCELADOS.has(status)) {
     return {
       nivel: 'informativo',
+      codigo: 'CANCELADO',
       situacao: 'Cancelado',
       motivo: 'Viagem cancelada: exibida somente para consulta.',
     };
@@ -95,6 +97,7 @@ const decidirSituacao = ({ frete, ocorrenciasAbertas, epodResumo, faltantes }) =
   if (ocorrenciaAtraso) {
     return {
       nivel: 'critico',
+      codigo: 'OCORRENCIA_ATRASO',
       situacao: 'Atraso registrado',
       motivo: 'Há ocorrência de atraso aberta ou em análise.',
     };
@@ -103,6 +106,7 @@ const decidirSituacao = ({ frete, ocorrenciasAbertas, epodResumo, faltantes }) =
   if (ocorrenciaCritica) {
     return {
       nivel: 'critico',
+      codigo: 'OCORRENCIA_CRITICA',
       situacao: 'Ocorrência crítica',
       motivo: `Há ocorrência de ${ocorrenciaCritica.tipo} aberta ou em análise.`,
     };
@@ -111,6 +115,7 @@ const decidirSituacao = ({ frete, ocorrenciasAbertas, epodResumo, faltantes }) =
   if (ocorrenciasAbertas.length > 0) {
     return {
       nivel: 'atencao',
+      codigo: 'OCORRENCIA_ABERTA',
       situacao: 'Ocorrência aberta',
       motivo: 'Há ocorrência aberta ou em análise.',
     };
@@ -119,6 +124,7 @@ const decidirSituacao = ({ frete, ocorrenciasAbertas, epodResumo, faltantes }) =
   if (STATUS_FINAIS.has(status) && epodResumo.status === 'sem_epod') {
     return {
       nivel: 'informativo',
+      codigo: 'SEM_COMPROVANTE',
       situacao: 'Sem comprovante',
       motivo: 'Viagem finalizada sem comprovante de entrega registrado.',
     };
@@ -127,6 +133,7 @@ const decidirSituacao = ({ frete, ocorrenciasAbertas, epodResumo, faltantes }) =
   if (STATUS_FINAIS.has(status) && STATUS_EPOD_ATENCAO.has(epodResumo.status)) {
     return {
       nivel: epodResumo.status === 'rejeitado' ? 'critico' : 'atencao',
+      codigo: epodResumo.status === 'rejeitado' ? 'COMPROVANTE_RECUSADO' : 'COMPROVACAO_PENDENTE',
       situacao: epodResumo.status === 'rejeitado' ? 'Comprovante recusado' : 'Comprovação pendente',
       motivo: epodResumo.status === 'rejeitado'
         ? 'Comprovante de entrega recusado.'
@@ -137,6 +144,7 @@ const decidirSituacao = ({ frete, ocorrenciasAbertas, epodResumo, faltantes }) =
   if (STATUS_ATIVOS.has(status) && faltantes.length > 0) {
     return {
       nivel: 'atencao',
+      codigo: 'DADOS_INCOMPLETOS',
       situacao: 'Informações incompletas',
       motivo: `Campos pendentes: ${faltantes.join(', ')}.`,
     };
@@ -145,6 +153,7 @@ const decidirSituacao = ({ frete, ocorrenciasAbertas, epodResumo, faltantes }) =
   if (STATUS_FINAIS.has(status) && STATUS_EPOD_OK.has(epodResumo.status)) {
     return {
       nivel: 'ok',
+      codigo: 'CONCLUIDO',
       situacao: 'Concluído',
       motivo: 'Viagem finalizada com comprovante de entrega aprovado.',
     };
@@ -153,6 +162,7 @@ const decidirSituacao = ({ frete, ocorrenciasAbertas, epodResumo, faltantes }) =
   if (STATUS_ATIVOS.has(status)) {
     return {
       nivel: 'ok',
+      codigo: status === 'pendente' ? 'PENDENTE' : 'EM_ANDAMENTO',
       situacao: status === 'pendente' ? 'Pendente' : 'Em andamento',
       motivo: status === 'pendente' ? 'Viagem aguardando ativação operacional.' : 'Viagem em andamento, sem alertas.',
     };
@@ -160,6 +170,7 @@ const decidirSituacao = ({ frete, ocorrenciasAbertas, epodResumo, faltantes }) =
 
   return {
     nivel: 'informativo',
+    codigo: 'INFORMATIVO',
     situacao: frete.status || 'Status nao informado',
     motivo: 'Viagem sem alertas operacionais.',
   };
@@ -238,7 +249,7 @@ const montarLocalizacao = ({ frete, loc, estado }) => {
   };
 };
 
-function montarTorreControle({ fretes, ocorrencias, epods, evidencias, localizacoes, localizacaoEstados }) {
+function montarTorreControle({ fretes, ocorrencias, epods, evidencias, localizacoes, localizacaoEstados, financialVisibility = true }) {
   const ocorrPorFrete = contarPorFrete(ocorrencias);
   const epodPorFrete = new Map((epods || []).map((e) => [e.frete_id, e]));
   const evidPorFrete = contarPorFrete(evidencias);
@@ -261,10 +272,16 @@ function montarTorreControle({ fretes, ocorrencias, epods, evidencias, localizac
     const decisaoComLocalizacao = localizacao.nivel_alerta === 'atencao' && decisao.nivel === 'ok'
       ? {
           nivel: 'atencao',
+          codigo: 'LOCALIZACAO_ATENCAO',
           situacao: localizacao.rotulo,
           motivo: localizacao.detalhe || 'A viagem esta em andamento, mas o compartilhamento de localizacao precisa de atencao.',
         }
       : decisao;
+
+    // Privacidade financeira (§26/§27): valor do frete só quando autorizado. Sem
+    // permissão, o campo é OMITIDO (não retornado 0/mascarado no cliente) e o campo
+    // "valor do frete" também sai da lista de pendências (não sinaliza financeiro).
+    const faltantesExpostos = financialVisibility ? faltantes : faltantes.filter((f) => f !== 'valor do frete');
 
     return {
       frete_id: frete.id,
@@ -276,11 +293,13 @@ function montarTorreControle({ fretes, ocorrencias, epods, evidencias, localizac
       destino: frete.destino || null,
       placa: frete.placa || null,
       status: frete.status || null,
-      valor_frete: numero(frete.valor_frete),
+      ...(financialVisibility ? { valor_frete: numero(frete.valor_frete) } : {}),
+      financial_visibility: financialVisibility === true,
       nivel: decisaoComLocalizacao.nivel,
+      attention_code: decisaoComLocalizacao.codigo || 'INFORMATIVO',
       situacao: decisaoComLocalizacao.situacao,
       motivo: decisaoComLocalizacao.motivo,
-      dados_incompletos: faltantes,
+      dados_incompletos: faltantesExpostos,
       ocorrencias: {
         total: todasOcorrencias.length,
         abertas: ocorrenciasAbertas.length,
