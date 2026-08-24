@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Users, FileText, Truck, ChevronLeft, ChevronRight, Upload, X, Check, Trash2, Settings, UserCircle, Receipt, History, Building2, DollarSign, Bell, Plug, ClipboardList, Ticket, TrendingUp, TowerControl, Boxes, FileSignature, CreditCard, Network, ShieldCheck } from 'lucide-react';
+import { LayoutDashboard, Users, FileText, Truck, ChevronLeft, ChevronRight, Upload, X, Check, Trash2, Settings, UserCircle, Receipt, History, Building2, DollarSign, Bell, Plug, ClipboardList, Ticket, TrendingUp, TowerControl, Boxes, FileSignature, CreditCard, Network, ShieldCheck, Route as RouteIcon } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useContratacaoStatus } from '../hooks/useContratacaoStatus';
 import { usePortalGovernanca } from '../hooks/usePortalGovernanca';
@@ -185,6 +185,9 @@ export const Sidebar: React.FC = () => {
       ...(can('reports.operational.view') ? [
         { to: '/relatorios/torre-controle', icon: TowerControl, label: 'Torre de Controle' },
       ] : []),
+      ...(can('freight.view') ? [
+        { to: '/rota', icon: RouteIcon, label: 'Rota inteligente' },
+      ] : []),
       { to: '/relatorios/resumo', icon: History, label: 'Histórico de Fretes' },
       { to: '/relatorios', icon: FileText, label: 'Relatórios' },
       // Rentabilidade/Acerto são RELATÓRIOS FINANCEIROS → reports.financial.view.
@@ -226,6 +229,7 @@ export const Sidebar: React.FC = () => {
       { to: '/painel-administrativo/operacional', icon: Network, label: 'Estrutura Operacional' },
       { to: '/painel-administrativo/motoristas', icon: Users, label: 'Motoristas / Autônomos' },
       { to: '/relatorios/torre-controle', icon: TowerControl, label: 'Torre de Controle' },
+      { to: '/rota', icon: RouteIcon, label: 'Rota inteligente' },
       { to: '/relatorios/resumo', icon: History, label: 'Histórico de Fretes' },
       { to: '/relatorios/acerto-motoristas', icon: Receipt, label: 'Acerto de Motoristas' },
     ] },

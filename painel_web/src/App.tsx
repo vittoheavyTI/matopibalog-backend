@@ -13,6 +13,7 @@ import { Relatorios } from './pages/Relatorios';
 import Rentabilidade from './pages/Rentabilidade';
 import { AcertoMotoristas } from './pages/AcertoMotoristas';
 import { TorreControle } from './pages/TorreControle';
+import { RotaInteligente } from './pages/RotaInteligente';
 import { GerenciamentoViagens } from './pages/GerenciamentoViagens';
 import { ResumoMotorista } from './pages/ResumoMotorista';
 import { Usuarios } from './pages/Usuarios';
@@ -90,6 +91,7 @@ const AppRoutes = () => {
         <Route path="relatorios/rentabilidade" element={<PermissionRoute permission="reports.financial.view"><Rentabilidade /></PermissionRoute>} />
         <Route path="relatorios/acerto-motoristas" element={<PermissionRoute permission="reports.financial.view"><AcertoMotoristas /></PermissionRoute>} />
         <Route path="relatorios/torre-controle" element={<TorreControle />} />
+        <Route path="rota" element={<PermissionRoute permission="freight.view"><RotaInteligente /></PermissionRoute>} />
         <Route path="admins" element={<Usuarios />} />
         <Route path="perfis-permissoes" element={<PermissionRoute permission="permissions.manage"><PerfisPermissoes /></PermissionRoute>} />
         <Route path="operacional" element={<Operacional />} />
