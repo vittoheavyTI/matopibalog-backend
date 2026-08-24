@@ -7,8 +7,9 @@ const registry = require('../toolRegistry');
 const fleetCurrentSummary = require('./fleetCurrentSummary');
 const commercialPlanSummary = require('./commercialPlanSummary');
 const operationFreightsAttention = require('./operationFreightsAttention');
+const commandCenterSummary = require('./commandCenterSummary');
 
-const ALL = [fleetCurrentSummary, commercialPlanSummary, operationFreightsAttention];
+const ALL = [fleetCurrentSummary, commercialPlanSummary, operationFreightsAttention, commandCenterSummary];
 
 let _registered = false;
 function registerAllTools() {

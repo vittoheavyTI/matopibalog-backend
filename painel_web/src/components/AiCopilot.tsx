@@ -38,6 +38,18 @@ export const AiCopilot: React.FC = () => {
     if (aberto) setTimeout(() => inputRef.current?.focus(), 50);
   }, [aberto]);
 
+  // Outras telas (ex.: Torre de Controle) podem abrir o assistente via evento,
+  // opcionalmente pré-preenchendo uma pergunta sugerida.
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      setAberto(true);
+      const q = (e as CustomEvent).detail?.question;
+      if (typeof q === 'string' && q) setEntrada(q);
+    };
+    window.addEventListener('ai:open', onOpen);
+    return () => window.removeEventListener('ai:open', onOpen);
+  }, []);
+
   useEffect(() => { fimRef.current?.scrollIntoView?.({ behavior: 'smooth' }); }, [mensagens, carregando]);
 
   const enviar = useCallback(async (texto: string) => {
