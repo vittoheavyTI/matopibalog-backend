@@ -30,8 +30,10 @@ type Item = {
   destino: string | null;
   placa: string | null;
   status: string | null;
-  valor_frete: number | null;
+  valor_frete?: number | null; // ausente quando o usuário não tem visibilidade financeira
+  financial_visibility?: boolean;
   nivel: Nivel;
+  attention_code?: string;
   situacao: string;
   motivo: string;
   dados_incompletos: string[];
@@ -299,7 +301,10 @@ const LinhaItem: React.FC<{ item: Item }> = ({ item }) => (
     </div>
     <div className="flex flex-wrap gap-1.5 text-[10px] font-semibold text-gray-600 md:block md:space-y-1">
       <span className="inline-flex rounded-full bg-gray-100 px-2 py-0.5">{statusRotulo(item.status)}</span>
-      <span className="inline-flex rounded-full bg-gray-100 px-2 py-0.5">{item.valor_frete === null ? '-' : formatCurrency(item.valor_frete)}</span>
+      {/* Valor só quando há visibilidade financeira (campo ausente = sem permissão). */}
+      {item.valor_frete !== undefined && (
+        <span className="inline-flex rounded-full bg-gray-100 px-2 py-0.5">{item.valor_frete === null ? '-' : formatCurrency(item.valor_frete)}</span>
+      )}
     </div>
     <div className="min-w-0 text-gray-600">
       <p>{motivoAmigavel(item)}</p>
@@ -474,6 +479,13 @@ export const TorreControle: React.FC = () => {
       <div className="mb-1 flex items-center gap-2">
         <TowerControl className="text-green-700" size={21} aria-hidden="true" />
         <h1 className="text-xl font-bold text-gray-800">Torre de Controle</h1>
+        <button
+          type="button"
+          onClick={() => window.dispatchEvent(new CustomEvent('ai:open', { detail: { question: 'Quais viagens precisam de atenção agora?' } }))}
+          className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100"
+        >
+          Perguntar ao assistente
+        </button>
       </div>
       <p className="mb-3 inline-flex items-start gap-1 text-xs text-gray-500">
         <Info size={13} className="mt-0.5 shrink-0" aria-hidden="true" />

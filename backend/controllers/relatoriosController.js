@@ -9,6 +9,8 @@ const {
 const { calcularRentabilidadeFrete, resumirRentabilidade } = require('../utils/rentabilidadeFrete');
 const { calcularAcertoMotoristas } = require('../utils/acertoMotorista');
 const { montarTorreControle, resumirItensTorre } = require('../utils/torreControle');
+const { carregarCommandCenter } = require('../services/commandCenterService');
+const { ensureEffective } = require('../middlewares/requirePermission');
 const {
   resolverEscopoOperacional,
   aplicarEscopoOperacionalQuery,
@@ -441,102 +443,44 @@ exports.getTorreControle = async (req, res) => {
       }
     }
 
-    let fretesQuery = supabase
-      .from('fretes')
-      .select('id, empresa_id, motorista_id, data, origem, destino, placa, status, valor_frete');
-    fretesQuery = aplicarEscopoOperacionalQuery(fretesQuery, operationalScope);
-    if (inicio) fretesQuery = fretesQuery.gte('data', inicio);
-    if (fim) fretesQuery = fretesQuery.lte('data', fim);
-    if (motorista_id) fretesQuery = fretesQuery.eq('motorista_id', motorista_id);
-    if (status === 'em_andamento') {
-      fretesQuery = fretesQuery.in('status', ['ativo', 'pendente', 'em_viagem', 'em_andamento']);
-    } else if (status) {
-      fretesQuery = fretesQuery.eq('status', status);
-    }
-    fretesQuery = fretesQuery.order('data', { ascending: false }).limit(LIMITE_FRETES);
-
-    const { data: fretesRaw, error: fretesErr } = await fretesQuery;
-    if (fretesErr) throw fretesErr;
-
-    const fretesBase = fretesRaw || [];
-    const motoristasIds = [...new Set(fretesBase.map((f) => f.motorista_id).filter(Boolean))];
-    let motoristasPorId = new Map();
-    if (motoristasIds.length) {
-      let motoristasQuery = supabase
-        .from('motoristas')
-        .select('id, empresa_id, usuarios(nome)')
-        .in('id', motoristasIds);
-      motoristasQuery = aplicarEmpresasAutorizadasQuery(motoristasQuery, operationalScope, empresaAlvo);
-      const { data: motoristasRaw, error: motoristasErr } = await motoristasQuery;
-      if (motoristasErr) throw motoristasErr;
-      motoristasPorId = new Map((motoristasRaw || []).map((m) => [m.id, m]));
+    // Visibilidade financeira (§26/§27): valor do frete só com permissão operacional
+    // financeira efetiva (ou super-admin). freight.view/reports.operational.view NÃO
+    // concedem financeiro por si.
+    let financialVisibility = isSuperAdmin;
+    if (!financialVisibility) {
+      try {
+        const eff = await ensureEffective(req);
+        financialVisibility = Boolean(eff?.permissions?.['finance.operational.view']);
+      } catch { financialVisibility = false; }
     }
 
-    const fretes = fretesBase.map((frete) => ({
-      ...frete,
-      motoristas: motoristasPorId.get(frete.motorista_id) || null,
-    }));
-    const ids = fretes.map((f) => f.id).filter(Boolean);
-    let ocorrencias = [];
-    let epods = [];
-    let evidencias = [];
-    let localizacoes = [];
-    let localizacaoEstados = [];
+    // Capacidades para o cliente decidir o que renderizar (§30) — sem role hardcode.
+    let permissions = {};
+    try { permissions = (await ensureEffective(req))?.permissions || {}; } catch { permissions = {}; }
+    const capabilities = {
+      can_view_freight: isSuperAdmin || permissions['freight.view'] === true || permissions['reports.operational.view'] === true,
+      can_view_fleet: isSuperAdmin || permissions['fleet.view'] === true,
+      can_view_operational_finance: financialVisibility,
+      can_view_documents: isSuperAdmin || permissions['documents.view'] === true,
+    };
 
-    if (ids.length) {
-      const [ocRes, epodRes, evidRes, locRes, locEstadoRes] = await Promise.all([
-        aplicarEmpresasAutorizadasQuery(
-          supabase.from('frete_ocorrencias').select('id, frete_id, empresa_id, tipo, status, impacto, ocorrido_em, created_at'),
-          operationalScope,
-          empresaAlvo,
-        ).in('frete_id', ids),
-        aplicarEmpresasAutorizadasQuery(
-          supabase.from('frete_epod').select('id, frete_id, empresa_id, status, comprovado_em, validado_em'),
-          operationalScope,
-          empresaAlvo,
-        ).in('frete_id', ids),
-        aplicarEmpresasAutorizadasQuery(
-          supabase.from('frete_epod_evidencias').select('id, frete_id, empresa_id, status, created_at'),
-          operationalScope,
-          empresaAlvo,
-        ).in('frete_id', ids),
-        aplicarEmpresasAutorizadasQuery(
-          supabase.from('frete_ultima_localizacao').select('frete_id, empresa_id, motorista_id, accuracy_m, captured_at, received_at'),
-          operationalScope,
-          empresaAlvo,
-        ).in('frete_id', ids),
-        aplicarEmpresasAutorizadasQuery(
-          supabase.from('frete_localizacao_estado').select('frete_id, empresa_id, motorista_id, estado, detalhe, atualizado_em, ultima_localizacao_em'),
-          operationalScope,
-          empresaAlvo,
-        ).in('frete_id', ids),
-      ]);
-      if (ocRes.error) throw ocRes.error;
-      if (epodRes.error) throw epodRes.error;
-      if (evidRes.error) throw evidRes.error;
-      if (locRes.error) throw locRes.error;
-      if (locEstadoRes.error) throw locEstadoRes.error;
-      ocorrencias = ocRes.data || [];
-      epods = epodRes.data || [];
-      evidencias = evidRes.data || [];
-      localizacoes = locRes.data || [];
-      localizacaoEstados = locEstadoRes.data || [];
-    }
-
-    let torre = montarTorreControle({ fretes, ocorrencias, epods, evidencias, localizacoes, localizacaoEstados });
-    if (nivel) {
-      const itensFiltrados = torre.itens.filter((item) => item.nivel === nivel);
-      torre = {
-        ...torre,
-        resumo: resumirItensTorre(itensFiltrados),
-        itens: itensFiltrados,
-      };
-    }
+    const cc = await carregarCommandCenter(supabase, {
+      empresaAlvo,
+      operationalScope,
+      filtros: { inicio, fim, motorista_id, status, nivel },
+      financialVisibility,
+      limite: LIMITE_FRETES,
+    });
 
     res.status(200).json({
-      ...torre,
+      generated_at: new Date().toISOString(),
+      capabilities,
+      financial_visibility: financialVisibility,
+      resumo: cc.resumo,
+      attention_summary: cc.attention_summary,
+      itens: cc.itens,
       periodo: { inicio: inicio || null, fim: fim || null },
-      limite_aplicado: fretes.length >= LIMITE_FRETES,
+      limite_aplicado: cc.limite_aplicado,
     });
   } catch (error) {
     console.error('Erro ao carregar torre de controle:', error?.message || error);
