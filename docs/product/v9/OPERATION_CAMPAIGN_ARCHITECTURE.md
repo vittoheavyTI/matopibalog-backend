@@ -1,6 +1,7 @@
 # ONDA 3 - Operation Campaign / Operacao de Escoamento
 
 > Status: `CAMPAIGN_AUDIT_FINDINGS_FROZEN=true`; `CAMPAIGN_A_TECHNICAL_STATUS=CLOSED`; `CAMPAIGN_A_END_STATE=APPROVED_PLAN`; `CAMPAIGN_A_FREIGHT_WRITES=0`.
+> `CAMPAIGN_B_TECHNICAL_STATUS=CLOSED` (materialization linkage; takeover Claude 2026-08-24, PR #464 `MERGE_SHA=139105d523e9023b616f340a40d6697d7b0e4444`). Migration **078 aplicada/rastreada exatamente uma vez** em produção (`20260824013400 078_operation_campaign_materialization`, SHA256 `5DEA792CA98FE28D8A68320F80BCB92A93B240360F9A552A2F261993193543DB`), 0 business writes, `campaign_trip_freights` criada (RLS/grants padrão canônico). `CAMPAIGN_B_DISPATCH_IMPLEMENTED=false`; `CAMPAIGN_PROGRESS=DEFERRED_NEXT_SLICE` (a implementação real entregou materialization linkage + preview + summary counts, não projeção de progresso).
 > Baseline auditado em 2026-08-23 sobre `origin/main=988bf3e5e8831f4833255e38293581002c052f88`; implementado em produção no PR #457 (`MERGE_SHA=32d8fe3e8824d1a8bc5be89ad6f5cdf86ae5c316`).
 
 ## Status de implementacao
@@ -28,7 +29,7 @@ A unidade de trabalho deixa de ser "criar frete manualmente" e passa a ser "decl
 - `OWNER_VISUAL_VALIDATION=PENDING`.
 - Campaign tables em producao: `0`.
 - Campaign migrations aplicadas/rastreadas: `076_operation_campaign_foundation.sql` e `077_operation_campaign_076_payload_reconciliation.sql`.
-- Proxima migration possivel, somente se Campaign-B exigir schema e com novo owner gate: `078_operation_campaign_materialization.sql`.
+- Migration `078_operation_campaign_materialization.sql` **APLICADA em produção** (Campaign-B, owner gate único 2026-08-24). Próxima migration (dispatch/progress persistente) exigiria novo owner gate explícito.
 
 ## Auditoria Delta
 
