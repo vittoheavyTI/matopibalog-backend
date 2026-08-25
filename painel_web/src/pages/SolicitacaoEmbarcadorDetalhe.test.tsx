@@ -65,10 +65,14 @@ describe('Documentos enviados pelo embarcador', () => {
       }],
     });
     expect(await screen.findByText('Nota fiscal.pdf')).toBeInTheDocument();
-    const abrir = vi.spyOn(window, 'open').mockImplementation(() => null);
+    const abrirJanela = vi.spyOn(window, 'open').mockImplementation(() => null);
     clicar(screen.getByRole('button', { name: 'Abrir' }));
-    await waitFor(() => expect(abrir).toHaveBeenCalledWith('https://signed/doc', '_blank', 'noopener,noreferrer'));
-    abrir.mockRestore();
+    // Pré-visualização embutida, igual ao portal externo: quem confere um
+    // documento do embarcador quer olhar, não baixar para abrir em outro
+    // programa. A nova aba deixou de ser o caminho principal.
+    expect(await screen.findByRole('dialog', { name: /visualizar arquivo/i })).toBeInTheDocument();
+    expect(abrirJanela).not.toHaveBeenCalled();
+    abrirJanela.mockRestore();
   });
 
   it('sem anexos, diz isso claramente em vez de deixar vazio', async () => {

@@ -98,7 +98,7 @@ describe('Início do portal', () => {
         data: {
           precisam_atencao: [operacao({
             status_externo: 'AJUSTES_SOLICITADOS', status_rotulo: 'Ajustes solicitados',
-            proxima_acao: { rotulo: 'Corrigir solicitação', tipo: 'REVISAR' },
+            proxima_acao: { rotulo: 'Corrigir', tipo: 'REVISAR' },
           })],
           em_andamento: [], comprovantes_disponiveis: [], recentes: [],
           contadores: { precisam_atencao: 1, em_andamento: 0, comprovantes_disponiveis: 0, total: 1 },
@@ -107,7 +107,7 @@ describe('Início do portal', () => {
     });
     comProvider(<PortalInicio />);
     expect(await screen.findByText(/precisa da sua atenção/i)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Corrigir solicitação' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Corrigir' })).toBeInTheDocument();
     expect(screen.queryByText(/CHANGES_REQUESTED/)).not.toBeInTheDocument();
   });
 
@@ -117,7 +117,7 @@ describe('Início do portal', () => {
       return Promise.resolve({
         data: {
           precisam_atencao: [operacao({
-            status_externo: 'EM_TRANSPORTE', status_rotulo: 'Em transporte',
+            status_externo: 'EM_TRANSPORTE', status_rotulo: 'Em transporte', tem_operacao: true,
             proxima_acao: { rotulo: 'Acompanhar operação', tipo: 'ACOMPANHAR' },
           })],
           em_andamento: [operacao()], comprovantes_disponiveis: [], recentes: [],
@@ -142,12 +142,12 @@ describe('Lista', () => {
         data: { itens: [operacao(), operacao({ request_id: 'req-2', reference_code: 'SOL-2' })] },
       });
     });
-    const { container } = comProvider(<PortalLista modo="solicitacoes" />);
+    const { container } = comProvider(<PortalLista modo="pedidos" />);
     await screen.findByText(/SOL-1/);
     expect(container.querySelector('table')).toBeNull();
   });
 
-  it('separa pedidos ainda em análise de operações em andamento', async () => {
+  it('separa pedidos ainda em análise de transportes com operação criada', async () => {
     get.mockImplementation((url: string) => {
       if (url.includes('/contexto')) return Promise.resolve({ data: CONTEXTO });
       return Promise.resolve({
@@ -156,24 +156,24 @@ describe('Lista', () => {
             operacao({ request_id: 'r-analise', reference_code: 'SOL-ANALISE', status_externo: 'EM_ANALISE' }),
             operacao({
               request_id: 'r-transporte', reference_code: 'SOL-TRANSP',
-              status_externo: 'EM_TRANSPORTE', status_rotulo: 'Em transporte',
+              status_externo: 'EM_TRANSPORTE', status_rotulo: 'Em transporte', tem_operacao: true,
             }),
           ],
         },
       });
     });
-    comProvider(<PortalLista modo="operacoes" />);
+    comProvider(<PortalLista modo="transportes" />);
     expect(await screen.findByText(/SOL-TRANSP/)).toBeInTheDocument();
     expect(screen.queryByText(/SOL-ANALISE/)).not.toBeInTheDocument();
   });
 
-  it('vazio da lista de operações explica quando algo aparece ali', async () => {
+  it('vazio da lista de transportes explica quando algo aparece ali', async () => {
     get.mockImplementation((url: string) => {
       if (url.includes('/contexto')) return Promise.resolve({ data: CONTEXTO });
       return Promise.resolve({ data: { itens: [] } });
     });
-    comProvider(<PortalLista modo="operacoes" />);
-    expect(await screen.findByText(/nenhuma operação em andamento/i)).toBeInTheDocument();
+    comProvider(<PortalLista modo="transportes" />);
+    expect(await screen.findByText(/nenhum transporte em andamento/i)).toBeInTheDocument();
   });
 });
 
@@ -189,7 +189,7 @@ describe('Detalhe da operação', () => {
     status_externo: 'AJUSTES_SOLICITADOS', status_rotulo: 'Ajustes solicitados',
     motivo_transportadora: 'A janela de coleta não é viável.',
     versao_atual: 1, revisoes: 0, comprovante_disponivel: false,
-    proxima_acao: { rotulo: 'Corrigir solicitação', tipo: 'REVISAR' },
+    proxima_acao: { rotulo: 'Corrigir', tipo: 'REVISAR' },
     linha_do_tempo: [{ chave: 'SOLICITACAO_ENVIADA', rotulo: 'Solicitação enviada', em: '2026-01-01T00:00:00Z' }],
     atualizado_em: '2026-01-02T00:00:00Z',
   };
@@ -216,12 +216,12 @@ describe('Detalhe da operação', () => {
   it('mostra o motivo da transportadora junto do botão de correção', async () => {
     montarDetalhe();
     expect(await screen.findByText('A janela de coleta não é viável.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Corrigir solicitação' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Corrigir pedido' })).toBeInTheDocument();
   });
 
   it('a correção abre JÁ PREENCHIDA com o que foi enviado antes', async () => {
     montarDetalhe();
-    clicar(await screen.findByRole('button', { name: 'Corrigir solicitação' }));
+    clicar(await screen.findByRole('button', { name: 'Corrigir pedido' }));
     // Corrigir não é recomeçar: os valores anteriores estão lá.
     expect(await screen.findByDisplayValue('Soja')).toBeInTheDocument();
     expect(screen.getByDisplayValue('Fazenda 1')).toBeInTheDocument();
@@ -233,7 +233,7 @@ describe('Detalhe da operação', () => {
   it('o reenvio manda a versão que a tela estava exibindo', async () => {
     post.mockResolvedValue({ data: {} });
     montarDetalhe();
-    clicar(await screen.findByRole('button', { name: 'Corrigir solicitação' }));
+    clicar(await screen.findByRole('button', { name: 'Corrigir pedido' }));
     clicar(await screen.findByRole('button', { name: 'Enviar correção' }));
     await waitFor(() => expect(post).toHaveBeenCalled());
     const [url, corpo] = post.mock.calls[0];
@@ -241,27 +241,27 @@ describe('Detalhe da operação', () => {
     expect((corpo as { expected_version: number }).expected_version).toBe(1);
   });
 
-  it('comprovante disponível pode ser aberto pelo próprio embarcador', async () => {
-    const abrir = vi.spyOn(window, 'open').mockImplementation(() => null);
+  it('comprovante disponível abre em pré-visualização, sem sair da tela', async () => {
     montarDetalhe(
       {
         status_externo: 'COMPROVANTE_DISPONIVEL', status_rotulo: 'Comprovante disponível',
         motivo_transportadora: null, comprovante_disponivel: true,
-        proxima_acao: { rotulo: 'Baixar comprovante', tipo: 'VER_COMPROVANTE' },
+        proxima_acao: { rotulo: 'Ver comprovante', tipo: 'VER_COMPROVANTE' },
       },
       {
         enviados_por_mim: [], da_transportadora: [],
         comprovantes: [{ id: 'share-1', origem: 'COMPROVANTE', nome: 'Comprovante de entrega', descricao: null, enviado_em: '2026-01-06T00:00:00Z' }],
       },
     );
-    const botao = await screen.findByRole('button', { name: /abrir comprovante/i });
+    const botao = await screen.findByRole('button', { name: /ver comprovante/i });
     get.mockImplementation((url: string) => {
       if (url.includes('/url')) return Promise.resolve({ data: { url: 'https://signed/x', expira_em_segundos: 300 } });
       return Promise.resolve({ data: CONTEXTO });
     });
     clicar(botao);
-    await waitFor(() => expect(abrir).toHaveBeenCalled());
-    abrir.mockRestore();
+    // Pré-visualização embutida (VIS-08): o comprovante aparece na própria
+    // tela, em vez de virar um download que a pessoa abre em outro programa.
+    expect(await screen.findByRole('dialog', { name: /visualizar arquivo/i })).toBeInTheDocument();
   });
 
   it('falha ao abrir arquivo vira mensagem acionável, não exceção crua', async () => {
@@ -272,7 +272,7 @@ describe('Detalhe da operação', () => {
         da_transportadora: [], comprovantes: [],
       },
     );
-    const botao = await screen.findByRole('button', { name: 'Abrir' });
+    const botao = await screen.findByRole('button', { name: 'Ver' });
     get.mockImplementation((url: string) => {
       if (url.includes('/url')) return Promise.reject({ response: { data: { message: 'Documento não encontrado.' } } });
       return Promise.resolve({ data: CONTEXTO });

@@ -46,10 +46,10 @@ const EXTERNAL_STATUS = Object.freeze({
 });
 
 const ROTULO = Object.freeze({
-  RECEBIDA: 'Solicitação recebida',
+  RECEBIDA: 'Pedido recebido',
   EM_ANALISE: 'Em análise pela transportadora',
   AJUSTES_SOLICITADOS: 'Ajustes solicitados',
-  ACEITA: 'Solicitação aceita',
+  ACEITA: 'Pedido aceito',
   EM_PLANEJAMENTO: 'Em planejamento',
   AGENDADA: 'Transporte agendado',
   EM_TRANSPORTE: 'Em transporte',
@@ -147,9 +147,11 @@ function derivarStatusExterno({ request, campaign, freights = [], temComprovante
 function derivarProximaAcao(statusExterno, { requestId }) {
   switch (statusExterno) {
     case EXTERNAL_STATUS.AJUSTES_SOLICITADOS:
-      return { rotulo: 'Corrigir solicitação', tipo: 'REVISAR', request_id: requestId };
+      return { rotulo: 'Corrigir pedido', tipo: 'REVISAR', request_id: requestId };
+    // "Ver", não "Baixar": desde o preview embutido, abrir o comprovante na
+    // própria tela é a ação principal e o download passou a ser secundário.
     case EXTERNAL_STATUS.COMPROVANTE_DISPONIVEL:
-      return { rotulo: 'Baixar comprovante', tipo: 'VER_COMPROVANTE', request_id: requestId };
+      return { rotulo: 'Ver comprovante', tipo: 'VER_COMPROVANTE', request_id: requestId };
     case EXTERNAL_STATUS.EM_TRANSPORTE:
     case EXTERNAL_STATUS.AGENDADA:
     // Entrega parcial ainda é operação em curso do ponto de vista do cliente:
@@ -167,13 +169,13 @@ function montarLinhaDoTempo({ request, campaign, freights = [], comprovanteEm = 
   const marcos = [];
   const push = (chave, rotulo, em) => { if (em) marcos.push({ chave, rotulo, em }); };
 
-  push('SOLICITACAO_ENVIADA', 'Solicitação enviada', request.submitted_at || request.created_at);
+  push('SOLICITACAO_ENVIADA', 'Pedido enviado', request.submitted_at || request.created_at);
   if (request.status === 'CHANGES_REQUESTED' || request.revision_count > 0) {
     push('AJUSTES_SOLICITADOS', 'Ajustes solicitados pela transportadora', request.decided_at);
   }
-  if (request.status === 'ACCEPTED') push('SOLICITACAO_ACEITA', 'Solicitação aceita', request.decided_at);
-  if (request.status === 'REJECTED') push('SOLICITACAO_RECUSADA', 'Solicitação não atendida', request.decided_at);
-  if (request.status === 'CANCELLED') push('SOLICITACAO_CANCELADA', 'Solicitação cancelada', request.cancelled_at);
+  if (request.status === 'ACCEPTED') push('SOLICITACAO_ACEITA', 'Pedido aceito', request.decided_at);
+  if (request.status === 'REJECTED') push('SOLICITACAO_RECUSADA', 'Pedido não atendido', request.decided_at);
+  if (request.status === 'CANCELLED') push('SOLICITACAO_CANCELADA', 'Pedido cancelado', request.cancelled_at);
 
   if (campaign && campaign.status === 'APPROVED') {
     push('OPERACAO_PLANEJADA', 'Operação planejada', campaign.approved_at || campaign.updated_at);
@@ -332,6 +334,12 @@ async function listarMinhasOperacoes(supabase, { portalUserId }) {
       status_externo: statusExterno,
       status_rotulo: ROTULO[statusExterno],
       comprovante_disponivel: Boolean(comprovanteEm),
+      // Separa "Pedidos" de "Transportes" no portal por PROVENIÊNCIA REAL, e não
+      // por status (§47). Enquanto não existe operação vinculada, o item é um
+      // pedido — inclusive o aceito cuja Campanha ainda não foi criada (§48),
+      // que continua em Pedidos como "Pedido aceito" em vez de aparecer como um
+      // transporte que ninguém consegue acompanhar.
+      tem_operacao: Boolean(campaign),
       proxima_acao: derivarProximaAcao(statusExterno, { requestId: r.id }),
       atualizado_em: r.updated_at,
     };
@@ -419,17 +427,24 @@ async function obterMinhaOperacao(supabase, { portalUserId, requestId }) {
 async function resumoInicio(supabase, { portalUserId }) {
   const { itens } = await listarMinhasOperacoes(supabase, { portalUserId });
   const precisamAtencao = itens.filter((i) => i.proxima_acao.tipo === 'REVISAR');
+  // PARCIALMENTE_ENTREGUE entra aqui porque É uma operação em curso: parte da
+  // carga do cliente continua esperando. Ficar de fora produzia o pior estado
+  // possível da home — os três blocos vazios e o texto "nenhuma ação é
+  // necessária" para quem tem carga por entregar (VIS-03).
   const emAndamento = itens.filter((i) => [
     EXTERNAL_STATUS.EM_ANALISE, EXTERNAL_STATUS.ACEITA, EXTERNAL_STATUS.EM_PLANEJAMENTO,
     EXTERNAL_STATUS.AGENDADA, EXTERNAL_STATUS.EM_TRANSPORTE,
+    EXTERNAL_STATUS.PARCIALMENTE_ENTREGUE,
   ].includes(i.status_externo));
   const comComprovante = itens.filter((i) => i.comprovante_disponivel);
 
+  // `recentes` foi removido: era calculado, trafegado e nunca renderizado
+  // (VIS-11). Um bloco passivo a mais na home não resolveria o VIS-03 — quem
+  // resolve é `PARCIALMENTE_ENTREGUE` estar em `em_andamento`, acima.
   return {
     precisam_atencao: precisamAtencao,
     em_andamento: emAndamento.slice(0, 10),
     comprovantes_disponiveis: comComprovante.slice(0, 10),
-    recentes: itens.slice(0, 5),
     contadores: {
       precisam_atencao: precisamAtencao.length,
       em_andamento: emAndamento.length,

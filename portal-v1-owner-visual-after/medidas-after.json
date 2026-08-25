@@ -1,0 +1,490 @@
+[
+  {
+    "cena": "07-inicio-ativo",
+    "viewport": "1440x900",
+    "scrollWidth": 1440,
+    "clientWidth": 1440,
+    "estouraLargura": false,
+    "destaquesSemanticos": [
+      {
+        "texto": "Precisa da sua atençãoA transportadora pediu ajustes nestes ",
+        "background": "oklch(0.987 0.022 95.277)"
+      },
+      {
+        "texto": "Comprovantes disponíveisAlgodão em pluma · Armazém de Luís E",
+        "background": "oklch(0.979 0.021 166.113)"
+      }
+    ],
+    "elementosQueEstouram": []
+  },
+  {
+    "cena": "07-inicio-ativo",
+    "viewport": "390x844",
+    "scrollWidth": 390,
+    "clientWidth": 390,
+    "estouraLargura": false,
+    "destaquesSemanticos": [
+      {
+        "texto": "Precisa da sua atençãoA transportadora pediu ajustes nestes ",
+        "background": "oklch(0.987 0.022 95.277)"
+      },
+      {
+        "texto": "Comprovantes disponíveisAlgodão em pluma · Armazém de Luís E",
+        "background": "oklch(0.979 0.021 166.113)"
+      }
+    ],
+    "elementosQueEstouram": []
+  },
+  {
+    "cena": "07b-inicio-entrega-parcial",
+    "viewport": "1440x900",
+    "scrollWidth": 1440,
+    "clientWidth": 1440,
+    "estouraLargura": false,
+    "destaquesSemanticos": [
+      {
+        "texto": "Em andamentoUm transporte teve entrega parcial: parte da car",
+        "background": "oklch(0.987 0.022 95.277)"
+      }
+    ],
+    "elementosQueEstouram": []
+  },
+  {
+    "cena": "07b-inicio-entrega-parcial",
+    "viewport": "390x844",
+    "scrollWidth": 390,
+    "clientWidth": 390,
+    "estouraLargura": false,
+    "destaquesSemanticos": [
+      {
+        "texto": "Em andamentoUm transporte teve entrega parcial: parte da car",
+        "background": "oklch(0.987 0.022 95.277)"
+      }
+    ],
+    "elementosQueEstouram": []
+  },
+  {
+    "cena": "13-pedido-enviado",
+    "viewport": "1440x900",
+    "scrollWidth": 1440,
+    "clientWidth": 1440,
+    "estouraLargura": false,
+    "destaquesSemanticos": [
+      {
+        "texto": "Pedido enviado com sucesso.A transportadora vai analisar sua",
+        "background": "oklch(0.979 0.021 166.113)"
+      }
+    ],
+    "elementosQueEstouram": []
+  },
+  {
+    "cena": "13-pedido-enviado",
+    "viewport": "390x844",
+    "scrollWidth": 390,
+    "clientWidth": 390,
+    "estouraLargura": false,
+    "destaquesSemanticos": [
+      {
+        "texto": "Pedido enviado com sucesso.A transportadora vai analisar sua",
+        "background": "oklch(0.979 0.021 166.113)"
+      }
+    ],
+    "elementosQueEstouram": []
+  },
+  {
+    "cena": "20-ajustes-solicitados",
+    "viewport": "1440x900",
+    "scrollWidth": 1440,
+    "clientWidth": 1440,
+    "estouraLargura": false,
+    "destaquesSemanticos": [
+      {
+        "texto": "A transportadora pediu ajustesA janela pedida coincide com a",
+        "background": "oklch(0.987 0.022 95.277)"
+      }
+    ],
+    "elementosQueEstouram": []
+  },
+  {
+    "cena": "20-ajustes-solicitados",
+    "viewport": "390x844",
+    "scrollWidth": 390,
+    "clientWidth": 390,
+    "estouraLargura": false,
+    "destaquesSemanticos": [
+      {
+        "texto": "A transportadora pediu ajustesA janela pedida coincide com a",
+        "background": "oklch(0.987 0.022 95.277)"
+      }
+    ],
+    "elementosQueEstouram": []
+  },
+  {
+    "cena": "22-historico-envios",
+    "viewport": "1440x900",
+    "scrollWidth": 1440,
+    "clientWidth": 1440,
+    "estouraLargura": false,
+    "destaquesSemanticos": [],
+    "elementosQueEstouram": []
+  },
+  {
+    "cena": "22-historico-envios",
+    "viewport": "390x844",
+    "scrollWidth": 390,
+    "clientWidth": 390,
+    "estouraLargura": false,
+    "destaquesSemanticos": [],
+    "elementosQueEstouram": []
+  },
+  {
+    "cena": "33-tracking-entrega-parcial",
+    "viewport": "1440x900",
+    "scrollWidth": 1440,
+    "clientWidth": 1440,
+    "estouraLargura": false,
+    "destaquesSemanticos": [
+      {
+        "texto": "ResumoParte da carga já foi entregue e o restante continua p",
+        "background": "oklch(0.987 0.022 95.277)"
+      },
+      {
+        "texto": "Já entregue500 t",
+        "background": "oklch(0.979 0.021 166.113)"
+      },
+      {
+        "texto": "Ainda falta700 t",
+        "background": "oklch(0.987 0.022 95.277)"
+      }
+    ],
+    "elementosQueEstouram": []
+  },
+  {
+    "cena": "33-tracking-entrega-parcial",
+    "viewport": "390x844",
+    "scrollWidth": 390,
+    "clientWidth": 390,
+    "estouraLargura": false,
+    "destaquesSemanticos": [
+      {
+        "texto": "ResumoParte da carga já foi entregue e o restante continua p",
+        "background": "oklch(0.987 0.022 95.277)"
+      },
+      {
+        "texto": "Já entregue500 t",
+        "background": "oklch(0.979 0.021 166.113)"
+      },
+      {
+        "texto": "Ainda falta700 t",
+        "background": "oklch(0.987 0.022 95.277)"
+      }
+    ],
+    "elementosQueEstouram": []
+  },
+  {
+    "cena": "34-tracking-entregue",
+    "viewport": "1440x900",
+    "scrollWidth": 1440,
+    "clientWidth": 1440,
+    "estouraLargura": false,
+    "destaquesSemanticos": [
+      {
+        "texto": "Já entregue1.200 t",
+        "background": "oklch(0.979 0.021 166.113)"
+      }
+    ],
+    "elementosQueEstouram": []
+  },
+  {
+    "cena": "34-tracking-entregue",
+    "viewport": "390x844",
+    "scrollWidth": 390,
+    "clientWidth": 390,
+    "estouraLargura": false,
+    "destaquesSemanticos": [
+      {
+        "texto": "Já entregue1.200 t",
+        "background": "oklch(0.979 0.021 166.113)"
+      }
+    ],
+    "elementosQueEstouram": []
+  },
+  {
+    "cena": "35-comprovante-preview",
+    "viewport": "1440x900",
+    "scrollWidth": 1440,
+    "clientWidth": 1440,
+    "estouraLargura": false,
+    "destaquesSemanticos": [
+      {
+        "texto": "Comprovante de entregaCanhoto assinado no destino.jpgVer com",
+        "background": "oklch(0.979 0.021 166.113)"
+      }
+    ],
+    "elementosQueEstouram": []
+  },
+  {
+    "cena": "35-comprovante-preview",
+    "viewport": "390x844",
+    "scrollWidth": 390,
+    "clientWidth": 390,
+    "estouraLargura": false,
+    "destaquesSemanticos": [
+      {
+        "texto": "Comprovante de entregaCanhoto assinado no destino.jpgVer com",
+        "background": "oklch(0.979 0.021 166.113)"
+      }
+    ],
+    "elementosQueEstouram": []
+  },
+  {
+    "cena": "40-documentos-do-pedido",
+    "viewport": "1440x900",
+    "scrollWidth": 1440,
+    "clientWidth": 1440,
+    "estouraLargura": false,
+    "destaquesSemanticos": [
+      {
+        "texto": "Já entregue1.200 t",
+        "background": "oklch(0.979 0.021 166.113)"
+      },
+      {
+        "texto": "Comprovante de entregaCanhoto assinado no destino.jpgVer com",
+        "background": "oklch(0.979 0.021 166.113)"
+      }
+    ],
+    "elementosQueEstouram": []
+  },
+  {
+    "cena": "40-documentos-do-pedido",
+    "viewport": "390x844",
+    "scrollWidth": 390,
+    "clientWidth": 390,
+    "estouraLargura": false,
+    "destaquesSemanticos": [
+      {
+        "texto": "Já entregue1.200 t",
+        "background": "oklch(0.979 0.021 166.113)"
+      },
+      {
+        "texto": "Comprovante de entregaCanhoto assinado no destino.jpgVer com",
+        "background": "oklch(0.979 0.021 166.113)"
+      }
+    ],
+    "elementosQueEstouram": []
+  },
+  {
+    "cena": "43-duas-transportadoras",
+    "viewport": "1440x900",
+    "scrollWidth": 1440,
+    "clientWidth": 1440,
+    "estouraLargura": false,
+    "destaquesSemanticos": [
+      {
+        "texto": "Precisa da sua atençãoA transportadora pediu ajustes nestes ",
+        "background": "oklch(0.987 0.022 95.277)"
+      },
+      {
+        "texto": "Comprovantes disponíveisAlgodão em pluma · Armazém de Luís E",
+        "background": "oklch(0.979 0.021 166.113)"
+      }
+    ],
+    "elementosQueEstouram": []
+  },
+  {
+    "cena": "43-duas-transportadoras",
+    "viewport": "390x844",
+    "scrollWidth": 390,
+    "clientWidth": 390,
+    "estouraLargura": false,
+    "destaquesSemanticos": [
+      {
+        "texto": "Precisa da sua atençãoA transportadora pediu ajustes nestes ",
+        "background": "oklch(0.987 0.022 95.277)"
+      },
+      {
+        "texto": "Comprovantes disponíveisAlgodão em pluma · Armazém de Luís E",
+        "background": "oklch(0.979 0.021 166.113)"
+      }
+    ],
+    "elementosQueEstouram": []
+  },
+  {
+    "cena": "50-conteudo-longo",
+    "viewport": "1440x900",
+    "scrollWidth": 1440,
+    "clientWidth": 1440,
+    "estouraLargura": false,
+    "destaquesSemanticos": [
+      {
+        "texto": "A transportadora pediu ajustesPrecisamos que você confirme a",
+        "background": "oklch(0.987 0.022 95.277)"
+      },
+      {
+        "texto": "Comprovante de entregaCanhoto de entrega assinado pelo respo",
+        "background": "oklch(0.979 0.021 166.113)"
+      }
+    ],
+    "elementosQueEstouram": []
+  },
+  {
+    "cena": "50-conteudo-longo",
+    "viewport": "390x844",
+    "scrollWidth": 390,
+    "clientWidth": 390,
+    "estouraLargura": false,
+    "destaquesSemanticos": [
+      {
+        "texto": "A transportadora pediu ajustesPrecisamos que você confirme a",
+        "background": "oklch(0.987 0.022 95.277)"
+      },
+      {
+        "texto": "Comprovante de entregaCanhoto de entrega assinado pelo respo",
+        "background": "oklch(0.979 0.021 166.113)"
+      }
+    ],
+    "elementosQueEstouram": []
+  },
+  {
+    "cena": "70-aba-pedidos",
+    "viewport": "1440x900",
+    "scrollWidth": 1440,
+    "clientWidth": 1440,
+    "estouraLargura": false,
+    "destaquesSemanticos": [],
+    "elementosQueEstouram": []
+  },
+  {
+    "cena": "70-aba-pedidos",
+    "viewport": "390x844",
+    "scrollWidth": 390,
+    "clientWidth": 390,
+    "estouraLargura": false,
+    "destaquesSemanticos": [],
+    "elementosQueEstouram": []
+  },
+  {
+    "cena": "71-aba-transportes",
+    "viewport": "1440x900",
+    "scrollWidth": 1440,
+    "clientWidth": 1440,
+    "estouraLargura": false,
+    "destaquesSemanticos": [
+      {
+        "texto": "Soja em grãos · Porto de ItaquiSOL-2026-0003 · 1.200 tPeríod",
+        "background": "oklch(0.987 0.022 95.277)"
+      }
+    ],
+    "elementosQueEstouram": []
+  },
+  {
+    "cena": "71-aba-transportes",
+    "viewport": "390x844",
+    "scrollWidth": 390,
+    "clientWidth": 390,
+    "estouraLargura": false,
+    "destaquesSemanticos": [
+      {
+        "texto": "Soja em grãos · Porto de ItaquiSOL-2026-0003 · 1.200 tPeríod",
+        "background": "oklch(0.987 0.022 95.277)"
+      }
+    ],
+    "elementosQueEstouram": []
+  },
+  {
+    "cena": "72-aba-documentos",
+    "viewport": "1440x900",
+    "scrollWidth": 1440,
+    "clientWidth": 1440,
+    "estouraLargura": false,
+    "destaquesSemanticos": [
+      {
+        "texto": "Comprovante de entregaCanhoto assinado no destino.jpgSOL-202",
+        "background": "oklch(0.979 0.021 166.113)"
+      }
+    ],
+    "elementosQueEstouram": []
+  },
+  {
+    "cena": "72-aba-documentos",
+    "viewport": "390x844",
+    "scrollWidth": 390,
+    "clientWidth": 390,
+    "estouraLargura": false,
+    "destaquesSemanticos": [
+      {
+        "texto": "Comprovante de entregaCanhoto assinado no destino.jpgSOL-202",
+        "background": "oklch(0.979 0.021 166.113)"
+      }
+    ],
+    "elementosQueEstouram": []
+  },
+  {
+    "cena": "62-inbox-detalhe",
+    "viewport": "1440x900",
+    "scrollWidth": 1440,
+    "clientWidth": 1440,
+    "estouraLargura": false,
+    "destaquesSemanticos": [
+      {
+        "texto": "Ajustes reenviados (1)O embarcador corrigiu e reenviou. Conf",
+        "background": "oklch(0.979 0.021 166.113)"
+      },
+      {
+        "texto": "Pedir ajustes",
+        "background": "rgba(0, 0, 0, 0)"
+      },
+      {
+        "texto": "O que mudou no envio 2Você havia pedido: A janela coincide c",
+        "background": "oklch(0.987 0.022 95.277)"
+      },
+      {
+        "texto": "Revogar acesso",
+        "background": "rgba(0, 0, 0, 0)"
+      },
+      {
+        "texto": "Novas solicitações (2)Aguardando sua decisão.Soja em grãos ·",
+        "background": "oklch(0.979 0.021 166.113)"
+      },
+      {
+        "texto": "Pedir ajustes",
+        "background": "rgba(0, 0, 0, 0)"
+      }
+    ],
+    "elementosQueEstouram": []
+  },
+  {
+    "cena": "62-inbox-detalhe",
+    "viewport": "390x844",
+    "scrollWidth": 390,
+    "clientWidth": 390,
+    "estouraLargura": false,
+    "destaquesSemanticos": [
+      {
+        "texto": "Ajustes reenviados (1)O embarcador corrigiu e reenviou. Conf",
+        "background": "oklch(0.979 0.021 166.113)"
+      },
+      {
+        "texto": "Pedir ajustes",
+        "background": "rgba(0, 0, 0, 0)"
+      },
+      {
+        "texto": "O que mudou no envio 2Você havia pedido: A janela coincide c",
+        "background": "oklch(0.987 0.022 95.277)"
+      },
+      {
+        "texto": "Revogar acesso",
+        "background": "rgba(0, 0, 0, 0)"
+      },
+      {
+        "texto": "Novas solicitações (2)Aguardando sua decisão.Soja em grãos ·",
+        "background": "oklch(0.979 0.021 166.113)"
+      },
+      {
+        "texto": "Pedir ajustes",
+        "background": "rgba(0, 0, 0, 0)"
+      }
+    ],
+    "elementosQueEstouram": []
+  }
+]

@@ -2,7 +2,7 @@ import { useMemo, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import portalApi, { mensagemDeErro } from './portalApi';
 import { usePortalAuth } from './PortalAuthContext';
-import { Cartao, Quantidade } from './PortalUI';
+import { BOTAO_PRIMARIO, BOTAO_SECUNDARIO, Cartao, FOCO_CLARO, Quantidade } from './PortalUI';
 
 type Origem = { nome: string; quantidade: string };
 
@@ -88,7 +88,7 @@ export default function PortalNovaSolicitacao() {
         notes: observacoes.trim() || null,
         client_request_id: clientRequestId.current,
       });
-      navigate(`/portal/embarcador/operacoes/${data.id}?enviada=1`, { replace: true });
+      navigate(`/portal/embarcador/pedidos/${data.id}?enviada=1`, { replace: true });
     } catch (e) {
       setErro(mensagemDeErro(e, 'Não foi possível enviar seu pedido.'));
       setEtapa('dados');
@@ -159,13 +159,13 @@ export default function PortalNovaSolicitacao() {
         <div className="flex flex-wrap gap-3">
           <button
             type="button" onClick={() => setEtapa('dados')} disabled={enviando}
-            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            className={BOTAO_SECUNDARIO}
           >
             Voltar e ajustar
           </button>
           <button
             type="button" onClick={enviar} disabled={enviando}
-            className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-60"
+            className={BOTAO_PRIMARIO}
           >
             {enviando ? 'Enviando…' : 'Enviar pedido'}
           </button>
@@ -238,7 +238,7 @@ export default function PortalNovaSolicitacao() {
                 <button
                   type="button"
                   onClick={() => setOrigens((atual) => atual.filter((_, idx) => idx !== i))}
-                  className="rounded-lg border border-slate-300 px-3 py-2 text-xs text-slate-600 hover:bg-slate-50"
+                  className={`rounded-lg border border-slate-300 px-3 py-2 text-xs text-slate-600 hover:bg-slate-50 ${FOCO_CLARO}`}
                   aria-label={`Remover local de coleta ${i + 1}`}
                 >
                   Remover
@@ -252,7 +252,7 @@ export default function PortalNovaSolicitacao() {
           <button
             type="button"
             onClick={() => setOrigens((atual) => [...atual, { nome: '', quantidade: '' }])}
-            className="rounded-lg border border-emerald-700 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
+            className={`rounded-lg border border-emerald-700 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50 ${FOCO_CLARO}`}
           >
             Adicionar outro local
           </button>
@@ -289,12 +289,12 @@ export default function PortalNovaSolicitacao() {
 
       <div className="flex flex-wrap gap-3">
         <Link
-          to="/portal/embarcador"
-          className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          to="/portal/embarcador/pedidos"
+          className={BOTAO_SECUNDARIO}
         >
           Cancelar
         </Link>
-        <button type="submit" className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800">
+        <button type="submit" className={BOTAO_PRIMARIO}>
           Conferir pedido
         </button>
       </div>

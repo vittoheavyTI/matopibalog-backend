@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import portalApi, { mensagemDeErro } from './portalApi';
 import { usePortalAuth } from './PortalAuthContext';
-import { Carregando, Erro } from './PortalUI';
+import { CampoSenha, Carregando, Erro, FOCO_CLARO } from './PortalUI';
 
 type Preview = {
   email: string;
@@ -129,7 +129,7 @@ export default function PortalAtivarConvite() {
             <button
               type="button"
               onClick={() => navigate('/portal/embarcador', { replace: true })}
-              className="mt-4 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800"
+              className={`mt-4 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 ${FOCO_CLARO}`}
             >
               Continuar
             </button>
@@ -159,35 +159,31 @@ export default function PortalAtivarConvite() {
                   className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600"
                 />
               </div>
-              <div>
-                <label htmlFor="conv-senha" className="block text-sm font-medium text-slate-700">
-                  {contaExistente ? 'Senha da sua conta' : 'Crie uma senha'}
-                </label>
-                <input
-                  id="conv-senha" type="password"
-                  autoComplete={contaExistente ? 'current-password' : 'new-password'}
-                  required minLength={contaExistente ? undefined : 8}
-                  value={senha} onChange={(e) => setSenha(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600"
-                />
-                <p className="mt-1 text-xs text-slate-500">
-                  {contaExistente
-                    ? 'Continue usando a senha que você já tem. Ela não será alterada.'
-                    : 'Pelo menos 8 caracteres.'}
-                </p>
-              </div>
+              {/* Alternar visibilidade importa mais aqui do que no login: com
+                  conta existente, a pessoa precisa acertar uma senha que ela já
+                  usa, digitando às cegas no celular (VIS-12). */}
+              <CampoSenha
+                id="conv-senha"
+                rotulo={contaExistente ? 'Senha da sua conta' : 'Crie uma senha'}
+                autoComplete={contaExistente ? 'current-password' : 'new-password'}
+                minLength={contaExistente ? undefined : 8}
+                valor={senha}
+                aoMudar={setSenha}
+                ajuda={contaExistente
+                  ? 'Continue usando a senha que você já tem. Ela não será alterada.'
+                  : 'Pelo menos 8 caracteres.'}
+              />
               {/* Confirmação só faz sentido quando a senha está sendo criada.
                   Para conta existente, pedir "repita a senha" sugeriria que ela
                   está sendo trocada — e não está. */}
               {!contaExistente && (
-                <div>
-                  <label htmlFor="conv-conf" className="block text-sm font-medium text-slate-700">Repita a senha</label>
-                  <input
-                    id="conv-conf" type="password" autoComplete="new-password" required
-                    value={confirmacao} onChange={(e) => setConfirmacao(e.target.value)}
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600"
-                  />
-                </div>
+                <CampoSenha
+                  id="conv-conf"
+                  rotulo="Repita a senha"
+                  autoComplete="new-password"
+                  valor={confirmacao}
+                  aoMudar={setConfirmacao}
+                />
               )}
             </div>
 
@@ -195,7 +191,7 @@ export default function PortalAtivarConvite() {
 
             <button
               type="submit" disabled={enviando}
-              className="mt-5 w-full rounded-lg bg-emerald-700 px-4 py-2.5 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-60"
+              className={`mt-5 w-full rounded-lg bg-emerald-700 px-4 py-2.5 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-60 ${FOCO_CLARO}`}
             >
               {enviando ? 'Ativando…' : 'Ativar meu acesso'}
             </button>

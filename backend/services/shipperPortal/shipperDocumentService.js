@@ -142,7 +142,10 @@ function projetarDocumentoDoEmbarcador(row) {
     nome: row.nome_documento,
     descricao: row.descricao || null,
     enviado_em: row.created_at,
-    // storage_path JAMAIS entra na projeção (§67).
+    // Tipo do arquivo para a tela decidir entre pré-visualizar e baixar. É
+    // metadado do próprio documento do embarcador — `storage_path` JAMAIS entra
+    // na projeção (§67).
+    mime_type: row.mime_type || null,
   };
 }
 
@@ -164,7 +167,7 @@ async function listarDocumentosDaSolicitacao(supabase, { portalUserId, requestId
 
   const [meus, compartilhados] = await Promise.all([
     supabase.from('shipper_request_documents')
-      .select('id, nome_documento, descricao, created_at, status')
+      .select('id, nome_documento, descricao, created_at, status, mime_type')
       .eq('request_id', requestId).eq('status', 'ativo')
       .order('created_at', { ascending: false }),
     supabase.from('shipper_document_shares')
@@ -187,6 +190,65 @@ async function listarDocumentosDaSolicitacao(supabase, { portalUserId, requestId
   };
 }
 
+// Todos os arquivos do embarcador, de todos os pedidos, em uma lista só.
+//
+// Existe porque a pessoa procura um comprovante PELO ARQUIVO ("cadê o canhoto
+// da entrega?"), não pelo pedido que o originou — e antes isso obrigava a
+// lembrar em qual pedido ele estava. A fronteira é a MESMA das outras leituras:
+// organização do embarcador + relacionamentos ativos, aplicada no servidor.
+// Nenhuma origem nova de arquivo é introduzida aqui: continuam as três de
+// sempre, e `storage_path` segue fora da projeção (§67).
+async function listarTodosOsDocumentos(supabase, { portalUserId }) {
+  const context = await loadPortalContext(supabase, { portalUserId });
+
+  // Os pedidos do embarcador, para dar nome e referência a cada arquivo.
+  const { data: requests, error: reqError } = await supabase
+    .from('shipper_transport_requests')
+    .select('id, reference_code, cargo_name, destination_name')
+    .eq('shipper_org_id', context.shipperOrgId)
+    .in('relationship_id', context.relationshipIds);
+  throwDb(reqError, 'Não foi possível carregar seus pedidos.');
+
+  const requestIds = (requests || []).map((r) => r.id);
+  if (!requestIds.length) return { itens: [] };
+  const pedidoPorId = new Map((requests || []).map((r) => [r.id, r]));
+
+  const [meus, compartilhados] = await Promise.all([
+    supabase.from('shipper_request_documents')
+      .select('id, request_id, nome_documento, descricao, created_at, status, mime_type')
+      .in('request_id', requestIds).eq('status', 'ativo')
+      .order('created_at', { ascending: false }),
+    supabase.from('shipper_document_shares')
+      .select('id, request_id, source_kind, titulo, shared_at')
+      .in('request_id', requestIds)
+      .eq('shipper_org_id', context.shipperOrgId)
+      .in('relationship_id', context.relationshipIds)
+      .eq('status', 'ACTIVE')
+      .order('shared_at', { ascending: false }),
+  ]);
+  throwDb(meus.error, 'Não foi possível carregar seus documentos.');
+  throwDb(compartilhados.error, 'Não foi possível carregar os documentos da transportadora.');
+
+  const comPedido = (doc, requestId) => {
+    const pedido = pedidoPorId.get(requestId);
+    return {
+      ...doc,
+      request_id: requestId,
+      pedido_referencia: pedido?.reference_code || null,
+      pedido_titulo: pedido ? `${pedido.cargo_name} · ${pedido.destination_name}` : null,
+    };
+  };
+
+  const itens = [
+    ...(meus.data || []).map((row) => comPedido(
+      { ...projetarDocumentoDoEmbarcador(row), mime_type: row.mime_type || null }, row.request_id,
+    )),
+    ...(compartilhados.data || []).map((row) => comPedido(projetarCompartilhado(row), row.request_id)),
+  ].sort((a, b) => String(b.enviado_em).localeCompare(String(a.enviado_em)));
+
+  return { itens };
+}
+
 // Emissão da URL assinada. Este é o ponto onde um erro de fronteira viraria
 // IDOR, então a checagem é explícita e vem ANTES da assinatura, em todos os
 // caminhos.
@@ -198,7 +260,7 @@ async function urlAssinadaParaEmbarcador(supabase, { portalUserId, documentoId, 
     // dele E de uma solicitação dentro da fronteira.
     const { data: doc, error } = await supabase
       .from('shipper_request_documents')
-      .select('id, storage_path, request_id, shipper_org_id, status')
+      .select('id, storage_path, request_id, shipper_org_id, status, mime_type')
       .eq('id', documentoId)
       .eq('shipper_org_id', context.shipperOrgId)
       .eq('status', 'ativo')
@@ -208,7 +270,7 @@ async function urlAssinadaParaEmbarcador(supabase, { portalUserId, documentoId, 
     // Confirma a solicitação também — se o relacionamento foi revogado, o
     // documento deixa de ser alcançável mesmo pertencendo à organização.
     await requireOwnedRequest(supabase, context, doc.request_id);
-    return assinar(supabase, BUCKET_PORTAL, doc.storage_path);
+    return assinar(supabase, BUCKET_PORTAL, doc.storage_path, doc.mime_type);
   }
 
   // Documento/comprovante liberado pela transportadora. A autoridade é a linha
@@ -231,18 +293,18 @@ async function urlAssinadaParaEmbarcador(supabase, { portalUserId, documentoId, 
   // reprovada depois do compartilhamento.
   if (share.source_kind === 'FRETE_DOCUMENTO') {
     const { data: doc, error: docError } = await supabase
-      .from('frete_documentos').select('storage_path, status')
+      .from('frete_documentos').select('storage_path, status, mime')
       .eq('id', share.frete_documento_id)
       .eq('frete_id', share.frete_id)
       .eq('empresa_id', share.empresa_id)
       .maybeSingle();
     throwDb(docError, 'Não foi possível abrir o documento.');
     if (!doc || doc.status !== 'ativo') throw naoEncontrado();
-    return assinar(supabase, BUCKET_PORTAL, doc.storage_path);
+    return assinar(supabase, BUCKET_PORTAL, doc.storage_path, doc.mime);
   }
 
   const { data: evid, error: evidError } = await supabase
-    .from('frete_epod_evidencias').select('storage_path, status')
+    .from('frete_epod_evidencias').select('storage_path, status, mime')
     .eq('id', share.epod_evidencia_id)
     .eq('frete_id', share.frete_id)
     .eq('empresa_id', share.empresa_id)
@@ -251,21 +313,29 @@ async function urlAssinadaParaEmbarcador(supabase, { portalUserId, documentoId, 
   // Dupla trava (§71/§72): mesmo compartilhada, uma evidência que deixou de
   // estar aprovada não é servida como comprovante final.
   if (!evid || evid.status !== 'aprovada') throw naoEncontrado();
-  return assinar(supabase, BUCKET_EVIDENCIAS, evid.storage_path);
+  return assinar(supabase, BUCKET_EVIDENCIAS, evid.storage_path, evid.mime);
 }
 
 function naoEncontrado() {
   return new ShipperPortalError('Documento não encontrado.', { status: 404, code: 'document_not_found' });
 }
 
-async function assinar(supabase, bucket, storagePath) {
+// `mimeType` acompanha a URL para o portal decidir COMO mostrar o arquivo:
+// imagem e PDF ganham pré-visualização embutida, o resto cai em download
+// (VIS-08). É metadado do próprio objeto já validado acima — não abre fronteira
+// nova nem revela `storage_path`.
+async function assinar(supabase, bucket, storagePath, mimeType = null) {
   const { data, error } = await supabase.storage.from(bucket).createSignedUrl(storagePath, SIGNED_URL_TTL_SECONDS);
   if (error || !data?.signedUrl) {
     throw new ShipperPortalError('Não foi possível abrir o arquivo agora. Tente novamente.', {
       status: 502, code: 'signed_url_failed',
     });
   }
-  return { url: data.signedUrl, expira_em_segundos: SIGNED_URL_TTL_SECONDS };
+  return {
+    url: data.signedUrl,
+    expira_em_segundos: SIGNED_URL_TTL_SECONDS,
+    mime_type: mimeType || null,
+  };
 }
 
 // ---- lado da transportadora: compartilhar / revogar -----------------------
@@ -455,7 +525,7 @@ async function listarDocumentosDoEmbarcador(supabase, { empresaId, requestId }) 
 async function urlAssinadaParaTransportadora(supabase, { empresaId, requestId, documentoId }) {
   const { data: doc, error } = await supabase
     .from('shipper_request_documents')
-    .select('id, storage_path, status, request_id, empresa_id')
+    .select('id, storage_path, status, request_id, empresa_id, mime_type')
     .eq('id', documentoId)
     .eq('request_id', requestId)
     .eq('empresa_id', empresaId)
@@ -463,7 +533,7 @@ async function urlAssinadaParaTransportadora(supabase, { empresaId, requestId, d
     .maybeSingle();
   throwDb(error, 'Não foi possível abrir o documento.');
   if (!doc) throw naoEncontrado();
-  return assinar(supabase, BUCKET_PORTAL, doc.storage_path);
+  return assinar(supabase, BUCKET_PORTAL, doc.storage_path, doc.mime_type);
 }
 
 async function revogarCompartilhamento(supabase, { empresaId, user, shareId }) {
@@ -484,6 +554,7 @@ async function revogarCompartilhamento(supabase, { empresaId, user, shareId }) {
 module.exports = {
   enviarDocumentoDaSolicitacao,
   listarDocumentosDaSolicitacao,
+  listarTodosOsDocumentos,
   urlAssinadaParaEmbarcador,
   listarCompartilhaveis,
   compartilhar,

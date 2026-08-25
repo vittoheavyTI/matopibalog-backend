@@ -427,3 +427,71 @@ sempre se comportaram. No navegador, o link do convite abre normalmente.
   Cotação/proposta segue deferida (`PORTAL_QUOTE_PROPOSAL_V1B`).
 
 `BLOCKERS_OPEN=0` · `HIGHS_OPEN=0` · `RESIDUALS_OPEN=0`
+
+## 15. Correção da aceitação visual (2026-08-25)
+
+`PORTAL_V1_VISUAL_FINDINGS_FROZEN=true` · `MIGRATION_REQUIRED=false`
+
+O pacote de aceitação visual (PR #479) levantou 0 BLOCKER, 5 HIGH, 6 MEDIUM,
+3 LOW e 2 NOTE. Esta fatia fecha tudo o que é específico do Portal, **sem
+schema**: as migrations 080 e 081 seguem intocadas, com os mesmos hashes que
+estão em produção.
+
+### 15.1 O padrão por trás dos achados
+
+Dois grupos, e nenhum era falta de domínio:
+
+**Informação que o backend produzia e a tela descartava.** O serviço de
+acompanhamento sempre calculou `entrega: {solicitado, entregue, restante}` — com
+o comentário, escrito lá, de que é "só o que o cliente entende: quanto da carga
+dele chegou e quanto ainda falta" — e o portal nunca leu o campo. Do mesmo modo,
+`derivarProximaAcao` tratava entrega parcial como operação em curso, mas os
+filtros da home e da lista a excluíam. O resultado era o pior possível: um
+embarcador com metade da carga por chegar via **"No momento, nenhuma ação é
+necessária"**.
+
+**Composição visual que não sobrevive a revisão de código.** O `Cartao` trazia
+`bg-white` na base e aceitava `bg-amber-50` por `className`. Duas utilitárias da
+mesma propriedade e mesma especificidade: quem vence é a ordem no CSS gerado, e
+vencia o branco. Todo destaque do portal era renderizado branco, e o JSX
+*parecia* certo.
+
+### 15.2 O que mudou
+
+| Achado | Correção |
+|---|---|
+| `VIS-01` | `Cartao` ganhou a prop `tom` (`neutro/atencao/erro/sucesso/informacao`). A cor é decidida **dentro** do componente: não existe mais como pedir destaque e receber branco. |
+| `VIS-02` | Progresso de entrega na tela — *Carga solicitada / Já entregue / Ainda falta* —, sempre que o backend consegue medir. Nunca calculado no cliente. |
+| `VIS-03` | `PARCIALMENTE_ENTREGUE` entrou no filtro da home (backend) e no de Transportes (frontend). Fica em "Em andamento", com tom de atenção. |
+| `VIS-04` | No celular, conteúdo e ações deixam de disputar a mesma faixa: ações em linha própria, ação primária em largura total. |
+| `VIS-14` | `min-w-0` no contêiner flex do cabeçalho. O nome do embarcador trunca; "Matopiba Log" e "Portal do Embarcador" permanecem. |
+| `VIS-05` | `?enviada=1` passou a ser consumido: confirmação de envio + o que acontece a seguir, e a URL é limpa para o aviso não ressuscitar num F5. |
+| `VIS-06` | Mapa de tons congelado por situação. Entrega parcial é **atenção**; cancelada é **encerrado** — deixaram de ser o mesmo cinza. |
+| `VIS-07` | Seletor de arquivo próprio ("Escolher arquivo" / "Nenhum arquivo selecionado"), com o input nativo acessível por teclado. |
+| `VIS-08` | Pré-visualização embutida reusando o `ArquivoPreviewModal` que já existia — nenhum segundo visualizador foi criado. Baixar e abrir em nova guia viraram secundários. Vale também na caixa de entrada. |
+| `VIS-09` | O comparativo entre envios saiu da tela interna para `shared/comparacaoEnvios` e passou a valer para as duas pontas. Histórico externo agora é **crescente** (causa → correção) e marca o "Envio atual". |
+| `VIS-10` | Vocabulário externo congelado em **pedido**. Navegação: **Início / Pedidos / Transportes / Documentos**, separadas por proveniência real (`tem_operacao`) — cada item em uma aba só. Aceito sem operação criada continua em Pedidos (§48). |
+| `VIS-11` | `recentes` removido do payload: era calculado, trafegado e nunca renderizado. |
+| `VIS-12` | Mostrar/ocultar senha no login e nas duas ativações. |
+| `VIS-13` | `focus-visible` próprio, com anel que aparece sobre o verde escuro dos botões primários. |
+| `NOTE-01` | Não tocado — é o shell do painel interno, fora do escopo do Portal V1. |
+| `NOTE-02` | Comportamento conhecido e aceito do SPA no GitHub Pages. |
+
+### 15.3 Compatibilidade
+
+As rotas antigas (`/solicitacoes`, `/solicitacoes/nova`, `/operacoes`,
+`/operacoes/:id`) redirecionam para as novas preservando id e querystring — um
+link de convite ou um endereço salvo antes da renomeação continua funcionando,
+inclusive com `?acao=corrigir` e `?enviada=1`.
+
+### 15.4 Verificação
+
+Regressão em `PortalCorrecoes.test.tsx`, verificando **comportamento** e não
+string de classe — asserção sobre `className` foi exatamente o que deixou o
+`VIS-01` passar despercebido. As provas que dependem de CSS real (fundo
+computado, rolagem em 390 px) rodam no harness de navegador, com
+`getComputedStyle`, e ficam registradas em
+`portal-v1-owner-visual-after/medidas-after.json`.
+
+`OWNER_VISUAL_VALIDATION` permanece **`PENDING`** e `RBV9-INV-081` permanece
+**`IMPL_NV`**: a correção não substitui a revisão do owner.

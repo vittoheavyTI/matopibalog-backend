@@ -38,10 +38,10 @@ export const ArquivoPreviewModal: React.FC<Props> = ({ arquivo, onClose }) => {
                 <Share2 size={18} />
               </button>
             )}
-            <a href={arquivo.url} download className="p-2 rounded hover:bg-gray-100 text-gray-600" title="Salvar" aria-label="Salvar">
+            <a href={arquivo.url} download className="p-2 rounded hover:bg-gray-100 text-gray-600" title="Baixar arquivo" aria-label="Baixar arquivo">
               <Download size={18} />
             </a>
-            <a href={arquivo.url} target="_blank" rel="noopener noreferrer" className="p-2 rounded hover:bg-gray-100 text-gray-600" title="Abrir fora" aria-label="Abrir fora">
+            <a href={arquivo.url} target="_blank" rel="noopener noreferrer" className="p-2 rounded hover:bg-gray-100 text-gray-600" title="Abrir em nova guia" aria-label="Abrir em nova guia">
               <ExternalLink size={18} />
             </a>
             <button onClick={onClose} className="p-2 rounded hover:bg-gray-100 text-gray-600" title="Fechar" aria-label="Fechar">
@@ -59,8 +59,8 @@ export const ArquivoPreviewModal: React.FC<Props> = ({ arquivo, onClose }) => {
           ) : (
             <div className="min-h-[60vh] flex items-center justify-center p-6 text-center">
               <div>
-                <p className="text-sm font-semibold text-gray-700">Pre-visualizacao indisponivel para este formato.</p>
-                <p className="text-xs text-gray-500 mt-1">Use abrir fora ou salvar.</p>
+                <p className="text-sm font-semibold text-gray-700">Pré-visualização indisponível para este formato.</p>
+                <p className="text-xs text-gray-500 mt-1">Use "Abrir em nova guia" ou baixe o arquivo.</p>
               </div>
             </div>
           )}
