@@ -1,0 +1,138 @@
+[
+  {
+    "cena": "inicio-ativo",
+    "url": "/portal/embarcador",
+    "viewport": "390x844",
+    "scrollWidth": 390,
+    "clientWidth": 390,
+    "estouraLargura": false,
+    "elementosQueEstouram": [],
+    "destaques": [
+      {
+        "seletor": "rounded-xl border border-slate-200 bg-white p-4 shadow-sm border-amber-200 bg-amber-50",
+        "texto": "Precisa da sua atençãoA transportadora pediu ajust",
+        "background": "rgb(255, 255, 255)"
+      }
+    ]
+  },
+  {
+    "cena": "ajustes-solicitados",
+    "url": "/portal/embarcador/operacoes/req-fixture-0002",
+    "viewport": "390x844",
+    "scrollWidth": 390,
+    "clientWidth": 390,
+    "estouraLargura": false,
+    "elementosQueEstouram": [],
+    "destaques": [
+      {
+        "seletor": "rounded-xl border border-slate-200 bg-white p-4 shadow-sm border-amber-200 bg-amber-50",
+        "texto": "A transportadora pediu ajustesA janela pedida coin",
+        "background": "rgb(255, 255, 255)"
+      }
+    ]
+  },
+  {
+    "cena": "pedido-novo",
+    "url": "/portal/embarcador/solicitacoes/nova",
+    "viewport": "390x844",
+    "scrollWidth": 390,
+    "clientWidth": 390,
+    "estouraLargura": false,
+    "elementosQueEstouram": [],
+    "destaques": [
+      {
+        "seletor": "rounded-lg border border-emerald-700 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50",
+        "texto": "Adicionar outro local",
+        "background": "rgba(0, 0, 0, 0)"
+      }
+    ]
+  },
+  {
+    "cena": "conteudo-longo",
+    "url": "/portal/embarcador/operacoes/req-fixture-0003",
+    "viewport": "390x844",
+    "scrollWidth": 625,
+    "clientWidth": 390,
+    "estouraLargura": true,
+    "elementosQueEstouram": [
+      "div.flex.flex-1 :: \"☰Matopiba LogPortal do Embarcador · Coop\" (right=625)",
+      "div.min-w-0 :: \"Matopiba LogPortal do Embarcador · Coope\" (right=625)",
+      "p.text-sm.font-semibold :: \"Matopiba Log\" (right=625)",
+      "p.truncate.text-xs :: \"Portal do Embarcador · Cooperativa Agroi\" (right=625)"
+    ],
+    "destaques": [
+      {
+        "seletor": "rounded-xl border border-slate-200 bg-white p-4 shadow-sm border-amber-200 bg-amber-50",
+        "texto": "A transportadora pediu ajustesPrecisamos que você ",
+        "background": "rgb(255, 255, 255)"
+      }
+    ]
+  },
+  {
+    "cena": "documentos",
+    "url": "/portal/embarcador/operacoes/req-fixture-0003",
+    "viewport": "390x844",
+    "scrollWidth": 390,
+    "clientWidth": 390,
+    "estouraLargura": false,
+    "elementosQueEstouram": [],
+    "destaques": []
+  },
+  {
+    "cena": "inbox-grupos",
+    "url": "/solicitacoes-embarcadores",
+    "viewport": "390x844",
+    "scrollWidth": 390,
+    "clientWidth": 390,
+    "estouraLargura": false,
+    "elementosQueEstouram": [],
+    "destaques": [
+      {
+        "seletor": "rounded-xl border p-4 border-emerald-200 bg-emerald-50",
+        "texto": "Ajustes reenviados (1)O embarcador corrigiu e reen",
+        "background": "oklch(0.979 0.021 166.113)"
+      },
+      {
+        "seletor": "rounded-lg px-3 py-1.5 text-xs font-medium disabled:opacity-60 border border-amber-600 text-amber-700 hover:bg-amber-50",
+        "texto": "Pedir ajustes",
+        "background": "rgba(0, 0, 0, 0)"
+      },
+      {
+        "seletor": "rounded-xl border p-4 border-emerald-200 bg-emerald-50",
+        "texto": "Novas solicitações (2)Aguardando sua decisão.Soja ",
+        "background": "oklch(0.979 0.021 166.113)"
+      },
+      {
+        "seletor": "rounded-lg px-3 py-1.5 text-xs font-medium disabled:opacity-60 border border-amber-600 text-amber-700 hover:bg-amber-50",
+        "texto": "Pedir ajustes",
+        "background": "rgba(0, 0, 0, 0)"
+      },
+      {
+        "seletor": "rounded-lg px-3 py-1.5 text-xs font-medium disabled:opacity-60 border border-amber-600 text-amber-700 hover:bg-amber-50",
+        "texto": "Pedir ajustes",
+        "background": "rgba(0, 0, 0, 0)"
+      }
+    ]
+  },
+  {
+    "cena": "inbox-conteudo-longo",
+    "url": "/solicitacoes-embarcadores",
+    "viewport": "390x844",
+    "scrollWidth": 390,
+    "clientWidth": 390,
+    "estouraLargura": false,
+    "elementosQueEstouram": [],
+    "destaques": [
+      {
+        "seletor": "rounded-xl border p-4 border-emerald-200 bg-emerald-50",
+        "texto": "Novas solicitações (1)Aguardando sua decisão.Soja ",
+        "background": "oklch(0.979 0.021 166.113)"
+      },
+      {
+        "seletor": "rounded-lg px-3 py-1.5 text-xs font-medium disabled:opacity-60 border border-amber-600 text-amber-700 hover:bg-amber-50",
+        "texto": "Pedir ajustes",
+        "background": "rgba(0, 0, 0, 0)"
+      }
+    ]
+  }
+]

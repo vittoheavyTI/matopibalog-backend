@@ -1,0 +1,37 @@
+[
+  {
+    "arquivo": "carrier/62-inbox-detalhe-desktop.png",
+    "cena": "Detalhe aberto: 3 origens, observações, 2 versões de envio, documento do embarcador, documento de frete elegível e comprovante aprovado elegível.",
+    "viewport": "1440x900"
+  },
+  {
+    "arquivo": "carrier/62-inbox-detalhe-tablet.png",
+    "cena": "Detalhe aberto: 3 origens, observações, 2 versões de envio, documento do embarcador, documento de frete elegível e comprovante aprovado elegível.",
+    "viewport": "768x1024"
+  },
+  {
+    "arquivo": "mobile/62-inbox-detalhe-mobile.png",
+    "cena": "Detalhe aberto: 3 origens, observações, 2 versões de envio, documento do embarcador, documento de frete elegível e comprovante aprovado elegível.",
+    "viewport": "390x844"
+  },
+  {
+    "arquivo": "external/03-ativacao-conta-nova-desktop.png",
+    "cena": "Ativação de convite para e-mail sem conta. Verificar: quem convidou, para qual e-mail, criação de senha com confirmação, CTA claro.",
+    "viewport": "1440x900"
+  },
+  {
+    "arquivo": "mobile/03-ativacao-conta-nova-mobile.png",
+    "cena": "Ativação de convite para e-mail sem conta. Verificar: quem convidou, para qual e-mail, criação de senha com confirmação, CTA claro.",
+    "viewport": "390x844"
+  },
+  {
+    "arquivo": "external/22-historico-envios-desktop.png",
+    "cena": "Histórico aberto com v1 (motivo do ajuste) e v2. Verificar: uma pessoa comum entende o que mudou entre os envios.",
+    "viewport": "1440x900"
+  },
+  {
+    "arquivo": "mobile/22-historico-envios-mobile.png",
+    "cena": "Histórico aberto com v1 (motivo do ajuste) e v2. Verificar: uma pessoa comum entende o que mudou entre os envios.",
+    "viewport": "390x844"
+  }
+]
