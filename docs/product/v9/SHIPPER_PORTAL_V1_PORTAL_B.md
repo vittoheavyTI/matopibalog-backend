@@ -164,16 +164,40 @@ Não há e-mail transacional de convite nesta fatia. O token em claro é devolvi
 "e-mail enviado" sem provedor configurado seria mentir para o operador (§17).
 Só o hash é persistido; o token nunca é logado.
 
-## 11. Testes
+## 11. Achado da revisão de janelas de falha (§152)
+
+A revisão encontrou um vazamento real que eu mesmo havia introduzido, e vale
+registrar porque a versão errada parecia a mais natural.
+
+`cadastrarEmbarcador` procurava a organização pelo nome em
+`shipper_organizations` **globalmente**, para reusar em vez de duplicar. O schema
+permite que um embarcador se relacione com várias transportadoras (§22), então
+reusar parecia certo. Só que o acesso do portal é **por organização**:
+`loadPortalContext` devolve todos os relacionamentos ativos dela. Consequência:
+
+1. a transportadora A, digitando um nome, descobriria que aquele embarcador
+   existe e quantos contatos ativos ele tem — cadastrados pela B;
+2. os contatos cadastrados pela B passariam a enxergar a A automaticamente.
+
+Bastaria acertar o nome para se enxertar na base de outra transportadora.
+
+**Correção:** a busca por embarcador existente é feita somente entre os que já
+têm relacionamento com **esta** transportadora. Unificar organizações entre
+transportadoras é uma decisão de produto que ninguém tomou — é Partner Network,
+fora de escopo. O schema continua suportando N relacionamentos para quando essa
+decisão existir. Dois testes congelam os dois lados: nome igual de outra
+transportadora **não** reusa; nome igual dentro da própria **reusa**.
+
+## 12. Testes
 
 | Suíte | Contagem | Cobre |
 |---|---|---|
 | PG real 081 | 27 | histórico, 4 corridas de reenvio, ativação concorrente, fronteira de compartilhamento, permissão do operador |
-| Backend 081B | 29 | mapa de status, whitelist da linha do tempo, isolamento mesmo-transportadora, IDOR de documento/comprovante, varredura de chaves proibidas, separação de credenciais |
+| Backend 081B | 31 | mapa de status, whitelist da linha do tempo, isolamento mesmo-transportadora, IDOR de documento/comprovante, varredura de chaves proibidas, separação de credenciais |
 | Web portal | — | estados de carregamento/erro/vazio, correção pré-preenchida, idempotência do envio, ausência de jargão interno |
 | Web caixa de entrada | — | aceite sem redigitação, motivo obrigatório, conversão pendente visível |
 
-## 12. Fora de escopo (mantido)
+## 13. Fora de escopo (mantido)
 
 Partner Network, Marketplace, ERP, Billing no portal, financeiro interno,
 ações de escrita da IA, provider de rota novo. Cotação/proposta segue **deferida**

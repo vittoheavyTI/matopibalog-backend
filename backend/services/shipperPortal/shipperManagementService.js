@@ -94,20 +94,49 @@ async function listarEmbarcadores(supabase, { empresaId }) {
   };
 }
 
-// Cadastra o embarcador e abre o relacionamento numa única ação da tela. Se o
-// embarcador já existir (mesmo nome normalizado), reusa em vez de duplicar —
-// duas organizações com o mesmo nome só criariam confusão na caixa de entrada.
+// Cadastra o embarcador e abre o relacionamento numa única ação da tela.
+//
+// DECISÃO DE FRONTEIRA (não simplificar isto): a busca por embarcador existente
+// é feita SOMENTE entre os que já têm relacionamento com ESTA transportadora.
+//
+// A tentação natural seria procurar `shipper_organizations` pelo nome e reusar a
+// organização existente — afinal o schema permite que um embarcador se relacione
+// com várias transportadoras (§22). Mas a busca global cria dois vazamentos
+// reais entre transportadoras que não se conhecem:
+//
+//   1. a transportadora A, digitando um nome, descobriria que aquele embarcador
+//      existe e quantos contatos ativos ele tem (cadastrados pela B);
+//   2. os usuários de portal cadastrados pela B passariam a enxergar a A
+//      automaticamente — porque o acesso é por organização, e `loadPortalContext`
+//      devolve TODOS os relacionamentos ativos da organização.
+//
+// Ou seja: bastaria acertar o nome para se enxertar na base de contatos de outra
+// transportadora. Unificar organizações entre transportadoras é uma decisão de
+// produto que ninguém tomou (é Partner Network, fora de escopo). Até lá, cada
+// transportadora cadastra o seu — o schema continua suportando N relacionamentos
+// para quando essa decisão existir.
 async function cadastrarEmbarcador(supabase, { empresaId, user, body = {} }) {
   const nome = texto(body.nome, 'o nome do embarcador');
   const documento = texto(body.documento, 'o documento', { obrigatorio: false, max: 32 });
 
+  // Só reusa organização que JÁ está ligada a esta transportadora.
+  const { data: relsDaEmpresa, error: relsError } = await supabase
+    .from('shipper_carrier_relationships')
+    .select('id, status, shipper_org_id')
+    .eq('empresa_id', empresaId);
+  throwDb(relsError, 'Não foi possível verificar os embarcadores da empresa.');
+
+  const orgIdsDaEmpresa = (relsDaEmpresa || []).map((r) => r.shipper_org_id);
   let orgId = null;
-  const { data: existente, error: buscaError } = await supabase
-    .from('shipper_organizations').select('id').ilike('nome', nome).maybeSingle();
-  if (buscaError && buscaError.code !== 'PGRST116') throwDb(buscaError, 'Não foi possível verificar o embarcador.');
-  if (existente) {
-    orgId = existente.id;
-  } else {
+  if (orgIdsDaEmpresa.length) {
+    const { data: minhasOrgs, error: orgsError } = await supabase
+      .from('shipper_organizations').select('id, nome').in('id', orgIdsDaEmpresa);
+    throwDb(orgsError, 'Não foi possível verificar os embarcadores da empresa.');
+    const alvo = nome.toLowerCase();
+    orgId = (minhasOrgs || []).find((o) => String(o.nome || '').toLowerCase() === alvo)?.id || null;
+  }
+
+  if (!orgId) {
     const { data: criada, error: criaError } = await supabase
       .from('shipper_organizations').insert({ nome, documento }).select('id').single();
     throwDb(criaError, 'Não foi possível cadastrar o embarcador.');
@@ -116,12 +145,7 @@ async function cadastrarEmbarcador(supabase, { empresaId, user, body = {} }) {
 
   // Relacionamento já existente com esta transportadora: reativa em vez de
   // criar um segundo (o par é único no banco).
-  const { data: relExistente, error: relBuscaError } = await supabase
-    .from('shipper_carrier_relationships').select('*')
-    .eq('empresa_id', empresaId).eq('shipper_org_id', orgId).maybeSingle();
-  if (relBuscaError && relBuscaError.code !== 'PGRST116') {
-    throwDb(relBuscaError, 'Não foi possível verificar o acesso do embarcador.');
-  }
+  const relExistente = (relsDaEmpresa || []).find((r) => r.shipper_org_id === orgId) || null;
 
   if (relExistente) {
     if (relExistente.status === 'ACTIVE') {

@@ -507,6 +507,103 @@ test('081B desativação: usuário de portal desativado não acessa, mesmo com t
 });
 
 // ============================================================================
+// Cadastro de embarcador: não se enxertar na base de outra transportadora
+// ============================================================================
+
+const management = require('../services/shipperPortal/shipperManagementService');
+
+// Stub com escrita, para observar o que o cadastro realmente grava.
+function makeSupabaseComEscrita(tabelas = {}) {
+  const inseridos = [];
+  function builder(nome) {
+    const filtros = [];
+    const b = {
+      select() { return b; },
+      eq(col, val) { filtros.push([col, val, 'eq']); return b; },
+      in(col, vals) { filtros.push([col, vals, 'in']); return b; },
+      ilike(col, val) { filtros.push([col, val, 'ilike']); return b; },
+      order() { return b; },
+      limit() { return b; },
+      insert(valores) {
+        const linha = { id: `novo-${nome}-${inseridos.length + 1}`, ...valores };
+        inseridos.push({ tabela: nome, valores });
+        (tabelas[nome] = tabelas[nome] || []).push(linha);
+        return { select: () => ({ single: () => Promise.resolve({ data: linha, error: null }) }) };
+      },
+      update(valores) {
+        return {
+          eq: () => ({
+            eq: () => ({ select: () => ({ single: () => Promise.resolve({ data: { id: 'x', ...valores }, error: null }) }) }),
+            select: () => ({
+              single: () => Promise.resolve({ data: { id: 'x', ...valores }, error: null }),
+              maybeSingle: () => Promise.resolve({ data: { id: 'x', ...valores }, error: null }),
+            }),
+            ilike: () => Promise.resolve({ data: [], error: null }),
+            then: (r) => r({ data: [], error: null }),
+          }),
+        };
+      },
+      maybeSingle() { return Promise.resolve({ data: linhas()[0] || null, error: null }); },
+      single() { return Promise.resolve({ data: linhas()[0] || null, error: null }); },
+      then(resolve) { resolve({ data: linhas(), error: null }); },
+    };
+    function linhas() {
+      return (tabelas[nome] || []).filter((row) => filtros.every(([col, val, op]) => {
+        if (op === 'in') return val.includes(row[col]);
+        if (op === 'ilike') return String(row[col] || '').toLowerCase() === String(val).toLowerCase();
+        return row[col] === val;
+      }));
+    }
+    return b;
+  }
+  return { from: (n) => builder(n), _inseridos: inseridos };
+}
+
+test('081B cadastro: nome igual ao de embarcador de OUTRA transportadora não reusa a organização', async () => {
+  // A transportadora B já tem "Fazendas Boa Vista". A transportadora A cadastra
+  // um embarcador com o MESMO nome. Se reusássemos a organização por nome, os
+  // contatos cadastrados por B passariam a enxergar A — bastaria acertar o nome.
+  const EMP_B = 'empresa-b';
+  const ORG_DA_B = 'org-da-b';
+  const tabelas = {
+    shipper_organizations: [{ id: ORG_DA_B, nome: 'Fazendas Boa Vista', documento: null, status: 'active' }],
+    shipper_carrier_relationships: [
+      { id: 'rel-b', empresa_id: EMP_B, shipper_org_id: ORG_DA_B, status: 'ACTIVE' },
+    ],
+  };
+  const supabase = makeSupabaseComEscrita(tabelas);
+
+  const r = await management.cadastrarEmbarcador(supabase, {
+    empresaId: EMP_A, user: { uid: 'admin-a' }, body: { nome: 'Fazendas Boa Vista' },
+  });
+
+  assert.notEqual(r.shipper_org_id, ORG_DA_B, 'não pode reusar a organização de outra transportadora');
+  assert.equal(r.criado_agora, true);
+  // E o relacionamento criado aponta para a organização NOVA.
+  const relCriado = supabase._inseridos.find((i) => i.tabela === 'shipper_carrier_relationships');
+  assert.ok(relCriado, 'deve criar relacionamento');
+  assert.equal(relCriado.valores.empresa_id, EMP_A);
+  assert.notEqual(relCriado.valores.shipper_org_id, ORG_DA_B);
+});
+
+test('081B cadastro: mesmo nome DENTRO da própria transportadora reusa em vez de duplicar', async () => {
+  const ORG_DA_A = 'org-da-a';
+  const tabelas = {
+    shipper_organizations: [{ id: ORG_DA_A, nome: 'Fazendas Boa Vista', documento: null, status: 'active' }],
+    shipper_carrier_relationships: [
+      { id: 'rel-a', empresa_id: EMP_A, shipper_org_id: ORG_DA_A, status: 'ACTIVE' },
+    ],
+  };
+  const supabase = makeSupabaseComEscrita(tabelas);
+  const r = await management.cadastrarEmbarcador(supabase, {
+    empresaId: EMP_A, user: { uid: 'admin-a' }, body: { nome: 'fazendas boa vista' },
+  });
+  assert.equal(r.shipper_org_id, ORG_DA_A, 'reusa o próprio embarcador');
+  assert.equal(r.criado_agora, false);
+  assert.equal(supabase._inseridos.length, 0, 'nada é duplicado');
+});
+
+// ============================================================================
 // Resumo da home (§79)
 // ============================================================================
 
