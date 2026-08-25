@@ -632,8 +632,8 @@ function registrar(pg) {
       `INSERT INTO public.frete_epod (id, frete_id, empresa_id, status, criado_por)
        VALUES ($1,$2,$3,'validado',$4)`, [EPOD, FRETE, empresaId, ADM_A]);
     await pool.query(
-      `INSERT INTO public.frete_epod_evidencias (id, epod_id, frete_id, empresa_id, tipo, storage_path, status, criado_por)
-       VALUES ($1,$2,$3,$4,'foto',$5,'aprovada',$6)`,
+      `INSERT INTO public.frete_epod_evidencias (id, epod_id, frete_id, empresa_id, storage_path, status, criado_por)
+       VALUES ($1,$2,$3,$4,$5,'aprovada',$6)`,
       [EVID, EPOD, FRETE, empresaId, `e/${sufixo}/1.jpg`, ADM_A]);
 
     // Solicitação aceita e vinculada a esta campanha.

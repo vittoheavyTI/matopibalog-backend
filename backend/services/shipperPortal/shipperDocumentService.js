@@ -303,7 +303,10 @@ async function listarCompartilhaveis(supabase, { empresaId, requestId }) {
   // ePOD e sem depender de o vínculo estar coerente.
   const { data: evid, error: evidError } = await supabase
     .from('frete_epod_evidencias')
-    .select('id, frete_id, empresa_id, epod_id, tipo, created_at, status')
+    // Sem `tipo`: essa coluna não faz parte da cadeia versionada de migrations
+    // (048/050), e o serviço não precisa dela — pedir uma coluna que pode não
+    // existir quebraria a listagem inteira por nada.
+    .select('id, frete_id, empresa_id, epod_id, created_at, status')
     .in('frete_id', freteIds).eq('empresa_id', empresaId).eq('status', 'aprovada');
   throwDb(evidError, 'Não foi possível carregar os comprovantes.');
   const evidencias = evid || [];
