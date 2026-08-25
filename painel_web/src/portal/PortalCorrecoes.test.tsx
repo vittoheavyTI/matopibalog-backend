@@ -141,7 +141,13 @@ describe('VIS-10 · Pedidos e Transportes não duplicam o mesmo item', () => {
 // ---------------------------------------------------------------------------
 
 describe('Detalhe do pedido', () => {
-  const semDocs = { enviados_por_mim: [], da_transportadora: [], comprovantes: [] };
+  type Doc = {
+    id: string; origem: string; nome: string; descricao: string | null;
+    enviado_em: string; mime_type?: string | null;
+  };
+  type Docs = { enviados_por_mim: Doc[]; da_transportadora: Doc[]; comprovantes: Doc[] };
+
+  const semDocs: Docs = { enviados_por_mim: [], da_transportadora: [], comprovantes: [] };
 
   const detalheBase = {
     request_id: 'req-1', reference_code: 'SOL-1', cargo_name: 'Soja',
@@ -155,7 +161,7 @@ describe('Detalhe do pedido', () => {
     linha_do_tempo: [], atualizado_em: '2026-01-02T00:00:00Z',
   };
 
-  function montar(over: Record<string, unknown> = {}, docs = semDocs, rota = '/portal/embarcador/pedidos/req-1') {
+  function montar(over: Record<string, unknown> = {}, docs: Docs = semDocs, rota = '/portal/embarcador/pedidos/req-1') {
     get.mockImplementation((url: string) => {
       if (url.includes('/contexto')) return Promise.resolve({ data: CONTEXTO });
       if (url.includes('/documentos')) return Promise.resolve({ data: docs });
