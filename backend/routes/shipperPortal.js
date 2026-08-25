@@ -113,6 +113,14 @@ router.get('/operacoes/:id', (req, res) =>
   })));
 
 // Documentos
+// Lista agregada, para a aba "Documentos": todos os arquivos de todos os
+// pedidos do embarcador. Mesma fronteira das demais leituras — aplicada no
+// serviço, nunca pelo cliente.
+router.get('/documentos', (req, res) =>
+  responder(res, documentos.listarTodosOsDocumentos(supabase, {
+    portalUserId: req.portalUser.id,
+  })));
+
 router.get('/solicitacoes/:id/documentos', (req, res) =>
   responder(res, documentos.listarDocumentosDaSolicitacao(supabase, {
     portalUserId: req.portalUser.id, requestId: req.params.id,

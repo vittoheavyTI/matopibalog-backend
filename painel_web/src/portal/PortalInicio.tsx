@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import portalApi, { mensagemDeErro } from './portalApi';
-import { Carregando, Cartao, DataCurta, Erro, Quantidade, Situacao, Vazio } from './PortalUI';
+import { Carregando, Cartao, DataCurta, Erro, FOCO_CLARO, Quantidade, Situacao, Vazio } from './PortalUI';
 
 type Operacao = {
   request_id: string;
@@ -21,7 +21,6 @@ type Resumo = {
   precisam_atencao: Operacao[];
   em_andamento: Operacao[];
   comprovantes_disponiveis: Operacao[];
-  recentes: Operacao[];
   contadores: { precisam_atencao: number; em_andamento: number; comprovantes_disponiveis: number; total: number };
 };
 
@@ -30,29 +29,41 @@ type Resumo = {
 // buscar (o comprovante). Nada de uma parede de cartões genéricos.
 
 function LinhaOperacao({ op }: { op: Operacao }) {
+  const destino = op.proxima_acao.tipo === 'REVISAR'
+    ? `/portal/embarcador/pedidos/${op.request_id}?acao=corrigir`
+    : `/portal/embarcador/pedidos/${op.request_id}`;
+
   return (
-    <li className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 py-3 last:border-0">
-      <div className="min-w-0 flex-1">
-        <Link to={`/portal/embarcador/operacoes/${op.request_id}`} className="text-sm font-medium text-slate-900 hover:underline">
-          {op.cargo_name} · {op.destination_name}
-        </Link>
-        <p className="mt-0.5 text-xs text-slate-500">
-          {op.reference_code} · <Quantidade valor={op.total_quantidade} unidade={op.quantity_unit} />
-          {op.atualizado_em && <> · atualizado em <DataCurta valor={op.atualizado_em} /></>}
-        </p>
-      </div>
-      <div className="flex items-center gap-3">
-        <Situacao codigo={op.status_externo} rotulo={op.status_rotulo} />
-        {op.proxima_acao.tipo !== 'NENHUMA' && (
+    <li className="border-b border-slate-100 py-3 last:border-0">
+      {/* No celular, texto e ações NÃO disputam a mesma faixa (VIS-04). Antes,
+          o grupo selo+botão não cedia largura e o título era espremido até uma
+          palavra por linha — "Algodão / em / pluma / . / Armazém / de / Luís".
+          Abaixo de `sm` o conteúdo ocupa a linha inteira e as ações descem. */}
+      <div className="sm:flex sm:items-center sm:justify-between sm:gap-3">
+        <div className="min-w-0 sm:flex-1">
           <Link
-            to={op.proxima_acao.tipo === 'REVISAR'
-              ? `/portal/embarcador/operacoes/${op.request_id}?acao=corrigir`
-              : `/portal/embarcador/operacoes/${op.request_id}`}
-            className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-800"
+            to={destino}
+            className={`rounded text-sm font-medium text-slate-900 hover:underline ${FOCO_CLARO}`}
           >
-            {op.proxima_acao.rotulo}
+            {op.cargo_name} · {op.destination_name}
           </Link>
-        )}
+          <p className="mt-0.5 text-xs text-slate-500">
+            {op.reference_code} · <Quantidade valor={op.total_quantidade} unidade={op.quantity_unit} />
+            {op.atualizado_em && <> · atualizado em <DataCurta valor={op.atualizado_em} /></>}
+          </p>
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-2 sm:mt-0 sm:shrink-0">
+          <Situacao codigo={op.status_externo} rotulo={op.status_rotulo} />
+          {op.proxima_acao.tipo !== 'NENHUMA' && (
+            <Link
+              to={destino}
+              className={`w-full rounded-lg bg-emerald-700 px-3 py-2 text-center text-xs font-medium text-white hover:bg-emerald-800 sm:w-auto sm:py-1.5 ${FOCO_CLARO}`}
+            >
+              {op.proxima_acao.rotulo}
+            </Link>
+          )}
+        </div>
       </div>
     </li>
   );
@@ -83,14 +94,18 @@ export default function PortalInicio() {
   if (!dados) return null;
 
   const semNada = dados.contadores.total === 0;
+  // Entrega parcial vive dentro de "Em andamento" (§18) — parte da carga ainda
+  // está a caminho. Quando há uma, o bloco inteiro ganha tom de atenção, para
+  // não passar como acompanhamento rotineiro.
+  const temEntregaParcial = dados.em_andamento.some((o) => o.status_externo === 'PARCIALMENTE_ENTREGUE');
 
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-lg font-semibold text-slate-900">Início</h1>
         <Link
-          to="/portal/embarcador/solicitacoes/nova"
-          className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800"
+          to="/portal/embarcador/pedidos/novo"
+          className={`rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 ${FOCO_CLARO}`}
         >
           Pedir um transporte
         </Link>
@@ -102,8 +117,8 @@ export default function PortalInicio() {
           descricao="Quando precisar mover uma carga, descreva o que é, de onde sai e para onde vai. A transportadora recebe o pedido e responde por aqui."
           acao={(
             <Link
-              to="/portal/embarcador/solicitacoes/nova"
-              className="inline-block rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800"
+              to="/portal/embarcador/pedidos/novo"
+              className={`inline-block rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 ${FOCO_CLARO}`}
             >
               Pedir um transporte
             </Link>
@@ -112,7 +127,7 @@ export default function PortalInicio() {
       )}
 
       {dados.precisam_atencao.length > 0 && (
-        <Cartao className="border-amber-200 bg-amber-50">
+        <Cartao tom="atencao">
           <h2 className="text-sm font-semibold text-amber-900">Precisa da sua atenção</h2>
           <p className="mt-1 text-xs text-amber-800">
             A transportadora pediu ajustes nestes pedidos. Depois de corrigir, eles voltam para análise.
@@ -124,8 +139,8 @@ export default function PortalInicio() {
       )}
 
       {dados.comprovantes_disponiveis.length > 0 && (
-        <Cartao>
-          <h2 className="text-sm font-semibold text-slate-900">Comprovantes disponíveis</h2>
+        <Cartao tom="sucesso">
+          <h2 className="text-sm font-semibold text-emerald-900">Comprovantes disponíveis</h2>
           <ul className="mt-2">
             {dados.comprovantes_disponiveis.map((op) => <LinhaOperacao key={op.request_id} op={op} />)}
           </ul>
@@ -133,8 +148,15 @@ export default function PortalInicio() {
       )}
 
       {dados.em_andamento.length > 0 && (
-        <Cartao>
-          <h2 className="text-sm font-semibold text-slate-900">Em andamento</h2>
+        <Cartao tom={temEntregaParcial ? 'atencao' : 'neutro'}>
+          <h2 className={`text-sm font-semibold ${temEntregaParcial ? 'text-amber-900' : 'text-slate-900'}`}>
+            Em andamento
+          </h2>
+          {temEntregaParcial && (
+            <p className="mt-1 text-xs text-amber-800">
+              Um transporte teve entrega parcial: parte da carga ainda está a caminho.
+            </p>
+          )}
           <ul className="mt-2">
             {dados.em_andamento.map((op) => <LinhaOperacao key={op.request_id} op={op} />)}
           </ul>

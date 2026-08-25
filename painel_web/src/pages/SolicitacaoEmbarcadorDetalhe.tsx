@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import api from '../api';
+import { ArquivoPreviewModal, type ArquivoPreview } from '../components/ArquivoPreviewModal';
+import { diferencasEntreEnvios } from '../shared/comparacaoEnvios';
 
 // Detalhe de UMA solicitação, do lado da transportadora (owner review HIGH-05).
 //
@@ -48,34 +50,10 @@ function dataHora(valor: string | null) {
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
 }
 
-// Compara duas versões e descreve o que mudou (§50). Sem isto, "Confira o que
-// mudou" seria uma instrução que a tela não permite cumprir — o operador teria
-// que comparar de cabeça.
-function diferencas(anterior: Versao | null, atual: Versao | null): string[] {
-  if (!anterior || !atual) return [];
-  const mudancas: string[] = [];
-  if (anterior.cargo_name !== atual.cargo_name) {
-    mudancas.push(`Carga: "${anterior.cargo_name}" → "${atual.cargo_name}"`);
-  }
-  if (anterior.destination_name !== atual.destination_name) {
-    mudancas.push(`Destino: "${anterior.destination_name}" → "${atual.destination_name}"`);
-  }
-  if (anterior.total_quantidade !== atual.total_quantidade) {
-    mudancas.push(`Quantidade total: ${quantidade(anterior.total_quantidade, anterior.quantity_unit)} → ${quantidade(atual.total_quantidade, atual.quantity_unit)}`);
-  }
-  const antes = new Map(anterior.origens.map((o) => [o.nome, o.quantidade]));
-  const depois = new Map(atual.origens.map((o) => [o.nome, o.quantidade]));
-  for (const [nome, q] of depois) {
-    if (!antes.has(nome)) mudancas.push(`Local incluído: ${nome} (${quantidade(q, atual.quantity_unit)})`);
-    else if (antes.get(nome) !== q) {
-      mudancas.push(`${nome}: ${quantidade(antes.get(nome) ?? null, anterior.quantity_unit)} → ${quantidade(q, atual.quantity_unit)}`);
-    }
-  }
-  for (const nome of antes.keys()) {
-    if (!depois.has(nome)) mudancas.push(`Local removido: ${nome}`);
-  }
-  return mudancas;
-}
+// A comparação entre envios mora em `shared/comparacaoEnvios` porque as DUAS
+// pontas precisam dela: a transportadora, para decidir sobre o reenvio, e o
+// embarcador, para entender o que ele mesmo mudou. Enquanto existia só aqui, o
+// portal externo mostrava dois totais soltos e deixava a conta para o cliente.
 
 export function SolicitacaoEmbarcadorDetalhe({ requestId, aoFechar }: { requestId: string; aoFechar: () => void }) {
   const [historico, setHistorico] = useState<Versao[]>([]);
@@ -86,6 +64,7 @@ export function SolicitacaoEmbarcadorDetalhe({ requestId, aoFechar }: { requestI
   const [erro, setErro] = useState<string | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
   const [agindo, setAgindo] = useState<string | null>(null);
+  const [preview, setPreview] = useState<ArquivoPreview | null>(null);
 
   const carregar = useCallback(async () => {
     setCarregando(true);
@@ -119,12 +98,15 @@ export function SolicitacaoEmbarcadorDetalhe({ requestId, aoFechar }: { requestI
 
   useEffect(() => { void carregar(); }, [carregar]);
 
-  async function abrirDocumentoDoEmbarcador(docId: string) {
-    setAgindo(docId);
+  // Pré-visualização embutida, download secundário — o mesmo comportamento do
+  // portal externo. Quem confere um documento do embarcador quer olhar, não
+  // baixar para abrir em outro programa.
+  async function abrirDocumentoDoEmbarcador(doc: Documento) {
+    setAgindo(doc.id);
     setErro(null);
     try {
-      const { data } = await api.get(`/shipper-inbox/solicitacoes/${requestId}/documentos-embarcador/${docId}/url`);
-      window.open(data.url, '_blank', 'noopener,noreferrer');
+      const { data } = await api.get(`/shipper-inbox/solicitacoes/${requestId}/documentos-embarcador/${doc.id}/url`);
+      setPreview({ url: data.url, nome: doc.nome, mime: data.mime_type || doc.tipo_arquivo || null });
     } catch (e) {
       setErro(mensagemDeErro(e, 'Não foi possível abrir o documento.'));
     } finally {
@@ -169,7 +151,7 @@ export function SolicitacaoEmbarcadorDetalhe({ requestId, aoFechar }: { requestI
   const botao = 'rounded-lg px-3 py-1.5 text-xs font-medium disabled:opacity-60';
   const atual = historico[0] || null;
   const anterior = historico[1] || null;
-  const mudancas = diferencas(anterior, atual);
+  const mudancas = diferencasEntreEnvios(anterior, atual);
 
   if (carregando) {
     return (
@@ -255,7 +237,7 @@ export function SolicitacaoEmbarcadorDetalhe({ requestId, aoFechar }: { requestI
                   <p className="text-xs text-gray-500">Enviado em {dataHora(d.enviado_em)}</p>
                 </div>
                 <button
-                  type="button" disabled={agindo === d.id} onClick={() => abrirDocumentoDoEmbarcador(d.id)}
+                  type="button" disabled={agindo === d.id} onClick={() => abrirDocumentoDoEmbarcador(d)}
                   className={`${botao} border border-gray-300 text-gray-700 hover:bg-gray-50`}
                 >
                   {agindo === d.id ? 'Abrindo…' : 'Abrir'}
@@ -368,6 +350,8 @@ export function SolicitacaoEmbarcadorDetalhe({ requestId, aoFechar }: { requestI
           )}
         </>
       )}
+
+      <ArquivoPreviewModal arquivo={preview} onClose={() => setPreview(null)} />
     </div>
   );
 }

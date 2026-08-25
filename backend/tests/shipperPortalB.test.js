@@ -263,7 +263,7 @@ test('081B status: o mapa de bucket usado é o canônico do produto (sem cópia 
 test('081B ação: ajustes solicitados vira instrução, não código de status', () => {
   const acao = tracking.derivarProximaAcao(tracking.EXTERNAL_STATUS.AJUSTES_SOLICITADOS, { requestId: 'r1' });
   assert.equal(acao.tipo, 'REVISAR');
-  assert.equal(acao.rotulo, 'Corrigir solicitação');
+  assert.equal(acao.rotulo, 'Corrigir pedido');
   assert.ok(!/CHANGES_REQUESTED/.test(acao.rotulo));
 });
 
@@ -727,6 +727,6 @@ test('081B início: o que precisa de atenção vem separado do resto', async () 
   const r = await tracking.resumoInicio(supabase, { portalUserId: USER_X });
   assert.equal(r.contadores.precisam_atencao, 1);
   assert.equal(r.precisam_atencao[0].request_id, 'req-ajuste');
-  assert.equal(r.precisam_atencao[0].proxima_acao.rotulo, 'Corrigir solicitação');
+  assert.equal(r.precisam_atencao[0].proxima_acao.rotulo, 'Corrigir pedido');
   assert.equal(r.contadores.em_andamento, 1);
 });

@@ -325,11 +325,16 @@ async function historicoDaSolicitacao(supabase, { portalUserId, requestId }) {
   const context = await loadPortalContext(supabase, { portalUserId });
   await requireOwnedRequest(supabase, context, requestId);
 
+  // ORDEM CRESCENTE, ao contrário da caixa de entrada interna. Para o
+  // embarcador a leitura útil é causa → correção: envio 1, o que a
+  // transportadora pediu, envio 2. Ler do mais novo para o mais antigo mostrava
+  // o resultado antes do motivo, e contradizia a linha do tempo logo abaixo na
+  // mesma tela, que sempre foi cronológica (VIS-09).
   const { data, error } = await supabase
     .from('shipper_transport_request_submissions')
     .select('version, snapshot, submitted_at, decision, decision_reason, decided_at')
     .eq('request_id', requestId)
-    .order('version', { ascending: false });
+    .order('version', { ascending: true });
   throwDb(error, 'Não foi possível carregar o histórico da solicitação.');
 
   return {

@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { usePortalAuth } from './PortalAuthContext';
-import { Carregando } from './PortalUI';
+import { CampoSenha, Carregando, FOCO_CLARO } from './PortalUI';
 
 // Entrada do portal. Simples de propósito (§27): quem chega aqui é um cliente da
 // transportadora, não um operador — nenhuma navegação interna, nenhum conceito
@@ -54,18 +54,13 @@ export default function PortalLogin() {
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600"
               />
             </div>
-            <div>
-              <label htmlFor="portal-senha" className="block text-sm font-medium text-slate-700">Senha</label>
-              <input
-                id="portal-senha"
-                type="password"
-                autoComplete="current-password"
-                required
-                value={senha}
-                onChange={(e) => setSenha(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600"
-              />
-            </div>
+            <CampoSenha
+              id="portal-senha"
+              rotulo="Senha"
+              autoComplete="current-password"
+              valor={senha}
+              aoMudar={setSenha}
+            />
           </div>
 
           {erro && (
@@ -75,7 +70,7 @@ export default function PortalLogin() {
           <button
             type="submit"
             disabled={enviando}
-            className="mt-5 w-full rounded-lg bg-emerald-700 px-4 py-2.5 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-60"
+            className={`mt-5 w-full rounded-lg bg-emerald-700 px-4 py-2.5 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-60 ${FOCO_CLARO}`}
           >
             {enviando ? 'Entrando…' : 'Entrar'}
           </button>
@@ -84,7 +79,7 @@ export default function PortalLogin() {
               esse fluxo próprio, e um link que não funciona é pior que a
               ausência dele. A orientação é honesta sobre o caminho real. */}
           <p className="mt-4 text-center text-xs text-slate-500">
-            Recebeu um convite? <Link to="/portal/embarcador/convite" className="text-emerald-700 underline">Ative seu acesso</Link>.
+            Recebeu um convite? <Link to="/portal/embarcador/convite" className={`rounded text-emerald-700 underline ${FOCO_CLARO}`}>Ative seu acesso</Link>.
           </p>
           <p className="mt-2 text-center text-xs text-slate-500">
             Esqueceu a senha? Fale com a transportadora para receber um novo convite.

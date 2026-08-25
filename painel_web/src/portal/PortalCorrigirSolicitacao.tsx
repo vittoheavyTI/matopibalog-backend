@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import portalApi, { codigoDoErro, mensagemDeErro } from './portalApi';
-import { Cartao, Quantidade } from './PortalUI';
+import { BOTAO_PRIMARIO, BOTAO_SECUNDARIO, Cartao, FOCO_CLARO, Quantidade } from './PortalUI';
 
 type Detalhe = {
   request_id: string;
@@ -109,14 +109,14 @@ export default function PortalCorrigirSolicitacao({
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-lg font-semibold text-slate-900">Corrigir solicitação</h1>
+        <h1 className="text-lg font-semibold text-slate-900">Corrigir pedido</h1>
         <p className="mt-1 text-sm text-slate-600">
           Ajuste o que for necessário e envie novamente. Seus envios anteriores ficam registrados.
         </p>
       </div>
 
       {detalhe.motivo_transportadora && (
-        <Cartao className="border-amber-200 bg-amber-50">
+        <Cartao tom="atencao">
           <h2 className="text-sm font-semibold text-amber-900">O que a transportadora pediu</h2>
           <p className="mt-1 whitespace-pre-line text-sm text-amber-900">{detalhe.motivo_transportadora}</p>
         </Cartao>
@@ -168,7 +168,7 @@ export default function PortalCorrigirSolicitacao({
                 <button
                   type="button"
                   onClick={() => setOrigens((atual) => atual.filter((_, idx) => idx !== i))}
-                  className="rounded-lg border border-slate-300 px-3 py-2 text-xs text-slate-600 hover:bg-slate-50"
+                  className={`rounded-lg border border-slate-300 px-3 py-2 text-xs text-slate-600 hover:bg-slate-50 ${FOCO_CLARO}`}
                   aria-label={`Remover local de coleta ${i + 1}`}
                 >
                   Remover
@@ -182,7 +182,7 @@ export default function PortalCorrigirSolicitacao({
           <button
             type="button"
             onClick={() => setOrigens((atual) => [...atual, { nome: '', quantidade: '' }])}
-            className="rounded-lg border border-emerald-700 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
+            className={`rounded-lg border border-emerald-700 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-50 ${FOCO_CLARO}`}
           >
             Adicionar outro local
           </button>
@@ -228,13 +228,13 @@ export default function PortalCorrigirSolicitacao({
       <div className="flex flex-wrap gap-3">
         <button
           type="button" onClick={aoCancelar} disabled={enviando}
-          className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          className={BOTAO_SECUNDARIO}
         >
           Cancelar
         </button>
         <button
           type="button" onClick={enviar} disabled={enviando}
-          className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-60"
+          className={BOTAO_PRIMARIO}
         >
           {enviando ? 'Enviando…' : 'Enviar correção'}
         </button>
