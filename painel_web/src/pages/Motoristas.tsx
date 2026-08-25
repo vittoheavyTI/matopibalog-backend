@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, X, MessageCircle, Trash2, AlertTriangle, Camera, MapPin, Loader2, Eye, EyeOff, ArrowUpCircle } from 'lucide-react';
+import { Plus, X, MessageCircle, Trash2, AlertTriangle, Camera, MapPin, Loader2, UserPlus, ArrowUpCircle } from 'lucide-react';
+import { ModalFormulario, SecaoFormulario, Campo, CLASSE_INPUT, CLASSE_BOTAO_PRIMARIO, CLASSE_BOTAO_SECUNDARIO, CLASSE_GRADE_2 } from '../components/ModalFormulario';
 import api from '../api';
 import { mensagemErro } from '../utils/mensagemErro';
 import { maskPhone, maskCPF, maskCEP } from '../utils/masks';
@@ -21,6 +22,7 @@ export const Motoristas: React.FC = () => {
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isFetchingCep, setIsFetchingCep] = useState(false);
+  const [secaoAdicionaisMotorista, setSecaoAdicionaisMotorista] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Modal Editar Motorista
@@ -398,139 +400,164 @@ export const Motoristas: React.FC = () => {
       )}
 
       {/* Modais de Add/Edit */}
-      {showNewModal && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
-            <div className="flex justify-between items-center p-5 border-b border-gray-100 bg-gray-50/50">
-              <h3 className="font-bold text-lg text-gray-800">Cadastrar Novo Motorista</h3>
-              <button onClick={() => setShowNewModal(false)} className="text-gray-400 hover:text-gray-600 p-1.5 hover:bg-gray-100 rounded-lg transition-colors"><X size={20}/></button>
-            </div>
-            <div className="p-6 space-y-5 overflow-y-auto max-h-[70vh]">
-              
-              <div className="flex flex-col items-center space-y-2 pb-2">
-                <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileChange} />
-                <div 
-                  onClick={() => fileInputRef.current?.click()}
-                  className="w-24 h-24 rounded-2xl bg-gray-100 border-2 border-dashed border-gray-300 flex flex-col items-center justify-center text-gray-400 group hover:border-blue-400 hover:text-blue-500 cursor-pointer transition-all overflow-hidden relative"
-                >
-                  {newMot.fotoUrl ? (
-                    <>
-                      <img src={newMot.fotoUrl} alt="Preview" className="w-full h-full object-cover" />
-                      <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                        <Camera size={24} className="text-white" />
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <Camera size={32} />
-                      <span className="text-[10px] font-bold uppercase mt-1">Foto</span>
-                    </>
-                  )}
-                </div>
-                {newMot.fotoUrl && (
-                  <button onClick={() => setNewMot({...newMot, fotoUrl: ''})} className="text-[10px] font-bold text-red-500 uppercase hover:underline">
-                    Remover Foto
-                  </button>
-                )}
-              </div>
+      {/* MODAL DE MOTORISTA — mesmo padrão UX_FORM_001 do usuário e do frete.
+          Alinhamento VISUAL apenas: nenhum campo, regra de limite de plano ou
+          invariante de aprovação/bloqueio do domínio de motorista muda aqui
+          (§70/§71). O que muda é a ordem — identificação e acesso primeiro,
+          endereço recolhido — e o rodapé, que antes rolava junto com o corpo. */}
+      <ModalFormulario
+        aberto={showNewModal}
+        titulo="Cadastrar novo motorista"
+        icone={<UserPlus size={20} className="text-blue-600" />}
+        aoFechar={() => setShowNewModal(false)}
+        rodape={(
+          <>
+            <button type="button" onClick={() => setShowNewModal(false)} className={CLASSE_BOTAO_SECUNDARIO}>
+              Cancelar
+            </button>
+            <button type="button" onClick={handleAddMotorista} disabled={isSubmitting} className={CLASSE_BOTAO_PRIMARIO}>
+              {isSubmitting ? 'Cadastrando…' : 'Cadastrar motorista'}
+            </button>
+          </>
+        )}
+      >
+        <div className={CLASSE_GRADE_2}>
+          <Campo id="mot-nome" rotulo="Nome completo" obrigatorio>
+            <input
+              id="mot-nome" type="text" className={CLASSE_INPUT}
+              value={newMot.nomeCompleto}
+              onChange={e => setNewMot({ ...newMot, nomeCompleto: e.target.value })}
+              placeholder="Ex.: João da Silva"
+            />
+          </Campo>
+          <Campo id="mot-cpf" rotulo="CPF">
+            <input
+              id="mot-cpf" type="text" className={CLASSE_INPUT}
+              value={newMot.cpf}
+              onChange={e => setNewMot({ ...newMot, cpf: maskCPF(e.target.value) })}
+              placeholder="000.000.000-00"
+            />
+          </Campo>
+        </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1.5 ml-1">Nome Completo</label>
-                  <input type="text" className="w-full border-gray-200 rounded-xl p-2.5 outline-none border focus:border-blue-500" value={newMot.nomeCompleto} onChange={e => setNewMot({...newMot, nomeCompleto: e.target.value})} placeholder="Ex: João da Silva" />
-                </div>
-                <div>
-                   <label className="block text-xs font-bold text-gray-500 uppercase mb-1.5 ml-1">CPF</label>
-                   <input type="text" className="w-full border-gray-200 rounded-xl p-2.5 outline-none border focus:border-blue-500" value={newMot.cpf} onChange={e => setNewMot({...newMot, cpf: maskCPF(e.target.value)})} placeholder="000.000.000-00" />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1.5 ml-1">Email de Login</label>
-                  <input type="email" className="w-full border-gray-200 rounded-xl p-2.5 outline-none border focus:border-blue-500" value={newMot.email} onChange={e => setNewMot({...newMot, email: e.target.value})} placeholder="email@exemplo.com" />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1.5 ml-1">Senha Inicial</label>
-                  <div className="relative">
-                    <input type={showSenhaMotorista ? 'text' : 'password'} autoComplete="new-password" className="w-full border-gray-200 rounded-xl p-2.5 pr-10 outline-none border focus:border-blue-500" value={newMot.senha} onChange={e => setNewMot({...newMot, senha: e.target.value})} placeholder="Mín. 6 caracteres" />
-                    <button type="button" onClick={() => setShowSenhaMotorista(!showSenhaMotorista)} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700 p-1" title={showSenhaMotorista ? 'Ocultar senha' : 'Mostrar senha'} aria-label={showSenhaMotorista ? 'Ocultar senha' : 'Mostrar senha'}>
-                      {showSenhaMotorista ? <EyeOff size={18} /> : <Eye size={18} />}
-                    </button>
-                  </div>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1.5 ml-1">Placa Veículo</label>
-                  <input type="text" className="w-full border-gray-200 rounded-xl p-2.5 outline-none border focus:border-blue-500" value={newMot.placaVeiculo} onChange={e => setNewMot({...newMot, placaVeiculo: e.target.value})} placeholder="AAA-0000" />
-                </div>
-                <div>
-                   <label className="block text-xs font-bold text-gray-500 uppercase mb-1.5 ml-1">Telefone (Celular)</label>
-                   <input type="text" className="w-full border-gray-200 rounded-xl p-2.5 outline-none border focus:border-blue-500" value={newMot.telefone} onChange={e => setNewMot({...newMot, telefone: maskPhone(e.target.value)})} placeholder="(00) 0 0000-0000" />
-                </div>
-              </div>
-
-              <div className="bg-gray-50 p-4 rounded-xl border border-gray-100 space-y-4 mt-2">
-                <h4 className="text-xs font-bold text-gray-500 uppercase flex items-center">
-                  <MapPin size={14} className="mr-1.5 text-gray-400" /> Localização
-                </h4>
-                
-                <div>
-                  <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1 flex justify-between">
-                    CEP
-                    {isFetchingCep && <Loader2 size={12} className="animate-spin text-blue-500" />}
-                  </label>
-                  <input 
-                    className="w-full border-gray-200 rounded-xl p-2.5 outline-none border focus:border-blue-500 bg-white" 
-                    placeholder="00000-000"
-                    maxLength={9}
-                    value={newMot.cep}
-                    onChange={e => setNewMot({...newMot, cep: maskCEP(e.target.value)})}
-                    onBlur={e => buscarCep(e.target.value)}
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">Endereço / Logradouro</label>
-                  <input 
-                    className="w-full border-gray-200 rounded-xl p-2.5 outline-none border focus:border-blue-500 bg-white" 
-                    placeholder="Rua, número..."
-                    value={newMot.endereco}
-                    onChange={e => setNewMot({...newMot, endereco: e.target.value})}
-                  />
-                </div>
-                
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">Bairro</label>
-                    <input 
-                      className="w-full border-gray-200 rounded-xl p-2.5 outline-none border focus:border-blue-500 bg-white" 
-                      placeholder="Bairro"
-                      value={newMot.bairro}
-                      onChange={e => setNewMot({...newMot, bairro: e.target.value})}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">Cidade / UF</label>
-                    <input 
-                      className="w-full border-gray-200 rounded-xl p-2.5 outline-none border focus:border-blue-500 bg-white" 
-                      placeholder="Cidade - UF"
-                      value={newMot.cidade}
-                      onChange={e => setNewMot({...newMot, cidade: e.target.value})}
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="p-5 bg-gray-50/80 border-t flex justify-end space-x-3">
-              <button onClick={() => setShowNewModal(false)} className="px-5 py-2.5 text-gray-600 hover:bg-gray-200 rounded-xl font-bold text-sm">Cancelar</button>
-              <button onClick={handleAddMotorista} disabled={isSubmitting} className="px-6 py-2.5 bg-green-700 text-white hover:bg-green-800 rounded-xl font-bold text-sm shadow-md disabled:opacity-50">
-                {isSubmitting ? 'Cadastrando...' : 'Cadastrar'}
+        <div className={CLASSE_GRADE_2}>
+          <Campo id="mot-email" rotulo="E-mail de acesso" obrigatorio>
+            <input
+              id="mot-email" type="email" className={CLASSE_INPUT}
+              value={newMot.email}
+              onChange={e => setNewMot({ ...newMot, email: e.target.value })}
+              placeholder="email@exemplo.com"
+            />
+          </Campo>
+          <Campo id="mot-senha" rotulo="Senha inicial" obrigatorio ajuda="Mínimo de 6 caracteres.">
+            <div className="relative">
+              <input
+                id="mot-senha"
+                type={showSenhaMotorista ? 'text' : 'password'}
+                autoComplete="new-password"
+                className={`${CLASSE_INPUT} pr-24`}
+                value={newMot.senha}
+                onChange={e => setNewMot({ ...newMot, senha: e.target.value })}
+              />
+              <button
+                type="button"
+                onClick={() => setShowSenhaMotorista(!showSenhaMotorista)}
+                aria-pressed={showSenhaMotorista}
+                className="absolute inset-y-0 right-0 px-3 text-xs font-medium text-blue-600 hover:underline"
+              >
+                {showSenhaMotorista ? 'Ocultar senha' : 'Mostrar senha'}
               </button>
             </div>
-          </div>
+          </Campo>
         </div>
-      )}
+
+        <div className={CLASSE_GRADE_2}>
+          <Campo id="mot-placa" rotulo="Placa do veículo">
+            <input
+              id="mot-placa" type="text" className={CLASSE_INPUT}
+              value={newMot.placaVeiculo}
+              onChange={e => setNewMot({ ...newMot, placaVeiculo: e.target.value })}
+              placeholder="AAA-0000"
+            />
+          </Campo>
+          <Campo id="mot-telefone" rotulo="Celular">
+            <input
+              id="mot-telefone" type="text" className={CLASSE_INPUT}
+              value={newMot.telefone}
+              onChange={e => setNewMot({ ...newMot, telefone: maskPhone(e.target.value) })}
+              placeholder="(00) 0 0000-0000"
+            />
+          </Campo>
+        </div>
+
+        <SecaoFormulario
+          titulo="Informações adicionais"
+          descricao="Foto e endereço. Podem ser preenchidos depois."
+          recolhivel
+          aberta={secaoAdicionaisMotorista}
+          aoAlternar={() => setSecaoAdicionaisMotorista(v => !v)}
+          abertaPorPadrao={false}
+        >
+          <div className="flex items-center gap-3">
+            <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileChange} />
+            <div
+              onClick={() => fileInputRef.current?.click()}
+              className="w-14 h-14 shrink-0 rounded-xl bg-gray-100 border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 hover:border-blue-400 cursor-pointer overflow-hidden"
+            >
+              {newMot.fotoUrl
+                ? <img src={newMot.fotoUrl} alt="" className="w-full h-full object-cover" />
+                : <Camera size={20} />}
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm text-gray-700">Foto do motorista</p>
+              {newMot.fotoUrl && (
+                <button
+                  type="button"
+                  onClick={() => setNewMot({ ...newMot, fotoUrl: '' })}
+                  className="text-xs font-bold text-red-500 hover:underline"
+                >
+                  Remover foto
+                </button>
+              )}
+            </div>
+          </div>
+
+          <Campo id="mot-cep" rotulo="CEP" ajuda={isFetchingCep ? 'Buscando endereço…' : undefined}>
+            <input
+              id="mot-cep" className={CLASSE_INPUT} placeholder="00000-000"
+              value={newMot.cep}
+              onChange={e => {
+                const masked = maskCEP(e.target.value);
+                setNewMot({ ...newMot, cep: masked });
+                buscarCep(masked);
+              }}
+            />
+          </Campo>
+          <Campo id="mot-endereco" rotulo="Endereço">
+            <input
+              id="mot-endereco" className={CLASSE_INPUT}
+              value={newMot.endereco}
+              onChange={e => setNewMot({ ...newMot, endereco: e.target.value })}
+            />
+          </Campo>
+          <div className={CLASSE_GRADE_2}>
+            <Campo id="mot-bairro" rotulo="Bairro">
+              <input
+                id="mot-bairro" className={CLASSE_INPUT}
+                value={newMot.bairro}
+                onChange={e => setNewMot({ ...newMot, bairro: e.target.value })}
+              />
+            </Campo>
+            <Campo id="mot-cidade" rotulo="Cidade / UF">
+              <input
+                id="mot-cidade" className={CLASSE_INPUT}
+                value={newMot.cidade}
+                onChange={e => setNewMot({ ...newMot, cidade: e.target.value })}
+              />
+            </Campo>
+          </div>
+        </SecaoFormulario>
+      </ModalFormulario>
 
       {showEditModal && editingMot && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-fade-in">

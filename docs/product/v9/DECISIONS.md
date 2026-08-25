@@ -253,6 +253,21 @@ Campaign-A nao integra provider de rota, marketplace, parceiro real, portal do e
 ### D-066 — Migration 076 fica em single-flight com Agent A; docs canonicos tem owner unico
 `MIGRATION_076_OWNER=AGENT_A`; `076_operation_campaign_foundation.sql` fica reservado para Campaign-A. Agent B e Agent C nao tem autoridade de schema e nao podem criar/alterar migrations 076/077/078. `PRODUCTION_SCHEMA_WRITER_COUNT<=1`, `PRODUCTION_DDL_MAX_CONCURRENT=1` e `PRODUCTION_SENSITIVE_WRITE_MAX_CONCURRENT=1`. `CANONICAL_DOC_OWNER=ORCHESTRATOR/INTEGRATOR` para `DECISIONS`, `ROADMAP`, `MASTER_LEDGER` e `CONTEXT_BRIDGE`.
 
+### D-067 — Ler um perfil para atribuir e editar o que ele significa são autoridades diferentes
+`ASSIGN_PROFILE_AUTHORITY=users.manage`; `EDIT_PROFILE_AUTHORITY=permissions.manage`. Listar perfis atribuíveis, criar usuário com um perfil e trocar o perfil de alguém exigem `users.manage`. Alterar **o que um perfil concede** continua exigindo `permissions.manage`, e `routes/permissions.js` não foi afrouxado. Separar as duas coisas é o que permite delegar a formação da equipe sem entregar a matriz de permissões junto.
+
+### D-068 — Não-escalação por contenção, nunca por lista de perfis proibidos
+`PROFILE_ASSIGNMENT_RULE=CONTAINMENT_IN_ACTOR_EFFECTIVE_PERMISSIONS`. Um ator só atribui perfil cujas permissões efetivas estejam contidas nas dele — regra única, conferida na listagem **e** na gravação. Deliberadamente **não** existe lista de perfis "perigosos": uma regra que dependa de enumerar exceções erra em silêncio no dia em que a empresa criar um perfil novo. Consequências aceitas: administrador de verdade **pode** delegar administração (o conjunto dele contém o do template); gerente com `users.manage` **não** vê nem atribui Administrador ou Financeiro. Filtro de tela não é controle de acesso — a lista chega filtrada e é reconferida no servidor.
+
+### D-069 — `usuarios.tipo` é classe de conta, não papel
+`USER_TIPO_SEMANTICS=ACCOUNT_CLASS_NOT_ROLE`. Todo usuário interno nasce com `tipo='admin'` e a autoridade vive em `permission_template_id`. O motivo é concreto: `isAdmin` exige `role === 'admin'` e guarda **21 pontos de rota**, então gravar `tipo='operador'` criaria alguém que não abre nem o dashboard, com o rótulo legado vencendo a permissão efetiva. **Não deletar `tipo` às cegas.** Corolário operacional: enquanto `isAdmin` for role-based, o ponteiro de template não pode ficar nulo — por isso a criação de usuário é atômica (falha ao atribuir o perfil desfaz usuário + identidade Auth), e não "melhor esforço". Dívida em `RBV9-INV-110`.
+
+### D-070 — Escopo operacional não entra no modal de usuário enquanto não houver unidade configurada
+`TEAM_SCOPE_IN_USER_MODAL=DEFERRED_UNTIL_UNITS_EXIST`. Produção tem 0 grupos, 0 unidades e 0 memberships: forçar um seletor de escopo vazio seria inventar uma pergunta sem resposta. O modelo canônico (`usuario_operacional_memberships`, `estrutura_operacional.gerenciar`) segue sendo a autoridade e a atribuição continua na tela de Estrutura Operacional. Quando existir empresa com unidades configuradas, o seletor entra no modal — decisão registrada, não implementada às cegas.
+
+### D-071 — O modal de Novo Frete é o padrão de formulário do painel
+`UX_FORM_001=FREIGHT_MODAL_PATTERN_V1`. O padrão já aprovado pelo owner (cabeçalho e rodapé fixos, corpo com rolagem própria, ação primária sempre visível) foi extraído para `ModalFormulario.tsx` e é o alvo de convergência das telas de cadastro. O **Frete não foi refatorado**: o modal dele vive num arquivo de 2.000+ linhas entrelaçado com cálculo de valor de frete e comissão, e extraí-lo para arrumar uma tela de cadastro seria mexer no fluxo de receita da transportadora. O shell reproduz o comportamento; a convergência dos três fica como limpeza técnica (`RBV9-INV-111`), não dívida de produto.
+
 ---
 
 ## Gates registrados

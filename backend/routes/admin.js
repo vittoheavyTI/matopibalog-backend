@@ -34,10 +34,25 @@ router.get('/plano-uso', verificarEmpresa, requirePermission('drivers.view'), ad
 // P2.9 — LEITURA exige users.view (feature existente; legacyMenuKey 'usuarios'). A
 // migration 6a reproduz o menu legado desligado como override DENY users.view → a API
 // passa a refletir a intenção do menu (admin tem por padrão; super-admin passa).
+// PERFIS DE ACESSO ATRIBUÍVEIS — leitura sob `users.manage`, não `permissions.manage`.
+//
+// Ler um perfil para ATRIBUIR e editar o que ele SIGNIFICA são autoridades
+// diferentes. Enquanto a única listagem era `GET /permissions/templates` (protegida
+// por `permissions.manage`), quem tinha só `users.manage` não conseguia sequer ver
+// os perfis para escolher um — e criar usuário virou criar administrador (USR-001).
+//
+// A lista vem FILTRADA pelo servidor: o cliente nunca recebe perfis que não pode
+// atribuir, e a decisão é reconferida na gravação. Editar templates continua
+// exigindo `permissions.manage`, em routes/permissions.js, intocado.
+router.get('/perfis-acesso', verificarEmpresa, requirePermission('users.manage'), adminController.getPerfisAtribuiveis);
+
 router.get('/usuarios', verificarEmpresa, requirePermission('users.view'), adminController.getUsuarios);
 router.post('/usuarios', verificarEmpresa, verificarPlano, requirePermission('users.manage'), adminController.createUsuario);
 router.put('/usuarios/:id', verificarEmpresa, verificarPlano, requirePermission('users.manage'), adminController.updateUsuario);
 router.delete('/usuarios/:id', verificarEmpresa, verificarPlano, requirePermission('users.manage'), adminController.deleteUsuario);
 router.post('/usuarios/:id/reset-senha', verificarEmpresa, verificarPlano, requirePermission('users.manage'), validate(resetSenhaSchema), adminController.resetSenhaUsuario);
+// Trocar o perfil de acesso é gestão de equipe (`users.manage`), com a mesma
+// política de não-escalação da criação e a RPC guardada do último administrador.
+router.put('/usuarios/:id/perfil-acesso', verificarEmpresa, verificarPlano, requirePermission('users.manage'), adminController.alterarPerfilDeAcesso);
 
 module.exports = router;

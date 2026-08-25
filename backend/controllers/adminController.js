@@ -448,12 +448,26 @@ exports.getUsuarios = async (req, res) => {
 
     if (error) throw error;
 
+    // Nome do perfil de acesso, para a lista responder "quem tem qual acesso?"
+    // sem obrigar quem lê a decorar UUID de template (§59/§107). Uma consulta só,
+    // não uma por linha.
+    const templateIds = [...new Set((usuariosDb || []).map((u) => u.permission_template_id).filter(Boolean))];
+    const perfilPorId = new Map();
+    if (templateIds.length) {
+      const { data: tpls } = await supabase
+        .from('permission_templates')
+        .select('id, stable_key, display_name')
+        .in('id', templateIds);
+      for (const t of tpls || []) perfilPorId.set(t.id, t.display_name || t.stable_key);
+    }
+
     const usuariosComEmpresa = (usuariosDb || []).map(u => ({
       ...u,
       empresa_tipo: Array.isArray(u.empresas)
         ? u.empresas[0]?.tipo || null
         : u.empresas?.tipo || null,
       is_super_admin: u.is_super_admin === true,
+      perfil_acesso_nome: perfilPorId.get(u.permission_template_id) || null,
     }));
 
     // Órfãos do Auth (sem linha em usuarios) NÃO têm empresa_id → não dá para
@@ -489,9 +503,87 @@ exports.getUsuarios = async (req, res) => {
 };
 
 // ─── Criar Administrador ──────────────────────────────────────────────────────
+// ─── Trocar o perfil de acesso de um usuário ────────────────────────────────
+//
+// Existe aqui, sob `users.manage`, e não só em routes/permissions.js sob
+// `permissions.manage`, pelo mesmo motivo da listagem: trocar o perfil de alguém é
+// gestão de equipe, não edição do significado do perfil.
+//
+// Duas guardas, nesta ordem: a política de não-escalação (o ator não pode conceder
+// mais do que tem) e, na gravação, a RPC `atribuir_template_guardando_ultimo_admin`,
+// que serializa a mudança e recusa deixar a empresa sem administrador válido.
+exports.alterarPerfilDeAcesso = async (req, res) => {
+  const { id } = req.params;
+  const { perfil_acesso_id } = req.body || {};
+  try {
+    const { autorizarAtribuicao } = require('../services/permissions/assignableTemplates');
+
+    // Tenant: o alvo precisa ser desta empresa. Sem isto, um id de outra empresa
+    // chegaria à RPC — que também recusa, mas a negativa correta é aqui.
+    const { data: alvo } = await supabase
+      .from('usuarios').select('id').eq('id', id).eq('empresa_id', req.empresa_id).maybeSingle();
+    if (!alvo) return res.status(404).json({ message: 'Usuário não encontrado.' });
+
+    const autorizacao = await autorizarAtribuicao(supabase, {
+      actor: { ...req.user, empresa_id: req.empresa_id },
+      empresaId: req.empresa_id,
+      templateId: perfil_acesso_id,
+    });
+    if (!autorizacao.ok) return res.status(autorizacao.status).json({ message: autorizacao.message });
+
+    const { error } = await supabase.rpc('atribuir_template_guardando_ultimo_admin', {
+      p_usuario_id: id,
+      p_empresa_id: req.empresa_id,
+      p_template_id: perfil_acesso_id,
+      p_actor_user_id: req.user?.uid || null,
+    });
+    if (error) {
+      const msg = String(error.message || '').toLowerCase();
+      if (msg.includes('ultimo_admin')) {
+        return res.status(409).json({
+          message: 'Não é possível mudar o perfil do último administrador da empresa. '
+            + 'Promova outra pessoa a administrador antes de continuar.',
+        });
+      }
+      if (msg.includes('usuario_nao_encontrado')) {
+        return res.status(404).json({ message: 'Usuário não encontrado.' });
+      }
+      throw error;
+    }
+
+    // Mudar de perfil muda o que a pessoa pode fazer: a sessão aberta precisa
+    // refletir isso, como já ocorre em qualquer alteração de autoridade.
+    await revogarSessoesDoUsuarioSeSec1(id, 'role_alterada');
+
+    res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('[adminController:alterarPerfilDeAcesso]', err?.message || err);
+    res.status(500).json({ message: 'Não foi possível alterar o perfil de acesso.' });
+  }
+};
+
+// ─── Perfis de acesso que o ator pode atribuir ──────────────────────────────
+// Já filtrado no servidor (§18): a tela recebe apenas o que é legítimo oferecer.
+exports.getPerfisAtribuiveis = async (req, res) => {
+  try {
+    const { listarPerfisAtribuiveis } = require('../services/permissions/assignableTemplates');
+    const { itens } = await listarPerfisAtribuiveis(supabase, {
+      actor: { ...req.user, empresa_id: req.empresa_id },
+      empresaId: req.empresa_id,
+    });
+    res.status(200).json({ itens });
+  } catch (err) {
+    console.error('[adminController:getPerfisAtribuiveis]', err?.message || err);
+    res.status(500).json({ message: 'Não foi possível carregar os perfis de acesso.' });
+  }
+};
+
 exports.createUsuario = async (req, res) => {
-  const { email, senha, nome, telefone, cep, endereco, bairro, cidade, foto_url, permissoes, tipo } = req.body;
-  console.log('[adminController:createUsuario] Criando usuário:', { email, nome, tipo });
+  const {
+    email, senha, nome, telefone, cep, endereco, bairro, cidade, foto_url, permissoes, tipo,
+    perfil_acesso_id, client_request_id,
+  } = req.body;
+  console.log('[adminController:createUsuario] Criando usuário:', { email, nome, perfil_acesso_id });
 
   if (!email || !nome) {
     return res.status(400).json({ message: 'Nome e e-mail são obrigatórios.' });
@@ -505,9 +597,11 @@ exports.createUsuario = async (req, res) => {
   if (tipo === 'motorista') {
     return res.status(400).json({ message: 'Motoristas devem ser cadastrados pelo fluxo de Motoristas.' });
   }
-  if (tipo === 'operador') {
-    return res.status(400).json({ message: 'Operador ainda não possui permissões no painel. Crie um administrador.' });
-  }
+  // A recusa de `tipo='operador'` que existia aqui era a raiz do USR-001: o backend
+  // dizia "Operador ainda não possui permissões no painel", quando na verdade os
+  // templates existiam desde a 072. O perfil agora vem por `perfil_acesso_id`
+  // (template canônico), validado contra a política de atribuição — não por um
+  // rótulo legado com lista de permitidos embutida no controller.
 
   // [B1a] Super-admin deve escolher a empresa-alvo explicitamente (?empresa_id=, que o
   // tenant.js resolve marcando req.impersonating). Sem isso, req.empresa_id seria a empresa
@@ -528,6 +622,52 @@ exports.createUsuario = async (req, res) => {
     .single();
   if (empresaAlvoError || !empresaAlvo) {
     return res.status(400).json({ message: 'Empresa selecionada não encontrada.' });
+  }
+
+  // PERFIL DE ACESSO — decidido no servidor, antes de qualquer escrita.
+  //
+  // A autorização acontece AQUI e não depois: se a checagem viesse após criar a
+  // identidade, uma tentativa de escalação deixaria um usuário órfão no Auth. E o
+  // que a tela mandou não é confiado — `autorizarAtribuicao` reconfere a empresa
+  // do template e a contenção contra o efetivo do ator (§17/§82).
+  const { autorizarAtribuicao } = require('../services/permissions/assignableTemplates');
+  let perfilEscolhido = null;
+  try {
+    const autorizacao = await autorizarAtribuicao(supabase, {
+      actor: { ...req.user, empresa_id: req.empresa_id },
+      empresaId: req.empresa_id,
+      templateId: perfil_acesso_id,
+    });
+    if (!autorizacao.ok) {
+      return res.status(autorizacao.status).json({ message: autorizacao.message });
+    }
+    perfilEscolhido = autorizacao.template;
+  } catch (e) {
+    console.error('[adminController:createUsuario] falha ao validar perfil de acesso:', e?.message || e);
+    return res.status(500).json({ message: 'Não foi possível validar o perfil de acesso.' });
+  }
+
+  // IDEMPOTÊNCIA (§25/§90). Sem isto, um duplo clique ou um retry de rede criava
+  // duas identidades no Auth; a segunda falhava por e-mail duplicado, mas só
+  // depois de já ter havido escrita. Antes de qualquer criação, um e-mail que já
+  // existe nesta empresa devolve o usuário existente em vez de tentar de novo.
+  const emailNormalizado = String(email).trim().toLowerCase();
+  const { data: jaExiste } = await supabase
+    .from('usuarios')
+    .select('id, nome, email')
+    .eq('empresa_id', req.empresa_id)
+    .ilike('email', emailNormalizado)
+    .maybeSingle();
+  if (jaExiste) {
+    // Repetição do MESMO envio (mesmo client_request_id) converge para o usuário
+    // já criado. Um e-mail repetido sem esse marcador é erro do operador, e é
+    // dito como tal.
+    if (client_request_id) {
+      return res.status(200).json({
+        message: 'Usuário já criado.', uid: jaExiste.id, idempotent: true,
+      });
+    }
+    return res.status(409).json({ message: 'Já existe um usuário com este e-mail nesta empresa.' });
   }
 
   // Se o admin informou senha, usa a dele; senão gera uma aleatória forte.
@@ -563,7 +703,23 @@ exports.createUsuario = async (req, res) => {
         id: uid,
         nome,
         email,
-        tipo: tipo || 'admin',
+        // `tipo` NÃO é mais o papel da pessoa — é a CLASSE DA CONTA, mantida por
+        // compatibilidade (§65). Quem decide o que ela pode fazer é o template
+        // canônico em `permission_template_id`, resolvido por `requirePermission`.
+        //
+        // Por que 'admin' para todo usuário interno, inclusive Operador: o
+        // middleware `isAdmin` exige `role === 'admin'` e guarda 21 pontos de rota
+        // (dashboard, fretes, relatórios, admin…). Gravar `tipo='operador'` criaria
+        // um usuário que não abre nem o dashboard, por mais correto que fosse seu
+        // perfil — o rótulo legado venceria a permissão efetiva. Aqui `tipo`
+        // significa "conta interna da empresa, não motorista", e a autoridade fina
+        // é o template.
+        //
+        // Consequência que a atomicidade acima protege: se o ponteiro de template
+        // ficasse nulo, o resolver cairia no baseline por `tipo` — Administrador —
+        // e um Operador viraria administrador em silêncio. É exatamente por isso
+        // que a atribuição do perfil deixou de ser best-effort.
+        tipo: 'admin',
         status: 'ativo',
         empresa_id: req.empresa_id,
         // [B1a] Usuário criado pelo admin nasce com senha provisória → força troca no 1º acesso.
@@ -583,15 +739,31 @@ exports.createUsuario = async (req, res) => {
       return res.status(500).json({ message: `Erro ao salvar dados do administrador no banco: ${userError.message}` });
     }
 
-    // P2 — atribui o template baseline por tipo. Ponteiro permission_template_id é
-    // denormalização não-autoritativa (resolver faz dual-read por stable_key quando
-    // null → efetivo correto sem estado parcial). Falha é registrada, nunca silenciada.
-    try {
-      const { assignTemplateByTipo } = require('../services/permissions/permissionProvisioning');
-      const r = await assignTemplateByTipo(supabase, uid, req.empresa_id, tipo || 'admin');
-      if (!r?.ok) console.error(`[adminController:createUsuario] assignment de template não concluído (não-fatal, resolver usa baseline): ${r?.reason || 'desconhecido'} (usuario=${uid})`);
-    } catch (e) {
-      console.error('[adminController:createUsuario] erro no assignment de template (não-fatal):', e?.message || e);
+    // ATRIBUIÇÃO DO PERFIL — agora é parte do sucesso, não um "best-effort".
+    //
+    // Antes, esta etapa era um try/catch marcado como não-fatal, com o argumento de
+    // que o resolver cai no baseline por `stable_key` quando o ponteiro é nulo.
+    // Isso era verdade enquanto o único perfil possível era Administrador: o
+    // baseline por `tipo='admin'` coincidia com o que se queria. Passando a existir
+    // Operador e Gerente, deixou de ser: um assignment que falhasse produziria
+    // silenciosamente um usuário com MAIS acesso do que o pretendido — o resolver
+    // resolveria por `tipo`, que continua 'admin' por compatibilidade legada.
+    //
+    // Um usuário provisionado pela metade não pode ficar de pé. Se a atribuição
+    // falhar, desfazemos a criação inteira e devolvemos erro.
+    const { error: perfilError } = await supabase
+      .from('usuarios')
+      .update({ permission_template_id: perfilEscolhido.id })
+      .eq('id', uid)
+      .eq('empresa_id', req.empresa_id);
+
+    if (perfilError) {
+      console.error('[adminController:createUsuario] falha ao atribuir perfil — desfazendo criação:', perfilError.message || perfilError);
+      await supabase.from('usuarios').delete().eq('id', uid).catch(() => {});
+      await supabase.auth.admin.deleteUser(uid).catch(() => {});
+      return res.status(500).json({
+        message: 'Não foi possível concluir a criação do usuário. Nenhum acesso foi criado. Tente novamente.',
+      });
     }
 
     console.log(`[adminController:createUsuario] Usuário ${nome} criado com sucesso.`);
