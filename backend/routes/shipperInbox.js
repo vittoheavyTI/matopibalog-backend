@@ -150,6 +150,20 @@ router.post('/solicitacoes/:id/recusar', exigirPermissoes(REVIEW), (req, res) =>
     novoStatus: 'REJECTED', motivo: req.body?.motivo,
   })));
 
+// ---- documentos enviados pelo embarcador ---------------------------------
+// Ler o que o cliente anexou faz parte de REVISAR a solicitação — por isso
+// exige `requests.review`, não a permissão de compartilhamento.
+
+router.get('/solicitacoes/:id/documentos-embarcador', exigirPermissoes(REVIEW), (req, res) =>
+  responder(res, documentos.listarDocumentosDoEmbarcador(supabase, {
+    empresaId: req.empresa_id, requestId: req.params.id,
+  })));
+
+router.get('/solicitacoes/:id/documentos-embarcador/:docId/url', exigirPermissoes(REVIEW), (req, res) =>
+  responder(res, documentos.urlAssinadaParaTransportadora(supabase, {
+    empresaId: req.empresa_id, requestId: req.params.id, documentoId: req.params.docId,
+  })));
+
 // ---- documentos compartilhados -------------------------------------------
 
 router.get('/solicitacoes/:id/compartilhaveis', exigirPermissoes(SHARE), (req, res) =>

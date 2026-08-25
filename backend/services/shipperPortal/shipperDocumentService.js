@@ -215,7 +215,7 @@ async function urlAssinadaParaEmbarcador(supabase, { portalUserId, documentoId, 
   // de compartilhamento ATIVA — revogar corta o acesso aqui (§105).
   const { data: share, error } = await supabase
     .from('shipper_document_shares')
-    .select('id, source_kind, frete_documento_id, epod_evidencia_id, status, request_id')
+    .select('id, source_kind, frete_documento_id, epod_evidencia_id, status, request_id, empresa_id, frete_id')
     .eq('id', documentoId)
     .eq('shipper_org_id', context.shipperOrgId)
     .in('relationship_id', context.relationshipIds)
@@ -224,10 +224,18 @@ async function urlAssinadaParaEmbarcador(supabase, { portalUserId, documentoId, 
   throwDb(error, 'Não foi possível abrir o documento.');
   if (!share) throw naoEncontrado();
 
+  // Defesa em profundidade (§23): as FKs já provam a cadeia na gravação, mas na
+  // hora de assinar reconferimos empresa e frete do objeto. "A linha de
+  // compartilhamento existe" não pode ser tratado como "tudo que ela referencia
+  // continua válido" — o arquivo pode ter sido cancelado ou a evidência
+  // reprovada depois do compartilhamento.
   if (share.source_kind === 'FRETE_DOCUMENTO') {
     const { data: doc, error: docError } = await supabase
       .from('frete_documentos').select('storage_path, status')
-      .eq('id', share.frete_documento_id).maybeSingle();
+      .eq('id', share.frete_documento_id)
+      .eq('frete_id', share.frete_id)
+      .eq('empresa_id', share.empresa_id)
+      .maybeSingle();
     throwDb(docError, 'Não foi possível abrir o documento.');
     if (!doc || doc.status !== 'ativo') throw naoEncontrado();
     return assinar(supabase, BUCKET_PORTAL, doc.storage_path);
@@ -235,7 +243,10 @@ async function urlAssinadaParaEmbarcador(supabase, { portalUserId, documentoId, 
 
   const { data: evid, error: evidError } = await supabase
     .from('frete_epod_evidencias').select('storage_path, status')
-    .eq('id', share.epod_evidencia_id).maybeSingle();
+    .eq('id', share.epod_evidencia_id)
+    .eq('frete_id', share.frete_id)
+    .eq('empresa_id', share.empresa_id)
+    .maybeSingle();
   throwDb(evidError, 'Não foi possível abrir o comprovante.');
   // Dupla trava (§71/§72): mesmo compartilhada, uma evidência que deixou de
   // estar aprovada não é servida como comprovante final.
@@ -281,25 +292,21 @@ async function listarCompartilhaveis(supabase, { empresaId, requestId }) {
 
   const { data: docs, error: docsError } = await supabase
     .from('frete_documentos')
-    .select('id, frete_id, tipo, nome_documento, nome_arquivo, created_at, status')
-    .in('frete_id', freteIds).eq('status', 'ativo');
+    .select('id, frete_id, empresa_id, tipo, nome_documento, nome_arquivo, created_at, status')
+    .in('frete_id', freteIds).eq('status', 'ativo').eq('empresa_id', empresaId);
   throwDb(docsError, 'Não foi possível carregar os documentos.');
 
   // Somente evidências APROVADAS entram na lista de comprovantes ofertáveis
   // (§71/§72): rascunho, pendente ou rejeitada não são prova de entrega.
-  const { data: epods, error: epodError } = await supabase
-    .from('frete_epod').select('id, frete_id').in('frete_id', freteIds);
-  throwDb(epodError, 'Não foi possível carregar os comprovantes.');
-  const epodIds = (epods || []).map((e) => e.id);
-  let evidencias = [];
-  if (epodIds.length) {
-    const { data: evid, error: evidError } = await supabase
-      .from('frete_epod_evidencias')
-      .select('id, epod_id, tipo, created_at, status')
-      .in('epod_id', epodIds).eq('status', 'aprovada');
-    throwDb(evidError, 'Não foi possível carregar os comprovantes.');
-    evidencias = evid || [];
-  }
+  // `frete_epod_evidencias` já carrega `frete_id` e `empresa_id`, então a
+  // consulta parte direto dos fretes provados desta operação — sem passar pelo
+  // ePOD e sem depender de o vínculo estar coerente.
+  const { data: evid, error: evidError } = await supabase
+    .from('frete_epod_evidencias')
+    .select('id, frete_id, empresa_id, epod_id, tipo, created_at, status')
+    .in('frete_id', freteIds).eq('empresa_id', empresaId).eq('status', 'aprovada');
+  throwDb(evidError, 'Não foi possível carregar os comprovantes.');
+  const evidencias = evid || [];
 
   const { data: jaCompartilhados, error: shareError } = await supabase
     .from('shipper_document_shares')
@@ -310,8 +317,11 @@ async function listarCompartilhaveis(supabase, { empresaId, requestId }) {
   const evidCompartilhadas = new Set((jaCompartilhados || []).map((s) => s.epod_evidencia_id).filter(Boolean));
 
   return {
+    // `frete_id` acompanha cada item porque é parte da proveniência que a
+    // gravação do compartilhamento precisa registrar — o banco vai exigi-la.
     documentos: (docs || []).map((d) => ({
       id: d.id,
+      frete_id: d.frete_id,
       titulo: d.nome_documento || d.nome_arquivo || d.tipo?.toUpperCase() || 'Documento',
       tipo: d.tipo,
       criado_em: d.created_at,
@@ -319,6 +329,7 @@ async function listarCompartilhaveis(supabase, { empresaId, requestId }) {
     })),
     comprovantes: evidencias.map((e) => ({
       id: e.id,
+      frete_id: e.frete_id,
       titulo: 'Comprovante de entrega',
       criado_em: e.created_at,
       compartilhado: evidCompartilhadas.has(e.id),
@@ -372,6 +383,9 @@ async function compartilhar(supabase, { empresaId, user, requestId, body = {} })
     .maybeSingle();
   if (jaAtivo.data) return { id: jaAtivo.data.id, ja_estava_compartilhado: true };
 
+  // Proveniência COMPLETA na linha (HIGH-02). A checagem de elegibilidade acima
+  // continua valendo como primeira barreira e mensagem amigável; estas colunas
+  // são o que permite ao BANCO recusar sozinho uma combinação impossível.
   const { data, error: insertError } = await supabase
     .from('shipper_document_shares')
     .insert({
@@ -379,6 +393,8 @@ async function compartilhar(supabase, { empresaId, user, requestId, body = {} })
       shipper_org_id: request.shipper_org_id,
       relationship_id: request.relationship_id,
       request_id: requestId,
+      campaign_id: request.campaign_id,
+      frete_id: fonte.frete_id,
       source_kind: sourceKind,
       frete_documento_id: sourceKind === 'FRETE_DOCUMENTO' ? objetoId : null,
       epod_evidencia_id: sourceKind === 'EPOD_EVIDENCIA' ? objetoId : null,
@@ -386,8 +402,65 @@ async function compartilhar(supabase, { empresaId, user, requestId, body = {} })
       shared_by: userId(user),
     })
     .select('id').single();
+  if (insertError && insertError.code === '23503') {
+    // Violação de FK aqui significa que a cadeia de proveniência não fecha —
+    // é o banco recusando o que a aplicação deixou passar.
+    throw new ShipperPortalError('Este documento não pertence a esta operação.', {
+      status: 409, code: 'document_provenance_invalid',
+    });
+  }
   throwDb(insertError, 'Não foi possível compartilhar o documento.');
   return { id: data.id, ja_estava_compartilhado: false };
+}
+
+// Documentos que o EMBARCADOR enviou, vistos pelo lado da transportadora
+// (HIGH-05). Sem isto, o operador recebia anexos que não conseguia abrir — o
+// que torna o envio de documento pelo portal inútil na prática.
+//
+// Projeção por whitelist também aqui: `storage_path` nunca sai.
+async function listarDocumentosDoEmbarcador(supabase, { empresaId, requestId }) {
+  const { data: request, error } = await supabase
+    .from('shipper_transport_requests').select('id')
+    .eq('id', requestId).eq('empresa_id', empresaId).maybeSingle();
+  throwDb(error, 'Não foi possível carregar a solicitação.');
+  if (!request) {
+    throw new ShipperPortalError('Solicitação não encontrada.', { status: 404, code: 'request_not_found' });
+  }
+
+  const { data, error: docsError } = await supabase
+    .from('shipper_request_documents')
+    .select('id, nome_documento, descricao, mime_type, tamanho_bytes, created_at')
+    .eq('request_id', requestId).eq('empresa_id', empresaId).eq('status', 'ativo')
+    .order('created_at', { ascending: false });
+  throwDb(docsError, 'Não foi possível carregar os documentos do embarcador.');
+
+  return {
+    itens: (data || []).map((d) => ({
+      id: d.id,
+      nome: d.nome_documento,
+      descricao: d.descricao || null,
+      tipo_arquivo: d.mime_type || null,
+      tamanho_bytes: d.tamanho_bytes || null,
+      enviado_em: d.created_at,
+    })),
+  };
+}
+
+// URL assinada para a transportadora abrir um documento enviado pelo embarcador.
+// A fronteira aqui é o tenant + a solicitação: o documento precisa pertencer a
+// uma solicitação DESTA empresa.
+async function urlAssinadaParaTransportadora(supabase, { empresaId, requestId, documentoId }) {
+  const { data: doc, error } = await supabase
+    .from('shipper_request_documents')
+    .select('id, storage_path, status, request_id, empresa_id')
+    .eq('id', documentoId)
+    .eq('request_id', requestId)
+    .eq('empresa_id', empresaId)
+    .eq('status', 'ativo')
+    .maybeSingle();
+  throwDb(error, 'Não foi possível abrir o documento.');
+  if (!doc) throw naoEncontrado();
+  return assinar(supabase, BUCKET_PORTAL, doc.storage_path);
 }
 
 async function revogarCompartilhamento(supabase, { empresaId, user, shareId }) {
@@ -412,6 +485,8 @@ module.exports = {
   listarCompartilhaveis,
   compartilhar,
   revogarCompartilhamento,
+  listarDocumentosDoEmbarcador,
+  urlAssinadaParaTransportadora,
   EXTENSAO_POR_MIME,
   MAX_DOCS_POR_SOLICITACAO,
   SIGNED_URL_TTL_SECONDS,

@@ -156,6 +156,18 @@ DO $$ BEGIN
     ON DELETE RESTRICT;
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
+-- O documento também precisa provar que a SOLICITAÇÃO pertence ao mesmo
+-- embarcador (owner review HIGH-02, §13). Sem este elo, as duas FKs anteriores
+-- permitiriam a combinação "solicitação da empresa certa + autor do embarcador
+-- certo, mas solicitação de OUTRO embarcador da mesma empresa".
+DO $$ BEGIN
+  ALTER TABLE public.shipper_request_documents
+    ADD CONSTRAINT shipper_request_documents_request_org_fk
+    FOREIGN KEY (request_id, shipper_org_id)
+    REFERENCES public.shipper_transport_requests (id, shipper_org_id)
+    ON DELETE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
 -- ============================================================================
 -- 3. shipper_document_shares -- A AUTORIDADE DE VISIBILIDADE EXTERNA
 -- ============================================================================
@@ -169,12 +181,35 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 -- de ePOD) mas a AUTORIDADE e uma so. Duplicar a autoridade em duas tabelas
 -- seria duplicar o lugar onde um bug de vazamento pode nascer.
 
+-- PROVENIÊNCIA COMPLETA NO BANCO (owner review HIGH-02). A versão anterior
+-- validava a elegibilidade do documento apenas na aplicação
+-- (`listarCompartilhaveis`). Para a tabela que decide o que sai da
+-- transportadora, isso é frágil demais: um bug de rota, um id trocado ou um
+-- caminho futuro que esqueça a checagem produziria uma linha que torna
+-- EXTERNAMENTE visível um documento de outro embarcador, de outra campanha ou
+-- de outra empresa — e o banco não teria como recusar.
+--
+-- Agora a linha carrega a cadeia inteira e o banco prova cada elo:
+--   request_id  + campaign_id + empresa_id + shipper_org_id → a solicitação
+--   campaign_id + frete_id    + empresa_id                  → campaign_trip_freights
+--   documento   + frete_id    + empresa_id                  → frete_documentos
+--   evidência   + frete_id    + empresa_id                  → frete_epod_evidencias
+--
+-- Com isso, "compartilhar o documento do embarcador Y na solicitação do X" é
+-- impossível mesmo que a aplicação tente.
 CREATE TABLE IF NOT EXISTS public.shipper_document_shares (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   empresa_id UUID NOT NULL REFERENCES public.empresas(id) ON DELETE CASCADE,
   shipper_org_id UUID NOT NULL REFERENCES public.shipper_organizations(id) ON DELETE RESTRICT,
   relationship_id UUID NOT NULL REFERENCES public.shipper_carrier_relationships(id) ON DELETE CASCADE,
-  request_id UUID NULL REFERENCES public.shipper_transport_requests(id) ON DELETE CASCADE,
+  -- SHIPPER_DOCUMENT_SHARE_REQUEST_REQUIRED=true: no Portal V1 não existe
+  -- compartilhamento externo sem solicitação de origem. Sem ela não há
+  -- proveniência para provar, e a auditoria não encontrou nenhum caso legítimo.
+  request_id UUID NOT NULL REFERENCES public.shipper_transport_requests(id) ON DELETE CASCADE,
+  -- Operação de origem: a campanha que nasceu da solicitação aceita.
+  campaign_id UUID NOT NULL REFERENCES public.operation_campaigns(id) ON DELETE CASCADE,
+  -- Viagem/frete de origem do arquivo.
+  frete_id UUID NOT NULL REFERENCES public.fretes(id) ON DELETE CASCADE,
   source_kind TEXT NOT NULL CHECK (source_kind IN ('FRETE_DOCUMENTO','EPOD_EVIDENCIA')),
   frete_documento_id UUID NULL REFERENCES public.frete_documentos(id) ON DELETE CASCADE,
   epod_evidencia_id UUID NULL REFERENCES public.frete_epod_evidencias(id) ON DELETE CASCADE,
@@ -219,13 +254,126 @@ DO $$ BEGIN
     ON DELETE CASCADE;
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
+-- Índices de identidade necessários para as FKs compostas de proveniência.
+-- São aditivos e não alteram semântica de negócio: cada um inclui a PK da
+-- própria tabela, então já são únicos por construção — existem apenas para dar
+-- ao PostgreSQL a chave referenciável.
+CREATE UNIQUE INDEX IF NOT EXISTS frete_documentos_id_frete_empresa_key
+  ON public.frete_documentos (id, frete_id, empresa_id);
+CREATE UNIQUE INDEX IF NOT EXISTS frete_epod_evidencias_id_frete_empresa_key
+  ON public.frete_epod_evidencias (id, frete_id, empresa_id);
+CREATE UNIQUE INDEX IF NOT EXISTS campaign_trip_freights_campaign_frete_empresa_key
+  ON public.campaign_trip_freights (campaign_id, frete_id, empresa_id);
+CREATE UNIQUE INDEX IF NOT EXISTS shipper_requests_id_campaign_empresa_org_key
+  ON public.shipper_transport_requests (id, campaign_id, empresa_id, shipper_org_id);
+
+-- Elo 1: a solicitação pertence a esta empresa E a este embarcador E está
+-- vinculada exatamente a esta campanha. Fecha o caso "solicitação do X com
+-- documento da campanha do Y na mesma transportadora".
 DO $$ BEGIN
   ALTER TABLE public.shipper_document_shares
-    ADD CONSTRAINT shipper_shares_request_empresa_fk
-    FOREIGN KEY (request_id, empresa_id)
-    REFERENCES public.shipper_transport_requests (id, empresa_id)
+    ADD CONSTRAINT shipper_shares_request_campaign_fk
+    FOREIGN KEY (request_id, campaign_id, empresa_id, shipper_org_id)
+    REFERENCES public.shipper_transport_requests (id, campaign_id, empresa_id, shipper_org_id)
     ON DELETE CASCADE;
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- Elo 2: o frete pertence a esta campanha e a esta empresa (materialização).
+DO $$ BEGIN
+  ALTER TABLE public.shipper_document_shares
+    ADD CONSTRAINT shipper_shares_campaign_frete_fk
+    FOREIGN KEY (campaign_id, frete_id, empresa_id)
+    REFERENCES public.campaign_trip_freights (campaign_id, frete_id, empresa_id)
+    ON DELETE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- Elo 3a: o documento pertence a este frete e a esta empresa.
+DO $$ BEGIN
+  ALTER TABLE public.shipper_document_shares
+    ADD CONSTRAINT shipper_shares_frete_documento_fk
+    FOREIGN KEY (frete_documento_id, frete_id, empresa_id)
+    REFERENCES public.frete_documentos (id, frete_id, empresa_id)
+    ON DELETE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- Elo 3b: a evidência de ePOD pertence a este frete e a esta empresa.
+DO $$ BEGIN
+  ALTER TABLE public.shipper_document_shares
+    ADD CONSTRAINT shipper_shares_epod_evidencia_fk
+    FOREIGN KEY (epod_evidencia_id, frete_id, empresa_id)
+    REFERENCES public.frete_epod_evidencias (id, frete_id, empresa_id)
+    ON DELETE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- ============================================================================
+-- 3b. Imutabilidade do historico de submissao (owner review HIGH-03)
+-- ============================================================================
+-- "Append-only na pratica" nao serve para a tabela cuja unica razao de existir e
+-- ser EVIDENCIA. Se um bug futuro no backend fizer UPDATE no snapshot, a
+-- evidencia que a transportadora avaliou desaparece silenciosamente -- e nada no
+-- banco teria impedido.
+--
+-- Este gatilho protege inclusive escritas via `service_role`, que e exatamente
+-- o caminho que o backend usa. Proteger so contra `anon` seria proteger contra
+-- quem ja nao tem acesso nenhum.
+--
+-- O que fica congelado apos o INSERT: identidade, versao, snapshot, autoria e
+-- instante de envio. O que pode mudar UMA vez: a decisao da transportadora
+-- (NULL -> veredito), junto com motivo, instante e autor.
+
+CREATE OR REPLACE FUNCTION public.shipper_submission_immutable_guard()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    RAISE EXCEPTION 'submission_history_delete_forbidden' USING ERRCODE = '42501';
+  END IF;
+
+  -- Campos de identidade/evidencia: imutaveis.
+  IF NEW.id IS DISTINCT FROM OLD.id
+     OR NEW.request_id IS DISTINCT FROM OLD.request_id
+     OR NEW.empresa_id IS DISTINCT FROM OLD.empresa_id
+     OR NEW.shipper_org_id IS DISTINCT FROM OLD.shipper_org_id
+     OR NEW.version IS DISTINCT FROM OLD.version
+     OR NEW.snapshot IS DISTINCT FROM OLD.snapshot
+     OR NEW.submitted_at IS DISTINCT FROM OLD.submitted_at
+     OR NEW.submitted_by IS DISTINCT FROM OLD.submitted_by
+     OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
+    RAISE EXCEPTION 'submission_history_immutable' USING ERRCODE = '42501';
+  END IF;
+
+  -- A decisao e de mao unica: uma vez registrada, nao se troca ACCEPTED por
+  -- REJECTED nem se reescreve motivo/instante/autor.
+  IF OLD.decision IS NOT NULL THEN
+    IF NEW.decision IS DISTINCT FROM OLD.decision
+       OR NEW.decision_reason IS DISTINCT FROM OLD.decision_reason
+       OR NEW.decided_at IS DISTINCT FROM OLD.decided_at
+       OR NEW.decided_by IS DISTINCT FROM OLD.decided_by THEN
+      RAISE EXCEPTION 'submission_decision_already_final' USING ERRCODE = '42501';
+    END IF;
+  ELSIF NEW.decision IS NOT NULL THEN
+    -- Primeira decisao: precisa ser um veredito valido e datado.
+    IF NEW.decision NOT IN ('ACCEPTED','REJECTED','CHANGES_REQUESTED') THEN
+      RAISE EXCEPTION 'submission_decision_invalid' USING ERRCODE = '22023';
+    END IF;
+    IF NEW.decided_at IS NULL THEN
+      RAISE EXCEPTION 'submission_decision_requires_timestamp' USING ERRCODE = '22023';
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS shipper_submission_immutable ON public.shipper_transport_request_submissions;
+CREATE TRIGGER shipper_submission_immutable
+  BEFORE UPDATE OR DELETE ON public.shipper_transport_request_submissions
+  FOR EACH ROW EXECUTE FUNCTION public.shipper_submission_immutable_guard();
+
+REVOKE ALL ON FUNCTION public.shipper_submission_immutable_guard() FROM PUBLIC, anon, authenticated;
 
 -- ============================================================================
 -- 4. RLS + grants -- backend-mediado, igual a 080
@@ -577,6 +725,8 @@ SET search_path = public
 AS $$
 DECLARE
   v_request public.shipper_transport_requests;
+  v_snapshot jsonb;
+  v_carimbadas integer;
 BEGIN
   SELECT * INTO v_request FROM public.shipper_transport_requests
     WHERE id = p_request_id AND empresa_id = p_empresa_id
@@ -599,11 +749,28 @@ BEGIN
     RAISE EXCEPTION 'relationship_not_active' USING ERRCODE = '55000';
   END IF;
 
+  -- AUTORIDADE DO SNAPSHOT ACEITO (owner review HIGH-03).
+  --
+  -- A assinatura mantém `p_accepted_snapshot` por compatibilidade com o backend
+  -- já implantado (a 080 em produção chama assim), mas o valor recebido é
+  -- deliberadamente IGNORADO: o que vale é a submissão gravada no banco. Antes,
+  -- quem chamasse a RPC podia declarar "aceito: 999 t" enquanto o embarcador
+  -- havia enviado 100 t — e o registro do que foi aceito passaria a mentir.
+  --
+  -- A versão corrente precisa existir e ser exatamente uma; sem isso não há o
+  -- que auditar e a função falha fechada (§32).
+  SELECT snapshot INTO v_snapshot
+    FROM public.shipper_transport_request_submissions
+    WHERE request_id = p_request_id AND version = v_request.current_submission_version;
+  IF NOT FOUND OR v_snapshot IS NULL THEN
+    RAISE EXCEPTION 'current_submission_missing' USING ERRCODE = '55000';
+  END IF;
+
   UPDATE public.shipper_transport_requests
     SET status = 'ACCEPTED',
         decided_at = now(),
         decided_by = p_actor_id,
-        accepted_snapshot = COALESCE(p_accepted_snapshot, v_request.submitted_snapshot),
+        accepted_snapshot = v_snapshot,
         updated_at = now()
     WHERE id = p_request_id
     RETURNING * INTO v_request;
@@ -613,6 +780,13 @@ BEGIN
     WHERE request_id = p_request_id
       AND version = v_request.current_submission_version
       AND decision IS NULL;
+
+  -- Exatamente uma versão auditada precisa ter recebido o carimbo (§33).
+  -- Ignorar "0 linhas" deixaria a solicitação aceita sem evidência da decisão.
+  GET DIAGNOSTICS v_carimbadas = ROW_COUNT;
+  IF v_carimbadas <> 1 THEN
+    RAISE EXCEPTION 'submission_decision_stamp_failed: %', v_carimbadas USING ERRCODE = '55000';
+  END IF;
 
   RETURN v_request;
 END;
@@ -639,6 +813,7 @@ SET search_path = public
 AS $$
 DECLARE
   v_request public.shipper_transport_requests;
+  v_carimbadas integer;
 BEGIN
   IF p_new_status NOT IN ('REJECTED','CHANGES_REQUESTED') THEN
     RAISE EXCEPTION 'invalid_decision' USING ERRCODE = '22023';
@@ -673,6 +848,14 @@ BEGIN
     WHERE request_id = p_request_id
       AND version = v_request.current_submission_version
       AND decision IS NULL;
+
+  -- Mesma exigência do aceite (§33): a decisão precisa ter sido carimbada em
+  -- exatamente uma versão auditada, senão a solicitação mudaria de estado sem
+  -- evidência correspondente.
+  GET DIAGNOSTICS v_carimbadas = ROW_COUNT;
+  IF v_carimbadas <> 1 THEN
+    RAISE EXCEPTION 'submission_decision_stamp_failed: %', v_carimbadas USING ERRCODE = '55000';
+  END IF;
 
   RETURN v_request;
 END;

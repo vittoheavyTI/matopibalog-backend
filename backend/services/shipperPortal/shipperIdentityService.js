@@ -88,12 +88,22 @@ async function localizarIdentidadePorEmail(supabase, email) {
 
 // Fase 1 da ativação: garante que existe uma identidade de auth para este e-mail.
 //
-// Ponto de segurança que merece destaque: se o e-mail JÁ existe no Auth, esta
-// função NÃO redefine a senha. Redefinir seria permitir que qualquer pessoa com
-// um convite válido para um e-mail assumisse o controle de uma conta existente —
-// inclusive a de um usuário interno da transportadora (§26). Nesse caso a pessoa
-// entra com a senha que já tem, e a senha informada no convite é ignorada.
-async function resolverOuCriarIdentidade(supabase, { email, senha, nome }) {
+// POLÍTICA CONGELADA (EXISTING_AUTH_IDENTITY_INVITE_POLICY_V1, owner review
+// HIGH-01): quando o e-mail JÁ tem conta, o convite sozinho NÃO basta.
+//
+// A versão anterior fazia a coisa certa pela metade: não redefinia a senha (bom,
+// senão seria takeover explícito), mas vinculava a conta existente ao portal e
+// emitia sessão só com o token do convite. Quem tivesse o link — que é uma
+// credencial ao portador, entregue manualmente — passava a operar em nome de uma
+// identidade cuja senha nunca provou conhecer. Se essa identidade fosse a de um
+// operador interno da transportadora, o convite viraria um caminho para entrar
+// no lugar dele.
+//
+// Agora exige-se: TOKEN DE CONVITE **e** AUTENTICAÇÃO da conta existente. A
+// senha digitada na ativação é interpretada como a senha DAQUELA conta — ela é
+// verificada, nunca redefinida. Sem ela, a ativação é negada e o convite
+// permanece pendente.
+async function resolverOuCriarIdentidade(supabase, { email, senha, nome, auth = null }) {
   const alvo = normalizarEmail(email);
   if (!alvo) {
     throw new ShipperPortalError('Informe um e-mail válido.', { status: 400, code: 'invalid_email' });
@@ -101,6 +111,22 @@ async function resolverOuCriarIdentidade(supabase, { email, senha, nome }) {
 
   const existente = await localizarIdentidadePorEmail(supabase, alvo);
   if (existente) {
+    if (!senha) {
+      throw new ShipperPortalError(
+        'Este e-mail já tem uma conta no Matopiba Log. Informe a senha dessa conta para ativar seu acesso ao portal.',
+        { status: 401, code: 'existing_account_password_required' },
+      );
+    }
+    // Prova de controle da identidade existente. Falhou → nada é vinculado.
+    const { data, error } = await (auth || authClient())
+      .auth.signInWithPassword({ email: alvo, password: String(senha) });
+    if (error || !data?.user?.id) {
+      throw new ShipperPortalError(
+        'Senha incorreta para a conta já existente com este e-mail. Informe a senha atual dessa conta para ativar seu acesso.',
+        { status: 401, code: 'existing_account_password_invalid' },
+      );
+    }
+    // A senha continua sendo a mesma: verificamos, não trocamos.
     return { id: existente.id, jaExistia: true, senhaDefinidaAgora: false };
   }
 

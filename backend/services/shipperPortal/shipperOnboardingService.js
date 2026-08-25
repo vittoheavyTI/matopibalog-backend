@@ -48,6 +48,14 @@ function mapRpcError(error) {
       status: 400, code: 'auth_identity_required',
       message: 'Não foi possível concluir a ativação. Tente novamente.',
     },
+    existing_account_password_required: {
+      status: 401, code: 'existing_account_password_required',
+      message: 'Este e-mail já tem uma conta no Matopiba Log. Informe a senha dessa conta para ativar seu acesso ao portal.',
+    },
+    existing_account_password_invalid: {
+      status: 401, code: 'existing_account_password_invalid',
+      message: 'Senha incorreta para a conta já existente com este e-mail. Informe a senha atual dessa conta para ativar seu acesso.',
+    },
   };
   const known = mapa[code];
   if (known) return new ShipperPortalError(known.message, { status: known.status, code: known.code });
@@ -88,12 +96,32 @@ async function previewConvite(supabase, { token }) {
     supabase.from('shipper_organizations').select('nome').eq('id', data.shipper_org_id).maybeSingle(),
   ]);
 
+  // A tela precisa saber se vai pedir "crie uma senha" ou "informe a senha da
+  // sua conta" (HIGH-01). Sem isso a pessoa inventa uma senha nova, a ativação
+  // falha, e ela não entende por quê.
+  //
+  // Sobre revelar a existência da conta: quem chega aqui já tem o token do
+  // convite, que a transportadora emitiu para este e-mail específico — não há
+  // ganho de informação para um terceiro. Só é consultado com token válido e
+  // ainda utilizável.
+  let contaExistente = false;
+  if (utilizavel) {
+    try {
+      contaExistente = Boolean(await identity.localizarIdentidadePorEmail(supabase, data.email));
+    } catch {
+      // Indisponibilidade do Auth não pode quebrar a tela; ela cai no fluxo de
+      // conta nova e a ativação decide com autoridade.
+      contaExistente = false;
+    }
+  }
+
   return {
     email: data.email,
     nome_convidado: data.nome_convidado,
     transportadora: empresa?.nome || null,
     embarcador: org?.nome || null,
     utilizavel,
+    conta_existente: contaExistente,
     motivo: utilizavel ? null : (expirado ? 'expirado' : 'indisponivel'),
   };
 }
@@ -157,9 +185,11 @@ async function ativarConvite(supabase, { token, senha, nome }) {
       email: portalUser.email,
     }),
     usuario: { id: portalUser.id, nome: portalUser.nome, email: portalUser.email },
-    // Se a identidade já existia, a senha NÃO foi redefinida — a tela precisa
-    // dizer isso, senão a pessoa tenta entrar com a senha que acabou de digitar.
+    // Se a identidade já existia, a senha informada foi VERIFICADA (não
+    // redefinida) — ela continua sendo a senha da conta. A tela usa isso para
+    // não sugerir que uma senha nova foi criada.
     senha_definida_agora: identidade.senhaDefinidaAgora,
+    conta_existente: identidade.jaExistia,
     transportadoras: contexto.relationships.map((r) => ({ relationship_id: r.id })),
   };
 }

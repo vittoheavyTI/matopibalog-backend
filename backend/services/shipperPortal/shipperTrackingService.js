@@ -18,6 +18,7 @@ const {
   ShipperPortalError, throwDb, loadPortalContext, scopeRequestsQuery,
 } = require('./shipperBoundaryService');
 const { freightStatusToBucket, EXECUTION_BUCKET } = require('../campaign/freightExecutionStatus');
+const { getCampaignQuantitySummaryBatch } = require('../campaign/campaignProgressService');
 
 // Vocabulário externo. Congelado e testado — adicionar um estado aqui é uma
 // decisão consciente, não um efeito colateral.
@@ -29,6 +30,10 @@ const EXTERNAL_STATUS = Object.freeze({
   EM_PLANEJAMENTO: 'EM_PLANEJAMENTO',
   AGENDADA: 'AGENDADA',
   EM_TRANSPORTE: 'EM_TRANSPORTE',
+  // Parte da carga chegou, parte ainda não. Estado necessário porque o
+  // vocabulário anterior obrigava a escolher entre mentir ("Entregue") e
+  // esconder ("Em transporte", com nada rodando).
+  PARCIALMENTE_ENTREGUE: 'PARCIALMENTE_ENTREGUE',
   ENTREGUE: 'ENTREGUE',
   COMPROVANTE_DISPONIVEL: 'COMPROVANTE_DISPONIVEL',
   CANCELADA: 'CANCELADA',
@@ -48,6 +53,7 @@ const ROTULO = Object.freeze({
   EM_PLANEJAMENTO: 'Em planejamento',
   AGENDADA: 'Transporte agendado',
   EM_TRANSPORTE: 'Em transporte',
+  PARCIALMENTE_ENTREGUE: 'Entrega parcial',
   ENTREGUE: 'Entrega concluída',
   COMPROVANTE_DISPONIVEL: 'Comprovante disponível',
   CANCELADA: 'Cancelada',
@@ -79,8 +85,18 @@ const CAMPAIGN_STATUS_TO_EXTERNAL = Object.freeze({
 });
 
 // Deriva o estado externo a partir da evidência REAL disponível, na ordem de
-// autoridade: comprovante > fretes > campanha > solicitação.
-function derivarStatusExterno({ request, campaign, freights = [], temComprovante = false }) {
+// autoridade: solicitação (desfechos terminais) > demanda residual > execução.
+//
+// A REGRA QUE MAIS IMPORTA AQUI (owner review HIGH-04): "entregue" NÃO é "todos
+// os fretes materializados terminaram". A versão anterior tratava
+// `concluídos + cancelados === total` como entrega — o que significa que uma
+// operação com 30 t entregues e 70 t canceladas era anunciada ao cliente como
+// ENTREGUE, embora 70 t da carga dele nunca tivessem saído do lugar.
+//
+// A autoridade agora é a DEMANDA RESIDUAL calculada pelo serviço canônico de
+// progresso: só há entrega quando não sobra demanda a atender. Quantidade
+// cancelada nunca abate demanda — ela volta para o residual.
+function derivarStatusExterno({ request, campaign, freights = [], temComprovante = false, quantidade = null }) {
   const statusSolicitacao = REQUEST_STATUS_TO_EXTERNAL[request.status];
 
   // Desfechos da própria solicitação são terminais e não são sobrepostos por
@@ -95,21 +111,31 @@ function derivarStatusExterno({ request, campaign, freights = [], temComprovante
   // o embarcador vê "aceita", nunca um erro interno.
   if (!campaign) return EXTERNAL_STATUS.ACEITA;
 
-  if (freights.length) {
-    const buckets = freights.map((f) => freightStatusToBucket(f.status));
-    const emExecucao = buckets.filter((b) => b === EXECUTION_BUCKET.IN_EXECUTION).length;
-    const concluidos = buckets.filter((b) => b === EXECUTION_BUCKET.COMPLETED).length;
-    const cancelados = buckets.filter((b) => b === EXECUTION_BUCKET.CANCELLED).length;
-    const desconhecidos = buckets.filter((b) => b === EXECUTION_BUCKET.UNKNOWN).length;
+  const buckets = freights.map((f) => freightStatusToBucket(f.status));
+  const emExecucao = buckets.filter((b) => b === EXECUTION_BUCKET.IN_EXECUTION).length;
+  const concluidos = buckets.filter((b) => b === EXECUTION_BUCKET.COMPLETED).length;
 
-    // Tudo entregue: comprovante disponível só se houver comprovante COMPARTILHADO.
-    if (concluidos > 0 && concluidos + cancelados === buckets.length) {
-      return temComprovante ? EXTERNAL_STATUS.COMPROVANTE_DISPONIVEL : EXTERNAL_STATUS.ENTREGUE;
-    }
-    if (emExecucao > 0) return EXTERNAL_STATUS.EM_TRANSPORTE;
-    if (cancelados === buckets.length) return EXTERNAL_STATUS.ATUALIZACAO_EM_PROCESSAMENTO;
-    // Só desconhecidos: não fabricamos progresso.
-    if (desconhecidos === buckets.length) return EXTERNAL_STATUS.ATUALIZACAO_EM_PROCESSAMENTO;
+  // Entrega exige prova de que a necessidade foi atendida — e só o cálculo
+  // canônico de quantidade dá essa prova. Sem medição conclusiva, não afirmamos.
+  const podeAfirmarEntrega = Boolean(quantidade && quantidade.conclusivo);
+  if (podeAfirmarEntrega && quantidade.remaining <= 0 && quantidade.completed > 0) {
+    return temComprovante ? EXTERNAL_STATUS.COMPROVANTE_DISPONIVEL : EXTERNAL_STATUS.ENTREGUE;
+  }
+
+  // Há transporte acontecendo agora.
+  if (emExecucao > 0) return EXTERNAL_STATUS.EM_TRANSPORTE;
+
+  // Houve entrega parcial mas ainda sobra demanda: NÃO é "entregue", e também
+  // não é "em transporte" (nada está rodando). O cliente precisa de um estado
+  // honesto, sem jargão interno de replanejamento.
+  if (concluidos > 0 && podeAfirmarEntrega && quantidade.remaining > 0) {
+    return EXTERNAL_STATUS.PARCIALMENTE_ENTREGUE;
+  }
+
+  if (freights.length) {
+    // Existe execução materializada, mas nada dela permite concluir progresso.
+    if (!podeAfirmarEntrega) return EXTERNAL_STATUS.ATUALIZACAO_EM_PROCESSAMENTO;
+    if (concluidos === 0 && quantidade.trips.cancelled > 0) return EXTERNAL_STATUS.ATUALIZACAO_EM_PROCESSAMENTO;
     return EXTERNAL_STATUS.AGENDADA;
   }
 
@@ -126,6 +152,9 @@ function derivarProximaAcao(statusExterno, { requestId }) {
       return { rotulo: 'Baixar comprovante', tipo: 'VER_COMPROVANTE', request_id: requestId };
     case EXTERNAL_STATUS.EM_TRANSPORTE:
     case EXTERNAL_STATUS.AGENDADA:
+    // Entrega parcial ainda é operação em curso do ponto de vista do cliente:
+    // parte da carga dele continua esperando.
+    case EXTERNAL_STATUS.PARCIALMENTE_ENTREGUE:
       return { rotulo: 'Acompanhar operação', tipo: 'ACOMPANHAR', request_id: requestId };
     default:
       return { rotulo: 'No momento, nenhuma ação é necessária.', tipo: 'NENHUMA', request_id: requestId };
@@ -134,7 +163,7 @@ function derivarProximaAcao(statusExterno, { requestId }) {
 
 // Linha do tempo por whitelist (§54). Marcos derivados de evidência real — nunca
 // um despejo de eventos de auditoria interna.
-function montarLinhaDoTempo({ request, campaign, freights = [], comprovanteEm = null }) {
+function montarLinhaDoTempo({ request, campaign, freights = [], comprovanteEm = null, quantidade = null }) {
   const marcos = [];
   const push = (chave, rotulo, em) => { if (em) marcos.push({ chave, rotulo, em }); };
 
@@ -158,7 +187,12 @@ function montarLinhaDoTempo({ request, campaign, freights = [], comprovanteEm = 
   }
   if (concluidos.length) {
     const fim = concluidos.map((f) => f.updated_at || f.created_at).filter(Boolean).sort().pop();
-    push('ENTREGA_CONCLUIDA', 'Entrega concluída', fim);
+    // "Entrega concluída" só quando a demanda foi realmente satisfeita. Com
+    // saldo restante, o marco honesto é a entrega parcial — caso contrário a
+    // linha do tempo diria "concluída" com carga do cliente ainda parada.
+    const completa = Boolean(quantidade && quantidade.conclusivo && quantidade.remaining <= 0);
+    if (completa) push('ENTREGA_CONCLUIDA', 'Entrega concluída', fim);
+    else push('ENTREGA_PARCIAL', 'Parte da carga foi entregue', fim);
   }
   push('COMPROVANTE_DISPONIBILIZADO', 'Comprovante disponibilizado', comprovanteEm);
 
@@ -204,7 +238,27 @@ async function carregarOperacoes(supabase, requests) {
     if (!freightsByCampaign.has(v.campaign_id)) freightsByCampaign.set(v.campaign_id, []);
     freightsByCampaign.get(v.campaign_id).push(frete);
   }
-  return { campaignsById, freightsByCampaign };
+
+  // Quantidade canônica em LOTE (§137/§38): a autoridade de "quanto foi
+  // efetivamente entregue e quanto ainda falta" é o serviço de progresso da
+  // Campanha, não uma contagem de fretes feita aqui.
+  const empresaIds = [...new Set(requests.map((r) => r.empresa_id).filter(Boolean))];
+  const quantidadePorCampanha = new Map();
+  for (const empresaId of empresaIds) {
+    const idsDaEmpresa = requests
+      .filter((r) => r.empresa_id === empresaId).map((r) => r.campaign_id).filter(Boolean);
+    if (!idsDaEmpresa.length) continue;
+    try {
+      const lote = await getCampaignQuantitySummaryBatch(supabase, { empresaId, campaignIds: idsDaEmpresa });
+      for (const [cid, resumo] of lote) quantidadePorCampanha.set(cid, resumo);
+    } catch (err) {
+      // Falha ao medir NÃO pode virar "entregue". Sem resumo, o derivador cai
+      // no caminho conservador (§43).
+      console.error('[shipperPortal:quantidade]', err?.message || err);
+    }
+  }
+
+  return { campaignsById, freightsByCampaign, quantidadePorCampanha };
 }
 
 // Comprovantes COMPARTILHADOS por solicitação. A existência de um ePOD aprovado
@@ -240,7 +294,7 @@ async function listarMinhasOperacoes(supabase, { portalUserId }) {
   const requests = data || [];
   if (!requests.length) return { itens: [] };
 
-  const { campaignsById, freightsByCampaign } = await carregarOperacoes(supabase, requests);
+  const { campaignsById, freightsByCampaign, quantidadePorCampanha } = await carregarOperacoes(supabase, requests);
   const comprovantes = await carregarComprovantesCompartilhados(supabase, {
     shipperOrgId: context.shipperOrgId,
     requestIds: requests.map((r) => r.id),
@@ -262,6 +316,7 @@ async function listarMinhasOperacoes(supabase, { portalUserId }) {
     const comprovanteEm = comprovantes.get(r.id) || null;
     const statusExterno = derivarStatusExterno({
       request: r, campaign, freights, temComprovante: Boolean(comprovanteEm),
+      quantidade: campaign ? quantidadePorCampanha.get(campaign.id) || null : null,
     });
     const lista = (origensPorRequest.get(r.id) || []).sort((a, b) => a.ordem - b.ordem);
     return {
@@ -301,7 +356,7 @@ async function obterMinhaOperacao(supabase, { portalUserId, requestId }) {
     throw new ShipperPortalError('Operação não encontrada.', { status: 404, code: 'request_not_found' });
   }
 
-  const { campaignsById, freightsByCampaign } = await carregarOperacoes(supabase, [request]);
+  const { campaignsById, freightsByCampaign, quantidadePorCampanha } = await carregarOperacoes(supabase, [request]);
   const campaign = request.campaign_id ? campaignsById.get(request.campaign_id) || null : null;
   const freights = campaign ? (freightsByCampaign.get(campaign.id) || []) : [];
   const comprovantes = await carregarComprovantesCompartilhados(supabase, {
@@ -314,8 +369,9 @@ async function obterMinhaOperacao(supabase, { portalUserId, requestId }) {
     .select('nome, quantidade, quantity_unit, ordem')
     .eq('request_id', request.id).order('ordem', { ascending: true });
 
+  const quantidade = campaign ? quantidadePorCampanha.get(campaign.id) || null : null;
   const statusExterno = derivarStatusExterno({
-    request, campaign, freights, temComprovante: Boolean(comprovanteEm),
+    request, campaign, freights, temComprovante: Boolean(comprovanteEm), quantidade,
   });
 
   return {
@@ -337,10 +393,24 @@ async function obterMinhaOperacao(supabase, { portalUserId, requestId }) {
       ? request.decision_reason : null,
     versao_atual: request.current_submission_version ?? null,
     revisoes: request.revision_count ?? 0,
+    // Existir comprovante NÃO significa operação concluída (§44): um
+    // comprovante de uma viagem parcial é prova daquela viagem, não da entrega
+    // inteira. Os dois campos são deliberadamente independentes.
     comprovante_disponivel: Boolean(comprovanteEm),
+    // Progresso em quantidade, quando é possível medir com confiança. Só o que
+    // o cliente entende: quanto da carga dele chegou e quanto ainda falta.
+    // Nada de viagens, veículos ou plano — isso é planejamento interno.
+    entrega: quantidade && quantidade.conclusivo ? {
+      unidade: 'ton',
+      solicitado: quantidade.target,
+      entregue: quantidade.completed,
+      restante: quantidade.remaining,
+      concluida: quantidade.remaining <= 0 && quantidade.completed > 0,
+    } : null,
     proxima_acao: derivarProximaAcao(statusExterno, { requestId: request.id }),
-    linha_do_tempo: montarLinhaDoTempo({ request, campaign, freights, comprovanteEm }),
-    // Quantidade de veículos/viagens NÃO é exposta: é planejamento interno.
+    linha_do_tempo: montarLinhaDoTempo({
+      request, campaign, freights, comprovanteEm, quantidade,
+    }),
     atualizado_em: request.updated_at,
   };
 }

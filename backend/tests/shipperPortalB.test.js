@@ -111,32 +111,118 @@ test('081B status: status de frete DESCONHECIDO nunca vira "Em transporte"', () 
   assert.notEqual(r, tracking.EXTERNAL_STATUS.EM_TRANSPORTE);
 });
 
-test('081B status: frete em execução projeta Em transporte; todos finalizados projetam Entregue', () => {
+// Helper da matriz de quantidade (§45). `conclusivo` só quando há demanda
+// declarada e unidades compatíveis — do contrário não dá para afirmar entrega.
+function qtd(over = {}) {
+  return {
+    conclusivo: true, motivo: null,
+    target: 100, completed: 0, cancelled: 0, remaining: 100,
+    trips: { total: 1, completed: 0, cancelled: 0, in_execution: 0, unknown: 0, blocked: 0, not_materialized: 0 },
+    ...over,
+  };
+}
+
+test('081B status: frete em execução projeta Em transporte', () => {
   const emViagem = tracking.derivarStatusExterno({
     request: solicitacao(), campaign: { id: 'camp-1', status: 'APPROVED' },
     freights: [{ id: 'f1', status: 'em_viagem' }, { id: 'f2', status: 'finalizado' }],
+    quantidade: qtd({ completed: 50, remaining: 50 }),
   });
   assert.equal(emViagem, tracking.EXTERNAL_STATUS.EM_TRANSPORTE);
-
-  const entregue = tracking.derivarStatusExterno({
-    request: solicitacao(), campaign: { id: 'camp-1', status: 'APPROVED' },
-    freights: [{ id: 'f1', status: 'finalizado' }, { id: 'f2', status: 'finalizado' }],
-  });
-  assert.equal(entregue, tracking.EXTERNAL_STATUS.ENTREGUE);
 });
 
-test('081B status: entregue só vira "Comprovante disponível" se houver comprovante COMPARTILHADO', () => {
+test('081B HIGH-04: 100 solicitado / 100 entregue → ENTREGUE', () => {
+  const r = tracking.derivarStatusExterno({
+    request: solicitacao(), campaign: { id: 'camp-1', status: 'APPROVED' },
+    freights: [{ id: 'f1', status: 'finalizado' }],
+    quantidade: qtd({ completed: 100, remaining: 0 }),
+  });
+  assert.equal(r, tracking.EXTERNAL_STATUS.ENTREGUE);
+});
+
+test('081B HIGH-04: 30 entregue + 70 CANCELADO nunca é ENTREGUE', () => {
+  // A regressão que este teste existe para impedir: a versão anterior tratava
+  // "todos os fretes terminaram (concluído ou cancelado)" como entrega, e
+  // anunciava ENTREGUE ao cliente com 70 t da carga dele paradas.
+  const r = tracking.derivarStatusExterno({
+    request: solicitacao(), campaign: { id: 'camp-1', status: 'APPROVED' },
+    freights: [{ id: 'f1', status: 'finalizado' }, { id: 'f2', status: 'cancelado' }],
+    quantidade: qtd({
+      completed: 30, cancelled: 70, remaining: 70,
+      trips: { total: 2, completed: 1, cancelled: 1, in_execution: 0, unknown: 0, blocked: 0, not_materialized: 0 },
+    }),
+  });
+  assert.notEqual(r, tracking.EXTERNAL_STATUS.ENTREGUE);
+  assert.notEqual(r, tracking.EXTERNAL_STATUS.COMPROVANTE_DISPONIVEL);
+  assert.equal(r, tracking.EXTERNAL_STATUS.PARCIALMENTE_ENTREGUE);
+});
+
+test('081B HIGH-04: 30 entregue + 70 pendente de replanejamento não é ENTREGUE', () => {
+  const r = tracking.derivarStatusExterno({
+    request: solicitacao(), campaign: { id: 'camp-1', status: 'APPROVED' },
+    freights: [{ id: 'f1', status: 'finalizado' }],
+    quantidade: qtd({
+      completed: 30, remaining: 70,
+      trips: { total: 2, completed: 1, cancelled: 0, in_execution: 0, unknown: 0, blocked: 0, not_materialized: 1 },
+    }),
+  });
+  assert.notEqual(r, tracking.EXTERNAL_STATUS.ENTREGUE);
+  assert.equal(r, tracking.EXTERNAL_STATUS.PARCIALMENTE_ENTREGUE);
+});
+
+test('081B HIGH-04: comprovante de viagem parcial NÃO completa a operação', () => {
+  // §44: existir prova de uma viagem não prova que a necessidade foi atendida.
+  const r = tracking.derivarStatusExterno({
+    request: solicitacao(), campaign: { id: 'camp-1', status: 'APPROVED' },
+    freights: [{ id: 'f1', status: 'finalizado' }, { id: 'f2', status: 'cancelado' }],
+    temComprovante: true,
+    quantidade: qtd({
+      completed: 30, cancelled: 70, remaining: 70,
+      trips: { total: 2, completed: 1, cancelled: 1, in_execution: 0, unknown: 0, blocked: 0, not_materialized: 0 },
+    }),
+  });
+  assert.equal(r, tracking.EXTERNAL_STATUS.PARCIALMENTE_ENTREGUE);
+  assert.notEqual(r, tracking.EXTERNAL_STATUS.COMPROVANTE_DISPONIVEL);
+});
+
+test('081B HIGH-04: sem medição conclusiva não se afirma entrega', () => {
+  // Sem demanda declarada, "restante = 0" significa "não sabemos medir",
+  // não "entregue".
+  const r = tracking.derivarStatusExterno({
+    request: solicitacao(), campaign: { id: 'camp-1', status: 'APPROVED' },
+    freights: [{ id: 'f1', status: 'finalizado' }],
+    quantidade: qtd({
+      conclusivo: false, motivo: 'SEM_DEMANDA_DECLARADA',
+      target: 0, completed: 0, remaining: 0,
+      trips: { total: 1, completed: 1, cancelled: 0, in_execution: 0, unknown: 0, blocked: 0, not_materialized: 0 },
+    }),
+  });
+  assert.equal(r, tracking.EXTERNAL_STATUS.ATUALIZACAO_EM_PROCESSAMENTO);
+});
+
+test('081B status: entrega completa só vira "Comprovante disponível" com comprovante COMPARTILHADO', () => {
   const semComprovante = tracking.derivarStatusExterno({
     request: solicitacao(), campaign: { id: 'camp-1', status: 'APPROVED' },
     freights: [{ id: 'f1', status: 'finalizado' }], temComprovante: false,
+    quantidade: qtd({ completed: 100, remaining: 0 }),
   });
   assert.equal(semComprovante, tracking.EXTERNAL_STATUS.ENTREGUE);
 
   const comComprovante = tracking.derivarStatusExterno({
     request: solicitacao(), campaign: { id: 'camp-1', status: 'APPROVED' },
     freights: [{ id: 'f1', status: 'finalizado' }], temComprovante: true,
+    quantidade: qtd({ completed: 100, remaining: 0 }),
   });
   assert.equal(comComprovante, tracking.EXTERNAL_STATUS.COMPROVANTE_DISPONIVEL);
+});
+
+test('081B HIGH-04: quantidade cancelada nunca abate a demanda', () => {
+  const { calcularRestanteTon } = require('../services/campaign/campaignProgressService');
+  // 100 alvo, 30 entregues, 70 cancelados → restam 70, não 0.
+  assert.equal(calcularRestanteTon(100, 30), 70);
+  assert.equal(calcularRestanteTon(100, 100), 0);
+  // Entregue além do alvo não gera residual negativo.
+  assert.equal(calcularRestanteTon(100, 120), 0);
 });
 
 test('081B status: aceita sem operação criada continua "Aceita" (handoff pendente não vaza erro)', () => {
@@ -187,23 +273,44 @@ test('081B ação: sem pendência, a mensagem é explícita em vez de vazia', ()
   assert.equal(acao.rotulo, 'No momento, nenhuma ação é necessária.');
 });
 
+const MARCOS_PERMITIDOS = new Set([
+  'SOLICITACAO_ENVIADA', 'AJUSTES_SOLICITADOS', 'SOLICITACAO_ACEITA', 'SOLICITACAO_RECUSADA',
+  'SOLICITACAO_CANCELADA', 'OPERACAO_PLANEJADA', 'EM_TRANSPORTE', 'ENTREGA_PARCIAL',
+  'ENTREGA_CONCLUIDA', 'COMPROVANTE_DISPONIBILIZADO',
+]);
+
 test('081B linha do tempo: só marcos da whitelist, em ordem cronológica', () => {
   const marcos = tracking.montarLinhaDoTempo({
     request: solicitacao({ status: 'ACCEPTED' }),
     campaign: { id: 'c1', status: 'APPROVED', approved_at: '2026-01-03T00:00:00Z' },
     freights: [{ id: 'f1', status: 'finalizado', created_at: '2026-01-04T00:00:00Z', updated_at: '2026-01-05T00:00:00Z' }],
     comprovanteEm: '2026-01-06T00:00:00Z',
+    quantidade: qtd({ completed: 100, remaining: 0 }),
   });
   const chaves = marcos.map((m) => m.chave);
-  const permitidas = new Set([
-    'SOLICITACAO_ENVIADA', 'AJUSTES_SOLICITADOS', 'SOLICITACAO_ACEITA', 'SOLICITACAO_RECUSADA',
-    'SOLICITACAO_CANCELADA', 'OPERACAO_PLANEJADA', 'EM_TRANSPORTE', 'ENTREGA_CONCLUIDA',
-    'COMPROVANTE_DISPONIBILIZADO',
-  ]);
-  for (const c of chaves) assert.ok(permitidas.has(c), `marco fora da whitelist: ${c}`);
+  for (const c of chaves) assert.ok(MARCOS_PERMITIDOS.has(c), `marco fora da whitelist: ${c}`);
   const datas = marcos.map((m) => new Date(m.em).getTime());
   assert.deepEqual(datas, [...datas].sort((a, b) => a - b), 'linha do tempo deve estar em ordem');
   assert.ok(chaves.includes('COMPROVANTE_DISPONIBILIZADO'));
+  assert.ok(chaves.includes('ENTREGA_CONCLUIDA'));
+});
+
+test('081B linha do tempo: com saldo restante o marco é entrega PARCIAL, não concluída', () => {
+  // Dizer "Entrega concluída" na linha do tempo com carga do cliente ainda
+  // parada é a mesma mentira do status — e ficaria registrada na história.
+  const marcos = tracking.montarLinhaDoTempo({
+    request: solicitacao({ status: 'ACCEPTED' }),
+    campaign: { id: 'c1', status: 'APPROVED', approved_at: '2026-01-03T00:00:00Z' },
+    freights: [{ id: 'f1', status: 'finalizado', created_at: '2026-01-04T00:00:00Z', updated_at: '2026-01-05T00:00:00Z' }],
+    quantidade: qtd({
+      completed: 30, cancelled: 70, remaining: 70,
+      trips: { total: 2, completed: 1, cancelled: 1, in_execution: 0, unknown: 0, blocked: 0, not_materialized: 0 },
+    }),
+  });
+  const chaves = marcos.map((m) => m.chave);
+  for (const c of chaves) assert.ok(MARCOS_PERMITIDOS.has(c), `marco fora da whitelist: ${c}`);
+  assert.ok(chaves.includes('ENTREGA_PARCIAL'));
+  assert.ok(!chaves.includes('ENTREGA_CONCLUIDA'));
 });
 
 // ============================================================================
