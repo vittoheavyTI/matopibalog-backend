@@ -436,12 +436,16 @@ function registrar(pg) {
     assert.deepEqual(req.submitted_snapshot.origins.map((o) => o.nome), origens.map((o) => o.nome));
   });
 
-  test('080 HIGH-02: falha ao inserir origem NÃO deixa DRAFT parcial commitado', async () => {
+  test('080 HIGH-02: falha DURANTE o insert de origens NÃO deixa DRAFT parcial commitado', async () => {
     await fullSetup();
-    // quantidade negativa viola o CHECK da tabela de origens → transação inteira aborta.
+    // Nome duplicado viola o índice único (request_id, lower(nome)) — e, ao
+    // contrário da quantidade inválida, essa falha só acontece DEPOIS que a
+    // solicitação e a primeira origem já foram inseridas na transação. É
+    // justamente o cenário que prova rollback de verdade: a validação prévia
+    // não pega, o banco pega no meio da gravação.
     await assert.rejects(
-      criarESubmeter(null, { ref: 'SOL-FALHA', origins: [{ nome: 'Fazenda A', quantidade: 100 }, { nome: 'Fazenda B', quantidade: -5 }] }),
-      (err) => err.code === '23514',
+      criarESubmeter(null, { ref: 'SOL-FALHA', origins: [{ nome: 'Fazenda A', quantidade: 100 }, { nome: 'fazenda a', quantidade: 50 }] }),
+      (err) => err.code === '23505',
     );
     const { rows } = await pool.query(
       `SELECT count(*)::int AS n FROM public.shipper_transport_requests WHERE reference_code='SOL-FALHA'`);
