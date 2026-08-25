@@ -56,6 +56,10 @@ function mapRpcError(error) {
       status: 401, code: 'existing_account_password_invalid',
       message: 'Senha incorreta para a conta já existente com este e-mail. Informe a senha atual dessa conta para ativar seu acesso.',
     },
+    auth_identity_mismatch: {
+      status: 409, code: 'auth_identity_mismatch',
+      message: 'Não foi possível confirmar sua conta. Tente novamente ou peça um novo convite à transportadora.',
+    },
   };
   const known = mapa[code];
   if (known) return new ShipperPortalError(known.message, { status: known.status, code: known.code });

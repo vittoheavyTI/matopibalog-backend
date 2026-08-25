@@ -103,6 +103,43 @@ async function localizarIdentidadePorEmail(supabase, email) {
 // senha digitada na ativação é interpretada como a senha DAQUELA conta — ela é
 // verificada, nunca redefinida. Sem ela, a ativação é negada e o convite
 // permanece pendente.
+// Prova de controle de uma identidade PREEXISTENTE.
+//
+// Extraída porque a política vale para QUALQUER caminho que termine usando uma
+// conta que já existia — não só para o caminho "encontrei na busca inicial".
+// Ter isso em duas cópias foi exatamente o que abriu o furo no branch de
+// corrida: um dos caminhos provava, o outro não.
+async function provarControleDaIdentidade({ alvo, senha, identidadeEsperada, auth }) {
+  if (!senha) {
+    throw new ShipperPortalError(
+      'Este e-mail já tem uma conta no Matopiba Log. Informe a senha dessa conta para ativar seu acesso ao portal.',
+      { status: 401, code: 'existing_account_password_required' },
+    );
+  }
+
+  const { data, error } = await (auth || authClient())
+    .auth.signInWithPassword({ email: alvo, password: String(senha) });
+  if (error || !data?.user?.id) {
+    throw new ShipperPortalError(
+      'Senha incorreta para a conta já existente com este e-mail. Informe a senha atual dessa conta para ativar seu acesso.',
+      { status: 401, code: 'existing_account_password_invalid' },
+    );
+  }
+
+  // Defesa em profundidade: a identidade autenticada tem que ser a MESMA que
+  // será vinculada. Se divergir, algo mudou entre a busca e a autenticação —
+  // e escolher silenciosamente um dos dois ids seria vincular o portal a uma
+  // conta cuja senha talvez não tenha sido provada. Falha fechada.
+  if (identidadeEsperada && data.user.id !== identidadeEsperada) {
+    throw new ShipperPortalError(
+      'Não foi possível confirmar sua conta. Tente novamente ou peça um novo convite à transportadora.',
+      { status: 409, code: 'auth_identity_mismatch' },
+    );
+  }
+
+  return data.user.id;
+}
+
 async function resolverOuCriarIdentidade(supabase, { email, senha, nome, auth = null }) {
   const alvo = normalizarEmail(email);
   if (!alvo) {
@@ -111,21 +148,7 @@ async function resolverOuCriarIdentidade(supabase, { email, senha, nome, auth = 
 
   const existente = await localizarIdentidadePorEmail(supabase, alvo);
   if (existente) {
-    if (!senha) {
-      throw new ShipperPortalError(
-        'Este e-mail já tem uma conta no Matopiba Log. Informe a senha dessa conta para ativar seu acesso ao portal.',
-        { status: 401, code: 'existing_account_password_required' },
-      );
-    }
-    // Prova de controle da identidade existente. Falhou → nada é vinculado.
-    const { data, error } = await (auth || authClient())
-      .auth.signInWithPassword({ email: alvo, password: String(senha) });
-    if (error || !data?.user?.id) {
-      throw new ShipperPortalError(
-        'Senha incorreta para a conta já existente com este e-mail. Informe a senha atual dessa conta para ativar seu acesso.',
-        { status: 401, code: 'existing_account_password_invalid' },
-      );
-    }
+    await provarControleDaIdentidade({ alvo, senha, identidadeEsperada: existente.id, auth });
     // A senha continua sendo a mesma: verificamos, não trocamos.
     return { id: existente.id, jaExistia: true, senhaDefinidaAgora: false };
   }
@@ -144,11 +167,20 @@ async function resolverOuCriarIdentidade(supabase, { email, senha, nome, auth = 
   });
 
   if (error) {
-    // Corrida: outra ativação simultânea criou a identidade entre a busca e a
-    // criação. Reencontra em vez de estourar erro.
+    // Corrida: entre a busca e a criação, a identidade passou a existir.
+    //
+    // Este caminho também termina usando uma conta PREEXISTENTE — criada por
+    // outra pessoa, não por esta tentativa. Antes ele devolvia a identidade
+    // direto, e era um desvio completo da prova de senha: bastava disparar a
+    // ativação no instante certo (ou simplesmente depois de alguém já ter
+    // criado a conta) para vincular o portal a uma identidade alheia. Agora a
+    // mesma prova é exigida aqui.
     if (ehEmailJaRegistrado(error)) {
       const agora = await localizarIdentidadePorEmail(supabase, alvo);
-      if (agora) return { id: agora.id, jaExistia: true, senhaDefinidaAgora: false };
+      if (agora) {
+        await provarControleDaIdentidade({ alvo, senha, identidadeEsperada: agora.id, auth });
+        return { id: agora.id, jaExistia: true, senhaDefinidaAgora: false };
+      }
     }
     throw new ShipperPortalError('Não foi possível criar seu acesso agora. Tente novamente em instantes.', {
       status: 503, code: 'auth_create_failed',
@@ -181,6 +213,7 @@ module.exports = {
   gerarTokenConvite,
   normalizarEmail,
   localizarIdentidadePorEmail,
+  provarControleDaIdentidade,
   resolverOuCriarIdentidade,
   autenticarPorSenha,
 };

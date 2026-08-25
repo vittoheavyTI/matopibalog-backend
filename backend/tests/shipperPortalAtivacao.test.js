@@ -39,8 +39,10 @@ function makeSupabase({ usuarios = [], criarFalha = null } = {}) {
   };
 }
 
-// Client de auth falso: aceita a senha correta registrada para o e-mail.
-function makeAuth(senhasValidas = {}) {
+// Client de auth falso: aceita a senha correta registrada para o e-mail e
+// devolve o id real daquela identidade — o serviço confere se o id autenticado
+// é o mesmo que será vinculado, então o stub precisa ser coerente.
+function makeAuth(senhasValidas = {}, idsPorEmail = {}) {
   const tentativas = [];
   return {
     _tentativas: tentativas,
@@ -48,7 +50,8 @@ function makeAuth(senhasValidas = {}) {
       signInWithPassword: ({ email, password }) => {
         tentativas.push({ email, password });
         if (senhasValidas[email] && senhasValidas[email] === password) {
-          return Promise.resolve({ data: { user: { id: `auth-${email}`, email } }, error: null });
+          const id = idsPorEmail[email] || `auth-${email}`;
+          return Promise.resolve({ data: { user: { id, email } }, error: null });
         }
         return Promise.resolve({ data: null, error: { message: 'Invalid login credentials' } });
       },
@@ -80,7 +83,7 @@ test('081B HIGH-01: conta nova exige senha minimamente forte', async () => {
 
 test('081B HIGH-01: conta EXISTENTE + senha CORRETA ativa, e a senha NÃO é redefinida', async () => {
   const supabase = makeSupabase({ usuarios: [{ id: 'auth-existente', email: EMAIL }] });
-  const auth = makeAuth({ [EMAIL]: 'senha-real-da-conta' });
+  const auth = makeAuth({ [EMAIL]: 'senha-real-da-conta' }, { [EMAIL]: 'auth-existente' });
 
   const r = await identity.resolverOuCriarIdentidade(supabase, {
     email: EMAIL, senha: 'senha-real-da-conta', nome: 'Contato', auth,
@@ -125,7 +128,7 @@ test('081B HIGH-01: usuário INTERNO da transportadora — convite não dá aces
   // senha dele, o portador do convite não pode se vincular à identidade.
   const INTERNO = 'operador@transportadora.test';
   const supabase = makeSupabase({ usuarios: [{ id: 'auth-operador-interno', email: INTERNO }] });
-  const auth = makeAuth({ [INTERNO]: 'senha-do-operador' });
+  const auth = makeAuth({ [INTERNO]: 'senha-do-operador' }, { [INTERNO]: 'auth-operador-interno' });
 
   await assert.rejects(
     identity.resolverOuCriarIdentidade(supabase, {
@@ -143,28 +146,148 @@ test('081B HIGH-01: usuário INTERNO da transportadora — convite não dá aces
   assert.equal(ok.senhaDefinidaAgora, false);
 });
 
-test('081B HIGH-01: corrida na criação — se a identidade nasceu no meio, reencontra em vez de estourar', async () => {
-  const usuarios = [];
-  const supabase = makeSupabase({
-    usuarios,
-    criarFalha: { code: 'email_exists', message: 'User already registered' },
-  });
-  // Simula: a busca inicial não achou, mas entre a busca e a criação alguém
-  // criou. A segunda busca (após o erro) encontra.
-  const originalList = supabase.auth.admin.listUsers;
-  let chamada = 0;
-  supabase.auth.admin.listUsers = () => {
-    chamada += 1;
-    if (chamada === 1) return Promise.resolve({ data: { users: [] }, error: null });
-    return Promise.resolve({ data: { users: [{ id: 'auth-corrida', email: EMAIL }] }, error: null });
-  };
-  void originalList;
+// ============================================================================
+// RESIDUAL-01 — o branch de CORRIDA também é um caminho que termina usando uma
+// conta preexistente, e por isso exige a mesma prova de senha.
+//
+// O furo que estes testes fecham: bastava a conta já existir no momento do
+// `createUser` (por corrida real ou simplesmente porque outra pessoa a criou
+// antes) para o fluxo devolver a identidade sem verificar nada.
+// ============================================================================
 
+// Monta o cenário de corrida: a busca inicial não acha; o createUser falha com
+// "já registrado"; a busca seguinte acha.
+function makeSupabaseCorrida({ idExistente = 'auth-corrida' } = {}) {
+  let chamada = 0;
+  return {
+    _criados: [],
+    auth: {
+      admin: {
+        listUsers: () => {
+          chamada += 1;
+          if (chamada === 1) return Promise.resolve({ data: { users: [] }, error: null });
+          return Promise.resolve({ data: { users: [{ id: idExistente, email: EMAIL }] }, error: null });
+        },
+        createUser: () => Promise.resolve({
+          data: null, error: { code: 'email_exists', message: 'User already registered' },
+        }),
+      },
+    },
+  };
+}
+
+test('081B RESIDUAL-01: corrida + senha CORRETA passa (e não redefine senha)', async () => {
+  const supabase = makeSupabaseCorrida();
+  const auth = makeAuth({ [EMAIL]: 'senha-da-conta' }, { [EMAIL]: 'auth-corrida' });
   const r = await identity.resolverOuCriarIdentidade(supabase, {
-    email: EMAIL, senha: 'senha-forte-123', nome: 'C',
+    email: EMAIL, senha: 'senha-da-conta', nome: 'C', auth,
   });
   assert.equal(r.id, 'auth-corrida');
   assert.equal(r.jaExistia, true);
+  assert.equal(r.senhaDefinidaAgora, false);
+  assert.equal(auth._tentativas.length, 1, 'a senha foi verificada também no caminho de corrida');
+});
+
+test('081B RESIDUAL-01: corrida + senha ERRADA é NEGADA (era o bypass)', async () => {
+  const supabase = makeSupabaseCorrida();
+  const auth = makeAuth({ [EMAIL]: 'senha-da-conta' });
+  await assert.rejects(
+    identity.resolverOuCriarIdentidade(supabase, {
+      email: EMAIL, senha: 'senha-errada-mas-longa', nome: 'Invasor', auth,
+    }),
+    (err) => err.status === 401 && err.code === 'existing_account_password_invalid',
+  );
+});
+
+test('081B RESIDUAL-01: corrida + senha AUSENTE é NEGADA', async () => {
+  // Sem senha a criação nem chega ao Auth (weak_password barra antes), mas o
+  // ponto é que em NENHUMA hipótese a corrida devolve identidade sem prova.
+  const supabase = makeSupabaseCorrida();
+  const auth = makeAuth({ [EMAIL]: 'senha-da-conta' });
+  await assert.rejects(
+    identity.resolverOuCriarIdentidade(supabase, { email: EMAIL, senha: '', nome: 'X', auth }),
+    (err) => err.status === 400 || err.status === 401,
+  );
+  assert.equal(auth._tentativas.length, 0);
+});
+
+test('081B RESIDUAL-01: id divergente entre autenticação e identidade encontrada FALHA FECHADA', async () => {
+  // A busca devolve 'auth-corrida', mas o signIn autentica outro id. Escolher
+  // um dos dois silenciosamente vincularia o portal a uma conta cuja senha
+  // talvez não tenha sido provada.
+  const supabase = makeSupabaseCorrida({ idExistente: 'auth-corrida' });
+  const auth = {
+    _tentativas: [],
+    auth: {
+      signInWithPassword: ({ email, password }) => {
+        auth._tentativas.push({ email, password });
+        return Promise.resolve({ data: { user: { id: 'OUTRO-ID', email } }, error: null });
+      },
+    },
+  };
+  await assert.rejects(
+    identity.resolverOuCriarIdentidade(supabase, {
+      email: EMAIL, senha: 'senha-da-conta', nome: 'C', auth,
+    }),
+    (err) => err.status === 409 && err.code === 'auth_identity_mismatch',
+  );
+});
+
+test('081B RESIDUAL-01: id divergente também falha no caminho normal (não só na corrida)', async () => {
+  const supabase = makeSupabase({ usuarios: [{ id: 'auth-existente', email: EMAIL }] });
+  const auth = {
+    _tentativas: [],
+    auth: {
+      signInWithPassword: ({ email }) => Promise.resolve({ data: { user: { id: 'DIFERENTE', email } }, error: null }),
+    },
+  };
+  await assert.rejects(
+    identity.resolverOuCriarIdentidade(supabase, { email: EMAIL, senha: 'x', nome: 'C', auth }),
+    (err) => err.code === 'auth_identity_mismatch',
+  );
+});
+
+// ============================================================================
+// A consequência que importa: sem prova de senha, nada de domínio acontece.
+// ============================================================================
+
+test('081B RESIDUAL-01: prova falhando, a RPC de ativação NUNCA é chamada', async () => {
+  const onboarding = require('../services/shipperPortal/shipperOnboardingService');
+
+  const rpcCalls = [];
+  const usuariosAuth = [{ id: 'auth-existente', email: EMAIL }];
+  const convite = {
+    email: EMAIL, nome_convidado: 'Contato', status: 'PENDING',
+    expires_at: new Date(Date.now() + 86400000).toISOString(),
+  };
+
+  const supabase = {
+    from: () => ({
+      select: () => ({
+        eq: () => ({ maybeSingle: () => Promise.resolve({ data: convite, error: null }) }),
+      }),
+    }),
+    rpc: (name, params) => {
+      rpcCalls.push({ name, params });
+      return Promise.resolve({ data: null, error: null });
+    },
+    auth: {
+      admin: {
+        listUsers: () => Promise.resolve({ data: { users: usuariosAuth }, error: null }),
+        createUser: () => Promise.resolve({ data: null, error: { code: 'email_exists' } }),
+      },
+    },
+  };
+
+  // Senha errada → a ativação tem que morrer ANTES de tocar o domínio.
+  await assert.rejects(
+    onboarding.ativarConvite(supabase, { token: 'token-qualquer', senha: 'errada', nome: 'X' }),
+    (err) => err.status === 401,
+  );
+
+  const ativacoes = rpcCalls.filter((c) => c.name === 'shipper_invitation_activate');
+  assert.equal(ativacoes.length, 0,
+    'shipper_invitation_activate não pode ser chamada sem prova de controle da identidade');
 });
 
 test('081B HIGH-01: o hash do convite nunca revela o token', () => {

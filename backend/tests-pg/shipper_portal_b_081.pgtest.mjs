@@ -872,6 +872,126 @@ function registrar(pg) {
     );
   });
 
+  // ---- RESIDUAL-02: metadados de decisão não existem sem decisão ----------
+  //
+  // O gatilho protegia a decisão já finalizada, mas deixava uma janela: com
+  // `decision IS NULL`, os campos de metadado podiam ser escritos e reescritos
+  // livremente. Daria para gravar "decidido por Fulano em tal data" numa
+  // submissão que ninguém decidiu.
+
+  test('081 METADADO: decision_reason sem decisão é REJEITADO', async () => {
+    await fullSetup();
+    const req = await criarSolicitacao();
+    await assert.rejects(
+      pool.query(
+        `UPDATE public.shipper_transport_request_submissions
+         SET decision_reason='motivo fantasma' WHERE request_id=$1 AND version=1`, [req.id]),
+      (e) => /submission_decision_metadata_without_decision/.test(e.message),
+    );
+  });
+
+  test('081 METADADO: decided_at sem decisão é REJEITADO', async () => {
+    await fullSetup();
+    const req = await criarSolicitacao();
+    await assert.rejects(
+      pool.query(
+        `UPDATE public.shipper_transport_request_submissions
+         SET decided_at=now() WHERE request_id=$1 AND version=1`, [req.id]),
+      (e) => /submission_decision_metadata_without_decision|shipper_transport_request_submissions_check/.test(e.message),
+    );
+  });
+
+  test('081 METADADO: decided_by sem decisão é REJEITADO', async () => {
+    await fullSetup();
+    const req = await criarSolicitacao();
+    await assert.rejects(
+      pool.query(
+        `UPDATE public.shipper_transport_request_submissions
+         SET decided_by=$2 WHERE request_id=$1 AND version=1`, [req.id, ADM_A]),
+      (e) => /submission_decision_metadata_without_decision/.test(e.message),
+    );
+  });
+
+  test('081 METADADO: REJECTED sem motivo é REJEITADO', async () => {
+    await fullSetup();
+    const req = await criarSolicitacao();
+    await assert.rejects(
+      pool.query(
+        `UPDATE public.shipper_transport_request_submissions
+         SET decision='REJECTED', decided_at=now(), decided_by=$2
+         WHERE request_id=$1 AND version=1`, [req.id, ADM_A]),
+      (e) => /submission_decision_requires_reason/.test(e.message),
+    );
+  });
+
+  test('081 METADADO: CHANGES_REQUESTED com motivo em branco é REJEITADO', async () => {
+    await fullSetup();
+    const req = await criarSolicitacao();
+    await assert.rejects(
+      pool.query(
+        `UPDATE public.shipper_transport_request_submissions
+         SET decision='CHANGES_REQUESTED', decision_reason='   ', decided_at=now(), decided_by=$2
+         WHERE request_id=$1 AND version=1`, [req.id, ADM_A]),
+      (e) => /submission_decision_requires_reason/.test(e.message),
+    );
+  });
+
+  test('081 METADADO: decisão sem AUTOR é REJEITADA', async () => {
+    await fullSetup();
+    const req = await criarSolicitacao();
+    await assert.rejects(
+      pool.query(
+        `UPDATE public.shipper_transport_request_submissions
+         SET decision='ACCEPTED', decided_at=now() WHERE request_id=$1 AND version=1`, [req.id]),
+      (e) => /submission_decision_requires_actor/.test(e.message),
+    );
+  });
+
+  test('081 METADADO: ACCEPTED com instante e autor passa — e motivo continua opcional', async () => {
+    await fullSetup();
+    const req = await criarSolicitacao();
+    await pool.query(
+      `UPDATE public.shipper_transport_request_submissions
+       SET decision='ACCEPTED', decided_at=now(), decided_by=$2
+       WHERE request_id=$1 AND version=1`, [req.id, ADM_A]);
+    const { rows } = await pool.query(
+      `SELECT decision, decision_reason FROM public.shipper_transport_request_submissions
+       WHERE request_id=$1 AND version=1`, [req.id]);
+    assert.equal(rows[0].decision, 'ACCEPTED');
+    assert.equal(rows[0].decision_reason, null, 'aceite não inventa motivo');
+  });
+
+  test('081 METADADO: REJECTED completo passa, e depois fica congelado', async () => {
+    await fullSetup();
+    const req = await criarSolicitacao();
+    await pool.query(
+      `UPDATE public.shipper_transport_request_submissions
+       SET decision='REJECTED', decision_reason='Sem veículo', decided_at=now(), decided_by=$2
+       WHERE request_id=$1 AND version=1`, [req.id, ADM_A]);
+
+    // Congelado depois: nem autor, nem motivo, nem instante.
+    for (const sql of [
+      `UPDATE public.shipper_transport_request_submissions SET decided_by=NULL WHERE request_id=$1`,
+      `UPDATE public.shipper_transport_request_submissions SET decision_reason='outro' WHERE request_id=$1`,
+      `UPDATE public.shipper_transport_request_submissions SET decided_at=now() + interval '1 day' WHERE request_id=$1`,
+    ]) {
+      await assert.rejects(pool.query(sql, [req.id]), (e) => /submission_decision_already_final/.test(e.message));
+    }
+  });
+
+  test('081 METADADO: RPC de decisão sem autor falha com erro próprio', async () => {
+    await fullSetup();
+    const req = await criarSolicitacao();
+    await assert.rejects(
+      pool.query(`SELECT * FROM public.shipper_request_decide($1,$2,NULL,'REJECTED','motivo')`, [EMP_A, req.id]),
+      (e) => /decision_actor_required/.test(e.message),
+    );
+    await assert.rejects(
+      pool.query(`SELECT * FROM public.shipper_request_accept($1,$2,NULL,NULL)`, [EMP_A, req.id]),
+      (e) => /decision_actor_required/.test(e.message),
+    );
+  });
+
   test('081 SNAPSHOT: aceite IGNORA o snapshot fornecido e usa o que está gravado', async () => {
     // O teste do §34: o envio real foi 100; a chamada tenta declarar 999.
     await fullSetup();

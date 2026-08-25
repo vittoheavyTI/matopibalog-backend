@@ -355,12 +355,33 @@ BEGIN
       RAISE EXCEPTION 'submission_decision_already_final' USING ERRCODE = '42501';
     END IF;
   ELSIF NEW.decision IS NOT NULL THEN
-    -- Primeira decisao: precisa ser um veredito valido e datado.
+    -- Primeira decisao: precisa ser um veredito valido, datado e com autor.
     IF NEW.decision NOT IN ('ACCEPTED','REJECTED','CHANGES_REQUESTED') THEN
       RAISE EXCEPTION 'submission_decision_invalid' USING ERRCODE = '22023';
     END IF;
     IF NEW.decided_at IS NULL THEN
       RAISE EXCEPTION 'submission_decision_requires_timestamp' USING ERRCODE = '22023';
+    END IF;
+    IF NEW.decided_by IS NULL THEN
+      RAISE EXCEPTION 'submission_decision_requires_actor' USING ERRCODE = '22023';
+    END IF;
+    -- Devolver ou recusar exige dizer POR QUE: e a mensagem que o embarcador
+    -- le. Aceitar nao exige motivo -- inventar um seria fabricar conteudo.
+    IF NEW.decision IN ('REJECTED','CHANGES_REQUESTED')
+       AND (NEW.decision_reason IS NULL OR btrim(NEW.decision_reason) = '') THEN
+      RAISE EXCEPTION 'submission_decision_requires_reason' USING ERRCODE = '22023';
+    END IF;
+  ELSE
+    -- OLD.decision IS NULL AND NEW.decision IS NULL.
+    --
+    -- Sem esta guarda, os METADADOS da decisao podiam ser preenchidos enquanto
+    -- o veredito continuava nulo: daria para gravar "decidido por Fulano em tal
+    -- data" numa submissao que ninguem decidiu, ou apagar/alterar esses campos
+    -- depois. Os quatro campos nascem juntos, numa unica transicao logica.
+    IF NEW.decision_reason IS DISTINCT FROM OLD.decision_reason
+       OR NEW.decided_at IS DISTINCT FROM OLD.decided_at
+       OR NEW.decided_by IS DISTINCT FROM OLD.decided_by THEN
+      RAISE EXCEPTION 'submission_decision_metadata_without_decision' USING ERRCODE = '42501';
     END IF;
   END IF;
 
@@ -728,6 +749,13 @@ DECLARE
   v_snapshot jsonb;
   v_carimbadas integer;
 BEGIN
+  -- Toda decisao precisa de autor identificado: e ela que fica carimbada na
+  -- evidencia auditada. Validar aqui da um erro claro em vez de estourar no
+  -- gatilho de imutabilidade.
+  IF p_actor_id IS NULL THEN
+    RAISE EXCEPTION 'decision_actor_required' USING ERRCODE = '22023';
+  END IF;
+
   SELECT * INTO v_request FROM public.shipper_transport_requests
     WHERE id = p_request_id AND empresa_id = p_empresa_id
     FOR UPDATE;
@@ -820,6 +848,9 @@ BEGIN
   END IF;
   IF p_reason IS NULL OR btrim(p_reason) = '' THEN
     RAISE EXCEPTION 'decision_reason_required' USING ERRCODE = '22023';
+  END IF;
+  IF p_actor_id IS NULL THEN
+    RAISE EXCEPTION 'decision_actor_required' USING ERRCODE = '22023';
   END IF;
 
   SELECT * INTO v_request FROM public.shipper_transport_requests
