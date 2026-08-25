@@ -14,7 +14,9 @@
 // Nenhum Frete histórico é associado por semelhança de texto de origem/destino.
 // Se não há solicitação de origem, não aparece — mesmo que "pareça" ser dele.
 
-const { throwDb, loadPortalContext, scopeRequestsQuery } = require('./shipperBoundaryService');
+const {
+  ShipperPortalError, throwDb, loadPortalContext, scopeRequestsQuery,
+} = require('./shipperBoundaryService');
 const { freightStatusToBucket, EXECUTION_BUCKET } = require('../campaign/freightExecutionStatus');
 
 // Vocabulário externo. Congelado e testado — adicionar um estado aqui é uma
@@ -296,9 +298,7 @@ async function obterMinhaOperacao(supabase, { portalUserId, requestId }) {
   if (!request) {
     // 404 deliberado para objeto fora da fronteira (§101): não confirmamos que
     // a solicitação existe para quem não pode vê-la.
-    const err = new Error('Operação não encontrada.');
-    err.status = 404; err.code = 'request_not_found';
-    throw err;
+    throw new ShipperPortalError('Operação não encontrada.', { status: 404, code: 'request_not_found' });
   }
 
   const { campaignsById, freightsByCampaign } = await carregarOperacoes(supabase, [request]);
