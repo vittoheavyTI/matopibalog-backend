@@ -606,9 +606,12 @@ function registrar(pg) {
       [PLAN, empresaId, CAMP, ADM_A]);
     await pool.query(
       `UPDATE public.operation_campaigns SET approved_plan_version_id=$1 WHERE id=$2`, [PLAN, CAMP]);
+    // Sem `.catch` silencioso (§66): se a fixture não puder ser montada, o
+    // teste tem que falhar — não passar sem provar nada.
     await pool.query(
-      `INSERT INTO public.campaign_plan_scenarios (id, empresa_id, campaign_id, plan_version_id, name, is_selected, created_by)
-       VALUES ($1,$2,$3,$4,'Cenario',true,$5)`, [SCEN, empresaId, CAMP, PLAN, ADM_A]).catch(() => {});
+      `INSERT INTO public.campaign_plan_scenarios
+         (id, empresa_id, campaign_id, plan_version_id, scenario_key, label)
+       VALUES ($1,$2,$3,$4,'base','Cenário base')`, [SCEN, empresaId, CAMP, PLAN]);
     await pool.query(
       `INSERT INTO public.campaign_planned_trips
          (id, empresa_id, campaign_id, plan_version_id, scenario_id, origin_location_id, destination_location_id,
