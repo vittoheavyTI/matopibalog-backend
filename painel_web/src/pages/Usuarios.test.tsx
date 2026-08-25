@@ -81,4 +81,24 @@ describe('Usuarios (página real, API mockada)', () => {
     await waitFor(() => expect(screen.getByText('Fulano de Teste')).toBeInTheDocument());
     expect(screen.getByRole('button', { name: /Todos/ }).textContent).toContain('(1)');
   });
+
+  // A partir do TEAM_USER_PROVISIONING_V1, `tipo` é classe de conta e vale
+  // 'admin' para TODO usuário interno (D-069). Se a lista continuasse derivando o
+  // rótulo de `tipo`, um Operador apareceria como "Administrador" — exatamente a
+  // confusão que a frente veio eliminar. A autoridade exibida é o perfil.
+  test('10. a lista mostra o PERFIL DE ACESSO, não a classe da conta', async () => {
+    const operador = { ...usuario, id: 'u2', nome: 'Operadora Teste', tipo: 'admin', perfil_acesso_nome: 'Operador' };
+    setGet(() => Promise.resolve({ data: [operador] }));
+    renderPage();
+    await waitFor(() => expect(screen.getByText('Operadora Teste')).toBeInTheDocument());
+    expect(screen.getByText('Operador')).toBeInTheDocument();
+    expect(screen.queryByText('Administrador')).toBeNull();
+  });
+
+  test('11. sem perfil atribuído, cai na classe da conta em vez de mostrar vazio', async () => {
+    setGet(() => Promise.resolve({ data: [{ ...usuario, perfil_acesso_nome: null }] }));
+    renderPage();
+    await waitFor(() => expect(screen.getByText('Fulano de Teste')).toBeInTheDocument());
+    expect(screen.getByText('Administrador')).toBeInTheDocument();
+  });
 });

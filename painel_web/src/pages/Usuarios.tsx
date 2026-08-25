@@ -22,6 +22,10 @@ export const Usuarios: React.FC = () => {
       uid: u.id, nome: u.nome, email: u.email, celular: u.telefone || '', cep: u.cep || '',
       endereco: u.endereco || '', bairro: u.bairro || '', cidade: u.cidade || '', fotoUrl: u.foto_url || '',
       nivel: u.tipo || 'admin', empresaId: u.empresa_id || null,
+      // Perfil de acesso é a AUTORIDADE; 'nivel'/'tipo' é só a classe da conta e
+      // hoje vale 'admin' para todo usuário interno (D-069). Sem este campo a
+      // lista chamaria de 'Administrador' até quem é Operador.
+      perfilAcessoNome: u.perfil_acesso_nome || null,
       empresaTipo: Array.isArray(u.empresas) ? u.empresas[0]?.tipo || null : u.empresas?.tipo || null,
       is_super_admin: !!u.is_super_admin,
       permissoes: u.permissoes || { dashboard: true, motoristas: true, relatorios: true, usuarios: false, configuracoes: false },
@@ -412,8 +416,12 @@ export const Usuarios: React.FC = () => {
   const getTipoBadgeClasses = (user: any) => {
     if (user.is_super_admin) return 'bg-yellow-100 text-yellow-800';
     if (user.nivel === 'motorista' && user.empresaTipo === 'autonomo') return 'bg-emerald-100 text-emerald-700';
-    if (user.nivel === 'admin') return 'bg-purple-100 text-purple-700';
     if (user.nivel === 'motorista') return 'bg-blue-100 text-blue-700';
+    // Roxo é a cor de administrador. Como todo usuário interno tem
+    // tipo='admin' (D-069), a cor precisa vir do PERFIL, não da classe da conta —
+    // senão um Operador apareceria pintado de administrador.
+    if (user.perfilAcessoNome) return /administrador/i.test(user.perfilAcessoNome) ? 'bg-purple-100 text-purple-700' : 'bg-slate-100 text-slate-700';
+    if (user.nivel === 'admin') return 'bg-purple-100 text-purple-700';
     return 'bg-gray-100 text-gray-700';
   };
 
@@ -524,7 +532,7 @@ export const Usuarios: React.FC = () => {
                 <tr className="bg-gray-50 text-gray-600 text-xs font-bold uppercase tracking-wider">
                   <th className="p-3 border-b">Usuário</th>
                   <th className="p-3 border-b">Contato</th>
-                  <th className="p-3 border-b">Nível</th>
+                  <th className="p-3 border-b">Perfil de acesso</th>
                   <th className="p-3 border-b">Status</th>
                   <th className="p-3 border-b">Permissões</th>
                   <th className="p-3 border-b text-center">Ações</th>
@@ -559,7 +567,7 @@ export const Usuarios: React.FC = () => {
                     </td>
                     <td className="p-3 align-top">
                       <span className={`px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest ${getTipoBadgeClasses(user)}`}>
-                        {getTipoLabel(user)}
+                        {user.perfilAcessoNome || getTipoLabel(user)}
                       </span>
                     </td>
                     <td className="p-3 align-top">
