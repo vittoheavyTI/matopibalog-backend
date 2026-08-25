@@ -7,8 +7,8 @@
 - `MACROFRONT=E3_5_SHIPPER_PORTAL_V1_PORTAL_B` · fatia `PORTAL-B`
 - `MIGRATION_REQUIRED=true` · `MIGRATION_FILE=081_shipper_portal_b_revision_documents.sql`
 - `PORTAL_B_PRODUCTION_MIGRATION_AUTHORIZED=false` — **não aplicada em lugar nenhum**
-- `MIGRATION_081_FROZEN=true` · `SHA256=25f78a50584cf82f635068ac742abf9db91a302c8f27f736e0a7f0ca5e98f2e1` (48585 bytes)
-- SHA anterior `1ee2f4aa…` = **SUPERSEDED_NOT_AUTHORIZED** (owner review pré-DDL)
+- `MIGRATION_081_FROZEN=true` · `SHA256=285694fbfb4778d38eacdd5d3ac5d3da75ea80fd462ff1a2737d69de0711a53e` (50196 bytes)
+- SHAs anteriores `1ee2f4aa…` e `25f78a50…` = **SUPERSEDED_NOT_AUTHORIZED**
 - `BUSINESS_DML=0`
 
 ## 1. O que o PORTAL-A deixou pronto e o que faltava
@@ -252,6 +252,30 @@ interna a quem está de fora. Por isso a revisão é company-level (tenant +
 entitlement + `requests.review`). No **aceite**, que cria operação, o escopo
 operacional passa a ser exigido, junto de `campaign.create`.
 
+## 10d. Delta final pré-DDL — 2 residuais
+
+**RESIDUAL-01 — o branch de corrida contornava a prova de senha.** O caminho
+normal (identidade achada na busca inicial) exigia `signInWithPassword`, mas o
+caminho "`createUser` falhou com *já registrado* → reencontra" devolvia a
+identidade direto. Bastava a conta já existir naquele instante para vincular o
+portal a uma identidade alheia sem provar nada — o mesmo furo que o HIGH-01
+fechou, por outra porta. Ter a prova em **duas cópias** foi justamente o que
+permitiu que uma delas ficasse para trás; agora é uma função só, usada nos dois
+caminhos.
+
+Somado a isso, o id autenticado precisa ser o mesmo que será vinculado: se
+divergir, falha fechada — escolher silenciosamente um dos dois vincularia o
+portal a uma conta cuja senha talvez não tenha sido provada.
+
+**RESIDUAL-02 — metadados de decisão sem decisão.** O gatilho protegia a decisão
+já finalizada, mas deixava uma janela: com `decision IS NULL`, os campos
+`decision_reason`, `decided_at` e `decided_by` podiam ser escritos e reescritos —
+daria para gravar "decidido por Fulano em tal data" numa submissão que ninguém
+decidiu. Agora os quatro campos nascem juntos, numa única transição: a primeira
+decisão exige instante **e** autor; devolver ou recusar exige motivo (aceitar
+não — inventar motivo de aceite seria fabricar conteúdo). Depois de decidida,
+tudo congela.
+
 ## 11. Achado da revisão de janelas de falha (§152)
 
 A revisão encontrou um vazamento real que eu mesmo havia introduzido, e vale
@@ -280,8 +304,8 @@ transportadora **não** reusa; nome igual dentro da própria **reusa**.
 
 | Suíte | Contagem | Cobre |
 |---|---|---|
-| PG real 081 | 43 | histórico, 4 corridas de reenvio, ativação concorrente, **proveniência completa**, **imutabilidade do histórico**, **autoridade do snapshot**, **carimbo da versão**, permissão do operador |
-| Backend 081B | 38 + 9 (ativação) | mapa de status, whitelist da linha do tempo, isolamento mesmo-transportadora, IDOR de documento/comprovante, varredura de chaves proibidas, separação de credenciais |
+| PG real 081 | 52 | histórico, 4 corridas de reenvio, ativação concorrente, **proveniência completa**, **imutabilidade do histórico**, **autoridade do snapshot**, **carimbo da versão**, **metadados de decisão**, permissão do operador |
+| Backend 081B | 38 + 14 (ativação) | mapa de status, whitelist da linha do tempo, isolamento mesmo-transportadora, IDOR de documento/comprovante, varredura de chaves proibidas, separação de credenciais |
 | Web portal | — | estados de carregamento/erro/vazio, correção pré-preenchida, idempotência do envio, ausência de jargão interno |
 | Web caixa de entrada | — | aceite sem redigitação, motivo obrigatório, conversão pendente visível |
 
