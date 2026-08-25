@@ -6,7 +6,8 @@
 
 - `MACROFRONT=E3_5_SHIPPER_PORTAL_V1_PORTAL_B` · fatia `PORTAL-B`
 - `MIGRATION_REQUIRED=true` · `MIGRATION_FILE=081_shipper_portal_b_revision_documents.sql`
-- `PORTAL_B_PRODUCTION_MIGRATION_AUTHORIZED=false` — **não aplicada em lugar nenhum**
+- `OWNER_MIGRATION_GATE_SHIPPER_PORTAL_B_081=AUTHORIZED` — migration **aplicada em produção uma única vez** em 2026-08-25
+- `PORTAL_B_STATUS=TECHNICALLY_CLOSED_IN_PRODUCTION` · `E3_5_STATUS=TECHNICALLY_CLOSED` · PR #477 `MERGE_SHA=75a39d0a6758e50cc198a65576a909bbce59446e`
 - `MIGRATION_081_FROZEN=true` · `SHA256=285694fbfb4778d38eacdd5d3ac5d3da75ea80fd462ff1a2737d69de0711a53e` (50196 bytes)
 - SHAs anteriores `1ee2f4aa…` e `25f78a50…` = **SUPERSEDED_NOT_AUTHORIZED**
 - `BUSINESS_DML=0`
@@ -318,3 +319,111 @@ embarcador↔transportadora.
 
 Envelope digital: **deferido** — não há artefato de fechamento estável hoje, e
 construí-lo dentro do PORTAL-B seria inventar autoridade nova.
+
+## 14. Fechamento em produção (2026-08-25)
+
+`PORTAL_B_STATUS=TECHNICALLY_CLOSED_IN_PRODUCTION` · `E3_5_STATUS=TECHNICALLY_CLOSED`
+
+### 14.1 Migration 081
+
+Aplicada **exatamente uma vez**, na primeira e única tentativa, sob
+`OWNER_MIGRATION_GATE_SHIPPER_PORTAL_B_081=AUTHORIZED` e
+`MIGRATION_APPLY_MAX_ATTEMPTS=1`.
+
+| | |
+|---|---|
+| `TRACKING_VERSION` | `20260825144011` |
+| `TRACKING_NAME` | `081_shipper_portal_b_revision_documents` |
+| `TRACKING_COUNT` | 1 |
+| `APPLY_ATTEMPTS` | 1 |
+| `SOURCE_SHA256` / bytes | `285694fbfb4778d38eacdd5d3ac5d3da75ea80fd462ff1a2737d69de0711a53e` · 50196 |
+
+A fonte foi lida do commit certificado (`git cat-file`, nunca de buffer local
+nem de cópia do prompt). A fidelidade da transferência foi **provada no próprio
+servidor de produção antes do apply**, com um `SELECT digest(...)` read-only que
+devolveu o SHA certificado — e o SQL registrado no tracking tem o mesmo hash.
+Não é "conferido de olho": o que está no banco é byte a byte a fonte congelada.
+
+### 14.2 Postcheck de schema
+
+3 tabelas com **RLS habilitada** e **zero grant** a `anon`/`authenticated`
+(`service_role` com autoridade). 2 colunas aditivas em
+`shipper_transport_requests` (`integer NOT NULL DEFAULT 0`, `CHECK >= 0`).
+As 7 funções certificadas presentes, todas `SECURITY DEFINER` com
+`search_path=public` fixo e `EXECUTE` restrito a `postgres`/`service_role`.
+Gatilho `shipper_submission_immutable` instalado `BEFORE UPDATE OR DELETE …
+FOR EACH ROW`.
+
+Proveniência conferida no catálogo — as 5 FKs compostas existem e fecham a
+cadeia: `relationship → org/empresa`, `request → campanha/empresa/org`,
+`campanha → frete/empresa`, `documento → frete/empresa`,
+`evidência → frete/empresa`. Os 4 índices de identidade nas tabelas-fonte
+existem sem drift de definição.
+
+### 14.3 DML
+
+`PRODUCTION_BUSINESS_DML_081=0`. Backfill histórico: **0 linhas** (não havia
+solicitação em produção). DML técnica: **50 linhas**, exatamente o previsto pelo
+cálculo JIT — `shipper_portal.documents.share` em 25 templates `administrador` e
+25 `gerente_frota`; **`operador` continua com 0**, como congelado no owner review
+do PORTAL-A (§42). `permission_template_permissions` 3675 → 3725, aditivo e
+idempotente: nenhuma permissão preexistente foi apagada ou reescrita.
+
+Baselines de negócio inalteradas (empresas 34, usuários 38, fretes 63, campanhas
+0, `frete_documentos` 16, `frete_epod_evidencias` 10, `campaign_trip_freights` 0).
+
+### 14.4 Merge e deploy
+
+PR #477 → `MERGE_SHA=75a39d0a6758e50cc198a65576a909bbce59446e`, com CI 9/9 verde
+no head exato `e2e36c0e` (PG 081 52/52 · PG 080 37/37 · backend 1940/1940 · web
+186/186 · SEC-1). Deploy do backend (Railway) e do frontend (GitHub Pages) do
+SHA exato do merge: **SUCCESS** nos dois.
+
+Nota sobre a CI: ao marcar o PR como *ready*, o SEC-1 falhou uma vez na corrida
+de refresh de duas abas (`sec1.spec.ts:587`, esperado `[200, 409]`, recebido
+`[200, 200]`) — a instabilidade histórica conhecida desse teste. Antes de
+re-rodar, a causalidade foi descartada por inspeção do diff: o PR **não toca**
+os testes SEC-1, `middlewares/auth.js`, `routes/auth.js`, `AuthContext.tsx` nem
+`api.ts`; o portal traz provider e cliente HTTP próprios. O mesmo head já havia
+passado o SEC-1 antes. Re-run no head inalterado: verde.
+
+### 14.5 Certificação em produção — read-only
+
+A superfície HTTP do portal **passou a existir**: onde antes havia `404`, agora
+há `401` sem credencial.
+
+| Smoke | Resultado |
+|---|---|
+| `/health` | 200 |
+| `/portal/embarcador/{contexto,inicio,solicitacoes,operacoes}` sem token | 401 |
+| `/shipper-inbox/solicitacoes` sem auth interna | 401 |
+| `GET /portal/embarcador/convite` com token inválido | 404 (sem vazamento) |
+| `POST /portal/embarcador/login` com corpo vazio | 400 (valida antes de tocar o Auth) |
+| Shell web (`matopibalog.com.br`) | 200 |
+
+Nenhuma credencial real foi usada e nada foi escrito:
+`PRODUCTION_AUTH_USERS_CREATED=0` · `PRODUCTION_INVITATIONS_CREATED=0` ·
+`PRODUCTION_EMAILS_SENT=0` · `PRODUCTION_BUSINESS_WRITES=0`. Todas as tabelas de
+negócio do portal seguem em 0 linhas; `auth.users` permanece em 38, o mesmo
+número de usuários internos. Logs do deploy: só INFO de boot, `NEW_PRODUCTION_ERRORS=0`.
+
+Sobre o shell: deep-links como `/portal/embarcador/entrar` retornam **HTTP 404**
+servindo o `404.html` do próprio app, que restaura a rota via `spa-redirect.js`.
+Isso é o padrão de SPA do GitHub Pages e **não é regressão do PORTAL-B** —
+`/login`, `/planos`, `/cadastro` e `/dashboard` se comportam exatamente igual e
+sempre se comportaram. No navegador, o link do convite abre normalmente.
+
+### 14.6 O que isto **não** significa
+
+- **Não** há embarcador usando o portal. Nenhuma organização, relacionamento,
+  convite, usuário externo ou solicitação foi criada.
+- `INVITE_DELIVERY=MANUAL_LINK`. **Não** existe envio de convite por e-mail;
+  escrever "convite enviado por e-mail" seria falso.
+- `OWNER_VISUAL_VALIDATION=PENDING`. Falta o owner validar visualmente login
+  externo, criação de pedido, revisão, acompanhamento, documentos/comprovantes e
+  caixa de entrada da transportadora. Por isso `RBV9-INV-081` vai a **`IMPL_NV`**,
+  não a `IMPL_VAL`.
+- Fechar E3.5 **não** cria Partner Network, rede de cotação nem Marketplace.
+  Cotação/proposta segue deferida (`PORTAL_QUOTE_PROPOSAL_V1B`).
+
+`BLOCKERS_OPEN=0` · `HIGHS_OPEN=0` · `RESIDUALS_OPEN=0`

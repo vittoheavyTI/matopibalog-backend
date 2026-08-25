@@ -9,6 +9,8 @@
 - `MIGRATION_080_APPLIED_IN_PRODUCTION=true` · aplicação **única** (`APPLY_ATTEMPTS=1`), tracking `20260825005339`
 - `PORTAL_A_TECHNICAL_STATUS=TECHNICALLY_CLOSED` · `MERGE_SHA=91a52353cf97a2da48d49832fcf1bb25b41e3ba1`
 - `PRODUCTION_BUSINESS_WRITES=0` · `PRODUCTION_PORTAL_TEST_WRITES=0`
+- `PORTAL_B_TECHNICAL_STATUS=TECHNICALLY_CLOSED` · `MERGE_SHA=75a39d0a6758e50cc198a65576a909bbce59446e` (migration 081 aplicada uma única vez, tracking `20260825144011`) — ver [SHIPPER_PORTAL_V1_PORTAL_B](./SHIPPER_PORTAL_V1_PORTAL_B.md)
+- `E3_5_STATUS=TECHNICALLY_CLOSED` · `OWNER_VISUAL_VALIDATION=PENDING` · `INVITE_DELIVERY=MANUAL_LINK`
 
 ## 0. Fechamento (2026-08-25)
 
@@ -269,8 +271,9 @@ PR seguro):
 
 - **PORTAL-A (esta fatia)**: Slice A (identidade/fronteira externa) + Slice B
   (solicitação + handoff). É onde vive todo o risco de segurança.
-- **PORTAL-B (próxima)**: Slice C (tracking, documentos, comprovantes) + Slice D
-  (UX web do portal).
+- **PORTAL-B (concluída em 2026-08-25)**: Slice C (tracking, documentos,
+  comprovantes) + Slice D (UX web do portal). Fechada em produção com a
+  migration 081; é o que fez a superfície HTTP do portal passar a existir.
 
 Motivo da divisão: construir 4 slices de UX sobre um modelo de fronteira ainda
 não revisado seria risco desnecessário — e a frente termina em gate de owner de
