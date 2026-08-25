@@ -137,7 +137,10 @@ async function previewConvite(supabase, { token }) {
 // transportadora, ou um contato de outro embarcador) — o rollback destruiria uma
 // conta legítima. Uma identidade de auth sem vínculo de portal não autoriza
 // nada, e a próxima tentativa com o mesmo convite a reencontra e conclui.
-async function ativarConvite(supabase, { token, senha, nome }) {
+// `auth` é injetável apenas para teste: em produção fica null e o serviço usa o
+// client real. Sem isso, testar a fronteira exigiria rede — e um teste que
+// depende de rede não prova invariante de segurança, só prova conectividade.
+async function ativarConvite(supabase, { token, senha, nome, auth = null }) {
   if (!token) {
     throw new ShipperPortalError('Convite inválido.', { status: 400, code: 'invitation_token_required' });
   }
@@ -169,6 +172,7 @@ async function ativarConvite(supabase, { token, senha, nome }) {
     email: convite.email,
     senha,
     nome: nome || convite.nome_convidado,
+    auth,
   });
 
   // Fase 2 — domínio, atômico.

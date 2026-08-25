@@ -279,9 +279,12 @@ test('081B RESIDUAL-01: prova falhando, a RPC de ativação NUNCA é chamada', a
     },
   };
 
+  // Client de auth falso: nenhuma senha é válida, então a prova sempre falha.
+  const auth = makeAuth({});
+
   // Senha errada → a ativação tem que morrer ANTES de tocar o domínio.
   await assert.rejects(
-    onboarding.ativarConvite(supabase, { token: 'token-qualquer', senha: 'errada', nome: 'X' }),
+    onboarding.ativarConvite(supabase, { token: 'token-qualquer', senha: 'errada', nome: 'X', auth }),
     (err) => err.status === 401,
   );
 

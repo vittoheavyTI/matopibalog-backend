@@ -849,16 +849,19 @@ function registrar(pg) {
     );
   });
 
-  test('081 IMUTABILIDADE: a PRIMEIRA decisão é permitida e precisa ser datada', async () => {
+  test('081 IMUTABILIDADE: a PRIMEIRA decisão é permitida quando completa', async () => {
     await fullSetup();
     const req = await criarSolicitacao();
-    // NULL -> CHANGES_REQUESTED com instante: permitido.
+    // NULL -> CHANGES_REQUESTED com instante, autor e motivo: permitido.
+    // Os quatro campos nascem juntos (RESIDUAL-02) — decisão parcial não passa.
     await pool.query(
       `UPDATE public.shipper_transport_request_submissions
-       SET decision='CHANGES_REQUESTED', decided_at=now() WHERE request_id=$1 AND version=1`, [req.id]);
+       SET decision='CHANGES_REQUESTED', decision_reason='Rever janela', decided_at=now(), decided_by=$2
+       WHERE request_id=$1 AND version=1`, [req.id, ADM_A]);
     const { rows } = await pool.query(
-      `SELECT decision FROM public.shipper_transport_request_submissions WHERE request_id=$1`, [req.id]);
+      `SELECT decision, decision_reason FROM public.shipper_transport_request_submissions WHERE request_id=$1`, [req.id]);
     assert.equal(rows[0].decision, 'CHANGES_REQUESTED');
+    assert.equal(rows[0].decision_reason, 'Rever janela');
   });
 
   test('081 IMUTABILIDADE: decisão sem instante é recusada', async () => {
