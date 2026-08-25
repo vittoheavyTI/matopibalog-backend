@@ -5,8 +5,40 @@
 
 - `MACROFRONT=E3_5_SHIPPER_PORTAL_V1` · fatia `PORTAL-A`
 - `MIGRATION_REQUIRED=true` · `MIGRATION_FILE=080_shipper_portal_foundation.sql`
-- `SHIPPER_PORTAL_PRODUCTION_MIGRATION_AUTHORIZED=false` — **não aplicada em lugar nenhum**
-- `PRODUCTION_BUSINESS_WRITES=0`
+- `SHIPPER_PORTAL_PRODUCTION_MIGRATION_AUTHORIZED=true` — gate do owner **aberto e consumido**
+- `MIGRATION_080_APPLIED_IN_PRODUCTION=true` · aplicação **única** (`APPLY_ATTEMPTS=1`), tracking `20260825005339`
+- `PORTAL_A_TECHNICAL_STATUS=TECHNICALLY_CLOSED` · `MERGE_SHA=91a52353cf97a2da48d49832fcf1bb25b41e3ba1`
+- `PRODUCTION_BUSINESS_WRITES=0` · `PRODUCTION_PORTAL_TEST_WRITES=0`
+
+## 0. Fechamento (2026-08-25)
+
+Migration aplicada exatamente uma vez em produção, a partir do texto do commit
+certificado `c0a3e906`, `SHA256=fef45f5030930c40eef00b7e83c2a6292d7d5c91597d85bf27adb546418f7791`
+(34881 bytes) — hash reconferido **após** o apply e inalterado. O arquivo é
+imutável a partir daqui.
+
+Postcheck em produção (read-only): 6 tabelas, 5 funções (todas `SECURITY DEFINER`
+com `search_path=public` e `EXECUTE` só para `service_role`), RLS nas 6, **zero**
+grant a `anon`/`authenticated`/`PUBLIC`, 6 FKs compostas de fronteira, 4 índices
+únicos-invariante, DML técnico de permissão `3600 → 3675` (+75 exatos, com
+`operador = 0` conforme `SHIPPER_PORTAL_DEFAULT_PERMISSION_POLICY_V1`) e
+baselines de negócio inalteradas (empresas 34, usuários 38, templates 225,
+campanhas 0, fretes 63). **Zero linha de negócio** nas 6 tabelas do portal.
+
+**O que roda em produção nesta fatia:** apenas a mudança em
+`middlewares/auth.js`, que **rejeita** tokens com `token_kind='shipper_portal'`
+no sistema interno (inclusive no caminho legado). Os serviços em
+`services/shipperPortal/` não são importados por nenhuma rota — PORTAL-A entrega
+o **domínio e a fronteira**, não superfície HTTP. Nenhuma rota de portal existe
+em produção (`/portal/*` → 404, que é o estado correto e esperado). A UX externa
+é Slice D, em PORTAL-B.
+
+Certificação pós-deploy: health 200; auth interna intacta (`/auth/me`,
+`/fretes`, `/operation-campaigns`, `/dispatch`, `/admin/permissions`, `/ai/*`
+→ 401 sem credencial); `NEW_PRODUCTION_ERRORS=0` — os `ENOENT
+/painel_web/dist/index.html` observados são o catch-all de SPA respondendo a
+rota desconhecida, comportamento **pré-existente** (reproduzido no deploy
+anterior `50baaa18`, sem 080) e disparado pelos próprios probes de certificação.
 
 ## 1. Auditoria (§10) — o que existia antes
 
