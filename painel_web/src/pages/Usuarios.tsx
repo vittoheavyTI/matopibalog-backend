@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { UserPlus, Search, Shield, Phone, MapPin, Camera, X, Check, Trash2, AlertTriangle, Loader2, Key, Copy, KeyRound, Eye, EyeOff, Edit3 } from 'lucide-react';
+import { UserPlus, Search, Shield, Phone, MapPin, Camera, X, Check, Trash2, AlertTriangle, Key, Copy, KeyRound, Eye, EyeOff, Edit3 } from 'lucide-react';
 import api from '../api';
 import { ErroCarregamento } from '../components/ErroCarregamento';
 import { useCarregamento } from '../hooks/useCarregamento';
@@ -8,6 +8,8 @@ import { mensagemErro } from '../utils/mensagemErro';
 import { maskPhone, maskCEP } from '../utils/masks';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
+import { ModalFormulario, SecaoFormulario, Campo, CLASSE_INPUT, CLASSE_BOTAO_PRIMARIO, CLASSE_BOTAO_SECUNDARIO, CLASSE_GRADE_2 } from '../components/ModalFormulario';
+import { SeletorPerfilAcesso, useePerfisAcesso } from '../components/SeletorPerfilAcesso';
 
 export const Usuarios: React.FC = () => {
   const { user: currentUser } = useAuth();
@@ -42,6 +44,16 @@ export const Usuarios: React.FC = () => {
   const [categoriaFiltro, setCategoriaFiltro] = useState<'todos' | 'admins' | 'vinculados' | 'autonomos' | 'superadmins' | 'outros'>('todos');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // Perfil de acesso escolhido no modal. É o que decide o que a pessoa poderá
+  // fazer — o antigo campo 'Nível' só sabia dizer 'Administrador'.
+  const [perfilAcessoId, setPerfilAcessoId] = useState<string | null>(null);
+  const [erroValidacao, setErroValidacao] = useState<Record<string, string>>({});
+  const [secaoAdicionaisAberta, setSecaoAdicionaisAberta] = useState(false);
+  const [secaoAcessoAberta, setSecaoAcessoAberta] = useState(false);
+  // Gerado uma vez por abertura do modal: um duplo clique ou retry de rede
+  // converge para o mesmo usuário em vez de criar dois.
+  const clientRequestIdRef = useRef<string | null>(null);
+  const { perfis, carregando: perfisCarregando, erro: perfisErro } = useePerfisAcesso(showModal && !editingUser);
   const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isFetchingCep, setIsFetchingCep] = useState(false);
@@ -52,8 +64,6 @@ export const Usuarios: React.FC = () => {
   // Estado para mostrar/ocultar senha no modal de reset.
   // Reseta ao fechar o modal (setResetUserId(null) + setMostrarSenhaReset(false)).
   const [mostrarSenhaReset, setMostrarSenhaReset] = useState(false);
-  // Mostrar/ocultar a "Senha Provisória" do modal Novo Usuário (separado do reset).
-  const [showSenhaNovoUsuario, setShowSenhaNovoUsuario] = useState(false);
   // Senha temporária gerada pelo backend, exibida UMA única vez (estado efêmero,
   // nunca localStorage/sessionStorage/log; some ao fechar o modal).
   const [senhaGerada, setSenhaGerada] = useState<string | null>(null);
@@ -92,7 +102,6 @@ export const Usuarios: React.FC = () => {
   const [empresasLoaded, setEmpresasLoaded] = useState(false);
   const [selectedEmpresaId, setSelectedEmpresaId] = useState('');
   const [empresaSearch, setEmpresaSearch] = useState('');
-  const [showEmpresaDropdown, setShowEmpresaDropdown] = useState(false);
   // Fluxo "criar administrador da conta" (deep-link vindo de Empresas): a conta
   // chega pré-selecionada e TRAVADA (read-only) para não ser trocada por acidente.
   const [contaTravada, setContaTravada] = useState(false);
@@ -104,7 +113,17 @@ export const Usuarios: React.FC = () => {
   // Filtro por tipo dentro do combobox de conta (só afeta a lista do picker do modal,
   // não confundir com o filtro da listagem "Todas as contas").
   const [empresaTipoFiltro, setEmpresaTipoFiltro] = useState<'todas' | 'empresas' | 'autonomos'>('todas');
-  const empresaDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Contas filtradas pela busca do seletor do super-admin.
+  const empresasFiltradasParaSelecao = React.useMemo(() => {
+    const termo = empresaSearch.trim().toLowerCase();
+    const base = empresaTipoFiltro === 'todas'
+      ? empresas
+      : empresas.filter(e => (empresaTipoFiltro === 'autonomos' ? e.tipo === 'autonomo' : e.tipo !== 'autonomo'));
+    if (!termo) return base;
+    return base.filter(e => String(e.nome || '').toLowerCase().includes(termo));
+  }, [empresas, empresaSearch, empresaTipoFiltro]);
+
 
   const [newUser, setNewUser] = useState({
     nome: '',
@@ -175,16 +194,8 @@ export const Usuarios: React.FC = () => {
     setShowModal(true);
   }, [empresasLoaded, searchParams, empresas, currentUser]);
 
-  // Fecha dropdown de empresa ao clicar fora
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (empresaDropdownRef.current && !empresaDropdownRef.current.contains(e.target as Node)) {
-        setShowEmpresaDropdown(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  // O antigo dropdown de conta virou um seletor simples dentro do modal, então
+  // não há mais overlay para fechar ao clicar fora.
 
   // Fecha o modal de usuário e zera o estado do fluxo "criar administrador da conta"
   // (evita que uma abertura manual posterior herde a conta travada/banner).
@@ -215,10 +226,18 @@ export const Usuarios: React.FC = () => {
 
         await api.put('/admin/usuarios/' + editingUser.uid, payload);
       } else {
-        // Super-admin deve selecionar empresa alvo explicitamente
-        if (currentUser?.is_super_admin && !selectedEmpresaId) {
-          alert('Selecione a conta à qual o usuário será vinculado.');
-          return;
+        // Validação inline, junto do campo (§58). `alert` interrompe e some com a
+        // mensagem; o erro fica ao lado do que precisa ser corrigido.
+        const erros: Record<string, string> = {};
+        if (!newUser.nome.trim()) erros.nome = 'Informe o nome completo.';
+        if (!newUser.email.trim()) erros.email = 'Informe o e-mail de acesso.';
+        if (currentUser?.is_super_admin && !selectedEmpresaId) erros.conta = 'Selecione a conta do usuário.';
+        if (!perfilAcessoId) erros.perfil = 'Escolha o perfil de acesso.';
+        if (Object.keys(erros).length) { setErroValidacao(erros); setIsSubmitting(false); return; }
+        setErroValidacao({});
+
+        if (!clientRequestIdRef.current) {
+          clientRequestIdRef.current = `usuario-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
         }
         const payload: any = {
           email: newUser.email,
@@ -230,7 +249,9 @@ export const Usuarios: React.FC = () => {
           cidade: newUser.cidade,
           foto_url: newUser.fotoUrl,
           permissoes: newUser.permissoes,
-          tipo: newUser.nivel
+          // O perfil canônico é a autoridade; `tipo` deixou de ser enviado daqui.
+          perfil_acesso_id: perfilAcessoId,
+          client_request_id: clientRequestIdRef.current,
         };
         // Só envia senha se o admin digitou; vazio → backend gera senha aleatória.
         if (newUser.senha && newUser.senha.trim()) payload.senha = newUser.senha;
@@ -248,6 +269,11 @@ export const Usuarios: React.FC = () => {
       setEmpresaTipoFiltro('todas');
       setContaTravada(false);
       setBannerConta(null);
+      setPerfilAcessoId(null);
+      setErroValidacao({});
+      setSecaoAdicionaisAberta(false);
+      setSecaoAcessoAberta(false);
+      clientRequestIdRef.current = null;
       setNewUser({
         nome: '',
         email: '',
@@ -598,334 +624,283 @@ export const Usuarios: React.FC = () => {
         </div>
       </div>
 
-      {showModal && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl overflow-hidden max-h-[88vh] flex flex-col">
-            <div className="px-5 py-4 border-b flex justify-between items-center bg-gray-50 flex-shrink-0">
-              <h3 className="text-xl font-bold text-gray-800">{somenteLeitura ? 'Dados do Usuário' : editingUser ? 'Editar Usuário' : 'Novo Usuário'}</h3>
-              <button onClick={fecharModal} className="p-2 hover:bg-gray-200 rounded-full transition-colors"><X size={24} /></button>
+      {/* MODAL DE USUÁRIO — padrão UX_FORM_001 (FREIGHT_MODAL_PATTERN_V1).
+          A primeira dobra responde ao que a tarefa realmente é: quem é a pessoa e
+          que acesso ela terá. Foto e endereço, que antes ocupavam o topo e o meio
+          do formulário, viraram "Informações adicionais", recolhido. */}
+      <ModalFormulario
+        aberto={showModal}
+        titulo={somenteLeitura ? 'Dados do usuário' : editingUser ? 'Editar usuário' : 'Novo usuário'}
+        icone={<Shield size={20} className="text-blue-600" />}
+        aoFechar={fecharModal}
+        largura="xl"
+        rodape={(
+          <>
+            <button type="button" onClick={fecharModal} className={CLASSE_BOTAO_SECUNDARIO}>
+              {somenteLeitura ? 'Fechar' : 'Cancelar'}
+            </button>
+            {!somenteLeitura && (
+              <button type="button" onClick={handleSave} disabled={isSubmitting} className={CLASSE_BOTAO_PRIMARIO}>
+                {isSubmitting ? 'Salvando…' : editingUser ? 'Salvar alterações' : 'Criar usuário'}
+              </button>
+            )}
+          </>
+        )}
+      >
+        <fieldset disabled={somenteLeitura} className="contents">
+          {!editingUser && bannerConta && (
+            <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl p-3 text-sm text-blue-800">
+              <Shield size={16} className="flex-shrink-0" />
+              <span>Criando usuário para: <strong>{bannerConta}</strong></span>
             </div>
-            
-            <fieldset disabled={somenteLeitura} className="contents">
-            <div className="p-4 overflow-y-auto space-y-4">
-              {!editingUser && bannerConta && (
-                <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl p-3 text-sm text-blue-800">
-                  <Shield size={16} className="flex-shrink-0" />
-                  <span>Criando administrador para: <strong>{bannerConta}</strong></span>
-                </div>
-              )}
-              <div className="flex flex-col items-center space-y-1 pb-1">
-                <input 
-                  type="file" 
-                  ref={fileInputRef} 
-                  className="hidden" 
-                  accept="image/*" 
-                  onChange={handleFileChange} 
-                />
-                <div 
-                  onClick={() => { if (!somenteLeitura) fileInputRef.current?.click(); }}
-                  className={`w-16 h-16 rounded-xl bg-gray-100 border-2 border-dashed border-gray-300 flex flex-col items-center justify-center text-gray-400 group transition-all overflow-hidden relative ${somenteLeitura ? 'cursor-default' : 'hover:border-blue-400 hover:text-blue-500 cursor-pointer'}`}
+          )}
+
+          <div className={CLASSE_GRADE_2}>
+            <Campo id="usuario-nome" rotulo="Nome completo" obrigatorio erro={erroValidacao.nome}>
+              <input
+                id="usuario-nome"
+                className={CLASSE_INPUT}
+                value={editingUser ? editingUser.nome : newUser.nome}
+                onChange={e => editingUser
+                  ? setEditingUser({ ...editingUser, nome: e.target.value })
+                  : setNewUser({ ...newUser, nome: e.target.value })}
+              />
+            </Campo>
+            <Campo
+              id="usuario-email"
+              rotulo="E-mail"
+              obrigatorio={!editingUser}
+              erro={erroValidacao.email}
+              ajuda={editingUser ? 'O e-mail de acesso não é alterado por esta tela.' : undefined}
+            >
+              <input
+                id="usuario-email"
+                type="email"
+                className={CLASSE_INPUT}
+                value={editingUser ? editingUser.email : newUser.email}
+                onChange={e => editingUser
+                  ? setEditingUser({ ...editingUser, email: e.target.value })
+                  : setNewUser({ ...newUser, email: e.target.value })}
+                disabled={!!editingUser}
+              />
+            </Campo>
+          </div>
+
+          <div className={CLASSE_GRADE_2}>
+            <Campo id="usuario-celular" rotulo="Celular">
+              <input
+                id="usuario-celular"
+                className={CLASSE_INPUT}
+                placeholder="(00) 0 0000-0000"
+                value={editingUser ? editingUser.celular : newUser.celular}
+                onChange={e => {
+                  const masked = maskPhone(e.target.value);
+                  editingUser
+                    ? setEditingUser({ ...editingUser, celular: masked })
+                    : setNewUser({ ...newUser, celular: masked });
+                }}
+              />
+            </Campo>
+            {editingUser && (
+              <Campo id="usuario-status" rotulo="Status">
+                <select
+                  id="usuario-status"
+                  className={CLASSE_INPUT}
+                  value={editingUser.status}
+                  onChange={e => setEditingUser({ ...editingUser, status: e.target.value })}
                 >
-                  {(editingUser?.fotoUrl || newUser.fotoUrl) ? (
-                    <>
-                      <img 
-                        src={editingUser ? editingUser.fotoUrl : newUser.fotoUrl} 
-                        alt="Preview" 
-                        className="w-full h-full object-cover" 
-                      />
-                      <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                        <Camera size={24} className="text-white" />
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <Camera size={24} />
-                      <span className="text-[10px] font-bold uppercase mt-1">Foto</span>
-                    </>
-                  )}
-                </div>
+                  <option value="ativo">Ativo</option>
+                  <option value="bloqueado">Bloqueado</option>
+                </select>
+              </Campo>
+            )}
+          </div>
+
+          {/* Conta-alvo do super-admin. Continua explícita e obrigatória: sem ela
+              o backend recusa a criação, justamente para o usuário nunca nascer
+              na empresa errada. Travada quando veio de um deep-link de criação. */}
+          {currentUser?.is_super_admin && (editingUser || contaTravada) && (
+            <Campo rotulo="Conta vinculada" ajuda="Definida na criação, para preservar o isolamento entre contas.">
+              <input
+                type="text"
+                readOnly
+                className={`${CLASSE_INPUT} bg-gray-100 text-gray-600`}
+                value={editingUser
+                  ? contaAtualLabel(editingUser)
+                  : (empresas.find(e => e.id === selectedEmpresaId)?.nome || bannerConta || '')}
+              />
+            </Campo>
+          )}
+
+          {currentUser?.is_super_admin && !editingUser && !contaTravada && (
+            <Campo rotulo="Conta" obrigatorio erro={erroValidacao.conta}
+              ajuda="O usuário será criado dentro desta conta.">
+              <input
+                type="search"
+                className={`${CLASSE_INPUT} mb-2`}
+                placeholder="Buscar conta por nome"
+                value={empresaSearch}
+                onChange={e => setEmpresaSearch(e.target.value)}
+                aria-label="Buscar conta"
+              />
+              <select
+                className={CLASSE_INPUT}
+                value={selectedEmpresaId}
+                onChange={e => { setSelectedEmpresaId(e.target.value); setErroValidacao(({ conta, ...r }) => r); }}
+                size={Math.min(5, Math.max(2, empresasFiltradasParaSelecao.length))}
+              >
+                <option value="">Selecione a conta…</option>
+                {empresasFiltradasParaSelecao.map(e => (
+                  <option key={e.id} value={e.id}>
+                    {e.nome}{e.tipo === 'autonomo' ? ' — Autônomo' : ''}
+                  </option>
+                ))}
+              </select>
+              {!empresasLoaded && <p className="mt-1 text-xs text-gray-500">Carregando contas…</p>}
+            </Campo>
+          )}
+
+          {/* PERFIL DE ACESSO — o coração da tela. Substitui o campo "Nível", que
+              só sabia oferecer "Administrador" e por isso transformava toda a
+              equipe em administradores. */}
+          {!editingUser ? (
+            <Campo rotulo="Perfil de acesso" obrigatorio erro={erroValidacao.perfil}>
+              <SeletorPerfilAcesso
+                perfis={perfis}
+                carregando={perfisCarregando}
+                erro={perfisErro}
+                valor={perfilAcessoId}
+                aoEscolher={(id) => { setPerfilAcessoId(id); setErroValidacao(({ perfil, ...r }) => r); }}
+              />
+            </Campo>
+          ) : (
+            <Campo
+              rotulo="Perfil de acesso"
+              ajuda="Para trocar o perfil, use a tela de Perfis e Permissões."
+            >
+              <input
+                type="text"
+                readOnly
+                className={`${CLASSE_INPUT} bg-gray-100 text-gray-600`}
+                value={editingUser.perfilAcessoNome || getTipoLabel(editingUser)}
+              />
+            </Campo>
+          )}
+
+          {/* Opções de acesso — secundárias por decisão: o padrão é o sistema
+              gerar a senha temporária, e não o administrador inventar uma. */}
+          {!editingUser && (
+            <SecaoFormulario
+              titulo="Opções de acesso"
+              descricao="Por padrão, o sistema gera uma senha temporária e a mostra uma única vez."
+              recolhivel
+              aberta={secaoAcessoAberta}
+              aoAlternar={() => setSecaoAcessoAberta(v => !v)}
+              abertaPorPadrao={false}
+            >
+              <Campo
+                id="usuario-senha"
+                rotulo="Senha temporária personalizada"
+                ajuda="Deixe em branco para o sistema gerar automaticamente."
+              >
+                <input
+                  id="usuario-senha"
+                  type="text"
+                  className={CLASSE_INPUT}
+                  placeholder="Gerada automaticamente"
+                  value={newUser.senha}
+                  onChange={e => setNewUser({ ...newUser, senha: e.target.value })}
+                />
+              </Campo>
+            </SecaoFormulario>
+          )}
+
+          {/* Informações adicionais — endereço e foto. Não são a tarefa de criar
+              um acesso, então saem da primeira dobra (§53/§54). */}
+          <SecaoFormulario
+            titulo="Informações adicionais"
+            descricao="Foto e endereço. Podem ser preenchidos depois."
+            recolhivel
+            aberta={secaoAdicionaisAberta}
+            aoAlternar={() => setSecaoAdicionaisAberta(v => !v)}
+            abertaPorPadrao={false}
+          >
+            <div className="flex items-center gap-3">
+              <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileChange} />
+              <div
+                onClick={() => { if (!somenteLeitura) fileInputRef.current?.click(); }}
+                className={`w-14 h-14 shrink-0 rounded-xl bg-gray-100 border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 overflow-hidden ${somenteLeitura ? 'cursor-default' : 'hover:border-blue-400 cursor-pointer'}`}
+              >
+                {(editingUser?.fotoUrl || newUser.fotoUrl)
+                  ? <img src={editingUser ? editingUser.fotoUrl : newUser.fotoUrl} alt="" className="w-full h-full object-cover" />
+                  : <Camera size={20} />}
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm text-gray-700">Foto do usuário</p>
                 {!somenteLeitura && (editingUser?.fotoUrl || newUser.fotoUrl) && (
-                  <button 
-                    onClick={() => editingUser ? setEditingUser({...editingUser, fotoUrl: ''}) : setNewUser({...newUser, fotoUrl: ''})}
-                    className="text-[10px] font-bold text-red-500 uppercase hover:underline"
+                  <button
+                    type="button"
+                    onClick={() => editingUser
+                      ? setEditingUser({ ...editingUser, fotoUrl: '' })
+                      : setNewUser({ ...newUser, fotoUrl: '' })}
+                    className="text-xs font-bold text-red-500 hover:underline"
                   >
-                    Remover Foto
+                    Remover foto
                   </button>
                 )}
               </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">Nome Completo</label>
-                    <input 
-                      className="w-full border p-3 rounded-xl outline-none focus:border-blue-500 bg-gray-50/50" 
-                      value={editingUser ? editingUser.nome : newUser.nome}
-                      onChange={e => editingUser ? setEditingUser({...editingUser, nome: e.target.value}) : setNewUser({...newUser, nome: e.target.value})}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">E-mail</label>
-                    <input 
-                      className="w-full border p-3 rounded-xl outline-none focus:border-blue-500 bg-gray-50/50" 
-                      value={editingUser ? editingUser.email : newUser.email}
-                      onChange={e => editingUser ? setEditingUser({...editingUser, email: e.target.value}) : setNewUser({...newUser, email: e.target.value})}
-                      disabled={!!editingUser}
-                    />
-                  </div>
-                  {editingUser && currentUser?.is_super_admin && (
-                    <div>
-                      <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">Conta vinculada</label>
-                      <input
-                        type="text"
-                        readOnly
-                        className="w-full border p-3 rounded-xl bg-gray-100 text-gray-600"
-                        value={contaAtualLabel(editingUser)}
-                      />
-                      <p className="text-[10px] text-gray-400 mt-1 ml-1">
-                        A troca de conta do usuário será disponibilizada em uma etapa específica, para preservar o isolamento entre contas.
-                      </p>
-                    </div>
-                  )}
-                  {!editingUser && currentUser?.is_super_admin && contaTravada && (
-                    <div>
-                      <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">Conta</label>
-                      <input
-                        type="text"
-                        readOnly
-                        className="w-full border p-3 rounded-xl bg-gray-100 text-gray-600"
-                        value={empresas.find(e => e.id === selectedEmpresaId)?.nome || bannerConta || ''}
-                      />
-                      <p className="text-[10px] text-gray-400 mt-1 ml-1">
-                        Conta definida pela criação. Para vincular a outra conta, use "Novo Usuário".
-                      </p>
-                    </div>
-                  )}
-                  {!editingUser && currentUser?.is_super_admin && !contaTravada && (
-                    <div ref={empresaDropdownRef} className="relative">
-                      <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">Empresa</label>
-                      <input
-                        className="w-full border p-3 rounded-xl outline-none focus:border-blue-500 bg-white"
-                        value={selectedEmpresaId ? (empresas.find(e => e.id === selectedEmpresaId)?.nome || '') : empresaSearch}
-                        onChange={e => { setEmpresaSearch(e.target.value); setSelectedEmpresaId(''); setShowEmpresaDropdown(true); }}
-                        onFocus={() => setShowEmpresaDropdown(true)}
-                        placeholder="Digite para buscar..."
-                      />
-                      {showEmpresaDropdown && (
-                        <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg max-h-56 overflow-y-auto">
-                          <div className="flex gap-1 p-2 border-b bg-gray-50 sticky top-0">
-                            {([['todas', 'Todas'], ['empresas', 'Empresas'], ['autonomos', 'Autônomos']] as const).map(([k, l]) => (
-                              <button
-                                key={k}
-                                type="button"
-                                onClick={() => setEmpresaTipoFiltro(k)}
-                                className={`px-2.5 py-1 rounded-full text-[11px] font-bold border transition-colors ${empresaTipoFiltro === k ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
-                              >
-                                {l}
-                              </button>
-                            ))}
-                          </div>
-                          {(() => {
-                            const lista = empresas
-                              .filter(e => empresaTipoFiltro === 'todas' || (empresaTipoFiltro === 'autonomos' ? e.tipo === 'autonomo' : e.tipo !== 'autonomo'))
-                              .filter(e => !empresaSearch || e.nome.toLowerCase().includes(empresaSearch.toLowerCase()));
-                            if (lista.length === 0) {
-                              return <div className="px-4 py-3 text-sm text-gray-400">Nenhuma conta encontrada</div>;
-                            }
-                            return lista.map(e => (
-                              <div
-                                key={e.id}
-                                className="px-4 py-2.5 hover:bg-blue-50 cursor-pointer"
-                                onClick={() => { setSelectedEmpresaId(e.id); setEmpresaSearch(''); setShowEmpresaDropdown(false); }}
-                              >
-                                <div className="text-sm text-gray-700">{formatContaLinha(e)}</div>
-                                {e.status && e.status !== 'ativo' && (
-                                  <div className="text-[10px] font-bold uppercase tracking-wide text-amber-600">{e.status}</div>
-                                )}
-                              </div>
-                            ));
-                          })()}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {!editingUser && (
-                    <div>
-                      <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">Senha Provisória</label>
-                      <div className="relative">
-                        <input
-                          type={showSenhaNovoUsuario ? 'text' : 'password'}
-                          autoComplete="new-password"
-                          className="w-full border p-3 pr-10 rounded-xl outline-none focus:border-blue-500 bg-gray-50/50"
-                          value={newUser.senha}
-                          onChange={e => setNewUser({...newUser, senha: e.target.value})}
-                          placeholder="Mín. 6 caracteres"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowSenhaNovoUsuario(!showSenhaNovoUsuario)}
-                          className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700 p-1"
-                          title={showSenhaNovoUsuario ? 'Ocultar senha' : 'Mostrar senha'}
-                          aria-label={showSenhaNovoUsuario ? 'Ocultar senha' : 'Mostrar senha'}
-                        >
-                          {showSenhaNovoUsuario ? <EyeOff size={18} /> : <Eye size={18} />}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                  {editingUser ? (
-                    <div>
-                      <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">Nível</label>
-                      <input
-                        type="text"
-                        readOnly
-                        className="w-full border p-3 rounded-xl bg-gray-100 text-gray-600"
-                        value={editingUser.nivel === 'operador' ? 'Operador legado — sem permissão funcional' : getTipoLabel(editingUser)}
-                      />
-                      <p className="text-[10px] text-gray-400 mt-1 ml-1">
-                        O nível do usuário é definido no cadastro e não pode ser alterado nesta tela.
-                      </p>
-                    </div>
-                  ) : (
-                    <div>
-                      <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">Nível</label>
-                      <select
-                        className="w-full border p-3 rounded-xl outline-none focus:border-blue-500 bg-white"
-                        value={newUser.nivel}
-                        onChange={e => setNewUser({...newUser, nivel: e.target.value})}
-                      >
-                        <option value="admin">Administrador</option>
-                      </select>
-                      <p className="text-[10px] text-gray-400 mt-1 ml-1">
-                        Para cadastrar motoristas, use a tela de Motoristas.
-                      </p>
-                    </div>
-                  )}
-                  {editingUser && (
-                    <div>
-                      <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">Status</label>
-                      <select 
-                        className="w-full border p-3 rounded-xl outline-none focus:border-blue-500 bg-white"
-                        value={editingUser.status}
-                        onChange={e => setEditingUser({...editingUser, status: e.target.value})}
-                      >
-                        <option value="ativo">Ativo</option>
-                        <option value="bloqueado">Bloqueado</option>
-                      </select>
-                    </div>
-                  )}
-                </div>
-
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">Celular</label>
-                    <input 
-                      className="w-full border p-3 rounded-xl outline-none focus:border-blue-500 bg-gray-50/50" 
-                      placeholder="(00) 0 0000-0000"
-                      value={editingUser ? editingUser.celular : newUser.celular}
-                      onChange={e => {
-                        const masked = maskPhone(e.target.value);
-                        editingUser ? setEditingUser({...editingUser, celular: masked}) : setNewUser({...newUser, celular: masked});
-                      }}
-                    />
-                  </div>
-                  
-                  <div className="bg-gray-50 p-3 rounded-xl border border-gray-100 space-y-3">
-                    <h4 className="text-xs font-bold text-gray-500 uppercase flex items-center">
-                      <MapPin size={14} className="mr-1.5 text-gray-400" /> Localização
-                    </h4>
-                    
-                    <div>
-                      <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1 flex justify-between">
-                        CEP
-                        {isFetchingCep && <Loader2 size={12} className="animate-spin text-blue-500" />}
-                      </label>
-                      <input 
-                        className="w-full border p-3 rounded-xl outline-none focus:border-blue-500 bg-white" 
-                        placeholder="00000-000"
-                        maxLength={9}
-                        value={editingUser ? editingUser.cep : newUser.cep}
-                        onChange={e => {
-                          const masked = maskCEP(e.target.value);
-                          editingUser ? setEditingUser({...editingUser, cep: masked}) : setNewUser({...newUser, cep: masked});
-                        }}
-                        onBlur={e => buscarCep(e.target.value)}
-                      />
-                    </div>
-                    
-                    <div>
-                      <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">Endereço / Logradouro</label>
-                      <input 
-                        className="w-full border p-3 rounded-xl outline-none focus:border-blue-500 bg-white" 
-                        placeholder="Rua, número..."
-                        value={editingUser ? editingUser.endereco : newUser.endereco}
-                        onChange={e => editingUser ? setEditingUser({...editingUser, endereco: e.target.value}) : setNewUser({...newUser, endereco: e.target.value})}
-                      />
-                    </div>
-                    
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">Bairro</label>
-                        <input 
-                          className="w-full border p-3 rounded-xl outline-none focus:border-blue-500 bg-white" 
-                          placeholder="Bairro"
-                          value={editingUser ? editingUser.bairro : newUser.bairro}
-                          onChange={e => editingUser ? setEditingUser({...editingUser, bairro: e.target.value}) : setNewUser({...newUser, bairro: e.target.value})}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">Cidade / UF</label>
-                        <input 
-                          className="w-full border p-3 rounded-xl outline-none focus:border-blue-500 bg-white" 
-                          placeholder="Cidade - UF"
-                          value={editingUser ? editingUser.cidade : newUser.cidade}
-                          onChange={e => editingUser ? setEditingUser({...editingUser, cidade: e.target.value}) : setNewUser({...newUser, cidade: e.target.value})}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="bg-gray-50 p-3 rounded-xl border border-gray-100">
-                <h4 className="text-sm font-bold text-gray-700 mb-2 flex items-center"><Shield size={18} className="mr-2 text-blue-600" /> Permissões de Acesso</h4>
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-                  {Object.keys(newUser.permissoes || {}).map(key => (
-                    <label key={key} className="flex items-center space-x-2 p-2 bg-white rounded-lg border border-gray-200 cursor-pointer hover:border-blue-300 transition-colors">
-                      <input 
-                        type="checkbox" 
-                        className="rounded text-blue-600" 
-                        checked={editingUser ? (editingUser.permissoes as any)[key] : (newUser.permissoes as any)[key]}
-                        onChange={e => {
-                          const checked = e.target.checked;
-                          if (editingUser) {
-                            setEditingUser({...editingUser, permissoes: {...editingUser.permissoes, [key]: checked}});
-                          } else {
-                            setNewUser({...newUser, permissoes: {...(newUser.permissoes as any), [key]: checked}});
-                          }
-                        }}
-                      />
-                      <span className="text-xs font-bold text-gray-600 uppercase">{key}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
             </div>
-            </fieldset>
 
-            <div className="p-4 bg-gray-50 border-t flex justify-end space-x-3 flex-shrink-0">
-              <button onClick={fecharModal} className="px-4 py-2.5 font-medium text-sm text-gray-600 hover:bg-gray-200 rounded-xl transition-all">{somenteLeitura ? 'Fechar' : 'Cancelar'}</button>
-              {!somenteLeitura && <button
-                onClick={handleSave}
-                disabled={isSubmitting}
-                className="inline-flex items-center px-4 py-2.5 bg-green-700 text-white rounded-xl font-medium text-sm shadow-sm hover:bg-green-800 transition-all active:scale-95 disabled:opacity-50"
-              >
-                <Check size={18} className="mr-2" /> {isSubmitting ? 'Salvando...' : 'Salvar'}
-              </button>}
+            <Campo id="usuario-cep" rotulo="CEP" ajuda={isFetchingCep ? 'Buscando endereço…' : undefined}>
+              <input
+                id="usuario-cep"
+                className={CLASSE_INPUT}
+                placeholder="00000-000"
+                value={editingUser ? editingUser.cep : newUser.cep}
+                onChange={e => {
+                  const masked = maskCEP(e.target.value);
+                  editingUser
+                    ? setEditingUser({ ...editingUser, cep: masked })
+                    : setNewUser({ ...newUser, cep: masked });
+                  buscarCep(masked);
+                }}
+              />
+            </Campo>
+            <Campo id="usuario-endereco" rotulo="Endereço">
+              <input
+                id="usuario-endereco"
+                className={CLASSE_INPUT}
+                value={editingUser ? editingUser.endereco : newUser.endereco}
+                onChange={e => editingUser
+                  ? setEditingUser({ ...editingUser, endereco: e.target.value })
+                  : setNewUser({ ...newUser, endereco: e.target.value })}
+              />
+            </Campo>
+            <div className={CLASSE_GRADE_2}>
+              <Campo id="usuario-bairro" rotulo="Bairro">
+                <input
+                  id="usuario-bairro"
+                  className={CLASSE_INPUT}
+                  value={editingUser ? editingUser.bairro : newUser.bairro}
+                  onChange={e => editingUser
+                    ? setEditingUser({ ...editingUser, bairro: e.target.value })
+                    : setNewUser({ ...newUser, bairro: e.target.value })}
+                />
+              </Campo>
+              <Campo id="usuario-cidade" rotulo="Cidade / UF">
+                <input
+                  id="usuario-cidade"
+                  className={CLASSE_INPUT}
+                  value={editingUser ? editingUser.cidade : newUser.cidade}
+                  onChange={e => editingUser
+                    ? setEditingUser({ ...editingUser, cidade: e.target.value })
+                    : setNewUser({ ...newUser, cidade: e.target.value })}
+                />
+              </Campo>
             </div>
-          </div>
-        </div>
-      )}
+          </SecaoFormulario>
+        </fieldset>
+      </ModalFormulario>
 
       {/* Modal de Confirmação de Exclusão */}
       {deleteTarget && (
