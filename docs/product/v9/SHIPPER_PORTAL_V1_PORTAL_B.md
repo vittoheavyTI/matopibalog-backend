@@ -7,6 +7,8 @@
 - `MACROFRONT=E3_5_SHIPPER_PORTAL_V1_PORTAL_B` · fatia `PORTAL-B`
 - `MIGRATION_REQUIRED=true` · `MIGRATION_FILE=081_shipper_portal_b_revision_documents.sql`
 - `PORTAL_B_PRODUCTION_MIGRATION_AUTHORIZED=false` — **não aplicada em lugar nenhum**
+- `MIGRATION_081_FROZEN=true` · `SHA256=25f78a50584cf82f635068ac742abf9db91a302c8f27f736e0a7f0ca5e98f2e1` (48585 bytes)
+- SHA anterior `1ee2f4aa…` = **SUPERSEDED_NOT_AUTHORIZED** (owner review pré-DDL)
 - `BUSINESS_DML=0`
 
 ## 1. O que o PORTAL-A deixou pronto e o que faltava
@@ -112,7 +114,7 @@ com aceite e cancelamento **sem travar a linha**.
 
 O portal não tem máquina de estados própria. `shipperTrackingService` projeta o
 estado canônico em vocabulário externo, com uma ordem de autoridade explícita:
-comprovante > fretes > campanha > solicitação.
+desfecho da solicitação > demanda residual > execução.
 
 Dois cuidados que valem ser destacados:
 
@@ -122,6 +124,8 @@ Dois cuidados que valem ser destacados:
 - **Nada aparece por heurística.** A cadeia é `solicitação → campaign_id →
   campaign_trip_freights → fretes`. Um frete histórico com destino parecido não
   entra.
+- **"Entregue" exige demanda residual zero** (ver 10b/HIGH-04). Quantidade
+  cancelada não abate demanda, e entrega parcial tem estado próprio.
 
 Campanha cancelada internamente **não** vira "Cancelada" para o embarcador:
 cancelar planejamento interno não é uma decisão comunicada a ele.
@@ -164,6 +168,90 @@ Não há e-mail transacional de convite nesta fatia. O token em claro é devolvi
 "e-mail enviado" sem provedor configurado seria mentir para o operador (§17).
 Só o hash é persistido; o token nunca é logado.
 
+## 10b. Owner review pré-DDL — os 5 HIGHs corrigidos
+
+O owner revisou a frente antes da migration e apontou cinco pontos. Todos foram
+corrigidos na própria 081 (que nunca foi aplicada), sem criar 082.
+
+### HIGH-01 — ativação com conta já existente
+
+O fluxo anterior fazia a coisa certa pela metade: não redefinia a senha (bom),
+mas **vinculava a conta existente e emitia sessão só com o token do convite**.
+Como o convite é uma credencial ao portador entregue manualmente, quem tivesse o
+link passava a operar em nome de uma identidade cuja senha nunca provou conhecer
+— e se essa identidade fosse a de um operador interno, o convite viraria um
+caminho para entrar no lugar dele.
+
+Congelado: `EXISTING_AUTH_IDENTITY_INVITE_POLICY_V1` = **token de convite E
+autenticação da conta existente**. A senha digitada é verificada, nunca trocada.
+Senha errada → ativação negada, convite continua `PENDING`, nada é vinculado.
+
+### HIGH-02 — proveniência do compartilhamento agora é do banco
+
+A elegibilidade do documento era validada só na aplicação. Para a tabela que
+decide **o que sai da transportadora**, isso é frágil demais.
+
+A linha agora carrega `request_id`, `campaign_id` e `frete_id` (todos `NOT
+NULL`), e quatro FKs compostas fecham a cadeia:
+
+```
+request + campaign + empresa + org  →  shipper_transport_requests
+campaign + frete   + empresa        →  campaign_trip_freights
+documento + frete  + empresa        →  frete_documentos
+evidência + frete  + empresa        →  frete_epod_evidencias
+```
+
+Compartilhar o documento do embarcador Y na solicitação do X passa a ser
+impossível **mesmo que a aplicação tente**. Quatro índices de identidade
+aditivos foram criados nas tabelas-fonte para dar ao PostgreSQL a chave
+referenciável; nenhum altera semântica de negócio.
+
+### HIGH-03 — histórico imutável e snapshot com autoridade do banco
+
+Um gatilho impede alterar `snapshot`, `version`, autoria e instante de envio, e
+proíbe `DELETE` — inclusive por `service_role`, que é justamente o caminho do
+backend (proteger só contra `anon` seria proteger contra quem já não tem acesso).
+A decisão é de mão única: `ACCEPTED` não vira `REJECTED`.
+
+E `shipper_request_accept` **ignora** `p_accepted_snapshot`, usando a submissão
+gravada. Antes dava para declarar "aceito: 999 t" sobre um envio de 100 t. A
+assinatura foi preservada para o backend já implantado. Aceite e decisão exigem
+carimbo em **exatamente uma** versão auditada — 0 linhas afetadas falha fechada.
+
+### HIGH-04 — "entregue" deixa de ser "todos os fretes terminaram"
+
+A regra anterior tratava `concluídos + cancelados === total` como entrega. Uma
+operação com 30 t entregues e 70 t **canceladas** era anunciada ao cliente como
+ENTREGUE, com 70 t da carga dele paradas.
+
+Congelado: `EXTERNAL_DELIVERED_AUTHORITY` = **demanda residual do serviço
+canônico de progresso**. Quantidade cancelada nunca abate demanda. Novo estado
+`PARCIALMENTE_ENTREGUE`. Comprovante de viagem parcial não completa a operação.
+Sem medição conclusiva (sem demanda declarada ou unidade incompatível), não se
+afirma entrega.
+
+O cálculo é o do `campaignProgressService`, reusado em **lote** (4 consultas
+independentemente do número de operações) e sem escopo operacional fabricado —
+o embarcador não tem escopo interno, e inventar um seria criar autoridade falsa.
+
+### HIGH-05 — fluxo de documentos na web da transportadora
+
+Havia endpoint para tudo e nenhuma tela. Agora, no detalhe da solicitação: ver e
+abrir o que o embarcador anexou, **comparação explícita entre o envio anterior e
+o atual** (a caixa de entrada dizia "confira o que mudou" sem permitir fazê-lo),
+disponibilizar documento e comprovante, e revogar. Sem `documents.share`, o
+operador continua revisando e a tela explica a ausência das ações.
+
+## 10c. Escopo do intake (congelado)
+
+`PORTAL_INBOUND_REQUEST_SCOPE_V1 = TENANT_LEVEL_INTAKE_BEFORE_OPERATION`.
+
+Antes do aceite, a solicitação não tem unidade operacional interna — e pedir ao
+embarcador que escolha uma filial da transportadora seria expor organização
+interna a quem está de fora. Por isso a revisão é company-level (tenant +
+entitlement + `requests.review`). No **aceite**, que cria operação, o escopo
+operacional passa a ser exigido, junto de `campaign.create`.
+
 ## 11. Achado da revisão de janelas de falha (§152)
 
 A revisão encontrou um vazamento real que eu mesmo havia introduzido, e vale
@@ -192,8 +280,8 @@ transportadora **não** reusa; nome igual dentro da própria **reusa**.
 
 | Suíte | Contagem | Cobre |
 |---|---|---|
-| PG real 081 | 27 | histórico, 4 corridas de reenvio, ativação concorrente, fronteira de compartilhamento, permissão do operador |
-| Backend 081B | 31 | mapa de status, whitelist da linha do tempo, isolamento mesmo-transportadora, IDOR de documento/comprovante, varredura de chaves proibidas, separação de credenciais |
+| PG real 081 | 43 | histórico, 4 corridas de reenvio, ativação concorrente, **proveniência completa**, **imutabilidade do histórico**, **autoridade do snapshot**, **carimbo da versão**, permissão do operador |
+| Backend 081B | 38 + 9 (ativação) | mapa de status, whitelist da linha do tempo, isolamento mesmo-transportadora, IDOR de documento/comprovante, varredura de chaves proibidas, separação de credenciais |
 | Web portal | — | estados de carregamento/erro/vazio, correção pré-preenchida, idempotência do envio, ausência de jargão interno |
 | Web caixa de entrada | — | aceite sem redigitação, motivo obrigatório, conversão pendente visível |
 
