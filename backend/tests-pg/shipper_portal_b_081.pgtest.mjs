@@ -521,6 +521,8 @@ function registrar(pg) {
 
   // ---- documentos e compartilhamento --------------------------------------
 
+  // ---- documentos e compartilhamento --------------------------------------
+
   test('081 DOCUMENTO: documento da solicitação exige autor do MESMO embarcador', async () => {
     await fullSetup();
     const req = await criarSolicitacao();
@@ -543,58 +545,380 @@ function registrar(pg) {
     );
   });
 
-  test('081 COMPARTILHAMENTO: exige exatamente uma origem coerente com source_kind', async () => {
+  test('081 DOCUMENTO: solicitação de OUTRO embarcador não aceita documento (HIGH-02 §13)', async () => {
     await fullSetup();
-    // Nenhuma origem preenchida.
+    // Solicitação do embarcador Y, mas declarando shipper_org_id = X e autor X.
+    const reqY = await pool.query(
+      `INSERT INTO public.shipper_transport_requests
+         (empresa_id, shipper_org_id, relationship_id, reference_code, status, cargo_name,
+          destination_name, quantity_unit, created_by, submitted_at, submitted_snapshot)
+       VALUES ($1,$2,$3,'REQ-Y','SUBMITTED','Soja','Porto','ton',$4, now(), '{"t":1}'::jsonb)
+       RETURNING id`, [EMP_A, ORG_Y, REL_AY, USER_Y]);
+
+    await assert.rejects(
+      pool.query(
+        `INSERT INTO public.shipper_request_documents
+           (request_id, empresa_id, shipper_org_id, nome_documento, storage_path, enviado_por)
+         VALUES ($1,$2,$3,'Nota','portal/cross.pdf',$4)`,
+        [reqY.rows[0].id, EMP_A, ORG_X, USER_X],
+      ),
+      (e) => e.code === '23503',
+    );
+  });
+
+  // ---- HIGH-02: proveniência COMPLETA do compartilhamento -----------------
+  //
+  // Estes testes montam duas operações REAIS e completas dentro da MESMA
+  // transportadora (embarcador X e embarcador Y), cada uma com campanha, plano,
+  // viagem, frete, documento e evidência próprios. Sem fixture real não há como
+  // provar que o banco recusa a combinação errada — por isso nada aqui é
+  // pulado condicionalmente (§66): se a fixture falhar, o teste falha.
+
+  const UNIT_A = '08100000-0000-4000-a000-000000000601';
+  const DRIVER_A = '08100000-0000-4000-a000-000000000602';
+
+  // Cria uma operação inteira ligada a uma solicitação já aceita.
+  async function montarOperacao({ sufixo, orgId, relId, portalUserId, empresaId = EMP_A, unitId = UNIT_A }) {
+    const id = (n) => `08100000-0000-4000-a${sufixo}-0000000009${n}`;
+    const CAMP = id('01'); const PLAN = id('02'); const SCEN = id('03');
+    const ORIGIN = id('04'); const DEST = id('05'); const DEMAND = id('06');
+    const TRIP = id('07'); const FRETE = id('08'); const DOC = id('09'); const EPOD = id('10');
+    const EVID = id('11');
+
+    await pool.query(
+      `INSERT INTO public.operation_campaigns (id, empresa_id, reference_code, name, cargo_name, status, planning_status, created_by, approved_plan_version_id)
+       VALUES ($1,$2,$3,'Campanha','Soja','APPROVED','APPROVED',$4,NULL)`,
+      [CAMP, empresaId, `CAMP-${sufixo}`, ADM_A]);
+    await pool.query(
+      `INSERT INTO public.campaign_operational_units (empresa_id, campaign_id, unidade_operacional_id, created_by)
+       VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`, [empresaId, CAMP, unitId, ADM_A]);
+    await pool.query(
+      `INSERT INTO public.campaign_locations (id, empresa_id, campaign_id, kind, name, unidade_operacional_id, created_by)
+       VALUES ($1,$2,$3,'origin','Origem',$5,$4),($6,$2,$3,'destination','Destino',$5,$4)`,
+      [ORIGIN, empresaId, CAMP, ADM_A, unitId, DEST]);
+    await pool.query(
+      `INSERT INTO public.campaign_demands (id, empresa_id, campaign_id, origin_location_id, destination_location_id, cargo_name, target_quantity, quantity_unit, created_by)
+       VALUES ($1,$2,$3,$4,$5,'Soja',100,'ton',$6)`,
+      [DEMAND, empresaId, CAMP, ORIGIN, DEST, ADM_A]);
+    await pool.query(
+      `INSERT INTO public.campaign_plan_versions (id, empresa_id, campaign_id, version_number, status, rules_version, generated_by, approved_by, approved_at)
+       VALUES ($1,$2,$3,1,'APPROVED','081.test',$4,$4,now())`,
+      [PLAN, empresaId, CAMP, ADM_A]);
+    await pool.query(
+      `UPDATE public.operation_campaigns SET approved_plan_version_id=$1 WHERE id=$2`, [PLAN, CAMP]);
+    await pool.query(
+      `INSERT INTO public.campaign_plan_scenarios (id, empresa_id, campaign_id, plan_version_id, name, is_selected, created_by)
+       VALUES ($1,$2,$3,$4,'Cenario',true,$5)`, [SCEN, empresaId, CAMP, PLAN, ADM_A]).catch(() => {});
+    await pool.query(
+      `INSERT INTO public.campaign_planned_trips
+         (id, empresa_id, campaign_id, plan_version_id, scenario_id, origin_location_id, destination_location_id,
+          demand_id, planned_quantity, quantity_unit, required_capacity_kg, candidate_driver_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,100,'ton',10000,$9)`,
+      [TRIP, empresaId, CAMP, PLAN, SCEN, ORIGIN, DEST, DEMAND, DRIVER_A]);
+    await pool.query(
+      `INSERT INTO public.fretes (id, empresa_id, motorista_id, status, data)
+       VALUES ($1,$2,$3,'finalizado',now())`, [FRETE, empresaId, DRIVER_A]);
+    await pool.query(
+      `INSERT INTO public.campaign_trip_freights
+         (empresa_id, campaign_id, plan_version_id, planned_trip_id, frete_id, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6)`, [empresaId, CAMP, PLAN, TRIP, FRETE, ADM_A]);
+    await pool.query(
+      `INSERT INTO public.frete_documentos (id, frete_id, empresa_id, tipo, storage_path, criado_por)
+       VALUES ($1,$2,$3,'cte',$4,$5)`, [DOC, FRETE, empresaId, `f/${sufixo}/doc.pdf`, ADM_A]);
+    await pool.query(
+      `INSERT INTO public.frete_epod (id, frete_id, empresa_id, status, criado_por)
+       VALUES ($1,$2,$3,'validado',$4)`, [EPOD, FRETE, empresaId, ADM_A]);
+    await pool.query(
+      `INSERT INTO public.frete_epod_evidencias (id, epod_id, frete_id, empresa_id, tipo, storage_path, status, criado_por)
+       VALUES ($1,$2,$3,$4,'foto',$5,'aprovada',$6)`,
+      [EVID, EPOD, FRETE, empresaId, `e/${sufixo}/1.jpg`, ADM_A]);
+
+    // Solicitação aceita e vinculada a esta campanha.
+    const reqRes = await pool.query(
+      `INSERT INTO public.shipper_transport_requests
+         (empresa_id, shipper_org_id, relationship_id, reference_code, status, cargo_name,
+          destination_name, quantity_unit, created_by, submitted_at, submitted_snapshot,
+          accepted_snapshot, campaign_id, current_submission_version)
+       VALUES ($1,$2,$3,$4,'ACCEPTED','Soja','Porto','ton',$5, now(), '{"t":1}'::jsonb,
+               '{"t":1}'::jsonb, $6, 1) RETURNING id`,
+      [empresaId, orgId, relId, `SOL-${sufixo}`, portalUserId, CAMP]);
+
+    return { CAMP, PLAN, TRIP, FRETE, DOC, EVID, requestId: reqRes.rows[0].id, relId, orgId, empresaId };
+  }
+
+  async function setupDuasOperacoes() {
+    await fullSetup();
+    await pool.query(
+      `INSERT INTO public.unidades_operacionais (id, empresa_id, nome, status, is_default)
+       VALUES ($1,$2,'Unidade A','ativo',true) ON CONFLICT (id) DO NOTHING`, [UNIT_A, EMP_A]);
+    await pool.query(
+      `INSERT INTO public.usuarios (id, empresa_id, tipo, status, is_super_admin, nome)
+       VALUES ($1,$2,'motorista','ativo',false,'Driver A') ON CONFLICT (id) DO NOTHING`, [DRIVER_A, EMP_A]);
+    const x = await montarOperacao({ sufixo: '001', orgId: ORG_X, relId: REL_AX, portalUserId: USER_X });
+    const y = await montarOperacao({ sufixo: '002', orgId: ORG_Y, relId: REL_AY, portalUserId: USER_Y });
+    return { x, y };
+  }
+
+  function inserirShare(o, over = {}) {
+    const v = {
+      empresa_id: o.empresaId, shipper_org_id: o.orgId, relationship_id: o.relId,
+      request_id: o.requestId, campaign_id: o.CAMP, frete_id: o.FRETE,
+      source_kind: 'FRETE_DOCUMENTO', frete_documento_id: o.DOC, epod_evidencia_id: null,
+      titulo: 'CT-e', ...over,
+    };
+    return pool.query(
+      `INSERT INTO public.shipper_document_shares
+         (empresa_id, shipper_org_id, relationship_id, request_id, campaign_id, frete_id,
+          source_kind, frete_documento_id, epod_evidencia_id, titulo)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+      [v.empresa_id, v.shipper_org_id, v.relationship_id, v.request_id, v.campaign_id, v.frete_id,
+        v.source_kind, v.frete_documento_id, v.epod_evidencia_id, v.titulo],
+    );
+  }
+
+  test('081 PROVENIÊNCIA: compartilhamento coerente é aceito', async () => {
+    const { x } = await setupDuasOperacoes();
+    const r = await inserirShare(x);
+    assert.ok(r.rows[0].id);
+  });
+
+  test('081 PROVENIÊNCIA: documento do embarcador Y na solicitação do X é REJEITADO pelo banco', async () => {
+    // O caso central do HIGH-02: mesma transportadora, dois embarcadores.
+    // A aplicação já recusa; aqui provamos que o BANCO recusa sozinho.
+    const { x, y } = await setupDuasOperacoes();
+    await assert.rejects(
+      inserirShare(x, { frete_documento_id: y.DOC }),
+      (e) => e.code === '23503',
+    );
+    // Nem trocando o frete junto, porque o frete de Y não pertence à campanha de X.
+    await assert.rejects(
+      inserirShare(x, { frete_documento_id: y.DOC, frete_id: y.FRETE }),
+      (e) => e.code === '23503',
+    );
+  });
+
+  test('081 PROVENIÊNCIA: frete de OUTRA campanha é REJEITADO', async () => {
+    const { x, y } = await setupDuasOperacoes();
+    // Campanha de X com frete da campanha de Y.
+    await assert.rejects(
+      inserirShare(x, { frete_id: y.FRETE, frete_documento_id: y.DOC }),
+      (e) => e.code === '23503',
+    );
+    // E campanha de Y declarada numa solicitação de X.
+    await assert.rejects(
+      inserirShare(x, { campaign_id: y.CAMP }),
+      (e) => e.code === '23503',
+    );
+  });
+
+  test('081 PROVENIÊNCIA: documento de OUTRA transportadora é REJEITADO', async () => {
+    const { x } = await setupDuasOperacoes();
+    await pool.query(
+      `INSERT INTO public.unidades_operacionais (id, empresa_id, nome, status, is_default)
+       VALUES ($1,$2,'Unidade B','ativo',true) ON CONFLICT (id) DO NOTHING`,
+      ['08100000-0000-4000-a000-000000000701', EMP_B]);
+    await pool.query(
+      `INSERT INTO public.usuarios (id, empresa_id, tipo, status, is_super_admin, nome)
+       VALUES ($1,$2,'motorista','ativo',false,'Driver B') ON CONFLICT (id) DO NOTHING`,
+      ['08100000-0000-4000-a000-000000000702', EMP_B]);
+    const freteB = '08100000-0000-4000-a000-000000000703';
+    const docB = '08100000-0000-4000-a000-000000000704';
+    await pool.query(
+      `INSERT INTO public.fretes (id, empresa_id, motorista_id, status, data)
+       VALUES ($1,$2,$3,'finalizado',now())`, [freteB, EMP_B, '08100000-0000-4000-a000-000000000702']);
+    await pool.query(
+      `INSERT INTO public.frete_documentos (id, frete_id, empresa_id, tipo, storage_path, criado_por)
+       VALUES ($1,$2,$3,'cte','b/doc.pdf',$4)`, [docB, freteB, EMP_B, ADM_B]);
+
+    await assert.rejects(
+      inserirShare(x, { frete_documento_id: docB, frete_id: freteB }),
+      (e) => e.code === '23503',
+    );
+  });
+
+  test('081 PROVENIÊNCIA: evidência de ePOD segue a mesma cadeia', async () => {
+    const { x, y } = await setupDuasOperacoes();
+    // Coerente passa.
+    const ok = await inserirShare(x, {
+      source_kind: 'EPOD_EVIDENCIA', frete_documento_id: null, epod_evidencia_id: x.EVID, titulo: 'Comprovante',
+    });
+    assert.ok(ok.rows[0].id);
+    // Evidência do outro embarcador não.
+    await assert.rejects(
+      inserirShare(x, {
+        source_kind: 'EPOD_EVIDENCIA', frete_documento_id: null, epod_evidencia_id: y.EVID, titulo: 'Comprovante',
+      }),
+      (e) => e.code === '23503',
+    );
+  });
+
+  test('081 PROVENIÊNCIA: compartilhamento sem solicitação é impossível', async () => {
+    const { x } = await setupDuasOperacoes();
     await assert.rejects(
       pool.query(
         `INSERT INTO public.shipper_document_shares
-           (empresa_id, shipper_org_id, relationship_id, source_kind, titulo)
-         VALUES ($1,$2,$3,'FRETE_DOCUMENTO','CT-e')`, [EMP_A, ORG_X, REL_AX]),
+           (empresa_id, shipper_org_id, relationship_id, campaign_id, frete_id, source_kind, frete_documento_id, titulo)
+         VALUES ($1,$2,$3,$4,$5,'FRETE_DOCUMENTO',$6,'CT-e')`,
+        [x.empresaId, x.orgId, x.relId, x.CAMP, x.FRETE, x.DOC]),
+      (e) => e.code === '23502', // NOT NULL de request_id
+    );
+  });
+
+  test('081 COMPARTILHAMENTO: exige exatamente uma origem coerente com source_kind', async () => {
+    const { x } = await setupDuasOperacoes();
+    // Nenhuma origem preenchida.
+    await assert.rejects(
+      inserirShare(x, { frete_documento_id: null, epod_evidencia_id: null }),
+      (e) => e.code === '23514');
+    // Duas origens ao mesmo tempo.
+    await assert.rejects(
+      inserirShare(x, { epod_evidencia_id: x.EVID }),
       (e) => e.code === '23514');
   });
 
-  test('081 COMPARTILHAMENTO: não é possível compartilhar para relacionamento de outro embarcador', async () => {
-    await fullSetup();
-    // REL_AY pertence ao embarcador Y; tentar usá-lo declarando ORG_X.
-    await assert.rejects(
-      pool.query(
-        `INSERT INTO public.shipper_document_shares
-           (empresa_id, shipper_org_id, relationship_id, source_kind, epod_evidencia_id, titulo)
-         VALUES ($1,$2,$3,'EPOD_EVIDENCIA',gen_random_uuid(),'Comprovante')`, [EMP_A, ORG_X, REL_AY]),
-      (e) => e.code === '23503');
-  });
-
   test('081 COMPARTILHAMENTO: revogar libera novo compartilhamento do mesmo objeto', async () => {
-    await fullSetup();
-    // Um documento de frete real, para a FK ter alvo.
-    const frete = await pool.query(
-      `INSERT INTO public.fretes (empresa_id, motorista_id, origem, destino, status, quem_recebeu)
-       VALUES ($1,$2,'A','B','finalizado','proprietario') RETURNING id`, [EMP_A, ADM_A])
-      .catch(() => null);
-    if (!frete) return; // schema de fretes divergente no harness: teste de FK já coberto acima.
-
-    const doc = await pool.query(
-      `INSERT INTO public.frete_documentos (frete_id, empresa_id, tipo, storage_path, criado_por)
-       VALUES ($1,$2,'cte','fretes/doc.pdf',$3) RETURNING id`, [frete.rows[0].id, EMP_A, ADM_A]);
-
-    const ins = `INSERT INTO public.shipper_document_shares
-        (empresa_id, shipper_org_id, relationship_id, source_kind, frete_documento_id, titulo, shared_by)
-      VALUES ($1,$2,$3,'FRETE_DOCUMENTO',$4,'CT-e',$5) RETURNING id`;
-    const p = [EMP_A, ORG_X, REL_AX, doc.rows[0].id, ADM_A];
-    const primeiro = await pool.query(ins, p);
-
-    // Segundo compartilhamento ATIVO do mesmo objeto para o mesmo relacionamento: barrado.
-    await assert.rejects(pool.query(ins, p), (e) => e.code === '23505');
+    const { x } = await setupDuasOperacoes();
+    const primeiro = await inserirShare(x);
+    // Segundo compartilhamento ATIVO do mesmo objeto: barrado.
+    await assert.rejects(inserirShare(x), (e) => e.code === '23505');
 
     await pool.query(
       `UPDATE public.shipper_document_shares SET status='REVOKED', revoked_at=now() WHERE id=$1`,
       [primeiro.rows[0].id]);
-    // Depois de revogar, recompartilhar é possível — e o histórico da revogação fica.
-    await pool.query(ins, p);
+    // Depois de revogar, recompartilhar é possível — e o histórico fica.
+    await inserirShare(x);
     const { rows } = await pool.query(
-      `SELECT count(*)::int AS n FROM public.shipper_document_shares WHERE frete_documento_id=$1`, [doc.rows[0].id]);
+      `SELECT count(*)::int AS n FROM public.shipper_document_shares WHERE frete_documento_id=$1`, [x.DOC]);
     assert.equal(rows[0].n, 2, 'compartilhamento revogado permanece como historico');
+  });
+
+  // ---- HIGH-03: imutabilidade do histórico e autoridade do snapshot -------
+
+  test('081 IMUTABILIDADE: snapshot de uma submissão não pode ser alterado', async () => {
+    await fullSetup();
+    const req = await criarSolicitacao();
+    await assert.rejects(
+      pool.query(
+        `UPDATE public.shipper_transport_request_submissions
+         SET snapshot = '{"total_quantidade": 999}'::jsonb WHERE request_id=$1 AND version=1`, [req.id]),
+      (e) => /submission_history_immutable/.test(e.message),
+    );
+  });
+
+  test('081 IMUTABILIDADE: versão, autoria e instante de envio são congelados', async () => {
+    await fullSetup();
+    const req = await criarSolicitacao();
+    for (const sql of [
+      `UPDATE public.shipper_transport_request_submissions SET version = 9 WHERE request_id=$1`,
+      `UPDATE public.shipper_transport_request_submissions SET submitted_by = NULL WHERE request_id=$1`,
+      `UPDATE public.shipper_transport_request_submissions SET submitted_at = now() - interval '5 days' WHERE request_id=$1`,
+      `UPDATE public.shipper_transport_request_submissions SET request_id = gen_random_uuid() WHERE request_id=$1`,
+    ]) {
+      await assert.rejects(pool.query(sql, [req.id]), (e) => /submission_history_immutable/.test(e.message));
+    }
+  });
+
+  test('081 IMUTABILIDADE: DELETE de submissão é proibido', async () => {
+    await fullSetup();
+    const req = await criarSolicitacao();
+    await assert.rejects(
+      pool.query(`DELETE FROM public.shipper_transport_request_submissions WHERE request_id=$1`, [req.id]),
+      (e) => /submission_history_delete_forbidden/.test(e.message),
+    );
+  });
+
+  test('081 IMUTABILIDADE: a decisão é de mão única — não se troca ACCEPTED por REJECTED', async () => {
+    await fullSetup();
+    const req = await criarSolicitacao();
+    await pool.query(`SELECT * FROM public.shipper_request_accept($1,$2,$3,NULL)`, [EMP_A, req.id, ADM_A]);
+
+    await assert.rejects(
+      pool.query(
+        `UPDATE public.shipper_transport_request_submissions
+         SET decision='REJECTED' WHERE request_id=$1 AND version=1`, [req.id]),
+      (e) => /submission_decision_already_final/.test(e.message),
+    );
+    await assert.rejects(
+      pool.query(
+        `UPDATE public.shipper_transport_request_submissions
+         SET decision_reason='outro motivo' WHERE request_id=$1 AND version=1`, [req.id]),
+      (e) => /submission_decision_already_final/.test(e.message),
+    );
+  });
+
+  test('081 IMUTABILIDADE: a PRIMEIRA decisão é permitida e precisa ser datada', async () => {
+    await fullSetup();
+    const req = await criarSolicitacao();
+    // NULL -> CHANGES_REQUESTED com instante: permitido.
+    await pool.query(
+      `UPDATE public.shipper_transport_request_submissions
+       SET decision='CHANGES_REQUESTED', decided_at=now() WHERE request_id=$1 AND version=1`, [req.id]);
+    const { rows } = await pool.query(
+      `SELECT decision FROM public.shipper_transport_request_submissions WHERE request_id=$1`, [req.id]);
+    assert.equal(rows[0].decision, 'CHANGES_REQUESTED');
+  });
+
+  test('081 IMUTABILIDADE: decisão sem instante é recusada', async () => {
+    await fullSetup();
+    const req = await criarSolicitacao();
+    await assert.rejects(
+      pool.query(
+        `UPDATE public.shipper_transport_request_submissions
+         SET decision='ACCEPTED' WHERE request_id=$1 AND version=1`, [req.id]),
+      (e) => /submission_decision_requires_timestamp|shipper_transport_request_submissions_check/.test(e.message),
+    );
+  });
+
+  test('081 SNAPSHOT: aceite IGNORA o snapshot fornecido e usa o que está gravado', async () => {
+    // O teste do §34: o envio real foi 100; a chamada tenta declarar 999.
+    await fullSetup();
+    const req = await criarSolicitacao({ origins: [{ nome: 'Fazenda 1', quantidade: 100 }] });
+    const { rows } = await pool.query(
+      `SELECT * FROM public.shipper_request_accept($1,$2,$3,'{"total_quantidade": 999}'::jsonb)`,
+      [EMP_A, req.id, ADM_A]);
+
+    assert.equal(Number(rows[0].accepted_snapshot.total_quantidade), 100,
+      'o snapshot aceito precisa ser o que o embarcador enviou, nunca o que a chamada declarou');
+    assert.notEqual(Number(rows[0].accepted_snapshot.total_quantidade), 999);
+  });
+
+  test('081 SNAPSHOT: aceite usa a versão CORRENTE após reenvio', async () => {
+    await fullSetup();
+    const req = await criarSolicitacao({ origins: [{ nome: 'Fazenda 1', quantidade: 100 }] });
+    await pedirAjustes(req.id);
+    await reenviar(req.id, { origins: [{ nome: 'Fazenda 1', quantidade: 150 }] });
+    const { rows } = await pool.query(
+      `SELECT * FROM public.shipper_request_accept($1,$2,$3,'{"total_quantidade": 1}'::jsonb)`,
+      [EMP_A, req.id, ADM_A]);
+    assert.equal(Number(rows[0].accepted_snapshot.total_quantidade), 150, 'usa a v2, não a v1 nem o valor fornecido');
+  });
+
+  test('081 CARIMBO: decisão sem versão corrente correspondente falha fechada', async () => {
+    await fullSetup();
+    const req = await criarSolicitacao();
+    // Aponta a solicitação para uma versão que não existe no histórico.
+    await pool.query(
+      `UPDATE public.shipper_transport_requests SET current_submission_version = 7 WHERE id=$1`, [req.id]);
+    await assert.rejects(
+      pool.query(`SELECT * FROM public.shipper_request_accept($1,$2,$3,NULL)`, [EMP_A, req.id, ADM_A]),
+      (e) => /current_submission_missing/.test(e.message),
+    );
+    // A solicitação NÃO pode ter ficado aceita.
+    const { rows } = await pool.query(`SELECT status FROM public.shipper_transport_requests WHERE id=$1`, [req.id]);
+    assert.equal(rows[0].status, 'SUBMITTED');
+  });
+
+  test('081 CARIMBO: rejeitar também exige carimbar exatamente uma versão', async () => {
+    await fullSetup();
+    const req = await criarSolicitacao();
+    await pool.query(
+      `UPDATE public.shipper_transport_requests SET current_submission_version = 7 WHERE id=$1`, [req.id]);
+    await assert.rejects(
+      pool.query(`SELECT * FROM public.shipper_request_decide($1,$2,$3,'REJECTED','motivo')`, [EMP_A, req.id, ADM_A]),
+      (e) => /submission_decision_stamp_failed/.test(e.message),
+    );
+    const { rows } = await pool.query(`SELECT status FROM public.shipper_transport_requests WHERE id=$1`, [req.id]);
+    assert.equal(rows[0].status, 'SUBMITTED', 'sem evidência carimbada, o estado não muda');
   });
 
   // ---- permissões ---------------------------------------------------------
