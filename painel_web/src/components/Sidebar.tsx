@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Users, FileText, Truck, ChevronLeft, ChevronRight, Upload, X, Check, Trash2, Settings, UserCircle, Receipt, History, Building2, DollarSign, Bell, Plug, ClipboardList, Ticket, TrendingUp, TowerControl, Boxes, FileSignature, CreditCard, Network, ShieldCheck, Route as RouteIcon } from 'lucide-react';
+import { LayoutDashboard, Users, FileText, Truck, ChevronLeft, ChevronRight, Upload, X, Check, Trash2, Settings, UserCircle, Receipt, History, Building2, DollarSign, Bell, Plug, ClipboardList, Ticket, TrendingUp, TowerControl, Boxes, FileSignature, CreditCard, Network, ShieldCheck, Inbox, Route as RouteIcon } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useContratacaoStatus } from '../hooks/useContratacaoStatus';
 import { usePortalGovernanca } from '../hooks/usePortalGovernanca';
@@ -178,6 +178,12 @@ export const Sidebar: React.FC = () => {
       { to: '/relatorios/viagens', icon: Truck, label: 'Gerenciamento de Fretes' },
       ...(can('fleet.view') ? [
         { to: '/frota', icon: Boxes, label: 'Frota' },
+      ] : []),
+      // Trabalho que CHEGA de fora fica junto do trabalho operacional, logo
+      // antes de Campanhas — que é exatamente no que uma solicitação aceita se
+      // transforma. Só aparece para quem tem a permissão de revisão.
+      ...(can('shipper_portal.requests.review') ? [
+        { to: '/solicitacoes-embarcadores', icon: Inbox, label: 'Solicitações de Embarcadores' },
       ] : []),
       ...(can('campaign.view') ? [
         { to: '/campanhas-escoamento', icon: ClipboardList, label: 'Campanhas de Escoamento' },

@@ -125,6 +125,10 @@ function projetarRequestParaPortal(row, origens = []) {
     submitted_at: row.submitted_at,
     decided_at: row.decided_at,
     decision_reason: row.decision_reason,
+    // Versão corrente: o portal devolve no reenvio como `expected_version`, o
+    // que impede sobrescrever uma correção feita por outra pessoa da empresa.
+    versao_atual: row.current_submission_version ?? null,
+    revisoes: row.revision_count ?? 0,
     // campaign_id/decided_by/snapshots NÃO são expostos: são autoridade interna.
     operacao_criada: Boolean(row.campaign_id),
   };
@@ -195,6 +199,16 @@ function mapRpcError(error) {
       status: 409,
       code: 'request_not_cancellable',
       message: 'Esta solicitação já foi decidida pela transportadora e não pode mais ser cancelada por aqui. Fale com a transportadora.',
+    },
+    request_not_revisable: {
+      status: 409,
+      code: 'request_not_revisable',
+      message: 'Esta solicitação não está aguardando correção. Atualize a página para ver a situação atual.',
+    },
+    request_version_conflict: {
+      status: 409,
+      code: 'request_version_conflict',
+      message: 'Esta solicitação foi alterada enquanto você editava. Atualize a página e refaça a correção.',
     },
   };
   const known = mapa[code];
@@ -271,12 +285,77 @@ async function cancelarSolicitacao(supabase, { portalUserId, requestId, motivo }
   return projetarRequestParaPortal(cancelada, await carregarOrigens(supabase, requestId));
 }
 
+// Correção e reenvio (PORTAL-B). A transportadora pediu ajustes; o embarcador
+// corrige e reenvia. A submissão anterior NÃO é sobrescrita: vira a versão
+// anterior no histórico, com o motivo do pedido de ajuste carimbado nela.
+//
+// `expected_version` é controle otimista: se o portal estava exibindo a v2 e o
+// banco já foi para a v3, o reenvio falha em vez de sobrescrever silenciosamente
+// uma correção que outra pessoa da mesma empresa acabou de mandar.
+async function revisarSolicitacao(supabase, { portalUserId, requestId, body = {} }) {
+  const context = await loadPortalContext(supabase, { portalUserId });
+  const atual = await requireOwnedRequest(supabase, context, requestId);
+
+  const unidadeCanonica = unidade(body.quantity_unit || atual.quantity_unit);
+  const origens = normalizarOrigens(body.origins, unidadeCanonica);
+
+  const { data, error } = await supabase.rpc('shipper_request_revise_and_resubmit', {
+    p_shipper_org_id: context.shipperOrgId,
+    p_request_id: requestId,
+    p_portal_user_id: portalUserId,
+    p_cargo_name: texto(body.cargo_name, 'o que será transportado', { obrigatorio: false }) || atual.cargo_name,
+    p_destination_name: texto(body.destination_name, 'o destino', { obrigatorio: false }) || atual.destination_name,
+    p_quantity_unit: unidadeCanonica,
+    p_window_start: body.window_start || null,
+    p_window_end: body.window_end || null,
+    p_notes: texto(body.notes, 'as observações', { obrigatorio: false, max: 2000 }),
+    p_origins: origens.map((o) => ({ nome: o.nome, quantidade: o.quantidade })),
+    p_expected_version: Number.isInteger(body.expected_version) ? body.expected_version : null,
+  });
+  if (error) throw mapRpcError(error);
+  const revisada = Array.isArray(data) ? data[0] : data;
+  return projetarRequestParaPortal(revisada, await carregarOrigens(supabase, requestId));
+}
+
+// Histórico de envios de UMA solicitação, para o embarcador entender o que ele
+// mandou antes e por que foi devolvido. Projeção enxuta: o snapshot completo de
+// versões antigas não é despejado na tela — só o essencial para reconhecer a
+// versão e a decisão que ela recebeu.
+async function historicoDaSolicitacao(supabase, { portalUserId, requestId }) {
+  const context = await loadPortalContext(supabase, { portalUserId });
+  await requireOwnedRequest(supabase, context, requestId);
+
+  const { data, error } = await supabase
+    .from('shipper_transport_request_submissions')
+    .select('version, snapshot, submitted_at, decision, decision_reason, decided_at')
+    .eq('request_id', requestId)
+    .order('version', { ascending: false });
+  throwDb(error, 'Não foi possível carregar o histórico da solicitação.');
+
+  return {
+    itens: (data || []).map((s) => ({
+      versao: s.version,
+      enviada_em: s.submitted_at,
+      cargo_name: s.snapshot?.cargo_name || null,
+      destination_name: s.snapshot?.destination_name || null,
+      quantity_unit: s.snapshot?.quantity_unit || null,
+      total_quantidade: s.snapshot?.total_quantidade ?? null,
+      origens: (s.snapshot?.origins || []).map((o) => ({ nome: o.nome, quantidade: Number(o.quantidade) })),
+      decisao: s.decision,
+      motivo: s.decision_reason,
+      decidida_em: s.decided_at,
+    })),
+  };
+}
+
 module.exports = {
   ShipperPortalError,
   criarSolicitacao,
   listarMinhasSolicitacoes,
   obterMinhaSolicitacao,
   cancelarSolicitacao,
+  revisarSolicitacao,
+  historicoDaSolicitacao,
   normalizarOrigens,
   montarSnapshot,
   projetarRequestParaPortal,

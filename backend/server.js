@@ -187,6 +187,15 @@ app.use('/ai', require('./routes/ai'));
 // Route Intelligence V1 — estimativa de rota read-only, provider-agnostic. Default
 // inerte (ROUTE_PROVIDER_MODE=disabled); entrada manual sempre funciona; sem provider real.
 app.use('/route-intelligence', require('./routes/routeIntelligence'));
+// Portal do Embarcador (E3.5). Duas superfícies deliberadamente separadas:
+//   * /portal/embarcador  → EXTERNA. Sessão de portal (token_kind='shipper_portal'),
+//     nunca `verificarEmpresa`. A autorização é identidade externa + relacionamento
+//     ativo + objeto dentro daquele relacionamento — tenant sozinho não autoriza.
+//   * /shipper-inbox      → INTERNA. Sessão da transportadora, tenant, entitlement,
+//     permissão efetiva e escopo operacional, como qualquer rota interna.
+// As duas nunca compartilham contexto: o token de uma é recusado pela outra.
+app.use('/portal/embarcador', require('./routes/shipperPortal'));
+app.use('/shipper-inbox', require('./routes/shipperInbox'));
 
 // Tratamento de erros de upload (multer). Mapeia tamanho/MIME para respostas
 // JSON controladas; erros não relacionados seguem para o próximo handler.

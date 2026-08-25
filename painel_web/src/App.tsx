@@ -6,6 +6,8 @@ import { SuperAdminRoute } from './components/SuperAdminRoute';
 import { PermissionRoute } from './components/PermissionRoute';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Layout } from './components/Layout';
+import PortalApp from './portal/PortalApp';
+import { SolicitacoesEmbarcador } from './pages/SolicitacoesEmbarcador';
 import { Login } from './pages/Login';
 import { Dashboard } from './pages/Dashboard';
 import { Motoristas } from './pages/Motoristas';
@@ -97,6 +99,14 @@ const AppRoutes = () => {
         <Route path="operacional" element={<Operacional />} />
         <Route path="frota" element={<PermissionRoute permission="fleet.view"><Frota /></PermissionRoute>} />
         <Route path="campanhas-escoamento" element={<OperationCampaigns />} />
+        <Route
+          path="solicitacoes-embarcadores"
+          element={(
+            <PermissionRoute permission="shipper_portal.requests.review">
+              <SolicitacoesEmbarcador />
+            </PermissionRoute>
+          )}
+        />
         <Route path="painel-administrativo">
           <Route index element={<Navigate to="visao-geral" replace />} />
           <Route path="visao-geral" element={<SuperAdminRoute><PainelVisaoGeral /></SuperAdminRoute>} />
@@ -135,11 +145,24 @@ const AppRoutes = () => {
 
 function App() {
   return (
-    <AuthProvider>
-      <Router>
-        <AppRoutes />
-      </Router>
-    </AuthProvider>
+    <Router>
+      <Routes>
+        {/* Portal do Embarcador (E3.5). Fica FORA do AuthProvider interno de
+            propósito: o embarcador é um usuário externo e não deve nem disparar
+            `/auth/me` da transportadora, muito menos herdar sessão/tenant dela.
+            O portal traz o próprio provider de sessão e o próprio cliente HTTP.
+            As duas árvores coexistem sem se misturar. */}
+        <Route path="/portal/embarcador/*" element={<PortalApp />} />
+        <Route
+          path="*"
+          element={(
+            <AuthProvider>
+              <AppRoutes />
+            </AuthProvider>
+          )}
+        />
+      </Routes>
+    </Router>
   );
 }
 

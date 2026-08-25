@@ -30,6 +30,8 @@ function mapRpcError(error) {
     relationship_not_active: { status: 409, code: 'relationship_not_active', message: 'O acesso deste embarcador foi revogado. Reative o acesso antes de aceitar a solicitação.' },
     request_not_accepted: { status: 409, code: 'request_not_accepted', message: 'A solicitação precisa ser aceita antes de virar operação.' },
     request_already_linked_to_another_campaign: { status: 409, code: 'request_already_linked', message: 'Esta solicitação já está vinculada a outra operação.' },
+    decision_reason_required: { status: 400, code: 'decision_reason_required', message: 'Informe o motivo para o embarcador entender a decisão.' },
+    invalid_decision: { status: 400, code: 'invalid_decision', message: 'Decisão inválida.' },
   };
   const known = mapa[code];
   if (known) return new ShipperPortalError(known.message, { status: known.status, code: known.code });
@@ -98,11 +100,40 @@ async function listarCaixaDeEntrada(supabase, { empresaId, status = null }) {
     porRequest.get(o.request_id).push(o);
   }
 
-  const itens = rows.map((r) => projetarParaTransportadora(r, porRequest.get(r.id) || []));
+  const itens = rows.map((r) => ({
+    ...projetarParaTransportadora(r, porRequest.get(r.id) || []),
+    versao_atual: r.current_submission_version ?? null,
+    revisoes: r.revision_count ?? 0,
+    // Aceita mas sem operação criada: a conversão falhou e alguém precisa
+    // reprocessar. É trabalho interno, e a caixa de entrada precisa mostrá-lo —
+    // caso contrário fica invisível e o embarcador espera para sempre (§44).
+    conversao_pendente: r.status === 'ACCEPTED' && !r.campaign_id,
+  }));
+
+  // Agrupamento por AÇÃO, não por status cru (§39/§87). A caixa de entrada
+  // responde "o que preciso fazer", não "quantos registros existem".
+  const novas = itens.filter((i) => i.status === 'SUBMITTED' && (i.revisoes || 0) === 0);
+  const reenviadas = itens.filter((i) => i.status === 'SUBMITTED' && (i.revisoes || 0) > 0);
+  const conversaoPendente = itens.filter((i) => i.conversao_pendente);
+  const convertidas = itens.filter((i) => i.status === 'ACCEPTED' && i.campaign_id);
+  const aguardandoEmbarcador = itens.filter((i) => i.status === 'CHANGES_REQUESTED');
+  const encerradas = itens.filter((i) => ['REJECTED', 'CANCELLED'].includes(i.status));
+
   return {
     itens,
+    grupos: {
+      novas_solicitacoes: novas,
+      ajustes_reenviados: reenviadas,
+      conversao_pendente: conversaoPendente,
+      aguardando_embarcador: aguardandoEmbarcador,
+      convertidas_em_operacao: convertidas,
+      encerradas,
+    },
     resumo: {
-      aguardando_decisao: itens.filter((i) => i.status === 'SUBMITTED').length,
+      aguardando_decisao: novas.length + reenviadas.length,
+      novas_solicitacoes: novas.length,
+      ajustes_reenviados: reenviadas.length,
+      conversao_pendente: conversaoPendente.length,
       total: itens.length,
     },
   };
@@ -202,9 +233,20 @@ async function aceitarSolicitacao(supabase, { empresaId, requestId, user, operat
   };
 }
 
+// Rejeitar ou pedir ajustes. Passou a ser ATÔMICO na RPC (PORTAL-B).
+//
+// Antes isto era um UPDATE condicional na aplicação: lia o status, e depois
+// atualizava com `.eq('status','SUBMITTED')`. Isso protegia contra outra
+// rejeição simultânea, mas NÃO travava a linha — o aceite e o cancelamento
+// podiam ler o mesmo 'SUBMITTED' e seguir caminhos concorrentes. Agora todas as
+// decisões disputam o MESMO `FOR UPDATE`, então existe uma ordem serial única.
+//
+// A decisão também é carimbada na VERSÃO avaliada, e não só na solicitação —
+// é isso que permite, depois de um reenvio, saber que o pedido de ajuste se
+// referia à v1 e não à v2.
 async function decidirSemAceite(supabase, { empresaId, requestId, user, novoStatus, motivo }) {
-  const permitidos = { REJECTED: 'rejeitar', CHANGES_REQUESTED: 'solicitar ajustes' };
-  if (!permitidos[novoStatus]) {
+  const permitidos = ['REJECTED', 'CHANGES_REQUESTED'];
+  if (!permitidos.includes(novoStatus)) {
     throw new ShipperPortalError('Decisão inválida.', { status: 400, code: 'invalid_decision' });
   }
   const razao = typeof motivo === 'string' ? motivo.trim().slice(0, 500) : '';
@@ -213,32 +255,74 @@ async function decidirSemAceite(supabase, { empresaId, requestId, user, novoStat
       status: 400, code: 'decision_reason_required',
     });
   }
-  const { data: atual, error: readError } = await supabase
-    .from('shipper_transport_requests').select('status')
-    .eq('empresa_id', empresaId).eq('id', requestId).maybeSingle();
-  throwDb(readError, 'Não foi possível carregar a solicitação.');
-  if (!atual) throw new ShipperPortalError('Solicitação não encontrada.', { status: 404, code: 'request_not_found' });
-  if (atual.status !== 'SUBMITTED') {
-    throw new ShipperPortalError('Esta solicitação não está mais aguardando decisão.', {
-      status: 409, code: 'request_not_acceptable',
-    });
+
+  const { data, error } = await supabase.rpc('shipper_request_decide', {
+    p_empresa_id: empresaId,
+    p_request_id: requestId,
+    p_actor_id: userId(user),
+    p_new_status: novoStatus,
+    p_reason: razao,
+  });
+  if (error) throw mapRpcError(error);
+  const decidida = Array.isArray(data) ? data[0] : data;
+  return projetarParaTransportadora(decidida);
+}
+
+// Histórico completo de envios, para o operador ver o que mudou entre a versão
+// que ele devolveu e a que chegou agora — sem precisar comparar de cabeça.
+async function historicoDaSolicitacao(supabase, { empresaId, requestId }) {
+  const { data: request, error: reqError } = await supabase
+    .from('shipper_transport_requests').select('id')
+    .eq('id', requestId).eq('empresa_id', empresaId).maybeSingle();
+  throwDb(reqError, 'Não foi possível carregar a solicitação.');
+  if (!request) {
+    throw new ShipperPortalError('Solicitação não encontrada.', { status: 404, code: 'request_not_found' });
   }
 
   const { data, error } = await supabase
-    .from('shipper_transport_requests')
-    .update({
-      status: novoStatus, decided_at: new Date().toISOString(), decided_by: userId(user),
-      decision_reason: razao, updated_at: new Date().toISOString(),
-    })
-    .eq('empresa_id', empresaId).eq('id', requestId).eq('status', 'SUBMITTED')
-    .select('*').maybeSingle();
-  throwDb(error, 'Não foi possível registrar a decisão.');
-  if (!data) {
-    throw new ShipperPortalError('Esta solicitação acabou de ser decidida por outra pessoa.', {
-      status: 409, code: 'request_not_acceptable',
+    .from('shipper_transport_request_submissions')
+    .select('version, snapshot, submitted_at, decision, decision_reason, decided_at')
+    .eq('request_id', requestId)
+    .order('version', { ascending: false });
+  throwDb(error, 'Não foi possível carregar o histórico da solicitação.');
+
+  return {
+    itens: (data || []).map((s) => ({
+      versao: s.version,
+      enviada_em: s.submitted_at,
+      cargo_name: s.snapshot?.cargo_name || null,
+      destination_name: s.snapshot?.destination_name || null,
+      quantity_unit: s.snapshot?.quantity_unit || null,
+      total_quantidade: s.snapshot?.total_quantidade ?? null,
+      origens: (s.snapshot?.origins || []).map((o) => ({ nome: o.nome, quantidade: Number(o.quantidade) })),
+      decisao: s.decision,
+      motivo: s.decision_reason,
+      decidida_em: s.decided_at,
+    })),
+  };
+}
+
+// Retentativa da conversão quando a fase 1 (aceite) passou mas a fase 2
+// (criar/vincular a Campanha) falhou (§44/§91). Reusa `aceitarSolicitacao`, que
+// é idempotente: a RPC de aceite devolve a solicitação já aceita sem reescrever
+// nada, e a criação do objetivo usa o mesmo `client_request_id` — então não há
+// como duplicar Campanha.
+async function reconverterSolicitacao(supabase, opcoes) {
+  const { empresaId, requestId } = opcoes;
+  const { data, error } = await supabase
+    .from('shipper_transport_requests').select('status, campaign_id')
+    .eq('id', requestId).eq('empresa_id', empresaId).maybeSingle();
+  throwDb(error, 'Não foi possível carregar a solicitação.');
+  if (!data) throw new ShipperPortalError('Solicitação não encontrada.', { status: 404, code: 'request_not_found' });
+  if (data.status !== 'ACCEPTED') {
+    throw new ShipperPortalError('Só é possível criar a operação de uma solicitação aceita.', {
+      status: 409, code: 'request_not_accepted',
     });
   }
-  return projetarParaTransportadora(data);
+  if (data.campaign_id) {
+    return { campaign_id: data.campaign_id, criada_agora: false, ja_existia: true };
+  }
+  return aceitarSolicitacao(supabase, opcoes);
 }
 
 module.exports = {
@@ -246,6 +330,8 @@ module.exports = {
   obterSolicitacao,
   aceitarSolicitacao,
   decidirSemAceite,
+  historicoDaSolicitacao,
+  reconverterSolicitacao,
   snapshotParaObjetivo,
   projetarParaTransportadora,
   mapRpcError,

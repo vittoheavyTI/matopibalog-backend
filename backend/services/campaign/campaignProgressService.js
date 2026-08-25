@@ -35,6 +35,16 @@ function round3(n) {
   return Math.round((Number(n) || 0) * 1000) / 1000;
 }
 
+// Demanda residual — a fórmula canônica, num lugar só.
+//
+// O ponto que ela protege: quantidade CANCELADA não abate a demanda. Se o alvo
+// é 100 e 70 foram cancelados, o residual continua 70 — a carga do cliente não
+// deixou de precisar ser transportada porque a viagem foi cancelada. Só entrega
+// concluída abate.
+function calcularRestanteTon(targetTon, completedTon) {
+  return Math.max(0, (Number(targetTon) || 0) - (Number(completedTon) || 0));
+}
+
 function throwDb(error) {
   if (!error) return;
   if (error.code === '42P01') {
@@ -403,7 +413,7 @@ async function getCampaignProgress(supabase, { empresaId, campaignId, operationa
   // ---- Quantidade (§21/§22) — fonte = quantidade planejada do frete ---------
   const targetTon = demands.reduce((sum, d) => sum + toTon(d.target_quantity, d.quantity_unit).value, 0);
   const demandIncompatible = demands.some((d) => !toTon(d.target_quantity, d.quantity_unit).compatible);
-  const remainingTon = Math.max(0, targetTon - completedQtyTon);
+  const remainingTon = calcularRestanteTon(targetTon, completedQtyTon);
 
   const quantity = {
     unit: 'ton',
@@ -442,8 +452,199 @@ async function getCampaignProgress(supabase, { empresaId, campaignId, operationa
   };
 }
 
+// ============================================================================
+// Resumo de quantidade SEM escopo operacional — para consumidores externos
+// ============================================================================
+//
+// Existe porque o Portal do Embarcador precisa da MESMA verdade de quantidade,
+// mas não pode passar por `getCampaignProgress`: aquela função exige
+// `operationalScope`, que é a fronteira de um usuário INTERNO. O embarcador não
+// tem (nem deve ter) escopo operacional — a fronteira dele é outra, provada
+// antes pela proveniência da solicitação. Fabricar um escopo sintético só para
+// atravessar a checagem seria inventar autoridade interna.
+//
+// O que esta função NÃO é: um segundo calculador. Ela usa as mesmas primitivas
+// (`toTon`, `freightStatusToBucket`, `ACTIVE_MATERIALIZATION`) e a mesma fórmula
+// de residual (`calcularRestanteTon`). Um teste congela a equivalência numérica
+// com `getCampaignProgress` para o mesmo cenário — se as duas divergirem, quebra.
+//
+// Quem chama é responsável por já ter provado que pode ver esta campanha.
+function resumoVazio(motivo) {
+  return {
+    conclusivo: false,
+    motivo,
+    target: 0, completed: 0, cancelled: 0, remaining: 0,
+    trips: { total: 0, completed: 0, cancelled: 0, in_execution: 0, unknown: 0, blocked: 0, not_materialized: 0 },
+  };
+}
+
+// Núcleo PURO da classificação de quantidade. Uma implementação só, usada pela
+// versão individual e pela versão em lote — não há dois lugares onde a regra
+// possa divergir.
+function resumirQuantidade({ trips, activeLinkByTrip, fretesById, demands }) {
+  const counts = { total: trips.length, completed: 0, cancelled: 0, in_execution: 0, unknown: 0, blocked: 0, not_materialized: 0 };
+  let completedTon = 0; let cancelledTon = 0;
+  let unidadesIncompativeis = false;
+
+  for (const trip of trips) {
+    const q = toTon(trip.planned_quantity, trip.quantity_unit);
+    if (!q.compatible) unidadesIncompativeis = true;
+
+    if (trip.status === 'BLOCKED') { counts.blocked += 1; continue; }
+    const link = activeLinkByTrip.get(trip.id);
+    if (!link) { counts.not_materialized += 1; continue; }
+
+    const freight = fretesById.get(link.frete_id) || null;
+    const bucket = freight ? freightStatusToBucket(freight.status) : EXECUTION_BUCKET.UNKNOWN;
+    if (bucket === EXECUTION_BUCKET.COMPLETED) { counts.completed += 1; completedTon += q.value; }
+    else if (bucket === EXECUTION_BUCKET.CANCELLED) { counts.cancelled += 1; cancelledTon += q.value; }
+    else if (bucket === EXECUTION_BUCKET.IN_EXECUTION) { counts.in_execution += 1; }
+    else { counts.unknown += 1; }
+  }
+
+  const targetTon = demands.reduce((s, d) => s + toTon(d.target_quantity, d.quantity_unit).value, 0);
+  const demandaIncompativel = demands.some((d) => !toTon(d.target_quantity, d.quantity_unit).compatible);
+
+  // Conclusivo só quando a medição é confiável. Sem demanda declarada, ou com
+  // unidade fora do domínio de massa, "restante = 0" não significa entregue —
+  // significa que não sabemos medir.
+  const conclusivo = targetTon > 0 && !unidadesIncompativeis && !demandaIncompativel;
+
+  return {
+    conclusivo,
+    motivo: conclusivo ? null : (targetTon > 0 ? 'UNIDADE_INCOMPATIVEL' : 'SEM_DEMANDA_DECLARADA'),
+    target: round3(targetTon),
+    completed: round3(completedTon),
+    cancelled: round3(cancelledTon),
+    remaining: round3(calcularRestanteTon(targetTon, completedTon)),
+    trips: counts,
+  };
+}
+
+// Versão em LOTE. O portal lista até 100 operações de uma vez; pedir o resumo
+// campanha a campanha seria N+1 (§137). Aqui são 4 consultas no total,
+// independentemente de quantas campanhas.
+async function getCampaignQuantitySummaryBatch(supabase, { empresaId, campaignIds = [] } = {}) {
+  const resultado = new Map();
+  const ids = [...new Set((campaignIds || []).filter(Boolean))];
+  if (!ids.length) return resultado;
+
+  const { data: campaigns, error: campaignError } = await supabase
+    .from('operation_campaigns').select('id, status, approved_plan_version_id')
+    .eq('empresa_id', empresaId).in('id', ids);
+  throwDb(campaignError);
+
+  const aprovadas = (campaigns || []).filter((c) => c.status === 'APPROVED' && c.approved_plan_version_id);
+  for (const c of campaigns || []) {
+    if (!aprovadas.includes(c)) resultado.set(c.id, resumoVazio('SEM_PLANO_APROVADO'));
+  }
+  if (!aprovadas.length) return resultado;
+
+  const planIds = aprovadas.map((c) => c.approved_plan_version_id);
+  const campanhaPorPlano = new Map(aprovadas.map((c) => [c.approved_plan_version_id, c.id]));
+
+  const [tripsRes, linksRes, demandsRes] = await Promise.all([
+    supabase.from('campaign_planned_trips').select('id, status, planned_quantity, quantity_unit, plan_version_id')
+      .eq('empresa_id', empresaId).in('plan_version_id', planIds),
+    supabase.from('campaign_trip_freights').select('planned_trip_id, frete_id, materialization_status, plan_version_id')
+      .eq('empresa_id', empresaId).in('plan_version_id', planIds),
+    supabase.from('campaign_demands').select('target_quantity, quantity_unit, campaign_id')
+      .eq('empresa_id', empresaId).in('campaign_id', aprovadas.map((c) => c.id)),
+  ]);
+  for (const r of [tripsRes, linksRes, demandsRes]) throwDb(r.error);
+
+  const activeLinkByTrip = new Map();
+  for (const link of linksRes.data || []) {
+    if (ACTIVE_MATERIALIZATION.has(link.materialization_status) && !activeLinkByTrip.has(link.planned_trip_id)) {
+      activeLinkByTrip.set(link.planned_trip_id, link);
+    }
+  }
+
+  const freteIds = [...new Set([...activeLinkByTrip.values()].map((l) => l.frete_id).filter(Boolean))];
+  let fretesById = new Map();
+  if (freteIds.length) {
+    const { data: fretes, error: fretesError } = await supabase
+      .from('fretes').select('id, status').eq('empresa_id', empresaId).in('id', freteIds);
+    throwDb(fretesError);
+    fretesById = new Map((fretes || []).map((f) => [f.id, f]));
+  }
+
+  const tripsPorCampanha = new Map();
+  for (const t of tripsRes.data || []) {
+    const cid = campanhaPorPlano.get(t.plan_version_id);
+    if (!cid) continue;
+    if (!tripsPorCampanha.has(cid)) tripsPorCampanha.set(cid, []);
+    tripsPorCampanha.get(cid).push(t);
+  }
+  const demandsPorCampanha = new Map();
+  for (const d of demandsRes.data || []) {
+    if (!demandsPorCampanha.has(d.campaign_id)) demandsPorCampanha.set(d.campaign_id, []);
+    demandsPorCampanha.get(d.campaign_id).push(d);
+  }
+
+  for (const c of aprovadas) {
+    resultado.set(c.id, resumirQuantidade({
+      trips: tripsPorCampanha.get(c.id) || [],
+      activeLinkByTrip,
+      fretesById,
+      demands: demandsPorCampanha.get(c.id) || [],
+    }));
+  }
+  return resultado;
+}
+
+async function getCampaignQuantitySummary(supabase, { empresaId, campaignId } = {}) {
+  const { data: campaign, error: campaignError } = await supabase
+    .from('operation_campaigns')
+    .select('id, status, approved_plan_version_id')
+    .eq('empresa_id', empresaId).eq('id', campaignId).maybeSingle();
+  throwDb(campaignError);
+  if (!campaign) {
+    throw new CampaignError('Campanha nao encontrada.', { status: 404, code: 'campaign_not_found' });
+  }
+
+  const planId = campaign.approved_plan_version_id;
+  // Sem plano aprovado não há execução para medir. `conclusivo:false` impede
+  // que o consumidor externo interprete "zero residual" como entrega.
+  if (!planId || campaign.status !== 'APPROVED') return resumoVazio('SEM_PLANO_APROVADO');
+
+  const [tripsRes, linksRes, demandsRes] = await Promise.all([
+    supabase.from('campaign_planned_trips').select('id, status, planned_quantity, quantity_unit')
+      .eq('empresa_id', empresaId).eq('plan_version_id', planId),
+    supabase.from('campaign_trip_freights').select('planned_trip_id, frete_id, materialization_status')
+      .eq('empresa_id', empresaId).eq('plan_version_id', planId),
+    supabase.from('campaign_demands').select('target_quantity, quantity_unit')
+      .eq('empresa_id', empresaId).eq('campaign_id', campaignId),
+  ]);
+  for (const r of [tripsRes, linksRes, demandsRes]) throwDb(r.error);
+
+  const activeLinkByTrip = new Map();
+  for (const link of linksRes.data || []) {
+    if (ACTIVE_MATERIALIZATION.has(link.materialization_status) && !activeLinkByTrip.has(link.planned_trip_id)) {
+      activeLinkByTrip.set(link.planned_trip_id, link);
+    }
+  }
+
+  const freteIds = [...new Set([...activeLinkByTrip.values()].map((l) => l.frete_id).filter(Boolean))];
+  let fretesById = new Map();
+  if (freteIds.length) {
+    const { data: fretes, error: fretesError } = await supabase
+      .from('fretes').select('id, status').eq('empresa_id', empresaId).in('id', freteIds);
+    throwDb(fretesError);
+    fretesById = new Map((fretes || []).map((f) => [f.id, f]));
+  }
+
+  return resumirQuantidade({
+    trips: tripsRes.data || [], activeLinkByTrip, fretesById, demands: demandsRes.data || [],
+  });
+}
+
 module.exports = {
   getCampaignProgress,
+  getCampaignQuantitySummary,
+  getCampaignQuantitySummaryBatch,
+  resumirQuantidade,
+  calcularRestanteTon,
   toTon,
   deriveHealth,
   deriveReplan,
