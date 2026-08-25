@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import api from '../api';
+import { SolicitacaoEmbarcadorDetalhe } from './SolicitacaoEmbarcadorDetalhe';
 
 // Caixa de entrada de solicitações do Portal do Embarcador — lado da
 // TRANSPORTADORA.
@@ -72,6 +73,9 @@ export function SolicitacoesEmbarcador() {
   const [motivoAberto, setMotivoAberto] = useState<{ id: string; tipo: 'ajustes' | 'recusar' } | null>(null);
   const [motivo, setMotivo] = useState('');
   const [semPermissao, setSemPermissao] = useState(false);
+  // Detalhe progressivo (§49): o operador abre uma solicitação por vez, em vez
+  // de a lista carregar tudo de todas.
+  const [detalheAberto, setDetalheAberto] = useState<string | null>(null);
 
   const carregar = useCallback(async () => {
     setCarregando(true);
@@ -204,7 +208,21 @@ export function SolicitacoesEmbarcador() {
                   )}
                 </div>
               </div>
-              {acoes && <div className="mt-3 flex flex-wrap gap-2 border-t border-gray-100 pt-3">{acoes(s)}</div>}
+              <div className="mt-3 flex flex-wrap gap-2 border-t border-gray-100 pt-3">
+                {acoes && acoes(s)}
+                <button
+                  type="button"
+                  onClick={() => setDetalheAberto(detalheAberto === s.id ? null : s.id)}
+                  className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  {detalheAberto === s.id ? 'Ocultar detalhes' : 'Ver detalhes e documentos'}
+                </button>
+              </div>
+              {detalheAberto === s.id && (
+                <div className="mt-3">
+                  <SolicitacaoEmbarcadorDetalhe requestId={s.id} aoFechar={() => setDetalheAberto(null)} />
+                </div>
+              )}
             </li>
           ))}
         </ul>

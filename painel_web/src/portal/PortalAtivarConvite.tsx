@@ -10,6 +10,11 @@ type Preview = {
   transportadora: string | null;
   embarcador: string | null;
   utilizavel: boolean;
+  // Quando o e-mail já tem conta, a ativação exige a SENHA DESSA CONTA — o
+  // convite sozinho não vincula uma identidade existente. A tela precisa saber
+  // disso para pedir a coisa certa; senão a pessoa inventa uma senha nova e a
+  // ativação falha sem que ela entenda o motivo.
+  conta_existente: boolean;
   motivo: string | null;
 };
 
@@ -51,16 +56,24 @@ export default function PortalAtivarConvite() {
 
   useEffect(() => { void carregar(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [token]);
 
+  const contaExistente = Boolean(preview?.conta_existente);
+
   async function enviar(e: FormEvent) {
     e.preventDefault();
     setErro(null);
-    if (senha !== confirmacao) { setErro('As senhas não conferem.'); return; }
-    if (senha.length < 8) { setErro('Escolha uma senha com pelo menos 8 caracteres.'); return; }
+    if (!contaExistente) {
+      // Conta nova: a pessoa está escolhendo a senha agora.
+      if (senha !== confirmacao) { setErro('As senhas não conferem.'); return; }
+      if (senha.length < 8) { setErro('Escolha uma senha com pelo menos 8 caracteres.'); return; }
+    } else if (!senha) {
+      setErro('Informe a senha da sua conta para ativar o acesso.');
+      return;
+    }
     setEnviando(true);
     try {
       const { data } = await portalApi.post('/portal/embarcador/convite/ativar', { token, senha, nome });
-      // Caso real e nada óbvio: se o e-mail já tinha conta, a senha digitada
-      // agora NÃO vale — dizer isso evita a pessoa tentar entrar e falhar.
+      // Conta já existente: a senha foi VERIFICADA, não criada. Dizer isso
+      // evita a pessoa achar que trocou de senha.
       if (data.senha_definida_agora === false) {
         setAvisoSenha(true);
         await aplicarSessao(data.token);
@@ -131,6 +144,13 @@ export default function PortalAtivarConvite() {
               <p className="mt-1 text-xs text-slate-500">Acesso para {preview.email}</p>
             </div>
 
+            {contaExistente && (
+              <div className="mb-4 rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs text-sky-900">
+                Este e-mail já tem uma conta no Matopiba Log. Para confirmar que a conta é sua,
+                informe a senha que você já usa. Ela continua a mesma.
+              </div>
+            )}
+
             <div className="space-y-4">
               <div>
                 <label htmlFor="conv-nome" className="block text-sm font-medium text-slate-700">Seu nome</label>
@@ -140,22 +160,35 @@ export default function PortalAtivarConvite() {
                 />
               </div>
               <div>
-                <label htmlFor="conv-senha" className="block text-sm font-medium text-slate-700">Crie uma senha</label>
+                <label htmlFor="conv-senha" className="block text-sm font-medium text-slate-700">
+                  {contaExistente ? 'Senha da sua conta' : 'Crie uma senha'}
+                </label>
                 <input
-                  id="conv-senha" type="password" autoComplete="new-password" required minLength={8}
+                  id="conv-senha" type="password"
+                  autoComplete={contaExistente ? 'current-password' : 'new-password'}
+                  required minLength={contaExistente ? undefined : 8}
                   value={senha} onChange={(e) => setSenha(e.target.value)}
                   className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600"
                 />
-                <p className="mt-1 text-xs text-slate-500">Pelo menos 8 caracteres.</p>
+                <p className="mt-1 text-xs text-slate-500">
+                  {contaExistente
+                    ? 'Continue usando a senha que você já tem. Ela não será alterada.'
+                    : 'Pelo menos 8 caracteres.'}
+                </p>
               </div>
-              <div>
-                <label htmlFor="conv-conf" className="block text-sm font-medium text-slate-700">Repita a senha</label>
-                <input
-                  id="conv-conf" type="password" autoComplete="new-password" required
-                  value={confirmacao} onChange={(e) => setConfirmacao(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600"
-                />
-              </div>
+              {/* Confirmação só faz sentido quando a senha está sendo criada.
+                  Para conta existente, pedir "repita a senha" sugeriria que ela
+                  está sendo trocada — e não está. */}
+              {!contaExistente && (
+                <div>
+                  <label htmlFor="conv-conf" className="block text-sm font-medium text-slate-700">Repita a senha</label>
+                  <input
+                    id="conv-conf" type="password" autoComplete="new-password" required
+                    value={confirmacao} onChange={(e) => setConfirmacao(e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600"
+                  />
+                </div>
+              )}
             </div>
 
             {erro && <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800" role="alert">{erro}</p>}
