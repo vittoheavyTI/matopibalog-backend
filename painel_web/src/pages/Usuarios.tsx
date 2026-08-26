@@ -5,11 +5,12 @@ import api from '../api';
 import { ErroCarregamento } from '../components/ErroCarregamento';
 import { useCarregamento } from '../hooks/useCarregamento';
 import { mensagemErro } from '../utils/mensagemErro';
-import { maskPhone, maskCEP } from '../utils/masks';
-import axios from 'axios';
+import { maskPhone } from '../utils/masks';
 import { useAuth } from '../contexts/AuthContext';
 import { ModalFormulario, SecaoFormulario, Campo, CLASSE_INPUT, CLASSE_BOTAO_PRIMARIO, CLASSE_BOTAO_SECUNDARIO, CLASSE_GRADE_2 } from '../components/ModalFormulario';
 import { SeletorPerfilAcesso, useePerfisAcesso } from '../components/SeletorPerfilAcesso';
+import { SeletorConta } from '../components/SeletorConta';
+import { CampoCepEndereco } from '../components/CampoCepEndereco';
 
 export const Usuarios: React.FC = () => {
   const { user: currentUser } = useAuth();
@@ -17,6 +18,11 @@ export const Usuarios: React.FC = () => {
 
   // Mesma regra da Sidebar: super-admin passa; senão, permissão efetiva; e só cai
   // na classe de conta quando o backend ainda não mandou o efetivo.
+  const podeAdministrarUsuarios = currentUser?.is_super_admin === true
+    || (currentUser?.effective_permissions
+      ? currentUser.effective_permissions['users.manage'] === true
+      : currentUser?.role === 'admin');
+
   const podeVerPermissoes = currentUser?.is_super_admin === true
     || (currentUser?.effective_permissions
       ? currentUser.effective_permissions['permissions.manage'] === true
@@ -33,6 +39,7 @@ export const Usuarios: React.FC = () => {
       // hoje vale 'admin' para todo usuário interno (D-069). Sem este campo a
       // lista chamaria de 'Administrador' até quem é Operador.
       perfilAcessoNome: u.perfil_acesso_nome || null,
+      perfilAcessoId: u.permission_template_id || null,
       ajustesDeAcesso: Number(u.ajustes_de_acesso) || 0,
       empresaTipo: Array.isArray(u.empresas) ? u.empresas[0]?.tipo || null : u.empresas?.tipo || null,
       is_super_admin: !!u.is_super_admin,
@@ -60,15 +67,11 @@ export const Usuarios: React.FC = () => {
   // fazer — o antigo campo 'Nível' só sabia dizer 'Administrador'.
   const [perfilAcessoId, setPerfilAcessoId] = useState<string | null>(null);
   const [erroValidacao, setErroValidacao] = useState<Record<string, string>>({});
-  const [secaoAdicionaisAberta, setSecaoAdicionaisAberta] = useState(false);
-  const [secaoAcessoAberta, setSecaoAcessoAberta] = useState(false);
   // Gerado uma vez por abertura do modal: um duplo clique ou retry de rede
   // converge para o mesmo usuário em vez de criar dois.
   const clientRequestIdRef = useRef<string | null>(null);
-  const { perfis, carregando: perfisCarregando, erro: perfisErro } = useePerfisAcesso(showModal && !editingUser);
   const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [isFetchingCep, setIsFetchingCep] = useState(false);
   const [resetUserId, setResetUserId] = useState<string | null>(null);
   const [novaSenha, setNovaSenha] = useState('');
   const [isResetting, setIsResetting] = useState(false);
@@ -113,7 +116,16 @@ export const Usuarios: React.FC = () => {
   const [empresas, setEmpresas] = useState<any[]>([]);
   const [empresasLoaded, setEmpresasLoaded] = useState(false);
   const [selectedEmpresaId, setSelectedEmpresaId] = useState('');
-  const [empresaSearch, setEmpresaSearch] = useState('');
+  // Os perfis são necessários na criação E na edição (TEAM-FUNC-01). A conta-alvo
+  // manda: na edição é a empresa do usuário editado; na criação, a conta escolhida
+  // pelo super-admin. Sem isso o super-admin veria os perfis da própria empresa.
+  const empresaAlvoPerfis = editingUser
+    ? (currentUser?.is_super_admin ? editingUser.empresaId : null)
+    : (currentUser?.is_super_admin ? (selectedEmpresaId || null) : null);
+  const { perfis, carregando: perfisCarregando, erro: perfisErro } = useePerfisAcesso(
+    showModal && !somenteLeitura && (!currentUser?.is_super_admin || !!editingUser || !!selectedEmpresaId),
+    empresaAlvoPerfis,
+  );
   // Fluxo "criar administrador da conta" (deep-link vindo de Empresas): a conta
   // chega pré-selecionada e TRAVADA (read-only) para não ser trocada por acidente.
   const [contaTravada, setContaTravada] = useState(false);
@@ -124,17 +136,8 @@ export const Usuarios: React.FC = () => {
   const deepLinkRef = useRef(false);
   // Filtro por tipo dentro do combobox de conta (só afeta a lista do picker do modal,
   // não confundir com o filtro da listagem "Todas as contas").
-  const [empresaTipoFiltro, setEmpresaTipoFiltro] = useState<'todas' | 'empresas' | 'autonomos'>('todas');
 
   // Contas filtradas pela busca do seletor do super-admin.
-  const empresasFiltradasParaSelecao = React.useMemo(() => {
-    const termo = empresaSearch.trim().toLowerCase();
-    const base = empresaTipoFiltro === 'todas'
-      ? empresas
-      : empresas.filter(e => (empresaTipoFiltro === 'autonomos' ? e.tipo === 'autonomo' : e.tipo !== 'autonomo'));
-    if (!termo) return base;
-    return base.filter(e => String(e.nome || '').toLowerCase().includes(termo));
-  }, [empresas, empresaSearch, empresaTipoFiltro]);
 
 
   const [newUser, setNewUser] = useState({
@@ -197,7 +200,6 @@ export const Usuarios: React.FC = () => {
     setEditingUser(null);
     setSomenteLeitura(false);
     setSelectedEmpresaId(empresa.id);
-    setEmpresaSearch('');
     setNewUser(prev => ({ ...prev, nivel: 'admin' }));
     if (source === 'empresa-created') {
       setContaTravada(true);
@@ -236,7 +238,31 @@ export const Usuarios: React.FC = () => {
         // NÃO envia tipo na edição: o tipo é definido na criação e não deve ser
         // alterado por esta tela (evita promoção silenciosa de motorista para admin).
 
-        await api.put('/admin/usuarios/' + editingUser.uid, payload);
+        // Super-admin edita dentro do contexto EXPLÍCITO da conta do usuário (§29).
+        const paramsEdicao: any = {};
+        if (currentUser?.is_super_admin && editingUser.empresaId) {
+          paramsEdicao.empresa_id = editingUser.empresaId;
+        }
+
+        await api.put('/admin/usuarios/' + editingUser.uid, payload, { params: paramsEdicao });
+
+        // TEAM-FUNC-01: troca de perfil é OUTRA autoridade e outro endpoint — o
+        // canônico, que carrega a contenção, o invariante de último administrador
+        // e a revogação de sessão. Nunca gravar o ponteiro direto daqui (§35).
+        if (perfilAcessoId && perfilAcessoId !== editingUser.perfilAcessoId) {
+          try {
+            await api.put('/admin/usuarios/' + editingUser.uid + '/perfil-acesso',
+              { perfil_acesso_id: perfilAcessoId }, { params: paramsEdicao });
+          } catch (e: any) {
+            // 409 = último administrador. A mensagem do servidor já diz o caminho;
+            // mostrá-la junto do campo é melhor que um erro genérico de salvamento.
+            const msg = e?.response?.data?.message
+              || 'Não foi possível alterar o perfil de acesso.';
+            setErroValidacao({ perfil: msg });
+            setIsSubmitting(false);
+            return;
+          }
+        }
       } else {
         // Validação inline, junto do campo (§58). `alert` interrompe e some com a
         // mensagem; o erro fica ao lado do que precisa ser corrigido.
@@ -277,15 +303,11 @@ export const Usuarios: React.FC = () => {
       setShowModal(false);
       setEditingUser(null);
       setSelectedEmpresaId('');
-      setEmpresaSearch('');
-      setEmpresaTipoFiltro('todas');
-      setContaTravada(false);
+        setContaTravada(false);
       setBannerConta(null);
       setPerfilAcessoId(null);
       setErroValidacao({});
-      setSecaoAdicionaisAberta(false);
-      setSecaoAcessoAberta(false);
-      clientRequestIdRef.current = null;
+          clientRequestIdRef.current = null;
       setNewUser({
         nome: '',
         email: '',
@@ -360,37 +382,6 @@ export const Usuarios: React.FC = () => {
         }
       };
       reader.readAsDataURL(file);
-    }
-  };
-
-  const buscarCep = async (cepStr: string) => {
-    const cleanCep = cepStr.replace(/\D/g, '');
-    if (cleanCep.length !== 8) return;
-    
-    try {
-      setIsFetchingCep(true);
-      const response = await axios.get(`https://viacep.com.br/ws/${cleanCep}/json/`);
-      if (response.data && !response.data.erro) {
-        if (editingUser) {
-          setEditingUser({
-            ...editingUser,
-            endereco: response.data.logradouro,
-            bairro: response.data.bairro,
-            cidade: `${response.data.localidade} - ${response.data.uf}`
-          });
-        } else {
-          setNewUser({
-            ...newUser,
-            endereco: response.data.logradouro,
-            bairro: response.data.bairro,
-            cidade: `${response.data.localidade} - ${response.data.uf}`
-          });
-        }
-      }
-    } catch (err) {
-      if (import.meta.env.DEV) console.error('[Usuarios] buscar CEP falhou');
-    } finally {
-      setIsFetchingCep(false);
     }
   };
 
@@ -474,7 +465,7 @@ export const Usuarios: React.FC = () => {
           <p className="text-sm text-gray-500">Pessoas que acessam o sistema, vinculadas às contas da plataforma</p>
         </div>
         <button
-          onClick={() => { setEditingUser(null); setSomenteLeitura(false); setContaTravada(false); setBannerConta(null); setSelectedEmpresaId(''); setEmpresaSearch(''); setShowModal(true); }}
+          onClick={() => { setEditingUser(null); setSomenteLeitura(false); setContaTravada(false); setBannerConta(null); setSelectedEmpresaId(''); setPerfilAcessoId(null); setShowModal(true); }}
           className="inline-flex items-center px-4 py-2.5 bg-green-700 text-white rounded-xl font-medium text-sm shadow-sm hover:bg-green-800 transition-all active:scale-95"
         >
           <UserPlus size={18} className="mr-2" /> Novo Usuário
@@ -594,7 +585,7 @@ export const Usuarios: React.FC = () => {
                     <td className="p-3 text-right align-top">
                       <div className="flex items-center justify-end gap-2">
                         <button
-                          onClick={() => { setEditingUser(user); setSomenteLeitura(true); setShowModal(true); }}
+                          onClick={() => { setEditingUser(user); setPerfilAcessoId(user.perfilAcessoId || null); setSomenteLeitura(true); setShowModal(true); }}
                           className="inline-flex items-center text-gray-600 hover:bg-gray-100 p-1.5 rounded-lg transition-colors"
                           title="Ver"
                           aria-label="Ver usuário"
@@ -602,7 +593,7 @@ export const Usuarios: React.FC = () => {
                           <Eye size={16} />
                         </button>
                         <button
-                          onClick={() => { setEditingUser(user); setSomenteLeitura(false); setShowModal(true); }}
+                          onClick={() => { setEditingUser(user); setPerfilAcessoId(user.perfilAcessoId || null); setSomenteLeitura(false); setShowModal(true); }}
                           className="inline-flex items-center text-blue-600 hover:bg-blue-50 p-1.5 rounded-lg transition-colors"
                           title="Editar"
                           aria-label="Editar usuário"
@@ -654,6 +645,19 @@ export const Usuarios: React.FC = () => {
             <button type="button" onClick={fecharModal} className={CLASSE_BOTAO_SECUNDARIO}>
               {somenteLeitura ? 'Fechar' : 'Cancelar'}
             </button>
+            {/* TEAM-VIS-05: "Dados do usuário" continua sendo um modo de leitura,
+                mas quem tem autoridade precisa sair dele sem fechar e reabrir por
+                outro botão da lista. É a diferença entre poder corrigir o cadastro
+                de um cliente e ter que explicar por telefone como ele se corrige. */}
+            {somenteLeitura && podeAdministrarUsuarios && (
+              <button
+                type="button"
+                onClick={() => setSomenteLeitura(false)}
+                className={CLASSE_BOTAO_PRIMARIO}
+              >
+                Editar usuário
+              </button>
+            )}
             {!somenteLeitura && (
               <button type="button" onClick={handleSave} disabled={isSubmitting} className={CLASSE_BOTAO_PRIMARIO}>
                 {isSubmitting ? 'Salvando…' : editingUser ? 'Salvar alterações' : 'Criar usuário'}
@@ -735,8 +739,9 @@ export const Usuarios: React.FC = () => {
               o backend recusa a criação, justamente para o usuário nunca nascer
               na empresa errada. Travada quando veio de um deep-link de criação. */}
           {currentUser?.is_super_admin && (editingUser || contaTravada) && (
-            <Campo rotulo="Conta vinculada" ajuda="Definida na criação, para preservar o isolamento entre contas.">
+            <Campo id="usuario-conta-vinculada" rotulo="Conta vinculada" ajuda="Definida na criação, para preservar o isolamento entre contas.">
               <input
+                id="usuario-conta-vinculada"
                 type="text"
                 readOnly
                 className={`${CLASSE_INPUT} bg-gray-100 text-gray-600`}
@@ -750,28 +755,22 @@ export const Usuarios: React.FC = () => {
           {currentUser?.is_super_admin && !editingUser && !contaTravada && (
             <Campo rotulo="Conta" obrigatorio erro={erroValidacao.conta}
               ajuda="O usuário será criado dentro desta conta.">
-              <input
-                type="search"
-                className={`${CLASSE_INPUT} mb-2`}
-                placeholder="Buscar conta por nome"
-                value={empresaSearch}
-                onChange={e => setEmpresaSearch(e.target.value)}
-                aria-label="Buscar conta"
+              {/* TEAM-VIS-01: era um <select size={5}> com todas as contas
+                  renderizadas embaixo da busca — uma parede que nunca fechava,
+                  nem depois de escolher. Agora busca sob demanda e estado
+                  selecionado com "Alterar conta" (§7). */}
+              <SeletorConta
+                contas={empresas}
+                valor={selectedEmpresaId}
+                carregando={!empresasLoaded}
+                aoEscolher={(id) => {
+                  setSelectedEmpresaId(id);
+                  // §55: trocar de conta invalida o perfil escolhido — ele
+                  // pertence à conta anterior. Nunca carregar template estrangeiro.
+                  setPerfilAcessoId(null);
+                  setErroValidacao(({ conta, perfil, ...r }) => r);
+                }}
               />
-              <select
-                className={CLASSE_INPUT}
-                value={selectedEmpresaId}
-                onChange={e => { setSelectedEmpresaId(e.target.value); setErroValidacao(({ conta, ...r }) => r); }}
-                size={Math.min(5, Math.max(2, empresasFiltradasParaSelecao.length))}
-              >
-                <option value="">Selecione a conta…</option>
-                {empresasFiltradasParaSelecao.map(e => (
-                  <option key={e.id} value={e.id}>
-                    {e.nome}{e.tipo === 'autonomo' ? ' — Autônomo' : ''}
-                  </option>
-                ))}
-              </select>
-              {!empresasLoaded && <p className="mt-1 text-xs text-gray-500">Carregando contas…</p>}
             </Campo>
           )}
 
@@ -785,23 +784,37 @@ export const Usuarios: React.FC = () => {
                 carregando={perfisCarregando}
                 erro={perfisErro}
                 valor={perfilAcessoId}
+                podeEditarPermissoes={podeVerPermissoes}
+                empresaId={currentUser?.is_super_admin ? selectedEmpresaId : null}
                 aoEscolher={(id) => { setPerfilAcessoId(id); setErroValidacao(({ perfil, ...r }) => r); }}
               />
             </Campo>
           ) : (
-            <Campo
-              rotulo="Perfil de acesso"
-              ajuda="Para trocar o perfil, use a tela de Perfis e Permissões."
-            >
-              <input
-                type="text"
-                readOnly
-                className={`${CLASSE_INPUT} bg-gray-100 text-gray-600`}
-                value={editingUser.perfilAcessoNome || getTipoLabel(editingUser)}
+            <Campo rotulo="Perfil de acesso" erro={erroValidacao.perfil}>
+              {/* TEAM-FUNC-01: aqui havia um campo somente-leitura dizendo "use a
+                  tela de Perfis e Permissões" — conselho errado, porque aquela tela
+                  edita o que um perfil CONCEDE, não troca o perfil de uma pessoa. O
+                  endpoint canônico já existia (`PUT /admin/usuarios/:id/perfil-acesso`,
+                  com contenção, invariante de último administrador e revogação de
+                  sessão); faltava a UI chamá-lo. */}
+              <SeletorPerfilAcesso
+                perfis={perfis}
+                carregando={perfisCarregando}
+                erro={perfisErro}
+                valor={perfilAcessoId}
+                podeEditarPermissoes={podeVerPermissoes}
+                empresaId={editingUser.empresaId}
+                aoEscolher={(id) => { setPerfilAcessoId(id); setErroValidacao(({ perfil, ...r }) => r); }}
               />
-              {/* TEAM-UX-001 §5: o detalhe das exceções vive na tela canônica de
-                  permissões, que tem outra autoridade. Aqui só dizemos que existem e
-                  como chegar lá — não é um segundo editor de permissões. */}
+              {perfilAcessoId && perfilAcessoId !== editingUser.perfilAcessoId && (
+                <p className="mt-1.5 text-xs text-amber-700">
+                  Ao salvar, o acesso muda imediatamente e as sessões abertas desta
+                  pessoa são encerradas.
+                </p>
+              )}
+
+              {/* TEAM-UX-001 §52: exceção individual é OUTRO conceito — não se
+                  chama "editar perfil", e o detalhe vive na tela canônica. */}
               {editingUser.ajustesDeAcesso > 0 && (
                 <p className="mt-1.5 text-xs text-amber-700">
                   Esta pessoa tem{' '}
@@ -811,7 +824,7 @@ export const Usuarios: React.FC = () => {
                   {' '}além do perfil.{' '}
                   {podeVerPermissoes && (
                     <Link to="/perfis-permissoes" className="font-semibold underline hover:text-amber-800">
-                      Ver em Perfis e Permissões
+                      Ver ajustes individuais de acesso
                     </Link>
                   )}
                 </p>
@@ -825,10 +838,6 @@ export const Usuarios: React.FC = () => {
             <SecaoFormulario
               titulo="Opções de acesso"
               descricao="Por padrão, o sistema gera uma senha temporária e a mostra uma única vez."
-              recolhivel
-              aberta={secaoAcessoAberta}
-              aoAlternar={() => setSecaoAcessoAberta(v => !v)}
-              abertaPorPadrao={false}
             >
               <Campo
                 id="usuario-senha"
@@ -852,10 +861,6 @@ export const Usuarios: React.FC = () => {
           <SecaoFormulario
             titulo="Informações adicionais"
             descricao="Foto e endereço. Podem ser preenchidos depois."
-            recolhivel
-            aberta={secaoAdicionaisAberta}
-            aoAlternar={() => setSecaoAdicionaisAberta(v => !v)}
-            abertaPorPadrao={false}
           >
             <div className="flex items-center gap-3">
               <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileChange} />
@@ -883,53 +888,23 @@ export const Usuarios: React.FC = () => {
               </div>
             </div>
 
-            <Campo id="usuario-cep" rotulo="CEP" ajuda={isFetchingCep ? 'Buscando endereço…' : undefined}>
-              <input
-                id="usuario-cep"
-                className={CLASSE_INPUT}
-                placeholder="00000-000"
-                value={editingUser ? editingUser.cep : newUser.cep}
-                onChange={e => {
-                  const masked = maskCEP(e.target.value);
-                  editingUser
-                    ? setEditingUser({ ...editingUser, cep: masked })
-                    : setNewUser({ ...newUser, cep: masked });
-                  buscarCep(masked);
-                }}
-              />
-            </Campo>
-            <Campo id="usuario-endereco" rotulo="Endereço">
-              <input
-                id="usuario-endereco"
-                className={CLASSE_INPUT}
-                value={editingUser ? editingUser.endereco : newUser.endereco}
-                onChange={e => editingUser
-                  ? setEditingUser({ ...editingUser, endereco: e.target.value })
-                  : setNewUser({ ...newUser, endereco: e.target.value })}
-              />
-            </Campo>
-            <div className={CLASSE_GRADE_2}>
-              <Campo id="usuario-bairro" rotulo="Bairro">
-                <input
-                  id="usuario-bairro"
-                  className={CLASSE_INPUT}
-                  value={editingUser ? editingUser.bairro : newUser.bairro}
-                  onChange={e => editingUser
-                    ? setEditingUser({ ...editingUser, bairro: e.target.value })
-                    : setNewUser({ ...newUser, bairro: e.target.value })}
-                />
-              </Campo>
-              <Campo id="usuario-cidade" rotulo="Cidade / UF">
-                <input
-                  id="usuario-cidade"
-                  className={CLASSE_INPUT}
-                  value={editingUser ? editingUser.cidade : newUser.cidade}
-                  onChange={e => editingUser
-                    ? setEditingUser({ ...editingUser, cidade: e.target.value })
-                    : setNewUser({ ...newUser, cidade: e.target.value })}
-                />
-              </Campo>
-            </div>
+            {/* TEAM-FUNC-03: um componente para os quatro formulários. O patch é
+                aplicado com updater funcional de propósito — era exatamente o
+                estado obsoleto do closure que apagava o CEP recém-digitado quando
+                a consulta voltava. */}
+            <CampoCepEndereco
+              idPrefixo="usuario"
+              desabilitado={somenteLeitura}
+              valores={{
+                cep: (editingUser ? editingUser.cep : newUser.cep) || '',
+                endereco: (editingUser ? editingUser.endereco : newUser.endereco) || '',
+                bairro: (editingUser ? editingUser.bairro : newUser.bairro) || '',
+                cidade: (editingUser ? editingUser.cidade : newUser.cidade) || '',
+              }}
+              aoAlterar={(patch) => editingUser
+                ? setEditingUser((prev: any) => ({ ...prev, ...patch }))
+                : setNewUser((prev: any) => ({ ...prev, ...patch }))}
+            />
           </SecaoFormulario>
         </fieldset>
       </ModalFormulario>

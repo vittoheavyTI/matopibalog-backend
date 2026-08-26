@@ -29,14 +29,43 @@
 // Super-admin é break-glass da plataforma e não passa por contenção, mas continua
 // obrigado a escolher a empresa-alvo explicitamente.
 
-const { loadEffectivePermissions } = require('./permissionResolver');
-const { TEMPLATE_META, UI_ENABLED_TEMPLATE_KEYS, TEMPLATE_KEYS } = require('./permissionRegistry');
+const { loadEffectivePermissions, carregarEntitlements } = require('./permissionResolver');
+const { TEMPLATE_META, UI_ENABLED_TEMPLATE_KEYS, TEMPLATE_KEYS, PERMISSION_BY_KEY } = require('./permissionRegistry');
 
 // Perfis que descrevem gente de FORA da operação interna da transportadora. Não
 // aparecem como opção ao montar a equipe: motorista tem fluxo próprio (exige linha
 // em `motoristas`), e embarcador é identidade externa do Portal, que nem sequer
 // vive em `usuarios`.
 const NAO_ATRIBUIVEIS_NA_EQUIPE = new Set([TEMPLATE_KEYS.MOTORISTA, TEMPLATE_KEYS.EMBARCADOR]);
+
+// TEAM-FUNC-02 — POR QUE O ENTITLEMENT ENTRA AQUI.
+//
+// A contenção comparava as permissões CRUAS do template alvo (lidas de
+// `permission_template_permissions`) contra o EFETIVO do ator. São grandezas
+// diferentes: o efetivo passa por um gate de entitlement que nega, antes de
+// qualquer template, toda chave cuja funcionalidade a empresa não contratou.
+//
+// O resultado era absurdo e reproduzível. Na Empresa Alfa, cujo plano não inclui
+// `operation_campaign` nem `estrutura_operacional`, o efetivo do Administrador não
+// tem `campaign.*` — mas o template Administrador, cru, tem. Logo `contido()` dava
+// falso e **o administrador não conseguia atribuir nem o próprio perfil**. Sobrava
+// só Financeiro, o único baseline sem capacidade gated; numa empresa com plano
+// menor, sobrava zero. Quanto menor o plano, menos time a empresa conseguia
+// montar — o oposto do que faz sentido.
+//
+// A correção é comparar efetivo com efetivo. Uma capacidade que a empresa não
+// contratou não é "acesso a mais" que o ator estaria concedendo: ela não existe
+// para ninguém naquela empresa, e não pode pesar na contenção.
+function filtrarPorEntitlement(permissoes, entitlements) {
+  const efetivas = new Set();
+  for (const key of permissoes) {
+    const meta = PERMISSION_BY_KEY[key];
+    const exige = meta && meta.entitlementCodigo;
+    if (exige && entitlements[exige] !== true) continue;
+    efetivas.add(key);
+  }
+  return efetivas;
+}
 
 /**
  * Permissões efetivas de um template, resolvidas do banco.
@@ -88,6 +117,9 @@ async function listarPerfisAtribuiveis(supabase, { actor, empresaId }) {
 
   const isSuperAdmin = actor?.is_super_admin === true;
   const efetivoDoAtor = isSuperAdmin ? null : await loadEffectivePermissions(supabase, actor);
+  // Os entitlements da EMPRESA-ALVO, não os do ator: é a empresa que contrata
+  // funcionalidade, e é nela que o perfil vai valer.
+  const entitlements = isSuperAdmin ? null : await carregarEntitlements(supabase, { empresaId, user: actor });
 
   const itens = [];
   for (const t of templates || []) {
@@ -100,7 +132,10 @@ async function listarPerfisAtribuiveis(supabase, { actor, empresaId }) {
     if (baselineOculto) continue;
 
     const permissoes = await permissoesDoTemplate(supabase, t.id);
-    if (!isSuperAdmin && !contido(permissoes, efetivoDoAtor)) continue;
+    const efetivasDoPerfil = isSuperAdmin
+      ? permissoes
+      : filtrarPorEntitlement(permissoes, entitlements);
+    if (!isSuperAdmin && !contido(efetivasDoPerfil, efetivoDoAtor)) continue;
 
     const meta = TEMPLATE_META[t.stable_key] || {};
     itens.push({
@@ -108,7 +143,9 @@ async function listarPerfisAtribuiveis(supabase, { actor, empresaId }) {
       stable_key: t.stable_key,
       nome: t.display_name || meta.display_name || t.stable_key,
       descricao: t.descricao || meta.descricao || null,
-      resumo: resumirCapacidades(permissoes),
+      // O resumo descreve o que a pessoa VAI conseguir fazer nesta empresa —
+      // prometer uma capacidade não contratada seria mentir na tela.
+      resumo: resumirCapacidades(isSuperAdmin ? permissoes : efetivasDoPerfil),
       editavel: t.editable !== false,
     });
   }
@@ -153,12 +190,15 @@ async function autorizarAtribuicao(supabase, { actor, empresaId, templateId }) {
 
   if (actor?.is_super_admin === true) return { ok: true, template };
 
-  const [permissoes, efetivoDoAtor] = await Promise.all([
+  const [permissoes, efetivoDoAtor, entitlements] = await Promise.all([
     permissoesDoTemplate(supabase, template.id),
     loadEffectivePermissions(supabase, actor),
+    carregarEntitlements(supabase, { empresaId, user: actor }),
   ]);
 
-  if (!contido(permissoes, efetivoDoAtor)) {
+  // Mesmo critério da listagem — filtro de tela e regra de gravação não podem
+  // divergir, senão a lista oferece o que a gravação recusa.
+  if (!contido(filtrarPorEntitlement(permissoes, entitlements), efetivoDoAtor)) {
     // Deliberadamente explica o motivo sem listar as permissões que faltam: a
     // pessoa precisa saber que o caminho é pedir a um administrador, não
     // descobrir quais chaves tentar.

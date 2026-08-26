@@ -14,6 +14,9 @@ const Module = require('node:module');
 // Stub do resolver: os testes de contenção precisam controlar o efetivo do ator,
 // não exercitar o resolver (que tem cobertura própria).
 let efetivoDoAtorStub = {};
+// TEAM-FUNC-02: a contenção depende TAMBÉM do que a empresa contratou. Sem
+// controlar isto, o teste não consegue reproduzir o caso do owner.
+let entitlementsStub = { fleet: true, operation_campaign: true, estrutura_operacional: true, integracoes_erp: true, acesso_corporativo_sso: true };
 const resolverPath = require.resolve('../services/permissions/permissionResolver');
 const originalLoad = Module._load;
 Module._load = function (request, parent, isMain) {
@@ -21,6 +24,7 @@ Module._load = function (request, parent, isMain) {
     return {
       ...originalLoad.call(this, request, parent, isMain),
       loadEffectivePermissions: async () => efetivoDoAtorStub,
+      carregarEntitlements: async () => entitlementsStub,
     };
   }
   return originalLoad.call(this, request, parent, isMain);
@@ -229,4 +233,83 @@ test('resumo de capacidades é linguagem de negócio, sem chave de permissão', 
     assert.ok(!/\./.test(linha.replace(/\.$/, '')) || !/[a-z]+\.[a-z]+/.test(linha),
       `resumo não deve conter chave técnica: ${linha}`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// TEAM-FUNC-02 — regressão do caso reportado pelo owner.
+//
+// Reproduzido contra produção antes de corrigir: na Empresa Alfa, cujo plano não
+// inclui `operation_campaign` nem `estrutura_operacional`, um Administrador
+// legítimo via APENAS "Financeiro" na lista — e numa empresa com plano menor,
+// via ZERO. A causa não era permissão: era a contenção comparando as permissões
+// CRUAS do template alvo contra o EFETIVO do ator, que já passou pelo gate de
+// entitlement. Maçã com laranja.
+
+test('TEAM-FUNC-02: capacidade não contratada pela empresa não bloqueia a atribuição', async () => {
+  // A empresa não contratou frota. O efetivo do administrador, portanto, NÃO tem
+  // `fleet.view` — mas o template dele, cru no banco, tem.
+  entitlementsStub = { fleet: false, operation_campaign: false, estrutura_operacional: false };
+  efetivoDoAtorStub = efetivo(PERMISSOES['tpl-admin'].filter((k) => k !== 'fleet.view'));
+
+  const { itens } = await listarPerfisAtribuiveis(supabaseFake(), {
+    actor: { uid: 'u-admin', empresa_id: EMPRESA },
+    empresaId: EMPRESA,
+  });
+  const chaves = itens.map((i) => i.stable_key);
+
+  assert.ok(chaves.includes('administrador'),
+    'o administrador precisa conseguir atribuir o próprio perfil mesmo sem a funcionalidade contratada');
+  assert.ok(chaves.includes('gerente_frota'),
+    'gerente_frota tem fleet.view; sem o entitlement isso não pode sumir da lista');
+  assert.ok(chaves.includes('operador'));
+});
+
+test('TEAM-FUNC-02: a gravação usa o MESMO critério da listagem', async () => {
+  entitlementsStub = { fleet: false, operation_campaign: false, estrutura_operacional: false };
+  efetivoDoAtorStub = efetivo(PERMISSOES['tpl-admin'].filter((k) => k !== 'fleet.view'));
+
+  // Se listagem e gravação divergissem, a tela ofereceria o que o servidor recusa.
+  const r = await autorizarAtribuicao(supabaseFake(), {
+    actor: { uid: 'u-admin', empresa_id: EMPRESA },
+    empresaId: EMPRESA,
+    templateId: 'tpl-gerente',
+  });
+  assert.equal(r.ok, true, r.message);
+});
+
+test('TEAM-FUNC-02: a contenção real continua valendo — não virou passe livre', async () => {
+  // O ponto delicado: relaxar por entitlement não pode virar buraco. O gerente
+  // segue sem poder conceder um perfil que tem capacidades que ele não tem, e
+  // essas capacidades NÃO são gated por entitlement.
+  entitlementsStub = { fleet: false, operation_campaign: false, estrutura_operacional: false };
+  efetivoDoAtorStub = efetivo([...PERMISSOES['tpl-gerente'], 'users.manage', 'users.view']);
+
+  const { itens } = await listarPerfisAtribuiveis(supabaseFake(), {
+    actor: { uid: 'u-gerente', empresa_id: EMPRESA },
+    empresaId: EMPRESA,
+  });
+  assert.ok(!itens.map((i) => i.stable_key).includes('administrador'),
+    'permissions.manage e finance não são gated — o gerente continua barrado');
+
+  const r = await autorizarAtribuicao(supabaseFake(), {
+    actor: { uid: 'u-gerente', empresa_id: EMPRESA },
+    empresaId: EMPRESA,
+    templateId: 'tpl-admin',
+  });
+  assert.equal(r.ok, false);
+  assert.equal(r.status, 403);
+});
+
+test('TEAM-FUNC-02: o resumo não promete capacidade que a empresa não contratou', async () => {
+  entitlementsStub = { fleet: false, operation_campaign: false, estrutura_operacional: false };
+  efetivoDoAtorStub = efetivo(PERMISSOES['tpl-admin']);
+
+  const { itens } = await listarPerfisAtribuiveis(supabaseFake(), {
+    actor: { uid: 'u-admin', empresa_id: EMPRESA },
+    empresaId: EMPRESA,
+  });
+  const gerente = itens.find((i) => i.stable_key === 'gerente_frota');
+  assert.ok(gerente);
+  assert.ok(!gerente.resumo.includes('Frota'),
+    'sem entitlement de frota, dizer que a pessoa vai gerenciar frota é mentir na tela');
 });
