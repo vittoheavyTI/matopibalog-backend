@@ -43,21 +43,27 @@ Module._load = function (request, parent, isMain) {
   // Depois da autorização, a transição chama a RPC e o banco. Estes testes provam
   // AUTORIZAÇÃO, então o que vem depois vira dublê: sem isso o caso permitido sairia
   // pela rede e o teste ficaria lento e não-determinístico.
-  if (/lancamentoAcoesController/.test(arquivoPai)) {
-    if (request === '../services/lancamentoWorkflow') {
-      return {
-        transicionar: async () => ({ ok: true, data: { transicionado: true } }),
-        detectarOrigem: () => 'teste',
-      };
-    }
-    if (request === '../config/supabase') {
-      const tabela = {
-        select: () => tabela,
-        eq: () => tabela,
-        maybeSingle: async () => ({ data: { empresa_id: 'emp-1' } }),
-      };
-      return { from: () => tabela };
-    }
+  if (/lancamentoAcoesController/.test(arquivoPai) && request === '../services/lancamentoWorkflow') {
+    return {
+      transicionar: async () => ({ ok: true, data: { transicionado: true } }),
+      detectarOrigem: () => 'teste',
+    };
+  }
+
+  // O cliente real é substituído para TODO consumidor, não só o controller de
+  // lançamentos. Dois motivos, e o segundo só aparece no CI: nenhum destes testes
+  // deve tocar o banco; e o cliente real monta um RealtimeClient que, em Node 20 sem
+  // WebSocket nativo, LANÇA na carga do módulo. Em Node 24 há WebSocket e o erro não
+  // aparece localmente — foi assim que este teste passou aqui e quebrou no CI.
+  if (request === '../config/supabase' || request === './../config/supabase') {
+    const tabela = {
+      select: () => tabela,
+      eq: () => tabela,
+      in: () => tabela,
+      maybeSingle: async () => ({ data: { empresa_id: 'emp-1' } }),
+      single: async () => ({ data: { empresa_id: 'emp-1' } }),
+    };
+    return { from: () => tabela, rpc: async () => ({ data: null, error: null }) };
   }
   return originalLoad.call(this, request, parent, isMain);
 };
