@@ -3,7 +3,7 @@ const router = express.Router();
 const axios = require('axios');
 const crypto = require('crypto');
 const supabase = require('../config/supabase');
-const { verifyToken, isAdmin, isSuperAdmin } = require('../middlewares/auth');
+const { verifyToken, isSuperAdmin } = require('../middlewares/auth');
 const { requirePermission } = require('../middlewares/requirePermission');
 const { verificarEmpresa } = require('../middlewares/tenant');
 const { resolveAsaasApiKey } = require('../utils/asaasConfig');
@@ -391,7 +391,10 @@ async function carregarPlanoStatus(empresaId, user) {
 // Estado read-only do plano da empresa escopada pelo token.
 // Admin comum sempre usa a própria empresa; super-admin precisa selecionar
 // explicitamente uma empresa via ?empresa_id= (tratado por verificarEmpresa).
-router.get('/plano-status', verifyToken, isAdmin, verificarEmpresa, async (req, res) => {
+// RBV9-INV-110: era `isAdmin`, que hoje não distingue ninguém — todo usuário interno
+// carrega a classe legada. Estado comercial da empresa (plano, inadimplência) é
+// `finance.saas.view`, que no baseline pertence a Administrador e Financeiro.
+router.get('/plano-status', verifyToken, verificarEmpresa, requirePermission('finance.saas.view'), async (req, res) => {
   if (!req.empresa_id) {
     const message = req.user.is_super_admin === true
       ? 'Selecione uma empresa para consultar o status do plano.'
@@ -772,7 +775,10 @@ router.post('/minhas-faturas/sincronizar', verifyToken, verificarEmpresa, requir
 // solicitação pendente + a cobrança avulsa (sandbox) + a fatura local, SEM
 // aplicar o plano (isso é o webhook, PR 3). Gate sandbox hard antes de tudo.
 // Toda a coreografia idempotente vive em upgradeRequestService (testável).
-router.post('/upgrade/solicitar', verifyToken, isAdmin, verificarEmpresa, async (req, res) => {
+// RBV9-INV-110: solicitar upgrade cria solicitação + cobrança + fatura — compromete a
+// empresa financeiramente. `isAdmin` deixava qualquer usuário interno fazer isso. A
+// autoridade é `company.settings.manage`, que no baseline só o Administrador tem.
+router.post('/upgrade/solicitar', verifyToken, verificarEmpresa, requirePermission('company.settings.manage'), async (req, res) => {
   try {
     if (await bloquearSeNaoSandbox(res)) return;
     if (!req.empresa_id) {

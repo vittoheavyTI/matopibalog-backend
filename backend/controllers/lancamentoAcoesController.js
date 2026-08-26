@@ -2,18 +2,47 @@
 // pelos 3 routers (despesas/abastecimentos/vales) via factory por entityType, e também
 // pelo PATCH /:id de cada controller (delegação de mudança de status).
 //
-// Backend é a autoridade (§18/§20): approve/reject/cancel só para admin/super-admin;
-// a transição atômica + auditoria + CAS acontece na RPC (workflow). A UI só reflete.
+// Backend é a autoridade (§18/§20): approve/reject/cancel exigem a PERMISSÃO EFETIVA
+// correspondente ao status alvo — `launch.approve`, `launch.reject`, `launch.cancel` —,
+// nunca a classe de conta legada. Isto fecha `RBV9-INV-110` aqui: as rotas dedicadas já
+// exigiam essas chaves, mas o `PATCH /:id` (protegido só por `launch.create`) delegava
+// para cá e caía num gate `role==='admin'` — e como todo usuário interno carrega essa
+// classe (D-069), um Operador aprovava lançamento sem ter `launch.approve`. A checagem
+// agora vive na transição, que é o ponto por onde os dois caminhos passam.
+//
+// A transição atômica + auditoria + CAS acontece na RPC (workflow). A UI só reflete.
 // Cancelar NUNCA deleta (a RPC apenas muda o status e registra o evento).
 
 const supabase = require('../config/supabase');
 const workflow = require('../services/lancamentoWorkflow');
+const { ensureEffective } = require('../middlewares/requirePermission');
 
 const TABELA = { despesa: 'despesas', abastecimento: 'abastecimentos', vale: 'vales' };
 
-function ehAdministrador(req) {
-  return !!(req.user && (req.user.role === 'admin' || req.user.is_super_admin === true));
+// Permissão canônica exigida por transição. Sem entrada = transição desconhecida,
+// que é negada por construção em vez de cair num default permissivo.
+const PERMISSAO_POR_STATUS = Object.freeze({
+  aprovado: 'launch.approve',
+  rejeitado: 'launch.reject',
+  cancelado: 'launch.cancel',
+});
+
+// Autoridade da transição: super-admin passa (plataforma); qualquer outro precisa da
+// permissão efetiva do status alvo. Não há fallback por classe de conta.
+async function podeTransicionar(req, novoStatus) {
+  const permissao = PERMISSAO_POR_STATUS[novoStatus];
+  if (!permissao) return { ok: false, status: 400, message: 'Transição de status inválida.' };
+  if (req.user && req.user.is_super_admin === true) return { ok: true };
+  const efetivo = await ensureEffective(req);
+  if (efetivo && efetivo.permissions && efetivo.permissions[permissao] === true) return { ok: true };
+  return {
+    ok: false,
+    status: 403,
+    message: 'Permissão insuficiente para esta ação.',
+    permission: permissao,
+  };
 }
+
 function papelDe(req) {
   if (req.user && req.user.is_super_admin === true) return 'super_admin';
   return (req.user && req.user.role) || 'usuario';
@@ -36,8 +65,11 @@ async function resolverEmpresaAlvo(req, tabela, id) {
 async function executarTransicao(req, res, entityType, novoStatus) {
   const tabela = TABELA[entityType];
   if (!tabela) return res.status(400).json({ message: 'Tipo de lançamento inválido.' });
-  if (!ehAdministrador(req)) {
-    return res.status(403).json({ message: 'Ação restrita a administradores.' });
+  const autorizacao = await podeTransicionar(req, novoStatus);
+  if (!autorizacao.ok) {
+    const corpo = { message: autorizacao.message };
+    if (autorizacao.permission) corpo.permission = autorizacao.permission;
+    return res.status(autorizacao.status).json(corpo);
   }
   const { id } = req.params;
   const body = req.body || {};

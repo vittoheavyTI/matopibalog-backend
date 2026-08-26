@@ -1,12 +1,12 @@
 const express = require('express');
 const router = express.Router();
 const ctrl = require('../controllers/adminContratoModelosController');
-const { verifyToken, isAdmin, isSuperAdmin } = require('../middlewares/auth');
+const { verifyToken, isSuperAdmin } = require('../middlewares/auth');
 const validate = require('../middlewares/validate');
 const { criarContratoModeloSchema, atualizarContratoModeloSchema } = require('../schemas/contratoModelo');
 
 // Modelos de contrato por plano — só super-admin (documento comercial de plataforma).
-router.use(verifyToken, isAdmin, isSuperAdmin);
+router.use(verifyToken, isSuperAdmin);
 
 // Rotas específicas ANTES de /:id para não colidir.
 router.get('/overview', ctrl.overview);

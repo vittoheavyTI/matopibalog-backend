@@ -10,6 +10,7 @@ const {
 } = require('../services/freteFinanceiroCorrecaoService');
 const { revogarTrackingSeSemViagemAtiva } = require('../services/auth/trackingRevocacaoHook');
 const { publicarStatusFrete } = require('../services/campaign/freightRealtimeSignal');
+const { ensureEffective } = require('../middlewares/requirePermission');
 const {
   resolverEscopoOperacional,
   aplicarEscopoOperacionalQuery,
@@ -462,9 +463,18 @@ exports.corrigirFinanceiro = async (req, res) => {
 
   try {
     const isSuperAdmin = req.user.is_super_admin === true;
-    const isAdmin = req.user.role === 'admin';
-    if (!isAdmin && !isSuperAdmin) {
-      return res.status(403).json({ message: 'Acesso negado.' });
+    // RBV9-INV-110: defesa em profundidade pela MESMA autoridade da rota
+    // (`finance.operational.manage`), não pela classe de conta. O gate anterior era
+    // `role==='admin'`, que não negava ninguém interno — e, quando a classe legada
+    // deixar de ser universal, negaria justamente quem tem a permissão.
+    //
+    // O controller não confia em que a rota filtrou: `requirePermission` já resolveu o
+    // efetivo e o deixou em `req`, então reconferir aqui não custa consulta nova.
+    if (!isSuperAdmin) {
+      const efetivo = await ensureEffective(req);
+      if (!(efetivo && efetivo.permissions && efetivo.permissions['finance.operational.manage'] === true)) {
+        return res.status(403).json({ message: 'Permissão insuficiente para esta ação.', permission: 'finance.operational.manage' });
+      }
     }
 
     const { data: frete, error: freteError } = await supabase

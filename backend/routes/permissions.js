@@ -4,12 +4,12 @@
 
 const express = require('express');
 const router = express.Router();
-const { verifyToken, isAdmin } = require('../middlewares/auth');
+const { verifyToken } = require('../middlewares/auth');
 const { verificarEmpresa } = require('../middlewares/tenant');
 const { requirePermission } = require('../middlewares/requirePermission');
 const ctrl = require('../controllers/permissionsController');
 
-router.use(verifyToken, isAdmin, verificarEmpresa, requirePermission('permissions.manage'));
+router.use(verifyToken, verificarEmpresa, requirePermission('permissions.manage'));
 
 router.get('/registry', ctrl.getRegistry);
 router.get('/templates', ctrl.listTemplates);

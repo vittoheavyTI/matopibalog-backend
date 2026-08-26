@@ -268,6 +268,14 @@ Campaign-A nao integra provider de rota, marketplace, parceiro real, portal do e
 ### D-071 — O modal de Novo Frete é o padrão de formulário do painel
 `UX_FORM_001=FREIGHT_MODAL_PATTERN_V1`. O padrão já aprovado pelo owner (cabeçalho e rodapé fixos, corpo com rolagem própria, ação primária sempre visível) foi extraído para `ModalFormulario.tsx` e é o alvo de convergência das telas de cadastro. O **Frete não foi refatorado**: o modal dele vive num arquivo de 2.000+ linhas entrelaçado com cálculo de valor de frete e comissão, e extraí-lo para arrumar uma tela de cadastro seria mexer no fluxo de receita da transportadora. O shell reproduz o comportamento; a convergência dos três fica como limpeza técnica (`RBV9-INV-111`), não dívida de produto.
 
+### D-072 — Autoridade de produto é permissão efetiva; classe de conta não autoriza
+`PRODUCT_AUTHORIZATION_SOURCE=EFFECTIVE_PERMISSION`. Nenhuma rota, controller ou serviço pode usar `role==='admin'` (ou `tipo`) para decidir **se** alguém pode agir. A cadeia canônica para ação de tenant é `verifyToken + verificarEmpresa + verificarPlano (quando aplicável) + requirePermission(...) + escopo (quando aplicável)`. Autoridade de plataforma continua em `isSuperAdmin`, separada e não enfraquecida. E não se substitui um gate de papel por outro gate de papel: se nenhuma permissão existente representa a rota, a decisão é escolher a **menor** permissão canônica — nunca criar um `admin.access` guarda-chuva. A auditoria que fechou isto (`RBV9-INV-110`) não encontrou **nenhum** caso que exigisse "administrador da empresa" como conceito próprio.
+
+### D-073 — Quando dois caminhos levam à mesma ação, a autoridade vive na ação
+`AUTHORIZATION_AT_THE_TRANSITION_NOT_THE_ROUTE`. As rotas `/aprovar`, `/rejeitar` e `/cancelar` exigiam corretamente `launch.approve`/`reject`/`cancel`, mas o `PATCH /:id` — guardado por `launch.create` — delegava para a mesma transição, que checava só a classe de conta. Um Operador aprovava lançamento pela porta lateral. A regra geral: quando duas superfícies convergem para o mesmo efeito, a checagem pertence ao ponto de convergência, e transição sem permissão mapeada é **negada por construção**, não liberada por omissão. Ver `RBV9-INV-110`.
+
+### D-074 — Chave técnica de permissão não é informação de usuário
+`TEAM_UX_001=REMOVE_RAW_PERMISSION_KEYS_FROM_NORMAL_LIST`. A lista de equipe mostra **Perfil de acesso**; exceção individual aparece como indicador humano ("2 ajustes de acesso") que **qualifica o perfil**, sem citar chave. O detalhe do que foi ajustado vive na tela canônica de Perfis e Permissões, sob `permissions.manage` — e não se cria um segundo editor para isso. Quando não há informação humana útil além do perfil, a coluna é **removida sem substituição**: menos coluna útil é melhor que redundância decorativa.
 ---
 
 ## Gates registrados

@@ -1,18 +1,24 @@
 const express = require('express');
 const router = express.Router();
 const adminTermosController = require('../controllers/adminTermosController');
-const { verifyToken, isAdmin, isSuperAdmin } = require('../middlewares/auth');
+const { verifyToken, isSuperAdmin } = require('../middlewares/auth');
 const { verificarEmpresa } = require('../middlewares/tenant');
+const { requirePermission } = require('../middlewares/requirePermission');
 const validate = require('../middlewares/validate');
 const { criarTermoSchema, atualizarTermoSchema } = require('../schemas/termos');
 
-// Base: exige admin autenticado. Ações de escrita exigem super-admin (catálogo
-// de termos é documento legal de plataforma).
-router.use(verifyToken, isAdmin);
+// Base: exige apenas autenticação. Cada rota declara a própria autoridade: o
+// catálogo é documento legal de plataforma (super-admin); o relatório de aceites
+// da empresa é informação sobre usuários (users.view).
+router.use(verifyToken);
 
 // Relatório de aceites da empresa — admin comum vê a própria (verificarEmpresa).
 // Declarada ANTES das rotas /:id para não colidir com elas.
-router.get('/empresas/:id/aceites', verificarEmpresa, adminTermosController.listarAceitesDaEmpresa);
+// RBV9-INV-110: o relatório devolve `termos_aceites.*`, que inclui IP e user-agent por
+// usuário — dado pessoal. Com `isAdmin` no topo do router, qualquer usuário interno lia
+// isso. É informação SOBRE os usuários da empresa, logo `users.view` (que o Operador
+// não tem no baseline).
+router.get('/empresas/:id/aceites', verificarEmpresa, requirePermission('users.view'), adminTermosController.listarAceitesDaEmpresa);
 
 // Catálogo (super-admin).
 router.get('/', isSuperAdmin, adminTermosController.listar);

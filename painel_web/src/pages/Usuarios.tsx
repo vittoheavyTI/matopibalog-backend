@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { UserPlus, Search, Shield, Phone, MapPin, Camera, X, Check, Trash2, AlertTriangle, Key, Copy, KeyRound, Eye, EyeOff, Edit3 } from 'lucide-react';
 import api from '../api';
 import { ErroCarregamento } from '../components/ErroCarregamento';
@@ -15,6 +15,13 @@ export const Usuarios: React.FC = () => {
   const { user: currentUser } = useAuth();
   const currentUserId = currentUser?.uid || 'admin';
 
+  // Mesma regra da Sidebar: super-admin passa; senão, permissão efetiva; e só cai
+  // na classe de conta quando o backend ainda não mandou o efetivo.
+  const podeVerPermissoes = currentUser?.is_super_admin === true
+    || (currentUser?.effective_permissions
+      ? currentUser.effective_permissions['permissions.manage'] === true
+      : currentUser?.role === 'admin');
+
   // Carga da lista com estados distintos + AbortController + stale-guard + retry
   // (mesmo hook usado no Planos — cancelamento não vira erro; erro ≠ lista vazia).
   const { estado: estUsuarios, view: viewUsuarios, recarregar: loadUsuarios } = useCarregamento<any>(
@@ -26,6 +33,7 @@ export const Usuarios: React.FC = () => {
       // hoje vale 'admin' para todo usuário interno (D-069). Sem este campo a
       // lista chamaria de 'Administrador' até quem é Operador.
       perfilAcessoNome: u.perfil_acesso_nome || null,
+      ajustesDeAcesso: Number(u.ajustes_de_acesso) || 0,
       empresaTipo: Array.isArray(u.empresas) ? u.empresas[0]?.tipo || null : u.empresas?.tipo || null,
       is_super_admin: !!u.is_super_admin,
       permissoes: u.permissoes || { dashboard: true, motoristas: true, relatorios: true, usuarios: false, configuracoes: false },
@@ -534,13 +542,12 @@ export const Usuarios: React.FC = () => {
                   <th className="p-3 border-b">Contato</th>
                   <th className="p-3 border-b">Perfil de acesso</th>
                   <th className="p-3 border-b">Status</th>
-                  <th className="p-3 border-b">Permissões</th>
                   <th className="p-3 border-b text-center">Ações</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
                 {filtered.length === 0 && (
-                  <tr><td colSpan={6} className="p-8 text-center text-gray-400">Nenhum usuário neste grupo.</td></tr>
+                  <tr><td colSpan={5} className="p-8 text-center text-gray-400">Nenhum usuário neste grupo.</td></tr>
                 )}
                 {filtered.map(user => (
                   <tr key={user.uid} className="hover:bg-gray-50/50 transition-colors">
@@ -569,20 +576,20 @@ export const Usuarios: React.FC = () => {
                       <span className={`px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest ${getTipoBadgeClasses(user)}`}>
                         {user.perfilAcessoNome || getTipoLabel(user)}
                       </span>
+                      {/* TEAM-UX-001: existir exceção individual é informação de gestão;
+                          QUAL chave foi ajustada não é — isso vive na tela de permissões,
+                          que tem outra autoridade. Qualifica o perfil, então fica junto
+                          dele em vez de virar coluna própria. */}
+                      {user.ajustesDeAcesso > 0 && (
+                        <p className="mt-1 text-[10px] font-medium text-amber-700">
+                          {user.ajustesDeAcesso === 1 ? '1 ajuste de acesso' : `${user.ajustesDeAcesso} ajustes de acesso`}
+                        </p>
+                      )}
                     </td>
                     <td className="p-3 align-top">
                       <span className={`px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest ${user.status === 'ativo' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
                         {user.status || 'ATIVO'}
                       </span>
-                    </td>
-                    <td className="p-3">
-                      <div className="flex flex-wrap gap-1">
-                        {Object.entries(user.permissoes || {}).filter(([_, v]) => v).map(([key]) => (
-                          <span key={key} className="bg-gray-100 text-gray-500 text-[9px] px-1.5 py-0.5 rounded border border-gray-200 uppercase font-medium">
-                            {key}
-                          </span>
-                        ))}
-                      </div>
                     </td>
                     <td className="p-3 text-right align-top">
                       <div className="flex items-center justify-end gap-2">
@@ -792,6 +799,23 @@ export const Usuarios: React.FC = () => {
                 className={`${CLASSE_INPUT} bg-gray-100 text-gray-600`}
                 value={editingUser.perfilAcessoNome || getTipoLabel(editingUser)}
               />
+              {/* TEAM-UX-001 §5: o detalhe das exceções vive na tela canônica de
+                  permissões, que tem outra autoridade. Aqui só dizemos que existem e
+                  como chegar lá — não é um segundo editor de permissões. */}
+              {editingUser.ajustesDeAcesso > 0 && (
+                <p className="mt-1.5 text-xs text-amber-700">
+                  Esta pessoa tem{' '}
+                  {editingUser.ajustesDeAcesso === 1
+                    ? '1 ajuste individual de acesso'
+                    : `${editingUser.ajustesDeAcesso} ajustes individuais de acesso`}
+                  {' '}além do perfil.{' '}
+                  {podeVerPermissoes && (
+                    <Link to="/perfis-permissoes" className="font-semibold underline hover:text-amber-800">
+                      Ver em Perfis e Permissões
+                    </Link>
+                  )}
+                </p>
+              )}
             </Campo>
           )}
 

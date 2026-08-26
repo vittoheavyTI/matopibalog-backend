@@ -67,11 +67,22 @@ const criarController = (freteData, { rpcError = null } = {}) => {
   }
 };
 
-async function executar({ freteData = frete(), user = { role: 'admin', uid: '11111111-1111-1111-1111-111111111111' }, empresaId = frete().empresa_id, body, rpcError = null } = {}) {
+// RBV9-INV-110: a autoridade da correção financeira é a permissão efetiva
+// `finance.operational.manage`, não a classe de conta. O harness injeta o efetivo já
+// resolvido em `req._effectivePermissions` — que é exatamente o que `requirePermission`
+// deixa no request antes de o controller rodar. Por padrão a persona TEM a permissão;
+// os testes de negação passam `permissoes: {}`.
+async function executar({ freteData = frete(), user = { role: 'admin', uid: '11111111-1111-1111-1111-111111111111' }, empresaId = frete().empresa_id, body, rpcError = null, permissoes = { 'finance.operational.manage': true } } = {}) {
   const { controller, capt } = criarController(freteData, { rpcError });
   let resposta = null;
   await controller.corrigirFinanceiro(
-    { params: { id: freteData?.id || frete().id }, body, user, empresa_id: empresaId },
+    {
+      params: { id: freteData?.id || frete().id },
+      body,
+      user,
+      empresa_id: empresaId,
+      _effectivePermissions: { permissions: permissoes },
+    },
     { status(status) { return { json(b) { resposta = { status, body: b }; } }; } },
   );
   return { resposta, capt };
@@ -106,8 +117,11 @@ test('POST correcao-financeira chama RPC auditada com patch derivado', async () 
 });
 
 test('POST correcao-financeira bloqueia motorista e tenant divergente antes da RPC', async () => {
+  // O template Motorista não concede finance.operational.manage — é por isso que ele
+  // é negado, e não por carregar outra classe de conta.
   const motorista = await executar({
     user: { role: 'motorista', uid: '059ee0f2-fb3c-4693-8822-c5644c54901e' },
+    permissoes: {},
     body: { fields: { valor_tonelada_km: 0.245 }, reason: 'correcao financeira legado auditada', request_id: 'req-controller-2' },
   });
   assert.equal(motorista.resposta.status, 403);
@@ -133,6 +147,18 @@ test('POST correcao-financeira bloqueia cancelado com erro estruturado', async (
   assert.equal(capt.rpcName, null);
 });
 
+// RBV9-INV-110 — o caso que a classe de conta escondia: alguém interno, com
+// role='admin' como todo usuário do painel, mas SEM a permissão financeira.
+test('POST correcao-financeira bloqueia usuário interno sem finance.operational.manage', async () => {
+  const { resposta, capt } = await executar({
+    user: { role: 'admin', uid: '22222222-2222-2222-2222-222222222222' },
+    permissoes: { 'freight.manage': true, 'launch.create': true },
+    body: { fields: { valor_tonelada_km: 0.245 }, reason: 'correcao financeira legado auditada', request_id: 'req-controller-op' },
+  });
+  assert.equal(resposta.status, 403);
+  assert.equal(resposta.body.permission, 'finance.operational.manage');
+  assert.equal(capt.rpcName, null, 'nada pode chegar à RPC sem autoridade');
+});
 test('POST correcao-financeira mapeia concorrencia otimista para 409', async () => {
   const { resposta, capt } = await executar({
     body: {
