@@ -227,3 +227,49 @@ Dois defeitos reais encontrados enquanto se escrevia os testes:
 - Não permite editar e-mail nem mover usuário de empresa.
 - Não toca no Portal do Embarcador: `RBV9-INV-081` segue `IMPL_NV`.
 - Não inicia a E3.6.
+
+## 14. Fecho em produção
+
+| Item | Valor |
+|---|---|
+| PR | #486, `MERGE_SHA=5f4708f0c6ab66bcb87456c84da766812cf48a2c` |
+| CI | 4/4 verdes na `main`; SEC-1 sem rerun |
+| Frontend | bundle `index-iCm7Pmll.js` |
+| Migration | nenhuma |
+| Backend | 1969/1969 (eram 1965) |
+| Web | 229/229 (eram 209) |
+
+### Certificação read-only
+
+`/health` 200. Contrato sem credencial em `401` nas rotas tocadas:
+`/admin/perfis-acesso`, `PUT /admin/usuarios/:id/perfil-acesso`, `/admin/usuarios`
+e `PUT /admin/usuarios/:id`.
+
+Deploy do frontend verificado por inspeção do bundle — que é a prova útil, já que
+`401` não distingue rota existente de inexistente: `Selecionar perfil de acesso`,
+`Alterar perfil`, `Alterar conta`, `Editar permissões do perfil`, `CEP não
+encontrado` e `Editar usuário` estão presentes; o gate `Ocultar` das seções não
+aparece mais.
+
+Banco inalterado: 38 usuários (0 criados hoje), 225 templates, 3725 permissões de
+template, 8 overrides, 38/38 com ponteiro de template.
+
+`PRODUCTION_USER_WRITES=0` · `PRODUCTION_PERMISSION_WRITES=0`
+
+### Pacote visual
+
+17 cenas em `team-correcoes-visual/`, cobrindo o fluxo do super-admin, o da
+empresa, a edição com troca de perfil e o mobile 390×844. Medidas objetivas:
+nenhuma cena com overflow horizontal, nenhuma com rodapé oculto, nenhuma com
+modal maior que a tela; lista de contas aberta apenas na cena de busca e lista de
+perfis apenas nas quatro cenas em que foi aberta de propósito.
+
+`TEAM_OWNER_VISUAL_VALIDATION=PENDING_OWNER_FINAL_REVIEW`.
+
+### Nota de método
+
+Duas rodadas da suíte web acusaram falhas que não se reproduziram isoladas — eu
+havia deixado o Playwright rodando em paralelo. Rodada sozinha: 229/229. Fica
+registrado porque é o mesmo tipo de erro do `git stash` concorrente do fecho
+anterior: paralelizar o que disputa recurso produz vermelho falso e custa
+investigação à toa.
