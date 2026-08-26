@@ -547,7 +547,8 @@ function registrar(pg) {
        FROM permission_template_permissions p
        JOIN permission_templates t ON t.id = p.template_id
        WHERE p.permission_key LIKE 'partner_network.%' AND p.allowed
-       GROUP BY t.stable_key ORDER BY t.stable_key`);
+         AND t.empresa_id = $1
+       GROUP BY t.stable_key ORDER BY t.stable_key`, [EMPRESA_PRE]);
     const porChave = Object.fromEntries(rows.map((r) => [r.stable_key, r.n]));
     assert.equal(porChave.operador ?? 0, 0, 'Operador é DEFAULT_DENY; a empresa delega depois se quiser');
     for (const chave of ['administrador', 'gerente_frota']) {
