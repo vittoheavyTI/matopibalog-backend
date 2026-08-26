@@ -6,6 +6,10 @@ const CODIGOS_PORTAL = Object.freeze({
   acesso_corporativo_sso: 'acesso_corporativo_sso',
   fleet: 'fleet',
   operation_campaign: 'operation_campaign',
+  // E3.6A: a rede de parceiros nasce DEFERRED_DEFAULT_DENY — a funcionalidade
+  // existe no catálogo, mas nenhum plano a inclui e nenhuma empresa tem
+  // override. O mapeamento comercial é decisão do owner, noutra frente.
+  partner_network: 'partner_network',
 });
 
 const PERMISSOES_PORTAL = Object.freeze({
@@ -176,7 +180,7 @@ async function carregarPortalGovernanca(supabase, { empresaId, usuarioId, user }
 
     for (const [chave, codigo] of Object.entries(CODIGOS_PORTAL)) {
       const funcionalidade = porCodigo.get(codigo) || null;
-      const papelPermitido = chave === 'fleet' || chave === 'operation_campaign'
+      const papelPermitido = chave === 'fleet' || chave === 'operation_campaign' || chave === 'partner_network'
         ? true
         : permissaoUsuario(usuario, PERMISSOES_PORTAL[chave]);
       const planoFunc = funcionalidade ? pfPorFunc.get(funcionalidade.id) : null;
