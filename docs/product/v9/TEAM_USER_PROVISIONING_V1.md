@@ -206,3 +206,67 @@ autoridade decidida no servidor.
 - Não corrige `isAdmin` (ver §5) — registrado como dívida.
 - Não altera o status do Portal do Embarcador: `RBV9-INV-081` segue `IMPL_NV` e
   `OWNER_VISUAL_VALIDATION` segue `PENDING`.
+
+## 13. Fecho em produção
+
+| Item | Valor |
+|---|---|
+| PR principal | #481, `MERGE_SHA=a4cc17182409aa8e585ec68153693909f2fd2ac9` |
+| PR de correção | #482, `MERGE_SHA=4483c19836b540429fd32a2f8ccbad64fdf90b9d` |
+| CI | 4/4 verdes nas duas vezes, SEC-1 incluído |
+| Deploy backend | Railway `df37142c` SUCCESS; anterior removido |
+| Deploy frontend | bundle `index-BwplJnBU.js` publicado |
+| Migration | nenhuma |
+
+### O defeito que a certificação pegou
+
+Depois do deploy do #481, a conferência do bundle publicado mostrou que a string
+`Nível` ainda existia na tela. A investigação achou um defeito **da própria
+frente**: o backend passou a devolver `perfil_acesso_nome`, e o mapeamento da
+lista nunca leu o campo. Como `tipo` agora vale `admin` para todo usuário interno,
+a coluna derivava dele e chamaria de **Administrador até quem fosse Operador** —
+exatamente a confusão que esta frente veio eliminar. O modal de visualização tinha
+o mesmo problema em silêncio: `editingUser.perfilAcessoNome` era sempre
+`undefined`.
+
+Corrigido no #482: a coluna passou a se chamar **Perfil de acesso** e mostra o
+perfil real, com fallback para a classe da conta (motorista, super-admin não têm
+template). A cor do badge também vem do perfil — roxo é a cor de administrador e
+não pode pintar um Operador só porque `tipo=admin`. Dois testes travam a
+regressão, e o principal foi verificado contra a versão sem a correção: falha.
+
+A lição é específica: **acrescentar um campo no backend não é entregar a
+informação**. O gate que pegou isso não foi o teste nem o CI — foi conferir o
+artefato publicado.
+
+### Certificação read-only
+
+Produção idêntica antes e depois, sem nenhuma escrita:
+
+| Medida | Valor |
+|---|---|
+| `usuarios` por tipo | 18 admin · 20 motorista |
+| Usuários criados no período | **0** |
+| `permission_templates` | 225 (inalterado) |
+| `permission_template_permissions` | 3725 (inalterado) |
+| `user_permission_overrides` | 8 (inalterado) |
+| `auth_sessions` | 64 (inalterado) |
+| Memberships operacionais | 0 — confirma a decisão da §8 |
+| Usuários com ponteiro de template | 38 de 38 — **nenhum nulo** |
+
+O último número importa: enquanto `isAdmin` for role-based, um ponteiro nulo é
+uma exposição real. Hoje não há nenhum.
+
+Uma observação de método: testar as rotas novas sem credencial devolve `401`, mas
+isso **não prova** que elas existem — `verifyToken` roda antes do roteamento, e uma
+rota inexistente devolve `401` igual. A evidência de deploy veio do SHA do
+deployment no Railway e da inspeção do bundle publicado.
+
+### Achado registrado, não corrigido
+
+A coluna **Permissões** da lista ainda exibe chaves cruas em caixa alta
+(`DASHBOARD`, `MOTORISTAS`, `RELATORIOS`) vindas do campo legado `permissoes`.
+É anterior a esta frente e agora fica ao lado da coluna de perfil, o que torna o
+contraste visível. Não foi tocado porque decidir o que a coluna deve mostrar — as
+permissões efetivas resolvidas? o resumo do perfil? nada? — é decisão de produto,
+não limpeza. Registrado para o owner decidir.
