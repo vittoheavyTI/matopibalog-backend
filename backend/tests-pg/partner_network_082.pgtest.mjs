@@ -67,9 +67,37 @@ function registrar(pg) {
     migration('082_partner_network_foundation.sql'),
   ];
 
+  // As migrations da cadeia (073/074/076/078/079) criam policies que chamam os
+  // helpers de RLS definidos na migration 015, que não faz parte desta cadeia.
+  // Mesmo padrão do teste do Dispatch 079: instalar os stubs antes de aplicar.
+  async function instalarHelpersDeAuth() {
+    await pool.query('CREATE SCHEMA IF NOT EXISTS auth');
+    await pool.query(`
+      CREATE OR REPLACE FUNCTION auth.uid()
+      RETURNS uuid LANGUAGE sql STABLE
+      AS $$ SELECT NULLIF(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
+    `);
+    await pool.query(`
+      CREATE OR REPLACE FUNCTION public.rls_is_super_admin()
+      RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
+      AS $$ SELECT COALESCE((SELECT is_super_admin FROM usuarios WHERE id = auth.uid()), false) $$;
+    `);
+    await pool.query(`
+      CREATE OR REPLACE FUNCTION public.rls_is_company_admin()
+      RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
+      AS $$ SELECT COALESCE((SELECT tipo = 'admin' FROM usuarios WHERE id = auth.uid()), false) $$;
+    `);
+    await pool.query(`
+      CREATE OR REPLACE FUNCTION public.rls_empresa_id()
+      RETURNS uuid LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
+      AS $$ SELECT empresa_id FROM usuarios WHERE id = auth.uid() $$;
+    `);
+  }
+
   let preparado = false;
   async function preparar() {
     if (preparado) return;
+    await instalarHelpersDeAuth();
     for (const sql of cadeia) await pool.query(sql);
     preparado = true;
   }
@@ -83,7 +111,7 @@ function registrar(pg) {
     const empresaB = await id();
     for (const [eid, nome] of [[empresaA, 'Transportadora A'], [empresaB, 'Transportadora B']]) {
       await pool.query(
-        `INSERT INTO empresas (id, nome, tipo, status) VALUES ($1,$2,'transportadora','ativo')
+        `INSERT INTO empresas (id, nome, status) VALUES ($1,$2,'ativo')
          ON CONFLICT (id) DO NOTHING`, [eid, nome],
       );
     }
