@@ -95,15 +95,15 @@ criado. Não existe usuário provisionado pela metade.
 compatibilidade, e todo usuário interno nasce com `tipo='admin'`.
 
 Isso não é preguiça: o middleware `isAdmin` exige `role === 'admin'` e guarda
-**21 pontos de rota** (dashboard, fretes, relatórios, admin…). Gravar
+**80 rotas** (dashboard, fretes, relatórios, admin…) em 11 pontos de código. Gravar
 `tipo='operador'` criaria alguém que não abre nem o dashboard, por mais correto
 que fosse seu perfil — o rótulo legado venceria a permissão efetiva. Corrigir
-isso exigiria reescrever a autorização de 21 rotas, o que é outra frente.
+isso exigiria reescrever a autorização dessas rotas, o que é outra frente.
 
 Então: `tipo` = "conta interna, não motorista"; `permission_template_id` = o que
 a pessoa pode fazer. É a leitura que o modelo P2 já pressupõe.
 
-**Dívida registrada:** `isAdmin` deveria ser "usuário interno" e não "role admin".
+**Dívida registrada — já fechada:** `isAdmin` deveria ser "usuário interno" e não "role admin".
 Enquanto não for, o ponteiro de template não pode ficar nulo — é exatamente por
 isso que a atomicidade acima é obrigatória, e não uma melhoria.
 

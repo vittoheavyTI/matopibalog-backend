@@ -3,7 +3,8 @@ const multer = require('multer');
 const crypto = require('crypto');
 const axios = require('axios');
 const supabase = require('../config/supabase');
-const { verifyToken, isAdmin } = require('../middlewares/auth');
+const { verifyToken } = require('../middlewares/auth');
+const { ensureEffective } = require('../middlewares/requirePermission');
 const { verificarEmpresa } = require('../middlewares/tenant');
 const { resolveAsaasApiKey } = require('../utils/asaasConfig');
 const {
@@ -57,13 +58,25 @@ const upload = multer({
   },
 });
 
-// Quem pode agir sobre o CONTRATO do próprio tenant: admin/super-admin OU o DONO
-// de uma empresa AUTÔNOMA (cadastro autônomo self-service cria o usuário como
-// tipo 'motorista', que não é admin — mas é o dono e precisa assinar o próprio
-// contrato). Roda após verificarEmpresa (usa req.empresa_id). Motorista vinculado
-// a uma transportadora NÃO passa (empresa tipo != autonomo). Fail-closed.
+// Quem pode agir sobre o CONTRATO do próprio tenant. Duas autoridades distintas,
+// e a segunda não é redundante com a primeira:
+//
+//  1) capacidade delegável `company.settings.manage` — ato contratual da empresa.
+//     Era `role==='admin'` (RBV9-INV-110), que não distinguia ninguém interno: um
+//     Operador aceitava contrato e assinava em nome da empresa.
+//  2) o DONO de uma empresa AUTÔNOMA. O cadastro autônomo self-service cria o
+//     usuário como tipo 'motorista' e o template Motorista não concede — nem deve
+//     conceder — capacidade administrativa. Ele é o dono e precisa assinar o
+//     próprio contrato, então a exceção continua explícita.
+//
+// Motorista VINCULADO a uma transportadora não passa por nenhuma das duas
+// (empresa tipo != autonomo). Roda após verificarEmpresa. Fail-closed.
 async function permitirAssinaturaCliente(req, res, next) {
-  if (req.user && (req.user.role === 'admin' || req.user.is_super_admin === true)) return next();
+  if (req.user && req.user.is_super_admin === true) return next();
+  try {
+    const efetivo = await ensureEffective(req);
+    if (efetivo && efetivo.permissions && efetivo.permissions['company.settings.manage'] === true) return next();
+  } catch { /* fail-closed: cai na exceção do autônomo abaixo */ }
   try {
     if (!req.empresa_id) return res.status(403).json({ message: 'Acesso restrito.' });
     const { data: emp, error } = await supabase

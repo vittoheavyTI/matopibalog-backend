@@ -60,9 +60,22 @@ const verifyToken = (req, res, next) => {
   }
 };
 
-// Middleware 2: Verifica se o usuário é um Administrador
+// Middleware 2 — DEPRECIADO. NÃO USAR EM ROTA NOVA.
+//
+// Verifica `role === 'admin'`, que é a CLASSE DA CONTA e não o papel da pessoa:
+// desde o TEAM_USER_PROVISIONING_V1 (D-069) todo usuário interno nasce com
+// `tipo='admin'` — Operador, Gerente e Financeiro inclusive. Ou seja, este gate
+// **não distingue ninguém interno**: usá-lo é escrever uma porta destrancada.
+//
+// RBV9-INV-110 removeu todos os 11 usos que existiam (80 rotas). Hoje nenhuma rota
+// o referencia; a exportação permanece só para não quebrar importadores externos.
+//
+// Use no lugar:
+//   • ação de tenant  → requirePermission('<capability>') + verificarEmpresa
+//   • plataforma      → isSuperAdmin
+// E não substitua por outro teste de nome de papel — se nenhuma permissão existente
+// representa a rota, escolha a MENOR capability canônica (D-072).
 const isAdmin = (req, res, next) => {
-  // Olhamos o 'role' que salvamos dentro do token na hora do login
   if (req.user && req.user.role === 'admin') {
     next(); // Pode passar
   } else {

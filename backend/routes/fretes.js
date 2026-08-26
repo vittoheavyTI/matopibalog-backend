@@ -49,8 +49,9 @@ router.post('/', requirePermission('freight.create'), validate(createFreteSchema
 router.post('/localizacao/credencial', trackingCredentialController.emitir);
 // P2 — correção FINANCEIRA do frete é uma MUTAÇÃO de financeiro operacional →
 // exige finance.operational.manage (não só ler). Admin tem por padrão via template
-// administrador/financeiro; super-admin é authority separada. O controller mantém a
-// checagem isAdmin/ownership por dentro (defesa em profundidade).
+// administrador/financeiro; super-admin é authority separada. O controller reconfere
+// a MESMA permissão e o ownership por dentro (defesa em profundidade) — antes ele
+// reconferia role==='admin', que não negava ninguém interno (RBV9-INV-110).
 router.post('/:id/correcao-financeira', requirePermission('finance.operational.manage'), validate(correcaoFinanceiraFreteSchema), fretesController.corrigirFinanceiro);
 router.get('/:id', requirePermission('freight.view'), fretesController.getById);
 router.post('/:id/odometro/inicial', upload.single('foto'), fretesController.uploadOdometroInicial);

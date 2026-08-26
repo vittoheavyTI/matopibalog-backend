@@ -3,7 +3,7 @@ const router = express.Router();
 const multer = require('multer');
 const crypto = require('crypto');
 const supabase = require('../config/supabase');
-const { verifyToken, isAdmin, isSuperAdmin } = require('../middlewares/auth');
+const { verifyToken, isSuperAdmin } = require('../middlewares/auth');
 const { criarEmpresaCompleta } = require('../services/empresaService');
 const { plano_idValido, normalizarPlanoId } = require('../utils/plano');
 const { conflitoUnico } = require('../utils/pgError');
@@ -59,7 +59,7 @@ const {
   montarResgate,
 } = require('../services/promocaoDomainService');
 
-router.use(verifyToken, isAdmin, isSuperAdmin);
+router.use(verifyToken, isSuperAdmin);
 
 const uploadContrato = multer({
   storage: multer.memoryStorage(),
@@ -1396,7 +1396,7 @@ router.post('/promocoes/:id/aplicar', async (req, res) => {
 });
 
 // ═══ Catálogo de Funcionalidades e Add-ons (super-admin) ════════════════════
-// Guard já aplicado no topo (verifyToken, isAdmin, isSuperAdmin).
+// Guard já aplicado no topo (verifyToken, isSuperAdmin).
 
 router.get('/funcionalidades', async (req, res) => {
   try {

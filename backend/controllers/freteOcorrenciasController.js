@@ -1,6 +1,6 @@
 const crypto = require('crypto');
 const supabase = require('../config/supabase');
-const { buscarFreteComAcesso, ehAdmin } = require('./freteAcesso');
+const { buscarFreteComAcesso, negarSeNaoGerenciaFrete } = require('./freteAcesso');
 const { TIPOS_OCORRENCIA, STATUS_OCORRENCIA } = require('../schemas/freteOcorrencias');
 const notificacaoService = require('../services/notificacaoService');
 
@@ -98,9 +98,7 @@ exports.atualizar = async (req, res) => {
   if (!ocorrencia) return;
 
   const mudaStatus = req.body.status !== undefined && req.body.status !== ocorrencia.status;
-  if (mudaStatus && !ehAdmin(req)) {
-    return res.status(403).json({ message: 'Apenas administradores podem alterar o status da ocorrência.' });
-  }
+  if (mudaStatus && await negarSeNaoGerenciaFrete(req, res)) return;
 
   const patch = { updated_at: new Date().toISOString() };
   for (const campo of ['tipo', 'descricao', 'ocorrido_em', 'impacto', 'status', 'resolucao']) {

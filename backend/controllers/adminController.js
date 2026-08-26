@@ -461,6 +461,26 @@ exports.getUsuarios = async (req, res) => {
       for (const t of tpls || []) perfilPorId.set(t.id, t.display_name || t.stable_key);
     }
 
+    // TEAM-UX-001: a lista informa QUANTOS ajustes individuais a pessoa tem, nunca
+    // QUAIS. Saber que existe exceção é gestão de equipe; saber qual chave foi
+    // concedida é a tela de permissões, que tem outra autoridade. Uma consulta
+    // agregada para todos, não uma por linha.
+    const idsUsuarios = (usuariosDb || []).map((u) => u.id).filter(Boolean);
+    const ajustesPorUsuario = new Map();
+    if (idsUsuarios.length) {
+      const { data: overrides } = await supabase
+        .from('user_permission_overrides')
+        .select('usuario_id, empresa_id')
+        .in('usuario_id', idsUsuarios);
+      // Casa pelo par (usuário, empresa): o super-admin lista várias empresas, e um
+      // override só conta para o tenant a que pertence.
+      const empresaDoUsuario = new Map((usuariosDb || []).map((u) => [u.id, u.empresa_id]));
+      for (const o of overrides || []) {
+        if (empresaDoUsuario.get(o.usuario_id) !== o.empresa_id) continue;
+        ajustesPorUsuario.set(o.usuario_id, (ajustesPorUsuario.get(o.usuario_id) || 0) + 1);
+      }
+    }
+
     const usuariosComEmpresa = (usuariosDb || []).map(u => ({
       ...u,
       empresa_tipo: Array.isArray(u.empresas)
@@ -468,6 +488,7 @@ exports.getUsuarios = async (req, res) => {
         : u.empresas?.tipo || null,
       is_super_admin: u.is_super_admin === true,
       perfil_acesso_nome: perfilPorId.get(u.permission_template_id) || null,
+      ajustes_de_acesso: ajustesPorUsuario.get(u.id) || 0,
     }));
 
     // Órfãos do Auth (sem linha em usuarios) NÃO têm empresa_id → não dá para
@@ -708,12 +729,12 @@ exports.createUsuario = async (req, res) => {
         // canônico em `permission_template_id`, resolvido por `requirePermission`.
         //
         // Por que 'admin' para todo usuário interno, inclusive Operador: o
-        // middleware `isAdmin` exige `role === 'admin'` e guarda 21 pontos de rota
-        // (dashboard, fretes, relatórios, admin…). Gravar `tipo='operador'` criaria
-        // um usuário que não abre nem o dashboard, por mais correto que fosse seu
-        // perfil — o rótulo legado venceria a permissão efetiva. Aqui `tipo`
-        // significa "conta interna da empresa, não motorista", e a autoridade fina
-        // é o template.
+        // middleware `isAdmin` exigia `role === 'admin'` e guardava 80 rotas.
+        // Esse acoplamento foi desfeito em RBV9-INV-110: nenhuma autorização de
+        // produto depende mais da classe de conta. O valor continua `admin` porque
+        // trocá-lo agora é mudança de dado em produção, não de código — e nada mais
+        // o lê como papel. Aqui `tipo` significa "conta interna da empresa, não
+        // motorista"; a autoridade é o template.
         //
         // Consequência que a atomicidade acima protege: se o ponteiro de template
         // ficasse nulo, o resolver cairia no baseline por `tipo` — Administrador —

@@ -1,6 +1,6 @@
 const crypto = require('crypto');
 const supabase = require('../config/supabase');
-const { buscarFreteComAcesso, ehAdmin } = require('./freteAcesso');
+const { buscarFreteComAcesso, negarSeNaoGerenciaFrete } = require('./freteAcesso');
 const notificacaoService = require('../services/notificacaoService');
 
 // ePOD — comprovacao de entrega digital (1 por frete). Espelha o padrao dos
@@ -164,7 +164,7 @@ async function buscarEpodDoFrete(res, freteId) {
 // POST /fretes/:id/epod/evidencias/:evidId/validacao → admin aprova/rejeita UMA
 // evidência. Recalcula o status geral e avisa o motorista.
 exports.validarEvidencia = async (req, res) => {
-  if (!ehAdmin(req)) return res.status(403).json({ message: 'Apenas administradores podem validar evidências.' });
+  if (await negarSeNaoGerenciaFrete(req, res)) return;
   const frete = await buscarFreteComAcesso(req, res);
   if (!frete) return;
 
@@ -199,7 +199,7 @@ exports.validarEvidencia = async (req, res) => {
 // todas as evidências não-rejeitadas como rejeitadas (com motivo) e grava o
 // motivo no ePOD. Recalcula (→ rejeitado) e avisa o motorista.
 exports.rejeitarComprovacao = async (req, res) => {
-  if (!ehAdmin(req)) return res.status(403).json({ message: 'Apenas administradores podem rejeitar a comprovação.' });
+  if (await negarSeNaoGerenciaFrete(req, res)) return;
   const frete = await buscarFreteComAcesso(req, res);
   if (!frete) return;
   const epod = await buscarEpodDoFrete(res, frete.id);
@@ -228,7 +228,7 @@ exports.rejeitarComprovacao = async (req, res) => {
 // POST /fretes/:id/epod/aprovar-pendentes → atalho: admin aprova TODAS as
 // evidências pendentes de uma vez. Recalcula e avisa o motorista.
 exports.aprovarPendentes = async (req, res) => {
-  if (!ehAdmin(req)) return res.status(403).json({ message: 'Apenas administradores podem aprovar evidências.' });
+  if (await negarSeNaoGerenciaFrete(req, res)) return;
   const frete = await buscarFreteComAcesso(req, res);
   if (!frete) return;
   const epod = await buscarEpodDoFrete(res, frete.id);
