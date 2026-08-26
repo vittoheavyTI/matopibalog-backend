@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, X, MessageCircle, Trash2, AlertTriangle, Camera, MapPin, Loader2, UserPlus, ArrowUpCircle } from 'lucide-react';
+import { Plus, X, MessageCircle, Trash2, AlertTriangle, Camera, MapPin, UserPlus, ArrowUpCircle } from 'lucide-react';
 import { ModalFormulario, SecaoFormulario, Campo, CLASSE_INPUT, CLASSE_BOTAO_PRIMARIO, CLASSE_BOTAO_SECUNDARIO, CLASSE_GRADE_2 } from '../components/ModalFormulario';
+import { CampoCepEndereco } from '../components/CampoCepEndereco';
 import api from '../api';
 import { mensagemErro } from '../utils/mensagemErro';
-import { maskPhone, maskCPF, maskCEP } from '../utils/masks';
-import axios from 'axios';
+import { maskPhone, maskCPF } from '../utils/masks';
 
 export const Motoristas: React.FC = () => {
   const [motoristas, setMotoristas] = useState<any[]>([]);
@@ -21,8 +21,6 @@ export const Motoristas: React.FC = () => {
     percentualComissao: 12 
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isFetchingCep, setIsFetchingCep] = useState(false);
-  const [secaoAdicionaisMotorista, setSecaoAdicionaisMotorista] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Modal Editar Motorista
@@ -202,37 +200,6 @@ export const Motoristas: React.FC = () => {
         }
       };
       reader.readAsDataURL(file);
-    }
-  };
-
-  const buscarCep = async (cepStr: string) => {
-    const cleanCep = cepStr.replace(/\D/g, '');
-    if (cleanCep.length !== 8) return;
-    
-    try {
-      setIsFetchingCep(true);
-      const response = await axios.get(`https://viacep.com.br/ws/${cleanCep}/json/`);
-      if (response.data && !response.data.erro) {
-        if (editingMot) {
-          setEditingMot({
-            ...editingMot,
-            endereco: response.data.logradouro,
-            bairro: response.data.bairro,
-            cidade: `${response.data.localidade} - ${response.data.uf}`
-          });
-        } else {
-          setNewMot({
-            ...newMot,
-            endereco: response.data.logradouro,
-            bairro: response.data.bairro,
-            cidade: `${response.data.localidade} - ${response.data.uf}`
-          });
-        }
-      }
-    } catch (err) {
-      if (import.meta.env.DEV) console.error('[Motoristas] buscar CEP falhou');
-    } finally {
-      setIsFetchingCep(false);
     }
   };
 
@@ -493,10 +460,6 @@ export const Motoristas: React.FC = () => {
         <SecaoFormulario
           titulo="Informações adicionais"
           descricao="Foto e endereço. Podem ser preenchidos depois."
-          recolhivel
-          aberta={secaoAdicionaisMotorista}
-          aoAlternar={() => setSecaoAdicionaisMotorista(v => !v)}
-          abertaPorPadrao={false}
         >
           <div className="flex items-center gap-3">
             <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileChange} />
@@ -522,40 +485,15 @@ export const Motoristas: React.FC = () => {
             </div>
           </div>
 
-          <Campo id="mot-cep" rotulo="CEP" ajuda={isFetchingCep ? 'Buscando endereço…' : undefined}>
-            <input
-              id="mot-cep" className={CLASSE_INPUT} placeholder="00000-000"
-              value={newMot.cep}
-              onChange={e => {
-                const masked = maskCEP(e.target.value);
-                setNewMot({ ...newMot, cep: masked });
-                buscarCep(masked);
-              }}
-            />
-          </Campo>
-          <Campo id="mot-endereco" rotulo="Endereço">
-            <input
-              id="mot-endereco" className={CLASSE_INPUT}
-              value={newMot.endereco}
-              onChange={e => setNewMot({ ...newMot, endereco: e.target.value })}
-            />
-          </Campo>
-          <div className={CLASSE_GRADE_2}>
-            <Campo id="mot-bairro" rotulo="Bairro">
-              <input
-                id="mot-bairro" className={CLASSE_INPUT}
-                value={newMot.bairro}
-                onChange={e => setNewMot({ ...newMot, bairro: e.target.value })}
-              />
-            </Campo>
-            <Campo id="mot-cidade" rotulo="Cidade / UF">
-              <input
-                id="mot-cidade" className={CLASSE_INPUT}
-                value={newMot.cidade}
-                onChange={e => setNewMot({ ...newMot, cidade: e.target.value })}
-              />
-            </Campo>
-          </div>
+          {/* TEAM-FUNC-03/§71: o mesmo componente do formulário de usuário. Antes
+              havia uma cópia idêntica aqui e uma terceira variação no modal de
+              edição, que buscava no `onBlur` — três comportamentos para o mesmo
+              campo. */}
+          <CampoCepEndereco
+            idPrefixo="mot"
+            valores={{ cep: newMot.cep || '', endereco: newMot.endereco || '', bairro: newMot.bairro || '', cidade: newMot.cidade || '' }}
+            aoAlterar={(patch) => setNewMot((prev: any) => ({ ...prev, ...patch }))}
+          />
         </SecaoFormulario>
       </ModalFormulario>
 
@@ -645,51 +583,19 @@ export const Motoristas: React.FC = () => {
                   <MapPin size={14} className="mr-1.5 text-gray-400" /> Localização
                 </h4>
                 
-                <div>
-                  <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1 flex justify-between">
-                    CEP
-                    {isFetchingCep && <Loader2 size={12} className="animate-spin text-blue-500" />}
-                  </label>
-                  <input 
-                    className="w-full border-gray-200 rounded-xl p-2.5 outline-none border focus:border-blue-500 bg-white" 
-                    placeholder="00000-000"
-                    maxLength={9}
-                    value={editingMot.cep}
-                    onChange={e => setEditingMot({...editingMot, cep: maskCEP(e.target.value)})}
-                    onBlur={e => buscarCep(e.target.value)}
-                  />
-                </div>
-                
-                <div>
-                  <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">Endereço / Logradouro</label>
-                  <input 
-                    className="w-full border-gray-200 rounded-xl p-2.5 outline-none border focus:border-blue-500 bg-white" 
-                    placeholder="Rua, número..."
-                    value={editingMot.endereco}
-                    onChange={e => setEditingMot({...editingMot, endereco: e.target.value})}
-                  />
-                </div>
-                
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">Bairro</label>
-                    <input 
-                      className="w-full border-gray-200 rounded-xl p-2.5 outline-none border focus:border-blue-500 bg-white" 
-                      placeholder="Bairro"
-                      value={editingMot.bairro}
-                      onChange={e => setEditingMot({...editingMot, bairro: e.target.value})}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1 ml-1">Cidade / UF</label>
-                    <input 
-                      className="w-full border-gray-200 rounded-xl p-2.5 outline-none border focus:border-blue-500 bg-white" 
-                      placeholder="Cidade - UF"
-                      value={editingMot.cidade}
-                      onChange={e => setEditingMot({...editingMot, cidade: e.target.value})}
-                    />
-                  </div>
-                </div>
+                {/* §27: a edição usava `onBlur` enquanto a criação usava
+                    `onChange` — o mesmo campo com dois comportamentos. Agora é o
+                    componente compartilhado nos dois lados. */}
+                <CampoCepEndereco
+                  idPrefixo="mot-edit"
+                  valores={{
+                    cep: editingMot.cep || '',
+                    endereco: editingMot.endereco || '',
+                    bairro: editingMot.bairro || '',
+                    cidade: editingMot.cidade || '',
+                  }}
+                  aoAlterar={(patch) => setEditingMot((prev: any) => ({ ...prev, ...patch }))}
+                />
               </div>
               <div className="flex items-center justify-between bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 mt-2">
                 <div>

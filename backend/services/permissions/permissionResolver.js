@@ -283,6 +283,7 @@ function tabelaAusente(error) {
 
 module.exports = {
   computeEffectivePermissions,
+  carregarEntitlements,
   loadEffectivePermissions,
   hasPermission,
   PERMISSION_KEYS,

@@ -17,10 +17,24 @@ import { Usuarios } from './Usuarios';
 const mockApi = api as unknown as { get: ReturnType<typeof vi.fn> };
 const usuario = { id: 'u1', nome: 'Fulano de Teste', email: 'f@x.com', tipo: 'admin', empresa_id: null, status: 'ativo' };
 
-function setGet(usuariosFactory: () => Promise<any>) {
+// Perfis como o servidor os devolve — já filtrados pela contenção.
+const PERFIS = [
+  { id: 'tpl-admin', stable_key: 'administrador', nome: 'Administrador', descricao: 'Administra o tenant.', resumo: ['Gerenciar usuários e permissões'], editavel: true },
+  { id: 'tpl-operador', stable_key: 'operador', nome: 'Operador', descricao: 'Operação do dia a dia.', resumo: ['Fretes e operação'], editavel: true },
+  { id: 'tpl-gerente', stable_key: 'gerente_frota', nome: 'Gerente de Frota', descricao: 'Gestão da frota.', resumo: ['Frota'], editavel: true },
+];
+
+const CONTAS = [
+  { id: 'emp-1', nome: 'Transportes Cerrado', tipo: 'transportadora' },
+  { id: 'emp-2', nome: 'Fazenda Boa Vista', tipo: 'transportadora' },
+  { id: 'emp-3', nome: 'João Autônomo', tipo: 'autonomo' },
+];
+
+function setGet(usuariosFactory: () => Promise<any>, opcoes: { perfis?: any[]; contas?: any[] } = {}) {
   mockApi.get.mockImplementation((url: string) => {
     if (url === '/admin/usuarios') return usuariosFactory();
-    return Promise.resolve({ data: [] }); // /painel-admin/empresas (seletor)
+    if (url === '/admin/perfis-acesso') return Promise.resolve({ data: { itens: opcoes.perfis ?? PERFIS } });
+    return Promise.resolve({ data: opcoes.contas ?? CONTAS });
   });
 }
 const renderPage = () => render(<MemoryRouter><Usuarios /></MemoryRouter>);

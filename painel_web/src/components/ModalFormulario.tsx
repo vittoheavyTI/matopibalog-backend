@@ -37,7 +37,12 @@ export function ModalFormulario({
       {/* `max-h-[90vh] flex flex-col` é o coração do padrão: o container nunca
           passa da altura da tela, e as três faixas (topo, corpo, rodapé) se
           distribuem — só o corpo cresce e rola. */}
-      <div className={`bg-white rounded-2xl shadow-xl w-full ${maxLargura} overflow-hidden max-h-[90vh] flex flex-col`}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={titulo}
+        className={`bg-white rounded-2xl shadow-xl w-full ${maxLargura} overflow-hidden max-h-[90vh] flex flex-col`}
+      >
         <div className="p-5 border-b border-gray-100 flex justify-between items-center shrink-0">
           <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2 min-w-0">
             {icone}
@@ -63,45 +68,29 @@ export function ModalFormulario({
   );
 }
 
-// Seção do formulário. Existe para que "informações adicionais" possa ser
-// recolhida sem cada tela inventar seu próprio acordeão (§54/§75).
+// Seção do formulário. Agrupa visualmente sem esconder nada.
+//
+// A prop `recolhivel` foi REMOVIDA (§17/§19). Ela existia para "Opções de acesso"
+// e "Informações adicionais", e o efeito prático era ruim: os dois blocos nasciam
+// fechados, então a pessoa não via que existia senha temporária nem campo de
+// endereço — precisava adivinhar que havia um "Mostrar" para clicar. Esconder
+// campo atrás de um clique só se paga quando o campo é raro; estes não são.
+//
+// Sem a prop, ninguém pode reintroduzir o gate por engano.
 export function SecaoFormulario({
-  titulo, descricao, recolhivel = false, abertaPorPadrao = true, aberta, aoAlternar, children,
+  titulo, descricao, children,
 }: {
   titulo: string;
   descricao?: string;
-  recolhivel?: boolean;
-  abertaPorPadrao?: boolean;
-  aberta?: boolean;
-  aoAlternar?: () => void;
   children: ReactNode;
 }) {
-  const estaAberta = recolhivel ? (aberta ?? abertaPorPadrao) : true;
-
   return (
     <section className="rounded-xl border border-gray-100 bg-gray-50/40 p-4">
-      {recolhivel ? (
-        <button
-          type="button"
-          onClick={aoAlternar}
-          aria-expanded={estaAberta}
-          className="flex w-full items-center justify-between gap-3 text-left"
-        >
-          <span>
-            <span className="block text-sm font-bold text-gray-700">{titulo}</span>
-            {descricao && <span className="mt-0.5 block text-xs text-gray-500">{descricao}</span>}
-          </span>
-          <span className="text-xs font-medium text-blue-600 shrink-0">
-            {estaAberta ? 'Ocultar' : 'Mostrar'}
-          </span>
-        </button>
-      ) : (
-        <div>
-          <p className="text-sm font-bold text-gray-700">{titulo}</p>
-          {descricao && <p className="mt-0.5 text-xs text-gray-500">{descricao}</p>}
-        </div>
-      )}
-      {estaAberta && <div className="mt-3 space-y-3">{children}</div>}
+      <div>
+        <p className="text-sm font-bold text-gray-700">{titulo}</p>
+        {descricao && <p className="mt-0.5 text-xs text-gray-500">{descricao}</p>}
+      </div>
+      <div className="mt-3 space-y-3">{children}</div>
     </section>
   );
 }

@@ -276,6 +276,14 @@ Campaign-A nao integra provider de rota, marketplace, parceiro real, portal do e
 
 ### D-074 — Chave técnica de permissão não é informação de usuário
 `TEAM_UX_001=REMOVE_RAW_PERMISSION_KEYS_FROM_NORMAL_LIST`. A lista de equipe mostra **Perfil de acesso**; exceção individual aparece como indicador humano ("2 ajustes de acesso") que **qualifica o perfil**, sem citar chave. O detalhe do que foi ajustado vive na tela canônica de Perfis e Permissões, sob `permissions.manage` — e não se cria um segundo editor para isso. Quando não há informação humana útil além do perfil, a coluna é **removida sem substituição**: menos coluna útil é melhor que redundância decorativa.
+### D-075 — Contenção de perfil compara EFETIVO com EFETIVO
+`ASSIGNABLE_CONTAINMENT=EFFECTIVE_VS_EFFECTIVE`. Ao decidir se um ator pode atribuir um perfil, as permissões do perfil alvo passam pelo MESMO gate de entitlement que o efetivo do ator já atravessou. Comparar chave crua do template contra efetivo é comparar grandezas diferentes, e o efeito prático era invertido: quanto menor o plano da empresa, menos perfis ela conseguia atribuir — a ponto de um Administrador não poder criar ninguém. Uma capacidade que a empresa não contratou não existe para nenhum dos dois lados e não pode pesar na contenção. O relaxamento vale só para o não-contratado: o que o ator não tem continua bloqueando, e há teste para isso. Vale na listagem E na gravação — filtro de tela e regra de gravação que divergem oferecem o que o servidor recusa.
+
+### D-076 — Um formulário de usuário, duas entradas
+`TEAM_USER_FORM=SINGLE_CANONICAL_COMPONENT`. Super-admin e empresa usam o mesmo componente; a única diferença é o campo de conta, que no contexto de empresa não existe porque a empresa já é conhecida. Escolha de conta é `TYPEAHEAD_ON_DEMAND` e perfil é `COLLAPSED_SELECTION` — listas longas não ficam permanentemente abertas dentro de formulário. Trocar a conta LIMPA o perfil escolhido: template pertence a uma empresa, e carregar um id estrangeiro é erro por construção. Seções de formulário não têm gate de Mostrar/Ocultar (a prop foi removida do componente, não só dos usos): esconder campo atrás de um clique só se paga quando o campo é raro.
+
+### D-077 — O que o super-admin pode corrigir num usuário de cliente
+`TEAM_SUPERADMIN_EDIT=REQUIRED`, em contexto explícito da conta (`?empresa_id=`), nunca por pertencimento acidental. Editável: nome, telefone, status, foto, endereço e perfil de acesso. **E-mail permanece somente-leitura** porque `usuarios.email` espelha a identidade no Supabase Auth e não existe mutação canônica atômica para as duas — gravar só a tabela produziria alguém que aparece com um e-mail e entra com outro. **Conta vinculada é imutável**: mover usuário entre empresas levaria junto lançamentos, fretes e histórico; é migração de dados, não edição de cadastro.
 ---
 
 ## Gates registrados
