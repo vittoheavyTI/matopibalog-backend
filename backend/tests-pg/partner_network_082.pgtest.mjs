@@ -163,15 +163,32 @@ function registrar(pg) {
 
     const campanhaA = (await pool.query(
       `INSERT INTO operation_campaigns (empresa_id, reference_code, name, cargo_name, status)
-       VALUES ($1, 'CAMP-A-' || substr(md5(random()::text),1,8), 'Safra A', 'Soja', 'PLANNING')
+       VALUES ($1, 'CAMP-A-' || substr(md5(random()::text),1,8), 'Safra A', 'Soja', 'APPROVED')
        RETURNING id`, [empresaA])).rows[0].id;
+
+    // `plan_version_id` é NOT NULL: sem plano aprovado não existe residual
+    // canônico nem como provar depois qual fonte gerou o número.
+    const planoA = (await pool.query(
+      `INSERT INTO campaign_plan_versions (empresa_id, campaign_id, version_number, status, rules_version)
+       VALUES ($1,$2,1,'APPROVED','v1') RETURNING id`, [empresaA, campanhaA])).rows[0].id;
+    await pool.query(
+      'UPDATE operation_campaigns SET approved_plan_version_id = $2 WHERE id = $1', [campanhaA, planoA]);
+
+    const campanhaB = (await pool.query(
+      `INSERT INTO operation_campaigns (empresa_id, reference_code, name, cargo_name, status)
+       VALUES ($1, 'CAMP-B-' || substr(md5(random()::text),1,8), 'Safra B', 'Milho', 'APPROVED')
+       RETURNING id`, [empresaB])).rows[0].id;
+    const planoB = (await pool.query(
+      `INSERT INTO campaign_plan_versions (empresa_id, campaign_id, version_number, status, rules_version)
+       VALUES ($1,$2,1,'APPROVED','v1') RETURNING id`, [empresaB, campanhaB])).rows[0].id;
 
     const oportA = (await pool.query(
       `INSERT INTO partner_opportunities
-         (empresa_id, campaign_id, cargo_descricao, quantidade, quantidade_unidade)
-       VALUES ($1,$2,'Soja a granel', 500, 'ton') RETURNING id`, [empresaA, campanhaA])).rows[0].id;
+         (empresa_id, campaign_id, plan_version_id, cargo_descricao, quantidade, quantidade_unidade)
+       VALUES ($1,$2,$3,'Soja a granel', 500, 'ton') RETURNING id`,
+      [empresaA, campanhaA, planoA])).rows[0].id;
 
-    return { empresaA, empresaB, orgA, orgB, relA, relB, campanhaA, oportA };
+    return { empresaA, empresaB, orgA, orgB, relA, relB, campanhaA, planoA, campanhaB, planoB, oportA };
   }
 
   // ── Tenant / IDOR ────────────────────────────────────────────────────────────
@@ -392,8 +409,8 @@ function registrar(pg) {
     const c = await cenario();
     await assert.rejects(
       pool.query(
-        `INSERT INTO partner_opportunities (empresa_id, campaign_id, cargo_descricao, quantidade, quantidade_unidade)
-         VALUES ($1,$2,'Nada',0,'ton')`, [c.empresaA, c.campanhaA]),
+        `INSERT INTO partner_opportunities (empresa_id, campaign_id, plan_version_id, cargo_descricao, quantidade, quantidade_unidade)
+         VALUES ($1,$2,$3,'Nada',0,'ton')`, [c.empresaA, c.campanhaA, c.planoA]),
       /quantidade/i);
   });
 
@@ -404,13 +421,13 @@ function registrar(pg) {
     const rid = 'share-' + Math.random().toString(36).slice(2);
     await pool.query(
       `INSERT INTO partner_opportunities
-         (empresa_id, campaign_id, cargo_descricao, quantidade, quantidade_unidade, client_request_id)
-       VALUES ($1,$2,'Soja',100,'ton',$3)`, [c.empresaA, c.campanhaA, rid]);
+         (empresa_id, campaign_id, plan_version_id, cargo_descricao, quantidade, quantidade_unidade, client_request_id)
+       VALUES ($1,$2,$3,'Soja',100,'ton',$4)`, [c.empresaA, c.campanhaA, c.planoA, rid]);
     await assert.rejects(
       pool.query(
         `INSERT INTO partner_opportunities
-           (empresa_id, campaign_id, cargo_descricao, quantidade, quantidade_unidade, client_request_id)
-         VALUES ($1,$2,'Soja',100,'ton',$3)`, [c.empresaA, c.campanhaA, rid]),
+           (empresa_id, campaign_id, plan_version_id, cargo_descricao, quantidade, quantidade_unidade, client_request_id)
+         VALUES ($1,$2,$3,'Soja',100,'ton',$4)`, [c.empresaA, c.campanhaA, c.planoA, rid]),
       /partner_opportunities_client_request_key|duplicate key/i);
   });
 
@@ -561,8 +578,8 @@ function registrar(pg) {
     const fantasma = (await pool.query('SELECT gen_random_uuid() AS id')).rows[0].id;
     await assert.rejects(
       pool.query(
-        `INSERT INTO partner_opportunities (empresa_id, campaign_id, cargo_descricao, quantidade, quantidade_unidade)
-         VALUES ($1,$2,'Soja',10,'ton')`, [c.empresaA, fantasma]),
+        `INSERT INTO partner_opportunities (empresa_id, campaign_id, plan_version_id, cargo_descricao, quantidade, quantidade_unidade)
+         VALUES ($1,$2,$3,'Soja',10,'ton')`, [c.empresaA, fantasma, c.planoA]),
       /violates foreign key/i);
   });
 
@@ -571,10 +588,417 @@ function registrar(pg) {
     await assert.rejects(
       pool.query(
         `INSERT INTO partner_opportunities
-           (empresa_id, campaign_id, cargo_descricao, quantidade, quantidade_unidade, janela_inicio, janela_fim)
-         VALUES ($1,$2,'Soja',10,'ton', now(), now() - interval '1 day')`,
-        [c.empresaA, c.campanhaA]),
+           (empresa_id, campaign_id, plan_version_id, cargo_descricao, quantidade, quantidade_unidade, janela_inicio, janela_fim)
+         VALUES ($1,$2,$3,'Soja',10,'ton', now(), now() - interval '1 day')`,
+        [c.empresaA, c.campanhaA, c.planoA]),
       /partner_opportunities_janela_coerente/i);
+  });
+
+
+  // ── HIGH-05: cadeia de proveniência fechada no banco ─────────────────────────
+
+  test('082: destinatário NÃO pode misturar relacionamento de X com organização de Y', async () => {
+    const c = await cenario();
+    // O caso malicioso que importa: mesma transportadora, dois parceiros dela.
+    // A autorização EXTERNA resolve o destinatário por `partner_organization_id`,
+    // então essa combinação deixaria o parceiro Y ler e responder um pedido
+    // endereçado ao X.
+    const orgOutra = (await pool.query(
+      `INSERT INTO partner_organizations (nome, criado_por_empresa_id) VALUES ('Outro parceiro da A', $1) RETURNING id`,
+      [c.empresaA])).rows[0].id;
+    await pool.query(
+      `INSERT INTO partner_relationships (empresa_id, partner_organization_id, status)
+       VALUES ($1,$2,'ACTIVE')`, [c.empresaA, orgOutra]);
+
+    await assert.rejects(
+      pool.query(
+        `INSERT INTO partner_opportunity_recipients
+           (opportunity_id, empresa_id, relationship_id, partner_organization_id)
+         VALUES ($1,$2,$3,$4)`,
+        [c.oportA, c.empresaA, c.relA, orgOutra],
+      ),
+      /partner_recipients_relationship_boundary_fk|violates foreign key/i,
+      'o banco precisa exigir que relacionamento e organização sejam da MESMA relação',
+    );
+  });
+
+  test('082: resposta NÃO pode citar destinatário de um pedido e id de outro', async () => {
+    const c = await cenario();
+    const rec = (await pool.query(
+      `INSERT INTO partner_opportunity_recipients
+         (opportunity_id, empresa_id, relationship_id, partner_organization_id)
+       VALUES ($1,$2,$3,$4) RETURNING id`,
+      [c.oportA, c.empresaA, c.relA, c.orgA])).rows[0].id;
+
+    // Segunda oportunidade da MESMA empresa — o caso que as FKs separadas
+    // deixavam passar.
+    const oportOutra = (await pool.query(
+      `INSERT INTO partner_opportunities
+         (empresa_id, campaign_id, plan_version_id, cargo_descricao, quantidade, quantidade_unidade)
+       VALUES ($1,$2,$3,'Outra carga',100,'ton') RETURNING id`,
+      [c.empresaA, c.campanhaA, c.planoA])).rows[0].id;
+
+    await assert.rejects(
+      pool.query(
+        `INSERT INTO partner_opportunity_responses
+           (recipient_id, empresa_id, opportunity_id, revisao, situacao, capacidade_quantidade, capacidade_unidade)
+         VALUES ($1,$2,$3,1,'AVAILABLE',10,'ton')`,
+        [rec, c.empresaA, oportOutra],
+      ),
+      /partner_responses_recipient_boundary_fk|violates foreign key/i,
+    );
+  });
+
+  test('082: oportunidade da empresa A NÃO pode citar campanha da empresa B', async () => {
+    const c = await cenario();
+    await assert.rejects(
+      pool.query(
+        `INSERT INTO partner_opportunities
+           (empresa_id, campaign_id, plan_version_id, cargo_descricao, quantidade, quantidade_unidade)
+         VALUES ($1,$2,$3,'Soja',10,'ton')`,
+        [c.empresaA, c.campanhaB, c.planoB],
+      ),
+      /partner_opportunities_campanha_boundary_fk|violates foreign key/i,
+    );
+  });
+
+  test('082: versão de plano de OUTRA campanha é recusada', async () => {
+    const c = await cenario();
+    // Mesma empresa, mas o plano é de outra campanha: a procedência apontaria
+    // para o lugar errado, e a prova de obsolescência iria junto.
+    const outraCampanha = (await pool.query(
+      `INSERT INTO operation_campaigns (empresa_id, reference_code, name, cargo_name, status)
+       VALUES ($1, 'CAMP-X-' || substr(md5(random()::text),1,8), 'Outra', 'Milho', 'APPROVED')
+       RETURNING id`, [c.empresaA])).rows[0].id;
+    const outroPlano = (await pool.query(
+      `INSERT INTO campaign_plan_versions (empresa_id, campaign_id, version_number, status, rules_version)
+       VALUES ($1,$2,1,'APPROVED','v1') RETURNING id`, [c.empresaA, outraCampanha])).rows[0].id;
+
+    await assert.rejects(
+      pool.query(
+        `INSERT INTO partner_opportunities
+           (empresa_id, campaign_id, plan_version_id, cargo_descricao, quantidade, quantidade_unidade)
+         VALUES ($1,$2,$3,'Soja',10,'ton')`,
+        [c.empresaA, c.campanhaA, outroPlano],
+      ),
+      /partner_opportunities_plano_boundary_fk|violates foreign key/i,
+    );
+  });
+
+  test('082: oportunidade sem versão de plano é impossível', async () => {
+    const c = await cenario();
+    await assert.rejects(
+      pool.query(
+        `INSERT INTO partner_opportunities
+           (empresa_id, campaign_id, cargo_descricao, quantidade, quantidade_unidade)
+         VALUES ($1,$2,'Soja',10,'ton')`,
+        [c.empresaA, c.campanhaA],
+      ),
+      /null value in column "plan_version_id"|not-null/i,
+      'SHARE_REQUIRES_APPROVED_PLAN_VERSION: sem fonte não há como provar staleness',
+    );
+  });
+
+  // ── HIGH-07: auditoria append-only ───────────────────────────────────────────
+
+  test('082: evento de rede não pode ser alterado nem apagado', async () => {
+    const c = await cenario();
+    const ev = (await pool.query(
+      `INSERT INTO partner_network_events (empresa_id, entity_type, entity_id, action, source)
+       VALUES ($1,'relationship',$2,'relationship_invited','web') RETURNING id`,
+      [c.empresaA, c.relA])).rows[0].id;
+
+    await assert.rejects(
+      pool.query(`UPDATE partner_network_events SET reason='outro' WHERE id=$1`, [ev]),
+      /partner_network_event_append_only/i,
+      'um log que o processo auditado pode reescrever não é auditoria');
+    await assert.rejects(
+      pool.query('DELETE FROM partner_network_events WHERE id=$1', [ev]),
+      /partner_network_event_append_only/i);
+  });
+
+  // ── HIGH-06: convite e ativação atômicos ─────────────────────────────────────
+
+  test('082: criar convite é atômico — organização, relação, convite e evento juntos', async () => {
+    const c = await cenario();
+    const hash = 'hash-rpc-' + Math.random();
+    const { rows } = await pool.query(
+      `SELECT * FROM partner_network_create_invitation($1,$2,$3,$4,$5,$6)`,
+      [c.empresaA, null, 'Parceiro RPC', 'rpc@exemplo.invalid', hash,
+        new Date(Date.now() + 7 * 864e5).toISOString()]);
+
+    const r = rows[0];
+    assert.ok(r.relationship_id && r.partner_organization_id && r.invitation_id);
+
+    const { rows: ev } = await pool.query(
+      `SELECT action FROM partner_network_events WHERE entity_id=$1`, [r.relationship_id]);
+    assert.equal(ev.length, 1, 'o evento faz parte da mesma decisão');
+    assert.equal(ev[0].action, 'relationship_invited');
+  });
+
+  test('082: convite inválido não deixa resíduo — a transação inteira volta atrás', async () => {
+    const c = await cenario();
+    const antes = await pool.query('SELECT count(*)::int AS n FROM partner_organizations');
+    await assert.rejects(
+      pool.query(`SELECT * FROM partner_network_create_invitation($1,$2,$3,$4,$5,$6)`,
+        [c.empresaA, null, 'Sem token', 'x@exemplo.invalid', '', null]),
+      /partner_invite_token_invalido/i);
+    const depois = await pool.query('SELECT count(*)::int AS n FROM partner_organizations');
+    assert.equal(depois.rows[0].n, antes.rows[0].n,
+      'organização criada e depois abandonada seria resíduo de uma operação que falhou');
+  });
+
+  test('082: ativação concorrente do mesmo convite — exatamente uma vence', async () => {
+    const c = await cenario();
+    const hash = 'hash-corrida-rpc-' + Math.random();
+    await pool.query(`SELECT * FROM partner_network_create_invitation($1,$2,$3,$4,$5,$6)`,
+      [c.empresaA, null, 'Corrida', 'corrida-rpc@exemplo.invalid', hash,
+        new Date(Date.now() + 7 * 864e5).toISOString()]);
+
+    const ativar = async (authId) => {
+      const cli = await pool.connect();
+      try {
+        await cli.query('SELECT * FROM partner_network_activate_invitation($1,$2,$3)', [hash, authId, null]);
+        return 1;
+      } catch { return 0; } finally { cli.release(); }
+    };
+    const auth = (await pool.query('SELECT gen_random_uuid() AS id')).rows[0].id;
+    const [a, b] = await Promise.all([ativar(auth), ativar(auth)]);
+    assert.equal(a + b, 1, 'convite é de uso único mesmo sob corrida');
+  });
+
+  test('082: convite de relacionamento REVOGADO não ativa', async () => {
+    const c = await cenario();
+    const hash = 'hash-revogado-' + Math.random();
+    const { rows } = await pool.query(`SELECT * FROM partner_network_create_invitation($1,$2,$3,$4,$5,$6)`,
+      [c.empresaA, null, 'Revogado', 'rev@exemplo.invalid', hash,
+        new Date(Date.now() + 7 * 864e5).toISOString()]);
+    await pool.query(`UPDATE partner_relationships SET status='REVOKED' WHERE id=$1`, [rows[0].relationship_id]);
+
+    const auth = (await pool.query('SELECT gen_random_uuid() AS id')).rows[0].id;
+    await assert.rejects(
+      pool.query('SELECT * FROM partner_network_activate_invitation($1,$2,$3)', [hash, auth, null]),
+      /partner_relationship_revogado/i);
+  });
+
+  test('082: convite de relacionamento SUSPENSO não vira ativo em silêncio', async () => {
+    const c = await cenario();
+    const hash = 'hash-suspenso-' + Math.random();
+    const { rows } = await pool.query(`SELECT * FROM partner_network_create_invitation($1,$2,$3,$4,$5,$6)`,
+      [c.empresaA, null, 'Suspenso', 'sus@exemplo.invalid', hash,
+        new Date(Date.now() + 7 * 864e5).toISOString()]);
+    await pool.query(`UPDATE partner_relationships SET status='SUSPENDED' WHERE id=$1`, [rows[0].relationship_id]);
+
+    const auth = (await pool.query('SELECT gen_random_uuid() AS id')).rows[0].id;
+    await assert.rejects(
+      pool.query('SELECT * FROM partner_network_activate_invitation($1,$2,$3)', [hash, auth, null]),
+      /partner_relationship_suspenso/i,
+      'quem suspendeu precisa reativar deliberadamente');
+  });
+
+  test('082: convite expirado não ativa e fica marcado', async () => {
+    const c = await cenario();
+    const hash = 'hash-expirado-' + Math.random();
+    const { rows } = await pool.query(`SELECT * FROM partner_network_create_invitation($1,$2,$3,$4,$5,$6)`,
+      [c.empresaA, null, 'Expirado', 'exp@exemplo.invalid', hash,
+        new Date(Date.now() + 60000).toISOString()]);
+    await pool.query(`UPDATE partner_invitations SET expires_at = now() - interval '1 hour' WHERE relationship_id=$1`,
+      [rows[0].relationship_id]);
+
+    const auth = (await pool.query('SELECT gen_random_uuid() AS id')).rows[0].id;
+    await assert.rejects(
+      pool.query('SELECT * FROM partner_network_activate_invitation($1,$2,$3)', [hash, auth, null]),
+      /partner_invite_indisponivel/i);
+  });
+
+  // ── HIGH-04: resposta atômica e corridas ─────────────────────────────────────
+
+  async function cenarioComDestinatario() {
+    const c = await cenario();
+    const rec = (await pool.query(
+      `INSERT INTO partner_opportunity_recipients
+         (opportunity_id, empresa_id, relationship_id, partner_organization_id)
+       VALUES ($1,$2,$3,$4) RETURNING id`,
+      [c.oportA, c.empresaA, c.relA, c.orgA])).rows[0].id;
+    return { ...c, rec };
+  }
+
+  test('082: resposta válida cria revisão e evento na mesma transação', async () => {
+    const c = await cenarioComDestinatario();
+    const { rows } = await pool.query(
+      `SELECT * FROM partner_network_submit_response($1,$2,$3,$4,$5,$6)`,
+      [c.rec, c.orgA, null, 'PARTIALLY_AVAILABLE', 200, 'ton']);
+    assert.equal(rows[0].revisao, 1);
+
+    const { rows: ev } = await pool.query(
+      `SELECT action FROM partner_network_events WHERE entity_id=$1`, [rows[0].response_id]);
+    assert.equal(ev[0].action, 'response_submitted');
+  });
+
+  test('082: revogação ANTES da resposta — resposta negada', async () => {
+    const c = await cenarioComDestinatario();
+    await pool.query(`UPDATE partner_relationships SET status='REVOKED' WHERE id=$1`, [c.relA]);
+    await assert.rejects(
+      pool.query(`SELECT * FROM partner_network_submit_response($1,$2,$3,$4,$5,$6)`,
+        [c.rec, c.orgA, null, 'AVAILABLE', 10, 'ton']),
+      /partner_response_relacionamento_inativo/i,
+      'nunca pode existir resposta criada DEPOIS de a revogação já valer');
+  });
+
+  test('082: resposta ANTES da revogação — vira fato histórico', async () => {
+    const c = await cenarioComDestinatario();
+    const { rows } = await pool.query(`SELECT * FROM partner_network_submit_response($1,$2,$3,$4,$5,$6)`,
+      [c.rec, c.orgA, null, 'AVAILABLE', 10, 'ton']);
+    await pool.query(`UPDATE partner_relationships SET status='REVOKED' WHERE id=$1`, [c.relA]);
+
+    const { rows: ainda } = await pool.query(
+      'SELECT id FROM partner_opportunity_responses WHERE id=$1', [rows[0].response_id]);
+    assert.equal(ainda.length, 1, 'revogar não apaga o que já aconteceu');
+  });
+
+  test('082: fonte superada ANTES da resposta — resposta negada e share marcado', async () => {
+    const c = await cenarioComDestinatario();
+    // O caminho real: aprovar outro plano supera o anterior.
+    await pool.query(`UPDATE campaign_plan_versions SET status='SUPERSEDED' WHERE id=$1`, [c.planoA]);
+
+    await assert.rejects(
+      pool.query(`SELECT * FROM partner_network_submit_response($1,$2,$3,$4,$5,$6)`,
+        [c.rec, c.orgA, null, 'AVAILABLE', 10, 'ton']),
+      /partner_response_fonte_obsoleta/i,
+      'segunda camada: mesmo sem a marcação assíncrona, a fonte é conferida na transação');
+  });
+
+  test('082: prazo vencido barra a resposta', async () => {
+    const c = await cenarioComDestinatario();
+    await pool.query(
+      `UPDATE partner_opportunities SET prazo_resposta = now() - interval '1 hour' WHERE id=$1`, [c.oportA]);
+    await assert.rejects(
+      pool.query(`SELECT * FROM partner_network_submit_response($1,$2,$3,$4,$5,$6)`,
+        [c.rec, c.orgA, null, 'AVAILABLE', 10, 'ton']),
+      /partner_response_prazo_encerrado/i);
+  });
+
+  test('082: duas revisões simultâneas serializam — sem erro aleatório', async () => {
+    const c = await cenarioComDestinatario();
+    const enviar = async (q) => {
+      const cli = await pool.connect();
+      try {
+        const r = await cli.query(`SELECT * FROM partner_network_submit_response($1,$2,$3,$4,$5,$6)`,
+          [c.rec, c.orgA, null, 'PARTIALLY_AVAILABLE', q, 'ton']);
+        return r.rows[0].revisao;
+      } finally { cli.release(); }
+    };
+    const revisoes = await Promise.all([enviar(100), enviar(200)]);
+    assert.deepEqual(revisoes.slice().sort(), [1, 2],
+      'o lock do destinatário faz duas revisões concorrentes virarem 1 e 2, não uma colisão');
+  });
+
+  test('082: mesmo client_request_id converge para a revisão existente', async () => {
+    const c = await cenarioComDestinatario();
+    const rid = 'resp-' + Math.random().toString(36).slice(2);
+    const a = await pool.query(`SELECT * FROM partner_network_submit_response($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      [c.rec, c.orgA, null, 'AVAILABLE', 10, 'ton', null, null, null, rid]);
+    const b = await pool.query(`SELECT * FROM partner_network_submit_response($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      [c.rec, c.orgA, null, 'AVAILABLE', 10, 'ton', null, null, null, rid]);
+    assert.equal(a.rows[0].response_id, b.rows[0].response_id);
+    assert.equal(b.rows[0].idempotent, true);
+  });
+
+  test('082: parceiro NÃO responde por destinatário de outro parceiro', async () => {
+    const c = await cenarioComDestinatario();
+    await assert.rejects(
+      pool.query(`SELECT * FROM partner_network_submit_response($1,$2,$3,$4,$5,$6)`,
+        [c.rec, c.orgB, null, 'AVAILABLE', 10, 'ton']),
+      /partner_response_destinatario_invalido/i);
+  });
+
+  test('082: unidade divergente e capacidade acima da lacuna são recusadas', async () => {
+    const c = await cenarioComDestinatario();
+    await assert.rejects(
+      pool.query(`SELECT * FROM partner_network_submit_response($1,$2,$3,$4,$5,$6)`,
+        [c.rec, c.orgA, null, 'AVAILABLE', 10, 'kg']),
+      /partner_response_unidade_divergente/i);
+    await assert.rejects(
+      pool.query(`SELECT * FROM partner_network_submit_response($1,$2,$3,$4,$5,$6)`,
+        [c.rec, c.orgA, null, 'AVAILABLE', 99999, 'ton']),
+      /partner_response_capacidade_acima_da_lacuna/i);
+  });
+
+  // ── §10: share atômico ───────────────────────────────────────────────────────
+
+  test('082: share sem parceiro ativo não deixa oportunidade órfã', async () => {
+    const c = await cenario();
+    await pool.query(`UPDATE partner_relationships SET status='REVOKED' WHERE id=$1`, [c.relA]);
+    const antes = await pool.query('SELECT count(*)::int AS n FROM partner_opportunities');
+
+    await assert.rejects(
+      pool.query(`SELECT * FROM partner_network_share_gap($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [c.empresaA, null, c.campanhaA, c.planoA, 'Soja', 100, 'ton', [c.relA]]),
+      /partner_share_sem_parceiro_ativo/i);
+
+    const depois = await pool.query('SELECT count(*)::int AS n FROM partner_opportunities');
+    assert.equal(depois.rows[0].n, antes.rows[0].n,
+      'um pedido que não chegou a ninguém não pode ficar no banco');
+  });
+
+  test('082: share com plano não aprovado é recusado', async () => {
+    const c = await cenario();
+    await pool.query(`UPDATE campaign_plan_versions SET status='SUPERSEDED' WHERE id=$1`, [c.planoA]);
+    await assert.rejects(
+      pool.query(`SELECT * FROM partner_network_share_gap($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [c.empresaA, null, c.campanhaA, c.planoA, 'Soja', 100, 'ton', [c.relA]]),
+      /partner_share_plano_nao_aprovado/i);
+  });
+
+  test('082: share ignora parceiro revogado e mantém o ativo', async () => {
+    const c = await cenario();
+    const orgOutra = (await pool.query(
+      `INSERT INTO partner_organizations (nome, criado_por_empresa_id) VALUES ('Revogado', $1) RETURNING id`,
+      [c.empresaA])).rows[0].id;
+    const relRevogado = (await pool.query(
+      `INSERT INTO partner_relationships (empresa_id, partner_organization_id, status)
+       VALUES ($1,$2,'REVOKED') RETURNING id`, [c.empresaA, orgOutra])).rows[0].id;
+
+    const { rows } = await pool.query(`SELECT * FROM partner_network_share_gap($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [c.empresaA, null, c.campanhaA, c.planoA, 'Soja', 100, 'ton', [c.relA, relRevogado]]);
+    assert.equal(rows[0].destinatarios, 1, 'só o parceiro ativo recebe');
+  });
+
+  test('082: share idempotente por client_request_id', async () => {
+    const c = await cenario();
+    const rid = 'share-' + Math.random().toString(36).slice(2);
+    const a = await pool.query(`SELECT * FROM partner_network_share_gap($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+      [c.empresaA, null, c.campanhaA, c.planoA, 'Soja', 100, 'ton', [c.relA], null, null, null, null, null, null, rid]);
+    const b = await pool.query(`SELECT * FROM partner_network_share_gap($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+      [c.empresaA, null, c.campanhaA, c.planoA, 'Soja', 100, 'ton', [c.relA], null, null, null, null, null, null, rid]);
+    assert.equal(a.rows[0].opportunity_id, b.rows[0].opportunity_id);
+    assert.equal(b.rows[0].idempotent, true);
+  });
+
+  test('082: marcar fonte obsoleta muda o estado e registra evento', async () => {
+    const c = await cenario();
+    const n = await pool.query('SELECT partner_network_mark_source_stale($1,$2,$3,$4) AS n',
+      [c.empresaA, c.campanhaA, 'replan_aprovado', null]);
+    assert.ok(Number(n.rows[0].n) >= 1);
+
+    const { rows } = await pool.query('SELECT estado, estado_motivo FROM partner_opportunities WHERE id=$1', [c.oportA]);
+    assert.equal(rows[0].estado, 'STALE_SOURCE');
+    assert.equal(rows[0].estado_motivo, 'replan_aprovado');
+
+    const { rows: ev } = await pool.query(
+      `SELECT action FROM partner_network_events WHERE entity_id=$1 AND action='opportunity_stale_source'`, [c.oportA]);
+    assert.equal(ev.length, 1);
+  });
+
+  test('082: as RPCs não são executáveis por anon nem authenticated', async () => {
+    await preparar();
+    const { rows } = await pool.query(
+      `SELECT p.proname, r.grantee
+       FROM information_schema.role_routine_grants r
+       JOIN pg_proc p ON p.proname = r.routine_name
+       WHERE r.routine_schema='public' AND r.routine_name LIKE 'partner_network_%'
+         AND r.grantee IN ('anon','authenticated','PUBLIC')`);
+    assert.deepEqual(rows, [], 'o Partner Lite nunca fala com o banco direto');
   });
 
   after(async () => { await pool.end(); });

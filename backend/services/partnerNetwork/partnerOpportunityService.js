@@ -18,7 +18,7 @@
 // parceiro (a mesma razão que mantém `PORTAL_QUOTE_PROPOSAL_V1B` deferida), e
 // esta fatia não inventa uma.
 
-const { PartnerNetworkError, registrarEvento } = require('./partnerNetworkService');
+const { PartnerNetworkError, registrarEvento, traduzirErroDeRpc } = require('./partnerNetworkService');
 
 // Campos que podem sair do tenant. Lista POSITIVA de propósito: o que não está
 // aqui não vaza, e acrescentar algo exige decisão explícita — o inverso de um
@@ -89,85 +89,49 @@ async function compartilharLacuna(supabase, {
       code: 'sem_lacuna',
     });
   }
-
-  // Idempotência (§37): repetir o mesmo pedido converge para a oportunidade que
-  // já existe em vez de criar uma segunda.
-  if (clientRequestId) {
-    const { data: existente } = await supabase
-      .from('partner_opportunities')
-      .select('*')
-      .eq('empresa_id', empresaId)
-      .eq('client_request_id', clientRequestId)
-      .maybeSingle();
-    if (existente) {
-      const destinatarios = await listarDestinatarios(supabase, { empresaId, opportunityId: existente.id });
-      return { oportunidade: existente, destinatarios, idempotent: true };
-    }
-  }
-
-  // Só relacionamentos ATIVOS desta empresa. Filtrar no servidor é o que impede
-  // um id de parceiro revogado — ou de outra empresa — entrar pelo corpo.
-  const { data: ativos, error: ativosErro } = await supabase
-    .from('partner_relationships')
-    .select('id, partner_organization_id')
-    .eq('empresa_id', empresaId)
-    .eq('status', 'ACTIVE')
-    .in('id', relationshipIds);
-  erroDeBanco(ativosErro);
-
-  if (!ativos || ativos.length === 0) {
-    throw new PartnerNetworkError('Nenhum dos parceiros escolhidos está ativo na sua rede.', {
-      status: 403, code: 'parceiros_indisponiveis',
+  // `SHARE_REQUIRES_APPROVED_PLAN_VERSION`: sem a versão do plano não há como
+  // provar depois qual fonte gerou o residual.
+  if (!campanha.approved_plan_version_id) {
+    throw new PartnerNetworkError('Aprove o plano da campanha antes de pedir capacidade.', {
+      status: 409, code: 'plano_nao_aprovado',
     });
   }
 
-  const { data: oportunidade, error: oportErro } = await supabase
-    .from('partner_opportunities')
-    .insert({
-      empresa_id: empresaId,
-      campaign_id: campanha.id,
-      plan_version_id: campanha.approved_plan_version_id || null,
-      cargo_descricao: campanha.cargo_name || campanha.name || 'Carga',
-      origem_resumo: residual.origem_resumo || null,
-      destino_resumo: residual.destino_resumo || null,
-      quantidade,
-      quantidade_unidade: residual.unit,
-      janela_inicio: campanha.planned_start || null,
-      janela_fim: campanha.planned_end || null,
-      mensagem: mensagem ? String(mensagem).trim() : null,
-      prazo_resposta: prazoResposta || null,
-      criado_por: actorUserId || null,
-      client_request_id: clientRequestId || null,
-    })
-    .select('*')
-    .single();
-  erroDeBanco(oportErro);
+  // §10 + HIGH-04: oportunidade, destinatários e evento numa transação só. Antes
+  // eram três operações soltas, e uma falha no meio deixava uma oportunidade sem
+  // destinatário — um pedido que não chegou a ninguém, mas existe no banco.
+  //
+  // A RPC revalida empresa, campanha, plano aprovado e a titularidade dos
+  // relacionamentos. Nada disso vem do cliente como autoridade.
+  const { data, error } = await supabase.rpc('partner_network_share_gap', {
+    p_empresa_id: empresaId,
+    p_actor_user_id: actorUserId || null,
+    p_campaign_id: campanha.id,
+    p_plan_version_id: campanha.approved_plan_version_id,
+    p_cargo: campanha.cargo_name || campanha.name || 'Carga',
+    p_quantidade: quantidade,
+    p_unidade: residual.unit,
+    p_relationship_ids: relationshipIds,
+    p_origem_resumo: residual.origem_resumo || null,
+    p_destino_resumo: residual.destino_resumo || null,
+    p_janela_inicio: campanha.planned_start || null,
+    p_janela_fim: campanha.planned_end || null,
+    p_mensagem: mensagem ? String(mensagem).trim() : null,
+    p_prazo_resposta: prazoResposta || null,
+    p_client_request_id: clientRequestId || null,
+  });
+  if (error) throw traduzirErroDeRpc(error);
 
-  const { error: recErro } = await supabase
-    .from('partner_opportunity_recipients')
-    .insert(ativos.map((rel) => ({
-      opportunity_id: oportunidade.id,
-      empresa_id: empresaId,
-      relationship_id: rel.id,
-      partner_organization_id: rel.partner_organization_id,
-    })));
-  erroDeBanco(recErro);
-
-  await registrarEvento(supabase, {
-    empresaId, entityType: 'opportunity', entityId: oportunidade.id,
-    action: 'opportunity_shared', actorUserId,
-    metadata: {
-      campaign_id: campanha.id,
-      destinatarios: ativos.length,
-      quantidade,
-      unidade: residual.unit,
-    },
+  const linha = Array.isArray(data) ? data[0] : data;
+  const destinatarios = await listarDestinatarios(supabase, {
+    empresaId, opportunityId: linha.opportunity_id,
   });
 
-  const destinatarios = await listarDestinatarios(supabase, { empresaId, opportunityId: oportunidade.id });
-  return { oportunidade, destinatarios, idempotent: false };
-}
+  const { data: oportunidade } = await supabase
+    .from('partner_opportunities').select('*').eq('id', linha.opportunity_id).maybeSingle();
 
+  return { oportunidade, destinatarios, idempotent: linha.idempotent === true };
+}
 // ── Leitura interna ────────────────────────────────────────────────────────────
 
 async function listarDestinatarios(supabase, { empresaId, opportunityId }) {
@@ -236,24 +200,15 @@ async function listarDestinatarios(supabase, { empresaId, opportunityId }) {
  * campanha é replanejada.
  */
 async function marcarFonteObsoleta(supabase, { empresaId, campaignId, motivo = 'replan', actorUserId = null }) {
-  const { data, error } = await supabase
-    .from('partner_opportunities')
-    .update({ estado: 'STALE_SOURCE', estado_motivo: motivo, estado_em: new Date().toISOString() })
-    .eq('empresa_id', empresaId)
-    .eq('campaign_id', campaignId)
-    .eq('estado', 'CURRENT')
-    .select('id');
-  erroDeBanco(error);
-
-  for (const o of data || []) {
-    await registrarEvento(supabase, {
-      empresaId, entityType: 'opportunity', entityId: o.id,
-      action: 'opportunity_stale_source', actorUserId, reason: motivo,
-    });
-  }
-  return { afetadas: (data || []).length };
+  const { data, error } = await supabase.rpc('partner_network_mark_source_stale', {
+    p_empresa_id: empresaId,
+    p_campaign_id: campaignId,
+    p_motivo: motivo,
+    p_actor_user_id: actorUserId || null,
+  });
+  if (error) throw traduzirErroDeRpc(error);
+  return { afetadas: Number(data) || 0 };
 }
-
 async function retirarOportunidade(supabase, { empresaId, actorUserId, opportunityId, motivo = null }) {
   const { data, error } = await supabase
     .from('partner_opportunities')
@@ -329,118 +284,49 @@ async function resolverDestinatarioDoParceiro(supabase, { partnerOrganizationId,
 
 // ── Resposta ───────────────────────────────────────────────────────────────────
 
+/**
+ * Registra a resposta do parceiro.
+ *
+ * HIGH-04: a decisão inteira acontece numa transação no banco. A versão anterior
+ * resolvia o destinatário, conferia relacionamento, oportunidade e prazo, lia a
+ * última revisão e só então inseria — e entre a conferência e a escrita cabia uma
+ * revogação, um replanejamento ou o vencimento do prazo. Era TOCTOU, e o efeito
+ * não era teórico: uma resposta gravada depois de o acesso já ter sido cortado.
+ *
+ * A RPC recebe a MENOR identidade possível — o destinatário e a identidade
+ * externa. Empresa, oportunidade, relacionamento e campanha são derivados no
+ * banco; o cliente não influencia nenhum deles.
+ */
 async function responder(supabase, {
   partnerOrganizationId, partnerUserId = null, usuarioId = null, origem = 'partner_portal',
   recipientId, situacao, capacidadeQuantidade = null, capacidadeUnidade = null,
   disponivelDe = null, disponivelAte = null, nota = null, clientRequestId = null,
 }) {
-  const { destinatario, oportunidade } = await resolverDestinatarioDoParceiro(supabase, {
-    partnerOrganizationId, recipientId,
+  if (!recipientId || !partnerOrganizationId) {
+    throw new PartnerNetworkError('Oportunidade não encontrada.', { status: 404, code: 'oportunidade_nao_encontrada' });
+  }
+
+  const { data, error } = await supabase.rpc('partner_network_submit_response', {
+    p_recipient_id: recipientId,
+    p_partner_organization_id: partnerOrganizationId,
+    p_partner_user_id: partnerUserId,
+    p_situacao: situacao,
+    p_capacidade: situacao === 'DECLINED' ? null : Number(capacidadeQuantidade),
+    p_unidade: situacao === 'DECLINED' ? null : (capacidadeUnidade ? String(capacidadeUnidade).trim() : null),
+    p_disponivel_de: disponivelDe || null,
+    p_disponivel_ate: disponivelAte || null,
+    p_nota: nota ? String(nota).trim() : null,
+    p_client_request_id: clientRequestId || null,
+    p_origem: origem,
   });
+  if (error) throw traduzirErroDeRpc(error);
 
-  // §32: revalidar a fonte ANTES de aceitar. Uma oportunidade obsoleta ou
-  // retirada não pode receber resposta nova como se ainda valesse.
-  if (oportunidade.estado !== 'CURRENT') {
-    throw new PartnerNetworkError(
-      oportunidade.estado === 'WITHDRAWN'
-        ? 'Esta oportunidade foi retirada pela transportadora.'
-        : 'Esta oportunidade mudou e não aceita mais respostas. Aguarde um novo pedido.',
-      { status: 409, code: 'oportunidade_nao_current', details: { estado: oportunidade.estado } },
-    );
-  }
-  if (oportunidade.prazo_resposta && new Date(oportunidade.prazo_resposta).getTime() < Date.now()) {
-    throw new PartnerNetworkError('O prazo de resposta desta oportunidade encerrou.', {
-      status: 409, code: 'prazo_encerrado',
-    });
-  }
-
-  const situacoes = new Set(['AVAILABLE', 'PARTIALLY_AVAILABLE', 'DECLINED']);
-  if (!situacoes.has(situacao)) {
-    throw new PartnerNetworkError('Resposta inválida.', { code: 'situacao_invalida' });
-  }
-
-  let quantidade = null;
-  let unidade = null;
-  if (situacao !== 'DECLINED') {
-    quantidade = Number(capacidadeQuantidade);
-    if (!Number.isFinite(quantidade) || quantidade <= 0) {
-      throw new PartnerNetworkError('Informe a capacidade que você consegue atender.', { code: 'capacidade_invalida' });
-    }
-    if (quantidade > Number(oportunidade.quantidade)) {
-      throw new PartnerNetworkError(
-        `A capacidade informada é maior que a necessidade compartilhada (${oportunidade.quantidade} ${oportunidade.quantidade_unidade}).`,
-        { code: 'capacidade_acima_da_lacuna' },
-      );
-    }
-    // §30: a resposta usa a unidade EXATA da oportunidade. Não há conversão
-    // inventada aqui — nem entre kg e ton.
-    unidade = String(capacidadeUnidade || '').trim();
-    if (unidade !== oportunidade.quantidade_unidade) {
-      throw new PartnerNetworkError(
-        `Responda na mesma unidade do pedido (${oportunidade.quantidade_unidade}).`,
-        { code: 'unidade_divergente' },
-      );
-    }
-  }
-
-  // Idempotência da resposta: o mesmo envio repetido devolve a revisão já criada.
-  if (clientRequestId) {
-    const { data: jaExiste } = await supabase
-      .from('partner_opportunity_responses')
-      .select('*')
-      .eq('recipient_id', recipientId)
-      .eq('client_request_id', clientRequestId)
-      .maybeSingle();
-    if (jaExiste) return { resposta: jaExiste, idempotent: true };
-  }
-
-  // Append-only: a próxima revisão nasce da maior existente. O banco garante a
-  // unicidade de (recipient_id, revisao), então duas revisões simultâneas não
-  // podem colidir em silêncio.
-  const { data: ultima } = await supabase
-    .from('partner_opportunity_responses')
-    .select('revisao')
-    .eq('recipient_id', recipientId)
-    .order('revisao', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  const revisao = (ultima?.revisao || 0) + 1;
-
-  const { data: resposta, error } = await supabase
-    .from('partner_opportunity_responses')
-    .insert({
-      recipient_id: recipientId,
-      empresa_id: destinatario.empresa_id,
-      opportunity_id: destinatario.opportunity_id,
-      revisao,
-      situacao,
-      capacidade_quantidade: quantidade,
-      capacidade_unidade: unidade,
-      disponivel_de: disponivelDe || null,
-      disponivel_ate: disponivelAte || null,
-      nota: nota ? String(nota).trim() : null,
-      respondido_por_partner_user_id: partnerUserId,
-      respondido_por_usuario_id: usuarioId,
-      origem,
-      client_request_id: clientRequestId || null,
-    })
-    .select('*')
-    .single();
-  erroDeBanco(error);
-
-  await registrarEvento(supabase, {
-    empresaId: destinatario.empresa_id,
-    entityType: 'response', entityId: resposta.id,
-    action: situacao === 'DECLINED' ? 'response_declined' : (revisao > 1 ? 'response_revised' : 'response_submitted'),
-    actorPartnerUserId: partnerUserId,
-    actorUserId: usuarioId,
-    source: origem,
-    metadata: { revisao, situacao },
-  });
-
-  return { resposta, idempotent: false };
+  const linha = Array.isArray(data) ? data[0] : data;
+  return {
+    resposta: { id: linha.response_id, revisao: linha.revisao, situacao },
+    idempotent: linha.idempotent === true,
+  };
 }
-
 module.exports = {
   CAMPOS_PUBLICOS_DA_OPORTUNIDADE,
   projetarParaParceiro,

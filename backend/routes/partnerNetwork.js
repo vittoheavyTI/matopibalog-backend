@@ -19,6 +19,7 @@ const { requirePermission } = require('../middlewares/requirePermission');
 const rede = require('../services/partnerNetwork/partnerNetworkService');
 const oportunidades = require('../services/partnerNetwork/partnerOpportunityService');
 const { getCampaignProgress } = require('../services/campaign/campaignProgressService');
+const { resumirRotaDaCampanha } = require('../services/partnerNetwork/partnerRouteSummary');
 
 router.use(verifyToken, verificarEmpresa);
 
@@ -130,12 +131,23 @@ async function carregarLacuna(req) {
     operationalScope: req.operationalScope || null,
   });
 
+  // HIGH-08: rota derivada da autoridade canônica. O operador não redigita
+  // origem nem destino — eles já existem em `campaign_demands`/`campaign_locations`.
+  const rota = await resumirRotaDaCampanha(supabase, {
+    empresaId: req.empresa_id, campaignId: campanha.id,
+  });
+
   const quantidade = progresso?.progress?.quantity || {};
   const restante = Number(quantidade.remaining || 0);
   const incompativel = quantidade?.coverage?.incompatible_units === true;
 
   let motivo = null;
-  if (incompativel) {
+  if (!campanha.approved_plan_version_id) {
+    // `SHARE_REQUIRES_APPROVED_PLAN_VERSION`: sem plano aprovado não existe
+    // residual canônico, e sem versão de plano não há como provar depois qual
+    // fonte gerou o número — nem detectar que ela foi superada.
+    motivo = 'Esta campanha ainda não tem plano aprovado. Aprove o plano antes de pedir capacidade.';
+  } else if (incompativel) {
     motivo = 'As demandas desta campanha usam unidades que não podem ser somadas.';
   } else if (!(restante > 0)) {
     motivo = 'Esta campanha não tem quantidade restante para pedir capacidade.';
@@ -145,18 +157,18 @@ async function carregarLacuna(req) {
     campanha,
     pode_compartilhar: !motivo,
     motivo,
+    rota,
     residual: {
       remaining: restante,
       unit: quantidade.unit || null,
       known: !incompativel,
       compatible: !incompativel,
-      origem_resumo: null,
-      destino_resumo: null,
+      origem_resumo: rota.origem_resumo,
+      destino_resumo: rota.destino_resumo,
     },
     replan: progresso?.replan || null,
   };
 }
-
 // ── Oportunidades compartilhadas ───────────────────────────────────────────────
 
 router.get('/oportunidades', requirePermission('partner_network.view'), async (req, res) => {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Routes, Route, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Routes, Route, Navigate, Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import { Package, Clock, ArrowLeft, Check, X, Send } from 'lucide-react';
 
@@ -17,6 +17,18 @@ const CHAVE_SESSAO = 'matopibalog_partner_token';
 const clienteParceiro = axios.create({
   baseURL: `${import.meta.env.VITE_API_URL || ''}/portal/parceiro`,
 });
+
+// 401 no meio da navegação = sessão vencida ou acesso revogado. Limpar e mandar
+// para o login é a única saída honesta — o convite não serve mais.
+clienteParceiro.interceptors.response.use(
+  (r) => r,
+  (erro) => {
+    if (erro?.response?.status === 401) {
+      localStorage.removeItem(CHAVE_SESSAO);
+    }
+    return Promise.reject(erro);
+  },
+);
 
 clienteParceiro.interceptors.request.use((config) => {
   const token = localStorage.getItem(CHAVE_SESSAO);
@@ -85,6 +97,7 @@ function Ativar() {
   const navegar = useNavigate();
   const token = params.get('token') || '';
   const [nome, setNome] = useState('');
+  const [senha, setSenha] = useState('');
   const [erro, setErro] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
 
@@ -92,7 +105,11 @@ function Ativar() {
     setEnviando(true);
     setErro(null);
     try {
-      const { data } = await clienteParceiro.post('/ativar', { token, nome: nome.trim() || null });
+      const { data } = await clienteParceiro.post('/ativar', {
+        token,
+        nome: nome.trim() || null,
+        senha: senha || null,
+      });
       localStorage.setItem(CHAVE_SESSAO, data.token);
       navegar('/portal/parceiro/oportunidades', { replace: true });
     } catch (e) {
@@ -108,17 +125,19 @@ function Ativar() {
         <p className="text-sm text-gray-600">
           Link de convite inválido. Peça um novo link à transportadora.
         </p>
+        <LinkParaEntrar />
       </Moldura>
     );
   }
 
   return (
     <Moldura>
-      <h1 className="text-xl font-bold text-gray-800">Ativar seu acesso</h1>
+      <h1 className="text-xl font-bold text-gray-800">Criar seu acesso</h1>
       <p className="mt-1 text-sm text-gray-600">
-        Você foi convidado a receber oportunidades de carga. Este acesso mostra apenas o que for
-        compartilhado com você.
+        Você foi convidado a receber oportunidades de carga. Escolha uma senha para entrar
+        sempre que quiser — este acesso mostra apenas o que for compartilhado com você.
       </p>
+
       <label htmlFor="nome" className="mt-4 block text-xs font-bold uppercase text-gray-600">
         Seu nome
       </label>
@@ -129,7 +148,27 @@ function Ativar() {
         onChange={(e) => setNome(e.target.value)}
         placeholder="Como devemos chamar você"
       />
+
+      <label htmlFor="senha" className="mt-3 block text-xs font-bold uppercase text-gray-600">
+        Senha
+      </label>
+      <input
+        id="senha"
+        type="password"
+        autoComplete="new-password"
+        className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm outline-none focus:border-blue-500"
+        value={senha}
+        onChange={(e) => setSenha(e.target.value)}
+        placeholder="Mínimo de 8 caracteres"
+      />
+      {/* Se o e-mail já tiver conta no Matopiba Log, a senha pedida é a DELA — a
+          senha existente é verificada, nunca redefinida. */}
+      <p className="mt-1 text-xs text-gray-500">
+        Se você já tem conta no Matopiba Log com este e-mail, informe a senha dela.
+      </p>
+
       {erro && <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">{erro}</p>}
+
       <button
         type="button"
         onClick={ativar}
@@ -138,10 +177,85 @@ function Ativar() {
       >
         {enviando ? 'Ativando…' : 'Ativar acesso'}
       </button>
+      <LinkParaEntrar />
     </Moldura>
   );
 }
 
+// ── Login recorrente ───────────────────────────────────────────────────────────
+//
+// É o que torna o acesso durável: o convite serve uma vez, para provar quem é.
+// Depois disso a pessoa entra como em qualquer produto.
+function Entrar() {
+  const navegar = useNavigate();
+  const [email, setEmail] = useState('');
+  const [senha, setSenha] = useState('');
+  const [erro, setErro] = useState<string | null>(null);
+  const [enviando, setEnviando] = useState(false);
+
+  const entrar = async () => {
+    setEnviando(true);
+    setErro(null);
+    try {
+      const { data } = await clienteParceiro.post('/entrar', { email: email.trim(), senha });
+      localStorage.setItem(CHAVE_SESSAO, data.token);
+      navegar('/portal/parceiro/oportunidades', { replace: true });
+    } catch (e) {
+      setErro(mensagemDeErro(e, 'Não foi possível entrar.'));
+    } finally {
+      setEnviando(false);
+    }
+  };
+
+  return (
+    <Moldura>
+      <h1 className="text-xl font-bold text-gray-800">Entrar</h1>
+      <p className="mt-1 text-sm text-gray-600">Área do parceiro.</p>
+
+      <label htmlFor="email" className="mt-4 block text-xs font-bold uppercase text-gray-600">E-mail</label>
+      <input
+        id="email"
+        type="email"
+        autoComplete="email"
+        className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm outline-none focus:border-blue-500"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+      />
+
+      <label htmlFor="senha-login" className="mt-3 block text-xs font-bold uppercase text-gray-600">Senha</label>
+      <input
+        id="senha-login"
+        type="password"
+        autoComplete="current-password"
+        className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm outline-none focus:border-blue-500"
+        value={senha}
+        onChange={(e) => setSenha(e.target.value)}
+      />
+
+      {erro && <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">{erro}</p>}
+
+      <button
+        type="button"
+        onClick={entrar}
+        disabled={enviando}
+        className="mt-4 w-full rounded-xl bg-green-700 px-4 py-3 text-sm font-bold text-white disabled:opacity-50"
+      >
+        {enviando ? 'Entrando…' : 'Entrar'}
+      </button>
+    </Moldura>
+  );
+}
+
+function LinkParaEntrar() {
+  return (
+    <p className="mt-4 text-center text-sm text-gray-600">
+      Já ativou seu acesso?{' '}
+      <Link to="/portal/parceiro/entrar" className="font-bold text-green-700 hover:underline">
+        Entrar
+      </Link>
+    </p>
+  );
+}
 // ── Lista ──────────────────────────────────────────────────────────────────────
 
 function Lista() {
@@ -439,13 +553,9 @@ function Moldura({ children }: { children: React.ReactNode }) {
 
 function ExigirSessao({ children }: { children: React.ReactNode }) {
   if (!localStorage.getItem(CHAVE_SESSAO)) {
-    return (
-      <Moldura>
-        <p className="text-sm text-gray-600">
-          Seu acesso expirou ou ainda não foi ativado. Abra novamente o link que a transportadora enviou.
-        </p>
-      </Moldura>
-    );
+    // Mandar de volta ao link do convite era conselho impossível: o convite é de
+    // uso único e já foi consumido. O caminho certo é entrar.
+    return <Navigate to="/portal/parceiro/entrar" replace />;
   }
   return <>{children}</>;
 }
@@ -454,6 +564,7 @@ export default function PartnerApp() {
   return (
     <Routes>
       <Route path="ativar" element={<Ativar />} />
+      <Route path="entrar" element={<Entrar />} />
       <Route path="oportunidades" element={<ExigirSessao><Lista /></ExigirSessao>} />
       <Route path="oportunidades/:recipientId" element={<ExigirSessao><Detalhe /></ExigirSessao>} />
       <Route path="*" element={<Navigate to="/portal/parceiro/oportunidades" replace />} />

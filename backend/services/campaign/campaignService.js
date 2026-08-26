@@ -755,6 +755,35 @@ async function approvePlan(supabase, { empresaId, user, campaignId, planId, body
     .eq('empresa_id', empresaId)
     .eq('id', campaignId);
   throwDb(campaignError);
+
+  // E3.6A / HIGH-03 — aprovar um plano NOVO invalida o que já foi pedido à rede.
+  //
+  // Uma oportunidade compartilhada carrega o residual de um plano específico. Se
+  // esse plano foi superado, o número que o parceiro está vendo deixou de ser o
+  // pedido atual — e responder a ele viraria compromisso sobre uma carga que já
+  // mudou. Marcar aqui é o que liga o replan à rede: sem isto, `STALE_SOURCE`
+  // seria um estado que nada produz.
+  //
+  // O snapshot NÃO é reescrito: só o estado muda, e o evento fica registrado.
+  //
+  // Best-effort DELIBERADO, e a razão é que existe a segunda camada: a RPC de
+  // resposta reconfere a versão do plano dentro da própria transação, então uma
+  // falha aqui não deixa passar resposta obsoleta — só adia a marcação. Derrubar
+  // a aprovação de um plano por causa disso seria o remédio pior que a doença.
+  if (isReplanApproval) {
+    try {
+      await supabase.rpc('partner_network_mark_source_stale', {
+        p_empresa_id: empresaId,
+        p_campaign_id: campaignId,
+        p_motivo: 'replan_aprovado',
+        p_actor_user_id: userId(user),
+      });
+    } catch (err) {
+      // Só registra: a autoridade final é a revalidação no momento da resposta.
+      console.warn('[campaign:approvePlan] rede de parceiros nao marcada como obsoleta:', err?.message || err);
+    }
+  }
+
   return getPlan(supabase, { empresaId, campaignId, planId, operationalScope });
 }
 

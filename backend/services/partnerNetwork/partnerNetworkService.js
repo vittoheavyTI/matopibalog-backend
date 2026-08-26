@@ -51,29 +51,39 @@ function hashDoToken(valor) {
 }
 
 // ── Eventos ────────────────────────────────────────────────────────────────────
+//
+// HIGH-07: a auditoria das mutações de AUTORIDADE não é best-effort.
+//
+// A versão anterior engolia o erro "para não derrubar a ação". Isso é errado
+// justamente onde o evento é parte da prova: uma revogação que acontece sem
+// registro deixa a empresa sem como mostrar quando cortou o acesso. Por isso as
+// mutações críticas gravam evento DENTRO da mesma transação, nas RPCs — e esta
+// função sobrou apenas para os registros periféricos, onde falhar em auditar
+// realmente não muda o fato ocorrido.
 async function registrarEvento(supabase, {
   empresaId, entityType, entityId, action,
   actorUserId = null, actorPartnerUserId = null, source = 'web',
   reason = null, metadata = {},
 }) {
-  // Best-effort deliberado: auditoria não pode derrubar a ação que ela observa.
-  // O que NÃO pode acontecer é o token entrar aqui — por isso metadata é sempre
-  // montado pelo chamador com campos explícitos, nunca por spread de payload.
-  try {
-    await supabase.from('partner_network_events').insert({
-      empresa_id: empresaId,
-      entity_type: entityType,
-      entity_id: entityId,
-      action,
-      actor_user_id: actorUserId,
-      actor_partner_user_id: actorPartnerUserId,
-      source,
-      reason,
-      metadata,
+  const { error } = await supabase.from('partner_network_events').insert({
+    empresa_id: empresaId,
+    entity_type: entityType,
+    entity_id: entityId,
+    action,
+    actor_user_id: actorUserId,
+    actor_partner_user_id: actorPartnerUserId,
+    source,
+    reason,
+    // Montado com campos explícitos pelo chamador — nunca por spread de payload,
+    // para que token, hash e senha não tenham como entrar aqui.
+    metadata,
+  });
+  if (error) {
+    throw new PartnerNetworkError('Não foi possível registrar o evento de auditoria.', {
+      status: 500, code: 'partner_network_audit_failed',
     });
-  } catch { /* auditoria não bloqueia operação */ }
+  }
 }
-
 // ── Relacionamentos ────────────────────────────────────────────────────────────
 
 async function listarParceiros(supabase, { empresaId }) {
@@ -132,175 +142,234 @@ async function convidarParceiro(supabase, { empresaId, actorUserId, nome, email,
     throw new PartnerNetworkError('Informe um e-mail válido para o convite.', { code: 'partner_email_invalido' });
   }
 
-  // §14: nenhuma vinculação automática a empresa existente por nome, domínio,
-  // telefone ou semelhança de documento. A organização nasce Lite; virar Cliente
-  // é ato explícito e verificado, fora desta fatia.
-  const { data: org, error: orgErro } = await supabase
-    .from('partner_organizations')
-    .insert({
-      nome: nomeLimpo,
-      documento: documento ? String(documento).trim() : null,
-      criado_por_empresa_id: empresaId,
-      criado_por_usuario_id: actorUserId || null,
-    })
-    .select('id, nome')
-    .single();
-  erroDeBanco(orgErro);
-
-  const { data: rel, error: relErro } = await supabase
-    .from('partner_relationships')
-    .insert({
-      empresa_id: empresaId,
-      partner_organization_id: org.id,
-      status: 'INVITED',
-      apelido: apelido ? String(apelido).trim() : null,
-      criado_por: actorUserId || null,
-    })
-    .select('id, status')
-    .single();
-  erroDeBanco(relErro);
-
   const token = gerarTokenConvite();
   const expiraEm = new Date(Date.now() + CONVITE_TTL_DIAS * 24 * 60 * 60 * 1000).toISOString();
-  const { data: convite, error: convErro } = await supabase
-    .from('partner_invitations')
-    .insert({
-      relationship_id: rel.id,
-      empresa_id: empresaId,
-      email: emailLimpo,
-      token_hash: token.hash,
-      expires_at: expiraEm,
-      criado_por: actorUserId || null,
-    })
-    .select('id, expires_at')
-    .single();
-  erroDeBanco(convErro);
 
-  await registrarEvento(supabase, {
-    empresaId, entityType: 'relationship', entityId: rel.id,
-    action: 'relationship_invited', actorUserId,
-    // Sem token, sem hash de token. O e-mail é o mínimo para auditar o convite.
-    metadata: { partner_organization_id: org.id, email: emailLimpo },
+  // HIGH-06: organização + relacionamento + convite + evento numa transação só.
+  // Antes eram quatro inserts soltos: uma falha no terceiro deixava organização e
+  // relacionamento órfãos, e o parceiro aparecia na lista sem nunca ter sido
+  // convidado de fato.
+  const { data, error } = await supabase.rpc('partner_network_create_invitation', {
+    p_empresa_id: empresaId,
+    p_actor_user_id: actorUserId || null,
+    p_nome: nomeLimpo,
+    p_email: emailLimpo,
+    p_token_hash: token.hash,
+    p_expires_at: expiraEm,
+    p_documento: documento ? String(documento).trim() : null,
+    p_apelido: apelido ? String(apelido).trim() : null,
   });
+  if (error) throw traduzirErroDeRpc(error);
 
+  const linha = Array.isArray(data) ? data[0] : data;
   return {
-    relationship_id: rel.id,
-    partner_organization_id: org.id,
-    nome: org.nome,
+    relationship_id: linha.relationship_id,
+    partner_organization_id: linha.partner_organization_id,
+    nome: nomeLimpo,
     convite: {
-      id: convite.id,
-      expires_at: convite.expires_at,
-      // Entrega V1 = MANUAL_LINK (§19). Não há provedor de e-mail nesta frente,
-      // e o valor puro do token aparece exatamente aqui, uma vez.
+      id: linha.invitation_id,
+      expires_at: expiraEm,
+      // Entrega V1 = MANUAL_LINK (§19). O valor puro do token existe aqui, uma
+      // vez — no banco só há o hash.
       token: token.valor,
       entrega: 'MANUAL_LINK',
     },
   };
 }
+// Máquina de estados do relacionamento (§8), explícita para não haver transição
+// contraditória por PATCH.
+//
+//   INVITED   → ACTIVE     (somente por ativação válida do convite)
+//   ACTIVE    → SUSPENDED | REVOKED
+//   SUSPENDED → ACTIVE     (ação interna deliberada) | REVOKED
+//   REVOKED   → terminal nesta fatia
+//
+// REVOKED ser terminal é decisão de segurança, não limitação: reativar por PATCH
+// significaria que revogar o acesso pode ser desfeito sem passar por convite e
+// sem prova de que o outro lado ainda controla a conta. Reconvite pós-revogação
+// fica registrado como possibilidade futura — com fluxo próprio, não com um
+// UPDATE de status.
+const TRANSICOES_PERMITIDAS = Object.freeze({
+  INVITED: ['REVOKED'],
+  ACTIVE: ['SUSPENDED', 'REVOKED'],
+  SUSPENDED: ['ACTIVE', 'REVOKED'],
+  REVOKED: [],
+});
+
+const ACAO_POR_STATUS = Object.freeze({
+  ACTIVE: 'relationship_activated',
+  SUSPENDED: 'relationship_suspended',
+  REVOKED: 'relationship_revoked',
+});
 
 async function alterarStatusDoParceiro(supabase, { empresaId, actorUserId, relationshipId, novoStatus, motivo = null }) {
-  const permitidos = { ACTIVE: 'relationship_activated', SUSPENDED: 'relationship_suspended', REVOKED: 'relationship_revoked' };
-  if (!permitidos[novoStatus]) {
+  if (!ACAO_POR_STATUS[novoStatus]) {
     throw new PartnerNetworkError('Situação de parceiro inválida.', { code: 'partner_status_invalido' });
   }
 
-  const patch = { status: novoStatus, atualizado_em: new Date().toISOString() };
-  if (novoStatus === 'ACTIVE') patch.ativado_em = new Date().toISOString();
+  const { data: atual, error: erroAtual } = await supabase
+    .from('partner_relationships')
+    .select('id, status')
+    .eq('id', relationshipId)
+    .eq('empresa_id', empresaId)
+    .maybeSingle();
+  erroDeBanco(erroAtual);
+  if (!atual) throw new PartnerNetworkError('Parceiro não encontrado.', { status: 404, code: 'partner_nao_encontrado' });
+
+  if (atual.status === novoStatus) {
+    return { id: atual.id, status: atual.status, inalterado: true };
+  }
+
+  const permitidas = TRANSICOES_PERMITIDAS[atual.status] || [];
+  if (!permitidas.includes(novoStatus)) {
+    throw new PartnerNetworkError(
+      atual.status === 'REVOKED'
+        ? 'Este parceiro foi revogado. Convide-o novamente para restabelecer o acesso.'
+        : 'Esta mudança de situação não é permitida.',
+      { status: 409, code: 'partner_transicao_invalida', details: { de: atual.status, para: novoStatus } },
+    );
+  }
+
+  const agora = new Date().toISOString();
+  const patch = { status: novoStatus, atualizado_em: agora };
+  if (novoStatus === 'ACTIVE') patch.ativado_em = agora;
   if (novoStatus === 'REVOKED') {
-    patch.revogado_em = new Date().toISOString();
+    patch.revogado_em = agora;
     patch.revogado_por = actorUserId || null;
     patch.revogado_motivo = motivo ? String(motivo).trim() : null;
   }
 
-  // Tenant no WHERE, não em checagem prévia: um id de outra empresa simplesmente
-  // não encontra linha.
+  // A transição condicional é a decisão: o `eq(status)` faz duas mudanças
+  // simultâneas serializarem em vez de a última sobrescrever a primeira.
   const { data, error } = await supabase
     .from('partner_relationships')
     .update(patch)
     .eq('id', relationshipId)
     .eq('empresa_id', empresaId)
+    .eq('status', atual.status)
     .select('id, status')
     .maybeSingle();
   erroDeBanco(error);
-  if (!data) throw new PartnerNetworkError('Parceiro não encontrado.', { status: 404, code: 'partner_nao_encontrado' });
+  if (!data) {
+    throw new PartnerNetworkError('A situação deste parceiro mudou. Recarregue a lista.', {
+      status: 409, code: 'partner_status_concorrente',
+    });
+  }
 
   await registrarEvento(supabase, {
     empresaId, entityType: 'relationship', entityId: relationshipId,
-    action: permitidos[novoStatus], actorUserId, reason: motivo || null,
+    action: ACAO_POR_STATUS[novoStatus], actorUserId, reason: motivo || null,
   });
 
   return { id: data.id, status: data.status };
 }
+// Tradução dos erros das RPCs para mensagens de produto. Cada `RAISE EXCEPTION`
+// da migration tem um nome estável; sem este mapa a pessoa veria o texto cru do
+// Postgres.
+const MENSAGEM_DE_RPC = {
+  partner_invite_indisponivel: ['Este convite não é mais válido. Peça um novo à transportadora.', 410],
+  partner_invite_inconsistente: ['Convite inconsistente. Peça um novo à transportadora.', 409],
+  partner_relationship_revogado: ['Seu acesso foi encerrado pela transportadora.', 403],
+  partner_relationship_suspenso: ['Seu acesso está suspenso. Fale com a transportadora.', 403],
+  partner_invite_dados_invalidos: ['Dados do convite inválidos.', 400],
+  partner_invite_token_invalido: ['Convite inválido.', 400],
+  partner_activate_dados_invalidos: ['Convite inválido.', 400],
+  partner_response_destinatario_invalido: ['Oportunidade não encontrada.', 404],
+  partner_response_relacionamento_inativo: ['Seu acesso a esta oportunidade foi encerrado.', 403],
+  partner_response_oportunidade_nao_current: ['Esta oportunidade mudou e não aceita mais respostas.', 409],
+  partner_response_fonte_obsoleta: ['A campanha foi replanejada. Aguarde um novo pedido da transportadora.', 409],
+  partner_response_prazo_encerrado: ['O prazo de resposta desta oportunidade encerrou.', 409],
+  partner_response_situacao_invalida: ['Resposta inválida.', 400],
+  partner_response_capacidade_invalida: ['Informe a capacidade que você consegue atender.', 400],
+  partner_response_capacidade_acima_da_lacuna: ['A capacidade informada é maior que a necessidade compartilhada.', 400],
+  partner_response_unidade_divergente: ['Responda na mesma unidade do pedido.', 400],
+  partner_share_plano_nao_aprovado: ['O plano desta campanha não está mais aprovado. Replaneje antes de pedir capacidade.', 409],
+  partner_share_sem_parceiro_ativo: ['Nenhum dos parceiros escolhidos está ativo na sua rede.', 403],
+  partner_share_sem_destinatarios: ['Escolha pelo menos um parceiro.', 400],
+  partner_share_quantidade_invalida: ['Quantidade inválida para compartilhar.', 400],
+  partner_share_dados_invalidos: ['Dados insuficientes para compartilhar.', 400],
+};
 
-// ── Ativação do convite ────────────────────────────────────────────────────────
+function traduzirErroDeRpc(error) {
+  const bruto = String(error?.message || '');
+  for (const [codigo, [mensagem, status]] of Object.entries(MENSAGEM_DE_RPC)) {
+    if (bruto.includes(codigo)) return new PartnerNetworkError(mensagem, { status, code: codigo });
+  }
+  if (error?.code === '42883' || error?.code === '42P01') {
+    return new PartnerNetworkError('Rede de parceiros ainda não está disponível.', {
+      status: 503, code: 'partner_network_schema_missing',
+    });
+  }
+  return new PartnerNetworkError('Não foi possível concluir a operação.', {
+    status: 500, code: 'partner_network_rpc_error',
+  });
+}
 
-async function ativarConvite(supabase, { token, nome = null }) {
-  if (!token) throw new PartnerNetworkError('Convite inválido.', { status: 400, code: 'convite_invalido' });
-  const hash = hashDoToken(token);
-
-  // Consumo ATÔMICO: a transição condicional é a decisão. Um `select` seguido de
-  // `update` deixaria dois cliques simultâneos ativarem o mesmo convite.
-  const agora = new Date().toISOString();
-  const { data: convite, error } = await supabase
+/**
+ * E-mail para o qual o convite foi emitido.
+ *
+ * É a autoridade de "quem foi convidado": a ativação prova a posse DESSA conta,
+ * não de uma que a pessoa digite na hora. Aceitar um e-mail livre no corpo
+ * permitiria ativar o convite de outra pessoa com a própria conta.
+ *
+ * Leitura deliberadamente magra — só o e-mail, e sem revelar se o convite está
+ * pendente, expirado ou já usado: essa distinção só interessa a quem sonda tokens.
+ */
+async function emailDoConvite(supabase, { token }) {
+  const { data, error } = await supabase
     .from('partner_invitations')
-    .update({ status: 'ACEITO', aceito_em: agora })
-    .eq('token_hash', hash)
-    .eq('status', 'PENDENTE')
-    .gt('expires_at', agora)
-    .select('id, relationship_id, empresa_id, email')
+    .select('email')
+    .eq('token_hash', hashDoToken(token))
     .maybeSingle();
   erroDeBanco(error);
-
-  if (!convite) {
-    // Deliberadamente não distingue "inexistente" de "já usado" ou "expirado":
-    // a diferença só serve para quem está sondando tokens.
+  if (!data) {
     throw new PartnerNetworkError('Este convite não é mais válido. Peça um novo à transportadora.', {
       status: 410, code: 'convite_indisponivel',
     });
   }
-
-  const { data: rel, error: relErro } = await supabase
-    .from('partner_relationships')
-    .select('id, empresa_id, partner_organization_id, status')
-    .eq('id', convite.relationship_id)
-    .maybeSingle();
-  erroDeBanco(relErro);
-  if (!rel) throw new PartnerNetworkError('Convite inconsistente.', { status: 409, code: 'convite_inconsistente' });
-
-  const { data: usuario, error: usuarioErro } = await supabase
-    .from('partner_portal_users')
-    .upsert({
-      partner_organization_id: rel.partner_organization_id,
-      email: convite.email,
-      nome: nome ? String(nome).trim() : null,
-    }, { onConflict: 'partner_organization_id,email' })
-    .select('id, email, partner_organization_id')
-    .single();
-  erroDeBanco(usuarioErro);
-
-  await supabase.from('partner_invitations')
-    .update({ aceito_por_partner_user_id: usuario.id })
-    .eq('id', convite.id);
-
-  if (rel.status === 'INVITED') {
-    await supabase.from('partner_relationships')
-      .update({ status: 'ACTIVE', ativado_em: agora, atualizado_em: agora })
-      .eq('id', rel.id);
-    await registrarEvento(supabase, {
-      empresaId: rel.empresa_id, entityType: 'relationship', entityId: rel.id,
-      action: 'relationship_activated', actorPartnerUserId: usuario.id, source: 'partner_portal',
-    });
-  }
-
-  return {
-    partner_user_id: usuario.id,
-    partner_organization_id: usuario.partner_organization_id,
-    email: usuario.email,
-  };
+  return data.email;
 }
 
+/**
+ * Ativa o convite DEPOIS de a identidade Auth ter sido provada.
+ *
+ * A ordem importa e é o coração do HIGH-01/HIGH-06: quem prova a posse da conta
+ * é o chamador, ANTES de chegar aqui. Se a senha estiver errada, esta função nem
+ * é invocada — e o convite continua pendente, disponível para a tentativa certa.
+ * Queimar o convite numa senha errada seria transformar erro de digitação em
+ * perda de acesso.
+ */
+async function ativarConvite(supabase, { token, authUserId, nome = null }) {
+  if (!token) throw new PartnerNetworkError('Convite inválido.', { status: 400, code: 'convite_invalido' });
+  if (!authUserId) {
+    throw new PartnerNetworkError('Não foi possível confirmar sua identidade.', { status: 401, code: 'identidade_ausente' });
+  }
+
+  const { data, error } = await supabase.rpc('partner_network_activate_invitation', {
+    p_token_hash: hashDoToken(token),
+    p_auth_user_id: authUserId,
+    p_nome: nome ? String(nome).trim() : null,
+  });
+  if (error) throw traduzirErroDeRpc(error);
+
+  const linha = Array.isArray(data) ? data[0] : data;
+  if (!linha) {
+    throw new PartnerNetworkError('Este convite não é mais válido. Peça um novo à transportadora.', {
+      status: 410, code: 'convite_indisponivel',
+    });
+  }
+  return {
+    partner_user_id: linha.partner_user_id,
+    partner_organization_id: linha.partner_organization_id,
+    email: linha.email,
+    relationship_id: linha.relationship_id,
+  };
+}
 module.exports = {
   PartnerNetworkError,
+  emailDoConvite,
+  TRANSICOES_PERMITIDAS,
+  traduzirErroDeRpc,
   gerarTokenConvite,
   hashDoToken,
   registrarEvento,
