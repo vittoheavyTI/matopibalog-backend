@@ -106,7 +106,7 @@ function ResumoDoPerfil({
 
 export function SeletorPerfilAcesso({
   perfis, carregando, erro, valor, aoEscolher, erroValidacao,
-  podeEditarPermissoes = false, empresaId = null,
+  podeEditarPermissoes = false, empresaId = null, aguardandoConta = false,
 }: {
   perfis: PerfilAcesso[];
   carregando: boolean;
@@ -116,6 +116,8 @@ export function SeletorPerfilAcesso({
   erroValidacao?: string | null;
   podeEditarPermissoes?: boolean;
   empresaId?: string | null;
+  /** Super-admin ainda não escolheu a conta: não há o que listar AINDA. */
+  aguardandoConta?: boolean;
 }) {
   const [aberto, setAberto] = useState(false);
   const [busca, setBusca] = useState('');
@@ -138,6 +140,18 @@ export function SeletorPerfilAcesso({
     return (
       <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800" role="alert">
         {erro}
+      </p>
+    );
+  }
+
+  // Estado de espera ≠ estado de impedimento. Antes, enquanto o super-admin não
+  // tinha escolhido a conta, a tela dizia "Nenhum perfil disponível para você
+  // atribuir. Peça a um administrador" — acusando de falta de permissão quem só
+  // não tinha preenchido o campo anterior.
+  if (aguardandoConta) {
+    return (
+      <p className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-600">
+        Escolha a conta acima para ver os perfis de acesso disponíveis.
       </p>
     );
   }

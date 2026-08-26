@@ -219,6 +219,21 @@ Dois defeitos reais encontrados enquanto se escrevia os testes:
 - o campo "Conta vinculada" tinha rótulo sem `id` associado, então era anunciado
   como campo sem nome.
 
+## 12.1 Um achado que só a captura revelou
+
+Ao revisar a primeira cena do pacote visual apareceu um estado que nenhum dos
+achados congelados cobria: enquanto o super-admin ainda **não escolheu a conta**,
+o seletor de perfil dizia que não havia perfil disponível para ele atribuir e
+mandava pedir a um administrador da empresa.
+
+Estado de espera não é estado de impedimento. A frase acusava de falta de
+permissão quem apenas não tinha preenchido o campo anterior — e é justamente o
+tipo de mensagem que gerou a suspeita de bug em `TEAM-FUNC-02`. Agora esse estado
+diz o que fazer: **"Escolha a conta acima para ver os perfis de acesso
+disponíveis."**
+
+Vale como método: capturar o FLUXO pagou por si. Um screenshot do estado final
+não teria mostrado essa tela.
 ## 13. O que esta frente NÃO faz
 
 - Não reabre `RBV9-INV-110` nem a decisão da coluna de permissões (`TEAM-UX-001`).
