@@ -786,6 +786,7 @@ export const Usuarios: React.FC = () => {
                 valor={perfilAcessoId}
                 podeEditarPermissoes={podeVerPermissoes}
                 empresaId={currentUser?.is_super_admin ? selectedEmpresaId : null}
+                aguardandoConta={!!currentUser?.is_super_admin && !selectedEmpresaId}
                 aoEscolher={(id) => { setPerfilAcessoId(id); setErroValidacao(({ perfil, ...r }) => r); }}
               />
             </Campo>

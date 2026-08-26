@@ -242,4 +242,16 @@ describe('Usuarios — correção da aceitação visual', () => {
     expect(link.getAttribute('href')).toContain('perfil=tpl-operador');
     expect(link.getAttribute('href')).toContain('empresa_id=emp-1');
   });
+
+  test('estado de espera != impedimento: sem conta escolhida, a tela pede a conta', async () => {
+    await abrirNovoUsuario();
+    // O super-admin ainda não escolheu a conta. Dizer "peça a um administrador"
+    // aqui acusa de falta de permissão quem só não preencheu o campo anterior.
+    expect(screen.getByText(/escolha a conta acima/i)).toBeInTheDocument();
+    expect(screen.queryByText(/peça a um administrador/i)).toBeNull();
+
+    await escolherConta('cerrado', /transportes cerrado/i);
+    expect(await screen.findByRole('button', { name: /selecionar perfil de acesso/i })).toBeInTheDocument();
+    expect(screen.queryByText(/escolha a conta acima/i)).toBeNull();
+  });
 });
