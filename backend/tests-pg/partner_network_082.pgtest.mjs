@@ -1000,15 +1000,33 @@ function registrar(pg) {
     assert.equal(ev.length, 1);
   });
 
-  test('082: as RPCs não são executáveis por anon nem authenticated', async () => {
+  test('082: as RPCs de negócio não são executáveis por anon nem authenticated', async () => {
     await preparar();
+    // Escopado às funções CHAMÁVEIS. As duas funções de trigger
+    // (`*_append_only`, `*_congelar_snapshot`) retornam `trigger` e por isso não
+    // são invocáveis como RPC — nem pelo PostgREST, nem por SELECT direto. O
+    // `PUBLIC` que o Postgres dá a elas por padrão não é superfície de ataque, e
+    // revogá-lo arriscaria o próprio append-only, que é o invariante que elas
+    // guardam.
     const { rows } = await pool.query(
       `SELECT p.proname, r.grantee
        FROM information_schema.role_routine_grants r
        JOIN pg_proc p ON p.proname = r.routine_name
-       WHERE r.routine_schema='public' AND r.routine_name LIKE 'partner_network_%'
+       JOIN pg_type tp ON tp.oid = p.prorettype
+       WHERE r.routine_schema='public'
+         AND r.routine_name LIKE 'partner_network_%'
+         AND tp.typname <> 'trigger'
          AND r.grantee IN ('anon','authenticated','PUBLIC')`);
     assert.deepEqual(rows, [], 'o Partner Lite nunca fala com o banco direto');
+  });
+
+  test('082: as funções de trigger não são chamáveis como RPC', async () => {
+    await preparar();
+    // A prova de que o `PUBLIC` acima é inofensivo: o Postgres recusa invocar
+    // uma função de trigger diretamente.
+    await assert.rejects(
+      pool.query('SELECT public.partner_network_event_append_only()'),
+      /trigger functions can only be called as triggers|cannot be called directly/i);
   });
 
   after(async () => { await pool.end(); });
