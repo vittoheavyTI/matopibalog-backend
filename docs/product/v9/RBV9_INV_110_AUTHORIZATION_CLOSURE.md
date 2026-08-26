@@ -244,3 +244,59 @@ com a autoridade certa.
 | §64 | Perfil customizado funciona pela capacidade, sem depender do nome? | parcialmente | **SIM** |
 | §65 | A lista de equipe mostra chaves técnicas? | **SIM** | **NÃO** |
 | §66 | Quem precisa entender exceções ainda consegue, sem poluir a listagem? | não havia | **SIM** |
+
+## 8. Fecho em produção
+
+| Item | Valor |
+|---|---|
+| PR | #484, `MERGE_SHA=a79a7c664a5814bee3ebfcf6429f9ffe47afcf76` |
+| CI | 4/4 verdes na `main`; SEC-1 passou **sem rerun** |
+| Deploy backend | Railway `72698a05` SUCCESS |
+| Deploy frontend | bundle `index-8Hc3KmQ2.js` |
+| Migration | nenhuma |
+| Backend | 1965/1965 (eram 1950) |
+| Web | 209/209 (eram 205) |
+
+### Certificação read-only
+
+Contrato sem credencial nas superfícies tocadas — todas `401`:
+`/dashboard/summary`, `/relatorios/rentabilidade`, `/pagamentos/plano-status`,
+`/pagamentos/upgrade/solicitar`, `/admin/permissions/templates`,
+`/admin/perfis-acesso`, `/admin/termos/empresas/:id/aceites`, `/contratacao/status`,
+`/fretes/:id/epod/aprovar-pendentes`, `/despesas/:id/aprovar` e `PATCH /despesas/:id`.
+
+> Ressalva de método, a mesma do fecho anterior: **`401` não prova que a rota
+> existe** — `verifyToken` roda antes do roteamento. A evidência de deploy veio do
+> SHA do deployment no Railway e da inspeção do bundle publicado, onde a coluna
+> `Permissões` não aparece mais e `ajustes de acesso` aparece.
+
+Estado do banco, antes e depois:
+
+| Medida | Valor |
+|---|---|
+| `usuarios` por tipo | 18 admin · 20 motorista (inalterado) |
+| Usuários criados no período | **0** |
+| `permission_templates` | 225 (inalterado) |
+| `permission_template_permissions` | 3725 (inalterado) |
+| `user_permission_overrides` | 8 (inalterado) |
+| Ponteiro de template não nulo | 38 de 38 |
+| `auth_sessions` | 64 → **66** |
+
+As duas sessões novas **não são desta execução**: são logins web do próprio owner
+(01:09 e 01:13 UTC de 2026-08-26, `client_type=web`). Nenhuma chamada desta
+certificação foi autenticada — todas retornaram `401`. Registrado assim porque
+`PRODUCTION_SESSION_WRITES=0` só é verdade sobre o que **este trabalho** fez, e a
+contagem bruta da tabela mudaria de qualquer forma com o uso normal do sistema.
+
+### Uma falha de CI que valeu a pena entender
+
+`authorizationClosure.test.js` passava local (Node 24) e falhava no CI (Node 20).
+A causa não era o teste: ele carregava `config/supabase` de verdade através de
+`freteAcesso` e `requirePermission`, e `createClient` monta um `RealtimeClient` que,
+**sem WebSocket nativo, lança na carga do módulo**. Node 24 tem WebSocket; Node 20
+não. O dublê do cliente passou a valer para todo consumidor — que é o que já
+deveria ser, já que nenhum destes testes deve tocar o banco. Verificado que
+`@supabase/supabase-js` não é mais carregado, e o arquivo ficou 2x mais rápido.
+
+A lição é a mesma que o fecho anterior registrou por outro caminho: **verde local
+não é verde**. Aqui a diferença era a versão de runtime, não o cache.
