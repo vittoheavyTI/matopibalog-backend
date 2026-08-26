@@ -37,8 +37,14 @@ function registrar(pg) {
   const pgHarness = (name) => readFileSync(join(here, name), 'utf8');
   const pool = new Pool({ connectionString: CONN });
 
-  const cadeia = [
+  // Fase 1: o bootstrap cria as tabelas base, incluindo `usuarios`.
+  const bootstrap = [
     pgHarness('00_bootstrap_pre.sql'),
+  ];
+
+  // Fase 2 (depois dos helpers): o resto da cadeia, cujas policies chamam
+  // `rls_is_super_admin()` no momento em que a POLICY é criada.
+  const cadeia = [
     migration('060_catalogo_funcionalidades.sql'),
     migration('061_matriz_publicacao_transacional.sql'),
     pgHarness('99_grants_service_role_test.sql'),
@@ -97,6 +103,7 @@ function registrar(pg) {
   let preparado = false;
   async function preparar() {
     if (preparado) return;
+    for (const sql of bootstrap) await pool.query(sql);
     await instalarHelpersDeAuth();
     for (const sql of cadeia) await pool.query(sql);
     preparado = true;
