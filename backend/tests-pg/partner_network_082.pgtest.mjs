@@ -70,6 +70,11 @@ function registrar(pg) {
     migration('077_operation_campaign_076_payload_reconciliation.sql'),
     migration('078_operation_campaign_materialization.sql'),
     migration('079_dispatch_v1_atomic_offers.sql'),
+  ];
+
+  // A migration sob teste, aplicada por último — depois de existirem os
+  // templates que o DML dela precisa encontrar.
+  const migrationAlvo = [
     migration('082_partner_network_foundation.sql'),
   ];
 
@@ -100,12 +105,31 @@ function registrar(pg) {
     `);
   }
 
+  // Empresa e templates que já existiam antes da 082 — é o estado real que a
+  // migration encontra em produção, e sem ele o DML de permissões não teria o
+  // que popular.
+  const EMPRESA_PRE = '11111111-1111-4111-8111-111111111111';
+
+  async function semearTemplatesBaseline() {
+    await pool.query(
+      `INSERT INTO empresas (id, nome, status) VALUES ($1, 'Empresa Pré-082', 'ativo')
+       ON CONFLICT (id) DO NOTHING`, [EMPRESA_PRE]);
+    for (const chave of ['administrador', 'gerente_frota', 'operador']) {
+      await pool.query(
+        `INSERT INTO permission_templates (empresa_id, stable_key, display_name, is_system_baseline, editable)
+         VALUES ($1, $2, $2, true, true)
+         ON CONFLICT DO NOTHING`, [EMPRESA_PRE, chave]);
+    }
+  }
+
   let preparado = false;
   async function preparar() {
     if (preparado) return;
     for (const sql of bootstrap) await pool.query(sql);
     await instalarHelpersDeAuth();
     for (const sql of cadeia) await pool.query(sql);
+    await semearTemplatesBaseline();
+    for (const sql of migrationAlvo) await pool.query(sql);
     preparado = true;
   }
 
@@ -262,7 +286,9 @@ function registrar(pg) {
       ['quantidade', 999],
       ['quantidade_unidade', "'kg'"],
       ['cargo_descricao', "'Outra carga'"],
-      ['campaign_id', `'${c.campanhaA}'::uuid`],
+      // Precisa ser um valor DIFERENTE: o trigger não rejeita (nem deve) um
+      // update que não altera nada.
+      ['campaign_id', `'00000000-0000-4000-8000-000000000000'::uuid`],
     ]) {
       await assert.rejects(
         pool.query(`UPDATE partner_opportunities SET ${campo} = ${typeof valor === 'number' ? valor : valor} WHERE id = $1`, [c.oportA]),
