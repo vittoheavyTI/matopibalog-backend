@@ -224,7 +224,9 @@ async function loadEffectivePermissions(supabase, user = {}) {
     base.entitlements = await carregarEntitlements(supabase, { empresaId: resolvedEmpresaId, user: base.user });
   } catch (err) {
     // fail-safe: se algo do V9 ainda não existe, retorna o efetivo com o que carregou
-    // (nunca derruba a autoridade coarse legada, que segue em isAdmin/isSuperAdmin).
+    // em vez de falhar a request inteira. Atenção ao ler isto depois de RBV9-INV-110:
+    // NÃO existe mais autoridade coarse legada por trás — se o efetivo vier vazio, o
+    // gate nega. É fail-closed, e é essa a intenção.
     if (!tabelaAusente(err)) throw err;
   }
 

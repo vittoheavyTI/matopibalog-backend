@@ -5,9 +5,9 @@
 // - super_admin: authority de plataforma → passa.
 // - resolve o efetivo (templates+overrides+entitlement+legado) e nega com 403 se
 //   a capability não estiver concedida.
-// - ADITIVO: pensado para NOVOS gates (finance, freight.create) sem alterar a
-//   autoridade coarse (isAdmin/isSuperAdmin) das rotas já protegidas — preserva o
-//   comportamento existente durante a transição (DEPRECATED_READ_COMPATIBILITY).
+// - Desde RBV9-INV-110 esta é a ÚNICA autoridade de produto. A transição terminou:
+//   nenhuma rota usa mais o coarse isAdmin. Autoridade de PLATAFORMA continua
+//   separada em isSuperAdmin; classe de conta (usuarios.tipo) não autoriza nada.
 //
 // scope: a verificação de escopo operacional continua no middleware/serviço próprio
 // (verificarEscopoOperacional / canAccessUnit). Permissão NÃO expande scope.
