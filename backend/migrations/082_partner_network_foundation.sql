@@ -546,7 +546,7 @@ CREATE OR REPLACE FUNCTION public.partner_network_create_invitation(
   p_documento text DEFAULT NULL,
   p_apelido text DEFAULT NULL
 )
-RETURNS TABLE (relationship_id uuid, partner_organization_id uuid, invitation_id uuid)
+RETURNS TABLE (out_relationship_id uuid, out_partner_organization_id uuid, out_invitation_id uuid)
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
@@ -584,7 +584,7 @@ BEGIN
   VALUES (p_empresa_id, 'relationship', v_rel, 'relationship_invited', p_actor_user_id, 'web',
           jsonb_build_object('partner_organization_id', v_org, 'email', lower(btrim(p_email))));
 
-  RETURN QUERY SELECT v_rel, v_org, v_inv;
+  RETURN QUERY SELECT v_rel AS out_relationship_id, v_org AS out_partner_organization_id, v_inv AS out_invitation_id;
 END;
 $fn$;
 
@@ -598,7 +598,7 @@ CREATE OR REPLACE FUNCTION public.partner_network_activate_invitation(
   p_auth_user_id uuid,
   p_nome text DEFAULT NULL
 )
-RETURNS TABLE (partner_user_id uuid, partner_organization_id uuid, email text, relationship_id uuid)
+RETURNS TABLE (out_partner_user_id uuid, out_partner_organization_id uuid, out_email text, out_relationship_id uuid)
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
@@ -670,7 +670,8 @@ BEGIN
     VALUES (v_rel.empresa_id, 'relationship', v_rel.id, 'relationship_activated', v_user, 'partner_portal', '{}'::jsonb);
   END IF;
 
-  RETURN QUERY SELECT v_user, v_rel.partner_organization_id, v_inv.email, v_rel.id;
+  RETURN QUERY SELECT v_user AS out_partner_user_id, v_rel.partner_organization_id AS out_partner_organization_id,
+                      v_inv.email AS out_email, v_rel.id AS out_relationship_id;
 END;
 $fn$;
 
@@ -692,7 +693,7 @@ CREATE OR REPLACE FUNCTION public.partner_network_submit_response(
   p_client_request_id text DEFAULT NULL,
   p_origem text DEFAULT 'partner_portal'
 )
-RETURNS TABLE (response_id uuid, revisao integer, idempotent boolean)
+RETURNS TABLE (out_response_id uuid, out_revisao integer, out_idempotent boolean)
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
@@ -717,7 +718,7 @@ BEGIN
     FROM public.partner_opportunity_responses
     WHERE recipient_id = p_recipient_id AND client_request_id = p_client_request_id;
     IF FOUND THEN
-      RETURN QUERY SELECT v_existente.id, v_existente.revisao, true;
+      RETURN QUERY SELECT v_existente.id AS out_response_id, v_existente.revisao AS out_revisao, true AS out_idempotent;
       RETURN;
     END IF;
   END IF;
@@ -795,9 +796,9 @@ BEGIN
 
   -- Com o destinatário travado, a próxima revisão é determinística: duas
   -- revisões simultâneas serializam em vez de colidir no índice único.
-  SELECT coalesce(max(revisao), 0) + 1 INTO v_revisao
-  FROM public.partner_opportunity_responses
-  WHERE recipient_id = p_recipient_id;
+  SELECT coalesce(max(r.revisao), 0) + 1 INTO v_revisao
+  FROM public.partner_opportunity_responses r
+  WHERE r.recipient_id = p_recipient_id;
 
   INSERT INTO public.partner_opportunity_responses (
     recipient_id, empresa_id, opportunity_id, revisao, situacao,
@@ -823,7 +824,7 @@ BEGIN
     jsonb_build_object('revisao', v_revisao, 'situacao', p_situacao)
   );
 
-  RETURN QUERY SELECT v_id, v_revisao, false;
+  RETURN QUERY SELECT v_id AS out_response_id, v_revisao AS out_revisao, false AS out_idempotent;
 END;
 $fn$;
 
@@ -849,7 +850,7 @@ CREATE OR REPLACE FUNCTION public.partner_network_share_gap(
   p_prazo_resposta timestamptz DEFAULT NULL,
   p_client_request_id text DEFAULT NULL
 )
-RETURNS TABLE (opportunity_id uuid, destinatarios integer, idempotent boolean)
+RETURNS TABLE (out_opportunity_id uuid, out_destinatarios integer, out_idempotent boolean)
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
@@ -877,7 +878,7 @@ BEGIN
     IF FOUND THEN
       SELECT count(*)::int INTO v_n
       FROM public.partner_opportunity_recipients WHERE opportunity_id = v_existente;
-      RETURN QUERY SELECT v_existente, v_n, true;
+      RETURN QUERY SELECT v_existente AS out_opportunity_id, v_n AS out_destinatarios, true AS out_idempotent;
       RETURN;
     END IF;
   END IF;
@@ -928,7 +929,7 @@ BEGIN
           jsonb_build_object('campaign_id', p_campaign_id, 'destinatarios', v_n,
                              'quantidade', p_quantidade, 'unidade', p_unidade));
 
-  RETURN QUERY SELECT v_op, v_n, false;
+  RETURN QUERY SELECT v_op AS out_opportunity_id, v_n AS out_destinatarios, false AS out_idempotent;
 END;
 $fn$;
 

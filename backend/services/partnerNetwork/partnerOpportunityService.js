@@ -124,13 +124,13 @@ async function compartilharLacuna(supabase, {
 
   const linha = Array.isArray(data) ? data[0] : data;
   const destinatarios = await listarDestinatarios(supabase, {
-    empresaId, opportunityId: linha.opportunity_id,
+    empresaId, opportunityId: linha.out_opportunity_id,
   });
 
   const { data: oportunidade } = await supabase
-    .from('partner_opportunities').select('*').eq('id', linha.opportunity_id).maybeSingle();
+    .from('partner_opportunities').select('*').eq('id', linha.out_opportunity_id).maybeSingle();
 
-  return { oportunidade, destinatarios, idempotent: linha.idempotent === true };
+  return { oportunidade, destinatarios, idempotent: linha.out_idempotent === true };
 }
 // ── Leitura interna ────────────────────────────────────────────────────────────
 
@@ -323,8 +323,8 @@ async function responder(supabase, {
 
   const linha = Array.isArray(data) ? data[0] : data;
   return {
-    resposta: { id: linha.response_id, revisao: linha.revisao, situacao },
-    idempotent: linha.idempotent === true,
+    resposta: { id: linha.out_response_id, revisao: linha.out_revisao, situacao },
+    idempotent: linha.out_idempotent === true,
   };
 }
 module.exports = {

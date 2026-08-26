@@ -163,11 +163,11 @@ async function convidarParceiro(supabase, { empresaId, actorUserId, nome, email,
 
   const linha = Array.isArray(data) ? data[0] : data;
   return {
-    relationship_id: linha.relationship_id,
-    partner_organization_id: linha.partner_organization_id,
+    relationship_id: linha.out_relationship_id,
+    partner_organization_id: linha.out_partner_organization_id,
     nome: nomeLimpo,
     convite: {
-      id: linha.invitation_id,
+      id: linha.out_invitation_id,
       expires_at: expiraEm,
       // Entrega V1 = MANUAL_LINK (§19). O valor puro do token existe aqui, uma
       // vez — no banco só há o hash.
@@ -359,9 +359,9 @@ async function ativarConvite(supabase, { token, authUserId, nome = null }) {
     });
   }
   return {
-    partner_user_id: linha.partner_user_id,
+    partner_user_id: linha.out_partner_user_id,
     partner_organization_id: linha.partner_organization_id,
-    email: linha.email,
+    email: linha.out_email,
     relationship_id: linha.relationship_id,
   };
 }

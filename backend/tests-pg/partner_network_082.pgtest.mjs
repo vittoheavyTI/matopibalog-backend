@@ -728,10 +728,10 @@ function registrar(pg) {
         new Date(Date.now() + 7 * 864e5).toISOString()]);
 
     const r = rows[0];
-    assert.ok(r.relationship_id && r.partner_organization_id && r.invitation_id);
+    assert.ok(r.out_relationship_id && r.out_partner_organization_id && r.out_invitation_id);
 
     const { rows: ev } = await pool.query(
-      `SELECT action FROM partner_network_events WHERE entity_id=$1`, [r.relationship_id]);
+      `SELECT action FROM partner_network_events WHERE entity_id=$1`, [r.out_relationship_id]);
     assert.equal(ev.length, 1, 'o evento faz parte da mesma decisão');
     assert.equal(ev[0].action, 'relationship_invited');
   });
@@ -773,7 +773,7 @@ function registrar(pg) {
     const { rows } = await pool.query(`SELECT * FROM partner_network_create_invitation($1,$2,$3,$4,$5,$6)`,
       [c.empresaA, null, 'Revogado', 'rev@exemplo.invalid', hash,
         new Date(Date.now() + 7 * 864e5).toISOString()]);
-    await pool.query(`UPDATE partner_relationships SET status='REVOKED' WHERE id=$1`, [rows[0].relationship_id]);
+    await pool.query(`UPDATE partner_relationships SET status='REVOKED' WHERE id=$1`, [rows[0].out_relationship_id]);
 
     const auth = (await pool.query('SELECT gen_random_uuid() AS id')).rows[0].id;
     await assert.rejects(
@@ -787,7 +787,7 @@ function registrar(pg) {
     const { rows } = await pool.query(`SELECT * FROM partner_network_create_invitation($1,$2,$3,$4,$5,$6)`,
       [c.empresaA, null, 'Suspenso', 'sus@exemplo.invalid', hash,
         new Date(Date.now() + 7 * 864e5).toISOString()]);
-    await pool.query(`UPDATE partner_relationships SET status='SUSPENDED' WHERE id=$1`, [rows[0].relationship_id]);
+    await pool.query(`UPDATE partner_relationships SET status='SUSPENDED' WHERE id=$1`, [rows[0].out_relationship_id]);
 
     const auth = (await pool.query('SELECT gen_random_uuid() AS id')).rows[0].id;
     await assert.rejects(
@@ -803,7 +803,7 @@ function registrar(pg) {
       [c.empresaA, null, 'Expirado', 'exp@exemplo.invalid', hash,
         new Date(Date.now() + 60000).toISOString()]);
     await pool.query(`UPDATE partner_invitations SET expires_at = now() - interval '1 hour' WHERE relationship_id=$1`,
-      [rows[0].relationship_id]);
+      [rows[0].out_relationship_id]);
 
     const auth = (await pool.query('SELECT gen_random_uuid() AS id')).rows[0].id;
     await assert.rejects(
@@ -828,10 +828,10 @@ function registrar(pg) {
     const { rows } = await pool.query(
       `SELECT * FROM partner_network_submit_response($1,$2,$3,$4,$5,$6)`,
       [c.rec, c.orgA, null, 'PARTIALLY_AVAILABLE', 200, 'ton']);
-    assert.equal(rows[0].revisao, 1);
+    assert.equal(rows[0].out_revisao, 1);
 
     const { rows: ev } = await pool.query(
-      `SELECT action FROM partner_network_events WHERE entity_id=$1`, [rows[0].response_id]);
+      `SELECT action FROM partner_network_events WHERE entity_id=$1`, [rows[0].out_response_id]);
     assert.equal(ev[0].action, 'response_submitted');
   });
 
@@ -852,7 +852,7 @@ function registrar(pg) {
     await pool.query(`UPDATE partner_relationships SET status='REVOKED' WHERE id=$1`, [c.relA]);
 
     const { rows: ainda } = await pool.query(
-      'SELECT id FROM partner_opportunity_responses WHERE id=$1', [rows[0].response_id]);
+      'SELECT id FROM partner_opportunity_responses WHERE id=$1', [rows[0].out_response_id]);
     assert.equal(ainda.length, 1, 'revogar não apaga o que já aconteceu');
   });
 
@@ -869,12 +869,22 @@ function registrar(pg) {
   });
 
   test('082: prazo vencido barra a resposta', async () => {
-    const c = await cenarioComDestinatario();
-    await pool.query(
-      `UPDATE partner_opportunities SET prazo_resposta = now() - interval '1 hour' WHERE id=$1`, [c.oportA]);
+    const c = await cenario();
+    // O prazo é parte do snapshot congelado: quem o viu foi o parceiro. Por isso
+    // a oportunidade nasce com ele vencido, em vez de ser alterada depois.
+    const oportVencida = (await pool.query(
+      `INSERT INTO partner_opportunities
+         (empresa_id, campaign_id, plan_version_id, cargo_descricao, quantidade, quantidade_unidade, prazo_resposta)
+       VALUES ($1,$2,$3,'Soja',500,'ton', now() - interval '1 hour') RETURNING id`,
+      [c.empresaA, c.campanhaA, c.planoA])).rows[0].id;
+    const rec = (await pool.query(
+      `INSERT INTO partner_opportunity_recipients
+         (opportunity_id, empresa_id, relationship_id, partner_organization_id)
+       VALUES ($1,$2,$3,$4) RETURNING id`,
+      [oportVencida, c.empresaA, c.relA, c.orgA])).rows[0].id;
     await assert.rejects(
       pool.query(`SELECT * FROM partner_network_submit_response($1,$2,$3,$4,$5,$6)`,
-        [c.rec, c.orgA, null, 'AVAILABLE', 10, 'ton']),
+        [rec, c.orgA, null, 'AVAILABLE', 10, 'ton']),
       /partner_response_prazo_encerrado/i);
   });
 
@@ -885,7 +895,7 @@ function registrar(pg) {
       try {
         const r = await cli.query(`SELECT * FROM partner_network_submit_response($1,$2,$3,$4,$5,$6)`,
           [c.rec, c.orgA, null, 'PARTIALLY_AVAILABLE', q, 'ton']);
-        return r.rows[0].revisao;
+        return r.rows[0].out_revisao;
       } finally { cli.release(); }
     };
     const revisoes = await Promise.all([enviar(100), enviar(200)]);
@@ -900,8 +910,8 @@ function registrar(pg) {
       [c.rec, c.orgA, null, 'AVAILABLE', 10, 'ton', null, null, null, rid]);
     const b = await pool.query(`SELECT * FROM partner_network_submit_response($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
       [c.rec, c.orgA, null, 'AVAILABLE', 10, 'ton', null, null, null, rid]);
-    assert.equal(a.rows[0].response_id, b.rows[0].response_id);
-    assert.equal(b.rows[0].idempotent, true);
+    assert.equal(a.rows[0].out_response_id, b.rows[0].out_response_id);
+    assert.equal(b.rows[0].out_idempotent, true);
   });
 
   test('082: parceiro NÃO responde por destinatário de outro parceiro', async () => {
@@ -961,7 +971,7 @@ function registrar(pg) {
 
     const { rows } = await pool.query(`SELECT * FROM partner_network_share_gap($1,$2,$3,$4,$5,$6,$7,$8)`,
       [c.empresaA, null, c.campanhaA, c.planoA, 'Soja', 100, 'ton', [c.relA, relRevogado]]);
-    assert.equal(rows[0].destinatarios, 1, 'só o parceiro ativo recebe');
+    assert.equal(rows[0].out_destinatarios, 1, 'só o parceiro ativo recebe');
   });
 
   test('082: share idempotente por client_request_id', async () => {
@@ -971,8 +981,8 @@ function registrar(pg) {
       [c.empresaA, null, c.campanhaA, c.planoA, 'Soja', 100, 'ton', [c.relA], null, null, null, null, null, null, rid]);
     const b = await pool.query(`SELECT * FROM partner_network_share_gap($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
       [c.empresaA, null, c.campanhaA, c.planoA, 'Soja', 100, 'ton', [c.relA], null, null, null, null, null, null, rid]);
-    assert.equal(a.rows[0].opportunity_id, b.rows[0].opportunity_id);
-    assert.equal(b.rows[0].idempotent, true);
+    assert.equal(a.rows[0].out_opportunity_id, b.rows[0].out_opportunity_id);
+    assert.equal(b.rows[0].out_idempotent, true);
   });
 
   test('082: marcar fonte obsoleta muda o estado e registra evento', async () => {
