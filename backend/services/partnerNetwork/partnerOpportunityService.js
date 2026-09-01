@@ -18,7 +18,7 @@
 // parceiro (a mesma razão que mantém `PORTAL_QUOTE_PROPOSAL_V1B` deferida), e
 // esta fatia não inventa uma.
 
-const { PartnerNetworkError, registrarEvento, traduzirErroDeRpc } = require('./partnerNetworkService');
+const { PartnerNetworkError, traduzirErroDeRpc } = require('./partnerNetworkService');
 
 // Campos que podem sair do tenant. Lista POSITIVA de propósito: o que não está
 // aqui não vaza, e acrescentar algo exige decisão explícita — o inverso de um
@@ -209,23 +209,30 @@ async function marcarFonteObsoleta(supabase, { empresaId, campaignId, motivo = '
   if (error) throw traduzirErroDeRpc(error);
   return { afetadas: Number(data) || 0 };
 }
+/**
+ * Retira um pedido da rede — mudança de estado e evento na MESMA transação.
+ *
+ * HIGH-11, mesmo defeito da transição de relacionamento: o `UPDATE` commitava
+ * sozinho e o evento vinha numa segunda chamada. Uma falha no meio deixava o
+ * pedido retirado sem registro de retirada — e retirar é justamente o ato que
+ * encerra um compromisso já comunicado ao parceiro.
+ */
 async function retirarOportunidade(supabase, { empresaId, actorUserId, opportunityId, motivo = null }) {
-  const { data, error } = await supabase
-    .from('partner_opportunities')
-    .update({ estado: 'WITHDRAWN', estado_motivo: motivo, estado_em: new Date().toISOString() })
-    .eq('id', opportunityId)
-    .eq('empresa_id', empresaId)
-    .in('estado', ['CURRENT', 'STALE_SOURCE'])
-    .select('id')
-    .maybeSingle();
-  erroDeBanco(error);
-  if (!data) throw new PartnerNetworkError('Oportunidade não encontrada ou já encerrada.', { status: 404, code: 'oportunidade_indisponivel' });
-
-  await registrarEvento(supabase, {
-    empresaId, entityType: 'opportunity', entityId: opportunityId,
-    action: 'opportunity_withdrawn', actorUserId, reason: motivo,
+  const { data, error } = await supabase.rpc('partner_network_withdraw_opportunity', {
+    p_empresa_id: empresaId,
+    p_actor_user_id: actorUserId || null,
+    p_opportunity_id: opportunityId,
+    p_motivo: motivo ? String(motivo).trim() : null,
   });
-  return { id: data.id, estado: 'WITHDRAWN' };
+  if (error) throw traduzirErroDeRpc(error);
+
+  const linha = Array.isArray(data) ? data[0] : data;
+  if (!linha) {
+    throw new PartnerNetworkError('Oportunidade não encontrada ou já encerrada.', {
+      status: 404, code: 'partner_oportunidade_indisponivel',
+    });
+  }
+  return { id: linha.out_opportunity_id, estado: linha.out_estado };
 }
 
 // ── Lado do parceiro ───────────────────────────────────────────────────────────
@@ -322,6 +329,29 @@ async function responder(supabase, {
   if (error) throw traduzirErroDeRpc(error);
 
   const linha = Array.isArray(data) ? data[0] : data;
+  if (!linha) {
+    throw new PartnerNetworkError('Não foi possível registrar sua resposta. Tente novamente.', {
+      status: 500, code: 'partner_response_contract_broken',
+    });
+  }
+
+  // HIGH-13 — `SOURCE_STALE` é RESULTADO, não exceção.
+  //
+  // A RPC precisava PERSISTIR a auto-correção (oportunidade vira `STALE_SOURCE`,
+  // evento registrado) e ainda assim recusar a resposta. Com `RAISE EXCEPTION` as
+  // duas coisas se anulavam: o RAISE aborta a transação e leva junto as escritas
+  // que acabaram de acontecer. Por isso ela devolve um resultado estruturado e
+  // commita — e é AQUI que ele vira a recusa que o parceiro vê.
+  //
+  // 409 e não 400: o pedido do parceiro estava correto; o que mudou foi o estado
+  // do outro lado.
+  if (linha.out_result === 'SOURCE_STALE') {
+    throw new PartnerNetworkError(
+      'A campanha foi replanejada. Aguarde um novo pedido da transportadora.',
+      { status: 409, code: 'partner_response_fonte_obsoleta' },
+    );
+  }
+
   return {
     resposta: { id: linha.out_response_id, revisao: linha.out_revisao, situacao },
     idempotent: linha.out_idempotent === true,

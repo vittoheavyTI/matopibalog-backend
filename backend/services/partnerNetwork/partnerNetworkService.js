@@ -52,38 +52,21 @@ function hashDoToken(valor) {
 
 // ── Eventos ────────────────────────────────────────────────────────────────────
 //
-// HIGH-07: a auditoria das mutações de AUTORIDADE não é best-effort.
+// NÃO EXISTE MAIS UM `registrarEvento()` NESTE MÓDULO, e a ausência é a decisão.
 //
-// A versão anterior engolia o erro "para não derrubar a ação". Isso é errado
-// justamente onde o evento é parte da prova: uma revogação que acontece sem
-// registro deixa a empresa sem como mostrar quando cortou o acesso. Por isso as
-// mutações críticas gravam evento DENTRO da mesma transação, nas RPCs — e esta
-// função sobrou apenas para os registros periféricos, onde falhar em auditar
-// realmente não muda o fato ocorrido.
-async function registrarEvento(supabase, {
-  empresaId, entityType, entityId, action,
-  actorUserId = null, actorPartnerUserId = null, source = 'web',
-  reason = null, metadata = {},
-}) {
-  const { error } = await supabase.from('partner_network_events').insert({
-    empresa_id: empresaId,
-    entity_type: entityType,
-    entity_id: entityId,
-    action,
-    actor_user_id: actorUserId,
-    actor_partner_user_id: actorPartnerUserId,
-    source,
-    reason,
-    // Montado com campos explícitos pelo chamador — nunca por spread de payload,
-    // para que token, hash e senha não tenham como entrar aqui.
-    metadata,
-  });
-  if (error) {
-    throw new PartnerNetworkError('Não foi possível registrar o evento de auditoria.', {
-      status: 500, code: 'partner_network_audit_failed',
-    });
-  }
-}
+// HIGH-11: toda mutação de autoridade da rede — convidar, ativar, mudar situação,
+// compartilhar, responder, retirar, marcar obsoleto — grava o evento DENTRO da
+// mesma transação que muda o estado, nas RPCs da migration 082. Não sobrou
+// nenhuma mutação "periférica" para justificar um gravador avulso.
+//
+// Manter a função exportada seria manter a armadilha: ela commita separado do
+// estado, então o próximo uso reintroduziria exatamente o defeito que acabou de
+// ser corrigido — mudança de estado que persiste sem o registro dela. Uma escrita
+// de auditoria fora de transação é mais perigosa que nenhuma, porque parece
+// suficiente.
+//
+// `PARTNER_NETWORK_AUDIT_IS_TRANSACTIONAL_ONLY=true`
+
 // ── Relacionamentos ────────────────────────────────────────────────────────────
 
 async function listarParceiros(supabase, { empresaId }) {
@@ -202,66 +185,40 @@ const ACAO_POR_STATUS = Object.freeze({
   REVOKED: 'relationship_revoked',
 });
 
+/**
+ * Muda a situação do parceiro — mudança de estado e evento na MESMA transação.
+ *
+ * HIGH-11. A versão anterior fazia `UPDATE` condicional e, depois, uma segunda
+ * chamada para registrar o evento. O UPDATE commitava sozinho: se o evento
+ * falhasse, o acesso do parceiro já estava cortado e não havia registro de
+ * quando nem por quem. Uma revogação que a empresa não consegue provar depois
+ * derruba a única finalidade de ter auditoria.
+ *
+ * A máquina de estados (`TRANSICOES_PERMITIDAS`) continua declarada aqui porque
+ * a UI a lê — mas a AUTORIDADE passou a ser a RPC, que decide com a linha
+ * travada. Duas mudanças simultâneas serializam no lock, não numa releitura.
+ */
 async function alterarStatusDoParceiro(supabase, { empresaId, actorUserId, relationshipId, novoStatus, motivo = null }) {
   if (!ACAO_POR_STATUS[novoStatus]) {
     throw new PartnerNetworkError('Situação de parceiro inválida.', { code: 'partner_status_invalido' });
   }
 
-  const { data: atual, error: erroAtual } = await supabase
-    .from('partner_relationships')
-    .select('id, status')
-    .eq('id', relationshipId)
-    .eq('empresa_id', empresaId)
-    .maybeSingle();
-  erroDeBanco(erroAtual);
-  if (!atual) throw new PartnerNetworkError('Parceiro não encontrado.', { status: 404, code: 'partner_nao_encontrado' });
-
-  if (atual.status === novoStatus) {
-    return { id: atual.id, status: atual.status, inalterado: true };
-  }
-
-  const permitidas = TRANSICOES_PERMITIDAS[atual.status] || [];
-  if (!permitidas.includes(novoStatus)) {
-    throw new PartnerNetworkError(
-      atual.status === 'REVOKED'
-        ? 'Este parceiro foi revogado. Convide-o novamente para restabelecer o acesso.'
-        : 'Esta mudança de situação não é permitida.',
-      { status: 409, code: 'partner_transicao_invalida', details: { de: atual.status, para: novoStatus } },
-    );
-  }
-
-  const agora = new Date().toISOString();
-  const patch = { status: novoStatus, atualizado_em: agora };
-  if (novoStatus === 'ACTIVE') patch.ativado_em = agora;
-  if (novoStatus === 'REVOKED') {
-    patch.revogado_em = agora;
-    patch.revogado_por = actorUserId || null;
-    patch.revogado_motivo = motivo ? String(motivo).trim() : null;
-  }
-
-  // A transição condicional é a decisão: o `eq(status)` faz duas mudanças
-  // simultâneas serializarem em vez de a última sobrescrever a primeira.
-  const { data, error } = await supabase
-    .from('partner_relationships')
-    .update(patch)
-    .eq('id', relationshipId)
-    .eq('empresa_id', empresaId)
-    .eq('status', atual.status)
-    .select('id, status')
-    .maybeSingle();
-  erroDeBanco(error);
-  if (!data) {
-    throw new PartnerNetworkError('A situação deste parceiro mudou. Recarregue a lista.', {
-      status: 409, code: 'partner_status_concorrente',
-    });
-  }
-
-  await registrarEvento(supabase, {
-    empresaId, entityType: 'relationship', entityId: relationshipId,
-    action: ACAO_POR_STATUS[novoStatus], actorUserId, reason: motivo || null,
+  const { data, error } = await supabase.rpc('partner_network_set_relationship_status', {
+    p_empresa_id: empresaId,
+    p_actor_user_id: actorUserId || null,
+    p_relationship_id: relationshipId,
+    p_novo_status: novoStatus,
+    p_motivo: motivo ? String(motivo).trim() : null,
   });
+  if (error) throw traduzirErroDeRpc(error);
 
-  return { id: data.id, status: data.status };
+  const linha = Array.isArray(data) ? data[0] : data;
+  if (!linha) {
+    throw new PartnerNetworkError('Parceiro não encontrado.', { status: 404, code: 'partner_nao_encontrado' });
+  }
+  const saida = { id: linha.out_relationship_id, status: linha.out_status };
+  if (linha.out_inalterado === true) saida.inalterado = true;
+  return saida;
 }
 // Tradução dos erros das RPCs para mensagens de produto. Cada `RAISE EXCEPTION`
 // da migration tem um nome estável; sem este mapa a pessoa veria o texto cru do
@@ -283,11 +240,28 @@ const MENSAGEM_DE_RPC = {
   partner_response_capacidade_invalida: ['Informe a capacidade que você consegue atender.', 400],
   partner_response_capacidade_acima_da_lacuna: ['A capacidade informada é maior que a necessidade compartilhada.', 400],
   partner_response_unidade_divergente: ['Responda na mesma unidade do pedido.', 400],
+  partner_response_ator_invalido: ['Não foi possível confirmar quem está respondendo. Entre novamente.', 401],
+  partner_response_origem_nao_suportada: ['Esta origem de resposta ainda não está disponível.', 400],
   partner_share_plano_nao_aprovado: ['O plano desta campanha não está mais aprovado. Replaneje antes de pedir capacidade.', 409],
-  partner_share_sem_parceiro_ativo: ['Nenhum dos parceiros escolhidos está ativo na sua rede.', 403],
+  // ALL_REQUESTED_OR_FAIL: mensagem única para "não existe", "é de outra
+  // empresa" e "não está ativo" — distinguir os três confirmaria a existência de
+  // relacionamento alheio.
+  partner_share_destinatario_indisponivel: [
+    'Algum dos parceiros escolhidos não está mais ativo na sua rede. Atualize a lista e compartilhe de novo.', 409],
+  partner_share_idempotency_conflict: [
+    'Este pedido já foi usado para compartilhar outra campanha ou outro plano. Gere um novo compartilhamento.', 409],
+  partner_share_campanha_invalida: ['Campanha não encontrada.', 404],
   partner_share_sem_destinatarios: ['Escolha pelo menos um parceiro.', 400],
   partner_share_quantidade_invalida: ['Quantidade inválida para compartilhar.', 400],
   partner_share_dados_invalidos: ['Dados insuficientes para compartilhar.', 400],
+  partner_nao_encontrado: ['Parceiro não encontrado.', 404],
+  partner_relacionamento_revogado_terminal: [
+    'Este parceiro foi revogado. Convide-o novamente para restabelecer o acesso.', 409],
+  partner_transicao_invalida: ['Esta mudança de situação não é permitida.', 409],
+  partner_status_invalido: ['Situação de parceiro inválida.', 400],
+  partner_status_dados_invalidos: ['Dados inválidos para mudar a situação do parceiro.', 400],
+  partner_oportunidade_indisponivel: ['Oportunidade não encontrada ou já encerrada.', 404],
+  partner_withdraw_dados_invalidos: ['Dados inválidos para retirar a oportunidade.', 400],
 };
 
 function traduzirErroDeRpc(error) {
@@ -306,28 +280,53 @@ function traduzirErroDeRpc(error) {
 }
 
 /**
- * E-mail para o qual o convite foi emitido.
+ * PREFLIGHT do convite (HIGH-09) — resolve sem consumir.
  *
- * É a autoridade de "quem foi convidado": a ativação prova a posse DESSA conta,
- * não de uma que a pessoa digite na hora. Aceitar um e-mail livre no corpo
- * permitiria ativar o convite de outra pessoa com a própria conta.
+ * Devolve o e-mail para o qual o convite foi emitido, que é a AUTORIDADE de
+ * identidade: quem ativa é quem foi convidado, não quem digita um e-mail na
+ * hora.
  *
- * Leitura deliberadamente magra — só o e-mail, e sem revelar se o convite está
- * pendente, expirado ou já usado: essa distinção só interessa a quem sonda tokens.
+ * A versão anterior era um `select('email')` cru, e isso tinha duas
+ * consequências ruins ao mesmo tempo:
+ *
+ *   1. Ela achava o e-mail de QUALQUER convite — expirado, já aceito, revogado,
+ *      de um relacionamento cortado. A ativação então seguia para o Supabase Auth
+ *      e chegava a CRIAR uma conta antes de a RPC recusar o convite. Um token
+ *      morto produzindo identidade nova em produção é efeito colateral externo
+ *      disparado por credencial inválida.
+ *   2. A validação de estado vivia num lugar só — dentro da RPC de consumo —,
+ *      então não havia como recusar cedo sem duplicar a matriz.
+ *
+ * Agora a mesma matriz da RPC de ativação decide aqui também, e o convite
+ * continua intacto: nenhum `UPDATE`, nenhum `FOR UPDATE`. Isto ACELERA a recusa;
+ * quem decide de verdade continua sendo a transação da ativação.
  */
-async function emailDoConvite(supabase, { token }) {
-  const { data, error } = await supabase
-    .from('partner_invitations')
-    .select('email')
-    .eq('token_hash', hashDoToken(token))
-    .maybeSingle();
-  erroDeBanco(error);
-  if (!data) {
+async function preflightDoConvite(supabase, { token }) {
+  if (!token) throw new PartnerNetworkError('Convite inválido.', { status: 400, code: 'convite_invalido' });
+
+  const { data, error } = await supabase.rpc('partner_network_preflight_invitation', {
+    p_token_hash: hashDoToken(token),
+  });
+  if (error) throw traduzirErroDeRpc(error);
+
+  const linha = Array.isArray(data) ? data[0] : data;
+  if (!linha) {
     throw new PartnerNetworkError('Este convite não é mais válido. Peça um novo à transportadora.', {
       status: 410, code: 'convite_indisponivel',
     });
   }
-  return data.email;
+  return {
+    email: normalizarEmailDoConvite(linha.out_email),
+    relationship_id: linha.out_relationship_id,
+    partner_organization_id: linha.out_partner_organization_id,
+    relationship_status: linha.out_relationship_status,
+  };
+}
+
+// O convite grava o e-mail já normalizado; normalizar de novo na leitura é o que
+// impede que uma diferença de caixa vire uma comparação falsa lá na frente.
+function normalizarEmailDoConvite(email) {
+  return String(email || '').trim().toLowerCase();
 }
 
 /**
@@ -358,21 +357,43 @@ async function ativarConvite(supabase, { token, authUserId, nome = null }) {
       status: 410, code: 'convite_indisponivel',
     });
   }
+
+  // HIGH-10 — OS NOMES SÃO OS DA RPC, e a leitura é ESTRITA.
+  //
+  // A RPC devolve `out_partner_user_id`, `out_partner_organization_id`,
+  // `out_email` e `out_relationship_id`. Este código lia dois deles sem o
+  // prefixo (`linha.partner_organization_id`, `linha.relationship_id`), então os
+  // dois chegavam `undefined` — e `undefined` não explode: ele vira uma claim
+  // ausente no JWT emitido logo a seguir. O parceiro terminava a ativação com
+  // uma sessão sem organização, que o próprio `verifyPartnerToken` rejeita. O
+  // fluxo inteiro de entrada estava quebrado e nenhum teste via, porque nenhum
+  // teste ia da RPC até o token.
+  //
+  // Nada de `??` nem de fallback aqui: um campo que não veio é contrato
+  // quebrado, e adivinhar o valor esconderia a próxima vez que isso acontecer.
+  for (const campo of ['out_partner_user_id', 'out_partner_organization_id', 'out_email', 'out_relationship_id']) {
+    if (linha[campo] === undefined || linha[campo] === null) {
+      throw new PartnerNetworkError('Não foi possível concluir a ativação. Tente novamente.', {
+        status: 500, code: 'partner_activation_contract_broken', details: { campo },
+      });
+    }
+  }
+
   return {
     partner_user_id: linha.out_partner_user_id,
-    partner_organization_id: linha.partner_organization_id,
+    partner_organization_id: linha.out_partner_organization_id,
     email: linha.out_email,
-    relationship_id: linha.relationship_id,
+    relationship_id: linha.out_relationship_id,
   };
 }
 module.exports = {
   PartnerNetworkError,
-  emailDoConvite,
+  preflightDoConvite,
   TRANSICOES_PERMITIDAS,
   traduzirErroDeRpc,
   gerarTokenConvite,
   hashDoToken,
-  registrarEvento,
+
   listarParceiros,
   convidarParceiro,
   alterarStatusDoParceiro,

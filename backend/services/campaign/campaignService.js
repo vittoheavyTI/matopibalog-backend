@@ -771,16 +771,29 @@ async function approvePlan(supabase, { empresaId, user, campaignId, planId, body
   // falha aqui não deixa passar resposta obsoleta — só adia a marcação. Derrubar
   // a aprovação de um plano por causa disso seria o remédio pior que a doença.
   if (isReplanApproval) {
-    try {
-      await supabase.rpc('partner_network_mark_source_stale', {
-        p_empresa_id: empresaId,
-        p_campaign_id: campaignId,
-        p_motivo: 'replan_aprovado',
-        p_actor_user_id: userId(user),
-      });
-    } catch (err) {
-      // Só registra: a autoridade final é a revalidação no momento da resposta.
-      console.warn('[campaign:approvePlan] rede de parceiros nao marcada como obsoleta:', err?.message || err);
+    // O `try/catch` sozinho NÃO percebia a falha, e essa é a parte que importa.
+    //
+    // O client do Supabase não lança em erro de RPC: ele RESOLVE a promessa com
+    // `{ data, error }`. Uma função ausente (a 082 ainda não aplicada), sem
+    // permissão, ou que levantou exceção, voltava por `error` — e o `await` dentro
+    // do `try` seguia feliz. O `catch` só pegaria falha de rede.
+    //
+    // Ou seja: o único aviso que existia era inalcançável na prática. A marcação
+    // podia estar quebrada em produção indefinidamente sem uma linha de log.
+    const { error: staleError } = await supabase.rpc('partner_network_mark_source_stale', {
+      p_empresa_id: empresaId,
+      p_campaign_id: campaignId,
+      p_motivo: 'replan_aprovado',
+      p_actor_user_id: userId(user),
+    });
+    if (staleError) {
+      // Continua sendo não-fatal DE PROPÓSITO: a autoridade final é a
+      // revalidação da fonte dentro da RPC de resposta, que roda na mesma
+      // transação da escrita. Uma falha aqui adia a marcação; ela não deixa
+      // passar resposta obsoleta. Derrubar a aprovação de um plano por causa
+      // disso seria o remédio pior que a doença.
+      console.warn('[campaign:approvePlan] rede de parceiros nao marcada como obsoleta:',
+        staleError.message || staleError.code || staleError);
     }
   }
 

@@ -186,26 +186,105 @@ function Ativar() {
 //
 // É o que torna o acesso durável: o convite serve uma vez, para provar quem é.
 // Depois disso a pessoa entra como em qualquer produto.
+// Um contexto = um vínculo desta identidade com UMA organização parceira.
+// Repare no que não vem: nada da transportadora solicitante.
+type ContextoDeParceiro = {
+  partner_user_id: string;
+  organizacao: string | null;
+  vinculado_em: string | null;
+};
+
 function Entrar() {
   const navegar = useNavigate();
   const [email, setEmail] = useState('');
   const [senha, setSenha] = useState('');
   const [erro, setErro] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
+  // HIGH-15: só aparece quando o backend responde `requires_context_selection`,
+  // isto é, quando esta identidade está vinculada a mais de uma rede. Quem tem
+  // uma só nunca vê esta tela.
+  const [contextos, setContextos] = useState<ContextoDeParceiro[] | null>(null);
+
+  const concluir = (token: string) => {
+    localStorage.setItem(CHAVE_SESSAO, token);
+    navegar('/portal/parceiro/oportunidades', { replace: true });
+  };
 
   const entrar = async () => {
     setEnviando(true);
     setErro(null);
     try {
       const { data } = await clienteParceiro.post('/entrar', { email: email.trim(), senha });
-      localStorage.setItem(CHAVE_SESSAO, data.token);
-      navegar('/portal/parceiro/oportunidades', { replace: true });
+      if (data?.requires_context_selection) {
+        setContextos(data.contextos || []);
+        return;
+      }
+      concluir(data.token);
     } catch (e) {
       setErro(mensagemDeErro(e, 'Não foi possível entrar.'));
     } finally {
       setEnviando(false);
     }
   };
+
+  // A senha é reenviada aqui de propósito: não existe token intermediário
+  // "quase autenticado" guardado entre as duas telas. A posse da conta é provada
+  // de novo, e o backend ainda confere que o vínculo escolhido é mesmo desta
+  // identidade — a lista da tela não autoriza nada por si só.
+  const escolher = async (partnerUserId: string) => {
+    setEnviando(true);
+    setErro(null);
+    try {
+      const { data } = await clienteParceiro.post('/contexto', {
+        email: email.trim(), senha, partner_user_id: partnerUserId,
+      });
+      concluir(data.token);
+    } catch (e) {
+      setErro(mensagemDeErro(e, 'Não foi possível entrar nesta rede.'));
+    } finally {
+      setEnviando(false);
+    }
+  };
+
+  if (contextos) {
+    return (
+      <Moldura>
+        <h1 className="text-xl font-bold text-gray-800">Escolha a rede</h1>
+        <p className="mt-1 text-sm text-gray-600">
+          Seu e-mail tem acesso a mais de uma rede de parceiros. Escolha em qual quer entrar agora.
+        </p>
+
+        <div className="mt-4 space-y-2">
+          {contextos.map((c) => (
+            <button
+              key={c.partner_user_id}
+              type="button"
+              onClick={() => escolher(c.partner_user_id)}
+              disabled={enviando}
+              className="w-full rounded-xl border border-gray-200 px-4 py-3 text-left text-sm hover:border-green-600 disabled:opacity-50"
+            >
+              <span className="block font-bold text-gray-800">{c.organizacao || 'Parceiro'}</span>
+              {c.vinculado_em && (
+                <span className="block text-xs text-gray-500">
+                  Acesso desde {new Date(c.vinculado_em).toLocaleDateString('pt-BR')}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+
+        {erro && <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">{erro}</p>}
+
+        <button
+          type="button"
+          onClick={() => { setContextos(null); setErro(null); }}
+          className="mt-4 w-full rounded-xl border border-gray-200 px-4 py-2.5 text-sm font-bold text-gray-600"
+        >
+          Voltar
+        </button>
+      </Moldura>
+    );
+  }
 
   return (
     <Moldura>

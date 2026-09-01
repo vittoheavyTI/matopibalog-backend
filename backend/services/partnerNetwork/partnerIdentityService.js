@@ -25,6 +25,16 @@ const { PartnerNetworkError } = require('./partnerNetworkService');
 
 const SENHA_MINIMA = 8;
 
+// Proveniência da conta criada por convite de parceiro.
+//
+// O serviço compartilhado gravava `portal_embarcador: true` em QUALQUER conta que
+// ele criasse — inclusive nas de parceiro. A marca ficava simplesmente errada:
+// dizia "esta conta nasceu no Portal do Embarcador" sobre alguém que nunca viu
+// aquele portal. Metadata não autoriza nada (quem decide é
+// `partner_portal_users`, relido a cada requisição), mas metadata mentiroso
+// contamina exatamente quem for depurar um acesso mais tarde.
+const METADATA_DO_PARCEIRO = Object.freeze({ partner_portal: true });
+
 // Traduz o erro do serviço compartilhado para o vocabulário desta frente, sem
 // perder o código nem o status — a política é a mesma, a mensagem é nossa.
 function traduzirErro(err) {
@@ -56,9 +66,14 @@ function traduzirErro(err) {
  * senha correta, a ativação é negada — e quem chama precisa garantir que o
  * convite NÃO seja consumido nesse caso (§7).
  */
-async function resolverOuCriarIdentidade(supabase, { email, senha, nome }) {
+async function resolverOuCriarIdentidade(supabase, { email, senha, nome, auth = null }) {
   try {
-    return await identidadeExterna.resolverOuCriarIdentidade(supabase, { email, senha, nome });
+    return await identidadeExterna.resolverOuCriarIdentidade(supabase, {
+      email, senha, nome, auth,
+      // A política de prova de posse continua vindo inteira de lá; o que muda é
+      // só a etiqueta de domínio.
+      userMetadata: METADATA_DO_PARCEIRO,
+    });
   } catch (err) {
     throw traduzirErro(err);
   }
@@ -81,23 +96,86 @@ async function autenticarPorSenha({ email, senha }) {
 }
 
 /**
- * Contexto do parceiro a partir da identidade Auth.
+ * TODOS os contextos de parceiro de uma identidade Auth (HIGH-15).
+ *
+ * `PARTNER_MULTI_NETWORK_LOGIN_V1=EXPLICIT_CONTEXT_SELECTION`.
+ *
+ * POR QUE ISTO NÃO PODE SER UM `maybeSingle()`. A versão anterior resolvia o
+ * login com `.eq('auth_user_id', …).maybeSingle()`, e `maybeSingle` **falha**
+ * quando encontra mais de uma linha. Duas linhas para a mesma identidade não são
+ * corrupção: são o caso normal de quem é parceiro de duas transportadoras com o
+ * mesmo e-mail — cada uma com organização própria, cada uma nascida de um convite
+ * explícito. O efeito prático era que aceitar o segundo convite QUEBRAVA o login
+ * do primeiro, com erro de servidor e sem explicação.
+ *
+ * A correção NÃO é tornar `auth_user_id` único (isso proibiria o segundo convite
+ * legítimo), nem escolher uma linha em silêncio (a pessoa entraria na rede
+ * errada sem saber). É devolver a lista e deixar a escolha explícita.
+ *
+ * Só volta o que está ATIVO: um vínculo bloqueado não é uma opção a oferecer.
+ */
+async function listarContextosDoParceiro(supabase, { authUserId }) {
+  if (!authUserId) {
+    throw new PartnerNetworkError('Sessão inválida.', { status: 401, code: 'sessao_invalida' });
+  }
+
+  const { data, error } = await supabase
+    .from('partner_portal_users')
+    .select('id, partner_organization_id, email, nome, status, auth_user_id, criado_em, '
+      + 'partner_organizations!inner(nome)')
+    .eq('auth_user_id', authUserId)
+    .eq('status', 'ATIVO')
+    .order('criado_em', { ascending: true });
+
+  if (error) {
+    if (error.code === '42P01') {
+      throw new PartnerNetworkError('Rede de parceiros ainda não está disponível.', {
+        status: 503, code: 'partner_network_schema_missing',
+      });
+    }
+    throw new PartnerNetworkError('Erro ao carregar seu acesso.', { status: 500, code: 'contexto_erro' });
+  }
+
+  return (data || []).map((u) => {
+    const org = Array.isArray(u.partner_organizations) ? u.partner_organizations[0] : u.partner_organizations;
+    return {
+      id: u.id,
+      partner_organization_id: u.partner_organization_id,
+      email: u.email,
+      nome: u.nome,
+      auth_user_id: u.auth_user_id,
+      // Deliberadamente o nome da ORGANIZAÇÃO PARCEIRA, nunca o da
+      // transportadora que convidou. O portal inteiro é construído sobre "nada
+      // do solicitante sai daqui", e uma tela de escolha não é motivo para abrir
+      // exceção — ainda mais uma tela que aparece ANTES de haver sessão.
+      organizacao: org?.nome || null,
+      vinculado_em: u.criado_em,
+    };
+  });
+}
+
+/**
+ * Contexto do parceiro a partir do ID de vínculo.
  *
  * É a autoridade de sessão: o JWT sozinho não basta (HIGH-01). Uma identidade
  * BLOQUEADA perde o acesso mesmo com token ainda válido, porque o estado é
  * relido aqui a cada requisição.
+ *
+ * Resolve SEMPRE por `partnerUserId` — que é chave primária, então `maybeSingle`
+ * é honesto aqui. `authUserId`, quando informado, serve só para conferir a
+ * coerência do vínculo, nunca para localizar a linha (ver
+ * `listarContextosDoParceiro`).
  */
 async function carregarContextoDoParceiro(supabase, { authUserId = null, partnerUserId = null }) {
-  if (!authUserId && !partnerUserId) {
+  if (!partnerUserId) {
     throw new PartnerNetworkError('Sessão inválida.', { status: 401, code: 'sessao_invalida' });
   }
 
-  let consulta = supabase
+  const { data, error } = await supabase
     .from('partner_portal_users')
-    .select('id, partner_organization_id, email, nome, status, auth_user_id');
-  consulta = partnerUserId ? consulta.eq('id', partnerUserId) : consulta.eq('auth_user_id', authUserId);
-
-  const { data, error } = await consulta.maybeSingle();
+    .select('id, partner_organization_id, email, nome, status, auth_user_id')
+    .eq('id', partnerUserId)
+    .maybeSingle();
   if (error) {
     if (error.code === '42P01') {
       throw new PartnerNetworkError('Rede de parceiros ainda não está disponível.', {
@@ -133,8 +211,10 @@ async function carregarContextoDoParceiro(supabase, { authUserId = null, partner
 
 module.exports = {
   SENHA_MINIMA,
+  METADATA_DO_PARCEIRO,
   resolverOuCriarIdentidade,
   autenticarPorSenha,
+  listarContextosDoParceiro,
   carregarContextoDoParceiro,
   hashToken: identidadeExterna.hashToken,
   normalizarEmail: identidadeExterna.normalizarEmail,

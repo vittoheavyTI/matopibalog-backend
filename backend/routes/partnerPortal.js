@@ -49,17 +49,46 @@ router.post('/ativar', async (req, res) => {
       throw new rede.PartnerNetworkError('Convite inválido.', { status: 400, code: 'convite_invalido' });
     }
 
-    // O e-mail do convite é a autoridade: quem ativa é quem foi convidado.
-    const alvo = await rede.emailDoConvite(supabase, { token });
+    // 1. PREFLIGHT (HIGH-09). Resolve o convite SEM consumi-lo e recusa aqui o
+    //    que a ativação recusaria: token desconhecido, expirado, já usado,
+    //    relacionamento revogado ou suspenso.
+    //
+    //    Antes, essa checagem só existia dentro da RPC de consumo — depois da
+    //    criação da identidade no Auth. Um convite morto chegava a produzir uma
+    //    conta nova em produção antes de a recusa acontecer. A conta não
+    //    autorizava nada, mas era efeito colateral externo disparado por uma
+    //    credencial inválida, e nenhum retorno desfazia isso.
+    const convite = await rede.preflightDoConvite(supabase, { token });
 
-    // 1. Prova de identidade — ANTES de tocar no convite.
+    // 2. O E-MAIL DO CONVITE É A AUTORIDADE (HIGH-09).
+    //
+    //    O código anterior era `email: email ? String(email) : alvo` — ou seja,
+    //    qualquer e-mail no corpo SUBSTITUÍA o e-mail para o qual o convite foi
+    //    emitido. Quem tivesse o link (uma credencial ao portador, entregue à
+    //    mão) informava a PRÓPRIA conta e provava posse dela, não da conta
+    //    convidada. A prova de senha continuava intacta e completamente inútil:
+    //    ela provava a identidade errada. O convite endereçado a
+    //    contato@parceiro virava acesso para quem quisesse.
+    //
+    //    `body.email` permanece aceito só por compatibilidade de cliente, e
+    //    apenas para CONFIRMAR. Divergir é negar — nunca reescrever o alvo.
+    const informado = String(email || '').trim().toLowerCase();
+    if (informado && informado !== convite.email) {
+      throw new rede.PartnerNetworkError(
+        'Este convite foi enviado para outro e-mail. Use o endereço que recebeu o convite.',
+        { status: 403, code: 'convite_email_divergente' },
+      );
+    }
+
+    // 3. Prova de identidade — do e-mail DO CONVITE, e antes de tocar no convite.
     const auth = await identidade.resolverOuCriarIdentidade(supabase, {
-      email: email ? String(email) : alvo,
+      email: convite.email,
       senha,
       nome,
     });
 
-    // 2. Só agora o convite é consumido, atomicamente.
+    // 4. Só agora o convite é consumido, atomicamente. A RPC revalida tudo de
+    //    novo com a linha travada: o preflight acelera a recusa, não decide.
     const ativado = await rede.ativarConvite(supabase, {
       token, authUserId: auth.id, nome,
     });
@@ -77,19 +106,96 @@ router.post('/ativar', async (req, res) => {
 //
 // É isto que torna o acesso durável. Estar no Auth não autoriza nada: quem
 // decide é o registro de parceiro ATIVO, conferido a seguir.
+//
+// HIGH-15 — UMA IDENTIDADE, VÁRIAS REDES.
+// `PARTNER_MULTI_NETWORK_LOGIN_V1=EXPLICIT_CONTEXT_SELECTION`.
+//
+// A mesma pessoa pode ser parceira de duas transportadoras com o mesmo e-mail —
+// a rede é privada de cada solicitante, e ninguém lá fora mantém uma caixa de
+// entrada por cliente. A versão anterior resolvia o login com `maybeSingle()`,
+// que FALHA com mais de uma linha: aceitar o segundo convite quebrava o login do
+// primeiro, com erro 500 e sem explicação.
+//
+// As duas saídas fáceis estão descartadas por decisão: tornar `auth_user_id`
+// único proibiria o segundo convite legítimo, e escolher uma linha em silêncio
+// colocaria a pessoa na rede errada sem ela saber. A escolha é EXPLÍCITA, e só
+// entre os contextos aos quais aquela identidade já está vinculada.
+async function resolverSessao(res, { email, senha, partnerUserId = null }) {
+  // A senha é provada em TODA entrada, inclusive na escolha de contexto. Não
+  // existe token intermediário "quase autenticado" circulando entre as duas
+  // telas: um artefato desses seria uma credencial nova para guardar, revogar e
+  // errar.
+  const auth = await identidade.autenticarPorSenha({ email, senha });
+  const contextos = await identidade.listarContextosDoParceiro(supabase, { authUserId: auth.id });
+
+  if (contextos.length === 0) {
+    throw new rede.PartnerNetworkError(
+      'Você ainda não tem acesso de parceiro. Use o convite recebido.',
+      { status: 403, code: 'sem_acesso_de_parceiro' },
+    );
+  }
+
+  let escolhido;
+  if (partnerUserId) {
+    // A PROVA que fecha o isolamento: o vínculo escolhido tem que estar na lista
+    // DESTA identidade. Sem isso, `partner_user_id` no corpo seria um seletor
+    // livre de organização — a rede de qualquer um, com a senha de qualquer um.
+    escolhido = contextos.find((c) => c.id === partnerUserId);
+    if (!escolhido) {
+      throw new rede.PartnerNetworkError('Contexto de parceiro inválido.', {
+        status: 403, code: 'contexto_invalido',
+      });
+    }
+  } else if (contextos.length > 1) {
+    return res.status(200).json({
+      requires_context_selection: true,
+      // Apenas os contextos desta identidade, e sem nada da transportadora
+      // solicitante: o portal inteiro é construído sobre "nada do solicitante sai
+      // daqui", e uma tela que aparece ANTES de haver sessão não é lugar para
+      // abrir exceção.
+      contextos: contextos.map((c) => ({
+        partner_user_id: c.id,
+        organizacao: c.organizacao,
+        vinculado_em: c.vinculado_em,
+      })),
+    });
+  } else {
+    [escolhido] = contextos;
+  }
+
+  const sessao = emitirTokenParceiro({
+    partnerUserId: escolhido.id,
+    partnerOrganizationId: escolhido.partner_organization_id,
+    email: escolhido.email,
+  });
+  // Um token, um contexto. O token de A não alcança B, e vice-versa — o
+  // `verifyPartnerToken` relê a organização a cada requisição.
+  return res.status(200).json({
+    token: sessao,
+    email: escolhido.email,
+    nome: escolhido.nome,
+    organizacao: escolhido.organizacao,
+  });
+}
+
 router.post('/entrar', async (req, res) => {
   try {
     const { email, senha } = req.body || {};
-    const auth = await identidade.autenticarPorSenha({ email, senha });
-    const contexto = await identidade.carregarContextoDoParceiro(supabase, { authUserId: auth.id });
-
-    const sessao = emitirTokenParceiro({
-      partnerUserId: contexto.id,
-      partnerOrganizationId: contexto.partner_organization_id,
-      email: contexto.email,
-    });
-    return res.status(200).json({ token: sessao, email: contexto.email, nome: contexto.nome });
+    return await resolverSessao(res, { email, senha });
   } catch (err) { return responderErro(res, err, 'entrar'); }
+});
+
+// Escolha explícita de contexto, depois de `requires_context_selection`.
+router.post('/contexto', async (req, res) => {
+  try {
+    const { email, senha, partner_user_id: partnerUserId } = req.body || {};
+    if (!partnerUserId) {
+      throw new rede.PartnerNetworkError('Escolha uma das redes para entrar.', {
+        status: 400, code: 'contexto_obrigatorio',
+      });
+    }
+    return await resolverSessao(res, { email, senha, partnerUserId });
+  } catch (err) { return responderErro(res, err, 'contexto'); }
 });
 
 // ── Daqui para baixo, tudo exige a sessão externa ──────────────────────────────

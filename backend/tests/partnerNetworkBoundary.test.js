@@ -322,10 +322,72 @@ test('as mutações críticas passam por RPC transacional, não por inserts solt
   const fonteOport = require('fs').readFileSync(
     require.resolve('../services/partnerNetwork/partnerOpportunityService'), 'utf8');
 
-  for (const rpc of ['partner_network_create_invitation', 'partner_network_activate_invitation']) {
+  for (const rpc of [
+    'partner_network_create_invitation',
+    'partner_network_preflight_invitation',
+    'partner_network_activate_invitation',
+    // HIGH-11: mudar a situação do parceiro deixou de ser UPDATE + evento solto.
+    'partner_network_set_relationship_status',
+  ]) {
     assert.match(fonteRede, new RegExp(rpc), `${rpc} precisa ser usada`);
   }
-  for (const rpc of ['partner_network_share_gap', 'partner_network_submit_response', 'partner_network_mark_source_stale']) {
+  for (const rpc of [
+    'partner_network_share_gap', 'partner_network_submit_response',
+    'partner_network_mark_source_stale',
+    // HIGH-11: retirar também.
+    'partner_network_withdraw_opportunity',
+  ]) {
     assert.match(fonteOport, new RegExp(rpc), `${rpc} precisa ser usada`);
   }
+});
+
+// ── HIGH-11: nenhuma escrita de auditoria fora de transação ────────────────────
+
+test('HIGH-11: não existe gravador de evento avulso — auditoria é sempre transacional', () => {
+  // A armadilha que este teste tranca: um `registrarEvento()` que commita
+  // separado do estado. Ele PARECE suficiente, e o próximo uso reintroduz
+  // exatamente o defeito corrigido — mudança de estado que persiste sem o
+  // registro dela.
+  const rede = require('../services/partnerNetwork/partnerNetworkService');
+  const oport = require('../services/partnerNetwork/partnerOpportunityService');
+  for (const [nome, mod] of [['partnerNetworkService', rede], ['partnerOpportunityService', oport]]) {
+    assert.deepEqual(
+      Object.keys(mod).filter((k) => /registrarEvento|gravarEvento|auditar/i.test(k)), [],
+      `${nome} não pode exportar gravador de evento avulso`,
+    );
+  }
+
+});
+
+// HIGH-15: a superfície do serviço precisa oferecer a LISTA de contextos.
+//
+// Resolver o login por `maybeSingle()` em `auth_user_id` era o defeito: essa
+// chamada FALHA com mais de uma linha, então aceitar o segundo convite legítimo
+// quebrava o login do primeiro. A prova de COMPORTAMENTO está em
+// `partnerPortalAuthHttp.test.js` (duas redes, login não quebra, escolha
+// explícita) e nos testes PG contra o schema real — aqui fica só a garantia de
+// que a função existe e o contrato não regrediu para uma resolução única.
+test('HIGH-15: a identidade expõe listagem de contextos, não uma resolução única por auth_user_id', () => {
+  const identidade = require('../services/partnerNetwork/partnerIdentityService');
+  assert.equal(typeof identidade.listarContextosDoParceiro, 'function');
+  assert.equal(typeof identidade.carregarContextoDoParceiro, 'function');
+});
+
+test('HIGH-09: o serviço expõe o preflight do convite, que resolve sem consumir', () => {
+  const rede = require('../services/partnerNetwork/partnerNetworkService');
+  assert.equal(typeof rede.preflightDoConvite, 'function');
+  // `emailDoConvite` era a leitura crua que achava o e-mail de QUALQUER convite
+  // — inclusive expirado ou revogado — e deixava a ativação chegar ao Auth.
+  assert.equal(rede.emailDoConvite, undefined,
+    'a leitura sem validação de estado não pode voltar a existir');
+});
+
+test('PARTNER_AUTH_METADATA_DOMAIN: o parceiro tem marca própria, e o embarcador segue como default', () => {
+  const parceiro = require('../services/partnerNetwork/partnerIdentityService');
+  const embarcador = require('../services/shipperPortal/shipperIdentityService');
+  assert.equal(parceiro.METADATA_DO_PARCEIRO.partner_portal, true);
+  assert.ok(!('portal_embarcador' in parceiro.METADATA_DO_PARCEIRO),
+    'marcar a conta do parceiro como do Portal do Embarcador seria simplesmente falso');
+  assert.equal(embarcador.METADATA_PADRAO.portal_embarcador, true,
+    'o default preserva o comportamento da E3.5');
 });
