@@ -44,7 +44,11 @@ function buscarStatusDeduplicado(chave: string): Promise<unknown> {
   return promessa;
 }
 
-export function useContratacaoStatus() {
+// §10 — `enabled`: com a matriz de autoridade conhecida (`useAreaAuthority`), não
+// faz sentido disparar uma requisição que já se sabe que o backend vai negar. O
+// hook continua fail-open (403 → estado neutro), mas quem não tem autoridade de
+// contratação simplesmente não pergunta. O dedupe em voo permanece.
+export function useContratacaoStatus({ enabled = true }: { enabled?: boolean } = {}) {
   const { user } = useAuth();
   const [pendenciaObrigatoria, setPendenciaObrigatoria] = useState(false);
   const [trialAtivo, setTrialAtivo] = useState(false);
@@ -58,6 +62,7 @@ export function useContratacaoStatus() {
   const [quantidadeContratada, setQuantidadeContratada] = useState<number | null>(null);
 
   useEffect(() => {
+    if (!enabled) return;
     if (!user || user.is_super_admin) return;
     let vivo = true;
     buscarStatusDeduplicado(user.uid || 'anonimo')
@@ -76,7 +81,7 @@ export function useContratacaoStatus() {
       })
       .catch(() => {});
     return () => { vivo = false; };
-  }, [user?.uid, user?.is_super_admin]);
+  }, [user?.uid, user?.is_super_admin, enabled]);
 
   return {
     pendenciaObrigatoria,

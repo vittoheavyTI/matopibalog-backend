@@ -34,6 +34,9 @@
 
 export type SeveridadeComercial = 'ok' | 'informativo' | 'atencao' | 'critico';
 
+/** Certeza sobre a liberação de ESCRITA operacional. Ver `operacao` abaixo. */
+export type EstadoOperacao = 'liberada' | 'bloqueada' | 'indeterminada';
+
 export type EstadoComercial = {
   planoAtivo: boolean;
   trialAtivo: boolean;
@@ -44,8 +47,17 @@ export type EstadoComercial = {
   assinaturaPendente: boolean;
   /** Conta suspensa/expirada/bloqueada — operação de escrita negada. */
   operacaoBloqueada: boolean;
-  /** `false` só quando o backend comprovadamente nega a escrita. */
-  operacaoLiberada: boolean;
+  /**
+   * S1-HIGH-05 — TRÊS estados, não dois. O comentário desta função já dizia
+   * "indeterminada" para contrato pendente, mas o objeto devolvia `true` — ou seja,
+   * afirmava liberação onde não havia certeza. Um booleano não consegue representar
+   * "não sei", e "não sei" nunca pode virar "sim".
+   *
+   *   'liberada'      — o backend comprovadamente permite a escrita
+   *   'bloqueada'     — o backend comprovadamente nega
+   *   'indeterminada' — o frontend não recebe `pode_operar` e não pode afirmar
+   */
+  operacao: EstadoOperacao;
   severidade: SeveridadeComercial;
   /** Chave estável do motivo — é ela que as duas superfícies compartilham. */
   motivo: MotivoComercial;
@@ -97,44 +109,47 @@ export function resolverEstadoComercial(entrada: EntradaEstadoComercial = {}): E
 
   // O pior estado manda: bloqueio efetivo vence pendência de contrato.
   if (status === 'suspenso') {
-    return { ...base, operacaoLiberada: false, severidade: 'critico', motivo: 'conta_suspensa' };
+    return { ...base, operacao: 'bloqueada', severidade: 'critico', motivo: 'conta_suspensa' };
   }
   if (status === 'expirado') {
-    return { ...base, operacaoLiberada: false, severidade: 'critico', motivo: 'plano_expirado' };
+    return { ...base, operacao: 'bloqueada', severidade: 'critico', motivo: 'plano_expirado' };
   }
   if (status === 'bloqueado') {
-    return { ...base, operacaoLiberada: false, severidade: 'critico', motivo: 'plano_bloqueado' };
+    return { ...base, operacao: 'bloqueada', severidade: 'critico', motivo: 'plano_bloqueado' };
   }
   if (trialExpirado) {
-    return { ...base, operacaoLiberada: false, severidade: 'critico', motivo: 'trial_expirado' };
+    return { ...base, operacao: 'bloqueada', severidade: 'critico', motivo: 'trial_expirado' };
   }
 
   if (contratoPendente) {
-    // Não afirmamos bloqueio: em conta v2 ativa a escrita segue liberada, em conta
-    // legada não. Sem `pode_operar` vindo do backend, `operacaoLiberada` fica
-    // INDETERMINADA e é reportada como `false` apenas onde o backend comprova.
+    // Nem 'liberada' nem 'bloqueada': em conta v2 ATIVA a escrita segue permitida,
+    // em conta LEGADA o contrato pendente bloqueia — e o frontend não recebe
+    // `pode_operar` para distinguir. Este é o caso que existe para 'indeterminada'.
     return {
       ...base,
-      operacaoLiberada: true,
+      operacao: 'indeterminada',
       severidade: 'atencao',
       motivo: planoAtivo ? 'plano_ativo_contrato_pendente' : 'contrato_pendente',
     };
   }
 
   if (base.trialAtivo) {
+    // Verdade auditada: durante trial válido `operar_escrita` é `true`, e o próprio
+    // `/contratacao/status` zera a pendência obrigatória. Certeza real, não suposição.
     return {
       ...base,
-      operacaoLiberada: true,
+      operacao: 'liberada',
       severidade: assinaturaPendente ? 'informativo' : 'informativo',
       motivo: assinaturaPendente ? 'trial_ativo_assinatura_pendente' : 'trial_ativo',
     };
   }
 
   if (planoAtivo) {
-    return { ...base, operacaoLiberada: true, severidade: 'ok', motivo: 'plano_ativo' };
+    return { ...base, operacao: 'liberada', severidade: 'ok', motivo: 'plano_ativo' };
   }
 
-  return { ...base, operacaoLiberada: false, severidade: 'informativo', motivo: 'indefinido' };
+  // Status desconhecido: 'indeterminada', jamais 'liberada'. Não sabemos o que é.
+  return { ...base, operacao: 'indeterminada', severidade: 'informativo', motivo: 'indefinido' };
 }
 
 // ─── COPY DERIVADA ───────────────────────────────────────────────────────────

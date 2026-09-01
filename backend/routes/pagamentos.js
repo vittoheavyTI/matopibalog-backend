@@ -809,7 +809,25 @@ router.post('/upgrade/solicitar', verifyToken, verificarEmpresa, requirePermissi
 // Recupera o QR Code Pix de uma fatura consultando o Asaas SOB DEMANDA.
 // NÃO persiste imagem, payload, Base64 ou expiração no banco.
 // Retorna contrato explícito: { encoded_image, payload, expiration_date }.
-router.get('/faturas/:id/pix', verifyToken, async (req, res) => {
+// S1-HIGH-03 — PIX_VIEW_AUTHORITY = finance.saas.view.
+//
+// Esta rota tinha autenticação e isolamento de tenant (a conferência de
+// `usuarios.empresa_id` logo abaixo), mas NENHUMA checagem de permissão — enquanto
+// todas as rotas financeiras irmãs (`/plano-status`, `/cobrancas/:empresa_id`,
+// `/minhas-faturas/sincronizar`) exigem `finance.saas.view`. O resultado é que
+// qualquer usuário autenticado da empresa (um operador, um motorista vinculado)
+// obtinha o QR/copia-e-cola de uma fatura da empresa se conhecesse o id dela.
+//
+// A permissão entra ANTES de tudo — antes do lookup da fatura e, sobretudo, antes
+// da consulta ao provedor externo (`AUTHORIZATION_BEFORE_EXTERNAL_PROVIDER_CALL`):
+// quem não tem autoridade não gera nem uma chamada ao Asaas.
+//
+// Compatibilidade com o app: o dono de conta autônoma continua passando. Não por
+// exceção escrita aqui, mas porque o resolver real busca `empresas.tipo` no banco e
+// concede `finance.saas.view` ao autônomo por bypass legado
+// (`permissionResolver.js`). É a MESMA autoridade das rotas irmãs que o app já
+// consome — nenhuma permissão nova foi criada e o Flutter não precisa mudar.
+router.get('/faturas/:id/pix', verifyToken, requirePermission('finance.saas.view'), async (req, res) => {
   try {
     const { data: fatura, error: fetchErr } = await supabase
       .from('faturas')

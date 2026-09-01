@@ -7,7 +7,7 @@ import { ComparadorPlanos } from '../components/ComparadorPlanos';
 import { Contratacao } from './Contratacao';
 import { useAuth } from '../contexts/AuthContext';
 import { useContratacaoStatus } from '../hooks/useContratacaoStatus';
-import { usePermissions } from '../hooks/usePermissions';
+import { useAreaAuthority } from '../hooks/useAreaAuthority';
 import {
   resolverEstadoComercial, copyComercial, classesDaSeveridade,
 } from '../utils/commercialAccountState';
@@ -79,11 +79,13 @@ function getTipoLabel(tipo?: string): string {
 
 export const MinhasFaturas: React.FC = () => {
   const { user } = useAuth();
-  const { pendenciaObrigatoria, trialAtivo: trialAtivoContratacao, assinaturaPendente } = useContratacaoStatus();
-  const { can } = usePermissions();
-  // S1-HIGH-01 — CONTRACT_ACCESS_IS_NOT_FINANCE_ACCESS. Esta rota é um HUB com duas
-  // áreas de autoridade diferentes; `finance.saas.view` governa SÓ a área financeira.
-  const podeFinancas = can('finance.saas.view');
+  // S1-HIGH-01 / S1-HIGH-04 — este hub tem DUAS áreas com autoridades distintas, e
+  // a fronteira vale nos dois sentidos: contratação não abre finanças, finanças não
+  // abrem contratação.
+  const { podeFinancas, podeContratacao, semNenhumaArea } = useAreaAuthority();
+  const {
+    pendenciaObrigatoria, trialAtivo: trialAtivoContratacao, assinaturaPendente,
+  } = useContratacaoStatus({ enabled: podeContratacao });
   const [searchParams, setSearchParams] = useSearchParams();
   const [faturas, setFaturas] = useState<Fatura[]>([]);
   const [loading, setLoading] = useState(true);
@@ -97,11 +99,12 @@ export const MinhasFaturas: React.FC = () => {
   const [pixCarregando, setPixCarregando] = useState(false);
   const [pixCopiado, setPixCopiado] = useState(false);
   const pixTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Sem autoridade financeira a única área disponível é a contratação — inclusive
-  // se alguém forçar `?aba=faturas` na URL. Isso NÃO é um dead-end: a assinatura
-  // continua acessível, que é justamente o caminho do CTA do banner global.
+  // A aba efetiva é a interseção do que foi PEDIDO com o que é AUTORIZADO. Um deep
+  // link não fura a matriz: ele é atendido quando pode, e ignorado quando não.
   const abaPedida = searchParams.get('aba') === 'contratacao' ? 'contratacao' : 'faturas';
-  const abaAtual: 'faturas' | 'contratacao' = podeFinancas ? abaPedida : 'contratacao';
+  const abaAtual: 'faturas' | 'contratacao' = podeFinancas && podeContratacao
+    ? abaPedida
+    : podeFinancas ? 'faturas' : 'contratacao';
   const selecionarAba = (aba: 'faturas' | 'contratacao') => {
     if (aba === 'contratacao') setSearchParams({ aba: 'contratacao' });
     else setSearchParams({});
@@ -303,10 +306,37 @@ export const MinhasFaturas: React.FC = () => {
     trialAtivo: trialAtivoContratacao,
     assinaturaPendente,
   });
+  // §15 — o banner comercial precisa de informação que a persona possa ver: status
+  // financeiro (para quem tem finanças) ou estado de contratação (para quem tem
+  // contratação). Sem nenhum dos dois não há o que comunicar — e "não foi possível
+  // determinar o status" seria mentira, porque não houve chamada alguma a falhar.
+  //
+  // Sem autoridade financeira NÃO houve chamada de status do plano — logo o estado
+  // comercial é, corretamente, 'indefinido'. Mas exibir "não foi possível determinar
+  // o status" nesse caso seria relatar uma falha que não existiu: nada foi tentado.
+  // Para essa persona o banner só aparece quando há um sinal CONTRATUAL real a
+  // comunicar.
+  const mostrarBannerComercial = podeFinancas
+    || (podeContratacao && (pendenciaObrigatoria || assinaturaPendente));
   const bannerPlano = copyComercial(estadoComercial, 'financeiro', {
     trialData,
     temFaturaComLink: Boolean(atual?.invoice_url),
   });
+
+  // Matriz de áreas, caso D: sem finanças e sem contratação não há hub — e não se
+  // monta nada nem se chama nada. A superfície é a mesma do `PermissionRoute`,
+  // para o usuário não aprender duas linguagens diferentes de recusa.
+  if (semNenhumaArea) {
+    return (
+      <div className="p-8 max-w-lg mx-auto text-center">
+        <h2 className="text-lg font-semibold text-gray-800">Acesso restrito</h2>
+        <p className="mt-2 text-sm text-gray-500">
+          Você não tem permissão para acessar esta área. Fale com um administrador da sua
+          empresa para receber a permissão necessária.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 pb-20 px-6">
@@ -322,7 +352,7 @@ export const MinhasFaturas: React.FC = () => {
       <div className="flex flex-wrap gap-2 rounded-xl bg-gray-100 p-1 w-fit">
         {[
           ...(podeFinancas ? [{ id: 'faturas', label: 'Faturas' }] : []),
-          { id: 'contratacao', label: 'Plano e contratação' },
+          ...(podeContratacao ? [{ id: 'contratacao', label: 'Plano e contratação' }] : []),
         ].map((tab) => (
           <button
             key={tab.id}
@@ -358,13 +388,15 @@ export const MinhasFaturas: React.FC = () => {
         </div>
       )}
 
-      {!loading && erroPlano && (
+      {/* §15 — quem não tem autoridade financeira não chamou `plano-status`;
+          ausência de autoridade não é falha de carregamento e não vira alerta. */}
+      {!loading && podeFinancas && erroPlano && (
         <div className="flex items-center gap-2 p-4 bg-amber-50 text-amber-800 border border-amber-200 rounded-xl">
           <AlertCircle size={18} /> {erroPlano}
         </div>
       )}
 
-      {!loading && (
+      {!loading && mostrarBannerComercial && (
         <div className={`rounded-xl border p-5 ${classesDaSeveridade(bannerPlano.severidade)}`}>
           <div className="flex items-start gap-3">
             <AlertCircle size={20} className="shrink-0 mt-0.5" />
@@ -386,12 +418,15 @@ export const MinhasFaturas: React.FC = () => {
         </div>
       )}
 
-      {/* Plano e contratos (contrato assinado, certificado, datas de assinatura) */}
-      {!loading && <PlanoContratos />}
+      {/* §9 — PlanoContratos consome `GET /contratacao/minha`, logo é área de
+          CONTRATAÇÃO e não pode montar fora dela. Antes ficava fora da condição da
+          aba e disparava a chamada para qualquer persona, contando com o 403 do
+          servidor como se 403 fosse UX. */}
+      {!loading && podeContratacao && abaAtual === 'contratacao' && <PlanoContratos />}
 
-      {!loading && abaAtual === 'contratacao' && <ComparadorPlanos />}
+      {!loading && podeContratacao && abaAtual === 'contratacao' && <ComparadorPlanos />}
 
-      {!loading && abaAtual === 'contratacao' && <Contratacao />}
+      {!loading && podeContratacao && abaAtual === 'contratacao' && <Contratacao />}
 
       {abaAtual === 'faturas' && (
         <>

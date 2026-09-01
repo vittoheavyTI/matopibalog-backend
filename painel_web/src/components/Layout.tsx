@@ -7,6 +7,7 @@ import { OperationalContextSelector } from './OperationalContextSelector';
 import { AiCopilot } from './AiCopilot';
 import { useAuth } from '../contexts/AuthContext';
 import { useContratacaoStatus } from '../hooks/useContratacaoStatus';
+import { useAreaAuthority } from '../hooks/useAreaAuthority';
 import { resolverEstadoComercial, copyComercial } from '../utils/commercialAccountState';
 import api from '../api';
 import { LogOut, User as UserIcon, ChevronDown, UserCog, AlertTriangle, FileSignature } from 'lucide-react';
@@ -21,6 +22,10 @@ function formatarDataTrial(valor?: string | null) {
 export const Layout: React.FC = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  // §11 — os banners comerciais oferecem CTAs ("Assinar contrato", "Contratar
+  // agora") que chamam `/contratacao/*`. Sem autoridade de contratação, esse CTA
+  // terminaria em 403: não se oferece um caminho que se sabe fechado.
+  const { podeContratacao } = useAreaAuthority();
   const {
     pendenciaObrigatoria,
     trialAtivo,
@@ -32,7 +37,7 @@ export const Layout: React.FC = () => {
     podeDeclinar,
     planoId,
     quantidadeContratada,
-  } = useContratacaoStatus();
+  } = useContratacaoStatus({ enabled: podeContratacao });
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const dataTrial = formatarDataTrial(trialEndsAt);

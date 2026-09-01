@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { CENARIOS, ROTAS_CLIENTE, VIEWPORTS, instalarApiFake, PERMISSOES_SO_CONTRATACAO } from './fixtures';
+import { CENARIOS, ROTAS_CLIENTE, VIEWPORTS, instalarApiFake, PERMISSOES_SO_CONTRATACAO, PERMISSOES_SO_FINANCAS } from './fixtures';
 
 // PRODUCT REGRESSION PACK — verificações MEDIDAS, não capturas de tela.
 //
@@ -180,5 +180,27 @@ test.describe('§15 — a sentinela de rede realmente detecta vazamento', () => 
 
     expect(rede.violacoes.length).toBeGreaterThan(0);
     expect(() => rede.assertSemRedeExterna()).toThrow(/EXTERNAL_NETWORK_REQUESTS_ALLOWED=0/);
+  });
+});
+
+test.describe('S1-HIGH-04 — a fronteira vale nos dois sentidos', () => {
+  test('persona só de FINANÇAS não vê nem chama contratação', async ({ page }) => {
+    const contratuais: string[] = [];
+    page.on('request', (r) => {
+      if (r.url().includes('/contratacao')) contratuais.push(`${r.method()} ${r.url()}`);
+    });
+
+    const rede = await instalarApiFake(page, CENARIO_PADRAO, { permissoes: PERMISSOES_SO_FINANCAS });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    // Força o deep link da área que ela NÃO pode acessar.
+    await irPara(page, '/minhas-faturas?aba=contratacao');
+    await page.waitForTimeout(1200);
+
+    await expect(page.getByRole('button', { name: 'Faturas' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Plano e contratação' })).toHaveCount(0);
+    expect(contratuais, `I/O de contratação indevido: ${contratuais.join(', ')}`).toHaveLength(0);
+    // E o banner global de contratação não oferece um CTA que terminaria em 403.
+    await expect(page.getByRole('button', { name: /assinar contrato/i })).toHaveCount(0);
+    rede.assertSemRedeExterna();
   });
 });

@@ -35,6 +35,9 @@ const USUARIO_ADMIN = {
     'users.view': true,
     'permissions.manage': true,
     'company.settings.view': true,
+    // O baseline real do template Administrador inclui `company.settings.manage` —
+    // sem ele esta fixture representaria uma persona FINANCE_ONLY, não um admin.
+    'company.settings.manage': true,
     'finance.saas.view': true,
     'shipper_portal.requests.review': true,
   },
@@ -45,6 +48,13 @@ const USUARIO_ADMIN = {
 // financeira. É a fronteira do S1-HIGH-01.
 export const PERMISSOES_SO_CONTRATACAO: Record<string, boolean> = {
   'company.settings.manage': true,
+  'company.settings.view': true,
+};
+
+// Persona de FINANÇAS pura: vê faturas, não tem autoridade de contratação.
+// É a outra metade da fronteira (S1-HIGH-04).
+export const PERMISSOES_SO_FINANCAS: Record<string, boolean> = {
+  'finance.saas.view': true,
   'company.settings.view': true,
 };
 

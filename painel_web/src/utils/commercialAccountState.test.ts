@@ -31,7 +31,7 @@ describe('estado comercial — derivação', () => {
     const e = resolverEstadoComercial(CENARIOS['plano ativo']);
     expect(e.motivo).toBe('plano_ativo');
     expect(e.severidade).toBe('ok');
-    expect(e.operacaoLiberada).toBe(true);
+    expect(e.operacao).toBe('liberada');
   });
 
   test('plano ativo + contrato obrigatório é atenção, sem afirmar bloqueio', () => {
@@ -45,7 +45,7 @@ describe('estado comercial — derivação', () => {
   test('estados de bloqueio real negam a operação', () => {
     for (const nome of ['trial expirado', 'suspenso', 'expirado', 'bloqueado']) {
       const e = resolverEstadoComercial(CENARIOS[nome]);
-      expect(e.operacaoLiberada, nome).toBe(false);
+      expect(e.operacao, nome).toBe('bloqueada');
       expect(e.severidade, nome).toBe('critico');
     }
   });
@@ -60,7 +60,7 @@ describe('estado comercial — derivação', () => {
     const e = resolverEstadoComercial(CENARIOS['trial ativo + assinatura iniciada']);
     expect(e.motivo).toBe('trial_ativo_assinatura_pendente');
     expect(e.severidade).toBe('informativo');
-    expect(e.operacaoLiberada).toBe(true);
+    expect(e.operacao).toBe('liberada');
   });
 
   test('toda combinação alcançável produz um motivo e uma severidade válidos', () => {
@@ -136,8 +136,48 @@ describe('copy — contexto e datas', () => {
 
   test('estado indefinido não inventa liberação nem status técnico ao usuário', () => {
     const e = resolverEstadoComercial({ status: 'coisa_nova_do_backend' });
-    expect(e.operacaoLiberada).toBe(false);
+    expect(e.operacao).toBe('indeterminada');
     const c = copyComercial(e, 'financeiro');
     expect(c.texto).not.toMatch(/coisa_nova_do_backend/);
+  });
+});
+
+describe('S1-HIGH-05 — certeza sobre a operação não é inventada', () => {
+  test('contrato pendente é INDETERMINADO, nunca "liberada"', () => {
+    // Em conta v2 ativa a escrita segue permitida; em conta legada, não. O frontend
+    // não recebe `pode_operar` e portanto não pode escolher um dos dois lados.
+    for (const entrada of [
+      { status: 'ativo', contratoPendente: true },
+      { status: null, contratoPendente: true },
+    ]) {
+      const e = resolverEstadoComercial(entrada);
+      expect(e.operacao, JSON.stringify(entrada)).toBe('indeterminada');
+    }
+  });
+
+  test('desconhecido NUNCA vira liberada', () => {
+    for (const status of ['coisa_nova', '', null, undefined]) {
+      const e = resolverEstadoComercial({ status: status as string | null });
+      expect(e.operacao, String(status)).not.toBe('liberada');
+    }
+  });
+
+  test('só há "liberada" onde o backend comprovadamente permite', () => {
+    expect(resolverEstadoComercial({ status: 'ativo' }).operacao).toBe('liberada');
+    expect(resolverEstadoComercial({ status: 'trial', trialAtivo: true }).operacao).toBe('liberada');
+  });
+
+  test('a copy não afirma liberação nem bloqueio quando a operação é indeterminada', () => {
+    const estado = resolverEstadoComercial({ status: 'ativo', contratoPendente: true });
+    expect(estado.operacao).toBe('indeterminada');
+    for (const superficie of ['global', 'financeiro'] as const) {
+      const c = copyComercial(estado, superficie);
+      expect(c.texto, superficie).not.toMatch(/opera[çc][ãa]o liberada|tudo liberado/i);
+      expect(c.texto, superficie).not.toMatch(/opera[çc][ãa]o bloqueada|uso bloqueado/i);
+      // E não vaza o enum técnico. Note que "liberada"/"bloqueada" são palavras
+      // normais do português ("a consulta continua liberada") — só "indeterminada"
+      // seria jargão vazando para o usuário.
+      expect(c.texto, superficie).not.toMatch(/indeterminad/i);
+    }
   });
 });

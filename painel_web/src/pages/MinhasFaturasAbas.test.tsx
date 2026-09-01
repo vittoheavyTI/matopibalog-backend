@@ -20,8 +20,14 @@ const authState: { user: Record<string, unknown> | null } = { user: null };
 vi.mock('../contexts/AuthContext', () => ({ useAuth: () => ({ user: authState.user }) }));
 
 const contratacaoState: Record<string, unknown> = { pendenciaObrigatoria: false };
+// O hook agora aceita { enabled }; o mock registra as chamadas para provarmos que
+// personas sem autoridade de contratação nem chegam a consultar.
+const contratacaoEnabled: boolean[] = [];
 vi.mock('../hooks/useContratacaoStatus', () => ({
-  useContratacaoStatus: () => contratacaoState,
+  useContratacaoStatus: (opts?: { enabled?: boolean }) => {
+    contratacaoEnabled.push(opts?.enabled !== false);
+    return contratacaoState;
+  },
 }));
 
 // As sub-telas da aba de contratação têm rede própria; aqui interessa QUAL aba
@@ -50,11 +56,25 @@ function chamadasFinanceiras() {
   };
 }
 
-function usuario(permissoes: Record<string, boolean>) {
+function usuario(permissoes: Record<string, boolean>, empresaTipo = 'transportadora') {
   return {
     uid: 'u-1', nome: 'Fulano', role: 'admin', is_super_admin: false,
-    empresa_id: 'e-1', effective_permissions: permissoes,
+    empresa_id: 'e-1', empresa_tipo: empresaTipo, effective_permissions: permissoes,
   };
+}
+
+// §16 — as quatro personas da matriz de áreas do hub.
+const PERSONA = {
+  BOTH: { 'finance.saas.view': true, 'company.settings.manage': true },
+  FINANCE_ONLY: { 'finance.saas.view': true },
+  CONTRACT_ONLY: { 'company.settings.manage': true },
+  NEITHER: {},
+};
+
+function chamadasContratacao() {
+  const gets = mockApi.get.mock.calls.map((c) => String(c[0]));
+  const posts = mockApi.post.mock.calls.map((c) => String(c[0]));
+  return [...gets, ...posts].filter((u) => u.includes('/contratacao'));
 }
 
 function renderEm(rota: string) {
@@ -69,7 +89,8 @@ function renderEm(rota: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  authState.user = usuario({ 'finance.saas.view': true });
+  contratacaoEnabled.length = 0;
+  authState.user = usuario(PERSONA.BOTH);
   for (const k of Object.keys(contratacaoState)) delete contratacaoState[k];
   contratacaoState.pendenciaObrigatoria = false;
   mockApi.get.mockImplementation((url: string) => {
@@ -112,7 +133,7 @@ describe('deep link da aba de contratação', () => {
 
 describe('S1-HIGH-01 — nenhum I/O financeiro fora da área financeira', () => {
   test('persona SÓ de contratação: aba acessível e ZERO chamada financeira', async () => {
-    authState.user = usuario({ 'company.settings.manage': true }); // sem finance.saas.view
+    authState.user = usuario(PERSONA.CONTRACT_ONLY);
     contratacaoState.pendenciaObrigatoria = true;
 
     renderEm('/minhas-faturas?aba=contratacao');
@@ -126,7 +147,7 @@ describe('S1-HIGH-01 — nenhum I/O financeiro fora da área financeira', () => 
   });
 
   test('persona só de contratação não vê a aba Faturas nem conteúdo financeiro', async () => {
-    authState.user = usuario({ 'company.settings.manage': true });
+    authState.user = usuario(PERSONA.CONTRACT_ONLY);
     renderEm('/minhas-faturas?aba=contratacao');
     await waitFor(() => expect(screen.getByTestId('painel-contratacao')).toBeInTheDocument());
 
@@ -135,7 +156,7 @@ describe('S1-HIGH-01 — nenhum I/O financeiro fora da área financeira', () => 
   });
 
   test('forçar ?aba=faturas sem permissão financeira não vaza conteúdo nem dispara I/O', async () => {
-    authState.user = usuario({ 'company.settings.manage': true });
+    authState.user = usuario(PERSONA.CONTRACT_ONLY);
     renderEm('/minhas-faturas?aba=faturas');
     await waitFor(() => expect(screen.getByTestId('painel-contratacao')).toBeInTheDocument());
     await new Promise((r) => setTimeout(r, 30));
@@ -148,7 +169,7 @@ describe('S1-HIGH-01 — nenhum I/O financeiro fora da área financeira', () => 
   });
 
   test('persona COM finança na aba contratação: sem auto-sync (CONTRACT_TAB_AUTO_FINANCE_SYNC=false)', async () => {
-    authState.user = usuario({ 'finance.saas.view': true });
+    authState.user = usuario(PERSONA.BOTH);
     renderEm('/minhas-faturas?aba=contratacao');
     await waitFor(() => expect(screen.getByTestId('painel-contratacao')).toBeInTheDocument());
     await new Promise((r) => setTimeout(r, 30));
@@ -158,7 +179,7 @@ describe('S1-HIGH-01 — nenhum I/O financeiro fora da área financeira', () => 
   });
 
   test('persona COM finança na aba faturas: carrega e sincroniza normalmente', async () => {
-    authState.user = usuario({ 'finance.saas.view': true });
+    authState.user = usuario(PERSONA.BOTH);
     renderEm('/minhas-faturas');
     await waitFor(() => expect(screen.getByText('Plano ativo')).toBeInTheDocument());
     await waitFor(() => expect(mockApi.post).toHaveBeenCalledWith('/pagamentos/minhas-faturas/sincronizar'));
@@ -181,5 +202,80 @@ describe('S1-HIGH-02 — a tela usa a mesma autoridade semântica do shell', () 
     await waitFor(() => expect(screen.getByText(/Plano ativo — assinatura do contrato pendente/)).toBeInTheDocument());
     expect(screen.getByText(/algumas ações podem ficar restritas/i)).toBeInTheDocument();
     expect(screen.getByText(/consulta dos seus dados continua liberada/i)).toBeInTheDocument();
+  });
+});
+
+describe('S1-HIGH-04 — matriz de áreas do hub (finanças × contratação)', () => {
+  test('BOTH: as duas abas existem e o deep link funciona normalmente', async () => {
+    authState.user = usuario(PERSONA.BOTH);
+    renderEm('/minhas-faturas?aba=contratacao');
+    await waitFor(() => expect(screen.getByTestId('painel-contratacao')).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Faturas' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Plano e contratação' })).toBeInTheDocument();
+  });
+
+  test('FINANCE_ONLY: só a aba Faturas; ZERO componente e ZERO I/O de contratação', async () => {
+    authState.user = usuario(PERSONA.FINANCE_ONLY);
+    renderEm('/minhas-faturas');
+    await waitFor(() => expect(screen.getByText('Plano ativo')).toBeInTheDocument());
+    await new Promise((r) => setTimeout(r, 30));
+
+    expect(screen.queryByRole('button', { name: 'Plano e contratação' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('painel-contratacao')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('comparador-planos')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('plano-contratos')).not.toBeInTheDocument();
+    expect(chamadasContratacao(), 'I/O de contratação indevido').toHaveLength(0);
+    expect(contratacaoEnabled.every((e) => e === false), 'o hook não pode nem consultar').toBe(true);
+  });
+
+  test('FINANCE_ONLY forçando ?aba=contratacao permanece em Faturas', async () => {
+    authState.user = usuario(PERSONA.FINANCE_ONLY);
+    renderEm('/minhas-faturas?aba=contratacao');
+    await waitFor(() => expect(screen.getByText('Plano ativo')).toBeInTheDocument());
+    expect(screen.queryByTestId('painel-contratacao')).not.toBeInTheDocument();
+    expect(chamadasContratacao()).toHaveLength(0);
+  });
+
+  test('CONTRACT_ONLY: só a aba de contratação; ZERO I/O financeiro', async () => {
+    authState.user = usuario(PERSONA.CONTRACT_ONLY);
+    renderEm('/minhas-faturas');
+    await waitFor(() => expect(screen.getByTestId('painel-contratacao')).toBeInTheDocument());
+    await new Promise((r) => setTimeout(r, 30));
+
+    expect(screen.queryByRole('button', { name: 'Faturas' })).not.toBeInTheDocument();
+    expect(chamadasFinanceiras().gets).toHaveLength(0);
+    expect(chamadasFinanceiras().posts).toHaveLength(0);
+  });
+
+  test('NEITHER: acesso restrito, ZERO I/O das duas áreas', async () => {
+    authState.user = usuario(PERSONA.NEITHER);
+    renderEm('/minhas-faturas?aba=contratacao');
+    await waitFor(() => expect(screen.getByText('Acesso restrito')).toBeInTheDocument());
+    await new Promise((r) => setTimeout(r, 30));
+
+    expect(screen.queryByRole('button', { name: 'Faturas' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Plano e contratação' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('painel-contratacao')).not.toBeInTheDocument();
+    expect(chamadasFinanceiras().gets).toHaveLength(0);
+    expect(chamadasFinanceiras().posts).toHaveLength(0);
+    expect(chamadasContratacao()).toHaveLength(0);
+  });
+
+  test('autônomo tem autoridade de contratação mesmo sem company.settings.manage', async () => {
+    // Espelha o permitirAssinaturaCliente do backend, que aceita empresa autônoma.
+    authState.user = usuario({}, 'autonomo');
+    renderEm('/minhas-faturas?aba=contratacao');
+    await waitFor(() => expect(screen.getByTestId('painel-contratacao')).toBeInTheDocument());
+    expect(screen.queryByText('Acesso restrito')).not.toBeInTheDocument();
+  });
+
+  test('§15 — CONTRACT_ONLY não vê erro de status financeiro', async () => {
+    // Ausência de autoridade financeira não é falha de carregamento: a chamada que
+    // "falharia" deliberadamente não existe.
+    authState.user = usuario(PERSONA.CONTRACT_ONLY);
+    renderEm('/minhas-faturas');
+    await waitFor(() => expect(screen.getByTestId('painel-contratacao')).toBeInTheDocument());
+    expect(screen.queryByText(/não foi possível carregar o status do plano/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/não foi possível determinar/i)).not.toBeInTheDocument();
   });
 });

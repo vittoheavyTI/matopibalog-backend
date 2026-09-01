@@ -13,9 +13,9 @@ que continua sendo o registro detalhado da primeira rodada.
 | Slice | Escopo | Estado |
 |---|---|---|
 | **S1** | Shell / Navegação / Comercial | `IN_PROGRESS_PR491` — corrigido |
-| **S2** | Super Admin / Team / Permissões | `FINDINGS_FROZEN` — auditado, **não corrigido** |
-| **S3** | Núcleo operacional e formulários | `FINDINGS_FROZEN` — auditado, **não corrigido** |
-| **S4** | Portais externos | `FINDINGS_FROZEN` — auditado, **não corrigido** |
+| **S2** | Super Admin / Team / Permissões | `STATIC_AUDIT_FROZEN_NOT_BEHAVIORALLY_CERTIFIED` |
+| **S3** | Núcleo operacional e formulários | `STATIC_AUDIT_FROZEN_NOT_BEHAVIORALLY_CERTIFIED` |
+| **S4** | Portais externos | `STATIC_AUDIT_FROZEN_NOT_BEHAVIORALLY_CERTIFIED` |
 
 `STABILIZATION_SECURITY_BLOCKER` = **nenhum**. Detalhe em *Segurança*, abaixo.
 
@@ -28,7 +28,10 @@ que continua sendo o registro detalhado da primeira rodada.
 | REG-001 | Sidebar | `REGRESSION` | BLOCKER | `/minhas-faturas?aba=contratacao` | 1 item ativo | 2 itens ativos | Dois `NavLink` para o mesmo pathname; `isActive` ignora query string | Sidebar sem teste | Entrada financeira única + badge no próprio item | não | não | **FIXED** (rodada 1) |
 | S1-HIGH-01 | Faturas / Contratação | `EXISTING_BUG` | **HIGH** | Persona só de contratação abre `?aba=contratacao` | Assinar sem tocar em finanças | 2 GETs financeiros **+ 1 POST** de sincronização (write que chama o provedor) no mount, para qualquer persona e qualquer aba | O mount carregava a área financeira incondicionalmente; a rota não guardada (DEC-201) foi lida como "liberar a contratação", mas liberava o **hub inteiro** | Nenhum teste media I/O por persona | I/O financeiro só na área financeira e só com `finance.saas.view`; aba Faturas some sem a permissão; `?aba=faturas` forçado cai na contratação | não | não | **FIXED** |
 | S1-HIGH-02 | Layout + Faturas | `EXISTING_BUG` | **HIGH** | Contrato pendente nas duas telas | Mesmo sentido | Duas lógicas independentes: banner do Layout hardcoded, `resolverBannerPlano` na página. A correção do BUG-005 alcançou só uma | Copy comercial sem autoridade única | `utils/commercialAccountState.ts`: um resolvedor semântico, duas superfícies derivadas | não | não | **FIXED** |
-| S1-HIGH-03 | `GET /pagamentos/faturas/:id/pix` | `EXISTING_BUG` | **HIGH** | Usuário autenticado da empresa **sem** `finance.saas.view`, com um id de fatura | 403 | 200 com o QR/copia-e-cola da fatura | Rota só com `verifyToken`. O isolamento de tenant **existe** no corpo (compara `usuarios.empresa_id`), mas não há checagem de permissão — ao contrário de todas as rotas irmãs | Sem teste de autorização nessa rota | **NÃO aplicada** — ver nota abaixo | não | **sim** | **REPORTED** |
+| S1-HIGH-03 | `GET /pagamentos/faturas/:id/pix` | `EXISTING_BUG` | **HIGH** | Usuário autenticado da empresa **sem** `finance.saas.view`, com um id de fatura | 403 | 200 com o QR/copia-e-cola da fatura | Rota só com `verifyToken`. O isolamento de tenant **existia** no corpo, mas não havia checagem de permissão — ao contrário de todas as rotas irmãs | Sem teste de autorização nessa rota | `requirePermission('finance.saas.view')` **antes** do lookup e da chamada ao provedor | não | não | **FIXED** |
+| S1-HIGH-04 | Hub Faturas/Contratação | `EXISTING_BUG` | **HIGH** | Persona com `finance.saas.view` e **sem** autoridade de contratação abre `/minhas-faturas` | Só a área que ela pode usar | Via a aba "Plano e contratação", montava `PlanoContratos`/`ComparadorPlanos`/`Contratacao` e chamava `/contratacao/*` — que o backend nega | A R2 fechou `CONTRACT_ACCESS_IS_NOT_FINANCE_ACCESS` **numa direção só**. Ter finanças não é ter contratação | Nenhum teste exercitava a persona finance-only | `useAreaAuthority` (duas autoridades explícitas, espelhando o servidor) + matriz de 4 personas; deep link não fura a matriz; `useContratacaoStatus({ enabled })` | não | não | **FIXED** |
+| S1-HIGH-05 | Estado comercial | `EXISTING_BUG` | **HIGH** | Contrato pendente sem `pode_operar` conhecido | Representar "não sei" | O comentário dizia INDETERMINADO e o objeto devolvia `operacaoLiberada: true` — afirmava liberação sem certeza | Um booleano não representa três estados; "desconhecido" virava "sim" | A matriz testava o booleano, não a certeza | `operacao: 'liberada' | 'bloqueada' | 'indeterminada'`; desconhecido **nunca** vira liberada | não | não | **FIXED** |
+| S1-LOW-02 | Faturas (contract-only) | `EXISTING_BUG` | LOW | Persona sem finanças abre o hub | Nada a comunicar | Banner "Não foi possível determinar o status do seu plano agora" — relatando falha de uma chamada que deliberadamente não existiu | Ausência de autoridade tratada como erro de carregamento | — | Banner comercial só aparece com informação que a persona pode ver | não | não | **FIXED** |
 | BUG-002 | Hook de contratação | `EXISTING_BUG` | MEDIUM | leitura de código | Autoridade espelhando o backend | Gate próprio (`role==='admin'`) + bloco morto na Sidebar | Critério legado divergente do servidor | Hook sem teste | Hook alinhado ao servidor; comentário corrigido para a conclusão final da auditoria | não | não | **FIXED** |
 | BUG-003 | Rotas × menu | `EXISTING_BUG` | MEDIUM | URL direta sem permissão | Acesso restrito | Tela vazia | Menu gateado, rota não | Sem teste cruzado | `PermissionRoute` alinhado | não | não | **FIXED** (rodada 1) |
 | BUG-004 | Configurações | `EXISTING_BUG` | MEDIUM | Voltar de `?aba=perfil` | Sai da aba | Aba não muda | Query string lida num sentido só | Sem teste de abas | URL como fonte da verdade nos dois sentidos | não | não | **FIXED** (rodada 1) |
@@ -36,29 +39,30 @@ que continua sendo o registro detalhado da primeira rodada.
 | DEC-201 | Guarda de `/minhas-faturas` | `PRODUCT_DECISION_NEEDED` | — | — | — | — | — | — | Rota segue sem guarda; a autorização passou a ser **por área** dentro dela | não | registrada | **RESOLVIDA por S1-HIGH-01** |
 | DEBT-101 | Rotas órfãs super-admin | `KNOWN_ACCEPTANCE_DEBT` | LOW | `/painel-administrativo/visao-geral`, `.../relatorios` | — | Sem item de menu | Reorganização do menu preservou as páginas | — | Não corrigido — remover rota é decisão de produto | não | sim | **OPEN** |
 
-### S1-HIGH-03 — por que a correção NÃO foi aplicada aqui
+### S1-HIGH-03 — corrigido, com a compatibilidade do app **provada**
 
-É uma lacuna real de autorização e a correção é de uma linha (`verificarEmpresa` +
-`requirePermission('finance.saas.view')`, igual às rotas irmãs). Mesmo assim, não a
-apliquei, por três razões que se somam:
+Na rodada anterior deixei este achado aberto alegando que não dava para testar o
+app em device. O apontamento de que isso não justifica manter uma autorização
+incompleta está certo, e a compatibilidade se prova no **contrato de servidor**,
+não na tela do celular:
 
-1. **O consumidor não é só a web.** `app_android` chama esse endpoint em
-   `minhas_faturas_screen.dart`. A tela é gateada por `auth.isAutonomo`, e o
-   autônomo dono recebe `finance.saas.view` pelo bypass legado do
-   `permissionResolver` — então a correção *deveria* ser inócua. "Deveria" não é
-   "está provado": não tenho como exercitar o app em device nesta frente, e um 403
-   no fluxo de pagamento do autônomo seria pior que a lacuna.
-2. **A alcançabilidade é baixa.** Listar faturas já exige `finance.saas.view`; para
-   explorar isto é preciso conhecer o UUID de uma fatura, que não é enumerável por
-   essa via. Não é um caminho aberto, é uma porta sem tranca num corredor fechado.
-3. **Esta frente foi definida como não tocando o backend.** Mudar autoridade de
-   servidor sem o teste de device correspondente contradiz o próprio critério que
-   venho aplicando: autoridade não se mexe para fazer tela passar — nem para
-   fechar um relatório.
+1. O app só alcança o Pix a partir de `GET /pagamentos/me/faturas`, que **já** é
+   restrito a `empresa.tipo === 'autonomo'`. Um motorista vinculado nunca obtém um
+   id de fatura por ali.
+2. O resolver **real** concede `finance.saas.view` ao autônomo por bypass legado
+   (`permissionResolver.js`), porque ele lê `empresas.tipo` do banco. O teste
+   `pagamentosPixAuth.test.js` exercita o resolver de verdade — não um stub de
+   permissão, que provaria nada.
+3. Logo a persona que o app legitimamente usa continua recebendo 200.
+   `APP_ANDROID_CODE_CHANGE=false`.
 
-Não é tenant leak (o isolamento por empresa está no corpo da rota) e não move
-dinheiro. Fica registrado como **HIGH aberto**, com a correção pronta para ser
-autorizada junto de um teste do app.
+A autorização entra **antes** do lookup da fatura e da consulta ao provedor
+(`AUTHORIZATION_BEFORE_EXTERNAL_PROVIDER_CALL=true`): a asserção que mais importa
+nos testes não é o 403, é `chamadasProvider === 0` no caminho negado. Negar depois
+de consultar o Asaas seria negar tarde demais.
+
+`DEVICE_VISUAL_VALIDATION = NOT_REQUIRED_FOR_SERVER_AUTH_COMPATIBILITY` — e não se
+afirma aqui que o app foi validado visualmente; nada disso foi feito.
 
 ### Autoridade dos endpoints (auditada, §3)
 
@@ -67,7 +71,7 @@ autorizada junto de um teste do app.
 | `GET /pagamentos/cobrancas/:id` | token | `finance.saas.view` | `verificarEmpresa` | leitura | Administrador, Financeiro, autônomo dono |
 | `GET /pagamentos/plano-status` | token | `finance.saas.view` | `verificarEmpresa` | leitura | idem |
 | `POST /pagamentos/minhas-faturas/sincronizar` | token | `finance.saas.view` | `verificarEmpresa` | **write + chamada ao provedor**, gate sandbox | idem |
-| `GET /pagamentos/faturas/:id/pix` | token | **nenhuma** ⚠️ | no corpo | leitura + consulta ao provedor | *deveria* ser quem tem `finance.saas.view` |
+| `GET /pagamentos/faturas/:id/pix` | token | `finance.saas.view` ✅ | no corpo | leitura + consulta ao provedor | quem tem `finance.saas.view` (inclui o autônomo dono) |
 | `GET /contratacao/status` | token | `company.settings.manage` **ou** empresa `tipo='autonomo'` | `verificarEmpresa` | leitura, fail-open | quem trata do contrato |
 | `GET /contratacao/minha` | token | idem | `verificarEmpresa` | leitura | idem |
 | `POST /pagamentos/upgrade/solicitar` | token | `company.settings.manage` | `verificarEmpresa` | **write + cobrança**, gate sandbox | Administrador |
@@ -108,7 +112,7 @@ calculado ali) permitiria uma frase exata em vez de uma frase prudente.
 
 ---
 
-## S2 — Super Admin / Team / Permissões (`FINDINGS_FROZEN`, não corrigido)
+## S2 — Super Admin / Team / Permissões (`STATIC_AUDIT_FROZEN_NOT_BEHAVIORALLY_CERTIFIED`)
 
 | ID | Superfície | Classe | Sev. | Achado | Status |
 |---|---|---|---|---|---|
@@ -119,7 +123,7 @@ calculado ali) permitiria uma frase exata em vez de uma frase prudente.
 
 ---
 
-## S3 — Núcleo operacional e formulários (`FINDINGS_FROZEN`, não corrigido)
+## S3 — Núcleo operacional e formulários (`STATIC_AUDIT_FROZEN_NOT_BEHAVIORALLY_CERTIFIED`)
 
 | ID | Superfície | Classe | Sev. | Achado | Status |
 |---|---|---|---|---|---|
@@ -128,7 +132,7 @@ calculado ali) permitiria uma frase exata em vez de uma frase prudente.
 
 ---
 
-## S4 — Portais externos (`FINDINGS_FROZEN`, não corrigido)
+## S4 — Portais externos (`STATIC_AUDIT_FROZEN_NOT_BEHAVIORALLY_CERTIFIED`)
 
 | ID | Superfície | Classe | Sev. | Achado | Status |
 |---|---|---|---|---|---|
@@ -163,9 +167,9 @@ visual com fixtures por domínio de auth — trabalho de S2/S3/S4, não deste PR
 
 Procurei especificamente por tenant leak, auth bypass, aceitação de token
 cross-portal, write indevido de dinheiro e corrupção de dados. O único achado da
-família é o **S1-HIGH-03** (rota de Pix sem checagem de permissão) — que **não** é
-tenant leak, **não** move dinheiro e tem alcançabilidade baixa. Está reportado
-acima, com a correção pronta e a razão de não tê-la aplicado sem um teste do app.
+família era o **S1-HIGH-03** (rota de Pix sem checagem de permissão) — que **não**
+era tenant leak e **não** movia dinheiro. Nesta rodada foi **corrigido**, com a
+compatibilidade do app provada pelo contrato de servidor, e não resta HIGH aberto.
 
 ---
 

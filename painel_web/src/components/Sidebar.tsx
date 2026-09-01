@@ -3,6 +3,7 @@ import { NavLink } from 'react-router-dom';
 import { LayoutDashboard, Users, FileText, Truck, ChevronLeft, ChevronRight, Upload, X, Check, Trash2, Settings, UserCircle, Receipt, History, Building2, DollarSign, Bell, Plug, ClipboardList, Ticket, TrendingUp, TowerControl, Boxes, FileSignature, CreditCard, Network, ShieldCheck, Inbox, Route as RouteIcon } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useContratacaoStatus } from '../hooks/useContratacaoStatus';
+import { useAreaAuthority } from '../hooks/useAreaAuthority';
 import { usePortalGovernanca } from '../hooks/usePortalGovernanca';
 import api from '../api';
 
@@ -19,7 +20,11 @@ export const Sidebar: React.FC = () => {
   // Contratação vira etapa CONDICIONAL: só aparece no menu do cliente quando há
   // contrato obrigatório pendente de assinatura (ação necessária). Concluída,
   // some da sidebar. Super-admin não usa este item.
-  const { pendenciaObrigatoria: contratacaoPendente } = useContratacaoStatus();
+  // §11 — o badge de contratação só existe para quem pode CONSULTAR e AGIR sobre o
+  // contrato. Sinalizar uma ação que o usuário não tem autoridade para executar é
+  // pior que não sinalizar nada.
+  const { podeContratacao } = useAreaAuthority();
+  const { pendenciaObrigatoria: contratacaoPendente } = useContratacaoStatus({ enabled: podeContratacao });
   const { governanca } = usePortalGovernanca();
   const [isEditingLogo, setIsEditingLogo] = useState(false);
   const [tempLogo, setTempLogo] = useState<string | null>(null);
