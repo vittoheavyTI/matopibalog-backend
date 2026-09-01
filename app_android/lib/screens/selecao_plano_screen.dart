@@ -72,6 +72,10 @@ class _SelecaoPlanoScreenState extends State<SelecaoPlanoScreen> {
     final selecionado = _planoSelecionado?.id == plano.id;
     final detalhes = <String>[
       if (plano.diasTrial != null) '${plano.diasTrial} dias de teste grátis',
+      plano.valorImplantacao <= 0
+          ? 'Implantação grátis no lançamento'
+          : 'Implantação R\$ ${plano.valorImplantacao.toStringAsFixed(2).replaceAll('.', ',')}',
+      'Recorrência mensal',
       if (plano.limiteMotoristas != null) 'Até ${plano.limiteMotoristas} motorista(s)',
       ...plano.recursos.take(3),
     ];
@@ -174,6 +178,21 @@ class _SelecaoPlanoScreenState extends State<SelecaoPlanoScreen> {
                 const SizedBox(height: 16),
               ],
               ..._planos.map(_buildPlanoCard),
+            ],
+            if (!_carregando && !_semPlanos) ...[
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE7F0FE),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFFB6D4FE)),
+                ),
+                child: const Text(
+                  'Para liberar o uso do sistema, será necessário assinar eletronicamente o contrato, com código enviado por e-mail.',
+                  style: TextStyle(fontSize: 12, color: Color(0xFF1B4B91)),
+                ),
+              ),
             ],
             const SizedBox(height: 24),
             SizedBox(

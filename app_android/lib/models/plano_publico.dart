@@ -5,6 +5,7 @@ class PlanoPublico {
   final double precoMensal;
   final int? limiteMotoristas;
   final int? diasTrial;
+  final double valorImplantacao;
   final List<String> recursos;
 
   const PlanoPublico({
@@ -14,6 +15,7 @@ class PlanoPublico {
     required this.precoMensal,
     required this.limiteMotoristas,
     required this.diasTrial,
+    required this.valorImplantacao,
     required this.recursos,
   });
 
@@ -36,6 +38,9 @@ class PlanoPublico {
       diasTrial: trialRaw is num
           ? trialRaw.toInt()
           : int.tryParse(trialRaw?.toString() ?? ''),
+      valorImplantacao: json['valor_implantacao'] is num
+          ? (json['valor_implantacao'] as num).toDouble()
+          : double.tryParse(json['valor_implantacao']?.toString() ?? '') ?? 0,
       recursos: recursosRaw is List
           ? recursosRaw
               .map((recurso) => recurso.toString().trim())
@@ -52,6 +57,7 @@ class PlanoPublico {
         'preco_mensal': precoMensal,
         'limite_motoristas': limiteMotoristas,
         'dias_trial': diasTrial,
+        'valor_implantacao': valorImplantacao,
         'recursos': recursos,
       };
 }
