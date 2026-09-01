@@ -7,9 +7,12 @@
 const { MODES, LIMITS, resolveMode, providerAvailable, isEnabled } = require('./config');
 const { KNOWN_CAPABILITIES } = require('./capabilities');
 const { KNOWN_RECONCILE_STATUSES } = require('./reconcile');
-const { OUTBOX_STATUS, DEFAULT_LEASE_MS } = require('./outboxContract');
+const {
+  OUTBOX_STATUS, CLAIM_ACTION, DEFAULT_LEASE_MS,
+  OUTBOX_PROVIDER_AUTHORITY, OUTBOX_DEDUPE_AUTHORITY, ERP_OUTBOX_AMBIGUOUS_RECOVERY,
+} = require('./outboxContract');
 const { SCHEMA_VERSION } = require('./canonicalEnvelope');
-const { IDEMPOTENCY_EVENT_AUTHORITY } = require('./idempotency');
+const { ERP_EVENT_IDENTITY, ERP_INTENT_FINGERPRINT } = require('./idempotency');
 const gateway = require('./erpProviderGateway');
 
 // Snapshot seguro do Hub. `entitlement` é opcional e injetado pela rota (estado
@@ -32,7 +35,14 @@ function buildHubDiagnostics({ entitlement = null } = {}) {
     known_capabilities: KNOWN_CAPABILITIES,
     reconcile_statuses: KNOWN_RECONCILE_STATUSES,
     outbox_statuses: Object.values(OUTBOX_STATUS),
-    idempotency_event_authority: IDEMPOTENCY_EVENT_AUTHORITY,
+    outbox_claim_actions: Object.values(CLAIM_ACTION),
+    // R3-HIGH-01 — duas autoridades DISTINTAS e nomeadas: a identidade da ocorrência
+    // lógica e a guarda de conflito de intenção. Nunca a mesma coisa.
+    event_identity_authority: ERP_EVENT_IDENTITY,
+    intent_fingerprint_role: ERP_INTENT_FINGERPRINT,
+    outbox_provider_authority: OUTBOX_PROVIDER_AUTHORITY,
+    outbox_dedupe_authority: OUTBOX_DEDUPE_AUTHORITY,
+    outbox_ambiguous_recovery: ERP_OUTBOX_AMBIGUOUS_RECOVERY,
     // Linguagem precisa: a SEMÂNTICA de recuperação (lease + reclaim + recusa de
     // claim obsoleto) está definida e testada, mas sem persistência não há
     // crash-safety de produção — um crash do processo perde a fila.

@@ -39,6 +39,12 @@ function canPromoteToSucceeded(status) {
 // HIGH-05 — reenviar é seguro apenas quando o ERP comprovadamente NÃO conhece o
 // envio (NOT_FOUND). Todos os demais estados negam por padrão.
 //
+// R3-HIGH-04 — esta função é CONSULTADA PELA MÁQUINA DE OUTBOX (`recordReconcile`),
+// não é um helper opcional ao lado dela. Na R2 o outbox tinha um critério próprio
+// (`next_retry_at` vencido ⇒ elegível para envio) que contradizia esta política em
+// silêncio: bastava um `markFailed` genérico e o backoff para o item ser reenviado
+// sem evidência nenhuma. Autoridade única, aplicada no único lugar que decide.
+//
 // FAILED **não** é genericamente seguro, e essa foi a correção: provider-agnostic,
 // "falhou" pode significar tanto "o ERP recusou e nada foi aplicado" quanto "o ERP
 // aplicou o efeito e a resposta se perdeu no transporte". Reenviar no segundo caso

@@ -165,10 +165,33 @@ alguém confiasse neles:
 | MEDIUM-02 | `validateEnvelope` devolvia `ok:true` com `contemChaveSensivel:true` ao lado — dependia de todo caller conferir um segundo campo | **Fail-closed**: chave sensível ⇒ `ok:false`, `motivo:'chave_sensivel_detectada'`. Detecção estrutural recursiva, não regex sobre JSON |
 | MEDIUM-03 | `enqueue` aceitava payload arbitrário, furando a cadeia canônica | Só envelope canônico válido; `empresa_id`/`event_type` lidos do envelope (autoridade única) |
 
+> **Supersedido pela R3**: `HIGH-01` (a autoridade `CANONICAL_INTENT_FINGERPRINT` quebrava em
+> A→B→A) e `HIGH-05` (a política existia, mas o outbox não a aplicava) foram revistos abaixo.
+> Os demais sete achados da R2 permanecem fechados como registrado.
+
 `sanitizeError` também foi revisto: cobre `Bearer`, chaves com prefixo (`sk_`/`api_`…),
 segredo em query string e hash longo, e **sanitiza antes de truncar** (truncar primeiro podia
 cortar um token ao meio e deixar o fragmento escapar). Escopo honesto: é higiene de log, não
 DLP — a regra primária continua sendo nunca passar segredo ao Hub.
+
+## Hardening de contrato pré-merge (revisão do owner, PR #490 R3)
+
+A R2 corrigiu cada contrato isoladamente. A R3 fechou as **interações entre eles** — sete
+achados em que dois contratos individualmente corretos, combinados, produziam comportamento errado.
+
+| # | Achado | Correção |
+|---|---|---|
+| R3-HIGH-01 | `PAYLOAD_FINGERPRINT_IS_NOT_EVENT_OCCURRENCE_IDENTITY` — usar o fingerprint do intent como IDENTIDADE quebra em **A→B→A**: a terceira ocorrência tem payload idêntico à primeira, seria descartada como replay e o ERP ficaria parado em B | Duas autoridades distintas. `ERP_EVENT_IDENTITY=LOGICAL_EVENT_ID` (chave = `provider\|empresa_id\|event_id\|schema_version`, **nunca o payload**) e `ERP_INTENT_FINGERPRINT=CONFLICT_GUARD`. Mesmo `event_id` + mesma intenção = replay idempotente; intenção diferente = **IDEMPOTENCY_CONFLICT** |
+| R3-HIGH-02 | `OUTBOX_PROVIDER_AND_DEDUPE_AUTHORITY_INCOMPLETE` — provider entrava só por convenção e o outbox aceitava uma `dedupeKey` inventada pelo caller como autoridade | `OUTBOX_PROVIDER_AUTHORITY=EXPLICIT`: `enqueue({ provider, envelope })`, e a camada **deriva** chave, fingerprint e índice `(empresa_id, provider, event_id)`. Tenants e providers nunca colidem |
+| R3-HIGH-03 | `OUTBOX_ENVELOPE_SNAPSHOT_IS_MUTABLE_BY_REFERENCE` — o item guardava a referência do caller e devolvia `{...item}` (shallow), então mutar o envelope original **depois** da validação reescrevia a fila | Clone profundo na entrada, `deepFreeze` interno, clone profundo em toda leitura. O que foi validado é o que será enviado |
+| R3-HIGH-04 | `FAILED_RETRY_POLICY_NOT_ENFORCED_BY_OUTBOX` — `safeToRetry(FAILED)=false` vivia num helper que a máquina **não consultava**: `markFailed` + backoff vencido reabria SEND sozinho | A política passou para dentro da máquina. Falha de SEND sem evidência **não reabre SEND** — reabre RECONCILE. Só `retrySafe:true` / `evidence.retry_safe===true` libera reenvio |
+| R3-HIGH-05 | `EXPIRED_PROCESSING_MUST_RECONCILE_BEFORE_RESEND` — lease vencido devolvia o item **para envio**; um worker morto depois de o ERP aplicar o efeito produzia um segundo envio | `ERP_OUTBOX_AMBIGUOUS_RECOVERY=RECONCILE_BEFORE_RESEND`. Trabalho tipado (`CLAIM_FOR_SEND` × `CLAIM_FOR_RECONCILE`); lease vencido só libera RECONCILE. O resultado do reconcile está no contrato: SUCCEEDED→`processed`; NOT_FOUND→SEND autorizado; PENDING/UNKNOWN→reconciliar de novo (com teto); FAILED→bloqueado sem evidência. Contadores `send_attempts` × `reconcile_attempts` separados |
+| R3-MEDIUM-01 | `INBOUND_ENVELOPE_VALIDATION_NOT_SYMMETRIC_WITH_BUILDER` — havia duas definições de "envelope válido"; e `{ ...envelope, authorization: 'Bearer …' }` passava porque a varredura de segredo só olhava `payload`/`metadata` | `BUILD_AND_VALIDATE_CONSTRAINTS=SYMMETRIC`: o builder normaliza e **submete o resultado ao mesmo `validateEnvelope`**, que ganhou forma **fechada** (campo top-level inesperado invalida), todos os bounds, `occurred_at` como data real e teto de tamanho serializado |
+| R3-MEDIUM-02 | `DEEP_PAYLOAD_MUST_NOT_BE_SILENTLY_TRUNCATED` — profundidade excedida virava `null` sem erro: dado sumia, e dois payloads distintos podiam gerar o mesmo fingerprint truncado | `DEPTH_LIMIT_EXCEEDED=INVALID_ENVELOPE`. Uma única regra de profundidade (`LIMITS.MAX_PAYLOAD_DEPTH`) compartilhada por builder, validator e fingerprint, mais recusa explícita de conteúdo não-JSON-safe (BigInt, function, symbol, `NaN`/`Infinity`, `Date`/`Map`, `undefined` em array) |
+
+Consequência de escopo: `enqueue` mudou de assinatura (`{ envelope, dedupeKey }` → `{ provider, envelope }`)
+e o outbox ganhou `recordReconcile`. Nada disso é persistido nesta fatia — são invariantes que o
+schema de E3.7B apenas materializa.
 
 ### ERP_DIAGNOSTICS_AUTHORITY
 
@@ -198,20 +221,27 @@ Ou seja: **a rota de diagnóstico não abre acesso operacional de ERP**. Enquant
 
 ## Testes
 
-- **BACKEND_FOCUSED**: `tests/erpHubFoundation.test.js` (48) + `tests/erpHubRoute.test.js` (8)
-  = **56/56 verdes**. Cobrem: envelope/sanitização/versionamento e recusa fail-closed de chave
-  sensível (aninhada, em array, caixa mista); idempotência (retry↦mesma chave, revisão↦chave
-  distinta, ordem de chaves irrelevante, isolamento tenant/provider/entidade, bump de schema);
-  `DISABLED` vs `UNSUPPORTED_CAPABILITY` nas três operações; outbox (só envelope canônico,
-  dedupe cruzado entre tenants, duplicate tenant-safe, lease, sem duplo claim antes do expiry,
-  reclaim após expiry, claim obsoleto não finaliza, retry/backoff→dead, terminais imutáveis);
-  external identity (colisão de bind e de rebind, rebind idempotente, integridade preservada
-  no conflito, tenant/provider-safe); reconcile (UNKNOWN≠SUCCEEDED, `FAILED` sem evidência não
-  é retry-safe); `sanitizeError`; autoridade da rota pelo resolver **real**; e invariantes
-  arquiteturais (sem supabase, sem I/O de rede) **mais** inércia funcional do modo default.
-- **BACKEND_FULL** (`node --test`): **2042 pass**; a única falha local é um artefato de CRLF do
-  checkout Windows num teste que parseia `082_*.sql` por regex `)\nLANGUAGE` — o blob no git é LF
-  e casa, então **verde no CI** (Linux/LF); não é regressão desta frente.
+- **BACKEND_FOCUSED**: `tests/erpHubFoundation.test.js` (83) + `tests/erpHubRoute.test.js` (8)
+  = **91/91 verdes**. Cobrem, por COMPORTAMENTO: envelope (forma fechada v1, segredo no topo e
+  aninhado, bounds simétricos build↔validate provados por varredura, `occurred_at` como data real,
+  teto serializado, profundidade que recusa em vez de truncar, conteúdo não-JSON-safe);
+  idempotência (`event_id` preservado em retry, **A→B→A = três ocorrências distintas**, chave
+  independente do payload, mesma ocorrência com intenção diferente ⇒ conflito, isolamento
+  tenant/provider, bump de schema, o que compõe e o que não compõe a intenção);
+  `DISABLED` × `UNSUPPORTED_CAPABILITY`; outbox (provider explícito, dedupe derivado,
+  isolamento cruzado tenant×provider, imutabilidade do snapshot em entrada/retorno/read model,
+  `FAILED` sem evidência não reabre SEND nem depois do backoff, `retry_safe` reabre,
+  lease vencido ⇒ RECONCILE, **crash após o ERP aceitar ⇒ reconcile SUCCEEDED ⇒ exatamente 1
+  `send` contado**, NOT_FOUND ⇒ reenvio liberado, PENDING/UNKNOWN nunca, claim obsoleto,
+  terminais imutáveis, tetos de send e de reconcile); external identity; reconcile;
+  `sanitizeError`; autoridade da rota pelo resolver **real**; e invariantes arquiteturais
+  (sem supabase, sem I/O de rede) mais inércia funcional do modo default.
+- **BACKEND_FULL** (`node --test "tests/*.test.js"`): **2105 pass / 1 fail**. A única falha local é
+  um artefato de CRLF do checkout Windows num teste que parseia `082_*.sql` por regex
+  `)\nLANGUAGE` (`git ls-files --eol` ⇒ `i/lf w/crlf`) — o blob no git é LF e casa, então fica
+  **verde no CI** (Linux/LF). Não é regressão desta frente, não foi tocado aqui e segue
+  registrado como *pre-existing local harness issue*.
+- **SEC1**: 71/71 verdes.
 
 ## Git / produção
 

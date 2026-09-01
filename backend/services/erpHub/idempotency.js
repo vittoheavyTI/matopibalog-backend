@@ -1,69 +1,87 @@
 'use strict';
 
-// Idempotência / proveniência (§9) — HIGH-01.
+// Idempotência / proveniência (§9) — R3-HIGH-01.
 //
-// ERP_IDEMPOTENCY_EVENT_AUTHORITY = CANONICAL_INTENT_FINGERPRINT
+//   ERP_EVENT_IDENTITY      = LOGICAL_EVENT_ID
+//   ERP_INTENT_FINGERPRINT  = CONFLICT_GUARD
 //
-// A chave precisa satisfazer DUAS obrigações ao mesmo tempo:
-//   (a) ESTÁVEL entre retries do MESMO evento lógico — senão cada retry vira um
-//       envio novo e o efeito externo duplica;
-//   (b) DIFERENTE entre eventos legítimos distintos da MESMA entidade — senão
-//       "frete X updated (revisão A)" e "frete X updated (revisão B)" colapsam e a
-//       segunda revisão é silenciosamente descartada.
+// DUAS obrigações, UMA autoridade cada — e elas não são a mesma coisa:
 //
-// A versão anterior falhava em (b): a chave era só a IDENTIDADE DA ENTIDADE
-// (provider|empresa|entity_type|entity_id|event_type|schema_version), então toda
-// atualização subsequente da mesma entidade produzia a mesma chave.
+//   (a) IDENTIDADE da ocorrência: `event_id`. Estável entre retries do MESMO
+//       evento lógico, distinta entre ocorrências distintas.
+//   (b) GUARDA de conflito: o fingerprint canônico da INTENÇÃO. Não identifica
+//       nada; só responde "este `event_id` está sendo reapresentado com o mesmo
+//       conteúdo de antes?".
 //
-// AUTORIDADE ESCOLHIDA (uma só, deliberadamente): o **intent canônico** — isto é,
-// a identidade da entidade MAIS o fingerprint determinístico do `payload`, que é o
-// conteúdo imutável do que se quer comunicar.
+// POR QUE A AUTORIDADE ANTERIOR ESTAVA ERRADA. A versão R2 usava o fingerprint do
+// intent COMO identidade (`CANONICAL_INTENT_FINGERPRINT`). Isso resolvia o colapso
+// de revisões consecutivas, mas quebrava no caso A→B→A:
 //
-// Por que não o id lógico upstream (`request_id`): ele é NULLABLE no envelope. Uma
-// autoridade que às vezes não existe obrigaria a um fallback, e o fallback seria
-// uma SEGUNDA autoridade divergente — exatamente o que o contrato proíbe. O payload
-// canônico, ao contrário, está sempre presente.
+//   E1: entidade X, status=A
+//   E2: entidade X, status=B
+//   E3: entidade X, status=A     ← ocorrência LEGÍTIMA e nova
 //
-// EXCLUÍDOS da chave, de propósito (são da TENTATIVA/transporte, não do evento):
-//   event_id      — gerado por chamada; incluí-lo faria todo retry parecer novo
-//   request_id    — identificador de transporte, opcional
-//   correlation_id— rastro de observabilidade
-//   occurred_at   — timestamp; incluí-lo quebraria (a)
-//   metadata      — diagnóstico, não intent
+// E1 e E3 têm payload idêntico, logo fingerprint idêntico. Com dedupe permanente,
+// E3 seria descartado como replay de E1 e o ERP ficaria parado em B — um estado
+// de negócio errado, em silêncio. Conteúdo repetido não é evento repetido.
 //
-// SCHEMA_VERSION: entra na chave deliberadamente. Um bump de `schema_version` muda
-// a FORMA do que é enviado ao provider, então o evento é reemitido em vez de
-// deduplicar contra a versão antiga. É uma decisão explícita, coberta por teste.
+// A CHAVE, portanto, deriva de:  provider | empresa_id | event_id | schema_version
+// e NUNCA do payload. Ela responde só "é a mesma ocorrência?".
+//
+// O fingerprint continua existindo, com papel estritamente diferente:
+//   mesmo event_id + mesmo fingerprint      → replay idempotente (duplicate benigno)
+//   mesmo event_id + fingerprint DIFERENTE  → IDEMPOTENCY_CONFLICT
+// O segundo caso nunca é tratado como duplicata benigna: alguém reusou a
+// identidade de uma ocorrência para dizer outra coisa, e engolir isso perderia
+// uma das duas intenções.
+//
+// COMPÕEM A INTENÇÃO: schema_version, entity_type, entity_id, event_type, source,
+// payload. NÃO compõem: request_id, correlation_id, occurred_at (transporte /
+// tentativa) e metadata (diagnóstico, não intenção).
+//
+// SCHEMA_VERSION entra na CHAVE deliberadamente: um bump muda a FORMA do que é
+// enviado ao provider, então a ocorrência é reemitida em vez de deduplicar contra
+// a versão antiga. Decisão explícita, coberta por teste.
 
 const crypto = require('node:crypto');
+const { canonicalizeJsonSafe } = require('./canonicalEnvelope');
 
-// Canonicaliza recursivamente para que a ORDEM das chaves não afete o fingerprint:
-// { a:1, b:2 } e { b:2, a:1 } são o MESMO intent e precisam dar o mesmo hash.
-function canonicalize(value, depth = 0) {
-  if (depth > 12) return null; // corta estruturas patológicas
-  if (value === null || value === undefined) return null;
-  if (Array.isArray(value)) return value.map((v) => canonicalize(v, depth + 1)); // ordem do array É significativa
-  if (typeof value === 'object') {
-    const out = {};
-    for (const k of Object.keys(value).sort()) out[k] = canonicalize(value[k], depth + 1);
-    return out;
-  }
-  return value;
-}
-
+// Canonicalização determinística e JSON-safe — a MESMA usada pelo builder e pelo
+// validator. Estourar profundidade ou conteúdo não-JSON lança em vez de truncar,
+// para que dois payloads diferentes jamais produzam o mesmo fingerprint (R3-MEDIUM-02).
 function canonicalJson(value) {
-  return JSON.stringify(canonicalize(value === undefined ? {} : value));
+  return JSON.stringify(canonicalizeJsonSafe(value === undefined ? {} : value));
 }
 
-// Fingerprint determinístico do intent (payload canônico).
-function intentFingerprint(payload) {
-  return crypto.createHash('sha256').update(canonicalJson(payload)).digest('hex');
+// Fingerprint determinístico da INTENÇÃO (guarda de conflito, não identidade).
+function intentFingerprint({
+  schemaVersion = null, entityType, entityId, eventType, source, payload = {},
+} = {}) {
+  const intent = {
+    schema_version: schemaVersion == null ? null : schemaVersion,
+    entity_type: entityType == null ? null : String(entityType),
+    entity_id: entityId == null ? null : String(entityId),
+    event_type: eventType == null ? null : String(eventType),
+    source: source == null ? null : String(source),
+    payload: payload === undefined ? {} : payload,
+  };
+  return crypto.createHash('sha256').update(canonicalJson(intent)).digest('hex');
 }
 
-function deriveIdempotencyKey({
-  provider, empresaId, entityType, entityId, eventType, schemaVersion, payload = {},
-}) {
-  for (const [nome, v] of Object.entries({ provider, empresaId, entityType, entityId, eventType })) {
+function intentFingerprintForEnvelope(env) {
+  return intentFingerprint({
+    schemaVersion: env.schema_version,
+    entityType: env.entity_type,
+    entityId: env.entity_id,
+    eventType: env.event_type,
+    source: env.source,
+    payload: env.payload,
+  });
+}
+
+// Chave de idempotência: identidade da OCORRÊNCIA LÓGICA. Não depende do payload.
+function deriveIdempotencyKey({ provider, empresaId, eventId, schemaVersion }) {
+  for (const [nome, v] of Object.entries({ provider, empresaId, eventId })) {
     if (typeof v !== 'string' || v.trim() === '') {
       throw new Error(`deriveIdempotencyKey: campo obrigatorio ausente: ${nome}`);
     }
@@ -71,11 +89,8 @@ function deriveIdempotencyKey({
   const canonical = [
     String(provider),
     String(empresaId),
-    String(entityType),
-    String(entityId),
-    String(eventType),
+    String(eventId),
     String(schemaVersion == null ? '' : schemaVersion),
-    intentFingerprint(payload), // ← o que distingue revisões legítimas
   ].join('|');
   const hash = crypto.createHash('sha256').update(canonical).digest('hex');
   // Prefixo legível ajuda diagnóstico sem revelar nada sensível.
@@ -87,18 +102,18 @@ function idempotencyKeyForEnvelope(provider, env) {
   return deriveIdempotencyKey({
     provider,
     empresaId: env.empresa_id,
-    entityType: env.entity_type,
-    entityId: env.entity_id,
-    eventType: env.event_type,
+    eventId: env.event_id,
     schemaVersion: env.schema_version,
-    payload: env.payload,
   });
 }
 
 module.exports = {
-  IDEMPOTENCY_EVENT_AUTHORITY: 'CANONICAL_INTENT_FINGERPRINT',
+  ERP_EVENT_IDENTITY: 'LOGICAL_EVENT_ID',
+  ERP_INTENT_FINGERPRINT: 'CONFLICT_GUARD',
+  EVENT_ID_CREATED_ONCE_PER_LOGICAL_EVENT: true,
   canonicalJson,
   intentFingerprint,
+  intentFingerprintForEnvelope,
   deriveIdempotencyKey,
   idempotencyKeyForEnvelope,
 };

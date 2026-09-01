@@ -205,7 +205,9 @@ test('resposta é inerte e honesta (nunca "conectado"/"sincronizando")', async (
     assert.deepEqual(r.body.provider_capabilities, []);
     assert.equal(r.body.display_status, 'em_preparacao');
     assert.equal(r.body.crash_safety, 'CRASH_SAFE_CONTRACT_DEFINED');
-    assert.equal(r.body.idempotency_event_authority, 'CANONICAL_INTENT_FINGERPRINT');
+    assert.equal(r.body.event_identity_authority, 'LOGICAL_EVENT_ID');
+    assert.equal(r.body.intent_fingerprint_role, 'CONFLICT_GUARD');
+    assert.equal(r.body.outbox_ambiguous_recovery, 'RECONCILE_BEFORE_RESEND');
     assert.equal(r.body.entitlement.codigo, 'integracoes_erp');
     assert.equal(r.body.entitlement.technical_state, 'em_breve');
     const flat = JSON.stringify(r.body).toLowerCase();
