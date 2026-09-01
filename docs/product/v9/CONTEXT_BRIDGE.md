@@ -1,7 +1,7 @@
 # Matopiba Log — CONTEXT BRIDGE V9
 
 > **Handoff compacto.** Leia este arquivo primeiro ao retomar em outro chat/agente. Os detalhes estão nos 4 documentos linkados no fim.
-> Atualizado: **2026-08-24** (Mobile M1, Systemic Quality, Commercial V2, Campaign-A, AI Copilot V1, Command Center V2, Campaign-B, Route Intelligence V1 e Campaign-C closed; migration 078 aplicada; Campaign-C schema-free).
+> Atualizado: **2026-09-01** (E3.5 Portal do Embarcador A/B, Team Provisioning/Authz, E3.6A Rede Privada de Parceiros — migration 082 aplicada uma vez — closed em produção; **E3.7A ERP Integration Hub fundação `TECHNICALLY_CLOSED_SCHEMA_FREE`**, sem migration; **proveniência da migration 080 fechada como `BYTE_ONLY_DIFFERENCE`** — diferença só whitespace, cadeia segura). Marcos anteriores: Mobile M1, Systemic Quality, Commercial V2, Campaign-A/B/C/D, AI Copilot V1, Command Center V2, Route Intelligence V1.
 
 ---
 

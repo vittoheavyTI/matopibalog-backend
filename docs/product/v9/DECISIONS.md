@@ -286,6 +286,18 @@ Campaign-A nao integra provider de rota, marketplace, parceiro real, portal do e
 `TEAM_SUPERADMIN_EDIT=REQUIRED`, em contexto explícito da conta (`?empresa_id=`), nunca por pertencimento acidental. Editável: nome, telefone, status, foto, endereço e perfil de acesso. **E-mail permanece somente-leitura** porque `usuarios.email` espelha a identidade no Supabase Auth e não existe mutação canônica atômica para as duas — gravar só a tabela produziria alguém que aparece com um e-mail e entra com outro. **Conta vinculada é imutável**: mover usuário entre empresas levaria junto lançamentos, fretes e histórico; é migração de dados, não edição de cadastro.
 ---
 
+## ERP Integration Hub (E3.7)
+
+### D-078 — A fundação do ERP Hub é schema-free e estruturalmente inerte (ARQ)
+`ERP_HUB_FOUNDATION=SCHEMA_FREE`. A E3.7A entrega contrato provider-agnostic (envelope canônico versionado + sanitizado, gateway com capabilities explícitas, reconcile, idempotência) e implementações **em memória** de outbox e de mapa de identidade externa, **sem migration**. Razão: nada é exercitado em produção (provider `disabled`), e o schema do outbox/mapa depende de quais entidades canônicas compõem V1 — decisão de produto que não se inventa. `ERP_PROVIDER_MODE` só admite `disabled|fake`: **não existe modo de provider real nesta frente**, então chamada externa é impossível por construção (`ERP_HUB_PROVIDER_REAL_CALLS=0`). Materializar em tabela (idioma do `billing_outbox`/066) é E3.7B, sob gate próprio.
+
+### D-079 — Identidade externa vive num mapa genérico, não em coluna ad-hoc (ARQ/DOMÍNIO)
+`ERP_EXTERNAL_ID=GENERIC_MAP`. O padrão histórico (`empresas.asaas_subscription_id`, `faturas.asaas_subscription_id`, `asaas_webhook_events.asaas_payment_id`) espalha identidade externa por tabelas de domínio. O ERP Hub não repete isso: o vínculo é `(provider, empresa_id, entity_type, internal_entity_id) → external_entity_id`, tenant/provider-safe, identidade imutável com rebind só por caminho auditável (exige motivo). Contrato definido/testado em memória nesta fatia; persistência em E3.7B.
+
+### D-080 — O comportamento comercial/técnico do ERP não muda em E3.7A (PROCESSO)
+`ERP_ENTITLEMENT_STATE=PRESERVED`. `funcionalidades.integracoes_erp` continua `status_ciclo_vida='em_breve'`, logo `resolverEntitlement` continua negando por `nao_implementada`. A frente não torna ERP `disponivel`, não cria preço/add-on, não altera entitlements, não habilita ERP para nenhum cliente e nunca mostra "conectado"/"sincronizando" (a superfície de diagnóstico usa `display_status="em_preparacao"`). A autoridade da superfície interna reusa a permissão existente `integracoes_erp.gerenciar` — nenhuma chave nova.
+---
+
 ## Gates registrados
 
 | Gate | Critério de liberação |
@@ -295,6 +307,9 @@ Campaign-A nao integra provider de rota, marketplace, parceiro real, portal do e
 | `OPERATIONAL_SCOPE_ENFORCEMENT_GATE` | Enforcement automático de escopo P1 (grupos/filiais) está **desativado por segurança**; ativar só com dados operacionais reais + gate. |
 | `FISCAL_LEGAL_ENTITY_GATE` | **BLOCKED_PENDING_CNAE_AND_ACCOUNTING_ALIGNMENT.** Emissão fiscal real depende de adequação de CNAE/regime + alinhamento contábil do owner. Desenvolvimento/arquitetura fiscal **liberados**; emissão **real** bloqueada. |
 | `COMMERCIAL_PAID_GO_LIVE_GATE` | **BLOCKED_BY_FISCAL_LEGAL_ENTITY_GATE.** Go-live comercial pago (cobrança + NFS-e reais) só após liberar `FISCAL_LEGAL_ENTITY_GATE` **e** `FINAL_ASAAS_PRODUCTION_ACTIVATION_GATE`. |
+| `ERP_CANONICAL_ENTITY_SCOPE_DECISION_NEEDED` | Definir o primeiro conjunto de entidades canônicas do ERP Hub (ex.: parceiro, frete, documento) antes de materializar o schema de outbox/mapa (E3.7B). Deriva de integração/customização real; não inventar. |
+| `ERP_PROVIDER_REAL_ACTIVATION_GATE` (E3.7B) | Ativar provider ERP real / criar secret / conectar ERP externo / habilitar ERP para clientes só com autorização explícita do owner + adapter provado + escopo definido. Estado atual: **não existe modo real** (`ERP_PROVIDER_MODE=disabled|fake`). |
+| `E36B_PRICE_AND_AWARD_PRODUCT_DECISION_GATE` | **DEFERRED_UNTIL_OPERATIONAL_EVIDENCE.** Preço/adjudicação da Rede Privada de Parceiros só após cenário operacional real/certificado da rede. |
 
 ---
 

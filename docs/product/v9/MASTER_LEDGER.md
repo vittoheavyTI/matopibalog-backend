@@ -207,8 +207,8 @@ _Evidência coletada em 2026-08-19 (ver [FORENSIC_BASELINE](./FORENSIC_BASELINE.
 | ID | Item | Status | B W A D P | Evidência / Obs |
 |----|------|--------|-----------|-----------------|
 | RBV9-INV-084 | Integração customizada (integrações genéricas, cripto at-rest) | PARTIAL | ✓ ✓ — ~ ✓ | `INTEGRATIONS_SECRET_KEY`; `integracoes.js`; sem hub canônico |
-| RBV9-INV-085 | Integration Hub canônico (outbox/adapter/external_id/retry/reconcile) | ROADMAP | ✗ ✗ ✗ ✗ ✗ | D-023 |
-| RBV9-INV-086 | Adapters ERP (Aliare/SIAGRI, Sankhya, TOTVS, Senior, SSW, Bsoft, REST, CSV) | ROADMAP | ✗ ✗ ✗ ✗ ✗ | census de prospects pendente |
+| RBV9-INV-085 | Integration Hub canônico (outbox/adapter/external_id/retry/reconcile) | PARTIAL | ✓ ~ — ✗ ✓ | **E3.7A `TECHNICALLY_CLOSED_SCHEMA_FREE` (2026-09-01)**: fundação provider-agnostic em `services/erpHub/` (envelope canônico versionado+sanitizado, gateway com capabilities, reconcile UNKNOWN≠SUCCEEDED, idempotência tenant-safe) + contratos de outbox e external-id **em memória** (invariantes testados; persistência diferida a E3.7B) + verifiability `GET /erp-hub/status`. `ERP_PROVIDER_MODE=disabled` (sem modo real), 0 DDL, 0 write, 0 chamada externa. `D` ✗ porque `MIGRATION_REQUIRED=false` (nada persistido ainda). D-023/D-078/D-079/D-080. Ver [ERP_INTEGRATION_HUB_V1](./ERP_INTEGRATION_HUB_V1.md). |
+| RBV9-INV-086 | Adapters ERP (Aliare/SIAGRI, Sankhya, TOTVS, Senior, SSW, Bsoft, REST, CSV) | ROADMAP | ✗ ✗ ✗ ✗ ✗ | census de prospects `TECHNICAL_SIGNALS_ONLY` feito (0 config técnica, 0 uso; elegibilidade comercial só de plano). Provider real = E3.7B sob `ERP_PROVIDER_REAL_ACTIVATION_GATE`. |
 
 ## AUDIT / ENVELOPE DIGITAL
 

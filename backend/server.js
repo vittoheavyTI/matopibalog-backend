@@ -187,6 +187,10 @@ app.use('/ai', require('./routes/ai'));
 // Route Intelligence V1 — estimativa de rota read-only, provider-agnostic. Default
 // inerte (ROUTE_PROVIDER_MODE=disabled); entrada manual sempre funciona; sem provider real.
 app.use('/route-intelligence', require('./routes/routeIntelligence'));
+// ERP Integration Hub V1 (E3.7A) — fundação provider-agnostic, schema-free e
+// production-inert (ERP_PROVIDER_MODE=disabled por padrão). Só verifiability
+// read-only (/erp-hub/status); nenhum provider real, nenhuma escrita de negócio.
+app.use('/erp-hub', require('./routes/erpHub'));
 // Portal do Embarcador (E3.5). Duas superfícies deliberadamente separadas:
 //   * /portal/embarcador  → EXTERNA. Sessão de portal (token_kind='shipper_portal'),
 //     nunca `verificarEmpresa`. A autorização é identidade externa + relacionamento
