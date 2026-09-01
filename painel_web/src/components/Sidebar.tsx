@@ -162,7 +162,14 @@ export const Sidebar: React.FC = () => {
   // sidebar está recolhida). Estrutura Operacional do cliente vive junto de
   // Configurações e só aparece quando elegível; Faturas/Regularização é o hub
   // comercial (a aba "Plano e contratação" continua dentro dela).
-  type GrupoNav = { titulo: string; itens: { to: string; icon: typeof LayoutDashboard; label: string }[] };
+  // REG-001 — FINANCIAL_SIDEBAR_SINGLE_ENTRY. Um item de navegação pode sinalizar
+  // "ação necessária" SEM virar um segundo item apontando para a mesma rota. O
+  // `isActive` do react-router compara PATHNAME e ignora a query string, então
+  // `/minhas-faturas` e `/minhas-faturas?aba=contratacao` acendiam JUNTOS e o usuário
+  // via duas respostas para "onde estou". Sinalização é propriedade do item, não
+  // item novo.
+  type ItemNav = { to: string; icon: typeof LayoutDashboard; label: string; badge?: string };
+  type GrupoNav = { titulo: string; itens: ItemNav[] };
 
   // P2.9 — gate de menu por permissão efetiva V9 (backend é a autoridade real; isto só
   // esconde itens). Fallback: admin legado enxerga tudo até o efetivo ser populado.
@@ -218,8 +225,16 @@ export const Sidebar: React.FC = () => {
     ] },
     // Faturas SaaS / Regularização da própria empresa → finance.saas.view (admin por
     // template; autônomo dono por bypass). Distinto do financeiro operacional dos fretes.
+    // É o HUB comercial: a aba "Plano e contratação" já vive dentro dele, então com
+    // contrato obrigatório pendente o MESMO item ganha indicador âmbar + "Ação
+    // necessária" — nunca um segundo item apontando para a mesma rota.
     ...(can('finance.saas.view') ? [{ titulo: 'Financeiro', itens: [
-      { to: '/minhas-faturas', icon: Receipt, label: 'Faturas / Regularização' },
+      {
+        to: '/minhas-faturas',
+        icon: Receipt,
+        label: 'Faturas / Regularização',
+        ...(contratacaoPendente ? { badge: 'Ação necessária' } : {}),
+      },
     ] }] : []),
     { titulo: 'Configurações', itens: [
       // Configurações da empresa → company.settings.view.
@@ -335,49 +350,31 @@ export const Sidebar: React.FC = () => {
                   <p className="px-3 pt-1 text-[10px] font-bold uppercase tracking-wider text-gray-500 select-none">{grupo.titulo}</p>
                 )}
                 {grupo.itens.map((item) => (
-                  <NavLink key={item.to} to={item.to} end={item.to === '/' || item.to === '/relatorios'} className={linkClass} title={compact ? item.label : undefined}>
-                    <item.icon size={20} className="flex-shrink-0" />
-                    {!compact && <span>{item.label}</span>}
-                  </NavLink>
-                ))}
-                {/* Contratação pendente (ação necessária): fica no grupo Financeiro do
-                    cliente. Aparece só quando há contrato obrigatório pendente. */}
-                {grupo.titulo === 'Financeiro' && !user?.is_super_admin && contratacaoPendente && (
-                  <NavLink to="/minhas-faturas?aba=contratacao" className={linkClass} title={compact ? 'Contratação — ação necessária' : undefined}>
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    end={item.to === '/' || item.to === '/relatorios'}
+                    className={linkClass}
+                    title={compact ? (item.badge ? `${item.label} — ${item.badge}` : item.label) : undefined}
+                  >
                     <span className="relative flex-shrink-0">
-                      <ClipboardList size={20} />
-                      <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-amber-400 ring-2 ring-slate-800" />
+                      <item.icon size={20} />
+                      {item.badge && (
+                        <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-amber-400 ring-2 ring-slate-800" />
+                      )}
                     </span>
                     {!compact && (
                       <span className="flex-1">
-                        Contratação
-                        <span className="ml-2 rounded-full bg-amber-400/20 px-2 py-0.5 text-[10px] font-semibold text-amber-300 align-middle">Ação necessária</span>
+                        {item.label}
+                        {item.badge && (
+                          <span className="ml-2 rounded-full bg-amber-400/20 px-2 py-0.5 text-[10px] font-semibold text-amber-300 align-middle">{item.badge}</span>
+                        )}
                       </span>
                     )}
                   </NavLink>
-                )}
+                ))}
               </div>
             ))}
-
-            {/* Salvaguarda: se o cliente NÃO é admin (ex.: dono de conta autônoma,
-                tipo motorista) mas tem contratação obrigatória pendente, não há grupo
-                Financeiro — mostra o atalho de contratação mesmo assim. */}
-            {!user?.is_super_admin && user?.role !== 'admin' && contratacaoPendente && (
-              <div className="space-y-1">
-                <NavLink to="/minhas-faturas?aba=contratacao" className={linkClass} title={compact ? 'Contratação — ação necessária' : undefined}>
-                  <span className="relative flex-shrink-0">
-                    <ClipboardList size={20} />
-                    <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-amber-400 ring-2 ring-slate-800" />
-                  </span>
-                  {!compact && (
-                    <span className="flex-1">
-                      Contratação
-                      <span className="ml-2 rounded-full bg-amber-400/20 px-2 py-0.5 text-[10px] font-semibold text-amber-300 align-middle">Ação necessária</span>
-                    </span>
-                  )}
-                </NavLink>
-              </div>
-            )}
           </nav>
         </div>
 

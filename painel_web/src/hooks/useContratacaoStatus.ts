@@ -2,9 +2,22 @@ import { useEffect, useState } from 'react';
 import api from '../api';
 import { useAuth } from '../contexts/AuthContext';
 
-// Status enxuto da contratação do cliente (admin de empresa). Usado pela Sidebar
-// (item condicional) e pelo Layout (banner de ação necessária). Fail-open: erro
-// não polui a navegação. Só consulta para o cliente (não super-admin).
+// Status enxuto da contratação do cliente. Usado pela Sidebar (badge de ação
+// necessária no item Faturas / Regularização) e pelo Layout (banner). Fail-open:
+// erro não polui a navegação. Não consulta para super-admin, que não contrata.
+//
+// BUG-002 — a autoridade de QUEM pode ver isto é do BACKEND. `/contratacao/status`
+// libera para `company.settings.manage` **ou** para empresa `tipo='autonomo'`.
+// Este hook filtrava antes por `role === 'admin'`, um critério legado, mais
+// estreito e simplesmente DIFERENTE do servidor. A consequência era um beco sem
+// saída: o dono de conta autônoma (cujo `role` costuma ser `motorista`) precisava
+// assinar o contrato, mas o hook nunca perguntava — então `pendenciaObrigatoria`
+// ficava `false` para sempre, o banner do Layout nunca aparecia e a "salvaguarda"
+// da Sidebar, escrita exatamente para esse caso, era código morto. O usuário
+// obrigado a assinar não tinha caminho nenhum para assinar.
+//
+// Agora perguntamos e deixamos o servidor decidir: 403 cai no `catch` e o estado
+// permanece neutro, que é o mesmo efeito de não perguntar — sem o beco sem saída.
 export function useContratacaoStatus() {
   const { user } = useAuth();
   const [pendenciaObrigatoria, setPendenciaObrigatoria] = useState(false);
@@ -19,7 +32,7 @@ export function useContratacaoStatus() {
   const [quantidadeContratada, setQuantidadeContratada] = useState<number | null>(null);
 
   useEffect(() => {
-    if (user?.is_super_admin || user?.role !== 'admin') return;
+    if (!user || user.is_super_admin) return;
     let vivo = true;
     api.get('/contratacao/status')
       .then(({ data }) => {
@@ -37,7 +50,7 @@ export function useContratacaoStatus() {
       })
       .catch(() => {});
     return () => { vivo = false; };
-  }, [user?.is_super_admin, user?.role]);
+  }, [user?.uid, user?.is_super_admin]);
 
   return {
     pendenciaObrigatoria,

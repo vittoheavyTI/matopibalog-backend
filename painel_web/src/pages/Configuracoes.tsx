@@ -3,7 +3,7 @@ import {
   Building2, Save, Check, Image,
   Palette, X, Upload, Trash2, Truck, Move, Settings, FileText, UserCircle, Network, Plug, ShieldCheck
 } from 'lucide-react';
-import { useLocation, Link } from 'react-router-dom';
+import { useLocation, useNavigate, Link } from 'react-router-dom';
 import { maskPhone, maskCNPJ, maskCEP } from '../utils/masks';
 import api from '../api';
 import { writeToLS } from '../hooks/useLoginConfig';
@@ -101,6 +101,7 @@ function getContrastTextColor(hexColor: string): string {
 
 export const Configuracoes: React.FC = () => {
   const location = useLocation();
+  const navigate = useNavigate();
   const abaInicial = new URLSearchParams(location.search).get('aba');
   const [activeTab, setActiveTab] = useState<'perfil' | 'empresa' | 'estrutura' | 'erp' | 'sso' | 'sistema' | 'aparencia'>(
     abaInicial === 'perfil' ? 'perfil' : 'empresa'
@@ -168,9 +169,18 @@ export const Configuracoes: React.FC = () => {
   const logoFileRef = useRef<HTMLInputElement>(null);
   const bgFileRef = useRef<HTMLInputElement>(null);
 
+  // BUG-004 — a URL era lida só numa direção: entrar em `?aba=perfil` abria a aba,
+  // mas VOLTAR no navegador (saindo de `?aba=perfil` para `/configuracoes`) não
+  // restaurava nada — a aba continuava em "Meu perfil" e o botão Voltar parecia
+  // não fazer efeito. Agora a query string é a fonte da verdade nos dois sentidos.
   useEffect(() => {
     const aba = new URLSearchParams(location.search).get('aba');
-    if (aba === 'perfil') setActiveTab('perfil');
+    setActiveTab((atual) => {
+      if (aba === 'perfil') return 'perfil';
+      // Sem o parâmetro: só reverte se estávamos na aba que ele controla; assim
+      // navegar manualmente para outra aba não é desfeito por este efeito.
+      return atual === 'perfil' ? 'empresa' : atual;
+    });
   }, [location.search]);
 
   useEffect(() => {
@@ -519,6 +529,17 @@ export const Configuracoes: React.FC = () => {
   const ssoComercial = governanca?.entitlements?.acesso_corporativo_sso?.disponibilidade_comercial;
   const temDireitoComercial = (d?: string | null) =>
     user?.is_super_admin === true || (!!d && d !== 'indisponivel');
+  // Mantém URL e aba em sincronia: "Meu perfil" é deep-linkável (`?aba=perfil`) e
+  // sair dela limpa o parâmetro, para que Voltar/Avançar façam o esperado.
+  const selecionarAba = (aba: typeof activeTab) => {
+    setActiveTab(aba);
+    const params = new URLSearchParams(location.search);
+    if (aba === 'perfil') params.set('aba', 'perfil');
+    else params.delete('aba');
+    const busca = params.toString();
+    navigate({ pathname: location.pathname, search: busca ? `?${busca}` : '' }, { replace: false });
+  };
+
   const tabs = [
     { id: 'perfil', label: 'Meu perfil', icon: UserCircle, show: true },
     { id: 'empresa', label: 'Empresa', icon: Building2, show: true },
@@ -562,7 +583,7 @@ export const Configuracoes: React.FC = () => {
             return (
           <button
             key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
+            onClick={() => selecionarAba(tab.id)}
             className={`flex-1 min-w-[130px] flex items-center justify-center whitespace-nowrap px-4 py-2.5 rounded-lg font-bold text-sm transition-all ${activeTab === tab.id ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
           >
             <Icon size={18} className="mr-2 shrink-0" />{tab.label}

@@ -94,13 +94,16 @@ const AppRoutes = () => {
         <Route path="relatorios/resumo" element={<ResumoMotorista />} />
         <Route path="relatorios/rentabilidade" element={<PermissionRoute permission="reports.financial.view"><Rentabilidade /></PermissionRoute>} />
         <Route path="relatorios/acerto-motoristas" element={<PermissionRoute permission="reports.financial.view"><AcertoMotoristas /></PermissionRoute>} />
-        <Route path="relatorios/torre-controle" element={<TorreControle />} />
+        {/* BUG-003 — o menu escondia por permissão mas a ROTA ficava aberta: quem
+            não tinha a capability via a tela (vazia, porque o backend nega os dados)
+            em vez de um "acesso restrito" honesto. Guarda alinhada ao item de menu. */}
+        <Route path="relatorios/torre-controle" element={<PermissionRoute permission="reports.operational.view"><TorreControle /></PermissionRoute>} />
         <Route path="rota" element={<PermissionRoute permission="freight.view"><RotaInteligente /></PermissionRoute>} />
         <Route path="admins" element={<Usuarios />} />
         <Route path="perfis-permissoes" element={<PermissionRoute permission="permissions.manage"><PerfisPermissoes /></PermissionRoute>} />
         <Route path="operacional" element={<Operacional />} />
         <Route path="frota" element={<PermissionRoute permission="fleet.view"><Frota /></PermissionRoute>} />
-        <Route path="campanhas-escoamento" element={<OperationCampaigns />} />
+        <Route path="campanhas-escoamento" element={<PermissionRoute permission="campaign.view"><OperationCampaigns /></PermissionRoute>} />
         <Route path="rede-parceiros" element={<PermissionRoute permission="partner_network.view"><RedeParceiros /></PermissionRoute>} />
         <Route
           path="solicitacoes-embarcadores"

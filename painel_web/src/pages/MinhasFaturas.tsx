@@ -6,6 +6,8 @@ import { PlanoContratos } from '../components/PlanoContratos';
 import { ComparadorPlanos } from '../components/ComparadorPlanos';
 import { Contratacao } from './Contratacao';
 import { useAuth } from '../contexts/AuthContext';
+import { useContratacaoStatus } from '../hooks/useContratacaoStatus';
+import { resolverBannerPlano, classesDoTom } from '../utils/planoStatusCopy';
 import { civilDateToDayNumber, compareCivilDates, formatCivilDate, formatTechnicalDate } from '../utils';
 import { brl, mensagemRodapePagamento } from '../utils/faturaCopy';
 
@@ -74,6 +76,7 @@ function getTipoLabel(tipo?: string): string {
 
 export const MinhasFaturas: React.FC = () => {
   const { user } = useAuth();
+  const { pendenciaObrigatoria } = useContratacaoStatus();
   const [searchParams, setSearchParams] = useSearchParams();
   const [faturas, setFaturas] = useState<Fatura[]>([]);
   const [loading, setLoading] = useState(true);
@@ -258,43 +261,18 @@ export const MinhasFaturas: React.FC = () => {
     ? `mailto:${suporteEmail}?subject=${encodeURIComponent('Solicitação de regularização do plano')}`
     : null;
 
-  const bannerPlano = (() => {
-    const status = planoStatus?.status;
-    if (status === 'ativo') return {
-      titulo: 'Plano ativo',
-      texto: 'Seu plano está ativo.',
-      classes: 'bg-green-50 border-green-200 text-green-800',
-    };
-    if (status === 'trial') {
-      if (planoStatus?.trial_expirado) return {
-        titulo: 'Período de teste expirado',
-        texto: trialData ? `Seu teste expirou em ${trialData}.` : 'Seu período de teste expirou.',
-        classes: 'bg-red-50 border-red-200 text-red-800',
-      };
-      return {
-        titulo: 'Período de teste',
-        texto: trialData ? `Seu período de teste permanece ativo até ${trialData}.` : 'Sua empresa está no período de teste.',
-        classes: 'bg-blue-50 border-blue-200 text-blue-800',
-      };
-    }
-    if (status === 'suspenso') return {
-      titulo: 'Conta suspensa',
-      texto: atual?.invoice_url
-        ? 'Sua conta está suspensa. Pague a fatura pendente para recuperar o acesso.'
-        : 'Sua conta está suspensa. Entre em contato com o suporte para regularizar.',
-      classes: 'bg-red-50 border-red-200 text-red-800',
-    };
-    if (status === 'expirado' || status === 'bloqueado') return {
-      titulo: status === 'expirado' ? 'Plano expirado' : 'Plano bloqueado',
-      texto: 'Seu acesso operacional está bloqueado. Entre em contato com o suporte.',
-      classes: 'bg-red-50 border-red-200 text-red-800',
-    };
-    return {
-      titulo: 'Status do plano',
-      texto: status ? `Status atual: ${status}.` : 'Status não informado.',
-      classes: 'bg-gray-50 border-gray-200 text-gray-700',
-    };
-  })();
+  // BUG-005 — a matriz comercial (trial x plano x contrato x fatura) vive em
+  // `utils/planoStatusCopy`, como função pura testável. Antes ela era um IIFE dentro
+  // do render: impossível de exercitar, e foi assim que "Plano ativo / Seu plano está
+  // ativo." passou a ser dito ao lado de um pedido de assinatura de contrato — com o
+  // backend já bloqueando as escritas por causa desse mesmo contrato.
+  const bannerPlano = resolverBannerPlano({
+    status: planoStatus?.status,
+    trialExpirado: planoStatus?.trial_expirado,
+    trialData,
+    pendenciaObrigatoria,
+    temFaturaComLink: Boolean(atual?.invoice_url),
+  });
 
   return (
     <div className="space-y-6 pb-20 px-6">
@@ -353,7 +331,7 @@ export const MinhasFaturas: React.FC = () => {
       )}
 
       {!loading && (
-        <div className={`rounded-xl border p-5 ${bannerPlano.classes}`}>
+        <div className={`rounded-xl border p-5 ${classesDoTom(bannerPlano.tom)}`}>
           <div className="flex items-start gap-3">
             <AlertCircle size={20} className="shrink-0 mt-0.5" />
             <div className="flex-1 min-w-0">
