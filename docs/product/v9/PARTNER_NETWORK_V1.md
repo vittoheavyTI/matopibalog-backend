@@ -191,3 +191,156 @@ evento fiscal ou evento de ERP · não constrói marketplace, busca pública de
 transportadora, ranking, score ou preço.
 
 `E36B_PRICE_AND_AWARD_PRODUCT_DECISION_GATE=PENDING`.
+
+## 11. Owner review — correção R2 (HIGH-09..15)
+
+Segunda rodada de revisão. A migration 082 **não** havia sido aplicada, então ela
+foi corrigida **no lugar** — sem 083. Os sete achados têm um fio comum: em cada
+um, a promessa estava escrita no código e o mecanismo não a sustentava.
+
+### HIGH-09 — o e-mail do convite é a autoridade
+
+`INVITATION_EMAIL_IS_AUTHORITATIVE=true`
+
+A ativação fazia `email: body.email || convite.email`. O corpo **substituía** o
+alvo, então quem tivesse o link — uma credencial ao portador, entregue à mão —
+informava a própria conta, provava posse dela e entrava no lugar do convidado. A
+prova de senha continuava acontecendo e provava a identidade errada.
+
+Agora `body.email` só **confirma** (divergir é 403), e existe um preflight
+não-consumidor, `partner_network_preflight_invitation`, que valida token,
+expiração e situação do relacionamento **antes** de qualquer identidade nascer no
+Supabase Auth. Um convite morto deixou de produzir conta nova em produção.
+
+O preflight usa a **mesma matriz** da RPC de ativação, `ACTIVE` inclusive: o
+reconvite legítimo (uma segunda pessoa da mesma organização parceira) precisa
+passar nos dois, ou o segundo acesso seria impossível de conceder. Duas
+autoridades divergindo é a classe de erro que este achado é.
+
+### HIGH-10 — o contrato de saída da RPC
+
+O serviço lia `linha.relationship_id` e `linha.partner_organization_id`; a RPC
+devolve `out_*`. Os dois campos chegavam `undefined`, viravam claims ausentes no
+JWT, e o próprio `verifyPartnerToken` recusava a sessão recém-emitida. A ativação
+inteira estava quebrada e a bateria passava — porque nenhum teste ia da RPC até o
+token. A leitura agora é estrita (campo ausente = erro, nunca fallback), e o
+teste HTTP atravessa RPC → serviço → `POST /portal/parceiro/ativar` → JWT →
+`GET /eu`.
+
+### HIGH-11 — estado e evento são a mesma decisão
+
+`PARTNER_NETWORK_AUDIT_IS_TRANSACTIONAL_ONLY=true`
+
+`UPDATE` seguido de `registrarEvento()` são duas transações. O UPDATE commitava
+sozinho: uma revogação podia valer sem registro de quando nem por quem — e
+"provar depois" é o único uso de um log de auditoria.
+
+Duas RPCs novas — `partner_network_set_relationship_status` e
+`partner_network_withdraw_opportunity` — travam a linha, validam a transição,
+mudam o estado e gravam o evento na mesma transação. A máquina de estados passou
+a viver **no banco**, não só no JavaScript. E o gravador de evento avulso foi
+**removido**: mantê-lo exportado manteria a armadilha, porque ele parece
+suficiente.
+
+### HIGH-12 — autorização antes de idempotência
+
+A RPC de resposta resolvia `client_request_id` **primeiro** e retornava. Isso
+transformava um id de requisição conhecido numa chave-mestra de leitura: devolvia
+200 com id e revisão depois da revogação, com a organização errada, com a fonte
+obsoleta ou com o prazo vencido. Um replay não pode ser mais poderoso que a
+chamada original.
+
+Ordem congelada: destinatário → organização → relacionamento → **ator** →
+oportunidade → prazo → fonte → idempotência → escrita.
+
+`p_partner_user_id` deixou de ser rótulo livre (§9): precisa existir, estar
+`ATIVO` e pertencer à mesma organização. `partner_client` continua **fora** da
+E3.6A — a coluna existe para não reescrever a tabela depois, e a porta segue
+fechada até haver decisão.
+
+### HIGH-13 — a auto-correção precisa persistir
+
+A RPC marcava `STALE_SOURCE`, gravava o evento e dava `RAISE EXCEPTION`. O RAISE
+aborta a transação e leva as duas escritas junto: o comentário prometia "marca o
+estado para a próxima leitura chegar honesta" e o banco não guardava nada. A
+oportunidade seguia `CURRENT` para sempre, recusando cada resposta com o mesmo
+erro e sem nunca contar por quê.
+
+Agora devolve `out_result='SOURCE_STALE'` e **commita**: zero resposta inserida,
+estado e evento persistidos. O serviço converte em HTTP 409 — a recusa continua
+recusa, mas deixa rastro.
+
+### HIGH-14 — todos os pedidos, ou nenhum
+
+`SHARE_RECIPIENT_POLICY_V1=ALL_REQUESTED_OR_FAIL`
+
+Pedir `[A, B, C]` com B revogado compartilhava com A e C, devolvia 201 e
+informava "2 destinatários" — um número que ninguém lê como "faltou o B". O
+operador acreditava ter pedido capacidade a três parceiros; a lacuna que ele dava
+por coberta continuava aberta, e a descoberta vinha tarde.
+
+A lista é normalizada (nulos fora, duplicatas colapsadas, ordenada por id), todos
+os pedidos são travados nessa ordem estável **antes** de qualquer decisão, e
+todos precisam existir, ser da empresa e estar `ACTIVE`. Qualquer um inválido
+reprova a operação inteira: zero oportunidade, zero destinatário, zero evento.
+
+O teste que afirmava o contrário — *"share ignora parceiro revogado e mantém o
+ativo"* — consagrava o defeito e foi substituído.
+
+Idempotência de share também endureceu: mesma chave com campanha ou plano
+diferente agora é `partner_share_idempotency_conflict`, nunca o share anterior
+devolvido em silêncio.
+
+### HIGH-15 — uma identidade, várias redes
+
+`PARTNER_MULTI_NETWORK_LOGIN_V1=EXPLICIT_CONTEXT_SELECTION`
+
+O login resolvia por `maybeSingle()` sobre `auth_user_id`, e essa chamada
+**falha** com mais de uma linha. Duas linhas para a mesma identidade não são
+corrupção: são o caso normal de quem é parceiro de duas transportadoras com o
+mesmo e-mail. Na prática, aceitar o segundo convite **quebrava o login do
+primeiro**, com erro de servidor e sem explicação.
+
+As duas saídas fáceis estão descartadas por decisão:
+
+- `auth_user_id` **não** vira único global — isso proibiria o segundo convite
+  legítimo, com a rede da empresa B negando acesso porque a A convidou antes;
+- nenhuma linha é escolhida em silêncio — a pessoa entraria na rede errada sem
+  saber.
+
+Com 0 vínculos ativos: nega. Com 1: emite a sessão direto. Com mais de 1:
+`requires_context_selection=true` e **apenas** os contextos daquela identidade.
+A escolha vai para `POST /portal/parceiro/contexto`, que prova a senha de novo e
+exige que o vínculo pertença ao `auth_user_id` autenticado. Um token, um
+contexto: o da rede A não alcança a B.
+
+Nada liga duas organizações automaticamente — nem por e-mail, CNPJ, nome ou
+domínio. Cada vínculo nasce de um convite explícito.
+
+A tela de escolha mostra o nome da **organização parceira**, nunca o da
+transportadora solicitante: o portal inteiro é construído sobre "nada do
+solicitante sai daqui", e uma tela que aparece *antes* de existir sessão não é
+lugar para abrir exceção.
+
+### Resíduos fechados
+
+- **`REPLAN_RPC_ERROR_HANDLING`** — `approvePlan` usava `try/catch` em volta de
+  `supabase.rpc()`. O client não lança em erro de RPC: resolve com
+  `{ data, error }`. Função ausente, sem permissão ou com exceção voltavam por
+  `error` e o `catch` nunca era alcançado — o único aviso existente era
+  inalcançável na prática, e a marcação podia estar quebrada em produção
+  indefinidamente sem uma linha de log. Agora lê `{ error }` e registra. Segue
+  não-fatal de propósito: a autoridade final é a revalidação da fonte dentro da
+  transação da resposta.
+- **`PARTNER_AUTH_METADATA_DOMAIN`** — o serviço compartilhado gravava
+  `portal_embarcador: true` em qualquer conta que criasse, inclusive as de
+  parceiro. A marca ficava simplesmente falsa. O metadata passou a ser
+  parametrizado (`userMetadata`), com o default preservando a E3.5 e o parceiro
+  usando `partner_portal: true`. **Metadata não é autoridade** — é proveniência;
+  nenhum caminho de autorização lê dali.
+
+### Fora de escopo, ainda em aberto
+
+- `PARTNER_CLIENT_UX_DECISION_NEEDED=DEFERRED`
+- `E36B_PRICE_AND_AWARD_PRODUCT_DECISION_GATE=PENDING`
+- `CAMPAIGN_SCENARIO_CAPACITY_GAP_IMPRECISO=TECH_DEBT_SEPARATE_NOT_FIXED` (§2)
