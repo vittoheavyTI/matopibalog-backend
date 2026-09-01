@@ -755,6 +755,48 @@ async function approvePlan(supabase, { empresaId, user, campaignId, planId, body
     .eq('empresa_id', empresaId)
     .eq('id', campaignId);
   throwDb(campaignError);
+
+  // E3.6A / HIGH-03 — aprovar um plano NOVO invalida o que já foi pedido à rede.
+  //
+  // Uma oportunidade compartilhada carrega o residual de um plano específico. Se
+  // esse plano foi superado, o número que o parceiro está vendo deixou de ser o
+  // pedido atual — e responder a ele viraria compromisso sobre uma carga que já
+  // mudou. Marcar aqui é o que liga o replan à rede: sem isto, `STALE_SOURCE`
+  // seria um estado que nada produz.
+  //
+  // O snapshot NÃO é reescrito: só o estado muda, e o evento fica registrado.
+  //
+  // Best-effort DELIBERADO, e a razão é que existe a segunda camada: a RPC de
+  // resposta reconfere a versão do plano dentro da própria transação, então uma
+  // falha aqui não deixa passar resposta obsoleta — só adia a marcação. Derrubar
+  // a aprovação de um plano por causa disso seria o remédio pior que a doença.
+  if (isReplanApproval) {
+    // O `try/catch` sozinho NÃO percebia a falha, e essa é a parte que importa.
+    //
+    // O client do Supabase não lança em erro de RPC: ele RESOLVE a promessa com
+    // `{ data, error }`. Uma função ausente (a 082 ainda não aplicada), sem
+    // permissão, ou que levantou exceção, voltava por `error` — e o `await` dentro
+    // do `try` seguia feliz. O `catch` só pegaria falha de rede.
+    //
+    // Ou seja: o único aviso que existia era inalcançável na prática. A marcação
+    // podia estar quebrada em produção indefinidamente sem uma linha de log.
+    const { error: staleError } = await supabase.rpc('partner_network_mark_source_stale', {
+      p_empresa_id: empresaId,
+      p_campaign_id: campaignId,
+      p_motivo: 'replan_aprovado',
+      p_actor_user_id: userId(user),
+    });
+    if (staleError) {
+      // Continua sendo não-fatal DE PROPÓSITO: a autoridade final é a
+      // revalidação da fonte dentro da RPC de resposta, que roda na mesma
+      // transação da escrita. Uma falha aqui adia a marcação; ela não deixa
+      // passar resposta obsoleta. Derrubar a aprovação de um plano por causa
+      // disso seria o remédio pior que a doença.
+      console.warn('[campaign:approvePlan] rede de parceiros nao marcada como obsoleta:',
+        staleError.message || staleError.code || staleError);
+    }
+  }
+
   return getPlan(supabase, { empresaId, campaignId, planId, operationalScope });
 }
 

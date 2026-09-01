@@ -140,7 +140,19 @@ async function provarControleDaIdentidade({ alvo, senha, identidadeEsperada, aut
   return data.user.id;
 }
 
-async function resolverOuCriarIdentidade(supabase, { email, senha, nome, auth = null }) {
+// Marca de domínio gravada em `user_metadata` quando a identidade é criada AQUI.
+//
+// É só uma etiqueta de proveniência — "esta conta nasceu por um convite de
+// portal" — e nunca autoriza nada: quem decide acesso é `shipper_portal_users` /
+// `partner_portal_users`, relidos a cada requisição. Por isso ela pode ser
+// parametrizada sem abrir nada: o default preserva o comportamento do
+// Embarcador, e a Rede de Parceiros passa a própria marca em vez de herdar
+// `portal_embarcador: true`, que dizia uma coisa falsa sobre a conta.
+const METADATA_PADRAO = Object.freeze({ portal_embarcador: true });
+
+async function resolverOuCriarIdentidade(supabase, {
+  email, senha, nome, auth = null, userMetadata = METADATA_PADRAO,
+}) {
   const alvo = normalizarEmail(email);
   if (!alvo) {
     throw new ShipperPortalError('Informe um e-mail válido.', { status: 400, code: 'invalid_email' });
@@ -163,7 +175,9 @@ async function resolverOuCriarIdentidade(supabase, { email, senha, nome, auth = 
     email: alvo,
     password: String(senha),
     email_confirm: true,
-    user_metadata: { nome: nome || null, portal_embarcador: true },
+    // Metadata NÃO é autoridade — é proveniência. Quem chamou decide a marca;
+    // nenhum caminho de autorização lê daqui.
+    user_metadata: { nome: nome || null, ...(userMetadata || METADATA_PADRAO) },
   });
 
   if (error) {
@@ -209,6 +223,7 @@ async function autenticarPorSenha({ email, senha }) {
 }
 
 module.exports = {
+  METADATA_PADRAO,
   hashToken,
   gerarTokenConvite,
   normalizarEmail,

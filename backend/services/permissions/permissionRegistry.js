@@ -30,6 +30,7 @@ const CATEGORIES = Object.freeze({
   finance_saas: 'finance.saas',
   reports: 'reports',
   governance: 'governance', // estrutura/ERP/SSO — já existem como PERMISSOES_PORTAL
+  partner_network: 'partner_network', // E3.6: rede privada de parceiros
 });
 
 /**
@@ -98,6 +99,15 @@ const PERMISSIONS = Object.freeze([
   // ── REPORTS ────────────────────────────────────────────────────────────────
   { key: 'reports.operational.view', category: CATEGORIES.reports, label: 'Relatórios operacionais', scoped: true, legacyMenuKey: 'relatorios' },
   { key: 'reports.financial.view', category: CATEGORIES.reports, label: 'Relatórios financeiros', scoped: true },
+
+  // ── PARTNER NETWORK (E3.6A) ────────────────────────────────────────────────
+  // Rede PRIVADA: quem vê, quem administra o relacionamento, quem compartilha
+  // uma lacuna de capacidade e quem responde por um parceiro que também é
+  // cliente Matopiba. Nenhuma delas concede acesso financeiro.
+  { key: 'partner_network.view', category: CATEGORIES.partner_network, label: 'Ver rede de parceiros', scoped: false, entitlementCodigo: 'partner_network' },
+  { key: 'partner_network.manage', category: CATEGORIES.partner_network, label: 'Convidar e revogar parceiros', scoped: false, entitlementCodigo: 'partner_network' },
+  { key: 'partner_network.share', category: CATEGORIES.partner_network, label: 'Compartilhar lacuna de capacidade com parceiros', scoped: true, entitlementCodigo: 'partner_network' },
+  { key: 'partner_network.respond', category: CATEGORIES.partner_network, label: 'Responder oportunidades recebidas de parceiros', scoped: false, entitlementCodigo: 'partner_network' },
 
   // ── GOVERNANCE (portal — já existiam em PERMISSOES_PORTAL) ──────────────────
   { key: 'estrutura_operacional.gerenciar', category: CATEGORIES.governance, label: 'Gerenciar estrutura operacional', scoped: false, entitlementCodigo: 'estrutura_operacional' },
@@ -178,6 +188,7 @@ const TEMPLATE_BASELINE_ALLOW = Object.freeze({
     'finance.saas.view',
     'reports.operational.view', 'reports.financial.view',
     'estrutura_operacional.gerenciar', 'integracoes_erp.gerenciar', 'acesso_corporativo_sso.gerenciar',
+    'partner_network.view', 'partner_network.manage', 'partner_network.share', 'partner_network.respond',
   ),
   [TEMPLATE_KEYS.OPERADOR]: _A(
     'company.settings.view',
@@ -197,6 +208,9 @@ const TEMPLATE_BASELINE_ALLOW = Object.freeze({
     'fleet.view', 'fleet.manage',
     'campaign.view', 'campaign.create', 'campaign.plan', 'campaign.approve', 'campaign.manage', 'campaign.dispatch',
     'reports.operational.view',
+    // §43: a rede é operacional, então o Gerente de Frota recebe. O Operador NÃO —
+    // fica DEFAULT_DENY e a empresa delega depois, se quiser, pelo template editável.
+    'partner_network.view', 'partner_network.manage', 'partner_network.share', 'partner_network.respond',
   ),
   [TEMPLATE_KEYS.GERENTE_FILIAL]: _A(
     'company.settings.view',

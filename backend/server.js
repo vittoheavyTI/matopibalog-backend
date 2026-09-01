@@ -197,6 +197,19 @@ app.use('/route-intelligence', require('./routes/routeIntelligence'));
 app.use('/portal/embarcador', require('./routes/shipperPortal'));
 app.use('/shipper-inbox', require('./routes/shipperInbox'));
 
+// Rede Privada de Parceiros (E3.6A). Mesma separação em duas superfícies, pela
+// mesma razão: uma identidade externa que entrasse no roteador interno herdaria
+// o tenant do solicitante via `usuarios.empresa_id`.
+//   * /portal/parceiro  → EXTERNA. Sessão de parceiro (token_kind='partner_portal'),
+//     NUNCA `verificarEmpresa`. Autoriza identidade externa + relacionamento ativo
+//     + share explícito + estado do share.
+//   * /rede-parceiros   → INTERNA. Sessão da transportadora, tenant, entitlement,
+//     permissão efetiva e escopo, como qualquer rota interna.
+// Sem preço, sem adjudicação, sem marketplace: E3.6A compartilha lacuna de
+// capacidade e recebe disponibilidade declarada, nada além disso.
+app.use('/portal/parceiro', require('./routes/partnerPortal'));
+app.use('/rede-parceiros', require('./routes/partnerNetwork'));
+
 // Tratamento de erros de upload (multer). Mapeia tamanho/MIME para respostas
 // JSON controladas; erros não relacionados seguem para o próximo handler.
 app.use((err, req, res, next) => {

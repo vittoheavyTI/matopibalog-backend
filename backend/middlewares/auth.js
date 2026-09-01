@@ -4,16 +4,42 @@ const { criarVerifyTokenSec1 } = require('./authSession');
 
 let verifyTokenSec1Memo = null;
 
-// Portal do Embarcador (E3.5): o token do portal é assinado com o MESMO
-// JWT_SECRET (não inventamos gestão de segredo nova) e carrega a claim
-// discriminante `token_kind='shipper_portal'`. Sem esta rejeição explícita, o
-// caminho legado abaixo (jwt.verify puro) aceitaria um token externo como se
-// fosse de um operador interno. A identidade externa NUNCA vale aqui.
-const PORTAL_TOKEN_KIND = 'shipper_portal';
+// IDENTIDADES EXTERNAS: os tokens do Portal do Embarcador (E3.5) e da Rede de
+// Parceiros (E3.6) são assinados com o MESMO `JWT_SECRET` — não inventamos gestão
+// de segredo nova — e se distinguem por uma claim obrigatória, `token_kind`.
+//
+// Sem esta rejeição, o caminho legado abaixo (`jwt.verify` puro) aceitaria um
+// token externo como se fosse de um operador interno. E o dano não seria "ver a
+// tela errada": `middlewares/tenant.js` deriva `req.empresa_id` de
+// `usuarios.empresa_id`, então uma identidade externa que entrasse aqui herdaria
+// o tenant inteiro de quem a convidou.
+//
+// A REGRA É GENÉRICA, e essa é a diferença que importa. Uma lista de kinds
+// conhecidos só barra o que alguém lembrou de cadastrar: um portal novo criado
+// no futuro passaria direto até alguém notar. Aqui a autoridade é a presença da
+// claim, não o valor dela — nenhum token interno tem `token_kind` (o de sessão
+// usa `token_use: 'access'`, o legado não tem claim de tipo, e a credencial de
+// rastreamento também não), então qualquer valor presente é, por definição, de
+// fora. O default é NEGAR.
+//
+// `ANY_NON_EMPTY_TOKEN_KIND_ON_INTERNAL_VERIFYTOKEN=DENY`
 
-function rejeitarTokenDePortal(decoded, res) {
-  if (decoded && decoded.token_kind === PORTAL_TOKEN_KIND) {
-    res.status(403).json({ message: 'Esta credencial é do portal do embarcador e não acessa o sistema interno.' });
+// Só para a mensagem — nunca para a decisão de autorizar.
+const MENSAGEM_POR_KIND = {
+  shipper_portal: 'Esta credencial é do portal do embarcador e não acessa o sistema interno.',
+  partner_portal: 'Esta credencial é da área do parceiro e não acessa o sistema interno.',
+};
+
+// Mantido exportado para os testes de simetria e para quem precise enumerar os
+// domínios externos conhecidos. NÃO é a autoridade da rejeição.
+const TOKEN_KINDS_EXTERNOS = new Set(Object.keys(MENSAGEM_POR_KIND));
+
+function rejeitarTokenExterno(decoded, res) {
+  const kind = decoded && decoded.token_kind;
+  if (typeof kind === 'string' && kind.trim() !== '') {
+    res.status(403).json({
+      message: MENSAGEM_POR_KIND[kind] || 'Esta credencial é de um domínio externo e não acessa o sistema interno.',
+    });
     return true;
   }
   return false;
@@ -27,14 +53,14 @@ const verifyToken = (req, res, next) => {
       verifyTokenSec1Memo = criarVerifyTokenSec1({ cfg, sessionService });
     }
     // Defesa em profundidade: mesmo com SEC-1 ligado (que valida sessão em
-    // `auth_sessions`, onde um usuário de portal nunca existe), rejeitamos o
-    // token de portal ANTES, com mensagem correta em vez de erro de sessão.
+    // `auth_sessions`, onde uma identidade externa nunca existe), rejeitamos o
+    // token externo ANTES, com mensagem correta em vez de erro de sessão.
     const authHeader = req.headers['authorization'];
     const bruto = (authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null)
       || (req.cookies ? req.cookies.token : null);
     if (bruto) {
       const semVerificar = jwt.decode(bruto);
-      if (rejeitarTokenDePortal(semVerificar, res)) return undefined;
+      if (rejeitarTokenExterno(semVerificar, res)) return undefined;
     }
     return verifyTokenSec1Memo(req, res, next);
   }
@@ -52,7 +78,7 @@ const verifyToken = (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    if (rejeitarTokenDePortal(decoded, res)) return undefined;
+    if (rejeitarTokenExterno(decoded, res)) return undefined;
     req.user = decoded; // Salva os dados do usuário para a próxima rota
     next();
   } catch (err) {
@@ -95,6 +121,7 @@ const isSuperAdmin = (req, res, next) => {
 // Exporta as funções para serem usadas nas rotas
 module.exports = {
   verifyToken,
+  TOKEN_KINDS_EXTERNOS,
   isAdmin,
   isSuperAdmin
 };

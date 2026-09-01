@@ -253,7 +253,26 @@ function makeSupabase() {
     }
     return b;
   }
-  return { from: (name) => builder(name), __tables: tables };
+  // E3.6A: `approvePlan` chama `partner_network_mark_source_stale` no replan.
+  //
+  // O dublê precisa oferecer `rpc` porque o serviço agora LÊ `{ error }` em vez
+  // de confiar num `try/catch` — que nunca disparava, já que o client do Supabase
+  // resolve a promessa com o erro dentro em vez de lançar. `__rpc` guarda as
+  // chamadas para os testes olharem, e `__rpcError` deixa forçar a falha.
+  const rpcCalls = [];
+  const supa = {
+    from: (name) => builder(name),
+    __tables: tables,
+    __rpc: rpcCalls,
+    __rpcError: null,
+    rpc: async (fn, args) => {
+      rpcCalls.push({ fn, args });
+      return supa.__rpcError
+        ? { data: null, error: supa.__rpcError }
+        : { data: 0, error: null };
+    },
+  };
+  return supa;
 }
 
 const SCOPE = { mode: 'LEGACY_COMPANY' };
@@ -376,4 +395,61 @@ test('approvePlan (replan): aprovar a v2 supera a v1 ANTES de promover — nunca
   assert.equal(supabase.__tables.campaign_trip_freights.length, 2);
   assert.ok(supabase.__tables.campaign_planned_trips.some((t) => t.id === 't1'));
   assert.ok(supabase.__tables.campaign_planned_trips.some((t) => t.id === 't2'));
+});
+
+// ── E3.6A / REPLAN_RPC_ERROR_HANDLING ─────────────────────────────────────────
+//
+// O caminho de replan avisa a rede de parceiros que as oportunidades já
+// compartilhadas ficaram obsoletas. O que estes dois testes protegem não é a
+// marcação em si — é a CAPACIDADE DE PERCEBER que ela falhou.
+
+test('replan: a aprovação avisa a rede de parceiros pelo caminho canônico', async () => {
+  const supabase = makeSupabase();
+  const created = await seedApprovedCampaignWithExecution(supabase);
+  const replanned = await generateReplan(supabase, {
+    empresaId: EMP, user: USER, campaignId: created.campaign.id, operationalScope: SCOPE, body: { reason: 'x' },
+  });
+  await approvePlan(supabase, {
+    empresaId: EMP, user: USER, campaignId: created.campaign.id, planId: replanned.plan.id, operationalScope: SCOPE,
+  });
+
+  const marcacoes = supabase.__rpc.filter((c) => c.fn === 'partner_network_mark_source_stale');
+  assert.equal(marcacoes.length, 1, 'replan aprovado precisa marcar a fonte como obsoleta');
+  assert.equal(marcacoes[0].args.p_campaign_id, created.campaign.id);
+  assert.equal(marcacoes[0].args.p_motivo, 'replan_aprovado');
+});
+
+test('replan: falha da RPC volta em { error } — e PRECISA ser percebida, sem derrubar a aprovação', async () => {
+  // O defeito que este teste trava: o código tinha `try { await supabase.rpc() }
+  // catch { warn }`. O client do Supabase NÃO lança em erro de RPC — ele resolve
+  // com `{ data, error }`. Função ausente (082 não aplicada), sem permissão ou
+  // com exceção voltavam por `error`, o `await` seguia adiante e o `catch` nunca
+  // era alcançado. O único aviso existente era inalcançável na prática.
+  const supabase = makeSupabase();
+  const created = await seedApprovedCampaignWithExecution(supabase);
+  const replanned = await generateReplan(supabase, {
+    empresaId: EMP, user: USER, campaignId: created.campaign.id, operationalScope: SCOPE, body: { reason: 'x' },
+  });
+
+  supabase.__rpcError = { message: 'function public.partner_network_mark_source_stale does not exist', code: '42883' };
+  const avisos = [];
+  const warnOriginal = console.warn;
+  console.warn = (...args) => avisos.push(args.map(String).join(' '));
+  try {
+    await approvePlan(supabase, {
+      empresaId: EMP, user: USER, campaignId: created.campaign.id, planId: replanned.plan.id, operationalScope: SCOPE,
+    });
+  } finally {
+    console.warn = warnOriginal;
+  }
+
+  assert.equal(avisos.length, 1, 'a falha precisa ser percebida e registrada');
+  assert.match(avisos[0], /rede de parceiros nao marcada como obsoleta/);
+  assert.match(avisos[0], /does not exist/, 'o motivo real precisa chegar ao log, não um objeto opaco');
+
+  // E a aprovação NÃO cai: a autoridade final é a revalidação da fonte dentro da
+  // RPC de resposta, que roda na mesma transação da escrita.
+  const aprovadas = supabase.__tables.campaign_plan_versions.filter((v) => v.status === 'APPROVED');
+  assert.equal(aprovadas.length, 1);
+  assert.equal(aprovadas[0].id, replanned.plan.id);
 });

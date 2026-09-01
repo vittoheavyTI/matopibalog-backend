@@ -188,6 +188,11 @@ export const Sidebar: React.FC = () => {
       ...(can('campaign.view') ? [
         { to: '/campanhas-escoamento', icon: ClipboardList, label: 'Campanhas de Escoamento' },
       ] : []),
+      // A rede fica logo depois de Campanhas porque é dali que ela nasce: a
+      // lacuna de capacidade de uma campanha é o que se compartilha.
+      ...(can('partner_network.view') ? [
+        { to: '/rede-parceiros', icon: Network, label: 'Rede de Parceiros' },
+      ] : []),
       ...(can('reports.operational.view') ? [
         { to: '/relatorios/torre-controle', icon: TowerControl, label: 'Torre de Controle' },
       ] : []),

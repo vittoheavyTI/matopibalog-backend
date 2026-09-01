@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Activity, AlertTriangle, CheckCircle2, ChevronDown, ClipboardCheck, ExternalLink, Factory, MapPin, Play, RefreshCw, Route, ShieldAlert, Sparkles, Target, Users, XCircle } from 'lucide-react';
+import { Activity, AlertTriangle, CheckCircle2, ChevronDown, ClipboardCheck, ExternalLink, Factory, MapPin, Play, RefreshCw, Route, ShieldAlert, Sparkles, Target, Users, XCircle , Share2 } from 'lucide-react';
 import api from '../api';
+import { CompartilharLacunaModal } from '../components/CompartilharLacunaModal';
+import { useAuth } from '../contexts/AuthContext';
 import { useLancamentosRealtime } from '../hooks/useLancamentosRealtime';
 
 type Unidade = { id: string; nome: string; codigo?: string | null };
@@ -680,6 +682,14 @@ function num(n: number | null | undefined) {
 }
 
 function CampaignExecution({ campaignId }: { campaignId: string }) {
+  const { user } = useAuth();
+  // E3.6A: a rede é uma saída para a lacuna, então o botão vive AQUI — junto do
+  // número que motiva a ação — e não numa tela desconectada (§50).
+  const [compartilharAberto, setCompartilharAberto] = useState(false);
+  const podeCompartilhar = user?.is_super_admin === true
+    || (user?.effective_permissions
+      ? user.effective_permissions['partner_network.share'] === true
+      : false);
   const [progress, setProgress] = useState<Progress | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -879,6 +889,32 @@ function CampaignExecution({ campaignId }: { campaignId: string }) {
           <Metric label="Cancelado" value={String(t.cancelled)} />
           <Metric label="Restante" value={`${num(q.remaining)} ${q.unit}`} />
         </div>
+
+        {/* Buscar capacidade na rede (E3.6A). Aparece só quando há lacuna REAL e
+            a unidade é comparável — pedir capacidade para um número que não
+            fecha seria pedir errado. Tudo que o parceiro vê é derivado daqui:
+            o operador não redigita carga, quantidade nem janela. */}
+        {podeCompartilhar && q.remaining > 0 && !q.coverage.incompatible_units && (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+            <p className="text-xs text-slate-600">
+              Faltam <strong>{num(q.remaining)} {q.unit}</strong>. Você pode pedir capacidade aos seus parceiros.
+            </p>
+            <button
+              type="button"
+              onClick={() => setCompartilharAberto(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-700"
+            >
+              <Share2 size={14} /> Buscar capacidade na rede
+            </button>
+          </div>
+        )}
+
+        <CompartilharLacunaModal
+          aberto={compartilharAberto}
+          campaignId={compartilharAberto ? campaignId : null}
+          aoFechar={() => setCompartilharAberto(false)}
+          aoCompartilhar={carregar}
+        />
         {pct !== null && (
           <div className="mt-3">
             <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>

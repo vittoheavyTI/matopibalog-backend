@@ -7,6 +7,7 @@ import { PermissionRoute } from './components/PermissionRoute';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Layout } from './components/Layout';
 import PortalApp from './portal/PortalApp';
+import PartnerApp from './partner/PartnerApp';
 import { SolicitacoesEmbarcador } from './pages/SolicitacoesEmbarcador';
 import { Login } from './pages/Login';
 import { Dashboard } from './pages/Dashboard';
@@ -25,6 +26,7 @@ import { Integracoes } from './pages/Integracoes';
 import { Operacional } from './pages/Operacional';
 import { Frota } from './pages/Frota';
 import { OperationCampaigns } from './pages/OperationCampaigns';
+import { RedeParceiros } from './pages/RedeParceiros';
 import { PainelVisaoGeral } from './pages/PainelVisaoGeral';
 import { PainelEmpresas } from './pages/PainelEmpresas';
 import { PainelPlanos } from './pages/PainelPlanos';
@@ -99,6 +101,7 @@ const AppRoutes = () => {
         <Route path="operacional" element={<Operacional />} />
         <Route path="frota" element={<PermissionRoute permission="fleet.view"><Frota /></PermissionRoute>} />
         <Route path="campanhas-escoamento" element={<OperationCampaigns />} />
+        <Route path="rede-parceiros" element={<PermissionRoute permission="partner_network.view"><RedeParceiros /></PermissionRoute>} />
         <Route
           path="solicitacoes-embarcadores"
           element={(
@@ -153,6 +156,9 @@ function App() {
             O portal traz o próprio provider de sessão e o próprio cliente HTTP.
             As duas árvores coexistem sem se misturar. */}
         <Route path="/portal/embarcador/*" element={<PortalApp />} />
+        {/* Área do parceiro: mesma separação do portal do embarcador — sessão
+            própria, cliente HTTP próprio, nenhuma navegação interna. */}
+        <Route path="/portal/parceiro/*" element={<PartnerApp />} />
         <Route
           path="*"
           element={(
