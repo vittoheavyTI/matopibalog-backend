@@ -6,7 +6,7 @@
 
 - `E36A_AUDIT_FROZEN=true`
 - `BASE=main @ bd146840`
-- `RBV9-INV-082` — permanece `IN_PROGRESS` até a migration ser aplicada
+- `RBV9-INV-082` — **`IMPL_NV`**: migration 082 aplicada e certificada em produção (2026-09-01, tracking `20260901031616`); falta a validação visual do owner
 
 ## 1. Auditoria delta (congelada)
 
@@ -467,3 +467,86 @@ janela, e `trim` **não** gerando conflito falso), entraram:
 - **corrida real de duas conexões** entre um share da fonte antiga **em voo** e o
   replan: o replan é observado bloqueado no lock que o share segura, e o estado
   final tem o share antigo `STALE_SOURCE` e o novo `CURRENT`.
+
+## 13. Produção — migration 082 aplicada e certificada (2026-09-01)
+
+`MIGRATION_082_PRODUCTION_APPLIED=true`
+`MIGRATION_082_PRODUCTION_TRACKING=20260901031616`
+`MIGRATION_082_SHA256=94787098C9FCDDF6921A38D3F79111E6B877F996FCB04BE3D68043CF6361C183`
+`E3_6A_SCHEMA_PRODUCTION=CERTIFIED`
+
+Aplicada **exatamente uma vez**, sob autorização explícita do owner, pelo
+mecanismo canônico de migration do Supabase — o mesmo das 080/081.
+
+### Como a fidelidade do SQL foi provada
+
+Duas vezes, e é isso que torna a certificação verificável em vez de declarada:
+
+1. **Antes do apply.** O texto a aplicar foi enviado ao servidor dentro de um
+   `SELECT sha256(...)` — sem executar nada — e o digest voltou idêntico ao
+   autorizado. Só depois disso o DDL rodou.
+2. **Depois do apply.** O SQL que o Supabase gravou em
+   `supabase_migrations.schema_migrations.statements` foi re-hasheado no próprio
+   banco: `94787098…c183`, byte a byte igual.
+
+O segundo passo é o que fecha o buraco: provar o arquivo local não prova o que
+chegou ao banco. Vale como método reusável — e vale notar que a 081 passa no
+mesmo teste, enquanto a 080 **não** (o SQL registrado dela diverge do arquivo
+atual no repositório). Isso não afeta a 082 nem foi tocado aqui, mas fica
+registrado porque significa que o arquivo 080 no repo não é literalmente o que
+está aplicado.
+
+### Certificação estrutural (banco real)
+
+| | Esperado | Real |
+|---|---|---|
+| Tabelas `partner_*` | 8 | **8** |
+| Índices | 23 declarados | **34** (23 + 8 de PK + 3 de UNIQUE) |
+| Funções | 11 | **11** |
+| — RPCs de negócio | 8 | **8**, todas `SECURITY DEFINER`, `search_path=public`, EXECUTE só `service_role` |
+| — funções de trigger | 3 | **3** |
+| Triggers | 3 | **3** |
+| FKs compostas | 6 | **6** |
+| RLS habilitado | 8/8 | **8/8** |
+| Policies permissivas | 0 | **0** |
+| Grants a `anon` / `authenticated` | 0 | **0 / 0** |
+
+Invariantes centrais conferidos na produção real: `partner_portal_users` **sem
+`empresa_id`**; `auth_user_id` indexado e **não único** (multi-network);
+`plan_version_id` `NOT NULL`; proveniência composta de destinatário, resposta,
+campanha e plano; e os três triggers de imutabilidade (snapshot congelado,
+respostas e eventos append-only).
+
+### DML — deltas reais, não "2 statements"
+
+| | Antes | Depois |
+|---|---|---|
+| `funcionalidades` | 23 | **24** |
+| `partner_network` (funcionalidade) | 0 | **1** |
+| `permission_template_permissions` | 3725 | **3925** |
+| — administrador (25 templates × 4) | 0 | **100** |
+| — gerente_frota (25 templates × 4) | 0 | **100** |
+| — **operador** | 0 | **0** |
+
+`BUSINESS_DML=0`. As oito tabelas da rede estão **vazias**: nenhuma organização,
+relacionamento, identidade, convite, oportunidade, destinatário, resposta ou
+evento. `empresas`, `usuarios`, `permission_templates`, `operation_campaigns` e
+`auth.users` seguem exatamente como antes (34 / 38 / 225 / 0 / 38).
+
+### A rede nasce comercialmente desligada
+
+`PARTNER_NETWORK_COMMERCIAL_DEFAULT=DENY`
+
+`plano_funcionalidades` = 0 e `empresa_funcionalidades` = 0 para
+`partner_network`, e a funcionalidade entra com `visivel_publicamente=false`.
+Nenhuma empresa tem o entitlement, então as permissões — que já existem nos
+templates — não concedem nada ainda: o resolver exige o entitlement na origem. O
+mapeamento comercial continua sendo decisão do owner, noutra frente.
+
+### O que isto NÃO significa
+
+O schema existir não é o mesmo que haver rede em uso. **Nenhuma transportadora
+convidou parceiro**, nenhum Partner Lite existe, e a entrega de convite continua
+`MANUAL_LINK` — não há envio de e-mail nesta fatia. Por isso
+`RBV9-INV-082=IMPL_NV` e `OWNER_VISUAL_VALIDATION=PENDING`: falta um humano
+percorrer o fluxo.
