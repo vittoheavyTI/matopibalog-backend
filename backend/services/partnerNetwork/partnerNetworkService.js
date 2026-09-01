@@ -251,6 +251,8 @@ const MENSAGEM_DE_RPC = {
   partner_share_idempotency_conflict: [
     'Este pedido já foi usado para compartilhar outra campanha ou outro plano. Gere um novo compartilhamento.', 409],
   partner_share_campanha_invalida: ['Campanha não encontrada.', 404],
+  partner_stale_campanha_invalida: ['Campanha não encontrada.', 404],
+  partner_stale_dados_invalidos: ['Dados inválidos para marcar a fonte como obsoleta.', 400],
   partner_share_sem_destinatarios: ['Escolha pelo menos um parceiro.', 400],
   partner_share_quantidade_invalida: ['Quantidade inválida para compartilhar.', 400],
   partner_share_dados_invalidos: ['Dados insuficientes para compartilhar.', 400],

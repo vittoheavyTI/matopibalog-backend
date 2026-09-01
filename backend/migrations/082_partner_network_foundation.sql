@@ -1031,12 +1031,22 @@ SET search_path = public
 AS $fn$
 DECLARE
   v_prev      public.partner_opportunities%ROWTYPE;
+  v_prev_ids  uuid[];
   v_ids       uuid[];
   v_pedidos   integer;
   v_elegiveis integer;
   v_op        uuid;
   v_plano     text;
   v_n         integer;
+  -- Forma NORMALIZADA de cada campo da intenção. Declaradas aqui de propósito:
+  -- são usadas tanto na comparação de idempotência quanto na escrita, e é isso
+  -- que impede a comparação de divergir do que foi gravado.
+  v_cargo     text;
+  v_origem    text;
+  v_destino   text;
+  v_mensagem  text;
+  v_unidade   text;
+  v_qtd       numeric(14,3);
 BEGIN
   IF p_empresa_id IS NULL OR p_campaign_id IS NULL OR p_plan_version_id IS NULL THEN
     RAISE EXCEPTION 'partner_share_dados_invalidos';
@@ -1045,12 +1055,32 @@ BEGIN
     RAISE EXCEPTION 'partner_share_quantidade_invalida';
   END IF;
 
+  -- NORMALIZAÇÃO ÚNICA (HIGH-16). Comparar o pedido novo contra o gravado só é
+  -- honesto se os dois passarem pela MESMA normalização. Fazer isso em dois
+  -- lugares diferentes produziria conflito falso — " Soja" contra "Soja" — ou,
+  -- pior, equivalência falsa.
+  --
+  -- `''` vira NULL nos campos opcionais: no banco eles são anuláveis, e tratar
+  -- string vazia como valor distinto de ausente criaria duas representações do
+  -- mesmo nada.
+  v_cargo    := btrim(coalesce(p_cargo, ''));
+  IF v_cargo = '' THEN
+    RAISE EXCEPTION 'partner_share_dados_invalidos';
+  END IF;
+  v_origem   := nullif(btrim(coalesce(p_origem_resumo, '')), '');
+  v_destino  := nullif(btrim(coalesce(p_destino_resumo, '')), '');
+  v_mensagem := nullif(btrim(coalesce(p_mensagem, '')), '');
+  v_unidade  := btrim(p_unidade);
+  -- A coluna é `numeric(14,3)`: comparar o valor CRU faria 100.0001 e 100.0002
+  -- parecerem intenções diferentes quando os dois gravam 100.000.
+  v_qtd      := p_quantidade::numeric(14,3);
+
   -- HIGH-14, primeiro passo: NORMALIZAR a lista pedida.
   --
   -- Nulos fora, duplicatas colapsadas e ordem por id. A ordenação não é
-  -- cosmética: é ela que dá a ordem estável de lock mais abaixo, e é o que
-  -- impede dois shares concorrentes com listas em ordens diferentes de travarem
-  -- um ao outro em sentidos opostos.
+  -- cosmética: é ela que dá a ordem estável de lock mais abaixo, é o que impede
+  -- dois shares concorrentes com listas em ordens diferentes de travarem um ao
+  -- outro em sentidos opostos, e é o que torna [A,B] e [B,A] a MESMA intenção.
   SELECT array_agg(DISTINCT x ORDER BY x) INTO v_ids
   FROM unnest(coalesce(p_relationship_ids, ARRAY[]::uuid[])) AS x
   WHERE x IS NOT NULL;
@@ -1060,40 +1090,24 @@ BEGIN
     RAISE EXCEPTION 'partner_share_sem_destinatarios';
   END IF;
 
-  -- AUTORIDADE BÁSICA ANTES DA IDEMPOTÊNCIA (§15). Sem isto, um
-  -- `client_request_id` conhecido devolvia a oportunidade anterior sem que
-  -- campanha e plano desta chamada fossem sequer olhados.
+  -- 1. FRONTEIRA DA CAMPANHA.
   PERFORM 1 FROM public.operation_campaigns
    WHERE id = p_campaign_id AND empresa_id = p_empresa_id;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'partner_share_campanha_invalida';
   END IF;
 
-  IF p_client_request_id IS NOT NULL THEN
-    SELECT * INTO v_prev
-    FROM public.partner_opportunities
-    WHERE empresa_id = p_empresa_id AND client_request_id = p_client_request_id
-    FOR UPDATE;
-    IF FOUND THEN
-      -- MESMA CHAVE, INTENÇÃO DIFERENTE → CONFLITO, nunca a resposta antiga.
-      --
-      -- Devolver silenciosamente o share anterior quando a campanha ou o plano
-      -- mudaram é pior que um erro: o operador vê "compartilhado" e acredita que
-      -- pediu capacidade para a campanha nova. Ele não pediu — e vai descobrir
-      -- quando a carga não for coberta. Idempotência responde "esta é a mesma
-      -- requisição?"; se a intenção difere, a resposta é não.
-      IF v_prev.campaign_id IS DISTINCT FROM p_campaign_id
-         OR v_prev.plan_version_id IS DISTINCT FROM p_plan_version_id THEN
-        RAISE EXCEPTION 'partner_share_idempotency_conflict';
-      END IF;
-      SELECT count(*)::int INTO v_n
-      FROM public.partner_opportunity_recipients WHERE opportunity_id = v_prev.id;
-      RETURN QUERY SELECT v_prev.id AS out_opportunity_id, v_n AS out_destinatarios, true AS out_idempotent;
-      RETURN;
-    END IF;
-  END IF;
-
-  -- A versão citada precisa ser a APROVADA daquela campanha, nesta empresa.
+  -- 2/3. AUTORIDADE DA FONTE — E ELA VEM ANTES DA IDEMPOTÊNCIA (HIGH-17).
+  --
+  -- A ordem anterior era: campanha → idempotência → (só então) plano aprovado.
+  -- Com ela, um `client_request_id` antigo ressuscitava um plano já superado:
+  -- bastava repetir a requisição depois do replan para receber 200 e
+  -- `out_idempotent=true`, como se o pedido continuasse valendo. O operador via
+  -- "já compartilhado" para uma fonte que não existe mais, e o parceiro seguia
+  -- olhando um número que o replan tornou obsoleto.
+  --
+  -- Idempotência responde "esta requisição já foi feita?". Ela não pode
+  -- responder antes de "esta requisição ainda é válida?".
   SELECT status INTO v_plano
   FROM public.campaign_plan_versions
   WHERE id = p_plan_version_id AND campaign_id = p_campaign_id AND empresa_id = p_empresa_id
@@ -1103,7 +1117,59 @@ BEGIN
     RAISE EXCEPTION 'partner_share_plano_nao_aprovado';
   END IF;
 
-  -- HIGH-14 — TRAVAR TODOS OS PEDIDOS, EM ORDEM, ANTES DE DECIDIR.
+  -- 4. IDEMPOTÊNCIA — e ela compara a INTENÇÃO INTEIRA (HIGH-16).
+  --
+  -- A versão anterior conferia apenas `campaign_id` e `plan_version_id`. Todo o
+  -- resto do pedido — quantidade, prazo, mensagem e, sobretudo, PARA QUEM ia —
+  -- passava sem ser olhado. O caso que isso deixava passar:
+  --
+  --     req 1: key=ABC, campanha C1, plano P1, destinatários [A, B]
+  --     req 2: key=ABC, campanha C1, plano P1, destinatários [A, C]
+  --     → devolvia o share de [A, B] com out_idempotent=true
+  --
+  -- O operador pedia capacidade a C e recebia confirmação. C nunca foi
+  -- convidado, B foi convidado sem que se quisesse, e nada no retorno dizia
+  -- isso. É o mesmo dano do HIGH-14 — o operador acreditando ter pedido a quem
+  -- não pediu — só que pela porta da idempotência.
+  --
+  -- A comparação é feita contra o que está PERSISTIDO, não contra um resumo
+  -- paralelo: sem coluna nova, sem fingerprint que possa divergir da linha real.
+  IF p_client_request_id IS NOT NULL THEN
+    SELECT * INTO v_prev
+    FROM public.partner_opportunities
+    WHERE empresa_id = p_empresa_id AND client_request_id = p_client_request_id
+    FOR UPDATE;
+    IF FOUND THEN
+      -- Conjunto de destinatários do share anterior, na mesma forma canônica
+      -- (ordenado, sem duplicata — o índice único já garante unicidade por par).
+      SELECT array_agg(relationship_id ORDER BY relationship_id) INTO v_prev_ids
+      FROM public.partner_opportunity_recipients
+      WHERE opportunity_id = v_prev.id;
+
+      IF v_prev.campaign_id      IS DISTINCT FROM p_campaign_id
+         OR v_prev.plan_version_id IS DISTINCT FROM p_plan_version_id
+         OR v_prev.cargo_descricao IS DISTINCT FROM v_cargo
+         OR v_prev.quantidade      IS DISTINCT FROM v_qtd
+         OR v_prev.quantidade_unidade IS DISTINCT FROM v_unidade
+         OR v_prev.origem_resumo   IS DISTINCT FROM v_origem
+         OR v_prev.destino_resumo  IS DISTINCT FROM v_destino
+         OR v_prev.janela_inicio   IS DISTINCT FROM p_janela_inicio
+         OR v_prev.janela_fim      IS DISTINCT FROM p_janela_fim
+         OR v_prev.mensagem        IS DISTINCT FROM v_mensagem
+         OR v_prev.prazo_resposta  IS DISTINCT FROM p_prazo_resposta
+         OR v_prev_ids             IS DISTINCT FROM v_ids
+      THEN
+        RAISE EXCEPTION 'partner_share_idempotency_conflict';
+      END IF;
+
+      RETURN QUERY SELECT v_prev.id AS out_opportunity_id,
+                          coalesce(array_length(v_prev_ids, 1), 0) AS out_destinatarios,
+                          true AS out_idempotent;
+      RETURN;
+    END IF;
+  END IF;
+
+  -- 5. HIGH-14 — TRAVAR TODOS OS PEDIDOS, EM ORDEM, ANTES DE DECIDIR.
   --
   -- Sem `empresa_id` no WHERE de propósito: travamos exatamente os ids que o
   -- operador pediu, inclusive um que não seja dele. A validação vem logo abaixo;
@@ -1143,9 +1209,12 @@ BEGIN
     origem_resumo, destino_resumo, quantidade, quantidade_unidade,
     janela_inicio, janela_fim, mensagem, prazo_resposta, criado_por, client_request_id
   ) VALUES (
-    p_empresa_id, p_campaign_id, p_plan_version_id, p_cargo,
-    p_origem_resumo, p_destino_resumo, p_quantidade, p_unidade,
-    p_janela_inicio, p_janela_fim, nullif(btrim(coalesce(p_mensagem, '')), ''),
+    -- As MESMAS variáveis normalizadas que a comparação de idempotência usa.
+    -- Gravar o valor cru aqui e comparar o normalizado acima faria a segunda
+    -- chamada idêntica virar conflito — o defeito se disfarçaria de correção.
+    p_empresa_id, p_campaign_id, p_plan_version_id, v_cargo,
+    v_origem, v_destino, v_qtd, v_unidade,
+    p_janela_inicio, p_janela_fim, v_mensagem,
     p_prazo_resposta, p_actor_user_id, p_client_request_id
   )
   RETURNING id INTO v_op;
@@ -1172,7 +1241,7 @@ BEGIN
     (empresa_id, entity_type, entity_id, action, actor_user_id, source, metadata)
   VALUES (p_empresa_id, 'opportunity', v_op, 'opportunity_shared', p_actor_user_id, 'web',
           jsonb_build_object('campaign_id', p_campaign_id, 'destinatarios', v_n,
-                             'quantidade', p_quantidade, 'unidade', p_unidade));
+                             'quantidade', v_qtd, 'unidade', v_unidade));
 
   RETURN QUERY SELECT v_op AS out_opportunity_id, v_n AS out_destinatarios, false AS out_idempotent;
 END;
@@ -1340,6 +1409,32 @@ END;
 $fn$;
 
 -- ── 11.8 Marcar fonte obsoleta (chamado pelo caminho canônico de replan) ──────
+--
+-- HIGH-18 — O MARCADOR PRECISA SER ESCOPADO À FONTE, NÃO À CAMPANHA.
+--
+-- A versão anterior marcava como obsoleta TODA oportunidade `CURRENT` da
+-- campanha, sem olhar de qual plano ela veio. E o `approvePlan` chama esta
+-- função DEPOIS de já ter promovido o plano novo e apontado
+-- `operation_campaigns.approved_plan_version_id` para ele.
+--
+-- O efeito: um share criado a partir do plano NOVO — legítimo, atual, ainda não
+-- respondido — era marcado `STALE_SOURCE` pelo próprio replan que promoveu esse
+-- plano. A janela não é teórica: basta o operador compartilhar a lacuna logo
+-- depois da aprovação e antes de a marcação rodar. O parceiro passava a ver um
+-- pedido "obsoleto" que era o único pedido válido, e a resposta dele seria
+-- recusada por uma obsolescência que nunca aconteceu.
+--
+-- `STALE_SOURCE_MEANS_SOURCE_IS_NO_LONGER_CURRENT=true`. A pergunta certa não é
+-- "esta campanha replanejou?", é "a fonte DESTE share ainda é a fonte atual da
+-- campanha?".
+--
+-- UMA autoridade, não duas: a fonte atual é
+-- `operation_campaigns.approved_plan_version_id`. Conferir também
+-- `campaign_plan_versions.status` como um segundo critério criaria dois donos da
+-- mesma verdade, que é como se produz divergência. O status do plano continua
+-- sendo conferido onde ele decide de fato — na transação de
+-- `partner_network_submit_response` (§13), que é a autoridade final e não
+-- depende desta marcação ter rodado.
 CREATE OR REPLACE FUNCTION public.partner_network_mark_source_stale(
   p_empresa_id uuid,
   p_campaign_id uuid,
@@ -1352,12 +1447,39 @@ SECURITY DEFINER
 SET search_path = public
 AS $fn$
 DECLARE
-  v_id uuid;
-  v_n  integer := 0;
+  v_id     uuid;
+  v_atual  uuid;
+  v_achou  boolean;
+  v_n      integer := 0;
 BEGIN
+  IF p_empresa_id IS NULL OR p_campaign_id IS NULL THEN
+    RAISE EXCEPTION 'partner_stale_dados_invalidos';
+  END IF;
+
+  -- A fonte ATUAL da campanha, lida da autoridade canônica e sob o mesmo lock
+  -- que o replan usa para promovê-la: sem isto, esta função poderia ler o
+  -- ponteiro antigo e marcar exatamente o share que acabou de nascer certo.
+  SELECT approved_plan_version_id, true INTO v_atual, v_achou
+  FROM public.operation_campaigns
+  WHERE id = p_campaign_id AND empresa_id = p_empresa_id
+  FOR SHARE;
+
+  IF NOT coalesce(v_achou, false) THEN
+    -- Campanha inexistente nesta empresa é erro de chamada, não "nada a fazer".
+    -- Silenciar aqui esconderia uma marcação que nunca aconteceu.
+    RAISE EXCEPTION 'partner_stale_campanha_invalida';
+  END IF;
+
   FOR v_id IN
     SELECT id FROM public.partner_opportunities
-    WHERE empresa_id = p_empresa_id AND campaign_id = p_campaign_id AND estado = 'CURRENT'
+    WHERE empresa_id = p_empresa_id
+      AND campaign_id = p_campaign_id
+      AND estado = 'CURRENT'
+      -- O FILTRO QUE FALTAVA. `IS DISTINCT FROM` (e não `<>`) porque
+      -- `v_atual` pode ser NULL: uma campanha que perdeu o plano aprovado não
+      -- tem fonte atual nenhuma, e aí TODO share vivo está mesmo órfão.
+      AND plan_version_id IS DISTINCT FROM v_atual
+    ORDER BY id
     FOR UPDATE
   LOOP
     UPDATE public.partner_opportunities

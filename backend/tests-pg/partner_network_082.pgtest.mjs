@@ -1136,8 +1136,25 @@ function registrar(pg) {
     assert.equal(b.rows[0].out_idempotent, true);
   });
 
+  // Promove uma v2 pelo caminho real do replan: supera a v1, cria a v2 APPROVED
+  // (o schema só admite UMA aprovada por campanha) e aponta a autoridade
+  // canônica da campanha para ela.
+  async function promoverNovoPlano(c) {
+    await pool.query(`UPDATE campaign_plan_versions SET status='SUPERSEDED' WHERE id=$1`, [c.planoA]);
+    const plano2 = (await pool.query(
+      `INSERT INTO campaign_plan_versions (empresa_id, campaign_id, version_number, status, rules_version)
+       VALUES ($1,$2,2,'APPROVED','v1') RETURNING id`, [c.empresaA, c.campanhaA])).rows[0].id;
+    await pool.query('UPDATE operation_campaigns SET approved_plan_version_id=$2 WHERE id=$1',
+      [c.campanhaA, plano2]);
+    return plano2;
+  }
+
   test('082: marcar fonte obsoleta muda o estado e registra evento', async () => {
     const c = await cenario();
+    // `oportA` nasceu de `planoA`; o replan promove a v2, então a fonte dela
+    // deixou de ser a atual.
+    await promoverNovoPlano(c);
+
     const n = await pool.query('SELECT partner_network_mark_source_stale($1,$2,$3,$4) AS n',
       [c.empresaA, c.campanhaA, 'replan_aprovado', null]);
     assert.ok(Number(n.rows[0].n) >= 1);
@@ -1801,5 +1818,364 @@ function registrar(pg) {
     assert.equal(rows[0].linked_empresa_id, null, 'virar Cliente é ato explícito, fora desta fatia');
   });
 
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // HIGH-16 — A CHAVE DE IDEMPOTÊNCIA REPRESENTA A INTENÇÃO INTEIRA
+  //
+  // A comparação anterior olhava só `campaign_id` e `plan_version_id`. Todo o
+  // resto do pedido — quantidade, prazo, mensagem e, sobretudo, PARA QUEM ia —
+  // passava sem ser conferido. Repetir a chave com outra lista de parceiros
+  // devolvia o share antigo com `out_idempotent=true`: o operador pedia
+  // capacidade a C, recebia confirmação, e C nunca tinha sido convidado.
+  // ══════════════════════════════════════════════════════════════════════════
+
+  // Assinatura completa do share, para variar UM campo por vez sem repetir 15
+  // posicionais em cada teste.
+  function argsDeShare(c, over = {}) {
+    const a = {
+      empresa: c.empresaA, ator: null, campanha: c.campanhaA, plano: c.planoA,
+      cargo: 'Soja', quantidade: 100, unidade: 'ton', recipients: [c.relA],
+      origem: null, destino: null, janelaInicio: null, janelaFim: null,
+      mensagem: null, prazo: null, key: null, ...over,
+    };
+    return [a.empresa, a.ator, a.campanha, a.plano, a.cargo, a.quantidade, a.unidade,
+      a.recipients, a.origem, a.destino, a.janelaInicio, a.janelaFim, a.mensagem, a.prazo, a.key];
+  }
+
+  const SQL_SHARE = `SELECT * FROM partner_network_share_gap(
+    $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`;
+
+  const compartilhar = (c, over) => pool.query(SQL_SHARE, argsDeShare(c, over));
+
+  async function cenarioComTresParceiros() {
+    const c = await cenario();
+    const b = await relacionamentoExtra(c.empresaA, 'ACTIVE', 'Parceiro B');
+    const d = await relacionamentoExtra(c.empresaA, 'ACTIVE', 'Parceiro C');
+    return { ...c, relB2: b.rel, relC2: d.rel };
+  }
+
+  test('082 HIGH-16: mesma intenção com destinatários em ORDEM diferente continua idempotente', async () => {
+    const c = await cenarioComTresParceiros();
+    const key = 'i16-ordem-' + Math.random().toString(36).slice(2);
+
+    const a = await compartilhar(c, { recipients: [c.relA, c.relB2], key });
+    const b = await compartilhar(c, { recipients: [c.relB2, c.relA], key });
+
+    assert.equal(b.rows[0].out_idempotent, true, '[A,B] e [B,A] são o MESMO pedido');
+    assert.equal(b.rows[0].out_opportunity_id, a.rows[0].out_opportunity_id);
+    assert.equal(b.rows[0].out_destinatarios, 2);
+  });
+
+  test('082 HIGH-16: duplicatas na lista não mudam a intenção', async () => {
+    const c = await cenarioComTresParceiros();
+    const key = 'i16-dup-' + Math.random().toString(36).slice(2);
+
+    const a = await compartilhar(c, { recipients: [c.relA, c.relB2], key });
+    const b = await compartilhar(c, { recipients: [c.relA, c.relA, c.relB2], key });
+
+    assert.equal(b.rows[0].out_idempotent, true);
+    assert.equal(b.rows[0].out_opportunity_id, a.rows[0].out_opportunity_id);
+  });
+
+  test('082 HIGH-16: mesma chave com DESTINATÁRIOS diferentes é conflito, não o share antigo', async () => {
+    const c = await cenarioComTresParceiros();
+    const key = 'i16-dest-' + Math.random().toString(36).slice(2);
+
+    // req 1 → [A, B]
+    const primeiro = await compartilhar(c, { recipients: [c.relA, c.relB2], key });
+
+    // req 2 → [A, C]. O caso exato do achado: antes devolvia o share de [A, B]
+    // como idempotente, e o operador acreditava ter convidado C.
+    await assert.rejects(
+      compartilhar(c, { recipients: [c.relA, c.relC2], key }),
+      /partner_share_idempotency_conflict/i);
+
+    // O share original permanece intacto, e C continua sem ter sido convidado.
+    const { rows } = await pool.query(
+      'SELECT relationship_id FROM partner_opportunity_recipients WHERE opportunity_id=$1 ORDER BY relationship_id',
+      [primeiro.rows[0].out_opportunity_id]);
+    assert.deepEqual(rows.map((r) => r.relationship_id).sort(), [c.relA, c.relB2].sort());
+  });
+
+  test('082 HIGH-16: destinatário A MAIS na segunda chamada é conflito', async () => {
+    const c = await cenarioComTresParceiros();
+    const key = 'i16-mais-' + Math.random().toString(36).slice(2);
+    await compartilhar(c, { recipients: [c.relA], key });
+    await assert.rejects(
+      compartilhar(c, { recipients: [c.relA, c.relB2], key }),
+      /partner_share_idempotency_conflict/i,
+      'ampliar a rede sob a mesma chave é uma intenção nova');
+  });
+
+  test('082 HIGH-16: QUANTIDADE diferente sob a mesma chave é conflito', async () => {
+    const c = await cenario();
+    const key = 'i16-qtd-' + Math.random().toString(36).slice(2);
+    await compartilhar(c, { quantidade: 100, key });
+    await assert.rejects(
+      compartilhar(c, { quantidade: 250, key }),
+      /partner_share_idempotency_conflict/i);
+  });
+
+  test('082 HIGH-16: MENSAGEM diferente sob a mesma chave é conflito', async () => {
+    const c = await cenario();
+    const key = 'i16-msg-' + Math.random().toString(36).slice(2);
+    await compartilhar(c, { mensagem: 'Precisamos carregar na segunda', key });
+    await assert.rejects(
+      compartilhar(c, { mensagem: 'Mudou: carregar na quarta', key }),
+      /partner_share_idempotency_conflict/i,
+      'a mensagem é o que o parceiro lê — trocá-la em silêncio seria mostrar o texto errado');
+  });
+
+  test('082 HIGH-16: PRAZO diferente sob a mesma chave é conflito', async () => {
+    const c = await cenario();
+    const key = 'i16-prazo-' + Math.random().toString(36).slice(2);
+    const t1 = new Date(Date.now() + 2 * 864e5).toISOString();
+    const t2 = new Date(Date.now() + 5 * 864e5).toISOString();
+    await compartilhar(c, { prazo: t1, key });
+    await assert.rejects(
+      compartilhar(c, { prazo: t2, key }),
+      /partner_share_idempotency_conflict/i);
+  });
+
+  test('082 HIGH-16: cargo, unidade, rota e janela também compõem a intenção', async () => {
+    const c = await cenario();
+    const janela = new Date(Date.now() + 864e5).toISOString();
+
+    for (const [rotulo, variacao] of [
+      ['cargo', { cargo: 'Milho' }],
+      ['origem', { origem: 'Balsas/MA' }],
+      ['destino', { destino: 'Itaqui/MA' }],
+      ['janela_inicio', { janelaInicio: janela }],
+      ['janela_fim', { janelaFim: janela }],
+    ]) {
+      const key = 'i16-campo-' + Math.random().toString(36).slice(2);
+      await compartilhar(c, { key });
+      await assert.rejects(
+        compartilhar(c, { ...variacao, key }),
+        /partner_share_idempotency_conflict/i, `${rotulo} precisa entrar na comparação`);
+    }
+  });
+
+  test('082 HIGH-16: espaço em volta NÃO cria conflito falso — a normalização é a mesma dos dois lados', async () => {
+    const c = await cenario();
+    const key = 'i16-trim-' + Math.random().toString(36).slice(2);
+    await compartilhar(c, { cargo: 'Soja', mensagem: 'carregar cedo', key });
+    // Comparar o cru contra o normalizado faria a repetição idêntica virar
+    // conflito — o defeito se disfarçaria de correção.
+    const r = await compartilhar(c, { cargo: '  Soja  ', mensagem: ' carregar cedo ', key });
+    assert.equal(r.rows[0].out_idempotent, true);
+  });
+
+  test('082 HIGH-16: conflito de intenção NÃO deixa resíduo', async () => {
+    const c = await cenarioComTresParceiros();
+    const key = 'i16-residuo-' + Math.random().toString(36).slice(2);
+    await compartilhar(c, { recipients: [c.relA], key });
+
+    const antes = await contagens();
+    await assert.rejects(
+      compartilhar(c, { recipients: [c.relB2], quantidade: 999, key }),
+      /partner_share_idempotency_conflict/i);
+    assert.deepEqual(await contagens(), antes,
+      'ZERO nova oportunidade, ZERO destinatário, ZERO evento');
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // HIGH-17 — A AUTORIDADE DA FONTE VEM ANTES DA IDEMPOTÊNCIA
+  //
+  // A ordem anterior era campanha → idempotência → plano aprovado, então um
+  // `client_request_id` antigo ressuscitava um plano já superado: repetir a
+  // requisição depois do replan devolvia 200 com `out_idempotent=true`, como se
+  // o pedido continuasse valendo.
+  // ══════════════════════════════════════════════════════════════════════════
+
+  test('082 HIGH-17: replay de chave válida com plano SUPERADO é NEGADO, não idempotente', async () => {
+    const c = await cenario();
+    const key = 'i17-superado-' + Math.random().toString(36).slice(2);
+    await compartilhar(c, { key });
+
+    // O replan supera a fonte.
+    await pool.query(`UPDATE campaign_plan_versions SET status='SUPERSEDED' WHERE id=$1`, [c.planoA]);
+
+    const antes = await contagens();
+    await assert.rejects(
+      compartilhar(c, { key }),
+      /partner_share_plano_nao_aprovado/i,
+      'idempotência responde "já foi feita?", nunca antes de "ainda é válida?"');
+    assert.deepEqual(await contagens(), antes, 'zero escrita nova');
+  });
+
+  test('082 HIGH-17: com o plano ainda APROVADO e a intenção idêntica, segue idempotente', async () => {
+    const c = await cenario();
+    const key = 'i17-ok-' + Math.random().toString(36).slice(2);
+    const a = await compartilhar(c, { key });
+    const b = await compartilhar(c, { key });
+    assert.equal(b.rows[0].out_idempotent, true);
+    assert.equal(b.rows[0].out_opportunity_id, a.rows[0].out_opportunity_id);
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // HIGH-18 — O MARCADOR É ESCOPADO À FONTE, NÃO À CAMPANHA
+  //
+  // `approvePlan` chama o marcador DEPOIS de promover o plano novo. Marcando
+  // toda oportunidade CURRENT da campanha, o replan marcava como obsoleto um
+  // share recém-criado a partir do plano que ele mesmo acabou de aprovar.
+  // ══════════════════════════════════════════════════════════════════════════
+
+  test('082 HIGH-18 CASO A: share do plano NOVO sobrevive ao marcador', async () => {
+    const c = await cenario();
+    const plano2 = await promoverNovoPlano(c);
+
+    // Share legítimo da fonte ATUAL — o caso que o marcador destruía.
+    const novo = (await compartilhar(c, { plano: plano2 })).rows[0].out_opportunity_id;
+
+    await pool.query('SELECT partner_network_mark_source_stale($1,$2,$3,$4) AS n',
+      [c.empresaA, c.campanhaA, 'replan_aprovado', null]);
+
+    const { rows } = await pool.query('SELECT estado FROM partner_opportunities WHERE id=$1', [novo]);
+    assert.equal(rows[0].estado, 'CURRENT',
+      'o replan não pode invalidar o pedido que a própria aprovação dele tornou válido');
+
+    const { rows: ev } = await pool.query(
+      `SELECT count(*)::int AS n FROM partner_network_events
+       WHERE entity_id=$1 AND action='opportunity_stale_source'`, [novo]);
+    assert.equal(ev[0].n, 0, 'ZERO evento de obsolescência para a fonte atual');
+  });
+
+  test('082 HIGH-18 CASO B: share da fonte ANTIGA vira stale, com exatamente um evento', async () => {
+    const c = await cenario();
+    const antigo = (await compartilhar(c, {})).rows[0].out_opportunity_id;
+    await promoverNovoPlano(c);
+
+    const n = await pool.query('SELECT partner_network_mark_source_stale($1,$2,$3,$4) AS n',
+      [c.empresaA, c.campanhaA, 'replan_aprovado', null]);
+    assert.ok(Number(n.rows[0].n) >= 1);
+
+    const { rows } = await pool.query(
+      'SELECT estado, estado_motivo FROM partner_opportunities WHERE id=$1', [antigo]);
+    assert.equal(rows[0].estado, 'STALE_SOURCE');
+    assert.equal(rows[0].estado_motivo, 'replan_aprovado');
+
+    const { rows: ev } = await pool.query(
+      `SELECT count(*)::int AS n FROM partner_network_events
+       WHERE entity_id=$1 AND action='opportunity_stale_source'`, [antigo]);
+    assert.equal(ev[0].n, 1);
+  });
+
+  test('082 HIGH-18: antigo e novo convivendo — o marcador separa os dois corretamente', async () => {
+    const c = await cenario();
+    const antigo = (await compartilhar(c, {})).rows[0].out_opportunity_id;
+    const plano2 = await promoverNovoPlano(c);
+    const novo = (await compartilhar(c, { plano: plano2, quantidade: 77 })).rows[0].out_opportunity_id;
+
+    const n = await pool.query('SELECT partner_network_mark_source_stale($1,$2,$3,$4) AS n',
+      [c.empresaA, c.campanhaA, 'replan_aprovado', null]);
+
+    const { rows } = await pool.query(
+      'SELECT id, estado FROM partner_opportunities WHERE id = ANY($1) ORDER BY id', [[antigo, novo]]);
+    const porId = Object.fromEntries(rows.map((r) => [r.id, r.estado]));
+    assert.equal(porId[antigo], 'STALE_SOURCE');
+    assert.equal(porId[novo], 'CURRENT');
+    assert.equal(Number(n.rows[0].n), 2,
+      'a oportunidade do cenário base também é da fonte antiga — antigo + oportA');
+  });
+
+  test('082 HIGH-18: campanha sem plano aprovado deixa TODO share vivo órfão', async () => {
+    const c = await cenario();
+    const share = (await compartilhar(c, {})).rows[0].out_opportunity_id;
+    // `IS DISTINCT FROM` e não `<>`: com a autoridade em NULL, nenhuma fonte é a
+    // atual, e `plan_version_id <> NULL` não marcaria nada.
+    await pool.query('UPDATE operation_campaigns SET approved_plan_version_id=NULL WHERE id=$1', [c.campanhaA]);
+
+    await pool.query('SELECT partner_network_mark_source_stale($1,$2,$3,$4) AS n',
+      [c.empresaA, c.campanhaA, 'plano_removido', null]);
+
+    const { rows } = await pool.query('SELECT estado FROM partner_opportunities WHERE id=$1', [share]);
+    assert.equal(rows[0].estado, 'STALE_SOURCE');
+  });
+
+  test('082 HIGH-18: o marcador é idempotente — um fato, um evento', async () => {
+    const c = await cenario();
+    const antigo = (await compartilhar(c, {})).rows[0].out_opportunity_id;
+    await promoverNovoPlano(c);
+
+    const primeira = await pool.query('SELECT partner_network_mark_source_stale($1,$2,$3,$4) AS n',
+      [c.empresaA, c.campanhaA, 'replan_aprovado', null]);
+    assert.ok(Number(primeira.rows[0].n) >= 1);
+
+    const segunda = await pool.query('SELECT partner_network_mark_source_stale($1,$2,$3,$4) AS n',
+      [c.empresaA, c.campanhaA, 'replan_aprovado', null]);
+    assert.equal(Number(segunda.rows[0].n), 0, 'nada mais está CURRENT com fonte antiga');
+
+    const { rows: ev } = await pool.query(
+      `SELECT count(*)::int AS n FROM partner_network_events
+       WHERE entity_id=$1 AND action='opportunity_stale_source'`, [antigo]);
+    assert.equal(ev[0].n, 1, 'a segunda passagem não pode duplicar o registro do mesmo fato');
+  });
+
+  test('082 HIGH-18: campanha de OUTRA empresa não é marcável', async () => {
+    const c = await cenario();
+    await assert.rejects(
+      pool.query('SELECT partner_network_mark_source_stale($1,$2,$3,$4) AS n',
+        [c.empresaB, c.campanhaA, 'replan', null]),
+      /partner_stale_campanha_invalida/i,
+      'silenciar aqui esconderia uma marcação que nunca aconteceu');
+  });
+
+  test('082 HIGH-18 CASO C: share da fonte antiga EM VOO × replan — corrida real', async () => {
+    const c = await cenario();
+    const cliShare = await pool.connect();
+    const cliReplan = await pool.connect();
+    let shareAntigo;
+    let shareNovo;
+    try {
+      // O share da fonte antiga abre e segura `FOR SHARE` sobre a v1.
+      await cliShare.query('BEGIN');
+      shareAntigo = (await cliShare.query(SQL_SHARE, argsDeShare(c, { quantidade: 40 })))
+        .rows[0].out_opportunity_id;
+
+      // O replan tenta superar a v1 — e precisa do lock exclusivo que o share
+      // está segurando. É aqui que as duas operações se encontram de verdade.
+      const pidReplan = (await cliReplan.query('SELECT pg_backend_pid() AS pid')).rows[0].pid;
+      await cliReplan.query('BEGIN');
+      const superando = cliReplan.query(
+        `UPDATE campaign_plan_versions SET status='SUPERSEDED' WHERE id=$1`, [c.planoA]);
+
+      assert.equal(await aguardarBloqueioDeLock(pidReplan), true,
+        'o replan precisa ESPERAR o share em voo, não passar por cima dele');
+
+      await cliShare.query('COMMIT');
+      await superando;
+
+      // Replan segue: promove a v2, aponta a campanha para ela, compartilha a
+      // lacuna nova e só então marca as fontes obsoletas — a ordem real do
+      // `approvePlan`.
+      const plano2 = (await cliReplan.query(
+        `INSERT INTO campaign_plan_versions (empresa_id, campaign_id, version_number, status, rules_version)
+         VALUES ($1,$2,2,'APPROVED','v1') RETURNING id`, [c.empresaA, c.campanhaA])).rows[0].id;
+      await cliReplan.query('UPDATE operation_campaigns SET approved_plan_version_id=$2 WHERE id=$1',
+        [c.campanhaA, plano2]);
+      shareNovo = (await cliReplan.query(SQL_SHARE, argsDeShare(c, { plano: plano2, quantidade: 60 })))
+        .rows[0].out_opportunity_id;
+      await cliReplan.query('SELECT partner_network_mark_source_stale($1,$2,$3,$4)',
+        [c.empresaA, c.campanhaA, 'replan_aprovado', null]);
+      await cliReplan.query('COMMIT');
+    } finally {
+      cliShare.release();
+      cliReplan.release();
+    }
+
+    const { rows } = await pool.query(
+      'SELECT id, estado FROM partner_opportunities WHERE id = ANY($1)', [[shareAntigo, shareNovo]]);
+    const porId = Object.fromEntries(rows.map((r) => [r.id, r.estado]));
+    assert.equal(porId[shareAntigo], 'STALE_SOURCE',
+      'nenhum share da fonte antiga pode continuar CURRENT depois do replan');
+    assert.equal(porId[shareNovo], 'CURRENT',
+      'e nenhum share da fonte nova pode ser marcado stale pelo replan que a promoveu');
+
+    const { rows: ev } = await pool.query(
+      `SELECT count(*)::int AS n FROM partner_network_events
+       WHERE entity_id=$1 AND action='opportunity_stale_source'`, [shareNovo]);
+    assert.equal(ev[0].n, 0);
+  });
   after(async () => { await pool.end(); });
 }
