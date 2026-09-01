@@ -1530,6 +1530,11 @@ function registrar(pg) {
     await pool.query(`SELECT * FROM partner_network_share_gap($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
       [c.empresaA, null, c.campanhaA, c.planoA, 'Soja', 100, 'ton', [c.relA], null, null, null, null, null, null, rid]);
 
+    // O caminho REAL do replan: a v1 é superada e a v2 é promovida. O schema
+    // impõe `campaign_plan_versions_one_approved_key` — nunca duas APPROVED na
+    // mesma campanha —, então este é o único jeito honesto de ter um segundo
+    // plano aprovado aqui.
+    await pool.query(`UPDATE campaign_plan_versions SET status='SUPERSEDED' WHERE id=$1`, [c.planoA]);
     const plano2 = (await pool.query(
       `INSERT INTO campaign_plan_versions (empresa_id, campaign_id, version_number, status, rules_version)
        VALUES ($1,$2,2,'APPROVED','v1') RETURNING id`, [c.empresaA, c.campanhaA])).rows[0].id;
