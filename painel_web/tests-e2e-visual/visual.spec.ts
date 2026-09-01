@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { CENARIOS, ROTAS_CLIENTE, VIEWPORTS, instalarApiFake } from './fixtures';
+import { CENARIOS, ROTAS_CLIENTE, VIEWPORTS, instalarApiFake, PERMISSOES_SO_CONTRATACAO } from './fixtures';
 
 // PRODUCT REGRESSION PACK — verificações MEDIDAS, não capturas de tela.
 //
@@ -25,7 +25,7 @@ test.describe('sem rolagem horizontal em nenhuma viewport', () => {
   for (const vp of VIEWPORTS) {
     for (const rota of ROTAS_CLIENTE) {
       test(`${vp.nome} ${vp.width}x${vp.height} — ${rota}`, async ({ page }) => {
-        await instalarApiFake(page, CENARIO_PADRAO);
+        const rede = await instalarApiFake(page, CENARIO_PADRAO);
         await page.setViewportSize({ width: vp.width, height: vp.height });
         await irPara(page, rota);
 
@@ -37,6 +37,7 @@ test.describe('sem rolagem horizontal em nenhuma viewport', () => {
           medida.scrollWidth,
           `${rota} em ${vp.nome} rola horizontalmente (${medida.scrollWidth} > ${medida.clientWidth})`,
         ).toBeLessThanOrEqual(medida.clientWidth + 1);
+        rede.assertSemRedeExterna();
       });
     }
   }
@@ -45,17 +46,18 @@ test.describe('sem rolagem horizontal em nenhuma viewport', () => {
 test.describe('REG-001 — um único item de navegação ativo', () => {
   for (const rota of ['/', '/minhas-faturas', '/minhas-faturas?aba=contratacao', '/relatorios', '/relatorios/viagens']) {
     test(`exatamente 1 item ativo em ${rota}`, async ({ page }) => {
-      await instalarApiFake(page, CENARIO_PADRAO);
+      const rede = await instalarApiFake(page, CENARIO_PADRAO);
       await page.setViewportSize({ width: 1440, height: 900 });
       await irPara(page, rota);
 
       const ativos = await page.locator('nav a.bg-green-700').count();
       expect(ativos, `${rota} acendeu ${ativos} itens de navegação`).toBe(1);
+      rede.assertSemRedeExterna();
     });
   }
 
   test('com contrato pendente existe UM item financeiro, com badge', async ({ page }) => {
-    await instalarApiFake(page, CENARIO_PADRAO);
+    const rede = await instalarApiFake(page, CENARIO_PADRAO);
     await page.setViewportSize({ width: 1440, height: 900 });
     await irPara(page, '/minhas-faturas');
 
@@ -64,12 +66,13 @@ test.describe('REG-001 — um único item de navegação ativo', () => {
     await expect(page.locator('nav').getByText('Faturas / Regularização')).toBeVisible();
     await expect(page.locator('nav').getByText('Ação necessária')).toBeVisible();
     await expect(page.locator('nav').getByText('Contratação', { exact: true })).toHaveCount(0);
+    rede.assertSemRedeExterna();
   });
 });
 
 test.describe('CTA de contratação leva à aba certa e o deep link sobrevive ao reload', () => {
   test('banner → aba contratacao → reload mantém a aba', async ({ page }) => {
-    await instalarApiFake(page, CENARIO_PADRAO);
+    const rede = await instalarApiFake(page, CENARIO_PADRAO);
     await page.setViewportSize({ width: 1440, height: 900 });
     await irPara(page, '/');
 
@@ -82,10 +85,11 @@ test.describe('CTA de contratação leva à aba certa e o deep link sobrevive ao
     await expect(page).toHaveURL(/aba=contratacao/);
     // A aba continua sendo a de contratação após o reload (deriva da URL).
     await expect(page.getByRole('button', { name: 'Plano e contratação' })).toBeVisible();
+    rede.assertSemRedeExterna();
   });
 
   test('voltar no navegador sincroniza a aba', async ({ page }) => {
-    await instalarApiFake(page, CENARIO_PADRAO);
+    const rede = await instalarApiFake(page, CENARIO_PADRAO);
     await page.setViewportSize({ width: 1440, height: 900 });
     await irPara(page, '/minhas-faturas');
 
@@ -94,13 +98,14 @@ test.describe('CTA de contratação leva à aba certa e o deep link sobrevive ao
 
     await page.goBack();
     await expect(page).not.toHaveURL(/aba=contratacao/);
+    rede.assertSemRedeExterna();
   });
 });
 
 test.describe('coerência da matriz comercial na tela', () => {
   for (const cenario of CENARIOS) {
     test(`${cenario.nome} comunica um estado só`, async ({ page }) => {
-      await instalarApiFake(page, cenario);
+      const rede = await instalarApiFake(page, cenario);
       await page.setViewportSize({ width: 1440, height: 900 });
       await irPara(page, '/minhas-faturas');
 
@@ -115,6 +120,7 @@ test.describe('coerência da matriz comercial na tela', () => {
       }
       // Sempre há uma comunicação de estado — nunca uma tela muda.
       expect(corpo.length).toBeGreaterThan(0);
+      rede.assertSemRedeExterna();
     });
   }
 });
@@ -122,7 +128,7 @@ test.describe('coerência da matriz comercial na tela', () => {
 test.describe('ações primárias permanecem alcançáveis', () => {
   for (const vp of VIEWPORTS) {
     test(`${vp.nome} — CTA de assinatura visível e dentro da viewport`, async ({ page }) => {
-      await instalarApiFake(page, CENARIO_PADRAO);
+      const rede = await instalarApiFake(page, CENARIO_PADRAO);
       await page.setViewportSize({ width: vp.width, height: vp.height });
       await irPara(page, '/');
 
@@ -132,6 +138,47 @@ test.describe('ações primárias permanecem alcançáveis', () => {
       expect(caixa, 'CTA sem caixa de layout').not.toBeNull();
       expect(caixa!.x).toBeGreaterThanOrEqual(0);
       expect(caixa!.x + caixa!.width).toBeLessThanOrEqual(vp.width + 1);
+      rede.assertSemRedeExterna();
     });
   }
+});
+
+test.describe('S1-HIGH-01 — a aba de contratação não faz I/O financeiro', () => {
+  test('persona sem finance.saas.view assina sem tocar em endpoint financeiro', async ({ page }) => {
+    const financeiros: string[] = [];
+    page.on('request', (r) => {
+      const u = r.url();
+      if (u.includes('/pagamentos/')) financeiros.push(`${r.method()} ${u}`);
+    });
+
+    const rede = await instalarApiFake(page, CENARIO_PADRAO, { permissoes: PERMISSOES_SO_CONTRATACAO });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await irPara(page, '/minhas-faturas?aba=contratacao');
+    await page.waitForTimeout(1200);
+
+    // A área de contratação está acessível...
+    await expect(page.getByRole('button', { name: 'Plano e contratação' })).toBeVisible();
+    // ...a aba financeira não é oferecida...
+    await expect(page.getByRole('button', { name: 'Faturas', exact: true })).toHaveCount(0);
+    // ...e nenhum endpoint financeiro foi chamado. 403 do backend não bastaria:
+    // a UI não deve pedir o que sabe que não pode pedir.
+    expect(financeiros, `I/O financeiro indevido: ${financeiros.join(', ')}`).toHaveLength(0);
+    rede.assertSemRedeExterna();
+  });
+});
+
+test.describe('§15 — a sentinela de rede realmente detecta vazamento', () => {
+  test('uma request externa deliberada FALHA a asserção (controle negativo)', async ({ page }) => {
+    const rede = await instalarApiFake(page, CENARIO_PADRAO);
+    await irPara(page, '/');
+    // O host precisa ser um dos permitidos pela CSP do app (), senão o
+    // navegador barra antes de virar requisição e a sentinela nem é exercitada — a
+    // CSP é, aliás, uma terceira camada de contenção. Este é exatamente o host que
+    // vazou na primeira execução do pack.
+    await page.evaluate(() => fetch('https://api.matopibalog.com.br/ping').catch(() => {}));
+    await page.waitForTimeout(300);
+
+    expect(rede.violacoes.length).toBeGreaterThan(0);
+    expect(() => rede.assertSemRedeExterna()).toThrow(/EXTERNAL_NETWORK_REQUESTS_ALLOWED=0/);
+  });
 });

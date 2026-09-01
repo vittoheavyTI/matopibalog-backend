@@ -41,6 +41,13 @@ const USUARIO_ADMIN = {
   permission_template: 'administrador',
 };
 
+// Persona de CONTRATAÇÃO pura: pode tratar do contrato, não tem autoridade
+// financeira. É a fronteira do S1-HIGH-01.
+export const PERMISSOES_SO_CONTRATACAO: Record<string, boolean> = {
+  'company.settings.manage': true,
+  'company.settings.view': true,
+};
+
 export const CENARIOS: Cenario[] = [
   {
     nome: 'trial-ativo-sem-pendencia',
@@ -99,17 +106,55 @@ function json(route: Route, body: unknown, status = 200) {
  * com o backend real em vez de com as fixtures. Aqui, o que não for `localhost`
  * é atendido pela fixture ou abortado; **nenhuma requisição sai da máquina**.
  */
-export async function instalarApiFake(page: Page, cenario: Cenario) {
+export type SentinelaRede = {
+  /** Requisições que tentaram sair da máquina. DEVE ficar vazia. */
+  violacoes: string[];
+  /** Falha o teste se qualquer request externa tiver escapado. */
+  assertSemRedeExterna: () => void;
+};
+
+export async function instalarApiFake(
+  page: Page,
+  cenario: Cenario,
+  opcoes: { permissoes?: Record<string, boolean> } = {},
+): Promise<SentinelaRede> {
+  // §15 — EXTERNAL_NETWORK_REQUESTS_ALLOWED=0, PROVADO em vez de presumido.
+  //
+  // Defesa em profundidade, em duas camadas independentes:
+  //
+  //  1. O build do pack é gerado com `VITE_API_URL` apontando para o PRÓPRIO
+  //     preview (`npm run build:e2e`). Assim as chamadas normais da aplicação já
+  //     nascem locais — não dependem de a regra de interceptação casar.
+  //  2. Este handler é um catch-all: o que não for `localhost` é ABORTADO e
+  //     registrado como violação, e o teste falha no fim do cenário.
+  //
+  // A primeira execução deste pack vazou duas GETs para produção porque a regra
+  // estava amarrada a um host e o bundle embutia outro. Responder com fixture não
+  // é garantia: se a regra deixar de casar, o vazamento volta a ser silencioso.
+  // Por isso a violação é medida, não deduzida.
+  const violacoes: string[] = [];
+
   await page.route('**/*', async (route) => {
     const url = new URL(route.request().url());
 
-    // Recursos do próprio preview (HTML, JS, CSS, imagens) seguem normalmente.
-    if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') return route.continue();
+    if (url.protocol === 'data:' || url.protocol === 'blob:') return route.continue();
+
+    if (url.hostname !== 'localhost' && url.hostname !== '127.0.0.1') {
+      violacoes.push(`${route.request().method()} ${url.href}`);
+      return route.abort('blockedbyclient');
+    }
+
+    // Recursos do próprio preview (HTML, JS, CSS) seguem normalmente.
+    if (!url.pathname.startsWith('/api/')) return route.continue();
 
     const p = url.pathname;
 
     if (p.endsWith('/configuracoes/public')) return json(route, {});
-    if (p.endsWith('/auth/me')) return json(route, USUARIO_ADMIN);
+    if (p.endsWith('/auth/me')) {
+      return json(route, opcoes.permissoes
+        ? { ...USUARIO_ADMIN, effective_permissions: opcoes.permissoes }
+        : USUARIO_ADMIN);
+    }
     if (p.endsWith('/auth/logout') || p.endsWith('/auth/refresh')) return json(route, {});
     if (p.endsWith('/contratacao/status')) return json(route, cenario.contratacaoStatus);
     if (p.endsWith('/contratacao/minha')) return json(route, { contratos: [] });
@@ -128,6 +173,18 @@ export async function instalarApiFake(page: Page, cenario: Cenario) {
   await page.addInitScript(() => {
     localStorage.setItem('auth_token', 'token-de-teste-visual');
   });
+
+  return {
+    violacoes,
+    assertSemRedeExterna() {
+      if (violacoes.length > 0) {
+        throw new Error(
+          `EXTERNAL_NETWORK_REQUESTS_ALLOWED=0 violado — ${violacoes.length} requisição(ões) `
+          + `tentaram sair da máquina: ${violacoes.join(' | ')}`,
+        );
+      }
+    },
+  };
 }
 
 export const VIEWPORTS = [

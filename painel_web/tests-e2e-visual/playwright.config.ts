@@ -19,9 +19,12 @@ export default defineConfig({
   workers: 1,
   reporter: [['list']],
   webServer: {
-    command: 'npm run preview -- --port 4183 --strictPort',
+    // Build dedicado (`--mode e2e`, .env.e2e) com VITE_API_URL apontando para o
+    // PRÓPRIO preview: as chamadas da aplicação já nascem locais. É a primeira das
+    // duas camadas de isolamento de rede (a outra é o deny catch-all nas fixtures).
+    command: 'npm run build:e2e && npm run preview -- --port 4183 --strictPort',
     port: 4183,
-    reuseExistingServer: true,
+    reuseExistingServer: false,
     timeout: 120_000,
   },
   use: {

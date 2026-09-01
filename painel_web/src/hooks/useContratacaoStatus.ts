@@ -6,18 +6,44 @@ import { useAuth } from '../contexts/AuthContext';
 // necessária no item Faturas / Regularização) e pelo Layout (banner). Fail-open:
 // erro não polui a navegação. Não consulta para super-admin, que não contrata.
 //
-// BUG-002 — a autoridade de QUEM pode ver isto é do BACKEND. `/contratacao/status`
-// libera para `company.settings.manage` **ou** para empresa `tipo='autonomo'`.
-// Este hook filtrava antes por `role === 'admin'`, um critério legado, mais
-// estreito e simplesmente DIFERENTE do servidor. A consequência era um beco sem
-// saída: o dono de conta autônoma (cujo `role` costuma ser `motorista`) precisava
-// assinar o contrato, mas o hook nunca perguntava — então `pendenciaObrigatoria`
-// ficava `false` para sempre, o banner do Layout nunca aparecia e a "salvaguarda"
-// da Sidebar, escrita exatamente para esse caso, era código morto. O usuário
-// obrigado a assinar não tinha caminho nenhum para assinar.
+// BUG-002 — a autoridade de QUEM pode ver isto é do BACKEND.
+// `/contratacao/status` libera para `company.settings.manage` **ou** para empresa
+// `tipo='autonomo'`. Este hook filtrava antes por `role === 'admin'`: um critério
+// legado, com autoridade PRÓPRIA e diferente da do servidor.
+//
+// Correção de escopo, porque a primeira leitura desta auditoria estava errada e não
+// vale deixar a história antiga no código: chegou-se a supor um dono de conta
+// autônoma "preso" sem caminho para assinar. Isso NÃO acontece no painel web — o
+// `ProtectedRoute` já barra todo `role !== 'admin'` antes de qualquer tela, então
+// esse usuário nunca chega aqui (ele usa o app). O defeito real era menor e de outra
+// natureza: um gate de UI divergente do servidor, e um bloco da Sidebar
+// (`role !== 'admin' && contratacaoPendente`) que, por isso, era código MORTO.
 //
 // Agora perguntamos e deixamos o servidor decidir: 403 cai no `catch` e o estado
-// permanece neutro, que é o mesmo efeito de não perguntar — sem o beco sem saída.
+// permanece neutro — mesma UI de antes, sem uma segunda autoridade inventada aqui.
+// §14 — Layout, Sidebar e MinhasFaturas usam este hook, e cada montagem disparava
+// o SEU próprio `GET /contratacao/status`: três requisições idênticas e simultâneas
+// por carga de página.
+//
+// A correção é deliberadamente pequena: dedupe do que está EM VOO, não cache de
+// resultado. Montagens concorrentes compartilham a mesma promessa; assim que ela
+// termina, o registro é descartado e a próxima montagem busca de novo. Um cache de
+// resultado economizaria mais, mas introduziria estado velho depois de assinar um
+// contrato ou trocar de conta — trocar uma GET por um dado desatualizado no gate
+// comercial seria um péssimo negócio.
+let requisicaoEmVoo: { chave: string; promessa: Promise<unknown> } | null = null;
+
+function buscarStatusDeduplicado(chave: string): Promise<unknown> {
+  if (requisicaoEmVoo && requisicaoEmVoo.chave === chave) return requisicaoEmVoo.promessa;
+  const promessa = api.get('/contratacao/status')
+    .then(({ data }) => data)
+    .finally(() => {
+      if (requisicaoEmVoo && requisicaoEmVoo.chave === chave) requisicaoEmVoo = null;
+    });
+  requisicaoEmVoo = { chave, promessa };
+  return promessa;
+}
+
 export function useContratacaoStatus() {
   const { user } = useAuth();
   const [pendenciaObrigatoria, setPendenciaObrigatoria] = useState(false);
@@ -34,8 +60,8 @@ export function useContratacaoStatus() {
   useEffect(() => {
     if (!user || user.is_super_admin) return;
     let vivo = true;
-    api.get('/contratacao/status')
-      .then(({ data }) => {
+    buscarStatusDeduplicado(user.uid || 'anonimo')
+      .then((data: any) => {
         if (!vivo) return;
         setPendenciaObrigatoria(data?.pendencia_obrigatoria === true);
         setTrialAtivo(data?.trial_ativo === true);

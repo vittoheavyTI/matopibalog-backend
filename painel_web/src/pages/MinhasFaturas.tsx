@@ -7,7 +7,10 @@ import { ComparadorPlanos } from '../components/ComparadorPlanos';
 import { Contratacao } from './Contratacao';
 import { useAuth } from '../contexts/AuthContext';
 import { useContratacaoStatus } from '../hooks/useContratacaoStatus';
-import { resolverBannerPlano, classesDoTom } from '../utils/planoStatusCopy';
+import { usePermissions } from '../hooks/usePermissions';
+import {
+  resolverEstadoComercial, copyComercial, classesDaSeveridade,
+} from '../utils/commercialAccountState';
 import { civilDateToDayNumber, compareCivilDates, formatCivilDate, formatTechnicalDate } from '../utils';
 import { brl, mensagemRodapePagamento } from '../utils/faturaCopy';
 
@@ -76,7 +79,11 @@ function getTipoLabel(tipo?: string): string {
 
 export const MinhasFaturas: React.FC = () => {
   const { user } = useAuth();
-  const { pendenciaObrigatoria } = useContratacaoStatus();
+  const { pendenciaObrigatoria, trialAtivo: trialAtivoContratacao, assinaturaPendente } = useContratacaoStatus();
+  const { can } = usePermissions();
+  // S1-HIGH-01 — CONTRACT_ACCESS_IS_NOT_FINANCE_ACCESS. Esta rota é um HUB com duas
+  // áreas de autoridade diferentes; `finance.saas.view` governa SÓ a área financeira.
+  const podeFinancas = can('finance.saas.view');
   const [searchParams, setSearchParams] = useSearchParams();
   const [faturas, setFaturas] = useState<Fatura[]>([]);
   const [loading, setLoading] = useState(true);
@@ -90,17 +97,38 @@ export const MinhasFaturas: React.FC = () => {
   const [pixCarregando, setPixCarregando] = useState(false);
   const [pixCopiado, setPixCopiado] = useState(false);
   const pixTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const abaAtual = searchParams.get('aba') === 'contratacao' ? 'contratacao' : 'faturas';
+  // Sem autoridade financeira a única área disponível é a contratação — inclusive
+  // se alguém forçar `?aba=faturas` na URL. Isso NÃO é um dead-end: a assinatura
+  // continua acessível, que é justamente o caminho do CTA do banner global.
+  const abaPedida = searchParams.get('aba') === 'contratacao' ? 'contratacao' : 'faturas';
+  const abaAtual: 'faturas' | 'contratacao' = podeFinancas ? abaPedida : 'contratacao';
   const selecionarAba = (aba: 'faturas' | 'contratacao') => {
     if (aba === 'contratacao') setSearchParams({ aba: 'contratacao' });
     else setSearchParams({});
   };
 
+  // S1-HIGH-01 — a página inteira disparava, no mount, dois GETs financeiros MAIS
+  // um POST de sincronização (write que fala com o provedor), independentemente da
+  // aba e da permissão. Abrir `?aba=contratacao` para assinar um contrato fazia o
+  // navegador bater em três endpoints financeiros que o usuário podia não ter
+  // direito de chamar. Devolver 403 no backend não resolve: a UI não deve pedir o
+  // que sabe que não pode. O I/O financeiro agora acontece só na área financeira,
+  // e só para quem tem a autoridade dela.
+  const jaCarregouRef = useRef(false);
   useEffect(() => {
     if (!user?.uid) return;
     if (user?.is_super_admin) return;
+    // Quando não há carga financeira a fazer, a página não pode ficar presa no
+    // "Carregando...": o estado inicial `loading` existe para a busca de faturas,
+    // e sem ela a aba de contratação precisa renderizar de imediato.
+    if (!podeFinancas || abaAtual !== 'faturas') {
+      setLoading(false);
+      return;
+    }
+    if (jaCarregouRef.current) return;
+    jaCarregouRef.current = true;
     carregarDados();
-  }, [user?.uid]);
+  }, [user?.uid, user?.is_super_admin, podeFinancas, abaAtual]);
 
   // Limpa modal Pix ao fechar
   useEffect(() => {
@@ -145,11 +173,14 @@ export const MinhasFaturas: React.FC = () => {
       setLoading(false);
     }
 
-    // Sincronização em segundo plano (best-effort)
+    // CONTRACT_TAB_AUTO_FINANCE_SYNC=false. A sincronização é um WRITE que chama o
+    // provedor (`POST /pagamentos/minhas-faturas/sincronizar`); só roda dentro da
+    // superfície financeira, para quem tem a autoridade dela.
     sincronizar(false);
   };
 
   const sincronizar = async (manual: boolean = true) => {
+    if (!podeFinancas) return; // nunca a partir da área de contratação
     if (sincronizando) return;
     setSincronizando(true);
     setErroSync(null);
@@ -261,16 +292,19 @@ export const MinhasFaturas: React.FC = () => {
     ? `mailto:${suporteEmail}?subject=${encodeURIComponent('Solicitação de regularização do plano')}`
     : null;
 
-  // BUG-005 — a matriz comercial (trial x plano x contrato x fatura) vive em
-  // `utils/planoStatusCopy`, como função pura testável. Antes ela era um IIFE dentro
-  // do render: impossível de exercitar, e foi assim que "Plano ativo / Seu plano está
-  // ativo." passou a ser dito ao lado de um pedido de assinatura de contrato — com o
-  // backend já bloqueando as escritas por causa desse mesmo contrato.
-  const bannerPlano = resolverBannerPlano({
+  // S1-HIGH-02 — o MESMO resolvedor semântico que o banner global do Layout usa.
+  // Antes havia duas lógicas independentes para o mesmo fato, e a correção do
+  // BUG-005 tinha alcançado só uma delas. Aqui a copy é a versão longa; no shell é
+  // a curta. Tamanhos diferentes, sentido idêntico.
+  const estadoComercial = resolverEstadoComercial({
     status: planoStatus?.status,
     trialExpirado: planoStatus?.trial_expirado,
+    contratoPendente: pendenciaObrigatoria,
+    trialAtivo: trialAtivoContratacao,
+    assinaturaPendente,
+  });
+  const bannerPlano = copyComercial(estadoComercial, 'financeiro', {
     trialData,
-    pendenciaObrigatoria,
     temFaturaComLink: Boolean(atual?.invoice_url),
   });
 
@@ -287,7 +321,7 @@ export const MinhasFaturas: React.FC = () => {
 
       <div className="flex flex-wrap gap-2 rounded-xl bg-gray-100 p-1 w-fit">
         {[
-          { id: 'faturas', label: 'Faturas' },
+          ...(podeFinancas ? [{ id: 'faturas', label: 'Faturas' }] : []),
           { id: 'contratacao', label: 'Plano e contratação' },
         ].map((tab) => (
           <button
@@ -331,7 +365,7 @@ export const MinhasFaturas: React.FC = () => {
       )}
 
       {!loading && (
-        <div className={`rounded-xl border p-5 ${classesDoTom(bannerPlano.tom)}`}>
+        <div className={`rounded-xl border p-5 ${classesDaSeveridade(bannerPlano.severidade)}`}>
           <div className="flex items-start gap-3">
             <AlertCircle size={20} className="shrink-0 mt-0.5" />
             <div className="flex-1 min-w-0">
