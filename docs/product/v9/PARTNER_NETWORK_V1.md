@@ -344,3 +344,126 @@ lugar para abrir exceção.
 - `PARTNER_CLIENT_UX_DECISION_NEEDED=DEFERRED`
 - `E36B_PRICE_AND_AWARD_PRODUCT_DECISION_GATE=PENDING`
 - `CAMPAIGN_SCENARIO_CAPACITY_GAP_IMPRECISO=TECH_DEBT_SEPARATE_NOT_FIXED` (§2)
+
+## 12. Owner pre-DDL review — correção R3 (HIGH-16..18)
+
+Terceira rodada, ainda antes do gate. A 082 continua **não aplicada** e foi
+alterada **no lugar** — sem 083. Os três achados são todos sobre **ordem** e
+**escopo**: a decisão certa acontecendo no momento errado, ou sobre o conjunto
+errado.
+
+### HIGH-16 — a chave de idempotência representa a intenção inteira
+
+`IDEMPOTENCY_SAME_KEY_SAME_INTENT_ONLY=true`
+
+A comparação da R2 conferia apenas `campaign_id` e `plan_version_id`. Todo o
+resto do pedido — quantidade, prazo, mensagem e, sobretudo, **para quem ia** —
+passava sem ser olhado:
+
+```
+req 1:  key=ABC,  campanha C1,  plano P1,  destinatários [A, B]
+req 2:  key=ABC,  campanha C1,  plano P1,  destinatários [A, C]
+     →  devolvia o share de [A, B] com out_idempotent=true
+```
+
+O operador pedia capacidade a **C** e recebia confirmação. C nunca foi
+convidado, B foi convidado sem que se quisesse, e nada no retorno dizia isso. É
+exatamente o dano do HIGH-14 — o operador acreditando ter pedido a quem não
+pediu — só que entrando pela porta da idempotência.
+
+A intenção agora é comparada por inteiro: campanha, plano, cargo, quantidade,
+unidade, origem, destino, janela (início e fim), mensagem, prazo **e o conjunto
+normalizado de destinatários**.
+
+A ordem da lista não é intenção, e duplicata também não:
+
+- `[A, B]` **==** `[B, A]`
+- `[A, A, B]` **==** `[A, B]`
+- `[A, B]` **!=** `[A, C]`
+
+Duas decisões de implementação, ambas para evitar uma segunda fonte de verdade:
+
+1. **Sem coluna nova e sem fingerprint.** A comparação roda contra o que está
+   **persistido** — a linha da oportunidade e seus destinatários. Um resumo
+   paralelo poderia divergir da linha real, e aí a idempotência passaria a
+   responder sobre um objeto que não é o compartilhado.
+2. **A normalização acontece uma vez só.** Os campos são normalizados no topo da
+   função (`btrim`, `'' → NULL`, quantidade em `numeric(14,3)`) e as **mesmas
+   variáveis** alimentam a comparação e a escrita. Normalizar em dois lugares
+   faria a repetição idêntica virar conflito falso — o defeito se disfarçando de
+   correção.
+
+### HIGH-17 — a autoridade da fonte vem antes da idempotência
+
+`SHARE_PLAN_AUTHORITY_BEFORE_IDEMPOTENCY=true`
+
+A ordem era: campanha → **idempotência** → plano aprovado. Com ela, um
+`client_request_id` antigo ressuscitava um plano já superado — bastava repetir a
+requisição depois do replan para receber `200` e `out_idempotent=true`, como se o
+pedido continuasse valendo. O operador via "já compartilhado" para uma fonte que
+não existe mais.
+
+É a mesma classe do HIGH-12, um nível acima: **idempotência responde "esta
+requisição já foi feita?"; ela não pode responder antes de "esta requisição ainda
+é válida?"**.
+
+Ordem congelada do share:
+
+```
+1. empresa/campanha          (fronteira de tenant)
+2. plano pertence à campanha/empresa
+3. plano.status = APPROVED   ← subiu para cá
+4. idempotência (intenção inteira)
+5. lock de todos os destinatários + ALL_REQUESTED_OR_FAIL
+6. escrita
+```
+
+### HIGH-18 — o marcador é escopado à fonte, não à campanha
+
+`STALE_SOURCE_MEANS_SOURCE_IS_NO_LONGER_CURRENT=true`
+
+`partner_network_mark_source_stale` marcava **toda** oportunidade `CURRENT` da
+campanha, sem olhar de qual plano ela veio. E o `approvePlan` chama essa função
+**depois** de já ter promovido o plano novo e apontado
+`operation_campaigns.approved_plan_version_id` para ele.
+
+O efeito: um share criado a partir do plano **novo** — legítimo, atual, ainda não
+respondido — era marcado `STALE_SOURCE` pelo próprio replan que promoveu esse
+plano. A janela não é teórica: basta o operador compartilhar a lacuna logo depois
+da aprovação e antes de a marcação rodar. O parceiro passava a ver como obsoleto
+o único pedido válido, e a resposta dele seria recusada por uma obsolescência que
+nunca aconteceu.
+
+A pergunta certa não é *"esta campanha replanejou?"* — é *"a fonte **deste** share
+ainda é a fonte atual da campanha?"*. O marcador agora lê
+`approved_plan_version_id` sob lock e marca apenas o que tem
+`plan_version_id IS DISTINCT FROM` essa fonte. `IS DISTINCT FROM` e não `<>`
+porque a autoridade pode ser `NULL`: uma campanha que perdeu o plano aprovado não
+tem fonte atual nenhuma, e aí todo share vivo está mesmo órfão.
+
+**Uma autoridade, não duas.** A fonte atual é `approved_plan_version_id`. Conferir
+também `campaign_plan_versions.status` aqui como critério paralelo criaria dois
+donos da mesma verdade, que é como se produz divergência. O status do plano
+continua sendo conferido onde ele decide de fato: na transação de
+`partner_network_submit_response`, que é a autoridade final e **não depende de
+esta marcação ter rodado** (§13 — as duas camadas são complementares, e a segunda
+foi preservada).
+
+O marcador é idempotente por construção: depois da primeira passagem nada mais
+está `CURRENT` com fonte antiga, então a segunda afeta 0 e não duplica evento.
+
+### Testes acrescentados
+
+PG real subiu de **92** para **111**. Além dos casos de intenção
+(ordem, duplicata, destinatário a mais, quantidade/mensagem/prazo/cargo/rota/
+janela, e `trim` **não** gerando conflito falso), entraram:
+
+- replay de chave válida com plano **superado** → negado, e zero escrita nova;
+- HIGH-18 caso A (share do plano novo sobrevive ao marcador, zero evento) e caso
+  B (share da fonte antiga vira stale, exatamente um evento);
+- antigo e novo convivendo, com o marcador separando os dois;
+- campanha sem plano aprovado deixando todo share vivo órfão;
+- marcador rodado duas vezes: `afetadas=0` na segunda, um fato → um evento;
+- **corrida real de duas conexões** entre um share da fonte antiga **em voo** e o
+  replan: o replan é observado bloqueado no lock que o share segura, e o estado
+  final tem o share antigo `STALE_SOURCE` e o novo `CURRENT`.
