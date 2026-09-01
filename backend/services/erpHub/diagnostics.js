@@ -7,8 +7,9 @@
 const { MODES, LIMITS, resolveMode, providerAvailable, isEnabled } = require('./config');
 const { KNOWN_CAPABILITIES } = require('./capabilities');
 const { KNOWN_RECONCILE_STATUSES } = require('./reconcile');
-const { OUTBOX_STATUS } = require('./outboxContract');
+const { OUTBOX_STATUS, DEFAULT_LEASE_MS } = require('./outboxContract');
 const { SCHEMA_VERSION } = require('./canonicalEnvelope');
+const { IDEMPOTENCY_EVENT_AUTHORITY } = require('./idempotency');
 const gateway = require('./erpProviderGateway');
 
 // Snapshot seguro do Hub. `entitlement` é opcional e injetado pela rota (estado
@@ -31,6 +32,12 @@ function buildHubDiagnostics({ entitlement = null } = {}) {
     known_capabilities: KNOWN_CAPABILITIES,
     reconcile_statuses: KNOWN_RECONCILE_STATUSES,
     outbox_statuses: Object.values(OUTBOX_STATUS),
+    idempotency_event_authority: IDEMPOTENCY_EVENT_AUTHORITY,
+    // Linguagem precisa: a SEMÂNTICA de recuperação (lease + reclaim + recusa de
+    // claim obsoleto) está definida e testada, mas sem persistência não há
+    // crash-safety de produção — um crash do processo perde a fila.
+    crash_safety: 'CRASH_SAFE_CONTRACT_DEFINED',
+    outbox_lease_ms: DEFAULT_LEASE_MS,
     limits: LIMITS,
     // Estado comercial/técnico da funcionalidade ERP (preservado por esta frente).
     entitlement: entitlement || {

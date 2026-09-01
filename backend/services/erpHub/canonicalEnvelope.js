@@ -118,24 +118,58 @@ function buildEnvelope(input = {}, { now = new Date(), eventId = null } = {}) {
   return envelope;
 }
 
+// Procura recursivamente uma chave proibida. Retorna o CAMINHO da primeira
+// encontrada (para diagnóstico) ou null. Caminha a estrutura em vez de casar regex
+// sobre o JSON serializado: um valor de texto contendo a palavra "token" não é uma
+// chave sensível, e uma chave aninhada dentro de array não seria pega de forma
+// confiável por regex.
+function findForbiddenKeyPath(value, caminho = '', depth = 0) {
+  if (depth > 12 || value === null || typeof value !== 'object') return null;
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i += 1) {
+      const achado = findForbiddenKeyPath(value[i], `${caminho}[${i}]`, depth + 1);
+      if (achado) return achado;
+    }
+    return null;
+  }
+  for (const [k, v] of Object.entries(value)) {
+    const p = caminho ? `${caminho}.${k}` : k;
+    if (isForbiddenKey(k)) return p;
+    const achado = findForbiddenKeyPath(v, p, depth + 1);
+    if (achado) return achado;
+  }
+  return null;
+}
+
 // Valida a FORMA de um envelope já pronto (ex.: recebido inbound). Não muta.
 // Retorna { ok, motivo }. NÃO valida entity_type contra enum (escopo diferido).
+//
+// MEDIUM-02 — FAIL-CLOSED: se o envelope carrega uma chave sensível, `ok` é FALSE.
+// Antes isto devolvia `ok:true` com um `contemChaveSensivel:true` ao lado, o que
+// dependia de TODO caller lembrar de conferir um segundo campo — um caller
+// distraído aceitaria um envelope com segredo. A recusa agora é o default.
 function validateEnvelope(env) {
-  if (!env || typeof env !== 'object') return { ok: false, motivo: 'nao_e_objeto' };
+  if (!env || typeof env !== 'object' || Array.isArray(env)) return { ok: false, motivo: 'nao_e_objeto' };
   if (env.schema_version !== SCHEMA_VERSION) return { ok: false, motivo: 'schema_version_incompativel' };
   for (const campo of ['event_id', 'empresa_id', 'entity_type', 'entity_id', 'event_type', 'occurred_at', 'source']) {
     if (!isNonEmptyString(env[campo])) return { ok: false, motivo: `campo_obrigatorio_ausente:${campo}` };
   }
-  if (env.payload == null || typeof env.payload !== 'object') return { ok: false, motivo: 'payload_invalido' };
-  // Defesa em profundidade: nenhum segredo pode ter sobrevivido.
-  const flat = JSON.stringify(env);
-  return { ok: true, motivo: null, contemChaveSensivel: /("(?:[^"]*)(?:secret|password|token|senha|authorization)[^"]*")\s*:/i.test(flat) };
+  if (env.payload == null || typeof env.payload !== 'object' || Array.isArray(env.payload)) {
+    return { ok: false, motivo: 'payload_invalido' };
+  }
+  // Defesa em profundidade: nenhum segredo pode ter sobrevivido à sanitização.
+  const caminhoSensivel = findForbiddenKeyPath({ payload: env.payload, metadata: env.metadata });
+  if (caminhoSensivel) {
+    return { ok: false, motivo: 'chave_sensivel_detectada', chaveSensivel: caminhoSensivel };
+  }
+  return { ok: true, motivo: null, chaveSensivel: null };
 }
 
 module.exports = {
   SCHEMA_VERSION,
   FORBIDDEN_KEY_FRAGMENTS,
   isForbiddenKey,
+  findForbiddenKeyPath,
   sanitizeObject,
   buildEnvelope,
   validateEnvelope,

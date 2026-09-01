@@ -36,10 +36,25 @@ function canPromoteToSucceeded(status) {
   return status === RECONCILE_STATUS.SUCCEEDED;
 }
 
-// Reenviar é seguro apenas quando o ERP comprovadamente não conhece o envio.
-// PENDING/UNKNOWN NÃO autorizam reenvio (risco de efeito duplicado).
-function safeToRetry(status) {
-  return status === RECONCILE_STATUS.NOT_FOUND || status === RECONCILE_STATUS.FAILED;
+// HIGH-05 — reenviar é seguro apenas quando o ERP comprovadamente NÃO conhece o
+// envio (NOT_FOUND). Todos os demais estados negam por padrão.
+//
+// FAILED **não** é genericamente seguro, e essa foi a correção: provider-agnostic,
+// "falhou" pode significar tanto "o ERP recusou e nada foi aplicado" quanto "o ERP
+// aplicou o efeito e a resposta se perdeu no transporte". Reenviar no segundo caso
+// duplica um efeito de negócio real. Como o Hub não pode distinguir os dois sem o
+// provider dizer, o default é NÃO reenviar.
+//
+// Um provider futuro que consiga provar a distinção informa evidência explícita:
+//   safeToRetry(FAILED, { retry_safe: true })
+// Isso mantém o contrato desacoplado (o Hub não conhece fornecedor nenhum) e coloca
+// o ônus da prova em quem tem a informação. Qualquer outro valor é ignorado.
+function safeToRetry(status, evidence = null) {
+  if (status === RECONCILE_STATUS.NOT_FOUND) return true;
+  if (status === RECONCILE_STATUS.FAILED) {
+    return Boolean(evidence && evidence.retry_safe === true);
+  }
+  return false; // PENDING, UNKNOWN, SUCCEEDED e desconhecidos
 }
 
 module.exports = {

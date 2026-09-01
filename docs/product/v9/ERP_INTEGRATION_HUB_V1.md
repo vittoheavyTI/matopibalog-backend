@@ -101,23 +101,33 @@ ERP externo → PROVIDER ADAPTER → INPUT CANÔNICO → validação → serviç
   `correlation_id`, `empresa_id`, `entity_type`, `entity_id`, `event_type`, `occurred_at`,
   `source`, `payload`, `metadata`. **Sanitização recursiva** remove qualquer chave sensível
   (jwt/senha/token/secret/cookie/refresh/credential/authorization). `entity_type` é validado
-  por forma, **não por enum** (escopo de entidades diferido).
-- **`idempotency.js`** — chave determinística `provider|empresa|entity_type|entity_id|
-  event_type|schema_version` (tenant-safe; nunca inclui event_id/timestamp).
-- **`reconcile.js`** — `NOT_FOUND | PENDING | SUCCEEDED | FAILED | UNKNOWN`. Invariante:
-  **UNKNOWN nunca vira SUCCEEDED**; só `NOT_FOUND`/`FAILED` autorizam reenvio.
+  por forma, **não por enum** (escopo de entidades diferido). `validateEnvelope` é
+  **fail-closed**: chave sensível ⇒ `ok:false`.
+- **`idempotency.js`** — `ERP_IDEMPOTENCY_EVENT_AUTHORITY = CANONICAL_INTENT_FINGERPRINT`:
+  identidade da entidade **+ fingerprint canônico do `payload`**. Estável entre retries,
+  distinta entre revisões legítimas. Exclui `event_id`/`request_id`/`correlation_id`/
+  `occurred_at`/`metadata` (tentativa ≠ evento).
+- **`reconcile.js`** — `NOT_FOUND | PENDING | SUCCEEDED | FAILED | UNKNOWN`. Invariantes:
+  **UNKNOWN nunca vira SUCCEEDED**; só `NOT_FOUND` autoriza reenvio por padrão, e `FAILED`
+  exige evidência explícita (`retry_safe:true`) do provider.
 - **`providers/disabledErpProvider.js`** — default de produção: capabilities `[]`, toda
   operação lança `DISABLED`. **Nunca finge sucesso.**
 - **`providers/fakeErpProvider.js`** — fake determinístico em memória (testes). Sem rede,
   sem segredo, sem escrita de negócio.
-- **`erpProviderGateway.js`** — ponto único; seleciona pelo modo, valida capability **antes**
-  de chamar o adapter, normaliza reconcile.
-- **`outboxContract.js`** — máquina de estados `pending→processing→processed|failed→dead`,
-  claim, backoff, `sanitizeError`, tenant isolation — implementação **em memória** com
-  assinatura async compatível com um repositório SQL futuro. **Sem runner ativo.**
+- **`erpProviderGateway.js`** — ponto único. Ordem: **modo disabled ⇒ `DISABLED`**; só então
+  valida capability (`UNSUPPORTED_CAPABILITY`); normaliza reconcile. Os dois diagnósticos
+  nunca colapsam.
+- **`outboxContract.js`** — aceita **somente envelope canônico válido**; `empresa_id` e
+  `event_type` são lidos do envelope (autoridade única). Dedupe é **composto por
+  `(empresa_id, dedupe_key)` na própria camada**. Máquina de estados
+  `pending→processing→processed|failed→dead` com **lease** (`claim_id`, `claimed_at`,
+  `lease_expires_at`), **reclaim** após expiração e **recusa de claim obsoleto**
+  (`stale_claim`). Em memória, com assinatura async compatível com um repositório SQL
+  futuro. **Sem runner ativo.**
 - **`externalIdentityContract.js`** — mapa genérico `(provider, empresa_id, entity_type,
-  internal_entity_id) → external_entity_id`, tenant/provider-safe, identidade imutável com
-  rebind auditável (exige motivo). Em memória; persistência diferida.
+  internal_entity_id) → external_entity_id`, tenant/provider-safe, unicidade nos **dois
+  sentidos**, identidade imutável com rebind auditável (exige motivo) que **valida tudo antes
+  de mutar** — nunca sequestra o external de outro internal nem deixa estado parcial.
 - **`diagnostics.js`** + **`routes/erpHub.js`** — `GET /erp-hub/status` read-only, gated por
   `verifyToken + verificarEmpresa + requirePermission('integracoes_erp.gerenciar')`.
   Devolve estado inerte; `display_status = "em_preparacao"` — **nunca "conectado"/"sincronizando"**.
@@ -131,6 +141,52 @@ inventada. Por isso os **invariantes** foram definidos e testados aqui contra im
 em memória, e a materialização em tabela (no idioma provado do `billing_outbox`/066) fica para
 a próxima fatia, sob gate próprio.
 
+Estado declarado, com a precisão que ele merece: **`CRASH_SAFE_CONTRACT_DEFINED`**, e não
+"production crash-safe". A *semântica* de recuperação existe e está provada (lease com
+expiração, reclaim determinístico, recusa de claim obsoleto); a *durabilidade* não existe —
+sem persistência, um crash do processo perde a fila inteira. O `GET /erp-hub/status` reporta
+exatamente esse valor, para que ninguém leia mais garantia do que há.
+
+## Hardening de contrato pré-merge (revisão do owner, PR #490 R2)
+
+Nove achados da revisão do contrato foram fechados **dentro da própria E3.7A**, sem migration,
+sem schema e sem provider real. Todos eram defeitos de contrato que só apareceriam quando
+alguém confiasse neles:
+
+| # | Achado | Correção |
+|---|---|---|
+| HIGH-01 | Chave de idempotência era a identidade da **entidade**, então duas revisões legítimas da mesma entidade colapsavam e a segunda era descartada em silêncio | Autoridade única declarada: `CANONICAL_INTENT_FINGERPRINT` (identidade + fingerprint canônico do payload). Estável em retry, distinta entre revisões |
+| HIGH-02 | Dedupe do outbox indexava só por `dedupe_key`; a segurança de tenant dependia de o *caller* ter embutido `empresa_id` na chave | Índice composto `(empresa_id, dedupe_key)` **na camada**; `duplicate` só devolve item do próprio tenant |
+| HIGH-03 | `rebind` deletava o índice antigo antes de validar e não checava se o novo external já pertencia a outro internal → **sequestro de identidade** e índice corrompido | Valida tudo → decide → só então muta. Colisão devolve `conflict_external_already_bound` e ambos os mapeamentos seguem íntegros |
+| HIGH-04 | `claimNext` movia para `processing` sem lease; worker morto travava o item para sempre | Lease com expiração + `claimToken`; reclaim determinístico após expirar; `markProcessed`/`markFailed` recusam **claim obsoleto** |
+| HIGH-05 | `safeToRetry(FAILED)` era `true`: uma falha de transporte após o ERP já ter aplicado o efeito autorizaria reenvio e **duplicaria efeito de negócio** | `FAILED` nega por padrão; só com evidência explícita `retry_safe:true` do provider |
+| HIGH-06 | Provider desligado devolvia `UNSUPPORTED_CAPABILITY` (lista vazia), dizendo "não sei fazer" quando a verdade era "estou desligado" | Ordem corrigida: disabled ⇒ `DISABLED`; capability só é avaliada para provider disponível |
+| MEDIUM-01 | O teste da rota injetava a permissão no efetivo e afirmava 200 para tenant — mas `integracoes_erp.gerenciar` tem `entitlementCodigo`, e o resolver nega **antes** de template/override enquanto o ERP é `em_breve`. Provava um acesso que ninguém tem | Teste passa a usar o `computeEffectivePermissions` **real** e provar a matriz verdadeira. Nenhuma permissão nova, nenhuma precedência relaxada |
+| MEDIUM-02 | `validateEnvelope` devolvia `ok:true` com `contemChaveSensivel:true` ao lado — dependia de todo caller conferir um segundo campo | **Fail-closed**: chave sensível ⇒ `ok:false`, `motivo:'chave_sensivel_detectada'`. Detecção estrutural recursiva, não regex sobre JSON |
+| MEDIUM-03 | `enqueue` aceitava payload arbitrário, furando a cadeia canônica | Só envelope canônico válido; `empresa_id`/`event_type` lidos do envelope (autoridade única) |
+
+`sanitizeError` também foi revisto: cobre `Bearer`, chaves com prefixo (`sk_`/`api_`…),
+segredo em query string e hash longo, e **sanitiza antes de truncar** (truncar primeiro podia
+cortar um token ao meio e deixar o fragmento escapar). Escopo honesto: é higiene de log, não
+DLP — a regra primária continua sendo nunca passar segredo ao Hub.
+
+### ERP_DIAGNOSTICS_AUTHORITY
+
+`EFFECTIVE_PERMISSION('integracoes_erp.gerenciar')`, com a precedência
+`ENTITLEMENT → OVERRIDE → TEMPLATE → DEFAULT_DENY` **preservada**. Consequência real, hoje:
+
+| Ator | Resultado |
+|---|---|
+| Anônimo | `401` |
+| Tenant com template que concede, entitlement técnico negado (`em_breve`) | **`403`** |
+| Tenant com override `allow` explícito, entitlement negado | **`403`** (entitlement vence) |
+| Tenant sem template / `tipo=admin` sozinho | `403` (classe de conta não autoriza — D-072) |
+| Super-admin | `200`, inerte |
+| Cenário futuro: ERP `disponivel` + concedido pelo plano | `200` |
+
+Ou seja: **a rota de diagnóstico não abre acesso operacional de ERP**. Enquanto o ERP for
+`em_breve`, só a autoridade de plataforma enxerga o diagnóstico.
+
 ## Decisões devolvidas ao owner (não bloqueiam a arquitetura-base)
 
 - **`ERP_CANONICAL_ENTITY_SCOPE_DECISION_NEEDED`** — qual o primeiro conjunto de entidades
@@ -142,12 +198,17 @@ a próxima fatia, sob gate próprio.
 
 ## Testes
 
-- **BACKEND_FOCUSED**: `tests/erpHubFoundation.test.js` (envelope/sanitização/versionamento;
-  provider disabled fail-safe; fake adapter; capability desconhecida/não suportada;
-  idempotência; outbox retry/backoff→dead + máquina de estados + tenant isolation; external
-  identity colisão/tenant-safe/rebind; reconcile UNKNOWN≠SUCCEEDED; arquitetural: nenhuma
-  camada importa supabase nem faz I/O de rede) + `tests/erpHubRoute.test.js` (401/403/200 inerte,
-  super-admin). **26/26 verdes.**
+- **BACKEND_FOCUSED**: `tests/erpHubFoundation.test.js` (48) + `tests/erpHubRoute.test.js` (8)
+  = **56/56 verdes**. Cobrem: envelope/sanitização/versionamento e recusa fail-closed de chave
+  sensível (aninhada, em array, caixa mista); idempotência (retry↦mesma chave, revisão↦chave
+  distinta, ordem de chaves irrelevante, isolamento tenant/provider/entidade, bump de schema);
+  `DISABLED` vs `UNSUPPORTED_CAPABILITY` nas três operações; outbox (só envelope canônico,
+  dedupe cruzado entre tenants, duplicate tenant-safe, lease, sem duplo claim antes do expiry,
+  reclaim após expiry, claim obsoleto não finaliza, retry/backoff→dead, terminais imutáveis);
+  external identity (colisão de bind e de rebind, rebind idempotente, integridade preservada
+  no conflito, tenant/provider-safe); reconcile (UNKNOWN≠SUCCEEDED, `FAILED` sem evidência não
+  é retry-safe); `sanitizeError`; autoridade da rota pelo resolver **real**; e invariantes
+  arquiteturais (sem supabase, sem I/O de rede) **mais** inércia funcional do modo default.
 - **BACKEND_FULL** (`node --test`): **2042 pass**; a única falha local é um artefato de CRLF do
   checkout Windows num teste que parseia `082_*.sql` por regex `)\nLANGUAGE` — o blob no git é LF
   e casa, então **verde no CI** (Linux/LF); não é regressão desta frente.
