@@ -274,20 +274,20 @@ describe('Objetivo guiado (Operation Orchestrator V1)', () => {
 
 describe('CampaignExecution', () => {
   test('estado de carregamento aparece antes da resposta do progresso', async () => {
-    let liberar: (v: unknown) => void = () => {};
+    let liberar!: (v: unknown) => void;
+    const progressDeferred = new Promise((resolve) => { liberar = resolve; });
     mockApi.get.mockImplementation((url: string) => {
-      if (url.endsWith('/progress')) return new Promise((resolve) => { liberar = resolve; });
+      if (url.endsWith('/progress')) return progressDeferred;
       return mockCampaignList()(url);
     });
 
     render(<MemoryRouter><OperationCampaigns /></MemoryRouter>);
     expect(await screen.findByText('Carregando execução da campanha…', {}, { timeout: 5000 })).toBeInTheDocument();
+    await waitFor(() => expect(mockApi.get).toHaveBeenCalledWith('/operation-campaigns/campaign-1/progress'));
 
     liberar({ data: buildProgress() });
-    // Timeout explícito: o default de 1s do waitFor fica no limite quando a suíte
-    // roda sob carga paralela neste ambiente (medido: ~1055ms numa execução
-    // isolada que passou). Não é lentidão do componente — é folga de ambiente.
     await waitFor(() => expect(screen.queryByText('Carregando execução da campanha…')).not.toBeInTheDocument(), { timeout: 5000 });
+    expect(await screen.findByRole('region', { name: /Execução da campanha/i })).toBeInTheDocument();
   }, 10000);
 
   test('mostra "sem execução ainda" e nenhuma barra de progresso quando não há viagens/meta', async () => {
