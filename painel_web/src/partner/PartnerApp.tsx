@@ -12,18 +12,24 @@ import { Package, Clock, ArrowLeft, Check, X, Send } from 'lucide-react';
 // A sessão vive em `partner_token`, distinta do token interno. As duas nunca se
 // misturam: o backend recusa cada uma no mundo da outra.
 
-const CHAVE_SESSAO = 'matopibalog_partner_token';
+export const CHAVE_SESSAO = 'matopibalog_partner_token';
+
+export function deveEncerrarSessaoParceiro(status: number | undefined | null): boolean {
+  return status === 401 || status === 403;
+}
 
 const clienteParceiro = axios.create({
   baseURL: `${import.meta.env.VITE_API_URL || ''}/portal/parceiro`,
 });
 
-// 401 no meio da navegação = sessão vencida ou acesso revogado. Limpar e mandar
-// para o login é a única saída honesta — o convite não serve mais.
+// 401/403 no meio da navegação = sessão vencida, inválida ou acesso revogado.
+// O backend usa 403 para parceiro bloqueado/revogado: manter o token local nesse
+// caso prende a pessoa numa sessão morta. Limpa só a sessão EXTERNA do parceiro;
+// não toca no `auth_token` interno nem no token do Portal do Embarcador.
 clienteParceiro.interceptors.response.use(
   (r) => r,
   (erro) => {
-    if (erro?.response?.status === 401) {
+    if (deveEncerrarSessaoParceiro(erro?.response?.status)) {
       localStorage.removeItem(CHAVE_SESSAO);
     }
     return Promise.reject(erro);
