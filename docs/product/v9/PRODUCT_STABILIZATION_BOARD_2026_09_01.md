@@ -178,3 +178,35 @@ compatibilidade do app provada pelo contrato de servidor, e não resta HIGH aber
 Somente leitura. `PRODUCTION_DDL=0`, `PRODUCTION_BUSINESS_WRITES=0`,
 `PRODUCTION_EXTERNAL_CALLS_FROM_VISUAL_TESTS=0` (provado pela sentinela do pack, com
 controle negativo), `ENV_CHANGED=false`, `MIGRATION_REQUIRED=false`.
+
+---
+
+## Retomada WEB_FULL gate — 2026-09-05
+
+`TEST-HARNESS-001=FIXED`
+`CLASSIFICATION=EXISTING_TEST_RACE`
+`ROOT_CAUSE=DEFERRED_RESOLVER_ASSIGNED_AFTER_LOADING_RENDER`
+`PRODUCT_CODE_CHANGED_FOR_TEST_HARNESS_001=false`
+`FOCUSED_REPEAT=3/3 PASS`
+`CAMPAIGN_FILE_SUITE=15/15 PASS`
+`WEB_FULL=PASS`
+`TYPECHECK=PASS`
+`BUILD=PASS`
+`SEC1_LOCAL=SKIPPED_DATABASE_URL_ABSENT`
+`VISUAL_PACK=43/43 PASS`
+
+O teste de loading de `CampaignExecution` criava o resolver da `Promise` somente
+quando o mock recebia `GET /progress`. Como a tela inicia em `loading=true`, a
+asserção de loading podia resolver antes dessa chamada, deixando `liberar` como
+no-op e a request pendente para sempre. A correção cria o deferred antes do
+render, confirma que `/progress` foi chamado, resolve a resposta e prova a região
+final `Execução da campanha`.
+
+O SEC-1 browser E2E local pulou por ausência de `DATABASE_URL`, conforme guarda do
+próprio spec. Nesta máquina recuperada também não há Docker, `psql` ou Postgres
+local para prover o banco efêmero; a validação real do SEC-1 permanece no CI do
+HEAD final, sem usar banco de produção.
+
+`STAB-S2=STATIC_AUDIT_FROZEN_NOT_BEHAVIORALLY_CERTIFIED`
+`STAB-S3=STATIC_AUDIT_FROZEN_NOT_BEHAVIORALLY_CERTIFIED`
+`STAB-S4=STATIC_AUDIT_FROZEN_NOT_BEHAVIORALLY_CERTIFIED`

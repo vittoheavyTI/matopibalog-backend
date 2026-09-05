@@ -25,6 +25,20 @@ import { usePermissions } from './usePermissions';
 // frontend com critério próprio foi exatamente o BUG-002.
 //
 // `role === 'admin'` NÃO é autoridade em lugar nenhum disto.
+//
+// S1-MEDIUM-01 — SUPER-ADMIN NÃO É PERSONA DESTE HUB.
+//
+// `usePermissions.can()` devolve `true` para super-admin (autoridade de
+// PLATAFORMA), então este hook derivava `podeFinancas` e `podeContratacao`
+// verdadeiros para ele. Só que `useContratacaoStatus` não consulta super-admin e a
+// página não carrega finanças para super-admin — três autoridades dizendo coisas
+// diferentes sobre o mesmo ator.
+//
+// A contradição se resolve pela fronteira, não por mais um caso especial:
+// `/minhas-faturas` é superfície DE TENANT, e super-admin não tem tenant implícito.
+// Ele tem `/painel-administrativo/financeiro`. Aqui o hook é fail-closed —
+// autoridade de plataforma não vira autoridade de cliente — e a página redireciona
+// antes de montar qualquer coisa.
 export type AutoridadeDeArea = {
   /** Pode ver faturas, status de plano e sincronizar. */
   podeFinancas: boolean;
@@ -37,6 +51,11 @@ export type AutoridadeDeArea = {
 export function useAreaAuthority(): AutoridadeDeArea {
   const { user } = useAuth();
   const { can } = usePermissions();
+
+  // Fail-closed: nenhuma área de tenant para quem é autoridade de plataforma.
+  if (user?.is_super_admin === true) {
+    return { podeFinancas: false, podeContratacao: false, semNenhumaArea: true };
+  }
 
   const podeFinancas = can('finance.saas.view');
   const podeContratacao = can('company.settings.manage') || user?.empresa_tipo === 'autonomo';

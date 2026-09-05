@@ -82,6 +82,8 @@ function renderEm(rota: string) {
     <MemoryRouter initialEntries={[rota]}>
       <Routes>
         <Route path="/minhas-faturas" element={<MinhasFaturas />} />
+        {/* Destino do redirect do super-admin (S1-MEDIUM-01). */}
+        <Route path="/painel-administrativo/financeiro" element={<div data-testid="financeiro-plataforma" />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -277,5 +279,66 @@ describe('S1-HIGH-04 — matriz de áreas do hub (finanças × contratação)', 
     await waitFor(() => expect(screen.getByTestId('painel-contratacao')).toBeInTheDocument());
     expect(screen.queryByText(/não foi possível carregar o status do plano/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/não foi possível determinar/i)).not.toBeInTheDocument();
+  });
+});
+
+describe('S1-MEDIUM-01 — super-admin não opera o hub de tenant', () => {
+  test('redireciona para o financeiro de plataforma, sem I/O de tenant', async () => {
+    authState.user = {
+      uid: 's-1', nome: 'Super', role: 'admin', is_super_admin: true,
+      empresa_id: null, effective_permissions: {},
+    };
+    renderEm('/minhas-faturas');
+    await waitFor(() => expect(screen.getByTestId('financeiro-plataforma')).toBeInTheDocument());
+    await new Promise((r) => setTimeout(r, 30));
+
+    // Nem tela de tenant, nem loading infinito, nem chamada alguma.
+    expect(screen.queryByText('Faturas e Regularização')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Faturas' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Plano e contratação' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Carregando...')).not.toBeInTheDocument();
+    expect(chamadasFinanceiras().gets, 'SUPERADMIN_CLIENT_FINANCE_IO').toHaveLength(0);
+    expect(chamadasFinanceiras().posts).toHaveLength(0);
+    expect(chamadasContratacao(), 'SUPERADMIN_CLIENT_CONTRACT_IO').toHaveLength(0);
+  });
+
+  test('o deep link da contratação também redireciona', async () => {
+    authState.user = {
+      uid: 's-1', role: 'admin', is_super_admin: true, empresa_id: null, effective_permissions: {},
+    };
+    renderEm('/minhas-faturas?aba=contratacao');
+    await waitFor(() => expect(screen.getByTestId('financeiro-plataforma')).toBeInTheDocument());
+    expect(screen.queryByTestId('painel-contratacao')).not.toBeInTheDocument();
+    expect(chamadasContratacao()).toHaveLength(0);
+  });
+});
+
+describe('S1-HIGH-06 — rebaixamento de permissão em runtime', () => {
+  test('BOTH com contrato pendente → FINANCE_ONLY: some aba, badge e estado antigo', async () => {
+    // O mesmo shell, sem remontar: é assim que o defeito aparece na vida real.
+    contratacaoState.pendenciaObrigatoria = true;
+    authState.user = usuario(PERSONA.BOTH);
+    const { rerender } = renderEm('/minhas-faturas?aba=contratacao');
+    await waitFor(() => expect(screen.getByTestId('painel-contratacao')).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Plano e contratação' })).toBeInTheDocument();
+
+    // Perde a autoridade de contratação. O hook devolve neutro para essa persona.
+    authState.user = usuario(PERSONA.FINANCE_ONLY);
+    contratacaoState.pendenciaObrigatoria = false;
+    rerender(
+      <MemoryRouter initialEntries={['/minhas-faturas?aba=contratacao']}>
+        <Routes>
+          <Route path="/minhas-faturas" element={<MinhasFaturas />} />
+          <Route path="/painel-administrativo/financeiro" element={<div data-testid="financeiro-plataforma" />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Plano e contratação' })).not.toBeInTheDocument());
+    expect(screen.queryByTestId('painel-contratacao')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('comparador-planos')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('plano-contratos')).not.toBeInTheDocument();
+    // Nenhum resquício da copy contratual do estado anterior.
+    expect(screen.queryByText(/assinatura do contrato pendente/i)).not.toBeInTheDocument();
   });
 });

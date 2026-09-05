@@ -79,6 +79,16 @@ function getTipoLabel(tipo?: string): string {
 
 export const MinhasFaturas: React.FC = () => {
   const { user } = useAuth();
+  // S1-MEDIUM-01 — SUPERADMIN_CLIENT_HUB_BEHAVIOR = REDIRECT_TO_PLATFORM_FINANCE.
+  //
+  // Este é o hub DE TENANT, e super-admin não tem tenant implícito: usar a empresa
+  // do último cliente visualizado seria tenant switching silencioso. O redirect
+  // acontece ANTES de qualquer efeito — antes de I/O financeiro, de I/O de
+  // contratação e de montar componente de tenant. O destino já existe.
+  //
+  // Isto NÃO muda o backend: as APIs que aceitam super-admin como autoridade de
+  // plataforma seguem aceitando. O que se define aqui é qual UX é a correta.
+  const ehSuperAdmin = user?.is_super_admin === true;
   // S1-HIGH-01 / S1-HIGH-04 — este hub tem DUAS áreas com autoridades distintas, e
   // a fronteira vale nos dois sentidos: contratação não abre finanças, finanças não
   // abrem contratação.
@@ -119,8 +129,8 @@ export const MinhasFaturas: React.FC = () => {
   // e só para quem tem a autoridade dela.
   const jaCarregouRef = useRef(false);
   useEffect(() => {
+    if (ehSuperAdmin) return;
     if (!user?.uid) return;
-    if (user?.is_super_admin) return;
     // Quando não há carga financeira a fazer, a página não pode ficar presa no
     // "Carregando...": o estado inicial `loading` existe para a busca de faturas,
     // e sem ela a aba de contratação precisa renderizar de imediato.
@@ -131,7 +141,7 @@ export const MinhasFaturas: React.FC = () => {
     if (jaCarregouRef.current) return;
     jaCarregouRef.current = true;
     carregarDados();
-  }, [user?.uid, user?.is_super_admin, podeFinancas, abaAtual]);
+  }, [user?.uid, ehSuperAdmin, podeFinancas, abaAtual]);
 
   // Limpa modal Pix ao fechar
   useEffect(() => {
@@ -237,10 +247,6 @@ export const MinhasFaturas: React.FC = () => {
     }
   };
 
-  // Super-admin vai para painel admin
-  if (user?.is_super_admin) {
-    return <Navigate to="/painel-administrativo/financeiro?aba=faturas" replace />;
-  }
 
   const trialAtivo = planoStatus?.status === 'trial' && !planoStatus?.trial_expirado;
   const trialEndsAt = planoStatus?.trial_ends_at;
@@ -322,6 +328,12 @@ export const MinhasFaturas: React.FC = () => {
     trialData,
     temFaturaComLink: Boolean(atual?.invoice_url),
   });
+
+  // Super-admin: superfície de plataforma, não de tenant. `replace` para o botão
+  // Voltar não devolver o usuário a uma tela que ele não deve operar.
+  if (ehSuperAdmin) {
+    return <Navigate to="/painel-administrativo/financeiro?aba=faturas" replace />;
+  }
 
   // Matriz de áreas, caso D: sem finanças e sem contratação não há hub — e não se
   // monta nada nem se chama nada. A superfície é a mesma do `PermissionRoute`,

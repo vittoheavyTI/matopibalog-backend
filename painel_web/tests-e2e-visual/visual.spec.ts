@@ -204,3 +204,30 @@ test.describe('S1-HIGH-04 — a fronteira vale nos dois sentidos', () => {
     rede.assertSemRedeExterna();
   });
 });
+
+test.describe('S1-MEDIUM-01 — super-admin não opera o hub de tenant', () => {
+  test('/minhas-faturas redireciona para o financeiro de plataforma, sem I/O de tenant', async ({ page }) => {
+    const tenantIO: string[] = [];
+    page.on('request', (r) => {
+      const u = r.url();
+      if (!u.includes('/pagamentos/') && !u.includes('/contratacao')) return;
+      let origem = '';
+      try {
+        origem = r.frame().url();
+      } catch {
+        origem = page.url();
+      }
+      if (origem.includes('/minhas-faturas')) tenantIO.push(`${r.method()} ${u} via ${origem}`);
+    });
+
+    const rede = await instalarApiFake(page, CENARIO_PADRAO, { superAdmin: true });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('/minhas-faturas', { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(1500);
+
+    await expect(page).toHaveURL(/painel-administrativo\/financeiro/);
+    await expect(page.getByRole('button', { name: 'Plano e contratação' })).toHaveCount(0);
+    expect(tenantIO, `I/O de tenant indevido: ${tenantIO.join(', ')}`).toHaveLength(0);
+    rede.assertSemRedeExterna();
+  });
+});

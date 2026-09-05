@@ -34,6 +34,12 @@
 
 export type SeveridadeComercial = 'ok' | 'informativo' | 'atencao' | 'critico';
 
+// S1-MEDIUM-02 — OPERATION_STATE_AUTHORITY = `EstadoComercial.operacao`, e só ela.
+// Havia um `operacaoBloqueada: boolean` sobrevivendo ao lado do tri-state: duas
+// representações do mesmo fato, uma delas incapaz de expressar "indeterminada".
+// Nenhum consumidor a usava, então foi removida em vez de mantida "por garantia" —
+// duas fontes para a mesma verdade divergem, é só questão de tempo.
+
 /** Certeza sobre a liberação de ESCRITA operacional. Ver `operacao` abaixo. */
 export type EstadoOperacao = 'liberada' | 'bloqueada' | 'indeterminada';
 
@@ -45,8 +51,6 @@ export type EstadoComercial = {
   contratoPendente: boolean;
   /** Contrato iniciado aguardando assinatura, SEM ser bloqueante (trial). */
   assinaturaPendente: boolean;
-  /** Conta suspensa/expirada/bloqueada — operação de escrita negada. */
-  operacaoBloqueada: boolean;
   /**
    * S1-HIGH-05 — TRÊS estados, não dois. O comentário desta função já dizia
    * "indeterminada" para contrato pendente, mas o objeto devolvia `true` — ou seja,
@@ -87,8 +91,6 @@ export type EntradaEstadoComercial = {
   assinaturaPendente?: boolean | null;
 };
 
-const BLOQUEADOS = new Set(['suspenso', 'expirado', 'bloqueado']);
-
 export function resolverEstadoComercial(entrada: EntradaEstadoComercial = {}): EstadoComercial {
   const status = entrada.status ?? null;
   const contratoPendente = entrada.contratoPendente === true;
@@ -96,7 +98,6 @@ export function resolverEstadoComercial(entrada: EntradaEstadoComercial = {}): E
   const trialExpirado = entrada.trialExpirado === true;
   const trialAtivo = entrada.trialAtivo === true || (status === 'trial' && !trialExpirado);
   const planoAtivo = status === 'ativo';
-  const operacaoBloqueada = BLOQUEADOS.has(status || '') || (status === 'trial' && trialExpirado);
 
   const base = {
     planoAtivo,
@@ -104,7 +105,6 @@ export function resolverEstadoComercial(entrada: EntradaEstadoComercial = {}): E
     trialExpirado,
     contratoPendente,
     assinaturaPendente: assinaturaPendente && !contratoPendente,
-    operacaoBloqueada,
   };
 
   // O pior estado manda: bloqueio efetivo vence pendência de contrato.

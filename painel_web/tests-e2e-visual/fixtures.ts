@@ -126,7 +126,7 @@ export type SentinelaRede = {
 export async function instalarApiFake(
   page: Page,
   cenario: Cenario,
-  opcoes: { permissoes?: Record<string, boolean> } = {},
+  opcoes: { permissoes?: Record<string, boolean>; superAdmin?: boolean } = {},
 ): Promise<SentinelaRede> {
   // §15 — EXTERNAL_NETWORK_REQUESTS_ALLOWED=0, PROVADO em vez de presumido.
   //
@@ -161,6 +161,9 @@ export async function instalarApiFake(
 
     if (p.endsWith('/configuracoes/public')) return json(route, {});
     if (p.endsWith('/auth/me')) {
+      if (opcoes.superAdmin) {
+        return json(route, { ...USUARIO_ADMIN, is_super_admin: true, empresa_id: null });
+      }
       return json(route, opcoes.permissoes
         ? { ...USUARIO_ADMIN, effective_permissions: opcoes.permissoes }
         : USUARIO_ADMIN);
