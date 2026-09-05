@@ -6,6 +6,11 @@ import { PlanoContratos } from '../components/PlanoContratos';
 import { ComparadorPlanos } from '../components/ComparadorPlanos';
 import { Contratacao } from './Contratacao';
 import { useAuth } from '../contexts/AuthContext';
+import { useContratacaoStatus } from '../hooks/useContratacaoStatus';
+import { useAreaAuthority } from '../hooks/useAreaAuthority';
+import {
+  resolverEstadoComercial, copyComercial, classesDaSeveridade,
+} from '../utils/commercialAccountState';
 import { civilDateToDayNumber, compareCivilDates, formatCivilDate, formatTechnicalDate } from '../utils';
 import { brl, mensagemRodapePagamento } from '../utils/faturaCopy';
 
@@ -74,6 +79,23 @@ function getTipoLabel(tipo?: string): string {
 
 export const MinhasFaturas: React.FC = () => {
   const { user } = useAuth();
+  // S1-MEDIUM-01 — SUPERADMIN_CLIENT_HUB_BEHAVIOR = REDIRECT_TO_PLATFORM_FINANCE.
+  //
+  // Este é o hub DE TENANT, e super-admin não tem tenant implícito: usar a empresa
+  // do último cliente visualizado seria tenant switching silencioso. O redirect
+  // acontece ANTES de qualquer efeito — antes de I/O financeiro, de I/O de
+  // contratação e de montar componente de tenant. O destino já existe.
+  //
+  // Isto NÃO muda o backend: as APIs que aceitam super-admin como autoridade de
+  // plataforma seguem aceitando. O que se define aqui é qual UX é a correta.
+  const ehSuperAdmin = user?.is_super_admin === true;
+  // S1-HIGH-01 / S1-HIGH-04 — este hub tem DUAS áreas com autoridades distintas, e
+  // a fronteira vale nos dois sentidos: contratação não abre finanças, finanças não
+  // abrem contratação.
+  const { podeFinancas, podeContratacao, semNenhumaArea } = useAreaAuthority();
+  const {
+    pendenciaObrigatoria, trialAtivo: trialAtivoContratacao, assinaturaPendente,
+  } = useContratacaoStatus({ enabled: podeContratacao });
   const [searchParams, setSearchParams] = useSearchParams();
   const [faturas, setFaturas] = useState<Fatura[]>([]);
   const [loading, setLoading] = useState(true);
@@ -87,17 +109,39 @@ export const MinhasFaturas: React.FC = () => {
   const [pixCarregando, setPixCarregando] = useState(false);
   const [pixCopiado, setPixCopiado] = useState(false);
   const pixTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const abaAtual = searchParams.get('aba') === 'contratacao' ? 'contratacao' : 'faturas';
+  // A aba efetiva é a interseção do que foi PEDIDO com o que é AUTORIZADO. Um deep
+  // link não fura a matriz: ele é atendido quando pode, e ignorado quando não.
+  const abaPedida = searchParams.get('aba') === 'contratacao' ? 'contratacao' : 'faturas';
+  const abaAtual: 'faturas' | 'contratacao' = podeFinancas && podeContratacao
+    ? abaPedida
+    : podeFinancas ? 'faturas' : 'contratacao';
   const selecionarAba = (aba: 'faturas' | 'contratacao') => {
     if (aba === 'contratacao') setSearchParams({ aba: 'contratacao' });
     else setSearchParams({});
   };
 
+  // S1-HIGH-01 — a página inteira disparava, no mount, dois GETs financeiros MAIS
+  // um POST de sincronização (write que fala com o provedor), independentemente da
+  // aba e da permissão. Abrir `?aba=contratacao` para assinar um contrato fazia o
+  // navegador bater em três endpoints financeiros que o usuário podia não ter
+  // direito de chamar. Devolver 403 no backend não resolve: a UI não deve pedir o
+  // que sabe que não pode. O I/O financeiro agora acontece só na área financeira,
+  // e só para quem tem a autoridade dela.
+  const jaCarregouRef = useRef(false);
   useEffect(() => {
+    if (ehSuperAdmin) return;
     if (!user?.uid) return;
-    if (user?.is_super_admin) return;
+    // Quando não há carga financeira a fazer, a página não pode ficar presa no
+    // "Carregando...": o estado inicial `loading` existe para a busca de faturas,
+    // e sem ela a aba de contratação precisa renderizar de imediato.
+    if (!podeFinancas || abaAtual !== 'faturas') {
+      setLoading(false);
+      return;
+    }
+    if (jaCarregouRef.current) return;
+    jaCarregouRef.current = true;
     carregarDados();
-  }, [user?.uid]);
+  }, [user?.uid, ehSuperAdmin, podeFinancas, abaAtual]);
 
   // Limpa modal Pix ao fechar
   useEffect(() => {
@@ -142,11 +186,14 @@ export const MinhasFaturas: React.FC = () => {
       setLoading(false);
     }
 
-    // Sincronização em segundo plano (best-effort)
+    // CONTRACT_TAB_AUTO_FINANCE_SYNC=false. A sincronização é um WRITE que chama o
+    // provedor (`POST /pagamentos/minhas-faturas/sincronizar`); só roda dentro da
+    // superfície financeira, para quem tem a autoridade dela.
     sincronizar(false);
   };
 
   const sincronizar = async (manual: boolean = true) => {
+    if (!podeFinancas) return; // nunca a partir da área de contratação
     if (sincronizando) return;
     setSincronizando(true);
     setErroSync(null);
@@ -200,10 +247,6 @@ export const MinhasFaturas: React.FC = () => {
     }
   };
 
-  // Super-admin vai para painel admin
-  if (user?.is_super_admin) {
-    return <Navigate to="/painel-administrativo/financeiro?aba=faturas" replace />;
-  }
 
   const trialAtivo = planoStatus?.status === 'trial' && !planoStatus?.trial_expirado;
   const trialEndsAt = planoStatus?.trial_ends_at;
@@ -258,43 +301,54 @@ export const MinhasFaturas: React.FC = () => {
     ? `mailto:${suporteEmail}?subject=${encodeURIComponent('Solicitação de regularização do plano')}`
     : null;
 
-  const bannerPlano = (() => {
-    const status = planoStatus?.status;
-    if (status === 'ativo') return {
-      titulo: 'Plano ativo',
-      texto: 'Seu plano está ativo.',
-      classes: 'bg-green-50 border-green-200 text-green-800',
-    };
-    if (status === 'trial') {
-      if (planoStatus?.trial_expirado) return {
-        titulo: 'Período de teste expirado',
-        texto: trialData ? `Seu teste expirou em ${trialData}.` : 'Seu período de teste expirou.',
-        classes: 'bg-red-50 border-red-200 text-red-800',
-      };
-      return {
-        titulo: 'Período de teste',
-        texto: trialData ? `Seu período de teste permanece ativo até ${trialData}.` : 'Sua empresa está no período de teste.',
-        classes: 'bg-blue-50 border-blue-200 text-blue-800',
-      };
-    }
-    if (status === 'suspenso') return {
-      titulo: 'Conta suspensa',
-      texto: atual?.invoice_url
-        ? 'Sua conta está suspensa. Pague a fatura pendente para recuperar o acesso.'
-        : 'Sua conta está suspensa. Entre em contato com o suporte para regularizar.',
-      classes: 'bg-red-50 border-red-200 text-red-800',
-    };
-    if (status === 'expirado' || status === 'bloqueado') return {
-      titulo: status === 'expirado' ? 'Plano expirado' : 'Plano bloqueado',
-      texto: 'Seu acesso operacional está bloqueado. Entre em contato com o suporte.',
-      classes: 'bg-red-50 border-red-200 text-red-800',
-    };
-    return {
-      titulo: 'Status do plano',
-      texto: status ? `Status atual: ${status}.` : 'Status não informado.',
-      classes: 'bg-gray-50 border-gray-200 text-gray-700',
-    };
-  })();
+  // S1-HIGH-02 — o MESMO resolvedor semântico que o banner global do Layout usa.
+  // Antes havia duas lógicas independentes para o mesmo fato, e a correção do
+  // BUG-005 tinha alcançado só uma delas. Aqui a copy é a versão longa; no shell é
+  // a curta. Tamanhos diferentes, sentido idêntico.
+  const estadoComercial = resolverEstadoComercial({
+    status: planoStatus?.status,
+    trialExpirado: planoStatus?.trial_expirado,
+    contratoPendente: pendenciaObrigatoria,
+    trialAtivo: trialAtivoContratacao,
+    assinaturaPendente,
+  });
+  // §15 — o banner comercial precisa de informação que a persona possa ver: status
+  // financeiro (para quem tem finanças) ou estado de contratação (para quem tem
+  // contratação). Sem nenhum dos dois não há o que comunicar — e "não foi possível
+  // determinar o status" seria mentira, porque não houve chamada alguma a falhar.
+  //
+  // Sem autoridade financeira NÃO houve chamada de status do plano — logo o estado
+  // comercial é, corretamente, 'indefinido'. Mas exibir "não foi possível determinar
+  // o status" nesse caso seria relatar uma falha que não existiu: nada foi tentado.
+  // Para essa persona o banner só aparece quando há um sinal CONTRATUAL real a
+  // comunicar.
+  const mostrarBannerComercial = podeFinancas
+    || (podeContratacao && (pendenciaObrigatoria || assinaturaPendente));
+  const bannerPlano = copyComercial(estadoComercial, 'financeiro', {
+    trialData,
+    temFaturaComLink: Boolean(atual?.invoice_url),
+  });
+
+  // Super-admin: superfície de plataforma, não de tenant. `replace` para o botão
+  // Voltar não devolver o usuário a uma tela que ele não deve operar.
+  if (ehSuperAdmin) {
+    return <Navigate to="/painel-administrativo/financeiro?aba=faturas" replace />;
+  }
+
+  // Matriz de áreas, caso D: sem finanças e sem contratação não há hub — e não se
+  // monta nada nem se chama nada. A superfície é a mesma do `PermissionRoute`,
+  // para o usuário não aprender duas linguagens diferentes de recusa.
+  if (semNenhumaArea) {
+    return (
+      <div className="p-8 max-w-lg mx-auto text-center">
+        <h2 className="text-lg font-semibold text-gray-800">Acesso restrito</h2>
+        <p className="mt-2 text-sm text-gray-500">
+          Você não tem permissão para acessar esta área. Fale com um administrador da sua
+          empresa para receber a permissão necessária.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 pb-20 px-6">
@@ -309,8 +363,8 @@ export const MinhasFaturas: React.FC = () => {
 
       <div className="flex flex-wrap gap-2 rounded-xl bg-gray-100 p-1 w-fit">
         {[
-          { id: 'faturas', label: 'Faturas' },
-          { id: 'contratacao', label: 'Plano e contratação' },
+          ...(podeFinancas ? [{ id: 'faturas', label: 'Faturas' }] : []),
+          ...(podeContratacao ? [{ id: 'contratacao', label: 'Plano e contratação' }] : []),
         ].map((tab) => (
           <button
             key={tab.id}
@@ -346,14 +400,16 @@ export const MinhasFaturas: React.FC = () => {
         </div>
       )}
 
-      {!loading && erroPlano && (
+      {/* §15 — quem não tem autoridade financeira não chamou `plano-status`;
+          ausência de autoridade não é falha de carregamento e não vira alerta. */}
+      {!loading && podeFinancas && erroPlano && (
         <div className="flex items-center gap-2 p-4 bg-amber-50 text-amber-800 border border-amber-200 rounded-xl">
           <AlertCircle size={18} /> {erroPlano}
         </div>
       )}
 
-      {!loading && (
-        <div className={`rounded-xl border p-5 ${bannerPlano.classes}`}>
+      {!loading && mostrarBannerComercial && (
+        <div className={`rounded-xl border p-5 ${classesDaSeveridade(bannerPlano.severidade)}`}>
           <div className="flex items-start gap-3">
             <AlertCircle size={20} className="shrink-0 mt-0.5" />
             <div className="flex-1 min-w-0">
@@ -374,12 +430,15 @@ export const MinhasFaturas: React.FC = () => {
         </div>
       )}
 
-      {/* Plano e contratos (contrato assinado, certificado, datas de assinatura) */}
-      {!loading && <PlanoContratos />}
+      {/* §9 — PlanoContratos consome `GET /contratacao/minha`, logo é área de
+          CONTRATAÇÃO e não pode montar fora dela. Antes ficava fora da condição da
+          aba e disparava a chamada para qualquer persona, contando com o 403 do
+          servidor como se 403 fosse UX. */}
+      {!loading && podeContratacao && abaAtual === 'contratacao' && <PlanoContratos />}
 
-      {!loading && abaAtual === 'contratacao' && <ComparadorPlanos />}
+      {!loading && podeContratacao && abaAtual === 'contratacao' && <ComparadorPlanos />}
 
-      {!loading && abaAtual === 'contratacao' && <Contratacao />}
+      {!loading && podeContratacao && abaAtual === 'contratacao' && <Contratacao />}
 
       {abaAtual === 'faturas' && (
         <>

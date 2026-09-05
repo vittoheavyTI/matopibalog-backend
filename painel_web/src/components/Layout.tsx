@@ -7,6 +7,8 @@ import { OperationalContextSelector } from './OperationalContextSelector';
 import { AiCopilot } from './AiCopilot';
 import { useAuth } from '../contexts/AuthContext';
 import { useContratacaoStatus } from '../hooks/useContratacaoStatus';
+import { useAreaAuthority } from '../hooks/useAreaAuthority';
+import { resolverEstadoComercial, copyComercial } from '../utils/commercialAccountState';
 import api from '../api';
 import { LogOut, User as UserIcon, ChevronDown, UserCog, AlertTriangle, FileSignature } from 'lucide-react';
 
@@ -20,6 +22,10 @@ function formatarDataTrial(valor?: string | null) {
 export const Layout: React.FC = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  // §11 — os banners comerciais oferecem CTAs ("Assinar contrato", "Contratar
+  // agora") que chamam `/contratacao/*`. Sem autoridade de contratação, esse CTA
+  // terminaria em 403: não se oferece um caminho que se sabe fechado.
+  const { podeContratacao } = useAreaAuthority();
   const {
     pendenciaObrigatoria,
     trialAtivo,
@@ -31,7 +37,7 @@ export const Layout: React.FC = () => {
     podeDeclinar,
     planoId,
     quantidadeContratada,
-  } = useContratacaoStatus();
+  } = useContratacaoStatus({ enabled: podeContratacao });
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const dataTrial = formatarDataTrial(trialEndsAt);
@@ -236,13 +242,22 @@ export const Layout: React.FC = () => {
           </div>
         )}
 
+        {/* S1-HIGH-02 — esta copy era escrita à mão aqui, em paralelo à de
+            MinhasFaturas, e as duas explicavam o MESMO fato de formas diferentes.
+            Agora ambas derivam de `resolverEstadoComercial`; muda só o tamanho.
+            §11: "formalizar a continuidade comercial" escondia o efeito operacional
+            — a copy nova diz que ações podem ficar restritas, sem exagerar
+            (leitura nunca é bloqueada pelo backend). */}
         {pendenciaObrigatoria && (
           <div className="bg-amber-50 border-b border-amber-300 px-4 md:px-8 py-3">
             <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
               <div className="flex items-start gap-2 text-amber-800 flex-1">
                 <AlertTriangle size={18} className="shrink-0 mt-0.5" />
                 <p className="text-sm font-medium">
-                  Sua contratação está iniciada. Assine o contrato para formalizar a continuidade comercial.
+                  {copyComercial(
+                    resolverEstadoComercial({ contratoPendente: true }),
+                    'global',
+                  ).texto}
                 </p>
               </div>
               <button
