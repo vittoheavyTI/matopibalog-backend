@@ -131,3 +131,21 @@ S4 não executa escrita real, convite real, login com usuário real, download re
 - `npm run test:e2e:sec1`: `1` skipped por `DATABASE_URL` ausente.
 - `npm test` em `painel_web`: `293/296` passed; falhas fora do escopo S4 em `PainelEmpresas.test.tsx` e `UsuariosCorrecoes.test.tsx`.
 - `backend npm run test:pg`: não executado localmente porque `DATABASE_URL_PRESENT=false`; os próprios arquivos `tests-pg` exigem banco efêmero de CI e vários falham deliberadamente em CI sem essa variável.
+
+## Fechamento em produção
+
+Data: 2026-10-06
+
+Status final: `S4_TECHNICALLY_CLOSED_IN_PRODUCTION`.
+
+- PR #492: merged em 2026-10-06T22:22:08Z.
+- `FINAL_HEAD=81b045e8cde4a0e5063f74db8cdd094f3ec5aee0`.
+- `MERGE_SHA=be9be5ef53da68cc4c94a75d7cbde775233c4476`.
+- `BASE_MAIN=f8cbd109a9a91c0f9e0a8ca77ef971be12395422`.
+- Main CI no `MERGE_SHA`: Backend CI `SUCCESS`, Frontend CI/build `SUCCESS`, SEC-1 Browser E2E `SUCCESS`, GitHub Pages `build-and-deploy` `SUCCESS`.
+- Railway backend: deployment `c0356113-e27a-43e1-985a-6741676d97e1` `SUCCESS`, `commitHash=be9be5ef53da68cc4c94a75d7cbde775233c4476`, branch `main`, 1 réplica rodando, 0 crashed, 0 warnings/críticas.
+- Smoke read-only em produção: `/health` 200; `/auth/me`, `/portal/embarcador/contexto`, `/portal/parceiro/oportunidades`, `/rede-parceiros/parceiros` e `/shipper-inbox/solicitacoes` negaram acesso sem credencial ou com credencial inválida via 401/403.
+- Logs pós-deploy: somente boot/configuração informativa; `NEW_PRODUCTION_ERRORS=0`.
+- Escritas de produção executadas por S4: `PRODUCTION_BUSINESS_WRITES=0`, `PRODUCTION_AUTH_USERS_CREATED=0`, `PRODUCTION_INVITATIONS_CREATED=0`, `PRODUCTION_EMAILS_SENT=0`, `MIGRATIONS_APPLIED_BY_S4=0`.
+- PR #490 permanece fora de escopo: `PR490_TOUCHED=false`.
+- `OWNER_VISUAL_VALIDATION=PENDING`: validação visual humana dos fluxos externos segue pendente e não reabre o fechamento técnico.
