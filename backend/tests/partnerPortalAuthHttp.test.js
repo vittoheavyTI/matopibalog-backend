@@ -573,6 +573,7 @@ test('(I): parceiro BLOQUEADO perde o acesso com o JWT ainda válido', async () 
   const r = await pedir(app, 'GET', '/portal/parceiro/eu', { token: ativado.body.token });
   assert.equal(r.status, 403, 'sem releitura, bloquear só valeria quando o token expirasse');
   assert.match(r.body.message, /bloqueado/i);
+  assert.equal(r.body.code, 'parceiro_bloqueado');
 });
 
 test('(I): identidade bloqueada também não consegue entrar de novo', async () => {
@@ -609,5 +610,6 @@ test('(J)(K): token interno e token sem kind não entram na área do parceiro', 
     const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: 3600 });
     const r = await pedir(app, 'GET', '/portal/parceiro/eu', { token });
     assert.equal(r.status, 403, `credencial ${JSON.stringify(payload)} não pode entrar`);
+    assert.equal(r.body.code, 'credencial_portal_parceiro_invalida');
   }
 });

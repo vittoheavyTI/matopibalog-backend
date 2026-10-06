@@ -233,36 +233,71 @@ test.describe('S1-MEDIUM-01 — super-admin não opera o hub de tenant', () => {
 });
 
 test.describe('S4 — fronteira do portal externo de parceiros', () => {
-  test('403 no portal do parceiro limpa só a sessão externa, preservando tokens internos/embarcador', async ({ page }) => {
+  async function prepararSessaoParceiro(page: import('@playwright/test').Page) {
     const rede = await instalarApiFake(page, CENARIO_PADRAO);
     await page.addInitScript(() => {
       localStorage.setItem('auth_token', 'internal-token-nao-usado-pelo-portal');
       localStorage.setItem('matopibalog_portal_token', 'shipper-token-nao-usado-pelo-parceiro');
-      localStorage.setItem('matopibalog_partner_token', 'partner-token-revogado');
+      localStorage.setItem('matopibalog_partner_token', 'partner-token-ainda-global');
     });
+    return rede;
+  }
 
+  async function tokensNoBrowser(page: import('@playwright/test').Page) {
+    return page.evaluate(() => ({
+      interno: localStorage.getItem('auth_token'),
+      embarcador: localStorage.getItem('matopibalog_portal_token'),
+      parceiro: localStorage.getItem('matopibalog_partner_token'),
+    }));
+  }
+
+  test('SESSION_INVALIDATION: 403 parceiro_bloqueado limpa só a sessão externa', async ({ page }) => {
+    const rede = await prepararSessaoParceiro(page);
     await page.route('**/api/portal/parceiro/oportunidades', async (route) => {
       await route.fulfill({
         status: 403,
         contentType: 'application/json',
-        body: JSON.stringify({ message: 'Acesso do parceiro revogado.' }),
+        body: JSON.stringify({ message: 'Seu acesso foi bloqueado.', code: 'parceiro_bloqueado' }),
       });
     });
 
     await page.goto('/portal/parceiro/oportunidades', { waitUntil: 'domcontentloaded' });
 
     await expect(page.getByText('Matopiba Log · Parceiros')).toBeVisible();
-    await expect(page.getByRole('alert')).toContainText('Acesso do parceiro revogado.');
+    await expect(page.getByRole('alert')).toContainText('Seu acesso foi bloqueado.');
     await expect(page.locator('nav a')).toHaveCount(0);
 
-    await expect.poll(async () => page.evaluate(() => ({
-      interno: localStorage.getItem('auth_token'),
-      embarcador: localStorage.getItem('matopibalog_portal_token'),
-      parceiro: localStorage.getItem('matopibalog_partner_token'),
-    }))).toEqual({
+    await expect.poll(async () => tokensNoBrowser(page)).toEqual({
       interno: 'internal-token-nao-usado-pelo-portal',
       embarcador: 'shipper-token-nao-usado-pelo-parceiro',
       parceiro: null,
+    });
+    rede.assertSemRedeExterna();
+  });
+
+  test('RESOURCE_FORBIDDEN: 403 relacionamento_inativo preserva sessão global do parceiro', async ({ page }) => {
+    const rede = await prepararSessaoParceiro(page);
+    await page.route('**/api/portal/parceiro/oportunidades', async (route) => {
+      await route.fulfill({
+        status: 403,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          message: 'Seu acesso a esta oportunidade foi encerrado.',
+          code: 'relacionamento_inativo',
+        }),
+      });
+    });
+
+    await page.goto('/portal/parceiro/oportunidades', { waitUntil: 'domcontentloaded' });
+
+    await expect(page.getByText('Matopiba Log · Parceiros')).toBeVisible();
+    await expect(page.getByRole('alert')).toContainText('Seu acesso a esta oportunidade foi encerrado.');
+    await expect(page.locator('nav a')).toHaveCount(0);
+
+    await expect.poll(async () => tokensNoBrowser(page)).toEqual({
+      interno: 'internal-token-nao-usado-pelo-portal',
+      embarcador: 'shipper-token-nao-usado-pelo-parceiro',
+      parceiro: 'partner-token-ainda-global',
     });
     rede.assertSemRedeExterna();
   });

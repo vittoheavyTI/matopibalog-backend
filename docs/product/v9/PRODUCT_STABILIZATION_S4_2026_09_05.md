@@ -75,6 +75,31 @@ Classificação: TEST_GAP.
 
 Correção planejada: adicionar teste Vitest focado no cliente externo do parceiro.
 
+### S4-MEDIUM-02 — RESOURCE_FORBIDDEN_MUST_NOT_INVALIDATE_PARTNER_SESSION
+
+A primeira correção de S4 passou a encerrar a sessão local do Partner Lite em
+qualquer `401` ou `403`. Isso fechou o caso de parceiro bloqueado/revogado, mas
+também apagaria `matopibalog_partner_token` quando o usuário continua legítimo e
+apenas um recurso específico foi negado.
+
+Autoridade congelada:
+
+- `SESSION_INVALIDATION`: `401` de credencial/sessão inválida; `403` somente
+  quando o backend retorna um `code` canônico que represente identidade, sessão ou
+  relação do parceiro inválida/revogada.
+- `RESOURCE_FORBIDDEN`: `403` de autorização/recurso não encerra a sessão global
+  do Partner Lite.
+- `UNKNOWN`: `code` ausente ou desconhecido nunca deve ser reinterpretado
+  automaticamente como `SESSION_INVALIDATION`.
+
+Classificação: MEDIUM. Não há bypass de autorização; o risco é derrubar uma
+sessão externa válida por uma negativa de recurso.
+
+Correção planejada: o backend deve devolver `code` canônico seguro nos caminhos
+de autenticação relevantes, sem vazar detalhes sensíveis; o frontend deve decidir
+por `status + code`, nunca por texto de mensagem, e remover somente
+`matopibalog_partner_token`.
+
 ## Achados não confirmados como falha
 
 - Portal do Embarcador não revalida usuário/relacionamento no middleware, mas os serviços de fronteira (`loadPortalContext`) são chamados nas operações externas e revalidam `shipper_portal_users.status = active` e relacionamento `ACTIVE`. A cobertura existente prova revogação/usuário desativado por serviço.
@@ -89,10 +114,11 @@ S4 não executa escrita real, convite real, login com usuário real, download re
 
 ## Correções aplicadas após o freeze
 
-- `painel_web/src/partner/PartnerApp.tsx`: o cliente externo do Partner Lite agora encerra a sessão local em `401` e `403`, removendo apenas `matopibalog_partner_token`.
+- `painel_web/src/partner/PartnerApp.tsx`: o cliente externo do Partner Lite agora encerra a sessão local em `401` e apenas em `403` com `code` canônico de identidade/sessão/relação inválida ou revogada; `403` de recurso preserva a sessão global do parceiro. A remoção continua restrita a `matopibalog_partner_token`.
+- `backend/middlewares/partnerPortalAuth.js`: respostas de autenticação do Partner Lite passam a expor `code` canônico seguro (`sessao_invalida`, `credencial_portal_parceiro_invalida` ou o `PartnerNetworkError.code` já saneado pelo domínio), sem basear a decisão em texto de mensagem.
 - `backend/tests/externalPortalAuthHttp.test.js`: adicionada matriz HTTP S4 cobrindo token externo em rota interna, token interno em portal externo, token de parceiro no portal do embarcador, token de embarcador no portal do parceiro e ausência de claims internas nos tokens externos.
 - `painel_web/src/partner/PartnerAuthBoundary.test.ts`: adicionada cobertura direta da chave de sessão externa do parceiro e dos status que limpam sessão.
-- `painel_web/tests-e2e-visual/visual.spec.ts`: adicionada cobertura Playwright para o comportamento de navegador do Partner Lite em `403`, provando que o portal externo limpa só a sessão do parceiro e não renderiza navegação interna.
+- `painel_web/tests-e2e-visual/visual.spec.ts`: adicionada cobertura Playwright para o comportamento de navegador do Partner Lite em `403`, provando que `SESSION_INVALIDATION` limpa só a sessão do parceiro, `RESOURCE_FORBIDDEN` preserva o token do parceiro, e em ambos os casos não há navegação interna nem rede externa não controlada.
 - `backend/tests/partnerPortalAuthHttp.test.js`: ajuste determinístico de parser para aceitar CRLF na migration 082 sem alterar migration aplicada.
 
 ## Verificação local

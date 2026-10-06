@@ -14,22 +14,35 @@ import { Package, Clock, ArrowLeft, Check, X, Send } from 'lucide-react';
 
 export const CHAVE_SESSAO = 'matopibalog_partner_token';
 
-export function deveEncerrarSessaoParceiro(status: number | undefined | null): boolean {
-  return status === 401 || status === 403;
+export const CODIGOS_INVALIDACAO_SESSAO_PARCEIRO = new Set([
+  'sessao_invalida',
+  'parceiro_bloqueado',
+  'sem_acesso_de_parceiro',
+  'credencial_portal_parceiro_invalida',
+]);
+
+export function deveEncerrarSessaoParceiro(
+  status: number | undefined | null,
+  code?: string | null,
+): boolean {
+  if (status === 401) return true;
+  if (status !== 403) return false;
+  return typeof code === 'string' && CODIGOS_INVALIDACAO_SESSAO_PARCEIRO.has(code);
 }
 
 const clienteParceiro = axios.create({
   baseURL: `${import.meta.env.VITE_API_URL || ''}/portal/parceiro`,
 });
 
-// 401/403 no meio da navegação = sessão vencida, inválida ou acesso revogado.
-// O backend usa 403 para parceiro bloqueado/revogado: manter o token local nesse
-// caso prende a pessoa numa sessão morta. Limpa só a sessão EXTERNA do parceiro;
-// não toca no `auth_token` interno nem no token do Portal do Embarcador.
+// 401 sempre encerra a sessão externa. 403 só encerra quando o backend manda um
+// `code` canônico de identidade/sessão inválida; 403 de recurso, como
+// `relacionamento_inativo`, preserva o token global porque outros vínculos podem
+// continuar válidos. Limpa só a sessão EXTERNA do parceiro; não toca no
+// `auth_token` interno nem no token do Portal do Embarcador.
 clienteParceiro.interceptors.response.use(
   (r) => r,
   (erro) => {
-    if (deveEncerrarSessaoParceiro(erro?.response?.status)) {
+    if (deveEncerrarSessaoParceiro(erro?.response?.status, erro?.response?.data?.code)) {
       localStorage.removeItem(CHAVE_SESSAO);
     }
     return Promise.reject(erro);

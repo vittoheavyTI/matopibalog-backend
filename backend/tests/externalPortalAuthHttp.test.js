@@ -32,16 +32,26 @@ _resetAuthRuntimeForTests();
 const { verifyToken } = require('../middlewares/auth');
 const { emitirTokenPortal, verifyPortalToken } = require('../middlewares/shipperPortalAuth');
 
+let partnerPortalUserFixture = null;
 const loadOriginal = Module._load;
 Module._load = function (request, parent, isMain) {
   const pedido = String(request).replace(/\\/g, '/');
   if (pedido.endsWith('config/supabase')) {
-    const tabela = {
-      select: () => tabela,
-      eq: () => tabela,
-      maybeSingle: async () => ({ data: null, error: null }),
+    return {
+      from: (table) => {
+        const query = {
+          select: () => query,
+          eq: () => query,
+          maybeSingle: async () => {
+            if (table === 'partner_portal_users') {
+              return { data: partnerPortalUserFixture, error: null };
+            }
+            return { data: null, error: null };
+          },
+        };
+        return query;
+      },
     };
-    return { from: () => tabela };
   }
   return loadOriginal.call(this, request, parent, isMain);
 };
@@ -140,6 +150,55 @@ test('S4 HTTP: token interno passa no auth interno, mas não entra nos portais e
 
   assert.equal((await pedir(app, '/portal/embarcador/contexto', tokenInterno())).status, 403);
   assert.equal((await pedir(app, '/portal/parceiro/eu', tokenInterno())).status, 403);
+});
+
+test('S4 HTTP: partner middleware devolve code seguro para credenciais inválidas', async () => {
+  const app = appDeTeste();
+
+  const semToken = await pedir(app, '/portal/parceiro/eu');
+  assert.equal(semToken.status, 401);
+  assert.equal(semToken.body.code, 'sessao_invalida');
+
+  const malformado = await pedir(app, '/portal/parceiro/eu', 'token-quebrado');
+  assert.equal(malformado.status, 401);
+  assert.equal(malformado.body.code, 'sessao_invalida');
+
+  const kindErrado = await pedir(app, '/portal/parceiro/eu', tokenInterno());
+  assert.equal(kindErrado.status, 403);
+  assert.equal(kindErrado.body.code, 'credencial_portal_parceiro_invalida');
+});
+
+test('S4 HTTP: partner middleware preserva code de invalidação de sessão emitido pelo domínio', async () => {
+  const app = appDeTeste();
+
+  partnerPortalUserFixture = null;
+  const semAcesso = await pedir(app, '/portal/parceiro/eu', tokenParceiro());
+  assert.equal(semAcesso.status, 403);
+  assert.equal(semAcesso.body.code, 'sem_acesso_de_parceiro');
+
+  partnerPortalUserFixture = {
+    id: 'partner-user-1',
+    partner_organization_id: 'partner-org-1',
+    email: 'contato@parceiro.test',
+    status: 'BLOQUEADO',
+    auth_user_id: 'auth-user-1',
+  };
+  const bloqueado = await pedir(app, '/portal/parceiro/eu', tokenParceiro());
+  assert.equal(bloqueado.status, 403);
+  assert.equal(bloqueado.body.code, 'parceiro_bloqueado');
+
+  partnerPortalUserFixture = {
+    id: 'partner-user-1',
+    partner_organization_id: 'partner-org-trocada',
+    email: 'contato@parceiro.test',
+    status: 'ATIVO',
+    auth_user_id: 'auth-user-1',
+  };
+  const incoerente = await pedir(app, '/portal/parceiro/eu', tokenParceiro());
+  assert.equal(incoerente.status, 401);
+  assert.equal(incoerente.body.code, 'sessao_invalida');
+
+  partnerPortalUserFixture = null;
 });
 
 test('S4 HTTP: os portais externos não aceitam token do outro portal', async () => {
