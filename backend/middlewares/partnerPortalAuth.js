@@ -19,6 +19,7 @@
 const jwt = require('jsonwebtoken');
 const supabase = require('../config/supabase');
 const { carregarContextoDoParceiro } = require('../services/partnerNetwork/partnerIdentityService');
+const { PartnerNetworkError } = require('../services/partnerNetwork/partnerNetworkService');
 
 const PARTNER_TOKEN_KIND = 'partner_portal';
 const PARTNER_TOKEN_TTL_SECONDS = 60 * 60 * 8; // 8h — sessão externa é curta.
@@ -52,20 +53,23 @@ async function verifyPartnerToken(req, res, next) {
   const token = tokenFromHeader || (req.cookies ? req.cookies.partner_token : null);
 
   if (!token) {
-    return res.status(401).json({ message: 'Faça login para acessar a área do parceiro.' });
+    return res.status(401).json({ message: 'Faça login para acessar a área do parceiro.', code: 'sessao_invalida' });
   }
 
   let decoded;
   try {
     decoded = jwt.verify(token, process.env.JWT_SECRET);
   } catch {
-    return res.status(401).json({ message: 'Sua sessão expirou. Entre novamente.' });
+    return res.status(401).json({ message: 'Sua sessão expirou. Entre novamente.', code: 'sessao_invalida' });
   }
 
   if (decoded.token_kind !== PARTNER_TOKEN_KIND
     || !decoded.partner_user_id
     || !decoded.partner_organization_id) {
-    return res.status(403).json({ message: 'Esta credencial não tem acesso à área do parceiro.' });
+    return res.status(403).json({
+      message: 'Esta credencial não tem acesso à área do parceiro.',
+      code: 'credencial_portal_parceiro_invalida',
+    });
   }
 
   // Releitura do estado: bloqueio, exclusão ou troca de vínculo têm efeito
@@ -77,7 +81,7 @@ async function verifyPartnerToken(req, res, next) {
     // A organização do token tem que bater com a do registro. Se divergir, algo
     // mudou depois da emissão e a sessão não vale mais.
     if (contexto.partner_organization_id !== decoded.partner_organization_id) {
-      return res.status(401).json({ message: 'Sua sessão expirou. Entre novamente.' });
+      return res.status(401).json({ message: 'Sua sessão expirou. Entre novamente.', code: 'sessao_invalida' });
     }
     req.partnerUser = {
       id: contexto.id,
@@ -87,8 +91,12 @@ async function verifyPartnerToken(req, res, next) {
     };
     return next();
   } catch (err) {
-    const status = err?.status || 401;
-    return res.status(status).json({ message: err?.message || 'Sua sessão expirou. Entre novamente.' });
+    const erroDeDominio = err instanceof PartnerNetworkError;
+    const status = erroDeDominio ? (err.status || 401) : 401;
+    return res.status(status).json({
+      message: erroDeDominio ? err.message : 'Sua sessão expirou. Entre novamente.',
+      code: erroDeDominio ? err.code : 'sessao_invalida',
+    });
   }
 }
 
