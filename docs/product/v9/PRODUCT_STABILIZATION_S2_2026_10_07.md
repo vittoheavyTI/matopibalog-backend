@@ -1,17 +1,21 @@
 # S2 — Super Admin / Team / Permissões — fechamento técnico pré-merge
 
-`FINAL_STATUS=HUMAN_S2_MERGE_DEPLOY_AUTH_REQUIRED`
+`FINAL_STATUS=S2_BEHAVIORAL_STABILIZATION_CLOSED`
 
 `BRANCH=stabilization/s2-superadmin-team-permissions`
 `BASE_MAIN=6043df89a656f95e26150e6484b4ad16e3d6b767`
+`PR=496`
+`PR_HEAD=9abc76d1b630e773d675bc51ceaa79f38cdb0bb4`
+`MERGE_SHA=d76838a0045e5c220ce5dd666d7fadc6dd1a2f58`
 `SCOPE=S2_SUPER_ADMIN_TEAM_PERMISSIONS`
 `PRODUCTION_WRITES=0`
 `MIGRATIONS=0`
 `PRODUCT_CODE_CORRECTIONS=0`
 
 Este fechamento converte a S2 de `STATIC_AUDIT_FROZEN_NOT_BEHAVIORALLY_CERTIFIED`
-para `S2_BEHAVIORALLY_CERTIFIED_PRE_MERGE`. O estado final de produção ainda
-depende de autorização humana para merge/deploy e validação pós-deploy.
+para `S2_BEHAVIORAL_STABILIZATION_CLOSED`. O PR #496 foi marcado Ready e mergeado
+em `main` mantendo exatamente o HEAD autorizado. O deploy Railway e GitHub Pages
+foram validados após o merge.
 
 ## Findings congelados
 
@@ -81,10 +85,15 @@ Alterações deste branch:
 | SEC-1 browser local | `SKIPPED` pela guarda do spec no ambiente local |
 | Visual pack | `88/88 PASS` |
 | Visual S2 dentro do pack | `43/43 PASS` |
+| PR #496 CI no HEAD exato | Frontend `SUCCESS`, SEC-1 Browser `SUCCESS` |
+| Main CI pós-merge | Frontend `SUCCESS`, SEC-1 Browser `SUCCESS`, GitHub Pages `SUCCESS` na rerun do mesmo merge SHA |
+| Railway deploy | `SUCCESS`, deployment `479b0fe2-1404-4508-aa3a-24d62edc602a`, commit `d76838a0045e5c220ce5dd666d7fadc6dd1a2f58`, 1 réplica `RUNNING` |
+| Smokes produção read-only | `/health` 200 em `api.matopibalog.com.br` e domínio Railway; `/configuracoes/public` 200; `/planos/publicos` 200; `/auth/me` 401 sem auth; `/painel-admin/empresas` 401 sem auth |
+| Logs pós-deploy | Startup normal; consulta HTTP 5xx pós-deploy sem novas entradas |
 
 ## Fora de escopo preservado
 
 Não houve toque em PR #490, S3, S4, DB-SEC-1, ERP Hub, Asaas, billing, Campaign,
 Dispatch, Partner Network, migrations, DDL Supabase ou produção.
 
-`NEXT_SAFE_ACTION=abrir PR draft, exigir CI do HEAD exato, manter draft e parar em gate humano de merge/deploy.`
+`NEXT_SAFE_ACTION=nenhuma ação técnica obrigatória; S2 fechada.`
