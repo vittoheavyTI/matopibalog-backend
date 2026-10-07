@@ -122,3 +122,78 @@ Migration 083 nao afirma modificar default privileges em producao. A superficie 
 - `rls_empresa_id()`, `rls_is_company_admin()` e `rls_is_super_admin()` não são bug por terem `authenticated EXECUTE`: elas são dependência direta de várias policies RLS. O hardening preserva esse contrato e remove apenas `PUBLIC/anon`.
 - `CREATE` no schema `public` já está fechado para `PUBLIC`, `anon` e `authenticated`.
 - PR #490, ERP, Asaas, S2 e S3 ficam fora de escopo.
+
+## Fechamento em produção
+
+`FINAL_STATUS=DB_SECURITY_DEFINER_HARDENING_CLOSED`
+
+`PRODUCTION_MIGRATION_APPLIED=true`
+
+`PRODUCTION_MIGRATION_REAPPLY=0`
+
+`PRODUCTION_BUSINESS_WRITES=0`
+
+`PRODUCTION_CRON_TOUCHES=0`
+
+### Autoridade de código
+
+- PR funcional: `#494`
+- Head aprovado: `843b8c4395cf3ad592a3db27f9142e37b52d12c5`
+- Merge em `main`: `e31bfc3b470c0b513989fff5dd469688a84bede6`
+- Migration em `main`: `backend/migrations/083_security_definer_hardening.sql`
+- SHA256 aprovado da migration em `main`: `394FD5350345EDBB13B64EDF53BA6541252DEBEF7FFA819B0A3BA0552BA7C834`
+
+### Produção Supabase
+
+Registry de produção confirmou exatamente uma aplicação:
+
+- `version=20261007124559`
+- `name=083_security_definer_hardening`
+- `matching_count=1`
+
+Post-check read-only confirmou:
+
+- `search_path_missing=0`
+- `public_execute_open=0`
+- `anon_execute_open=0`
+- `authenticated_unexpected_execute=0`
+- `authenticated_expected_only=true`, restrito a `empresa_id`, `is_super_admin`, `rls_empresa_id`, `rls_is_company_admin` e `rls_is_super_admin`
+
+O advisor de segurança deixou de reportar os achados-alvo:
+
+- `function_search_path_mutable=0`
+- `anon_security_definer_function_executable=0`
+
+Residuais conhecidos e fora do escopo DB-SEC-1:
+
+- `authenticated_security_definer_function_executable=5`, apenas nos helpers RLS/legados preservados por contrato.
+- `rls_enabled_no_policy`, já existente em tabelas backend-mediated/default-deny.
+- `auth_leaked_password_protection`, configuração de Auth fora desta macrofrente.
+- `dispatch_claim_planned_trip` permanece sem `EXECUTE` para `service_role` por design histórico da 079: é função interna, sem grant a ninguém, chamada de dentro das RPCs públicas de dispatch.
+
+### CI, deploy e smoke
+
+CI de `main` no merge `e31bfc3b470c0b513989fff5dd469688a84bede6` ficou verde:
+
+- Backend CI
+- Frontend/Playwright SEC-1 HTTPS same-site
+- Postgres 16 - DB security definer 083
+- suites PG 067, 075-079, 082 e matriz RPC
+- `build-and-deploy`
+
+Railway produção:
+
+- Projeto: `scintillating-magic`
+- Serviço backend: `matopibalog-backend`
+- Deployment: `80f70c5e-498d-45b9-aa08-941d9aebbf08`
+- Commit: `e31bfc3b470c0b513989fff5dd469688a84bede6`
+- Status: `SUCCESS`
+- Réplicas: `running=1`, `crashed=0`, `total=1`
+- Warnings/criticals: `0/0`
+
+Smoke read-only:
+
+- `GET /health` -> `200`, `status=UP`
+- `GET /abastecimentos` sem credencial -> `401`, `Token não fornecido.`
+
+Nenhum smoke criou usuário, empresa, fatura, frete, parceiro, convite ou documento.
