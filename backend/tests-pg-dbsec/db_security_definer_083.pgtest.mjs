@@ -282,7 +282,9 @@ function registrar(pg) {
     ];
     const { rows } = await pool.query(`
       with public_functions as (
-        select p.oid, p.oid::regprocedure::text as fn
+        select
+          p.oid,
+          format('%I.%I(%s)', n.nspname, p.proname, pg_get_function_identity_arguments(p.oid)) as fn
         from pg_proc p
         join pg_namespace n on n.oid = p.pronamespace
         where n.nspname = 'public'
