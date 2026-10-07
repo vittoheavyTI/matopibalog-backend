@@ -136,6 +136,9 @@ Fechamento técnico registrado em
 Nenhuma correção de código produto foi necessária: a suspeita estática foi
 medida por Playwright em 1440x900, 1024x768 e 390x844, com fixtures locais,
 sentinela de rede externa e bloqueio de writes de negócio.
+PR #497 foi mergeado em `main` no commit
+`1aeb5e60198fdf3c71c7021eba21979dbffdce8d`; Frontend CI, SEC-1 Browser E2E,
+GitHub Pages, Railway e smokes read-only de produção fecharam verdes.
 
 | ID | Superfície | Classe | Sev. | Achado | Status |
 |---|---|---|---|---|---|

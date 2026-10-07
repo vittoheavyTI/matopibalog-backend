@@ -1,18 +1,25 @@
-# S3 — Núcleo operacional e formulários — fechamento técnico pré-merge
+# S3 — Núcleo operacional e formulários — fechamento técnico pós-produção
 
 `FINAL_STATUS=S3_BEHAVIORAL_STABILIZATION_CLOSED`
 
 `BRANCH=stabilization/s3-operational-forms`
 `BASE_MAIN=f859f5cc102d108ec8b067246b00568eac8cbe4a`
+`PR=497`
+`PR_HEAD=ebbdb03420db1b9650d555129e2ec24893b7fb7e`
+`MERGE_SHA=1aeb5e60198fdf3c71c7021eba21979dbffdce8d`
 `SCOPE=S3_OPERATIONAL_FORMS`
 `PRODUCTION_WRITES=0`
 `MIGRATIONS=0`
 `PRODUCT_CODE_CORRECTIONS=0`
 
 Este fechamento converte a S3 de `STATIC_AUDIT_FROZEN_NOT_BEHAVIORALLY_CERTIFIED`
-para `S3_BEHAVIORAL_STABILIZATION_CLOSED`. A rodada mediu comportamento real do
-frontend com Playwright, fixtures locais e sentinela de rede externa, sem criar
-frete, campanha, despacho, ativo de frota, usuário, motorista ou parceiro real.
+para `S3_BEHAVIORAL_STABILIZATION_CLOSED`. O PR #497 foi marcado Ready e mergeado
+em `main` mantendo exatamente o HEAD autorizado. O deploy Railway e GitHub Pages
+foram validados após o merge.
+
+A rodada mediu comportamento real do frontend com Playwright, fixtures locais e
+sentinela de rede externa, sem criar frete, campanha, despacho, ativo de frota,
+usuário, motorista ou parceiro real.
 
 ## Findings congelados
 
@@ -86,10 +93,16 @@ classificado como `TEST_HARNESS_FIX`, não finding de produto.
 | Isolamento de rede externa | `PASS` |
 | Writes de negócio pelo pack S3 | `0` |
 | SEC-1 browser local | `SKIPPED` pela guarda do spec no ambiente local |
+| PR #497 CI no HEAD exato | Frontend `SUCCESS`, SEC-1 Browser `SUCCESS` após rerun do job falho |
+| Main CI pós-merge | Frontend `SUCCESS`, SEC-1 Browser `SUCCESS`, GitHub Pages `SUCCESS` |
+| Railway deploy | `SUCCESS`, deployment `3f7cc763-2908-4c54-b85c-06e2414490f3`, commit `1aeb5e60198fdf3c71c7021eba21979dbffdce8d`, 1 réplica `RUNNING` |
+| Smokes produção read-only | `/health` 200 no domínio Railway e em `api.matopibalog.com.br`; frontend 200 em `matopibalog.com.br` e fallback Pages; `/auth/me`, `/fleet/overview`, `/fretes`, `/operation-campaigns`, `/admin/motoristas`, `/admin/usuarios`, `/rede-parceiros/parceiros` e `/configuracoes/portal-governanca` retornaram 401 sem auth |
+| Logs pós-deploy | Startup normal; logs HTTP pós-smoke sem 5xx ou upstream errors |
 
 ## Fora de escopo preservado
 
 Não houve toque em PR #490, S1, S2, S4, DB-SEC-1, ERP Hub, SaaS Billing, Asaas,
-Partner Portal, Portal do Embarcador, migrations, DDL Supabase ou produção.
+Partner Portal, Portal do Embarcador, migrations ou DDL Supabase. Produção foi
+apenas publicada/validada com smokes read-only.
 
-`NEXT_SAFE_ACTION=abrir PR draft de S3 e aguardar autorização humana para Ready/merge/deploy.`
+`NEXT_SAFE_ACTION=nenhuma ação técnica obrigatória; S3 fechada.`
