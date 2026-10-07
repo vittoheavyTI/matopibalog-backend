@@ -207,7 +207,7 @@ _Evidência coletada em 2026-08-19 (ver [FORENSIC_BASELINE](./FORENSIC_BASELINE.
 | ID | Item | Status | B W A D P | Evidência / Obs |
 |----|------|--------|-----------|-----------------|
 | RBV9-INV-084 | Integração customizada (integrações genéricas, cripto at-rest) | PARTIAL | ✓ ✓ — ~ ✓ | `INTEGRATIONS_SECRET_KEY`; `integracoes.js`; sem hub canônico |
-| RBV9-INV-085 | Integration Hub canônico (outbox/adapter/external_id/retry/reconcile) | ROADMAP | ✗ ✗ ✗ ✗ ✗ | D-023 |
+| RBV9-INV-085 | Integration Hub canônico (outbox/adapter/external_id/retry/reconcile) | ROADMAP | ✗ ✗ ✗ ✗ ✗ | D-023. PR #490 permanece `OPEN_DRAFT_HOLD_DO_NOT_MERGE`, head `51961d3e46b066d59cbb6497aa470f079b0f3137`, 24 commits atras de `main` e 3 a frente da base historica. Reentry classificada como `PR490_REENTRY_REQUIRES_SECURITY_REAUDIT`: conflito textual conhecido em `docs/product/v9/ROADMAP.md`, sem migration SQL aparente no diff lido, mas rota/auth/permissao/entitlement precisam ser revalidados contra S1/S2/S4/DB-SEC-1 fechados. Ver [PRODUCT_STABILIZATION_WAVE_V1_FINAL_2026_10_07](./PRODUCT_STABILIZATION_WAVE_V1_FINAL_2026_10_07.md). |
 | RBV9-INV-086 | Adapters ERP (Aliare/SIAGRI, Sankhya, TOTVS, Senior, SSW, Bsoft, REST, CSV) | ROADMAP | ✗ ✗ ✗ ✗ ✗ | census de prospects pendente |
 
 ## AUDIT / ENVELOPE DIGITAL
@@ -265,7 +265,7 @@ _Evidência coletada em 2026-08-19 (ver [FORENSIC_BASELINE](./FORENSIC_BASELINE.
 | RBV9-INV-101 | `sec1-e2e-browser` flaky | TECH_DEBT | race no refresh |
 | RBV9-INV-102 | SQLs versionados antigos desatualizados | TECH_DEBT | conferir sempre o banco |
 | RBV9-INV-103 | Higiene de repositório local (~450 branches, dezenas de worktrees) | TECH_DEBT | ambiente do dev |
-| RBV9-INV-104 | Supabase advisors não coletados | TECH_DEBT | rodar na Onda 0/1 |
+| RBV9-INV-104 | Supabase advisors | TECH_DEBT | Coletados no fechamento DB-SEC-1/onda de estabilizacao: targets `function_search_path_mutable` e `anon_security_definer_function_executable` ausentes apos 083; residuais conhecidos `authenticated_security_definer_function_executable=5`, `rls_enabled_no_policy` e `auth_leaked_password_protection` permanecem fora do escopo. |
 | RBV9-INV-105 | Smoke autenticado automatizado ausente | TECH_DEBT | falta conta smoke |
 | RBV9-INV-106 | Tabelas legado (`documentos`, `contratos`, `modelo_contratos`) | TECH_DEBT | limpeza futura |
 | RBV9-INV-107 | `REALTIME_HORIZONTAL_SCALE` — bus SSE é in-memory/single-instance | DEFERRED | Onda 1/E1.6A; **Railway confirmado `numReplicas=1` (região sfo)** → `REALTIME_BUS_IN_MEMORY_ALLOWED=true` no escopo atual. **Critério de remoção:** antes de `replicas>1`, trocar o bus por pub/sub compartilhado atrás da mesma abstração. Mitigado hoje: clientes refazem fetch no reconnect/resume. **DEFERRED ≠ DONE.** |
