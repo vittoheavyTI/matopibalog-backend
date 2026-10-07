@@ -12,7 +12,7 @@ import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
   testDir: '.',
-  testMatch: /visual\.spec\.ts/,
+  testMatch: /(?:^|[\\/])(?:visual|s2\.visual|s3\.visual)\.spec\.ts$/,
   timeout: 90_000,
   expect: { timeout: 10_000 },
   fullyParallel: false,

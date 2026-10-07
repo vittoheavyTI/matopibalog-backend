@@ -14,7 +14,7 @@ que continua sendo o registro detalhado da primeira rodada.
 |---|---|---|
 | **S1** | Shell / Navegação / Comercial | `IN_PROGRESS_PR491` — corrigido |
 | **S2** | Super Admin / Team / Permissões | `S2_BEHAVIORAL_STABILIZATION_CLOSED` |
-| **S3** | Núcleo operacional e formulários | `STATIC_AUDIT_FROZEN_NOT_BEHAVIORALLY_CERTIFIED` |
+| **S3** | Núcleo operacional e formulários | `S3_BEHAVIORAL_STABILIZATION_CLOSED` |
 | **S4** | Portais externos | `STATIC_AUDIT_FROZEN_NOT_BEHAVIORALLY_CERTIFIED` |
 
 `STABILIZATION_SECURITY_BLOCKER` = **nenhum**. Detalhe em *Segurança*, abaixo.
@@ -129,12 +129,18 @@ sentinela de rede externa.
 
 ---
 
-## S3 — Núcleo operacional e formulários (`STATIC_AUDIT_FROZEN_NOT_BEHAVIORALLY_CERTIFIED`)
+## S3 — Núcleo operacional e formulários (`S3_BEHAVIORAL_STABILIZATION_CLOSED`)
+
+Fechamento técnico registrado em
+[`PRODUCT_STABILIZATION_S3_2026_10_07.md`](./PRODUCT_STABILIZATION_S3_2026_10_07.md).
+Nenhuma correção de código produto foi necessária: a suspeita estática foi
+medida por Playwright em 1440x900, 1024x768 e 390x844, com fixtures locais,
+sentinela de rede externa e bloqueio de writes de negócio.
 
 | ID | Superfície | Classe | Sev. | Achado | Status |
 |---|---|---|---|---|---|
-| S3-INFO-01 | UX_FORM_001 | — | — | **Sem regressão.** `ModalFormulario` segue aplicado em `Motoristas`, `Usuarios` e `RedeParceiros`; nenhum retorno a formulário gigante | — |
-| S3-LOW-01 | Telas operacionais | — | LOW | Nenhuma tela operacional está no pack visual: overflow, primeira dobra, estados vazios/erro/loading **não foram medidos** | OPEN |
+| S3-INFO-01 | UX_FORM_001 | — | — | **Sem regressão comportamental.** `ModalFormulario` foi exercitado em `Motoristas`, `Usuarios` e `RedeParceiros` no viewport mobile; nenhum retorno a formulário gigante | `CLOSED_BY_MEASUREMENT` |
+| S3-LOW-01 | Telas operacionais | `STATIC_RISK_NOT_REPRODUCED_BEHAVIORALLY` | LOW | Fretes, Campanhas de Escoamento, Operation Orchestrator/Dispatch, Route Intelligence, Frota, Estrutura Operacional e formulários foram medidos no pack visual S3 sem overflow global e sem vazamento externo | `CLOSED_BY_MEASUREMENT` |
 
 ---
 
@@ -215,5 +221,5 @@ local para prover o banco efêmero; a validação real do SEC-1 permanece no CI 
 HEAD final, sem usar banco de produção.
 
 `STAB-S2=S2_BEHAVIORAL_STABILIZATION_CLOSED`
-`STAB-S3=STATIC_AUDIT_FROZEN_NOT_BEHAVIORALLY_CERTIFIED`
+`STAB-S3=S3_BEHAVIORAL_STABILIZATION_CLOSED`
 `STAB-S4=STATIC_AUDIT_FROZEN_NOT_BEHAVIORALLY_CERTIFIED`
