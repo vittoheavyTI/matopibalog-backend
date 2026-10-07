@@ -1,10 +1,11 @@
 # Board da onda de estabilização V9 — 2026-09-01
 
 **Macrofrente:** `V9_PRODUCT_STABILIZATION_WAVE_V1`
-**Base:** `origin/main` = `cb505ac47e1801565951c89bc2161d9238b74048`
-**PR em curso:** #491 (draft) — **só S1**
+**Base original:** `origin/main` = `cb505ac47e1801565951c89bc2161d9238b74048`
+**Reconciliação final:** `origin/main` = `525f133b75652fc817335b480a2803434fae72f4`
+**PR S1:** #491 — merged
 **PR #490 (ERP Hub):** `OPEN_DRAFT_HOLD_DO_NOT_MERGE`, HEAD `51961d3e` intocado
-**Roadmap:** `PAUSED_FOR_STABILIZATION`
+**Roadmap:** `STABILIZATION_WAVE_V1_RECONCILED`
 
 Este board **agrega** a onda. Não substitui
 [`PRODUCT_REGRESSION_AUDIT_2026_09_01.md`](./PRODUCT_REGRESSION_AUDIT_2026_09_01.md),
@@ -12,10 +13,11 @@ que continua sendo o registro detalhado da primeira rodada.
 
 | Slice | Escopo | Estado |
 |---|---|---|
-| **S1** | Shell / Navegação / Comercial | `IN_PROGRESS_PR491` — corrigido |
+| **S1** | Shell / Navegação / Comercial | `S1_BEHAVIORAL_STABILIZATION_CLOSED` |
 | **S2** | Super Admin / Team / Permissões | `S2_BEHAVIORAL_STABILIZATION_CLOSED` |
 | **S3** | Núcleo operacional e formulários | `S3_BEHAVIORAL_STABILIZATION_CLOSED` |
-| **S4** | Portais externos | `STATIC_AUDIT_FROZEN_NOT_BEHAVIORALLY_CERTIFIED` |
+| **S4** | Portais externos | `S4_TECHNICALLY_CLOSED_IN_PRODUCTION` |
+| **DB-SEC-1** | Supabase/Postgres SECURITY DEFINER | `DB_SECURITY_DEFINER_HARDENING_CLOSED` |
 
 `STABILIZATION_SECURITY_BLOCKER` = **nenhum**. Detalhe em *Segurança*, abaixo.
 
@@ -147,13 +149,23 @@ GitHub Pages, Railway e smokes read-only de produção fecharam verdes.
 
 ---
 
-## S4 — Portais externos (`STATIC_AUDIT_FROZEN_NOT_BEHAVIORALLY_CERTIFIED`)
+## S4 — Portais externos (`S4_TECHNICALLY_CLOSED_IN_PRODUCTION`)
+
+Fechamento técnico e pós-deploy registrado em
+[`PRODUCT_STABILIZATION_S4_2026_09_05.md`](./PRODUCT_STABILIZATION_S4_2026_09_05.md).
+PR #492 foi mergeado em `main` no commit
+`be9be5ef53da68cc4c94a75d7cbde775233c4476`, com Backend CI, Frontend CI,
+SEC-1 Browser E2E, GitHub Pages, Railway e smokes read-only de produção verdes.
 
 | ID | Superfície | Classe | Sev. | Achado | Status |
 |---|---|---|---|---|---|
 | S4-INFO-01 | Isolamento cross-portal | — | — | **Sem achado, e bem defendido.** Claim discriminante `token_kind` obrigatória verificada nos dois lados (`shipper_portal` × `partner_portal`), com testes de recusa cruzada já existentes em `partnerPortalAuthHttp.test.js` | — |
 | S4-INFO-02 | Navegação do Portal do Embarcador | — | — | **Sem achado.** `Início` usa `end`; `Pedidos`/`Transportes`/`Documentos` são disjuntos. A classe do REG-001 não existe aqui | — |
-| S4-LOW-01 | Portais | — | LOW | Nenhum estado visual dos portais foi medido (login, vazio, erro, mobile, convite expirado). Exigem fixtures de auth próprias | OPEN |
+| S4-MEDIUM-01 | Partner Lite | `SESSION_STATE` | MEDIUM | Token local apos revogacao/bloqueio era preservado em `403`; corrigido com limpeza por `status + code` canonico | `CLOSED` |
+| S4-TEST-GAP-01 | Matriz HTTP cross-token | `TEST_GAP` | — | Matriz explicita adicionada para tokens internos/externos e claims internas ausentes nos tokens externos | `CLOSED` |
+| S4-TEST-GAP-02 | Sessao externa Partner Lite | `TEST_GAP` | — | Cobertura direta adicionada para chave `matopibalog_partner_token` sem apagar sessoes interna ou do embarcador | `CLOSED` |
+| S4-MEDIUM-02 | Partner Lite | `SESSION_SEMANTICS` | MEDIUM | `403` de recurso nao deve invalidar sessao; decisao passou a depender de `status + code`, nunca texto | `CLOSED` |
+| S4-LOW-01 | Portais | `OWNER_VISUAL_VALIDATION` | LOW | Validacao visual humana de login/vazio/erro/mobile/convite expirado segue pendente do owner | `PENDING_OWNER_VISUAL_VALIDATION` |
 
 ---
 
@@ -165,9 +177,12 @@ Sendo explícito, porque a rodada anterior foi cobrada justamente por isso:
   semântica nas duas superfícies, navegação, e pack visual em 1440/1024/390 com
   isolamento de rede provado.
 - **S2 foi promovido a evidência comportamental pré-merge**: rotas, permissões,
-  deep links e overflow global foram medidos no pack visual S2. **S3 segue
-  auditado por leitura/varredura estática**, e **S4 já possui fechamento próprio
-  posterior a este board**; não misturar esses estados.
+  deep links e overflow global foram medidos no pack visual S2.
+- **S3 foi promovido a evidência comportamental pré-merge**: núcleo operacional
+  e formulários foram medidos no pack visual S3, sem correção de produto.
+- **S4 foi fechado tecnicamente em produção**: matriz HTTP cross-token, fronteiras
+  de auth externa e semântica de sessão Partner Lite foram provadas; resta apenas
+  validação visual humana do owner.
 - Os `INFO` são conclusões positivas que eu de fato verifiquei (isolamento de token,
   navegação dos portais, UX_FORM_001, coerência do menu super-admin).
 
@@ -225,4 +240,6 @@ HEAD final, sem usar banco de produção.
 
 `STAB-S2=S2_BEHAVIORAL_STABILIZATION_CLOSED`
 `STAB-S3=S3_BEHAVIORAL_STABILIZATION_CLOSED`
-`STAB-S4=STATIC_AUDIT_FROZEN_NOT_BEHAVIORALLY_CERTIFIED`
+`STAB-S4=S4_TECHNICALLY_CLOSED_IN_PRODUCTION`
+`STAB-DBSEC=DB_SECURITY_DEFINER_HARDENING_CLOSED`
+`STABILIZATION_WAVE_V1=PRODUCT_STABILIZATION_WAVE_V1_RECONCILED`
