@@ -13,7 +13,7 @@ que continua sendo o registro detalhado da primeira rodada.
 | Slice | Escopo | Estado |
 |---|---|---|
 | **S1** | Shell / Navegação / Comercial | `IN_PROGRESS_PR491` — corrigido |
-| **S2** | Super Admin / Team / Permissões | `STATIC_AUDIT_FROZEN_NOT_BEHAVIORALLY_CERTIFIED` |
+| **S2** | Super Admin / Team / Permissões | `S2_BEHAVIORALLY_CERTIFIED_PRE_MERGE` — aguardando gate humano |
 | **S3** | Núcleo operacional e formulários | `STATIC_AUDIT_FROZEN_NOT_BEHAVIORALLY_CERTIFIED` |
 | **S4** | Portais externos | `STATIC_AUDIT_FROZEN_NOT_BEHAVIORALLY_CERTIFIED` |
 
@@ -112,14 +112,20 @@ calculado ali) permitiria uma frase exata em vez de uma frase prudente.
 
 ---
 
-## S2 — Super Admin / Team / Permissões (`STATIC_AUDIT_FROZEN_NOT_BEHAVIORALLY_CERTIFIED`)
+## S2 — Super Admin / Team / Permissões (`S2_BEHAVIORALLY_CERTIFIED_PRE_MERGE`)
+
+Fechamento técnico pré-merge registrado em
+[`PRODUCT_STABILIZATION_S2_2026_10_07.md`](./PRODUCT_STABILIZATION_S2_2026_10_07.md).
+Nenhuma correção de código produto foi necessária: a suspeita estática foi
+medida por Playwright em 1440x900, 1024x768 e 390x844, com fixtures locais e
+sentinela de rede externa.
 
 | ID | Superfície | Classe | Sev. | Achado | Status |
 |---|---|---|---|---|---|
-| S2-LOW-01 | `PainelMotoristas`, `PainelTermosLGPD`, `Operacional`, `PainelAssinaturas`, `ModelosContrato` | `EXISTING_BUG` (risco) | LOW | Tabelas sem contêiner `overflow-x`. Risco de rolagem horizontal em 390px — **detectado estaticamente, não confirmado por medição**: essas telas não estão no pack visual | OPEN |
+| S2-LOW-01 | `PainelMotoristas`, `PainelTermosLGPD`, `Operacional`, `PainelAssinaturas`, `ModelosContrato` | `STATIC_RISK_NOT_REPRODUCED_BEHAVIORALLY` | LOW | Tabelas/áreas antes suspeitas foram medidas sem overflow global nas três viewports do pack S2; nenhum produto alterado | **CLOSED_BY_MEASUREMENT** |
 | S2-INFO-01 | Menu super-admin × rotas | — | — | **Sem achado.** Todos os itens apontam para rotas declaradas; nenhum destino repetido; nenhum item visível exigindo permissão ausente | — |
-| S2-INFO-02 | `PainelAssinaturas` | — | — | **Sem achado.** Não é órfã: é a aba `?aba=assinaturas` de `PainelFinanceiro` | — |
-| DEBT-101 | Rotas órfãs | `KNOWN_ACCEPTANCE_DEBT` | LOW | `visao-geral` e `relatorios` sem item de menu | OPEN |
+| S2-INFO-02 | `PainelAssinaturas` | — | — | **Sem achado.** Não é órfã: é a aba `?aba=assinaturas` de `PainelFinanceiro`; deep link, reload e back/forward preservam a query | — |
+| DEBT-101 | Rotas órfãs | `KNOWN_ACCEPTANCE_DEBT` | LOW | `visao-geral` e `relatorios` sem item de menu, mas medidos como deep links funcionais, sem overflow e sem exigir correção automática de produto | **OPEN_ACCEPTED_DEBT** |
 
 ---
 
@@ -149,15 +155,16 @@ Sendo explícito, porque a rodada anterior foi cobrada justamente por isso:
 - **S1 está coberto por comportamento medido**: personas, I/O por permissão, matriz
   semântica nas duas superfícies, navegação, e pack visual em 1440/1024/390 com
   isolamento de rede provado.
-- **S2/S3/S4 foram auditados por leitura de código, matriz de rotas e varredura
-  estática** — não por exercício visual estado a estado. Onde não medi, o achado
-  está classificado como *risco* (`S2-LOW-01`) ou como *não medido*
-  (`S3-LOW-01`, `S4-LOW-01`), nunca como "verificado e limpo".
+- **S2 foi promovido a evidência comportamental pré-merge**: rotas, permissões,
+  deep links e overflow global foram medidos no pack visual S2. **S3 segue
+  auditado por leitura/varredura estática**, e **S4 já possui fechamento próprio
+  posterior a este board**; não misturar esses estados.
 - Os `INFO` são conclusões positivas que eu de fato verifiquei (isolamento de token,
   navegação dos portais, UX_FORM_001, coerência do menu super-admin).
 
-Para converter os `LOW` de "não medido" em evidência, o caminho é estender o pack
-visual com fixtures por domínio de auth — trabalho de S2/S3/S4, não deste PR.
+Para converter os `LOW` remanescentes de "não medido" em evidência, o caminho é
+estender o pack visual com fixtures por domínio de auth — trabalho de cada slice,
+não inferência por leitura.
 
 ---
 
@@ -207,6 +214,6 @@ próprio spec. Nesta máquina recuperada também não há Docker, `psql` ou Post
 local para prover o banco efêmero; a validação real do SEC-1 permanece no CI do
 HEAD final, sem usar banco de produção.
 
-`STAB-S2=STATIC_AUDIT_FROZEN_NOT_BEHAVIORALLY_CERTIFIED`
+`STAB-S2=S2_BEHAVIORALLY_CERTIFIED_PRE_MERGE`
 `STAB-S3=STATIC_AUDIT_FROZEN_NOT_BEHAVIORALLY_CERTIFIED`
 `STAB-S4=STATIC_AUDIT_FROZEN_NOT_BEHAVIORALLY_CERTIFIED`

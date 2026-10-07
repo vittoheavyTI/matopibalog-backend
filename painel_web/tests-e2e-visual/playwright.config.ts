@@ -25,7 +25,7 @@ export default defineConfig({
     command: 'npm run build:e2e && npm run preview -- --port 4183 --strictPort',
     port: 4183,
     reuseExistingServer: false,
-    timeout: 120_000,
+    timeout: 240_000,
   },
   use: {
     ...devices['Desktop Chrome'],

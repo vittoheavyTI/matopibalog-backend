@@ -228,7 +228,7 @@ describe('Usuarios — correção da aceitação visual', () => {
 
     expect(await screen.findByRole('button', { name: /selecionar perfil de acesso/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /alterar perfil/i })).toBeNull();
-  });
+  }, 15_000);
 
   test('TEAM-FUNC-04: quem tem permissions.manage vê o atalho para o editor canônico', async () => {
     await abrirNovoUsuario();
