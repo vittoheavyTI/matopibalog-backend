@@ -1,4 +1,4 @@
--- DB-SEC-1: hardening de funcoes public expostas por grants/default privileges.
+-- DB-SEC-1: hardening de funcoes public auditadas.
 --
 -- Escopo:
 --   * sem DML de negocio;
@@ -10,7 +10,7 @@
 --   * helpers RLS rls_* continuam executaveis por authenticated + service_role;
 --   * rotinas backend-only/maintenance ficam service_role-only;
 --   * trigger functions continuam funcionando por trigger, mas deixam de ser RPC publica;
---   * novas funcoes em public deixam de nascer com EXECUTE para anon/authenticated.
+--   * default privileges globais ou de platform schemas nao sao alterados.
 
 -- ---------------------------------------------------------------------------
 -- 1. SECURITY DEFINER legadas expostas como RPC publica.
@@ -47,7 +47,6 @@ BEGIN
     GRANT EXECUTE ON FUNCTION public.purge_frete_localizacoes_vencidas() TO service_role;
   END IF;
 END $$;
-
 -- ---------------------------------------------------------------------------
 -- 2. Helpers legados ainda usados por policies de configuracoes.
 --    authenticated precisa permanecer, anon/PUBLIC nao.
@@ -221,24 +220,4 @@ BEGIN
       EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO service_role', fn);
     END IF;
   END LOOP;
-END $$;
-
--- ---------------------------------------------------------------------------
--- 6. Default privileges: novas funcoes em public deixam de nascer como RPC anon.
--- ---------------------------------------------------------------------------
-DO $$
-BEGIN
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'postgres') THEN
-    ALTER DEFAULT PRIVILEGES FOR ROLE postgres
-      REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC, anon, authenticated;
-    ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
-      GRANT EXECUTE ON FUNCTIONS TO service_role;
-  END IF;
-
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_admin') THEN
-    ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin
-      REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC, anon, authenticated;
-    ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public
-      GRANT EXECUTE ON FUNCTIONS TO service_role;
-  END IF;
 END $$;

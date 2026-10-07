@@ -2,7 +2,7 @@
 //
 // Nunca roda contra produção: exige DATABASE_URL de banco efêmero. O teste cria
 // fixtures sintéticas suficientes para aplicar a migration e validar grants,
-// search_path, default privileges e preservação de helpers RLS/triggers.
+// search_path, preservação de helpers RLS/triggers e o guard pós-migration.
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -40,9 +40,25 @@ function registrar(pg) {
   }
 
   async function setupSchemas() {
-    await pool.query(`CREATE SCHEMA IF NOT EXISTS auth;`);
+    await pool.query(`
+      CREATE SCHEMA IF NOT EXISTS auth;
+      CREATE SCHEMA IF NOT EXISTS extensions;
+      CREATE SCHEMA IF NOT EXISTS graphql;
+      CREATE SCHEMA IF NOT EXISTS graphql_public;
+      CREATE SCHEMA IF NOT EXISTS realtime;
+      CREATE SCHEMA IF NOT EXISTS storage;
+      CREATE SCHEMA IF NOT EXISTS vault;
+    `);
     await pool.query(`CREATE EXTENSION IF NOT EXISTS pgcrypto;`);
     await pool.query(`CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $$ SELECT NULL::uuid $$;`);
+  }
+
+  async function setupProductionLikeDefaultAcls() {
+    for (const owner of ['postgres', 'supabase_admin']) {
+      for (const schema of ['public', 'extensions', 'graphql', 'graphql_public', 'realtime', 'storage']) {
+        await pool.query(`ALTER DEFAULT PRIVILEGES FOR ROLE ${owner} IN SCHEMA ${schema} GRANT EXECUTE ON FUNCTIONS TO anon, authenticated, service_role;`);
+      }
+    }
   }
 
   async function setupTargetFunctions() {
@@ -230,13 +246,90 @@ function registrar(pg) {
     return rows[0].proconfig || [];
   }
 
+  async function defaultAclSnapshot() {
+    const { rows } = await pool.query(`
+      select
+        r.rolname as owner,
+        coalesce(n.nspname, '') as schema_name,
+        d.defaclobjtype as object_type,
+        coalesce(
+          array_agg(
+            format('%s=%s', coalesce(grantee.rolname, 'PUBLIC'), acl.privilege_type)
+            order by coalesce(grantee.rolname, 'PUBLIC'), acl.privilege_type
+          ),
+          array[]::text[]
+        ) as grants
+      from pg_default_acl d
+      join pg_roles r on r.oid = d.defaclrole
+      left join pg_namespace n on n.oid = d.defaclnamespace
+      left join lateral aclexplode(d.defaclacl) acl on true
+      left join pg_roles grantee on grantee.oid = acl.grantee
+      where r.rolname in ('postgres', 'supabase_admin')
+        and d.defaclobjtype = 'f'
+      group by r.rolname, n.nspname, d.defaclobjtype
+      order by r.rolname, coalesce(n.nspname, ''), d.defaclobjtype
+    `);
+    return JSON.stringify(rows);
+  }
+
+  async function publicFunctionExposureViolations() {
+    const allowedAuthenticated = [
+      'public.empresa_id()',
+      'public.is_super_admin()',
+      'public.rls_empresa_id()',
+      'public.rls_is_company_admin()',
+      'public.rls_is_super_admin()',
+    ];
+    const { rows } = await pool.query(`
+      with public_functions as (
+        select p.oid, p.oid::regprocedure::text as fn
+        from pg_proc p
+        join pg_namespace n on n.oid = p.pronamespace
+        where n.nspname = 'public'
+          and not exists (
+            select 1
+            from pg_depend dep
+            where dep.classid = 'pg_proc'::regclass
+              and dep.objid = p.oid
+              and dep.deptype = 'e'
+          )
+      ),
+      exposure as (
+        select
+          fn,
+          exists (
+            select 1
+            from pg_proc p
+            cross join lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) acl
+            where p.oid = public_functions.oid
+              and acl.grantee = 0
+              and acl.privilege_type = 'EXECUTE'
+          ) as public_execute,
+          has_function_privilege('anon', oid, 'EXECUTE') as anon_execute,
+          has_function_privilege('authenticated', oid, 'EXECUTE') as authenticated_execute
+        from public_functions
+      )
+      select *
+      from exposure
+      where public_execute
+         or anon_execute
+         or (authenticated_execute and not (fn = any($1::text[])))
+      order by fn
+    `, [allowedAuthenticated]);
+    return rows;
+  }
+
   let prepared = false;
   async function prepare() {
     if (prepared) return;
     await setupRoles();
     await setupSchemas();
+    await setupProductionLikeDefaultAcls();
     await setupTargetFunctions();
+    const beforeDefaultAcls = await defaultAclSnapshot();
     await pool.query(migration083);
+    const afterDefaultAcls = await defaultAclSnapshot();
+    assert.equal(afterDefaultAcls, beforeDefaultAcls, '083 nao altera pg_default_acl');
     prepared = true;
   }
 
@@ -326,14 +419,22 @@ function registrar(pg) {
     }
   });
 
-  test('083: default privileges de funcoes futuras em public nascem default-deny', async () => {
+  test('083: security guard detecta e aceita exposicao public explicitamente corrigida', async () => {
     await prepare();
-    await pool.query(`DROP FUNCTION IF EXISTS public.dbsec083_future_default()`);
-    await pool.query(`CREATE FUNCTION public.dbsec083_future_default() RETURNS int LANGUAGE sql AS $$ SELECT 1 $$;`);
-    const g = await grants('public.dbsec083_future_default()');
-    assert.equal(g.public_execute, false);
-    assert.equal(g.anon_execute, false);
-    assert.equal(g.authenticated_execute, false);
-    assert.equal(g.service_role_execute, true);
+    await pool.query(`DROP FUNCTION IF EXISTS public.dbsec083_guard_open()`);
+    await pool.query(`CREATE FUNCTION public.dbsec083_guard_open() RETURNS int LANGUAGE sql AS $$ SELECT 1 $$;`);
+    await pool.query(`GRANT EXECUTE ON FUNCTION public.dbsec083_guard_open() TO PUBLIC, anon, authenticated`);
+
+    const negative = await publicFunctionExposureViolations();
+    assert.ok(
+      negative.some((row) => row.fn === 'public.dbsec083_guard_open()'),
+      'guard deve falhar para funcao public aberta indevidamente',
+    );
+
+    await pool.query(`REVOKE EXECUTE ON FUNCTION public.dbsec083_guard_open() FROM PUBLIC, anon, authenticated`);
+    await pool.query(`GRANT EXECUTE ON FUNCTION public.dbsec083_guard_open() TO service_role`);
+
+    const positive = await publicFunctionExposureViolations();
+    assert.deepEqual(positive, [], `guard deve passar apos hardening explicito: ${JSON.stringify(positive)}`);
   });
 }

@@ -87,7 +87,35 @@ DESIRED_GRANTS: default sem `PUBLIC/anon/authenticated`; `service_role` preserva
 
 COMPATIBILITY_RISK: médio para futuras migrations se esquecerem grants explícitos; desejado por segurança.
 
-FIX_PLAN: `ALTER DEFAULT PRIVILEGES` limitado a owners `postgres` e `supabase_admin`; revoke global remove o default nativo de `PUBLIC`, e grant de `service_role` permanece limitado ao schema `public`.
+FIX_PLAN: nao alterar default privileges em producao nesta macrofrente. A prevencao futura fica em CI por guard pos-migration que inspeciona o estado final de `public` e falha se surgir funcao exposta fora da allowlist explicita.
+
+### DBSEC-BLOCKER-DEFAULT-PRIV-01 — EPHEMERAL_DEFAULT_ACL_FIXTURE_DOES_NOT_MATCH_PRODUCTION_AND_GLOBAL_DEFAULT_REVOKE_HAS_CROSS_SCHEMA_BLAST_RADIUS
+
+EVIDENCE: producao possui default ACLs de funcao por schema para owners `postgres` e `supabase_admin`, incluindo `public`, e tambem schemas de plataforma como `extensions`, `graphql`, `graphql_public`, `realtime`, `storage` e outros.
+
+ATTACK_SURFACE: a fixture efemera anterior nao reproduzia default ACLs por schema de producao; a tentativa de usar `ALTER DEFAULT PRIVILEGES FOR ROLE ...` global teria efeito em funcoes futuras de todos os schemas criados pelo owner, nao apenas `public`.
+
+INTENDED_CALLERS: DB-SEC-1 deve endurecer apenas as funcoes `public` auditadas e prevenir regressao futura por CI, sem alterar defaults globais nem schemas de plataforma.
+
+CURRENT_GRANTS: default ACLs de producao permanecem fora do escopo da migration 083.
+
+DESIRED_GRANTS: funcoes `public` auditadas com grants explicitos e `search_path` fixo; funcoes futuras em `public` bloqueadas por guard pos-migration se ficarem abertas indevidamente.
+
+COMPATIBILITY_RISK: alto para revoke global, porque ultrapassa o escopo DB-SEC-1 e pode afetar comportamento futuro de schemas geridos pela plataforma.
+
+FIX_PLAN: `DEFAULT_PRIVILEGES_GLOBAL_CHANGE=REJECTED` por `CROSS_SCHEMA_PLATFORM_BLAST_RADIUS`; `FUTURE_PUBLIC_FUNCTION_GUARD=POST_MIGRATION_PG_CI_DEFAULT_DENY`.
+
+## Decisao R2
+
+`DEFAULT_PRIVILEGES_GLOBAL_CHANGE=REJECTED`
+
+`FUTURE_PUBLIC_FUNCTION_GUARD=POST_MIGRATION_PG_CI_DEFAULT_DENY`
+
+`MIGRATION_DEFAULT_PRIVILEGES_CHANGE=0`
+
+`PLATFORM_SCHEMA_CHANGE=0`
+
+Migration 083 nao afirma modificar default privileges em producao. A superficie de mudanca fica limitada a `ALTER FUNCTION`, `REVOKE EXECUTE` e `GRANT EXECUTE` das funcoes `public` auditadas.
 
 ## Decisão sobre não-findings
 
