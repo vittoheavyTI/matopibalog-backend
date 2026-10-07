@@ -13,7 +13,7 @@ que continua sendo o registro detalhado da primeira rodada.
 | Slice | Escopo | Estado |
 |---|---|---|
 | **S1** | Shell / Navegação / Comercial | `IN_PROGRESS_PR491` — corrigido |
-| **S2** | Super Admin / Team / Permissões | `S2_BEHAVIORALLY_CERTIFIED_PRE_MERGE` — aguardando gate humano |
+| **S2** | Super Admin / Team / Permissões | `S2_BEHAVIORAL_STABILIZATION_CLOSED` |
 | **S3** | Núcleo operacional e formulários | `STATIC_AUDIT_FROZEN_NOT_BEHAVIORALLY_CERTIFIED` |
 | **S4** | Portais externos | `STATIC_AUDIT_FROZEN_NOT_BEHAVIORALLY_CERTIFIED` |
 
@@ -112,9 +112,9 @@ calculado ali) permitiria uma frase exata em vez de uma frase prudente.
 
 ---
 
-## S2 — Super Admin / Team / Permissões (`S2_BEHAVIORALLY_CERTIFIED_PRE_MERGE`)
+## S2 — Super Admin / Team / Permissões (`S2_BEHAVIORAL_STABILIZATION_CLOSED`)
 
-Fechamento técnico pré-merge registrado em
+Fechamento técnico e pós-deploy registrado em
 [`PRODUCT_STABILIZATION_S2_2026_10_07.md`](./PRODUCT_STABILIZATION_S2_2026_10_07.md).
 Nenhuma correção de código produto foi necessária: a suspeita estática foi
 medida por Playwright em 1440x900, 1024x768 e 390x844, com fixtures locais e
@@ -214,6 +214,6 @@ próprio spec. Nesta máquina recuperada também não há Docker, `psql` ou Post
 local para prover o banco efêmero; a validação real do SEC-1 permanece no CI do
 HEAD final, sem usar banco de produção.
 
-`STAB-S2=S2_BEHAVIORALLY_CERTIFIED_PRE_MERGE`
+`STAB-S2=S2_BEHAVIORAL_STABILIZATION_CLOSED`
 `STAB-S3=STATIC_AUDIT_FROZEN_NOT_BEHAVIORALLY_CERTIFIED`
 `STAB-S4=STATIC_AUDIT_FROZEN_NOT_BEHAVIORALLY_CERTIFIED`
