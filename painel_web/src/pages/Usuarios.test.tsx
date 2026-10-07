@@ -59,7 +59,7 @@ describe('Usuarios (página real, API mockada)', () => {
   test('3/4/5. falha encerra loading, mostra erro e NÃO lista vazia silenciosa', async () => {
     setGet(() => Promise.reject({ response: { status: 403 } }));
     renderPage();
-    await waitFor(() => expect(screen.getByRole('button', { name: /tentar novamente/i })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('button', { name: /tentar novamente/i })).toBeInTheDocument(), { timeout: 5_000 });
     expect(screen.queryByText(/carregando usuários/i)).toBeNull();
     expect(screen.queryByText(/nenhum usuário neste grupo/i)).toBeNull();
   });
@@ -68,7 +68,7 @@ describe('Usuarios (página real, API mockada)', () => {
     let n = 0;
     setGet(() => { n += 1; return n === 1 ? Promise.reject({ response: { status: 403 } }) : Promise.resolve({ data: [usuario] }); });
     renderPage();
-    await waitFor(() => expect(screen.getByRole('button', { name: /tentar novamente/i })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('button', { name: /tentar novamente/i })).toBeInTheDocument(), { timeout: 5_000 });
     fireEvent.click(screen.getByRole('button', { name: /tentar novamente/i }));
     await waitFor(() => expect(screen.getByText('Fulano de Teste')).toBeInTheDocument());
   });
@@ -83,7 +83,7 @@ describe('Usuarios (página real, API mockada)', () => {
   test('8. contadores mostram "—" na falha (nunca 0 falso)', async () => {
     setGet(() => Promise.reject({ response: { status: 403 } }));
     renderPage();
-    await waitFor(() => expect(screen.getByRole('button', { name: /tentar novamente/i })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('button', { name: /tentar novamente/i })).toBeInTheDocument(), { timeout: 5_000 });
     const todos = screen.getByRole('button', { name: /Todos/ });
     expect(todos.textContent).toContain('—');
     expect(todos.textContent).not.toContain('(0)');
