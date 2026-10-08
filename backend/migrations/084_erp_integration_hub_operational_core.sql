@@ -39,16 +39,12 @@ CREATE TABLE IF NOT EXISTS public.erp_outbox (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   processed_at timestamptz NULL,
+  CONSTRAINT erp_outbox_logical_event_key UNIQUE (empresa_id, provider, event_id),
+  CONSTRAINT erp_outbox_dedupe_key UNIQUE (empresa_id, provider, dedupe_key),
   CHECK ((status = 'succeeded') = (processed_at IS NOT NULL)),
   CHECK ((claim_token IS NULL AND claim_action IS NULL) OR status = 'processing'),
   CHECK ((status IN ('pending','failed','unknown')) OR next_action IS NULL OR status = 'processing')
 );
-
-CREATE UNIQUE INDEX IF NOT EXISTS ux_erp_outbox_logical_event
-  ON public.erp_outbox (empresa_id, provider, event_id);
-
-CREATE UNIQUE INDEX IF NOT EXISTS ux_erp_outbox_dedupe_key
-  ON public.erp_outbox (empresa_id, provider, dedupe_key);
 
 CREATE INDEX IF NOT EXISTS ix_erp_outbox_claim_send
   ON public.erp_outbox (status, next_action, next_retry_at, created_at)
@@ -74,14 +70,10 @@ CREATE TABLE IF NOT EXISTS public.erp_external_identity_mappings (
   rebind_reason text NULL CHECK (rebind_reason IS NULL OR length(rebind_reason) BETWEEN 4 AND 500),
   rebound_at timestamptz NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now()
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT erp_external_identity_internal_key UNIQUE (empresa_id, provider, entity_type, internal_entity_id),
+  CONSTRAINT erp_external_identity_external_key UNIQUE (empresa_id, provider, entity_type, external_entity_id)
 );
-
-CREATE UNIQUE INDEX IF NOT EXISTS ux_erp_external_identity_internal
-  ON public.erp_external_identity_mappings (empresa_id, provider, entity_type, internal_entity_id);
-
-CREATE UNIQUE INDEX IF NOT EXISTS ux_erp_external_identity_external
-  ON public.erp_external_identity_mappings (empresa_id, provider, entity_type, external_entity_id);
 
 CREATE INDEX IF NOT EXISTS ix_erp_external_identity_empresa_provider
   ON public.erp_external_identity_mappings (empresa_id, provider, entity_type);
@@ -203,7 +195,7 @@ BEGIN
     v_empresa_id, p_provider, v_event_id, v_event_type, p_dedupe_key, p_intent_fingerprint,
     p_envelope, 'pending', 'SEND', COALESCE(p_max_send_attempts, 8), COALESCE(p_max_reconcile_attempts, 8)
   )
-  ON CONFLICT (empresa_id, provider, event_id) DO NOTHING
+  ON CONFLICT ON CONSTRAINT erp_outbox_logical_event_key DO NOTHING
   RETURNING * INTO v_inserted;
 
   IF v_inserted.id IS NOT NULL THEN
@@ -253,34 +245,34 @@ BEGIN
   END IF;
 
   WITH candidate AS (
-    SELECT id
-    FROM public.erp_outbox
+    SELECT e.id
+    FROM public.erp_outbox e
     WHERE
       (
         v_action = 'SEND'
-        AND status IN ('pending','failed')
-        AND next_action = 'SEND'
-        AND send_attempts < max_send_attempts
-        AND (next_retry_at IS NULL OR next_retry_at <= v_now)
+        AND e.status IN ('pending','failed')
+        AND e.next_action = 'SEND'
+        AND e.send_attempts < e.max_send_attempts
+        AND (e.next_retry_at IS NULL OR e.next_retry_at <= v_now)
       )
       OR (
         v_action = 'RECONCILE'
         AND (
           (
-            status IN ('failed','unknown')
-            AND next_action = 'RECONCILE'
-            AND reconcile_attempts < max_reconcile_attempts
-            AND (next_retry_at IS NULL OR next_retry_at <= v_now)
+            e.status IN ('failed','unknown')
+            AND e.next_action = 'RECONCILE'
+            AND e.reconcile_attempts < e.max_reconcile_attempts
+            AND (e.next_retry_at IS NULL OR e.next_retry_at <= v_now)
           )
           OR (
-            status = 'processing'
-            AND lease_expires_at IS NOT NULL
-            AND lease_expires_at <= v_now
-            AND reconcile_attempts < max_reconcile_attempts
+            e.status = 'processing'
+            AND e.lease_expires_at IS NOT NULL
+            AND e.lease_expires_at <= v_now
+            AND e.reconcile_attempts < e.max_reconcile_attempts
           )
         )
       )
-    ORDER BY created_at, id
+    ORDER BY e.created_at, e.id
     FOR UPDATE SKIP LOCKED
     LIMIT 1
   )
@@ -506,7 +498,7 @@ BEGIN
     empresa_id, provider, entity_type, internal_entity_id, external_entity_id, metadata
   )
   VALUES (p_empresa_id, p_provider, p_entity_type, p_internal_entity_id, p_external_entity_id, COALESCE(p_metadata, '{}'::jsonb))
-  ON CONFLICT (empresa_id, provider, entity_type, internal_entity_id) DO NOTHING
+  ON CONFLICT ON CONSTRAINT erp_external_identity_internal_key DO NOTHING
   RETURNING * INTO v_inserted;
 
   IF v_inserted.id IS NOT NULL THEN
@@ -515,9 +507,9 @@ BEGIN
   END IF;
 
   SELECT * INTO v_existing
-  FROM public.erp_external_identity_mappings
-  WHERE empresa_id = p_empresa_id AND provider = p_provider AND entity_type = p_entity_type
-    AND internal_entity_id = p_internal_entity_id;
+  FROM public.erp_external_identity_mappings m
+  WHERE m.empresa_id = p_empresa_id AND m.provider = p_provider AND m.entity_type = p_entity_type
+    AND m.internal_entity_id = p_internal_entity_id;
 
   IF v_existing.external_entity_id = p_external_entity_id THEN
     RETURN QUERY SELECT 'idempotent', v_existing.id, v_existing.external_entity_id, v_existing.internal_entity_id;
@@ -525,9 +517,9 @@ BEGIN
   END IF;
 
   SELECT * INTO v_external_owner
-  FROM public.erp_external_identity_mappings
-  WHERE empresa_id = p_empresa_id AND provider = p_provider AND entity_type = p_entity_type
-    AND external_entity_id = p_external_entity_id;
+  FROM public.erp_external_identity_mappings m
+  WHERE m.empresa_id = p_empresa_id AND m.provider = p_provider AND m.entity_type = p_entity_type
+    AND m.external_entity_id = p_external_entity_id;
   IF v_external_owner.id IS NOT NULL THEN
     RETURN QUERY SELECT 'conflict_external_already_bound', v_external_owner.id, v_external_owner.external_entity_id, v_external_owner.internal_entity_id;
   ELSE
@@ -558,9 +550,9 @@ BEGIN
     RETURN;
   END IF;
   SELECT * INTO v_current
-  FROM public.erp_external_identity_mappings
-  WHERE empresa_id = p_empresa_id AND provider = p_provider AND entity_type = p_entity_type
-    AND internal_entity_id = p_internal_entity_id
+  FROM public.erp_external_identity_mappings m
+  WHERE m.empresa_id = p_empresa_id AND m.provider = p_provider AND m.entity_type = p_entity_type
+    AND m.internal_entity_id = p_internal_entity_id
   FOR UPDATE;
   IF v_current.id IS NULL THEN
     RETURN QUERY SELECT 'not_found', NULL::uuid, p_external_entity_id, p_internal_entity_id;
@@ -572,9 +564,9 @@ BEGIN
   END IF;
 
   SELECT * INTO v_owner
-  FROM public.erp_external_identity_mappings
-  WHERE empresa_id = p_empresa_id AND provider = p_provider AND entity_type = p_entity_type
-    AND external_entity_id = p_external_entity_id
+  FROM public.erp_external_identity_mappings m
+  WHERE m.empresa_id = p_empresa_id AND m.provider = p_provider AND m.entity_type = p_entity_type
+    AND m.external_entity_id = p_external_entity_id
   FOR UPDATE;
   IF v_owner.id IS NOT NULL AND v_owner.id <> v_current.id THEN
     RETURN QUERY SELECT 'conflict_external_already_bound', v_current.id, v_current.external_entity_id, v_current.internal_entity_id;
