@@ -1,7 +1,7 @@
 # Matopiba Log — CONTEXT BRIDGE V9
 
 > **Handoff compacto.** Leia este arquivo primeiro ao retomar em outro chat/agente. Os detalhes estão nos documentos linkados no fim.
-> Atualizado: **2026-10-08** (E3.7A ERP Hub reentry implementation em branch nova baseada na `main` consolidada; PR #490 permanece hold).
+> Atualizado: **2026-10-08** (E3.7B ERP Hub operational core em branch nova baseada na `main` consolidada; PR #490 permanece hold).
 
 ---
 
@@ -36,13 +36,13 @@ Matopiba vira **frota/operação-centric** (D-001): o eixo é o **veículo/compo
 
 ## Macrofrente atual
 
-**`CURRENT_MACROFRONT = E3.7A_ERP_INTEGRATION_HUB_REENTRY_IMPLEMENTATION`**.
+**`CURRENT_MACROFRONT = E3.7B_ERP_INTEGRATION_HUB_OPERATIONAL_CORE`**.
 
 **Product Stabilization Wave V1 = RECONCILED.** S1 PR #491 (`MERGE_SHA=f8cbd109`), S4 PR #492 (`MERGE_SHA=be9be5e`), DB-SEC-1 PR #494 (`MERGE_SHA=e31bfc3`), S2 PR #496 (`MERGE_SHA=d76838a`) e S3 PR #497 (`MERGE_SHA=1aeb5e6`) estão todos ancestrais de `origin/main` em `525f133b75652fc817335b480a2803434fae72f4`. Não há `BLOCKER`, `HIGH` ou `MEDIUM` real aberto na onda de estabilização; residuais são owner visual/deferred/accepted debt. Ver [PRODUCT_STABILIZATION_WAVE_V1_FINAL_2026_10_07](./PRODUCT_STABILIZATION_WAVE_V1_FINAL_2026_10_07.md).
 
 **PR #490 / ERP Hub permanece HOLD.** Estado lido sem tocar a branch: `OPEN`, `DRAFT`, `NOT_MERGED`, head `51961d3e46b066d59cbb6497aa470f079b0f3137`, branch histórica divergida da `main` consolidada. A retomada autorizada nao rebaseia nem altera o PR #490: a entrega passa por nova branch `reentry/e3-7a-erp-integration-hub`, baseada em `origin/main` `4089f2124e82e30f3e008d74f63b9ad6b04fb6de`, transplantando apenas o delta ERP. Não marcar Ready, não mergear e não rebasear o #490 sem gate explícito.
 
-**E3.7A reentry implementation.** Estado neste PR: `REENTRY_IMPLEMENTATION_DRAFT`, sem merge/producao. Escopo: fundacao backend schema-free e production-inert (`/erp-hub/status`, `services/erpHub/*`, testes focados, docs reconciliados), `MIGRATION_REQUIRED=false`, `SCHEMA_CHANGE=false`, `ERP_PROVIDER_REAL=false`, `ERP_EXTERNAL_CALLS=0`, `PRODUCTION_BUSINESS_WRITES=0`. E3.7B/adapters reais/outbox persistente/UI/comercial permanecem fora de escopo. Ver [ERP_INTEGRATION_HUB_V1](./ERP_INTEGRATION_HUB_V1.md).
+**E3.7A fechado em `main`; E3.7B operational core em andamento.** Estado neste PR: `IMPLEMENTATION_DRAFT_AWAITING_PRODUCTION_MIGRATION_AUTH`, sem migration aplicada em producao, sem merge/deploy. Escopo: migration 084 para outbox persistente + identity map persistente, repository backend-mediated, diagnostico honesto e testes focados. Mantem `ERP_PROVIDER_REAL=false`, `ERP_EXTERNAL_CALLS=0`, `ERP_SECRETS=0`, `BUSINESS_EVENT_WIRING=0`, `PRODUCTION_BUSINESS_WRITES=0`. Ver [ERP_INTEGRATION_HUB_V1](./ERP_INTEGRATION_HUB_V1.md).
 
 **Campaign-C = CLOSED em produção** (PR #469 `MERGE_SHA=95fcded985470d059519008562a99fdb8dac3fd1`; progresso operacional read-only + elegibilidade determinística + dispatch readiness; sem schema/dispatch real; `CAMPAIGN_PROGRESS=DONE`). **Route Intelligence V1 = CLOSED em produção** (PR #467 `MERGE_SHA=0fcf9a66fe286a7f4b80dc20878324bab532d8ce`; provider-agnostic, default disabled/manual-safe, sem schema/secret/provider real). **Campaign-B = CLOSED em produção** (takeover Claude 2026-08-24, PR #464 `MERGE_SHA=139105d523e9023b616f340a40d6697d7b0e4444`; migration **078 aplicada/rastreada uma vez** `20260824013400`, SHA256 `5DEA792CA98FE28D8A68320F80BCB92A93B240360F9A552A2F261993193543DB`, `campaign_trip_freights` criada, `PRODUCTION_BUSINESS_WRITES=0`; materialização reusa criador canônico de fretes, idempotente/reconciliável, sob entitlement∧campaign.manage∧scope∧tenant; sem dispatch). **Command Center V2 = CLOSED** (PR #465). P2/E1.3/E1.4A/E1.5A/Fleet final closure estão CLOSED em produção. **Mobile M1 = CLOSED técnico** no PR #458 (`MERGE_SHA=a257e0f6b50e1d7d9f6f64113df768cdc6f7339f`), com validações físicas/publicação Play ainda deferidas. **Systemic Quality = CLOSED em produção** no PR #459 (`MERGE_SHA=35b840281a711bc2a0264358662e548cc6ecc1fa`). **Commercial V2 = CLOSED** no PR #460 (`MERGE_SHA=4faa735b5b1760fb159fbf9436f7d8eef0665b0e`). **Operation Campaign-A = CLOSED técnico em produção** no PR #457 (`FINAL_HEAD=45079e8151cde514bc4577dccb656c14419df35e`, `MERGE_SHA=32d8fe3e8824d1a8bc5be89ad6f5cdf86ae5c316`), com 076/077 aplicadas e rastreadas uma vez.
 
@@ -96,7 +96,7 @@ Adequação de **CNAE/CNPJ/regime** do owner corre **em paralelo** e **NÃO bloq
 
 ## Próximo passo recomendado
 
-Próxima ação recomendada: concluir a validação da branch **E3.7A ERP Integration Hub reentry implementation** com focused tests, backend full, SEC-1 aplicável e CI do HEAD exato. Mesmo verde, parar em `HUMAN_E37A_REENTRY_MERGE_DEPLOY_AUTH_REQUIRED`: novo PR deve permanecer draft até autorização humana posterior.
+Próxima ação recomendada: concluir a validação da branch **E3.7B ERP Integration Hub operational core** com focused tests, backend full possivel, PG tests da migration 084 quando houver `DATABASE_URL`, SEC-1 aplicável e CI do HEAD exato. Mesmo verde, parar em `HUMAN_E37B_PRODUCTION_MIGRATION_AUTH_REQUIRED`: novo PR deve permanecer draft; nao aplicar migration 084 em producao sem autorização humana posterior.
 
 ## Hard stops permanentes
 

@@ -19,6 +19,7 @@ const { verifyToken } = require('../middlewares/auth');
 const { verificarEmpresa } = require('../middlewares/tenant');
 const { requirePermission } = require('../middlewares/requirePermission');
 const { buildHubDiagnostics } = require('../services/erpHub/diagnostics');
+const { createPersistentErpRepository } = require('../services/erpHub/persistentRepository');
 
 // Toda rota exige sessão válida + tenant. Sem acesso anônimo.
 router.use(verifyToken, verificarEmpresa);
@@ -51,7 +52,13 @@ async function lerEntitlementErp() {
 // GET /erp-hub/status
 router.get('/status', requirePermission('integracoes_erp.gerenciar'), async (req, res) => {
   const entitlement = await lerEntitlementErp();
-  const diag = buildHubDiagnostics({ entitlement });
+  const repo = createPersistentErpRepository(supabase);
+  const persistence = await repo.persistenceStatus(req.empresa_id || null);
+  const diag = buildHubDiagnostics({ entitlement, persistence: {
+    ...persistence,
+    runner_enabled: false,
+    production_runner_enabled: false,
+  } });
   return res.json(diag);
 });
 
