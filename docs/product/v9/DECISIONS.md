@@ -284,6 +284,27 @@ Campaign-A nao integra provider de rota, marketplace, parceiro real, portal do e
 
 ### D-077 — O que o super-admin pode corrigir num usuário de cliente
 `TEAM_SUPERADMIN_EDIT=REQUIRED`, em contexto explícito da conta (`?empresa_id=`), nunca por pertencimento acidental. Editável: nome, telefone, status, foto, endereço e perfil de acesso. **E-mail permanece somente-leitura** porque `usuarios.email` espelha a identidade no Supabase Auth e não existe mutação canônica atômica para as duas — gravar só a tabela produziria alguém que aparece com um e-mail e entra com outro. **Conta vinculada é imutável**: mover usuário entre empresas levaria junto lançamentos, fretes e histórico; é migração de dados, não edição de cadastro.
+
+### D-078 — E3.7A reentra por branch nova a partir da main atual
+`E37A_REENTRY_STRATEGY=NEW_REENTRY_BRANCH_FROM_CURRENT_MAIN`. O PR #490 e fonte historica do delta tecnico, nao baseline. A reentrada do ERP Hub deve partir da `main` consolidada atual e transplantar apenas o delta ERP necessario, preservando S1/S2/S3/S4, DB-SEC-1 e Stabilization Wave V1. PR #490 permanece `OPEN_DRAFT_HOLD` ate decisao humana posterior.
+
+### D-079 — ERP Hub E3.7A e schema-free e production-inert
+`E37A_MIGRATION_REQUIRED=false`. A fundacao E3.7A nao cria tabela, RPC, funcao, grant, RLS, secret, env, provider real, cron ERP ou escrita de negocio. Outbox e external identity existem como contratos in-memory testaveis; persistencia real fica para E3.7B sob gate proprio.
+
+### D-080 — ERP interno usa permissao efetiva, nao classe de conta
+`ERP_DIAGNOSTICS_AUTHORITY=EFFECTIVE_PERMISSION('integracoes_erp.gerenciar')`. A superficie interna `/erp-hub/status` exige `verifyToken + verificarEmpresa + requirePermission`. `role`, `tipo` e `isAdmin` nao autorizam ERP. Super-admin continua autoridade de plataforma separada para diagnostico inerte.
+
+### D-081 — Token externo nunca entra na superficie interna ERP
+`ANY_NON_EMPTY_TOKEN_KIND_ON_INTERNAL_VERIFYTOKEN=DENY` tambem protege o ERP Hub. `shipper_portal`, `partner_portal` e qualquer `token_kind` futuro devem ser recusados antes de tenant resolution, permission resolution, leitura de `funcionalidades` ou provider gateway.
+
+### D-082 — Identidade de evento ERP e diferente de fingerprint de intenção
+`ERP_EVENT_IDENTITY=LOGICAL_EVENT_ID`; `ERP_INTENT_FINGERPRINT=CONFLICT_GUARD`. Retry da mesma ocorrencia e idempotente; mesmo `event_id` com intencao diferente e conflito; A->B->A sao ocorrencias distintas quando possuem event_id distinto. Payload fingerprint nunca e a identidade primaria do evento.
+
+### D-083 — Ambiguidade de entrega exige reconcile antes de resend
+`ERP_OUTBOX_AMBIGUOUS_RECOVERY=RECONCILE_BEFORE_RESEND`. Lease expirado ou falha apos possivel aceite externo nao autoriza resend cego. `FAILED` sem evidencia nao e retry-safe; somente evidencia explicita do provider (`retry_safe=true`) pode liberar nova tentativa.
+
+### D-084 — ERP provider real e E3.7B, nao E3.7A
+`ERP_PROVIDER_REAL=false` em E3.7A. Os unicos modos permitidos sao `disabled` e `fake`; modo desconhecido ou real falha seguro. Adapters reais, credenciais, webhooks, outbox persistente, identity map persistente, ativacao comercial e UI de configuracao pertencem a E3.7B ou fatia futura autorizada.
 ---
 
 ## Gates registrados
