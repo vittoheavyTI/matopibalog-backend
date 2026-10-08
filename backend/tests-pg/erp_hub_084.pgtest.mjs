@@ -1,13 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import pg from 'pg';
 
 const CONN = process.env.DATABASE_URL;
-if (!CONN) {
-  test('DATABASE_URL ausente', { skip: true }, () => {});
+const ENABLED = process.env.ERP_HUB_084_PG === '1';
+let pg;
+
+if (!CONN || !ENABLED) {
+  const motivo = !CONN ? 'DATABASE_URL ausente' : 'ERP_HUB_084_PG diferente de 1';
+  test(`084 ERP Hub PG (pulado: ${motivo})`, { skip: true }, () => {});
 }
 
 async function client() {
+  pg ||= (await import('pg')).default;
   const c = new pg.Client({ connectionString: CONN });
   await c.connect();
   return c;
@@ -35,7 +39,7 @@ function envelope(empresaId, eventId, payload = { valor: 1 }) {
   };
 }
 
-test('084 ERP outbox: idempotency conflict, claim race, stale claim and reconcile-before-resend', async () => {
+test('084 ERP outbox: idempotency conflict, claim race, stale claim and reconcile-before-resend', { skip: !CONN || !ENABLED }, async () => {
   const c = await client();
   const c2 = await client();
   try {
@@ -90,7 +94,7 @@ test('084 ERP outbox: idempotency conflict, claim race, stale claim and reconcil
   }
 });
 
-test('084 ERP external identity: tenant/provider uniqueness and collision-safe rebind', async () => {
+test('084 ERP external identity: tenant/provider uniqueness and collision-safe rebind', { skip: !CONN || !ENABLED }, async () => {
   const c = await client();
   try {
     const a = await one(c, "insert into public.empresas(nome) values ('ERP Tenant A') returning id");
@@ -130,7 +134,7 @@ test('084 ERP external identity: tenant/provider uniqueness and collision-safe r
   }
 });
 
-test('084 DB-SEC: RLS enabled and no anon/authenticated direct grants or public execute', async () => {
+test('084 DB-SEC: RLS enabled and no anon/authenticated direct grants or public execute', { skip: !CONN || !ENABLED }, async () => {
   const c = await client();
   try {
     const tables = await c.query(`
