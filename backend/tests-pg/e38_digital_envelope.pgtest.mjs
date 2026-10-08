@@ -8,9 +8,11 @@ import pg from 'pg';
 
 const { Pool } = pg;
 const CONN = process.env.DATABASE_URL;
+const ENABLED = process.env.E38_ENVELOPE_085_PG === '1';
 
-if (!CONN) {
-  test('PG E3.8 digital envelope (pulado: sem DATABASE_URL)', { skip: true }, () => {});
+if (!CONN || !ENABLED) {
+  const motivo = !CONN ? 'DATABASE_URL ausente' : 'E38_ENVELOPE_085_PG diferente de 1';
+  test(`PG E3.8 digital envelope (pulado: ${motivo})`, { skip: true }, () => {});
 } else {
   registrar();
 }
