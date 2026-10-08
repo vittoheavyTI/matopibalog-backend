@@ -32,8 +32,7 @@ function registrar() {
   });
 
   beforeEach(async () => {
-    await pool.query('DELETE FROM public.frete_envelopes_digitais');
-    await pool.query('DELETE FROM public.lancamento_eventos');
+    await pool.query('TRUNCATE TABLE public.frete_envelopes_digitais, public.lancamento_eventos CASCADE');
     await pool.query('DELETE FROM public.fretes WHERE id = ANY($1::uuid[])', [[F1, F2, F_LEGACY, F_CANCELLED]]);
     await pool.query(
       `INSERT INTO public.fretes
