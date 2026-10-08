@@ -27,13 +27,13 @@ concurrency:
 
 jobs:
   erp-hub-084-pg:
-    name: Postgres 16 - ERP Hub 084
+    name: Postgres 17 - ERP Hub 084
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
     services:
       postgres:
-        image: postgres:16
+        image: postgres:17
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres

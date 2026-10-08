@@ -323,6 +323,15 @@ Campaign-A nao integra provider de rota, marketplace, parceiro real, portal do e
 
 ### D-090 — Migration 084 para em gate humano antes da producao
 `E37B_PRODUCTION_MIGRATION_AUTH_REQUIRED=true`. O PR E3.7B pode conter migration 084 e testes, mas nao aplica a migration em producao, nao marca Ready, nao mergeia e nao dispara deploy sem autorizacao humana posterior.
+
+### D-091 — E3.7B tenant authority explicita no outbox persistente
+`BACKEND_AUTHORITATIVE_TENANT=true`. O enqueue persistente recebe `empresa_id` separado do envelope canonico, compara os dois valores e falha fechado com `tenant_mismatch` antes de inserir quando ha divergencia. O JSON nunca e a autoridade final de tenant.
+
+### D-092 — E3.7B nao persiste resultado externo arbitrario sem provider real
+`EXTERNAL_RESULT_ARBITRARY_PERSISTENCE=false` enquanto `ERP_PROVIDER_REAL=false`. Success do outbox nao guarda `external_reference` nem `external_result` arbitrarios nesta fatia; payloads upstream reais e URLs/refs de fornecedor exigem contrato seguro futuro antes de qualquer persistencia.
+
+### D-093 — E3.7B exige prova concorrente real do identity map
+`EXTERNAL_IDENTITY_CONCURRENCY_REAL_PG_REQUIRED=true`. A unique constraint externa continua autoridade final, e colisao concorrente em duas conexoes deve devolver contrato estruturado (`conflict_external_already_bound`) sem erro SQL cru nem duplicidade.
 ---
 
 ## Gates registrados

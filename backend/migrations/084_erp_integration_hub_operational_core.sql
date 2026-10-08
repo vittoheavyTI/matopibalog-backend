@@ -132,6 +132,7 @@ BEFORE UPDATE ON public.erp_external_identity_mappings
 FOR EACH ROW EXECUTE FUNCTION public.erp_touch_updated_at();
 
 CREATE OR REPLACE FUNCTION public.erp_enqueue_outbox(
+  p_empresa_id uuid,
   p_provider text,
   p_envelope jsonb,
   p_intent_fingerprint text,
@@ -151,12 +152,16 @@ SECURITY DEFINER
 SET search_path = public, pg_catalog
 AS $$
 DECLARE
-  v_empresa_id uuid;
+  v_envelope_empresa_id uuid;
   v_event_id text;
   v_event_type text;
   v_inserted public.erp_outbox%ROWTYPE;
   v_existing public.erp_outbox%ROWTYPE;
 BEGIN
+  IF p_empresa_id IS NULL THEN
+    RETURN QUERY SELECT 'invalid_empresa_id', NULL::uuid, NULL::text, p_intent_fingerprint, p_dedupe_key;
+    RETURN;
+  END IF;
   IF p_provider IS NULL OR trim(p_provider) = '' THEN
     RETURN QUERY SELECT 'invalid_provider', NULL::uuid, NULL::text, p_intent_fingerprint, p_dedupe_key;
     RETURN;
@@ -175,15 +180,19 @@ BEGIN
   END IF;
 
   BEGIN
-    v_empresa_id := (p_envelope->>'empresa_id')::uuid;
+    v_envelope_empresa_id := (p_envelope->>'empresa_id')::uuid;
   EXCEPTION WHEN others THEN
     RETURN QUERY SELECT 'invalid_empresa_id', NULL::uuid, NULL::text, p_intent_fingerprint, p_dedupe_key;
     RETURN;
   END;
   v_event_id := p_envelope->>'event_id';
   v_event_type := p_envelope->>'event_type';
-  IF v_empresa_id IS NULL OR COALESCE(trim(v_event_id), '') = '' OR COALESCE(trim(v_event_type), '') = '' THEN
+  IF v_envelope_empresa_id IS NULL OR COALESCE(trim(v_event_id), '') = '' OR COALESCE(trim(v_event_type), '') = '' THEN
     RETURN QUERY SELECT 'invalid_envelope_authority', NULL::uuid, NULL::text, p_intent_fingerprint, p_dedupe_key;
+    RETURN;
+  END IF;
+  IF v_envelope_empresa_id IS DISTINCT FROM p_empresa_id THEN
+    RETURN QUERY SELECT 'tenant_mismatch', NULL::uuid, NULL::text, p_intent_fingerprint, p_dedupe_key;
     RETURN;
   END IF;
 
@@ -192,7 +201,7 @@ BEGIN
     canonical_envelope, status, next_action, max_send_attempts, max_reconcile_attempts
   )
   VALUES (
-    v_empresa_id, p_provider, v_event_id, v_event_type, p_dedupe_key, p_intent_fingerprint,
+    p_empresa_id, p_provider, v_event_id, v_event_type, p_dedupe_key, p_intent_fingerprint,
     p_envelope, 'pending', 'SEND', COALESCE(p_max_send_attempts, 8), COALESCE(p_max_reconcile_attempts, 8)
   )
   ON CONFLICT ON CONSTRAINT erp_outbox_logical_event_key DO NOTHING
@@ -205,7 +214,7 @@ BEGIN
 
   SELECT * INTO v_existing
   FROM public.erp_outbox
-  WHERE empresa_id = v_empresa_id AND provider = p_provider AND event_id = v_event_id;
+  WHERE empresa_id = p_empresa_id AND provider = p_provider AND event_id = v_event_id;
 
   IF v_existing.intent_fingerprint = p_intent_fingerprint THEN
     RETURN QUERY SELECT 'duplicate', v_existing.id, v_existing.status, v_existing.intent_fingerprint, v_existing.dedupe_key;
@@ -331,8 +340,8 @@ BEGIN
       next_retry_at = NULL,
       blocked_reason = NULL,
       sanitized_failure_info = NULL,
-      external_reference = left(p_external_reference, 240),
-      external_result = p_external_result,
+      external_reference = NULL,
+      external_result = NULL,
       processed_at = now()
   WHERE id = p_item_id;
   RETURN QUERY SELECT 'succeeded', p_item_id, 'succeeded';
@@ -494,12 +503,15 @@ BEGIN
     RETURN;
   END IF;
 
-  INSERT INTO public.erp_external_identity_mappings (
-    empresa_id, provider, entity_type, internal_entity_id, external_entity_id, metadata
-  )
-  VALUES (p_empresa_id, p_provider, p_entity_type, p_internal_entity_id, p_external_entity_id, COALESCE(p_metadata, '{}'::jsonb))
-  ON CONFLICT ON CONSTRAINT erp_external_identity_internal_key DO NOTHING
-  RETURNING * INTO v_inserted;
+  BEGIN
+    INSERT INTO public.erp_external_identity_mappings (
+      empresa_id, provider, entity_type, internal_entity_id, external_entity_id, metadata
+    )
+    VALUES (p_empresa_id, p_provider, p_entity_type, p_internal_entity_id, p_external_entity_id, COALESCE(p_metadata, '{}'::jsonb))
+    RETURNING * INTO v_inserted;
+  EXCEPTION WHEN unique_violation THEN
+    NULL;
+  END;
 
   IF v_inserted.id IS NOT NULL THEN
     RETURN QUERY SELECT 'bound', v_inserted.id, v_inserted.external_entity_id, v_inserted.internal_entity_id;
@@ -573,12 +585,17 @@ BEGIN
     RETURN;
   END IF;
 
-  UPDATE public.erp_external_identity_mappings
-  SET external_entity_id = p_external_entity_id,
-      rebind_reason = p_reason,
-      rebound_at = now()
-  WHERE id = v_current.id
-  RETURNING * INTO v_current;
+  BEGIN
+    UPDATE public.erp_external_identity_mappings
+    SET external_entity_id = p_external_entity_id,
+        rebind_reason = p_reason,
+        rebound_at = now()
+    WHERE id = v_current.id
+    RETURNING * INTO v_current;
+  EXCEPTION WHEN unique_violation THEN
+    RETURN QUERY SELECT 'conflict_external_already_bound', v_current.id, v_current.external_entity_id, v_current.internal_entity_id;
+    RETURN;
+  END;
 
   RETURN QUERY SELECT 'rebound', v_current.id, v_current.external_entity_id, v_current.internal_entity_id;
 END;
@@ -591,7 +608,7 @@ GRANT SELECT, INSERT, UPDATE ON TABLE public.erp_external_identity_mappings TO s
 
 REVOKE ALL ON FUNCTION public.erp_sanitize_failure(text) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.erp_touch_updated_at() FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON FUNCTION public.erp_enqueue_outbox(text,jsonb,text,text,integer,integer) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.erp_enqueue_outbox(uuid,text,jsonb,text,text,integer,integer) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.erp_claim_next_outbox(text,text,integer) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.erp_mark_outbox_succeeded(uuid,uuid,text,jsonb) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.erp_mark_outbox_failed(uuid,uuid,text,boolean,jsonb) FROM PUBLIC, anon, authenticated;
@@ -601,7 +618,7 @@ REVOKE ALL ON FUNCTION public.erp_rebind_external_identity(uuid,text,text,text,t
 
 GRANT EXECUTE ON FUNCTION public.erp_sanitize_failure(text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.erp_touch_updated_at() TO service_role;
-GRANT EXECUTE ON FUNCTION public.erp_enqueue_outbox(text,jsonb,text,text,integer,integer) TO service_role;
+GRANT EXECUTE ON FUNCTION public.erp_enqueue_outbox(uuid,text,jsonb,text,text,integer,integer) TO service_role;
 GRANT EXECUTE ON FUNCTION public.erp_claim_next_outbox(text,text,integer) TO service_role;
 GRANT EXECUTE ON FUNCTION public.erp_mark_outbox_succeeded(uuid,uuid,text,jsonb) TO service_role;
 GRANT EXECUTE ON FUNCTION public.erp_mark_outbox_failed(uuid,uuid,text,boolean,jsonb) TO service_role;

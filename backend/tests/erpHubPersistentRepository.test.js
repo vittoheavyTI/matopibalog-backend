@@ -37,13 +37,14 @@ test('persistent ERP repository derives idempotency data and calls service-role 
 
   const env = envelope();
   const repo = createPersistentErpRepository(supabase);
-  const result = await repo.enqueue({ provider: 'fake', envelope: env });
+  const result = await repo.enqueue({ empresaId: EMPRESA_ID, provider: 'fake', envelope: env });
 
   assert.equal(result.code, 'inserted');
   assert.match(result.intentFingerprint, /^[0-9a-f]{64}$/);
   assert.equal(result.intentFingerprint, intentFingerprintForEnvelope(env));
   assert.equal(calls.length, 1);
   assert.equal(calls[0].name, 'erp_enqueue_outbox');
+  assert.equal(calls[0].params.p_empresa_id, EMPRESA_ID);
   assert.equal(calls[0].params.p_dedupe_key, result.dedupeKey);
   assert.equal(calls[0].params.p_intent_fingerprint, result.intentFingerprint);
 });
@@ -58,6 +59,7 @@ test('persistent ERP repository fails closed on invalid envelopes before RPC', a
   });
 
   const result = await repo.enqueue({
+    empresaId: EMPRESA_ID,
     provider: 'fake',
     envelope: envelope({ payload: { access_token: 'secret' } }),
   });
@@ -65,6 +67,44 @@ test('persistent ERP repository fails closed on invalid envelopes before RPC', a
   assert.equal(result.code, 'invalid_envelope');
   assert.equal(result.chaveSensivel, 'payload.access_token');
   assert.equal(rpcCalled, false);
+});
+
+test('persistent ERP repository fails closed on tenant mismatch before RPC', async () => {
+  let rpcCalled = false;
+  const repo = createPersistentErpRepository({
+    async rpc() {
+      rpcCalled = true;
+      return { data: [], error: null };
+    },
+  });
+
+  const result = await repo.enqueue({
+    empresaId: '22222222-2222-4222-8222-222222222222',
+    provider: 'fake',
+    envelope: envelope(),
+  });
+
+  assert.equal(result.code, 'tenant_mismatch');
+  assert.equal(rpcCalled, false);
+});
+
+test('persistent ERP repository never forwards arbitrary success payloads', async () => {
+  const calls = [];
+  const repo = createPersistentErpRepository({
+    async rpc(name, params) {
+      calls.push({ name, params });
+      return { data: [{ code: 'succeeded', item_id: 'item-1', status: 'succeeded' }], error: null };
+    },
+  });
+
+  await repo.markProcessed('item-1', '11111111-1111-4111-8111-111111111111', {
+    externalReference: 'https://x.test/path?access_token=secret',
+    externalResult: { nested: { client_secret: 'secret' }, authorization: 'Bearer secret-value' },
+  });
+
+  assert.equal(calls[0].name, 'erp_mark_outbox_succeeded');
+  assert.equal(calls[0].params.p_external_reference, null);
+  assert.equal(calls[0].params.p_external_result, null);
 });
 
 test('persistent ERP status reports schema_not_applied without throwing', async () => {

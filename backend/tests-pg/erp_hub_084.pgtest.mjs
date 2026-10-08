@@ -46,18 +46,18 @@ test('084 ERP outbox: idempotency conflict, claim race, stale claim and reconcil
     const empresa = await one(c, "insert into public.empresas(nome) values ('ERP PG A') returning id");
     const env = envelope(empresa.id, 'evt-1');
 
-    const inserted = await one(c, 'select * from public.erp_enqueue_outbox($1,$2,$3,$4)', [
-      'fake', env, 'a'.repeat(64), 'erp:fake:' + '1'.repeat(64),
+    const inserted = await one(c, 'select * from public.erp_enqueue_outbox($1,$2,$3,$4,$5)', [
+      empresa.id, 'fake', env, 'a'.repeat(64), 'erp:fake:' + '1'.repeat(64),
     ]);
     assert.equal(inserted.code, 'inserted');
 
-    const dup = await one(c, 'select * from public.erp_enqueue_outbox($1,$2,$3,$4)', [
-      'fake', env, 'a'.repeat(64), 'erp:fake:' + '1'.repeat(64),
+    const dup = await one(c, 'select * from public.erp_enqueue_outbox($1,$2,$3,$4,$5)', [
+      empresa.id, 'fake', env, 'a'.repeat(64), 'erp:fake:' + '1'.repeat(64),
     ]);
     assert.equal(dup.code, 'duplicate');
 
-    const conflict = await one(c, 'select * from public.erp_enqueue_outbox($1,$2,$3,$4)', [
-      'fake', { ...env, payload: { valor: 2 } }, 'b'.repeat(64), 'erp:fake:' + '2'.repeat(64),
+    const conflict = await one(c, 'select * from public.erp_enqueue_outbox($1,$2,$3,$4,$5)', [
+      empresa.id, 'fake', { ...env, payload: { valor: 2 } }, 'b'.repeat(64), 'erp:fake:' + '2'.repeat(64),
     ]);
     assert.equal(conflict.code, 'idempotency_conflict');
 
@@ -91,6 +91,72 @@ test('084 ERP outbox: idempotency conflict, claim race, stale claim and reconcil
   } finally {
     await c.end();
     await c2.end();
+  }
+});
+
+test('084 ERP outbox: backend tenant authority is explicit and tenant-scoped events do not collide', { skip: !CONN || !ENABLED }, async () => {
+  const c = await client();
+  try {
+    const a = await one(c, "insert into public.empresas(nome) values ('ERP Tenant Authority A') returning id");
+    const b = await one(c, "insert into public.empresas(nome) values ('ERP Tenant Authority B') returning id");
+    const envA = envelope(a.id, 'evt-same-tenant-scope');
+    const envB = envelope(b.id, 'evt-same-tenant-scope');
+
+    const mismatch = await one(c, 'select * from public.erp_enqueue_outbox($1,$2,$3,$4,$5)', [
+      a.id, 'fake', envB, 'c'.repeat(64), 'erp:fake:' + '3'.repeat(64),
+    ]);
+    assert.equal(mismatch.code, 'tenant_mismatch');
+
+    const mismatchCount = await one(c, 'select count(*)::int as count from public.erp_outbox where empresa_id=$1 and event_id=$2', [
+      a.id, 'evt-same-tenant-scope',
+    ]);
+    assert.equal(mismatchCount.count, 0);
+
+    const insertedA = await one(c, 'select * from public.erp_enqueue_outbox($1,$2,$3,$4,$5)', [
+      a.id, 'fake', envA, 'd'.repeat(64), 'erp:fake:' + '4'.repeat(64),
+    ]);
+    assert.equal(insertedA.code, 'inserted');
+
+    const insertedB = await one(c, 'select * from public.erp_enqueue_outbox($1,$2,$3,$4,$5)', [
+      b.id, 'fake', envB, 'e'.repeat(64), 'erp:fake:' + '5'.repeat(64),
+    ]);
+    assert.equal(insertedB.code, 'inserted');
+  } finally {
+    await c.end();
+  }
+});
+
+test('084 ERP outbox: success result does not persist raw secrets', { skip: !CONN || !ENABLED }, async () => {
+  const c = await client();
+  try {
+    const empresa = await one(c, "insert into public.empresas(nome) values ('ERP Secret Safety') returning id");
+    const env = envelope(empresa.id, 'evt-secret-safe');
+    const inserted = await one(c, 'select * from public.erp_enqueue_outbox($1,$2,$3,$4,$5)', [
+      empresa.id, 'fake', env, 'f'.repeat(64), 'erp:fake:' + '6'.repeat(64),
+    ]);
+    assert.equal(inserted.code, 'inserted');
+
+    const claim = await one(c, "select * from public.erp_claim_next_outbox('SEND','secret-test',300)");
+    assert.equal(claim.code, 'claimed');
+
+    const success = await one(c, 'select * from public.erp_mark_outbox_succeeded($1,$2,$3,$4)', [
+      claim.item_id,
+      claim.claim_token,
+      'https://erp.example/path?access_token=secret-value&client_secret=secret-value',
+      {
+        authorization: 'Bearer secret-value',
+        nested: { access_token: 'secret-value', password: 'secret-value' },
+        array: [{ client_secret: 'secret-value' }],
+      },
+    ]);
+    assert.equal(success.code, 'succeeded');
+
+    const stored = await one(c, 'select coalesce(external_reference, \'\') || \' \' || coalesce(external_result::text, \'\') as raw from public.erp_outbox where id=$1', [
+      claim.item_id,
+    ]);
+    assert.equal(/secret-value|Bearer|client_secret|access_token|password/i.test(stored.raw), false);
+  } finally {
+    await c.end();
   }
 });
 
@@ -131,6 +197,41 @@ test('084 ERP external identity: tenant/provider uniqueness and collision-safe r
     assert.equal(preserved.external_entity_id, 'ext-1');
   } finally {
     await c.end();
+  }
+});
+
+test('084 ERP external identity: real two-connection external collision is deterministic', { skip: !CONN || !ENABLED }, async () => {
+  const c1 = await client();
+  const c2 = await client();
+  try {
+    const tenant = await one(c1, "insert into public.empresas(nome) values ('ERP Identity Race') returning id");
+    const externalId = `external-shared-${Date.now()}`;
+
+    const [r1, r2] = await Promise.all([
+      one(c1, 'select * from public.erp_bind_external_identity($1,$2,$3,$4,$5,$6)', [
+        tenant.id, 'fake', 'frete', 'internal-1', externalId, {},
+      ]),
+      one(c2, 'select * from public.erp_bind_external_identity($1,$2,$3,$4,$5,$6)', [
+        tenant.id, 'fake', 'frete', 'internal-2', externalId, {},
+      ]),
+    ]);
+
+    const codes = [r1.code, r2.code].sort();
+    assert.deepEqual(codes, ['bound', 'conflict_external_already_bound']);
+
+    const count = await one(c1, 'select count(*)::int as count from public.erp_external_identity_mappings where empresa_id=$1 and provider=$2 and entity_type=$3 and external_entity_id=$4', [
+      tenant.id, 'fake', 'frete', externalId,
+    ]);
+    assert.equal(count.count, 1);
+
+    const winner = [r1, r2].find((r) => r.code === 'bound');
+    const stored = await one(c1, 'select internal_entity_id from public.erp_external_identity_mappings where id=$1', [
+      winner.mapping_id,
+    ]);
+    assert.equal(stored.internal_entity_id, winner.internal_entity_id);
+  } finally {
+    await c1.end();
+    await c2.end();
   }
 });
 

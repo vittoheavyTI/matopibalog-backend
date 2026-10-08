@@ -39,17 +39,21 @@ function createPersistentErpRepository(supabase) {
     }
   }
 
-  async function enqueue({ provider, envelope, maxSendAttempts, maxReconcileAttempts }) {
+  async function enqueue({ empresaId, provider, envelope, maxSendAttempts, maxReconcileAttempts }) {
     const v = validateEnvelope(envelope);
     if (!v.ok) return { code: 'invalid_envelope', motivo: v.motivo, chaveSensivel: v.chaveSensivel || null };
+    if (!empresaId || String(empresaId) !== String(envelope.empresa_id)) {
+      return { code: 'tenant_mismatch', motivo: 'empresa_id_divergente' };
+    }
     const intent = intentFingerprintForEnvelope(envelope);
     const dedupeKey = deriveIdempotencyKey({
       provider,
-      empresaId: envelope.empresa_id,
+      empresaId,
       eventId: envelope.event_id,
       schemaVersion: envelope.schema_version,
     });
     const row = await rpc('erp_enqueue_outbox', {
+      p_empresa_id: empresaId,
       p_provider: provider,
       p_envelope: envelope,
       p_intent_fingerprint: intent,
@@ -72,8 +76,8 @@ function createPersistentErpRepository(supabase) {
     return rpc('erp_mark_outbox_succeeded', {
       p_item_id: id,
       p_claim_token: claimToken,
-      p_external_reference: result.externalReference || null,
-      p_external_result: result.externalResult || null,
+      p_external_reference: null,
+      p_external_result: null,
     });
   }
 

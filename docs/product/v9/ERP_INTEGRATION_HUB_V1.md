@@ -101,8 +101,17 @@ roles. As RPCs tem `search_path` fixo e sao mediadas pelo backend via service ro
 | `ERP37B-INFO-001` | Auditoria read-only encontrou divergencia historica de tracking: a migration 068 nao aparece no registry de producao, mas seus efeitos existem (`iniciar_aquisicao_comercial_v2` e check constraint de origem). Nao bloqueia a 084; registrar como achado de processo. |
 | `ERP37B-HIGH-001` | Fechado neste PR: outbox persistente tem `FOR UPDATE SKIP LOCKED`, claim token, lease, stale-claim guard e terminal `succeeded` imutavel. |
 | `ERP37B-HIGH-002` | Fechado neste PR: falha/lease ambiguo nao autoriza resend cego; caminho padrao e `RECONCILE`, resend so com evidencia `retry_safe`. |
+| `ERP37B-HIGH-003` | Fechado no batch pre-migration do PR #500: enqueue persistente recebe `empresa_id` autoritativo do backend, compara com o envelope canonico e falha `tenant_mismatch` antes de inserir quando diverge. O repository tambem falha antes da RPC. |
+| `ERP37B-HIGH-004` | Fechado no batch pre-migration do PR #500: enquanto `ERP_PROVIDER_REAL=false`, success nao persiste `external_reference` nem `external_result` arbitrarios; testes provam `RAW_SECRET_OCCURRENCES=0` para Bearer/client_secret/access_token/password. |
 | `ERP37B-MEDIUM-001` | Fechado neste PR: identity map persistente e isolado por tenant/provider/entity type, com rebind collision-safe. |
 | `ERP37B-MEDIUM-002` | Fechado neste PR: diagnostico HTTP reporta persistencia honestamente e mantem runners desabilitados. |
+| `ERP37B-MEDIUM-003` | Fechado no batch pre-migration do PR #500: teste PG usa duas conexoes reais para colisao concorrente de external identity; exatamente um bind vence e a constraint externa permanece autoridade final. |
+| `ERP37B-MEDIUM-004` | Fechado no batch pre-migration do PR #500: workflow dedicado `ERP Hub 084 PG` roda em `postgres:17`, pareando o major observado em producao. |
+
+Hash pre-correcao da migration 084: `c75c1b59100780c27c13c480932b33ca9e029af3a67aad746d57c5502864fd7d`
+(`SUPERSEDED_PRE_CORRECTION_HASH`). O hash candidato ao gate humano deve ser recalculado
+apos o batch final do PR #500. Hash final congelado neste batch:
+`A3C2E9C4D2AD54D7A1BE5F2649C6D16714474BC186A35D227DA637CCC7A16BFE`.
 
 ## Findings congelados e fechamento
 
