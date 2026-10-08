@@ -1,31 +1,43 @@
-# ERP Integration Hub V1 — E3.7A Reentry
+# ERP Integration Hub V1 — E3.7A Closed / E3.7B Operational Core
 
-> Estado neste PR: `E37A_REENTRY_IMPLEMENTATION_DRAFT`
-> Base: `origin/main` consolidada `4089f2124e82e30f3e008d74f63b9ad6b04fb6de`
+> Estado E3.7A: `CLOSED_IN_MAIN`
+> Estado E3.7B neste PR: `PRODUCTION_MIGRATION_APPLIED_AWAITING_READY_MERGE_DEPLOY`
+> Base E3.7B: `origin/main` consolidada `26a4abc9cb78e6244a6d656555c12c0d379af059`
+> E3.7A: PR #499 `FINAL_HEAD=168597561aaf27f9dafdbf6a498d2ac29cf5b1b6`, `MERGE_SHA=26a4abc9cb78e6244a6d656555c12c0d379af059`
 > Fonte historica tecnica: PR #490, head `51961d3e46b066d59cbb6497aa470f079b0f3137`
-> Estrategia: `NEW_REENTRY_BRANCH_FROM_CURRENT_MAIN_AND_TRANSPLANT_ERP_DELTA`
+> PR #490: `OPEN_DRAFT_HOLD_DO_NOT_TOUCH`
 
-E3.7A entrega somente a fundacao tecnica do ERP Integration Hub. O PR #490 permanece
+E3.7A fechou em `main` a fundacao tecnica do ERP Integration Hub. O PR #490 permanece
 `OPEN_DRAFT_HOLD` e nao e baseline: o codigo foi reintroduzido em nova branch baseada
-na `main` atual, preservando os fechamentos S1/S2/S3/S4, DB-SEC-1 e Stabilization Wave V1.
+na `main` consolidada, preservando S1/S2/S3/S4, DB-SEC-1 e Stabilization Wave V1.
+
+E3.7B adiciona o nucleo operacional persistente: outbox transacional, claim atomico,
+reconcile-before-resend persistido e mapa de identidade externa. A migration 084 foi
+aplicada em producao uma unica vez em 2026-10-08 sob gate humano explicito, registrada
+como `20261008152836 084_erp_integration_hub_operational_core`. O PR #500 segue para
+ready/merge/deploy automatico normal somente apos CI verde do HEAD final.
 
 ## Escopo
 
 E3.7A e provider-agnostic, schema-free, read-only no endpoint HTTP e production-inert.
-Nao entrega ERP real, adapter de fornecedor, credencial, webhook, UI de configuracao,
-outbox persistente, mapa persistente de identidade externa, ativacao comercial ou E3.7B.
+E3.7B continua sem ERP real, adapter de fornecedor, credencial, webhook, UI de
+configuracao, ativacao comercial, chamada externa ou wiring de evento de negocio.
 
 Invariantes desta fatia:
 
 | Invariante | Valor |
 |---|---|
-| `MIGRATION_REQUIRED` | `false` |
-| `SCHEMA_CHANGE` | `false` |
+| `E37A_MIGRATION_REQUIRED` | `false` |
+| `E37A_SCHEMA_CHANGE` | `false` |
+| `E37B_MIGRATION_REQUIRED` | `true` |
+| `E37B_MIGRATION` | `084_erp_integration_hub_operational_core.sql` |
+| `PRODUCTION_MIGRATION_APPLIED` | `true` |
+| `E37B_PRODUCTION_MIGRATION_VERSION` | `20261008152836 084_erp_integration_hub_operational_core` |
 | `ERP_PROVIDER_REAL` | `false` |
 | `ERP_EXTERNAL_CALLS` | `0` |
 | `PRODUCTION_BUSINESS_WRITES` | `0` |
 | `ERP_SECRETS` | `0` |
-| `E37B_SCOPE` | `OUT_OF_SCOPE` |
+| `BUSINESS_EVENT_WIRING` | `0` |
 
 ## Arquitetura
 
@@ -35,8 +47,18 @@ O dominio Matopiba continua separado de qualquer schema/API de fornecedor (D-023
 DOMINIO -> ENVELOPE CANONICO -> OUTBOX CONTRACT -> PROVIDER GATEWAY -> ADAPTER FUTURO
 ```
 
-Nesta fatia o gateway so permite `disabled` e `fake`. Qualquer modo desconhecido ou real
+O gateway so permite `disabled` e `fake`. Qualquer modo desconhecido ou real
 falha de forma segura para disabled, sem caminho HTTP externo.
+
+E3.7B adiciona persistencia backend-mediated:
+
+- `erp_outbox`: evento logico, dedupe por provider/tenant/event, fingerprint de intencao,
+  lease, claim token, limites de tentativa, `SEND`/`RECONCILE`, estados terminais e
+  sanitizacao de falha.
+- `erp_external_identity_mappings`: vinculo por tenant/provider/entity type, com unique
+  interno e externo, idempotencia e rebind auditavel.
+- RPCs `SECURITY DEFINER` service-role-only para enqueue, claim, success/failure,
+  reconcile, bind e rebind.
 
 ## Superficie HTTP
 
@@ -69,9 +91,36 @@ permission resolution ou leitura de `funcionalidades`.
 
 ## DB-SEC-1
 
-E3.7A nao adiciona SQL, RPC, `SECURITY DEFINER`, grants, RLS, tabela, funcao ou migration.
-A unica leitura de banco da rota e read-only em `funcionalidades`, para refletir honestamente
-o estado tecnico de `integracoes_erp`.
+E3.7A nao adicionou SQL, RPC, `SECURITY DEFINER`, grants, RLS, tabela, funcao ou migration.
+
+E3.7B adiciona a migration 084 com RLS habilitado nas duas tabelas, sem grant direto para
+`anon`, `authenticated` ou `PUBLIC`, e com execute das funcoes `erp_%` revogado desses
+roles. As RPCs tem `search_path` fixo e sao mediadas pelo backend via service role.
+Pos-check de producao confirmou as duas tabelas criadas com contagem `0`, constraints
+unicas esperadas, RLS habilitado, zero grants diretos a `PUBLIC`/`anon`/`authenticated`,
+9/9 funcoes ERP presentes, execute somente para `service_role` e nenhuma funcao ERP com
+`search_path` mutavel.
+
+## E3.7B findings congelados
+
+| Finding | Status |
+|---|---|
+| `ERP37B-INFO-001` | Auditoria read-only encontrou divergencia historica de tracking: a migration 068 nao aparece no registry de producao, mas seus efeitos existem (`iniciar_aquisicao_comercial_v2` e check constraint de origem). Nao bloqueia a 084; registrar como achado de processo. |
+| `ERP37B-HIGH-001` | Fechado neste PR: outbox persistente tem `FOR UPDATE SKIP LOCKED`, claim token, lease, stale-claim guard e terminal `succeeded` imutavel. |
+| `ERP37B-HIGH-002` | Fechado neste PR: falha/lease ambiguo nao autoriza resend cego; caminho padrao e `RECONCILE`, resend so com evidencia `retry_safe`. |
+| `ERP37B-HIGH-003` | Fechado no batch pre-migration do PR #500: enqueue persistente recebe `empresa_id` autoritativo do backend, compara com o envelope canonico e falha `tenant_mismatch` antes de inserir quando diverge. O repository tambem falha antes da RPC. |
+| `ERP37B-HIGH-004` | Fechado no batch pre-migration do PR #500: enquanto `ERP_PROVIDER_REAL=false`, success nao persiste `external_reference` nem `external_result` arbitrarios; testes provam `RAW_SECRET_OCCURRENCES=0` para Bearer/client_secret/access_token/password. |
+| `ERP37B-MEDIUM-001` | Fechado neste PR: identity map persistente e isolado por tenant/provider/entity type, com rebind collision-safe. |
+| `ERP37B-MEDIUM-002` | Fechado neste PR: diagnostico HTTP reporta persistencia honestamente e mantem runners desabilitados. |
+| `ERP37B-MEDIUM-003` | Fechado no batch pre-migration do PR #500: teste PG usa duas conexoes reais para colisao concorrente de external identity; exatamente um bind vence e a constraint externa permanece autoridade final. |
+| `ERP37B-MEDIUM-004` | Fechado no batch pre-migration do PR #500: workflow dedicado `ERP Hub 084 PG` roda em `postgres:17`, pareando o major observado em producao. |
+
+Hash pre-correcao da migration 084: `c75c1b59100780c27c13c480932b33ca9e029af3a67aad746d57c5502864fd7d`
+(`SUPERSEDED_PRE_CORRECTION_HASH`). O hash candidato ao gate humano deve ser recalculado
+apos o batch final do PR #500. Hash final congelado neste batch:
+`A3C2E9C4D2AD54D7A1BE5F2649C6D16714474BC186A35D227DA637CCC7A16BFE`.
+Este hash final foi o payload aplicado em producao sob `MIGRATION_APPLY_MAX_ATTEMPTS=1`;
+blob git `a08a08a05b8c05cd776d5aba9542a3858777be4b`, 26713 bytes.
 
 ## Findings congelados e fechamento
 
@@ -86,7 +135,10 @@ o estado tecnico de `integracoes_erp`.
 
 ## Estado operacional
 
-Esta branch pode ficar tecnicamente pronta para merge quando focused tests, backend full,
-SEC-1 aplicavel e CI do HEAD exato estiverem verdes. Mesmo nesse caso, o estado final esperado
-e `HUMAN_E37A_REENTRY_MERGE_DEPLOY_AUTH_REQUIRED`: nao marcar Ready, nao mergear e nao deployar
-sem autorizacao humana posterior.
+E3.7A esta fechada em `main`.
+
+E3.7B esta em fechamento final do PR #500 apos aplicacao unica da migration 084 em producao.
+O proximo estado alvo e `E37B_OPERATIONAL_CORE_CLOSED` depois de CI verde no HEAD final,
+Ready, merge em `main`, auto-deploy Railway normal, smokes read-only e revisao de logs.
+Continuam fora de escopo: deploy/redeploy manual, nova migration, provider ERP real,
+segredos ERP, wiring de evento de negocio e qualquer escrita de negocio.

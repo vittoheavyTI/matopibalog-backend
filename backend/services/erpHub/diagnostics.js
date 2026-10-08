@@ -18,11 +18,11 @@ const gateway = require('./erpProviderGateway');
 // Snapshot seguro do Hub. `entitlement` é opcional e injetado pela rota (estado
 // técnico real da funcionalidade integracoes_erp), para o relatório ser honesto
 // sem acoplar o domínio puro ao banco.
-function buildHubDiagnostics({ entitlement = null } = {}) {
+function buildHubDiagnostics({ entitlement = null, persistence = null } = {}) {
   const mode = resolveMode();
   return {
     hub: 'erp_integration_hub',
-    version: 'E3.7A',
+    version: 'E3.7B_PRODUCTION_MIGRATION_APPLIED',
     // Estado operacional — em produção (disabled) tudo abaixo é inerte.
     mode,
     enabled: isEnabled(mode),
@@ -48,6 +48,12 @@ function buildHubDiagnostics({ entitlement = null } = {}) {
     // crash-safety de produção — um crash do processo perde a fila.
     crash_safety: 'CRASH_SAFE_CONTRACT_DEFINED',
     outbox_lease_ms: DEFAULT_LEASE_MS,
+    persistence: persistence || {
+      available: false,
+      reason: 'not_checked',
+      runner_enabled: false,
+      production_runner_enabled: false,
+    },
     limits: LIMITS,
     // Estado comercial/técnico da funcionalidade ERP (preservado por esta frente).
     entitlement: entitlement || {
