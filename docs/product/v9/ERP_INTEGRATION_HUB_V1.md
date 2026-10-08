@@ -1,7 +1,7 @@
 # ERP Integration Hub V1 — E3.7A Closed / E3.7B Operational Core
 
 > Estado E3.7A: `CLOSED_IN_MAIN`
-> Estado E3.7B neste PR: `IMPLEMENTATION_DRAFT_AWAITING_PRODUCTION_MIGRATION_AUTH`
+> Estado E3.7B neste PR: `PRODUCTION_MIGRATION_APPLIED_AWAITING_READY_MERGE_DEPLOY`
 > Base E3.7B: `origin/main` consolidada `26a4abc9cb78e6244a6d656555c12c0d379af059`
 > E3.7A: PR #499 `FINAL_HEAD=168597561aaf27f9dafdbf6a498d2ac29cf5b1b6`, `MERGE_SHA=26a4abc9cb78e6244a6d656555c12c0d379af059`
 > Fonte historica tecnica: PR #490, head `51961d3e46b066d59cbb6497aa470f079b0f3137`
@@ -12,8 +12,10 @@ E3.7A fechou em `main` a fundacao tecnica do ERP Integration Hub. O PR #490 perm
 na `main` consolidada, preservando S1/S2/S3/S4, DB-SEC-1 e Stabilization Wave V1.
 
 E3.7B adiciona o nucleo operacional persistente: outbox transacional, claim atomico,
-reconcile-before-resend persistido e mapa de identidade externa. Esta fatia ainda nao
-foi aplicada em producao: migration 084 para em gate humano explicito.
+reconcile-before-resend persistido e mapa de identidade externa. A migration 084 foi
+aplicada em producao uma unica vez em 2026-10-08 sob gate humano explicito, registrada
+como `20261008152836 084_erp_integration_hub_operational_core`. O PR #500 segue para
+ready/merge/deploy automatico normal somente apos CI verde do HEAD final.
 
 ## Escopo
 
@@ -29,7 +31,8 @@ Invariantes desta fatia:
 | `E37A_SCHEMA_CHANGE` | `false` |
 | `E37B_MIGRATION_REQUIRED` | `true` |
 | `E37B_MIGRATION` | `084_erp_integration_hub_operational_core.sql` |
-| `PRODUCTION_MIGRATION_APPLIED` | `false` |
+| `PRODUCTION_MIGRATION_APPLIED` | `true` |
+| `E37B_PRODUCTION_MIGRATION_VERSION` | `20261008152836 084_erp_integration_hub_operational_core` |
 | `ERP_PROVIDER_REAL` | `false` |
 | `ERP_EXTERNAL_CALLS` | `0` |
 | `PRODUCTION_BUSINESS_WRITES` | `0` |
@@ -93,6 +96,10 @@ E3.7A nao adicionou SQL, RPC, `SECURITY DEFINER`, grants, RLS, tabela, funcao ou
 E3.7B adiciona a migration 084 com RLS habilitado nas duas tabelas, sem grant direto para
 `anon`, `authenticated` ou `PUBLIC`, e com execute das funcoes `erp_%` revogado desses
 roles. As RPCs tem `search_path` fixo e sao mediadas pelo backend via service role.
+Pos-check de producao confirmou as duas tabelas criadas com contagem `0`, constraints
+unicas esperadas, RLS habilitado, zero grants diretos a `PUBLIC`/`anon`/`authenticated`,
+9/9 funcoes ERP presentes, execute somente para `service_role` e nenhuma funcao ERP com
+`search_path` mutavel.
 
 ## E3.7B findings congelados
 
@@ -112,6 +119,8 @@ Hash pre-correcao da migration 084: `c75c1b59100780c27c13c480932b33ca9e029af3a67
 (`SUPERSEDED_PRE_CORRECTION_HASH`). O hash candidato ao gate humano deve ser recalculado
 apos o batch final do PR #500. Hash final congelado neste batch:
 `A3C2E9C4D2AD54D7A1BE5F2649C6D16714474BC186A35D227DA637CCC7A16BFE`.
+Este hash final foi o payload aplicado em producao sob `MIGRATION_APPLY_MAX_ATTEMPTS=1`;
+blob git `a08a08a05b8c05cd776d5aba9542a3858777be4b`, 26713 bytes.
 
 ## Findings congelados e fechamento
 
@@ -128,7 +137,8 @@ apos o batch final do PR #500. Hash final congelado neste batch:
 
 E3.7A esta fechada em `main`.
 
-E3.7B pode ficar tecnicamente pronta para PR draft quando focused tests, backend full,
-SEC-1 aplicavel e CI do HEAD exato estiverem verdes. Mesmo nesse caso, o estado final esperado
-e `HUMAN_E37B_PRODUCTION_MIGRATION_AUTH_REQUIRED`: nao aplicar migration 084 em producao,
-nao marcar Ready, nao mergear e nao deployar sem autorizacao humana posterior.
+E3.7B esta em fechamento final do PR #500 apos aplicacao unica da migration 084 em producao.
+O proximo estado alvo e `E37B_OPERATIONAL_CORE_CLOSED` depois de CI verde no HEAD final,
+Ready, merge em `main`, auto-deploy Railway normal, smokes read-only e revisao de logs.
+Continuam fora de escopo: deploy/redeploy manual, nova migration, provider ERP real,
+segredos ERP, wiring de evento de negocio e qualquer escrita de negocio.

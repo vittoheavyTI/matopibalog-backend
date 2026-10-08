@@ -22,7 +22,7 @@ function buildHubDiagnostics({ entitlement = null, persistence = null } = {}) {
   const mode = resolveMode();
   return {
     hub: 'erp_integration_hub',
-    version: 'E3.7B_IMPLEMENTATION_DRAFT',
+    version: 'E3.7B_PRODUCTION_MIGRATION_APPLIED',
     // Estado operacional — em produção (disabled) tudo abaixo é inerte.
     mode,
     enabled: isEnabled(mode),

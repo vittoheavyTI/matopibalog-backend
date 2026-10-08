@@ -321,8 +321,8 @@ Campaign-A nao integra provider de rota, marketplace, parceiro real, portal do e
 ### D-089 — Identidade externa ERP e isolada por tenant, provider e tipo de entidade
 `ERP_EXTERNAL_IDENTITY_SCOPE=(empresa_id, provider, entity_type)`. Um ID externo nao pode ser reaproveitado dentro do mesmo escopo; rebind exige motivo e falha fechado quando colide com outro vinculo.
 
-### D-090 — Migration 084 para em gate humano antes da producao
-`E37B_PRODUCTION_MIGRATION_AUTH_REQUIRED=true`. O PR E3.7B pode conter migration 084 e testes, mas nao aplica a migration em producao, nao marca Ready, nao mergeia e nao dispara deploy sem autorizacao humana posterior.
+### D-090 — Migration 084 exige gate humano antes da producao
+`E37B_PRODUCTION_MIGRATION_AUTH_REQUIRED=true`. O PR E3.7B pode conter migration 084 e testes, mas nao aplica a migration em producao, nao marca Ready, nao mergeia e nao dispara deploy sem autorizacao humana posterior. Gate consumido em 2026-10-08 para o HEAD `e35ac6bdc7c7f2efb6e100e3251e2ec02c1a9451`: migration `084_erp_integration_hub_operational_core.sql` aplicada exatamente uma vez como `20261008152836`, SHA256 `A3C2E9C4D2AD54D7A1BE5F2649C6D16714474BC186A35D227DA637CCC7A16BFE`, com pos-check service-role-only e tabelas vazias. Ready/merge/deploy continuam gates separados e entram apenas no fechamento final autorizado do PR #500.
 
 ### D-091 — E3.7B tenant authority explicita no outbox persistente
 `BACKEND_AUTHORITATIVE_TENANT=true`. O enqueue persistente recebe `empresa_id` separado do envelope canonico, compara os dois valores e falha fechado com `tenant_mismatch` antes de inserir quando ha divergencia. O JSON nunca e a autoridade final de tenant.
