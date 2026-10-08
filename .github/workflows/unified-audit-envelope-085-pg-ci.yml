@@ -1,0 +1,80 @@
+name: Unified Audit Envelope 085 PG
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "backend/migrations/085_unified_audit_digital_envelope.sql"
+      - "backend/tests-pg/e38_digital_envelope.pgtest.mjs"
+      - "backend/tests-pg/apply_schema.mjs"
+      - ".github/workflows/unified-audit-envelope-085-pg-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "backend/migrations/085_unified_audit_digital_envelope.sql"
+      - "backend/tests-pg/e38_digital_envelope.pgtest.mjs"
+      - "backend/tests-pg/apply_schema.mjs"
+      - ".github/workflows/unified-audit-envelope-085-pg-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: unified-audit-envelope-085-pg-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unified-audit-envelope-085-pg:
+    name: Postgres 17 - Unified Audit Envelope 085
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: e38_envelope_085_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    defaults:
+      run:
+        working-directory: backend
+
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/e38_envelope_085_test
+      E38_ENVELOPE_085_PG: "1"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: backend/.nvmrc
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Show runtime versions
+        run: node --version && npm --version
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Apply isolated schema through migration 085
+        run: npm run test:pg:apply
+
+      - name: Run Unified Audit Envelope 085 PG tests
+        run: node --test --test-concurrency=1 tests-pg/e38_digital_envelope.pgtest.mjs

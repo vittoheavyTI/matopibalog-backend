@@ -32,6 +32,7 @@ const arquivos = [
   join(migrations, '071_lancamento_status_cancelado_check.sql'), // hotfix: relaxa CHECK status p/ incluir 'cancelado'
   join(migrations, '072_permissions_templates_overrides.sql'), // P2: permissões templates+overrides
   join(migrations, '084_erp_integration_hub_operational_core.sql'), // E3.7B: ERP persistent outbox + external identity
+  join(migrations, '085_unified_audit_digital_envelope.sql'), // E3.8: auditoria unificada + envelope digital
 ];
 
 const client = new pg.Client({ connectionString: CONN });
@@ -43,7 +44,7 @@ try {
     await client.query(sql);
     console.log('ok');
   }
-  console.log('Schema de teste aplicado (pré-bootstrap + 058 + 060 + 061 + 062 + 064 + 065 + 066 + 067 + 068 + 069 + 070 + 071 + 072 + 084).');
+  console.log('Schema de teste aplicado (pré-bootstrap + 058 + 060 + 061 + 062 + 064 + 065 + 066 + 067 + 068 + 069 + 070 + 071 + 072 + 084 + 085).');
 } finally {
   await client.end();
 }
