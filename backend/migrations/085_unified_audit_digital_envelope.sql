@@ -53,6 +53,33 @@ REVOKE ALL ON TABLE public.frete_envelopes_digitais FROM PUBLIC, anon, authentic
 GRANT SELECT, INSERT ON TABLE public.frete_envelopes_digitais TO service_role;
 REVOKE UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLE public.frete_envelopes_digitais FROM service_role;
 
+DO $$
+DECLARE
+  v_tbl text;
+  v_tables text[] := ARRAY[
+    'public.lancamento_eventos',
+    'public.fretes_financeiro_auditoria',
+    'public.permission_change_events',
+    'public.operational_scope_auditoria',
+    'public.billing_outbox',
+    'public.contrato_eventos',
+    'public.erp_outbox'
+  ];
+BEGIN
+  FOREACH v_tbl IN ARRAY v_tables
+  LOOP
+    IF to_regclass(v_tbl) IS NOT NULL THEN
+      EXECUTE format('GRANT SELECT ON %s TO service_role', v_tbl);
+    END IF;
+  END LOOP;
+  IF to_regclass('public.lancamento_eventos') IS NOT NULL THEN
+    EXECUTE 'GRANT INSERT ON public.lancamento_eventos TO service_role';
+  END IF;
+  IF to_regclass('public.fretes_financeiro_auditoria') IS NOT NULL THEN
+    EXECUTE 'GRANT INSERT ON public.fretes_financeiro_auditoria TO service_role';
+  END IF;
+END $$;
+
 CREATE OR REPLACE FUNCTION public.frete_envelopes_digitais_append_only()
 RETURNS trigger
 LANGUAGE plpgsql
