@@ -524,37 +524,35 @@ async function carregarFreteAutorizado(req, id) {
   return { frete: data };
 }
 
-async function redigirEnvelopeParaMotoristaSeAplicavel(req, envelope) {
+function redactInternalFinancialFields(obj) {
+  if (!obj || typeof obj !== 'object') return obj;
+  const out = { ...obj };
+  const fields = ['valor_frete', 'valor_tonelada_km', 'toneladas', 'modalidade_calculo'];
+  for (const f of fields) delete out[f];
+  return out;
+}
+
+async function redigirEnvelopeSeAplicavel(req, envelope) {
   if (!envelope) return envelope;
-  if (req.user?.is_super_admin === true || req.user?.role === 'admin' || (req.user?.tipo && req.user?.tipo !== 'motorista')) {
+  if (req.user?.is_super_admin === true) {
     return envelope;
   }
-  try {
-    const { loadEffectivePermissions } = require('../services/permissions/permissionResolver');
-    const { redactFreteForDriver } = require('../services/permissions/driverFinancialRedaction');
-    const eff = await loadEffectivePermissions(supabase, {
-      uid: req.user.uid, tipo: 'motorista', empresa_id: envelope.empresa_id, empresa_tipo: req.user.empresa_tipo,
-    });
-    const { data: mot } = await supabase.from('motoristas').select('percentual_comissao').eq('id', req.user.uid).maybeSingle();
-    const redactedSnapshot = redactFreteForDriver(envelope.frete_snapshot, eff?.driverFinancialVisibility || 'commission_only', mot?.percentual_comissao ?? null);
-    const redactedFinancial = redactFreteForDriver(envelope.financial_snapshot, eff?.driverFinancialVisibility || 'commission_only', mot?.percentual_comissao ?? null);
 
-    const clone = { ...envelope };
-    clone.frete_snapshot = redactedSnapshot;
-    clone.financial_snapshot = redactedFinancial;
-    if (clone.payload && typeof clone.payload === 'object') {
-      clone.payload = {
-        ...clone.payload,
-        frete_snapshot: redactedSnapshot,
-        financial_snapshot: redactedFinancial,
-      };
-    }
-    return clone;
-  } catch (_) {
-    try {
+  const isDriver = req.user?.tipo === 'motorista' || req.user?.role === 'motorista';
+
+  try {
+    const eff = await ensureEffective(req).catch(() => ({ permissions: {} }));
+    const hasFinanceView = Boolean(eff?.permissions && eff.permissions['finance.operational.view'] === true);
+
+    if (isDriver) {
       const { redactFreteForDriver } = require('../services/permissions/driverFinancialRedaction');
-      const redactedSnapshot = redactFreteForDriver(envelope.frete_snapshot, 'commission_only', null);
-      const redactedFinancial = redactFreteForDriver(envelope.financial_snapshot, 'commission_only', null);
+      const { data: mot } = await supabase.from('motoristas').select('percentual_comissao').eq('id', req.user.uid).maybeSingle().catch(() => ({ data: null }));
+      const visibility = eff?.driverFinancialVisibility || 'commission_only';
+      const pct = mot?.percentual_comissao ?? null;
+
+      const redactedSnapshot = redactFreteForDriver(envelope.frete_snapshot, visibility, pct);
+      const redactedFinancial = redactFreteForDriver(envelope.financial_snapshot, visibility, pct);
+
       const clone = { ...envelope };
       clone.frete_snapshot = redactedSnapshot;
       clone.financial_snapshot = redactedFinancial;
@@ -566,9 +564,39 @@ async function redigirEnvelopeParaMotoristaSeAplicavel(req, envelope) {
         };
       }
       return clone;
-    } catch {
-      return envelope;
     }
+
+    // Usuário interno: se não possuir finance.operational.view, redige financeiro
+    if (!hasFinanceView) {
+      const redactedSnapshot = redactInternalFinancialFields(envelope.frete_snapshot);
+      const clone = { ...envelope };
+      clone.frete_snapshot = redactedSnapshot;
+      clone.financial_snapshot = {};
+      if (clone.payload && typeof clone.payload === 'object') {
+        clone.payload = {
+          ...clone.payload,
+          frete_snapshot: redactedSnapshot,
+          financial_snapshot: {},
+        };
+      }
+      return clone;
+    }
+
+    return envelope;
+  } catch (_) {
+    // Fail-closed fallback: redige tudo
+    const redactedSnapshot = redactInternalFinancialFields(envelope.frete_snapshot);
+    const clone = { ...envelope };
+    clone.frete_snapshot = redactedSnapshot;
+    clone.financial_snapshot = {};
+    if (clone.payload && typeof clone.payload === 'object') {
+      clone.payload = {
+        ...clone.payload,
+        frete_snapshot: redactedSnapshot,
+        financial_snapshot: {},
+      };
+    }
+    return clone;
   }
 }
 
@@ -593,7 +621,7 @@ exports.getEnvelopeDigital = async (req, res) => {
       });
     }
 
-    const envelopeFinal = await redigirEnvelopeParaMotoristaSeAplicavel(req, data);
+    const envelopeFinal = await redigirEnvelopeSeAplicavel(req, data);
     return res.status(200).json({ status: 'FORMAL_ENVELOPE_SEALED', envelope: envelopeFinal });
   } catch (error) {
     console.error('Erro ao buscar envelope digital do frete:', error);
@@ -607,21 +635,18 @@ exports.getAuditoriaUnificadaFrete = async (req, res) => {
     if (!acesso.frete) return res.status(acesso.status).json(acesso.body);
 
     const limit = Number(req.query.limit || 100);
+    const freteId = String(req.params.id);
     const { data, error } = await supabase.rpc('listar_auditoria_unificada', {
       p_empresa_id: acesso.frete.empresa_id,
       p_limit: Number.isFinite(limit) ? limit : 100,
       p_before_occurred_at: req.query.before_occurred_at || null,
       p_before_event_id: req.query.before_event_id || null,
+      p_entity_type: 'frete',
+      p_entity_id: freteId,
     });
     if (error) throw error;
 
-    const freteId = String(req.params.id);
-    const eventos = (data || []).filter((evento) => (
-      String(evento.entity_id || '') === freteId
-      || String(evento.metadata?.frete_id || '') === freteId
-    ));
-
-    return res.status(200).json({ frete_id: freteId, eventos });
+    return res.status(200).json({ frete_id: freteId, eventos: data || [] });
   } catch (error) {
     console.error('Erro ao buscar auditoria unificada do frete:', error);
     return res.status(500).json({ message: 'Erro ao buscar auditoria unificada do frete.' });

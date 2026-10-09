@@ -105,14 +105,63 @@ function registrar() {
     }
   });
 
-  test('update direto para finalizado sem RPC e recusado pela guarda', async () => {
-    await assert.rejects(
-      () => pool.query(`UPDATE public.fretes SET status='finalizado' WHERE id=$1`, [F1]),
-      /E38_FINALIZED_WITHOUT_FORMAL_ENVELOPE/,
-    );
+  test('update direto para finalizado sem RPC e recusado pela guarda no COMMIT', async () => {
+    const c = await pool.connect();
+    try {
+      await c.query('BEGIN');
+      await c.query('SET LOCAL ROLE service_role');
+      await c.query(`UPDATE public.fretes SET status='finalizado' WHERE id=$1`, [F1]);
+      await assert.rejects(
+        () => c.query('COMMIT'),
+        /E38_FINALIZED_WITHOUT_FORMAL_ENVELOPE/,
+      );
+    } finally {
+      await c.query('ROLLBACK').catch(() => {});
+      c.release();
+    }
 
     const { rows } = await pool.query(`SELECT status FROM public.fretes WHERE id=$1`, [F1]);
     assert.equal(rows[0].status, 'ativo');
+  });
+
+  test('setting custom session GUC does NOT bypass the deferrable constraint trigger', async () => {
+    const c = await pool.connect();
+    try {
+      await c.query('BEGIN');
+      await c.query('SET LOCAL ROLE service_role');
+      await c.query(`SELECT set_config('app.e38_formal_envelope_authorized', 'true', true)`);
+      await c.query(`UPDATE public.fretes SET status='finalizado' WHERE id=$1`, [F1]);
+      await assert.rejects(
+        () => c.query('COMMIT'),
+        /E38_FINALIZED_WITHOUT_FORMAL_ENVELOPE/,
+      );
+    } finally {
+      await c.query('ROLLBACK').catch(() => {});
+      c.release();
+    }
+  });
+
+  test('insert direto de frete finalizado sem envelope e recusado no COMMIT', async () => {
+    const newFreteId = randomUUID();
+    const c = await pool.connect();
+    try {
+      await c.query('BEGIN');
+      await c.query('SET LOCAL ROLE service_role');
+      await c.query(
+        `INSERT INTO public.fretes (id, empresa_id, motorista_id, status, data, valor_frete) VALUES ($1, $2, $3, 'finalizado', now(), 1000)`,
+        [newFreteId, E1, A1],
+      );
+      await assert.rejects(
+        () => c.query('COMMIT'),
+        /E38_FINALIZED_WITHOUT_FORMAL_ENVELOPE/,
+      );
+    } finally {
+      await c.query('ROLLBACK').catch(() => {});
+      c.release();
+    }
+
+    const { rows } = await pool.query(`SELECT id FROM public.fretes WHERE id=$1`, [newFreteId]);
+    assert.equal(rows.length, 0);
   });
 
   test('RPC finaliza frete e sela envelope na mesma transacao', async () => {
@@ -208,21 +257,41 @@ function registrar() {
     );
   });
 
-  test('read model unificado inclui envelope e lancamento sem inventar campos', async () => {
+  test('read model unificado com filtro de entidade antes do limit e paginacao estavel', async () => {
     await rpc({ patch: { km_final: 300 } });
+    const leId1 = randomUUID();
+    const leId2 = randomUUID();
     await pool.query(
       `INSERT INTO public.lancamento_eventos
-       (empresa_id, entity_type, entity_id, frete_id, action, actor_user_id, actor_role, source, reason, metadata)
-       VALUES ($1,'despesa',$2,$3,'approved',$4,'admin','web','aprovacao operacional','{}'::jsonb)`,
-      [E1, randomUUID(), F1, A1],
+       (empresa_id, entity_type, entity_id, frete_id, action, actor_user_id, actor_role, source, reason, metadata, occurred_at)
+       VALUES
+       ($1,'despesa',$2,$3,'approved',$4,'admin','web','aprovacao operacional 1','{}'::jsonb, now() - interval '2 minutes'),
+       ($1,'despesa',$5,$3,'approved',$4,'admin','web','aprovacao operacional 2','{}'::jsonb, now() - interval '1 minute')`,
+      [E1, leId1, F1, A1, leId2],
+    );
+
+    // Evento não relacionado a este frete
+    await pool.query(
+      `INSERT INTO public.lancamento_eventos
+       (empresa_id, entity_type, entity_id, frete_id, action, actor_user_id, actor_role, source, reason, metadata, occurred_at)
+       VALUES ($1,'despesa',$2,NULL,'approved',$3,'admin','web','despesa avulsa','{}'::jsonb, now())`,
+      [E1, randomUUID(), A1],
     );
 
     const { rows } = await pool.query(
-      `SELECT * FROM public.listar_auditoria_unificada($1, 50, NULL, NULL) WHERE entity_id=$2 OR metadata->>'frete_id'=$2`,
+      `SELECT * FROM public.listar_auditoria_unificada($1, 10, NULL, NULL, 'frete', $2)`,
       [E1, F1],
     );
-    const sources = rows.map((r) => r.source_kind).sort();
-    assert.deepEqual(sources, ['frete_envelopes_digitais', 'lancamento_eventos']);
-    assert.ok(rows.every((r) => r.event_id && r.occurred_at));
+    assert.ok(rows.length >= 3, 'retorna envelope e os 2 lancamentos do frete');
+    assert.ok(rows.every((r) => r.entity_id === F1 || r.metadata?.frete_id === F1 || r.entity_type === 'frete'));
+
+    // Teste de ordenação e paginação por cursor (occurred_at DESC, event_id DESC)
+    const firstEvent = rows[0];
+    const { rows: page2 } = await pool.query(
+      `SELECT * FROM public.listar_auditoria_unificada($1, 10, $2, $3, 'frete', $4)`,
+      [E1, firstEvent.occurred_at, firstEvent.event_id, F1],
+    );
+    assert.equal(page2.length, rows.length - 1, 'segunda pagina exclui primeiro registro sem perder os outros');
+    assert.equal(page2[0].event_id, rows[1].event_id, 'segundo registro bate deterministicamente');
   });
 }

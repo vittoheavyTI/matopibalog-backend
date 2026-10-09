@@ -53,33 +53,6 @@ REVOKE ALL ON TABLE public.frete_envelopes_digitais FROM PUBLIC, anon, authentic
 GRANT SELECT, INSERT ON TABLE public.frete_envelopes_digitais TO service_role;
 REVOKE UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLE public.frete_envelopes_digitais FROM service_role;
 
-DO $$
-DECLARE
-  v_tbl text;
-  v_tables text[] := ARRAY[
-    'public.lancamento_eventos',
-    'public.fretes_financeiro_auditoria',
-    'public.permission_change_events',
-    'public.operational_scope_auditoria',
-    'public.billing_outbox',
-    'public.contrato_eventos',
-    'public.erp_outbox'
-  ];
-BEGIN
-  FOREACH v_tbl IN ARRAY v_tables
-  LOOP
-    IF to_regclass(v_tbl) IS NOT NULL THEN
-      EXECUTE format('GRANT SELECT ON %s TO service_role', v_tbl);
-    END IF;
-  END LOOP;
-  IF to_regclass('public.lancamento_eventos') IS NOT NULL THEN
-    EXECUTE 'GRANT INSERT ON public.lancamento_eventos TO service_role';
-  END IF;
-  IF to_regclass('public.fretes_financeiro_auditoria') IS NOT NULL THEN
-    EXECUTE 'GRANT INSERT ON public.fretes_financeiro_auditoria TO service_role';
-  END IF;
-END $$;
-
 CREATE OR REPLACE FUNCTION public.frete_envelopes_digitais_append_only()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -95,42 +68,67 @@ CREATE TRIGGER trg_frete_envelopes_digitais_append_only
   BEFORE UPDATE OR DELETE ON public.frete_envelopes_digitais
   FOR EACH ROW EXECUTE FUNCTION public.frete_envelopes_digitais_append_only();
 
-CREATE OR REPLACE FUNCTION public.e38_guard_frete_finalizado_envelope()
+-- Constraint trigger deferrable na tabela fretes:
+-- Garante a invariante estrita NO_FINALIZED_WITHOUT_FORMAL_ENVELOPE=true
+-- sem depender de variaveis de sessao / GUCs controlaveis pelo caller.
+-- Na finalizacao formal, o frete e atualizado e o envelope e inserido
+-- dentro da mesma transacao; no COMMIT, o trigger verifica a existencia
+-- de exatamente 1 envelope formal selado. Qualquer tentativa de UPDATE direto
+-- para 'finalizado' por qualquer role (incluindo service_role) sem envelope falha no COMMIT.
+CREATE OR REPLACE FUNCTION public.e38_check_frete_finalizado_envelope()
 RETURNS trigger
 LANGUAGE plpgsql
+SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
+DECLARE
+  v_count integer;
 BEGIN
-  IF NEW.status = 'finalizado'
-     AND coalesce(OLD.status, '') IS DISTINCT FROM 'finalizado'
-     AND coalesce(current_setting('app.e38_formal_envelope_authorized', true), '') <> 'true' THEN
-    RAISE EXCEPTION 'E38_FINALIZED_WITHOUT_FORMAL_ENVELOPE';
+  IF NEW.status = 'finalizado' AND (TG_OP = 'INSERT' OR OLD.status IS DISTINCT FROM 'finalizado') THEN
+    SELECT count(*)
+      INTO v_count
+      FROM public.frete_envelopes_digitais e
+     WHERE e.frete_id = NEW.id
+       AND e.empresa_id = NEW.empresa_id
+       AND e.envelope_type = 'formal_freight_closure';
+
+    IF v_count <> 1 THEN
+      RAISE EXCEPTION 'E38_FINALIZED_WITHOUT_FORMAL_ENVELOPE: frete % deve possuir exatamente 1 envelope formal selado na mesma transacao (encontrados: %)', NEW.id, v_count
+        USING errcode = '23514';
+    END IF;
   END IF;
   RETURN NEW;
 END;
 $$;
 
 DROP TRIGGER IF EXISTS trg_e38_guard_frete_finalizado_envelope ON public.fretes;
-CREATE TRIGGER trg_e38_guard_frete_finalizado_envelope
-  BEFORE UPDATE OF status ON public.fretes
-  FOR EACH ROW EXECUTE FUNCTION public.e38_guard_frete_finalizado_envelope();
+DROP TRIGGER IF EXISTS trg_e38_check_frete_finalizado_envelope ON public.fretes;
+CREATE CONSTRAINT TRIGGER trg_e38_check_frete_finalizado_envelope
+  AFTER INSERT OR UPDATE OF status ON public.fretes
+  DEFERRABLE INITIALLY DEFERRED
+  FOR EACH ROW
+  EXECUTE FUNCTION public.e38_check_frete_finalizado_envelope();
 
-CREATE OR REPLACE FUNCTION public.e38_jsonb_pick_existing(p_row jsonb, p_keys text[])
+CREATE OR REPLACE FUNCTION public.e38_jsonb_pick_existing(p_src jsonb, p_keys text[])
 RETURNS jsonb
 LANGUAGE plpgsql
 IMMUTABLE
 SET search_path = public, pg_temp
 AS $$
 DECLARE
-  v_result jsonb := '{}'::jsonb;
-  v_key text;
+  v_out jsonb := '{}'::jsonb;
+  v_k text;
 BEGIN
-  FOREACH v_key IN ARRAY p_keys LOOP
-    IF p_row ? v_key THEN
-      v_result := v_result || jsonb_build_object(v_key, p_row -> v_key);
+  IF p_src IS NULL OR jsonb_typeof(p_src) <> 'object' THEN
+    RETURN '{}'::jsonb;
+  END IF;
+  FOREACH v_k IN ARRAY p_keys
+  LOOP
+    IF p_src ? v_k THEN
+      v_out := v_out || jsonb_build_object(v_k, p_src->v_k);
     END IF;
   END LOOP;
-  RETURN v_result;
+  RETURN v_out;
 END;
 $$;
 
@@ -171,9 +169,9 @@ BEGIN
     RAISE EXCEPTION 'e38_frete_envelope_reason_required';
   END IF;
   IF btrim(coalesce(p_source, '')) <> 'backend_finalization' THEN
-    RAISE EXCEPTION 'e38_frete_envelope_source_not_allowed';
+    RAISE EXCEPTION 'e38_frete_envelope_source_invalid';
   END IF;
-  IF length(btrim(coalesce(p_request_id, ''))) < 8 THEN
+  IF btrim(coalesce(p_request_id, '')) = '' THEN
     RAISE EXCEPTION 'e38_frete_envelope_request_id_required';
   END IF;
   IF p_patch IS NULL OR jsonb_typeof(p_patch) <> 'object' THEN
@@ -240,8 +238,6 @@ BEGIN
 
   v_update := coalesce(p_patch, '{}'::jsonb) || jsonb_build_object('status', 'finalizado');
 
-  PERFORM set_config('app.e38_formal_envelope_authorized', 'true', true);
-
   UPDATE public.fretes
      SET status = 'finalizado',
          km_inicial = CASE WHEN v_update ? 'km_inicial' THEN (v_update->>'km_inicial')::numeric ELSE km_inicial END,
@@ -286,27 +282,30 @@ BEGIN
     'envelope_type', 'formal_freight_closure',
     'empresa_id', p_empresa_id,
     'frete_id', p_frete_id,
-    'sealed_at', now(),
-    'actor', jsonb_build_object(
-      'user_id', p_actor_user_id,
-      'auth_uid', p_actor_auth_uid,
-      'role', p_actor_role
-    ),
-    'reason', btrim(p_reason),
     'source', btrim(p_source),
     'request_id', btrim(p_request_id),
-    'correlation_id', nullif(btrim(coalesce(p_correlation_id, '')), ''),
+    'correlation_id', p_correlation_id,
+    'actor_user_id', p_actor_user_id,
+    'actor_auth_uid', p_actor_auth_uid,
+    'actor_role', p_actor_role,
+    'reason', btrim(p_reason),
     'frete_snapshot', v_frete_snapshot,
     'financial_snapshot', v_financial,
-    'audit_summary', v_audit_summary
+    'audit_summary', v_audit_summary,
+    'metadata', jsonb_build_object(
+      'sealed_from_status', v_frete.status,
+      'patch_applied', p_patch
+    )
   );
 
   v_envelope_hash := encode(extensions.digest(v_payload::text, 'sha256'), 'hex');
-  v_payload := v_payload || jsonb_build_object('envelope_hash', v_envelope_hash);
 
   INSERT INTO public.frete_envelopes_digitais (
     empresa_id,
     frete_id,
+    envelope_type,
+    schema_version,
+    status,
     source,
     request_id,
     actor_user_id,
@@ -314,6 +313,7 @@ BEGIN
     actor_role,
     reason,
     correlation_id,
+    sealed_at,
     frete_snapshot,
     financial_snapshot,
     audit_summary,
@@ -323,17 +323,24 @@ BEGIN
   ) VALUES (
     p_empresa_id,
     p_frete_id,
+    'formal_freight_closure',
+    'e38.freight_closure.v1',
+    'sealed',
     btrim(p_source),
     btrim(p_request_id),
     p_actor_user_id,
-    nullif(btrim(coalesce(p_actor_auth_uid, '')), ''),
-    nullif(btrim(coalesce(p_actor_role, '')), ''),
+    p_actor_auth_uid,
+    p_actor_role,
     btrim(p_reason),
-    nullif(btrim(coalesce(p_correlation_id, '')), ''),
+    p_correlation_id,
+    now(),
     v_frete_snapshot,
     v_financial,
     v_audit_summary,
-    jsonb_build_object('previous_status', v_frete.status),
+    jsonb_build_object(
+      'sealed_from_status', v_frete.status,
+      'patch_applied', p_patch
+    ),
     v_envelope_hash,
     v_payload
   )
@@ -347,15 +354,24 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.e38_finalize_frete_with_envelope(uuid, uuid, uuid, text, text, text, text, text, text, jsonb) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.e38_finalize_frete_with_envelope(uuid, uuid, uuid, text, text, text, text, text, text, jsonb) TO service_role;
+REVOKE ALL ON FUNCTION public.e38_finalize_frete_with_envelope(uuid,uuid,uuid,text,text,text,text,text,text,jsonb) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.e38_finalize_frete_with_envelope(uuid,uuid,uuid,text,text,text,text,text,text,jsonb) TO service_role;
 
+REVOKE ALL ON FUNCTION public.e38_check_frete_finalizado_envelope() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.e38_check_frete_finalizado_envelope() TO service_role;
+
+-- Read model SQL unificado de auditoria:
+-- Suporta projecao unificada de eventos operacionais com filtragem de entidade/frete
+-- ANTES do LIMIT e paginacao estável por cursor (occurred_at, event_id).
 CREATE OR REPLACE FUNCTION public.listar_auditoria_unificada(
   p_empresa_id uuid,
   p_limit integer DEFAULT 100,
   p_before_occurred_at timestamptz DEFAULT NULL,
-  p_before_event_id text DEFAULT NULL
-) RETURNS TABLE (
+  p_before_event_id text DEFAULT NULL,
+  p_entity_type text DEFAULT NULL,
+  p_entity_id text DEFAULT NULL
+)
+RETURNS TABLE (
   event_id text,
   source_kind text,
   source_record_id text,
@@ -400,7 +416,8 @@ BEGIN
   ) ON COMMIT DROP;
   TRUNCATE pg_temp.e38_audit_events;
 
-  IF to_regclass('public.frete_envelopes_digitais') IS NOT NULL THEN
+  -- 1. Frete Envelopes Digitais
+  IF (p_entity_type IS NULL OR p_entity_type = 'frete') AND to_regclass('public.frete_envelopes_digitais') IS NOT NULL THEN
     INSERT INTO pg_temp.e38_audit_events
     SELECT
       'frete_envelope:' || e.id::text,
@@ -414,14 +431,16 @@ BEGIN
       e.sealed_at,
       'freight_closure_envelope_sealed',
       e.reason,
-      jsonb_build_object('schema_version', e.schema_version, 'correlation_id', e.correlation_id),
+      jsonb_build_object('schema_version', e.schema_version, 'correlation_id', e.correlation_id, 'envelope_hash', e.envelope_hash),
       'formal_digital_envelope',
       'complete'
     FROM public.frete_envelopes_digitais e
-    WHERE e.empresa_id = p_empresa_id;
+    WHERE e.empresa_id = p_empresa_id
+      AND (p_entity_id IS NULL OR e.frete_id::text = p_entity_id OR e.id::text = p_entity_id);
   END IF;
 
-  IF to_regclass('public.lancamento_eventos') IS NOT NULL THEN
+  -- 2. Lancamento Eventos (despesas, adiantamentos, abastecimentos)
+  IF (p_entity_type IS NULL OR p_entity_type IN ('frete', 'despesa', 'adiantamento', 'abastecimento')) AND to_regclass('public.lancamento_eventos') IS NOT NULL THEN
     INSERT INTO pg_temp.e38_audit_events
     SELECT
       'lancamento_evento:' || le.id::text,
@@ -439,10 +458,12 @@ BEGIN
       'domain_ledger',
       'complete'
     FROM public.lancamento_eventos le
-    WHERE le.empresa_id = p_empresa_id;
+    WHERE le.empresa_id = p_empresa_id
+      AND (p_entity_id IS NULL OR le.frete_id::text = p_entity_id OR le.entity_id::text = p_entity_id);
   END IF;
 
-  IF to_regclass('public.fretes_financeiro_auditoria') IS NOT NULL THEN
+  -- 3. Fretes Financeiro Auditoria
+  IF (p_entity_type IS NULL OR p_entity_type = 'frete') AND to_regclass('public.fretes_financeiro_auditoria') IS NOT NULL THEN
     INSERT INTO pg_temp.e38_audit_events
     SELECT
       'frete_financeiro:' || fa.id::text,
@@ -460,73 +481,35 @@ BEGIN
       'domain_ledger',
       'complete'
     FROM public.fretes_financeiro_auditoria fa
-    WHERE fa.empresa_id = p_empresa_id;
+    WHERE fa.empresa_id = p_empresa_id
+      AND (p_entity_id IS NULL OR fa.frete_id::text = p_entity_id);
   END IF;
 
-  IF to_regclass('public.permission_change_events') IS NOT NULL THEN
+  -- 4. Frete Documento Eventos
+  IF (p_entity_type IS NULL OR p_entity_type IN ('frete', 'frete_documento')) AND to_regclass('public.frete_documento_eventos') IS NOT NULL THEN
     INSERT INTO pg_temp.e38_audit_events
     SELECT
-      'permission_change:' || pe.id::text,
-      'permission_change_events',
-      pe.id::text,
-      pe.empresa_id,
-      coalesce(pe.target_type, 'permission'),
-      coalesce(pe.target_id::text, pe.id::text),
-      pe.actor_user_id::text,
-      NULL,
-      pe.occurred_at,
-      pe.action,
-      NULL,
-      coalesce(pe.metadata, '{}'::jsonb),
-      'security_permission_ledger',
+      'frete_documento_evento:' || fde.id::text,
+      'frete_documento_eventos',
+      fde.id::text,
+      fde.empresa_id,
+      'frete_documento',
+      fde.documento_id::text,
+      fde.actor_user_id::text,
+      fde.actor_role,
+      fde.occurred_at,
+      fde.action,
+      fde.reason,
+      coalesce(fde.metadata, '{}'::jsonb) || jsonb_build_object('frete_id', fde.frete_id),
+      'domain_ledger',
       'complete'
-    FROM public.permission_change_events pe
-    WHERE pe.empresa_id = p_empresa_id;
+    FROM public.frete_documento_eventos fde
+    WHERE fde.empresa_id = p_empresa_id
+      AND (p_entity_id IS NULL OR fde.frete_id::text = p_entity_id OR fde.documento_id::text = p_entity_id);
   END IF;
 
-  IF to_regclass('public.auth_event_audit') IS NOT NULL THEN
-    INSERT INTO pg_temp.e38_audit_events
-    SELECT
-      'auth_event:' || ae.id::text,
-      'auth_event_audit',
-      ae.id::text,
-      ae.empresa_id,
-      'auth_session',
-      coalesce(ae.session_id::text, ae.id::text),
-      ae.usuario_id::text,
-      NULL,
-      ae.created_at,
-      ae.event,
-      ae.motivo,
-      jsonb_build_object('client_type', ae.client_type, 'origem', ae.origem, 'request_id', ae.request_id, 'resultado', ae.resultado),
-      'security_auth_ledger',
-      'complete'
-    FROM public.auth_event_audit ae
-    WHERE ae.empresa_id = p_empresa_id;
-  END IF;
-
-  IF to_regclass('public.contrato_eventos') IS NOT NULL THEN
-    INSERT INTO pg_temp.e38_audit_events
-    SELECT
-      'contrato_evento:' || ce.id::text,
-      'contrato_eventos',
-      ce.id::text,
-      ce.empresa_id,
-      'contrato_comercial',
-      ce.contrato_id::text,
-      ce.criado_por::text,
-      NULL,
-      ce.criado_em,
-      ce.tipo,
-      NULL,
-      coalesce(ce.detalhe, '{}'::jsonb),
-      'commercial_contract_ledger',
-      CASE WHEN ce.criado_por IS NULL THEN 'legacy_source' ELSE 'complete' END
-    FROM public.contrato_eventos ce
-    WHERE ce.empresa_id = p_empresa_id;
-  END IF;
-
-  IF to_regclass('public.erp_outbox') IS NOT NULL THEN
+  -- 5. ERP Outbox
+  IF (p_entity_type IS NULL OR p_entity_type = 'frete' OR p_entity_type = 'erp_event') AND to_regclass('public.erp_outbox') IS NOT NULL THEN
     INSERT INTO pg_temp.e38_audit_events
     SELECT
       'erp_outbox:' || eo.id::text,
@@ -544,7 +527,235 @@ BEGIN
       'integration_outbox',
       'complete'
     FROM public.erp_outbox eo
-    WHERE eo.empresa_id = p_empresa_id;
+    WHERE eo.empresa_id = p_empresa_id
+      AND (p_entity_id IS NULL OR eo.canonical_envelope->>'entity_id' = p_entity_id OR eo.id::text = p_entity_id);
+  END IF;
+
+  -- 6. Permission Change Events (somente quando consulta global ou por usuario)
+  IF (p_entity_type IS NULL OR p_entity_type = 'usuario') AND to_regclass('public.permission_change_events') IS NOT NULL THEN
+    INSERT INTO pg_temp.e38_audit_events
+    SELECT
+      'permission_change:' || pce.id::text,
+      'permission_change_events',
+      pce.id::text,
+      pce.empresa_id,
+      'usuario',
+      pce.usuario_id::text,
+      pce.altered_by_user_id::text,
+      NULL,
+      pce.created_at,
+      pce.change_type,
+      pce.reason,
+      jsonb_build_object('permission_key', pce.permission_key, 'old_effect', pce.old_effect, 'new_effect', pce.new_effect),
+      'governance_ledger',
+      'complete'
+    FROM public.permission_change_events pce
+    WHERE pce.empresa_id = p_empresa_id
+      AND (p_entity_id IS NULL OR pce.usuario_id::text = p_entity_id);
+  END IF;
+
+  -- 7. Operational Scope Auditoria (somente quando consulta global ou por unidade)
+  IF (p_entity_type IS NULL OR p_entity_type = 'unidade_operacional') AND to_regclass('public.operational_scope_auditoria') IS NOT NULL THEN
+    INSERT INTO pg_temp.e38_audit_events
+    SELECT
+      'operational_scope:' || osa.id::text,
+      'operational_scope_auditoria',
+      osa.id::text,
+      osa.empresa_id,
+      'unidade_operacional',
+      osa.unidade_operacional_id::text,
+      osa.actor_user_id::text,
+      NULL,
+      osa.created_at,
+      osa.action,
+      osa.reason,
+      jsonb_build_object('user_id', osa.usuario_id, 'tipo_acesso', osa.tipo_acesso),
+      'governance_ledger',
+      'complete'
+    FROM public.operational_scope_auditoria osa
+    WHERE osa.empresa_id = p_empresa_id
+      AND (p_entity_id IS NULL OR osa.unidade_operacional_id::text = p_entity_id OR osa.usuario_id::text = p_entity_id);
+  END IF;
+
+  -- 8. Auth Event Audit (somente quando consulta global ou por usuario)
+  IF (p_entity_type IS NULL OR p_entity_type = 'usuario') AND to_regclass('public.auth_event_audit') IS NOT NULL THEN
+    INSERT INTO pg_temp.e38_audit_events
+    SELECT
+      'auth_event:' || aea.id::text,
+      'auth_event_audit',
+      aea.id::text,
+      aea.empresa_id,
+      'usuario',
+      aea.user_id::text,
+      aea.user_id::text,
+      NULL,
+      aea.created_at,
+      aea.event_type,
+      NULL,
+      jsonb_build_object('ip', aea.ip, 'user_agent', aea.user_agent),
+      'security_ledger',
+      'complete'
+    FROM public.auth_event_audit aea
+    WHERE aea.empresa_id = p_empresa_id
+      AND (p_entity_id IS NULL OR aea.user_id::text = p_entity_id);
+  END IF;
+
+  -- 9. Billing Outbox (somente quando consulta global ou por billing)
+  IF (p_entity_type IS NULL OR p_entity_type = 'billing') AND to_regclass('public.billing_outbox') IS NOT NULL THEN
+    INSERT INTO pg_temp.e38_audit_events
+    SELECT
+      'billing_outbox:' || bo.id::text,
+      'billing_outbox',
+      bo.id::text,
+      bo.empresa_id,
+      'billing',
+      bo.empresa_id::text,
+      NULL,
+      NULL,
+      bo.created_at,
+      bo.event_type,
+      NULL,
+      jsonb_build_object('status', bo.status, 'retry_count', bo.retry_count),
+      'integration_outbox',
+      'complete'
+    FROM public.billing_outbox bo
+    WHERE bo.empresa_id = p_empresa_id;
+  END IF;
+
+  -- 10. Contrato Eventos (somente quando consulta global ou por contrato)
+  IF (p_entity_type IS NULL OR p_entity_type = 'empresa_contrato') AND to_regclass('public.contrato_eventos') IS NOT NULL THEN
+    INSERT INTO pg_temp.e38_audit_events
+    SELECT
+      'contrato_evento:' || ce.id::text,
+      'contrato_eventos',
+      ce.id::text,
+      ce.empresa_id,
+      'empresa_contrato',
+      ce.contrato_id::text,
+      ce.criado_por::text,
+      NULL,
+      ce.criado_em,
+      ce.tipo,
+      NULL,
+      coalesce(ce.detalhe, '{}'::jsonb),
+      'commercial_contract_ledger',
+      CASE WHEN ce.criado_por IS NULL THEN 'legacy_source' ELSE 'complete' END
+    FROM public.contrato_eventos ce
+    WHERE ce.empresa_id = p_empresa_id
+      AND (p_entity_id IS NULL OR ce.contrato_id::text = p_entity_id);
+  END IF;
+
+  -- 11. Partner Network Events (se existir tabela)
+  IF (p_entity_type IS NULL OR p_entity_type = 'partner') AND to_regclass('public.partner_network_events') IS NOT NULL THEN
+    INSERT INTO pg_temp.e38_audit_events
+    SELECT
+      'partner_network:' || pne.id::text,
+      'partner_network_events',
+      pne.id::text,
+      pne.empresa_id,
+      coalesce(pne.partner_entity_type, 'partner'),
+      coalesce(pne.partner_entity_id::text, pne.id::text),
+      pne.actor_user_id::text,
+      NULL,
+      pne.created_at,
+      pne.event_type,
+      NULL,
+      coalesce(pne.metadata, '{}'::jsonb),
+      'domain_ledger',
+      'complete'
+    FROM public.partner_network_events pne
+    WHERE pne.empresa_id = p_empresa_id;
+  END IF;
+
+  -- 12. Campaign Exceptions (se existir tabela)
+  IF (p_entity_type IS NULL OR p_entity_type = 'campaign') AND to_regclass('public.campaign_exceptions') IS NOT NULL THEN
+    INSERT INTO pg_temp.e38_audit_events
+    SELECT
+      'campaign_exception:' || ce.id::text,
+      'campaign_exceptions',
+      ce.id::text,
+      ce.empresa_id,
+      'campaign',
+      ce.campaign_id::text,
+      ce.created_by::text,
+      NULL,
+      ce.created_at,
+      ce.exception_type,
+      ce.reason,
+      jsonb_build_object('severity', ce.severity, 'status', ce.status),
+      'domain_ledger',
+      'complete'
+    FROM public.campaign_exceptions ce
+    WHERE ce.empresa_id = p_empresa_id
+      AND (p_entity_id IS NULL OR ce.campaign_id::text = p_entity_id);
+  END IF;
+
+  -- 13. Funcionalidade Auditoria (se existir tabela)
+  IF (p_entity_type IS NULL OR p_entity_type = 'funcionalidade') AND to_regclass('public.funcionalidade_auditoria') IS NOT NULL THEN
+    INSERT INTO pg_temp.e38_audit_events
+    SELECT
+      'funcionalidade_audit:' || fa.id::text,
+      'funcionalidade_auditoria',
+      fa.id::text,
+      fa.empresa_id,
+      'funcionalidade',
+      fa.funcionalidade_id::text,
+      fa.alterado_por::text,
+      NULL,
+      fa.criado_em,
+      fa.acao,
+      fa.motivo,
+      coalesce(fa.detalhes, '{}'::jsonb),
+      'governance_ledger',
+      'complete'
+    FROM public.funcionalidade_auditoria fa
+    WHERE fa.empresa_id = p_empresa_id;
+  END IF;
+
+  -- 14. Fleet Odometer Events (se existir tabela)
+  IF (p_entity_type IS NULL OR p_entity_type = 'fleet_asset') AND to_regclass('public.odometer_events') IS NOT NULL THEN
+    INSERT INTO pg_temp.e38_audit_events
+    SELECT
+      'odometer_event:' || oe.id::text,
+      'odometer_events',
+      oe.id::text,
+      oe.empresa_id,
+      'fleet_asset',
+      oe.asset_id::text,
+      oe.recorded_by::text,
+      NULL,
+      oe.recorded_at,
+      oe.event_type,
+      oe.reason,
+      jsonb_build_object('km', oe.km_value, 'source', oe.source),
+      'domain_ledger',
+      'complete'
+    FROM public.odometer_events oe
+    WHERE oe.empresa_id = p_empresa_id
+      AND (p_entity_id IS NULL OR oe.asset_id::text = p_entity_id);
+  END IF;
+
+  -- 15. Fleet Maintenance Events (se existir tabela)
+  IF (p_entity_type IS NULL OR p_entity_type = 'fleet_asset') AND to_regclass('public.maintenance_events') IS NOT NULL THEN
+    INSERT INTO pg_temp.e38_audit_events
+    SELECT
+      'maintenance_event:' || me.id::text,
+      'maintenance_events',
+      me.id::text,
+      me.empresa_id,
+      'fleet_asset',
+      me.asset_id::text,
+      me.created_by::text,
+      NULL,
+      me.created_at,
+      me.service_type,
+      me.notes,
+      jsonb_build_object('status', me.status, 'cost', me.cost),
+      'domain_ledger',
+      'complete'
+    FROM public.maintenance_events me
+    WHERE me.empresa_id = p_empresa_id
+      AND (p_entity_id IS NULL OR me.asset_id::text = p_entity_id);
   END IF;
 
   RETURN QUERY
@@ -558,5 +769,5 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.listar_auditoria_unificada(uuid, integer, timestamptz, text) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.listar_auditoria_unificada(uuid, integer, timestamptz, text) TO service_role;
+REVOKE ALL ON FUNCTION public.listar_auditoria_unificada(uuid, integer, timestamptz, text, text, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.listar_auditoria_unificada(uuid, integer, timestamptz, text, text, text) TO service_role;

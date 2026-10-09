@@ -8,51 +8,61 @@ Status neste PR: `E38_IMPLEMENTED_AWAITING_CI_AND_PRODUCTION_MIGRATION_GATE`.
 - E3.7B: fechado em `main` pelo PR #500, `MERGE_SHA=ca5ac312778d7af3368ec0fd286ed679e28320de`
 - Migration 084: aplicada exatamente uma vez em producao (`20261008152836 084_erp_integration_hub_operational_core`)
 - PR #490: permanece `OPEN_DRAFT_HOLD`, intocado
+- PR #501: DRAFT
 
-## Findings congelados
+## Findings Independentes — Correções Aplicadas
 
-`E38_AUDIT_FINDINGS_FROZEN=true`.
+`INDEPENDENT_REVIEW_FINDINGS_FROZEN=true`.
 
-O sistema ja tinha ledgers fortes, mas fragmentados. A E3.8 nao copia todo o historico para uma nova tabela global; cria um read model normalizador que preserva provenance e consulta as fontes existentes quando elas existem. Historico sem ator, motivo ou correlacao continua como legado/desconhecido, sem fabricacao.
+1. **`E38-IR-BLOCKER-001` (DB Invariant Deferrable Constraint Trigger)**:
+   - Removido uso de GUC/session flag `app.e38_formal_envelope_authorized`.
+   - Implementado trigger de restrição postergada (`DEFERRABLE INITIALLY DEFERRED`) `trg_e38_check_frete_finalizado_envelope` em `public.fretes`.
+   - No COMMIT, verifica que existe exatamente 1 envelope formal em `public.frete_envelopes_digitais` para o frete finalizado.
+   - Qualquer `UPDATE` direto ou `INSERT` com `status='finalizado'` falha no `COMMIT` para qualquer role (incluindo `service_role`).
 
-## Source matrix
+2. **`E38-IR-HIGH-001` (Redação Financeira Universal para Usuários Internos)**:
+   - `redigirEnvelopeSeAplicavel` aplica a autoridade `finance.operational.view` a todos os usuários internos (`admin`, `gerente`, `operador`).
+   - Super-admin mantém autoridade total.
+   - Sem permissão financeira, campos brutos (`valor_frete`, `valor_tonelada_km`, `toneladas`, `modalidade_calculo`) são expurgados de `frete_snapshot`, `financial_snapshot` é esvaziado (`{}`), tanto no nível raiz quanto recursivamente dentro de `payload`.
+   - Motoristas mantêm isolamento e redação por política de comissão (`driverFinancialVisibility`).
 
-| Fonte | Dominio | Autoridade | Completude historica | Normalizacao |
-|---|---|---|---|---|
-| `frete_envelopes_digitais` | fechamento de frete | envelope formal imutavel | completa para fechamentos novos | `formal_digital_envelope` |
-| `lancamento_eventos` | despesas/abastecimentos/vales | ledger append-only | completa desde 070 | `domain_ledger` |
-| `fretes_financeiro_auditoria` | correcao financeira legado | ledger service-role-only | completa desde 065 | `domain_ledger` |
-| `permission_change_events` | permissoes | ledger append-only | completa desde 072 | `security_permission_ledger` |
-| `auth_event_audit` | auth/sessoes | ledger append-only | completa desde 062; campos sensiveis redigidos | `security_auth_ledger` |
-| `contrato_eventos` | contratos comerciais | cadeia/eventos contratuais | parcial/legado para ator nulo | `commercial_contract_ledger` |
-| `erp_outbox` | integracoes ERP | outbox operacional | completa desde 084, sem provider real | `integration_outbox` |
+3. **`E38-IR-HIGH-002` (Matriz Real de Fontes de Auditoria — 15 Fontes)**:
+   - Contagem real auditada: exatamente 15 tabelas de eventos de domínio mapeadas no read model unificado.
+   - Diferenciação estrita entre a matriz global de fontes e a timeline filtrada por frete.
 
-## Envelope digital
+4. **`E38-IR-HIGH-003` (Filtro por Entidade no SQL antes do LIMIT e Paginação por Cursor)**:
+   - A função `listar_auditoria_unificada` recebe `p_entity_type` e `p_entity_id`.
+   - Fontes de frete são filtradas diretamente no SQL antes de aplicar `LIMIT` e ordenação.
+   - Paginação determinística via cursor `(occurred_at DESC, event_id DESC)`.
 
-O envelope digital formal e snapshot persistido em `frete_envelopes_digitais`, com `payload`, `frete_snapshot`, `financial_snapshot`, `audit_summary`, ator, fonte, `request_id`, correlacao e `sealed_at`. A tabela e RLS `FORCE`, `service_role` tem somente `SELECT/INSERT`, e trigger bloqueia `UPDATE/DELETE`.
+5. **`E38-IR-MEDIUM-001` (Precisão de Evidência e Grants)**:
+   - Identificadores de evento seguem o padrão determinístico `<source_kind>:<source_record_id>`.
+   - Removidos grants redundantes e desnecessários na migration 085.
 
-Fechamentos novos usam a RPC `e38_finalize_frete_with_envelope`, que faz lock do frete, altera `status='finalizado'` e insere o envelope na mesma transacao. A trigger `trg_e38_guard_frete_finalizado_envelope` bloqueia qualquer update direto para `finalizado` fora da RPC.
+## Matriz de Fontes de Auditoria (15 Fontes Verificadas)
 
-Fretes ja finalizados antes da E3.8 nao recebem backfill automatico; sao classificados como `LEGACY_NO_FORMAL_ENVELOPE`.
-
-## Read model
-
-`listar_auditoria_unificada(...)` retorna eventos normalizados com:
-
-- `event_id` deterministico por fonte/linha
-- `source_kind` e `source_record_id`
-- `entity_type`/`entity_id`
-- `actor_user_id`/`actor_role`
-- `occurred_at`, `action`, `reason`, `metadata`
-- `authority_class`
-- `historical_completeness`
-
-A funcao e dinamica: uma fonte ausente no banco de teste ou em instalacao parcial nao quebra a leitura; ela simplesmente nao contribui eventos.
+| # | Tabela Fonte | Domínio | Participa em Timeline de Frete? |
+|---|---|---|---|
+| 1 | `frete_envelopes_digitais` | Fechamento formal de frete | Sim (`frete_id`) |
+| 2 | `lancamento_eventos` | Despesas, abastecimentos, vales | Sim (`frete_id` / `entity_id`) |
+| 3 | `fretes_financeiro_auditoria` | Auditoria financeira de fretes | Sim (`frete_id`) |
+| 4 | `frete_documento_eventos` | Documentos e canhotos de frete | Sim (`frete_id`) |
+| 5 | `erp_outbox` | Outbox de integrações ERP | Sim (`aggregate_id` / `entity_id`) |
+| 6 | `permission_change_events` | Alterações de permissões e RBAC | Não (Global / Usuário) |
+| 7 | `operational_scope_auditoria` | Escopo operacional de unidades | Não (Global / Unidade) |
+| 8 | `auth_event_audit` | Sessões e autenticação | Não (Global / Auth UID) |
+| 9 | `billing_outbox` | Faturamento e cobrança | Sim (se referenciar frete) |
+| 10 | `contrato_eventos` | Contratos comerciais | Sim (se vinculado ao frete) |
+| 11 | `partner_network_events` | Rede de parceiros e transportadoras | Não (Global / Parceiro) |
+| 12 | `campaign_exceptions` | Exceções de campanhas | Sim (se frete vinculado) |
+| 13 | `funcionalidade_auditoria` | Auditoria de features | Não (Global / Feature) |
+| 14 | `odometer_events` | Eventos de odômetro | Sim (`frete_id`) |
+| 15 | `maintenance_events` | Manutenção de veículos | Não (Veículo / Frota) |
 
 ## Gates
 
-Esta frente cria a migration `085_unified_audit_digital_envelope.sql`. Portanto, apos CI verde, o proximo estado seguro e:
+Esta frente cria a migration `085_unified_audit_digital_envelope.sql`. Após CI verde, o próximo estado seguro e obrigatório é:
 
 `HUMAN_E38_PRODUCTION_MIGRATION_AUTH_REQUIRED`
 
-Nao aplicar migration, marcar Ready, mergear, deployar, criar envelope real, executar backfill ou fazer escrita de negocio sem gate explicito.
+Não aplicar migration em produção, não marcar Ready, não mergear, não deployar, não criar envelope real em produção, não executar backfill ou fazer escrita de negócio sem gate explícito.
