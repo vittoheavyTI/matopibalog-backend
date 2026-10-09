@@ -37,6 +37,13 @@ $$;
 REVOKE ALL ON FUNCTION public.e38_check_frete_finalizado_envelope() FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.e38_check_frete_finalizado_envelope() TO service_role;
 
+-- Hardening E3.8: Revoga execute de public/anon/authenticated nas funcoes auxiliares E3.8 criadas na 085
+REVOKE ALL ON FUNCTION public.frete_envelopes_digitais_append_only() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.frete_envelopes_digitais_append_only() TO service_role;
+
+REVOKE ALL ON FUNCTION public.e38_jsonb_pick_existing(jsonb, text[]) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.e38_jsonb_pick_existing(jsonb, text[]) TO service_role;
+
 DROP TRIGGER IF EXISTS trg_e38_guard_frete_finalizado_envelope ON public.fretes;
 DROP TRIGGER IF EXISTS trg_e38_check_frete_finalizado_envelope ON public.fretes;
 CREATE CONSTRAINT TRIGGER trg_e38_check_frete_finalizado_envelope
@@ -44,3 +51,4 @@ CREATE CONSTRAINT TRIGGER trg_e38_check_frete_finalizado_envelope
   DEFERRABLE INITIALLY DEFERRED
   FOR EACH ROW
   EXECUTE FUNCTION public.e38_check_frete_finalizado_envelope();
+

@@ -234,6 +234,34 @@ function registrar() {
     assert.equal(rows[0].status, 'finalizado');
   });
 
+  test('PHASE B (086 ENFORCEMENT): auxiliary functions have EXECUTE revoked from PUBLIC, anon, authenticated', async () => {
+    await apply086Enforcement();
+
+    for (const role of ['public', 'anon', 'authenticated']) {
+      const { rows: r1 } = await pool.query(
+        `SELECT has_function_privilege($1, 'public.frete_envelopes_digitais_append_only()', 'EXECUTE') AS ok`,
+        [role],
+      );
+      assert.equal(r1[0].ok, false, `${role} sem EXECUTE em append_only`);
+
+      const { rows: r2 } = await pool.query(
+        `SELECT has_function_privilege($1, 'public.e38_jsonb_pick_existing(jsonb, text[])', 'EXECUTE') AS ok`,
+        [role],
+      );
+      assert.equal(r2[0].ok, false, `${role} sem EXECUTE em jsonb_pick_existing`);
+    }
+
+    const { rows: s1 } = await pool.query(
+      `SELECT has_function_privilege('service_role', 'public.frete_envelopes_digitais_append_only()', 'EXECUTE') AS ok`,
+    );
+    assert.equal(s1[0].ok, true, 'service_role com EXECUTE em append_only');
+
+    const { rows: s2 } = await pool.query(
+      `SELECT has_function_privilege('service_role', 'public.e38_jsonb_pick_existing(jsonb, text[])', 'EXECUTE') AS ok`,
+    );
+    assert.equal(s2[0].ok, true, 'service_role com EXECUTE em jsonb_pick_existing');
+  });
+
   test('concorrencia: duas finalizacoes concorrentes resultam em exatamente 1 envelope formal', async () => {
     await apply086Enforcement();
 
