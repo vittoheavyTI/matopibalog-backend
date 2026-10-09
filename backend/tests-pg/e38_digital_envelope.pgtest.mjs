@@ -23,7 +23,9 @@ if (!CONN || !ENABLED) {
 
 function registrar() {
   const here = dirname(fileURLToPath(import.meta.url));
+  const migration085Path = join(here, '..', 'migrations', '085_unified_audit_digital_envelope.sql');
   const migration086Path = join(here, '..', 'migrations', '086_e38_formal_envelope_enforcement.sql');
+  const fixturePath = join(here, 'e38_production_shape_fixture.sql');
   const pool = new Pool({ connectionString: CONN, max: 8 });
 
   const E1 = randomUUID();
@@ -35,6 +37,12 @@ function registrar() {
   const F_CANCELLED = randomUUID();
 
   before(async () => {
+    // Aplica a migration 085 (Foundation) e fixtures dedicadas de producao
+    const sql085 = readFileSync(migration085Path, 'utf8');
+    await pool.query(sql085);
+    const sqlFixture = readFileSync(fixturePath, 'utf8');
+    await pool.query(sqlFixture);
+
     await pool.query(`INSERT INTO public.empresas (id, nome, status) VALUES ($1,'Empresa E38','ativo'),($2,'Empresa Outra','ativo') ON CONFLICT DO NOTHING`, [E1, E2]);
     await pool.query(`INSERT INTO public.usuarios (id, empresa_id, status) VALUES ($1,$2,'ativo') ON CONFLICT DO NOTHING`, [A1, E1]);
   });
