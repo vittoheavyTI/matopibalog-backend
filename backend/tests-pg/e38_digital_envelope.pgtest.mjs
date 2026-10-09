@@ -36,6 +36,7 @@ function registrar() {
   beforeEach(async () => {
     await pool.query('TRUNCATE TABLE public.frete_envelopes_digitais, public.lancamento_eventos CASCADE');
     await pool.query('DELETE FROM public.fretes WHERE id = ANY($1::uuid[])', [[F1, F2, F_LEGACY, F_CANCELLED]]);
+    await pool.query('ALTER TABLE public.fretes DISABLE TRIGGER trg_e38_check_frete_finalizado_envelope');
     await pool.query(
       `INSERT INTO public.fretes
        (id, empresa_id, motorista_id, status, data, modalidade_calculo, toneladas, valor_tonelada_km, valor_frete, km_inicial, km_final)
@@ -46,6 +47,7 @@ function registrar() {
        ($6,$2,$3,'cancelado',now(),'valor_fixo',NULL,NULL,700,1,2)`,
       [F1, E1, A1, F2, F_LEGACY, F_CANCELLED],
     );
+    await pool.query('ALTER TABLE public.fretes ENABLE TRIGGER trg_e38_check_frete_finalizado_envelope');
   });
 
   after(async () => { await pool.end(); });
