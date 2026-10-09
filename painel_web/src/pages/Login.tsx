@@ -99,7 +99,7 @@ export const Login: React.FC = () => {
   const [forgotError, setForgotError] = useState('');
 
   const navigate = useNavigate();
-  const { user, login } = useAuth();
+  const { user, login, sessionValidationUnavailable, revalidarSessao, logout } = useAuth();
   const { configLoading, ...config } = useLoginConfig();
 
   const tmpl = LOGIN_TEMPLATES.find(t => t.id === config.loginTemplate) || LOGIN_TEMPLATES[0];
@@ -135,11 +135,15 @@ export const Login: React.FC = () => {
     setReenvioMsg('');
     try {
       const response = await api.post('/auth/login', { email, senha: password });
-      const { user: rawUser, token } = response.data;
+      const { token } = response.data;
       // Save token for future requests (Bearer)
       try { localStorage.setItem('auth_token', token); } catch (e) {}
-      login({ ...rawUser, fotoUrl: rawUser.foto_url });
-      navigate('/');
+      const hydrated = await login();
+      if (hydrated) {
+        navigate('/');
+      } else {
+        setError('Sessão iniciada, mas a validação de autoridade está indisponível no momento. Tente novamente.');
+      }
     } catch (err: any) {
       // 403 { naoConfirmado } = e-mail ainda não confirmado (não é senha errada):
       // orientamos a confirmar e oferecemos o reenvio, sem tratar como credencial.
@@ -251,6 +255,62 @@ export const Login: React.FC = () => {
             {sessionNotice && (
               <div style={{ background: '#fffbeb', color: '#92400e', border: '1px solid #fde68a', padding: '12px', borderRadius: '8px', fontSize: '14px', textAlign: 'center', marginBottom: '16px' }}>
                 {sessionNotice}
+              </div>
+            )}
+
+            {/* Aviso de validação de sessão indisponível */}
+            {sessionValidationUnavailable && (
+              <div
+                data-testid="login-session-unavailable"
+                style={{
+                  background: '#fffbeb',
+                  color: '#92400e',
+                  border: '1px solid #fde68a',
+                  padding: '12px',
+                  borderRadius: '8px',
+                  fontSize: '14px',
+                  textAlign: 'center',
+                  marginBottom: '16px',
+                }}
+              >
+                <p style={{ fontWeight: 600, margin: '0 0 6px' }}>Validação de sessão indisponível</p>
+                <p style={{ margin: '0 0 10px', fontSize: '13px' }}>
+                  Não foi possível validar sua autoridade junto ao servidor.
+                </p>
+                <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+                  <button
+                    type="button"
+                    onClick={() => revalidarSessao()}
+                    style={{
+                      padding: '6px 12px',
+                      background: '#d97706',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: '6px',
+                      fontSize: '13px',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Tentar novamente
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => logout('manual')}
+                    style={{
+                      padding: '6px 12px',
+                      background: '#e5e7eb',
+                      color: '#374151',
+                      border: 'none',
+                      borderRadius: '6px',
+                      fontSize: '13px',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Limpar credencial
+                  </button>
+                </div>
               </div>
             )}
 

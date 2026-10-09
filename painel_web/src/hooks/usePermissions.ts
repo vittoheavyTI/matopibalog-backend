@@ -10,8 +10,10 @@ export function usePermissions() {
   const can = (key: string): boolean => {
     if (isSuper) return true;
     if (!eff) {
-      // Fallback compat (dados V9 ausentes): admin legado enxerga tudo do tenant.
-      return user?.role === 'admin';
+      // R1A: MISSING_EFFECTIVE_PERMISSIONS=DENY
+      // role='admin' não confere autoridade de permissão. Sem permissões efetivas V9 hidratadas,
+      // nega acesso a capabilities da UI por padrão (exceto super-admin).
+      return false;
     }
     return eff[key] === true;
   };

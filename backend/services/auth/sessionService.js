@@ -147,7 +147,7 @@ function criarSessionService({ supabase, cfg, auditar = async () => {} }) {
     try {
       ({ data: user, error: erroUser } = await supabase
         .from('usuarios')
-        .select('id, tipo, status, is_super_admin, empresa_id')
+        .select('id, tipo, status, is_super_admin, empresa_id, senha_temporaria')
         .eq('id', sess.usuario_id).maybeSingle());
     } catch (e) {
       throw new E.SessionDependencyUnavailable(e.message);
@@ -167,6 +167,7 @@ function criarSessionService({ supabase, cfg, auditar = async () => {} }) {
       is_super_admin: user.is_super_admin === true,
       empresa_id: user.empresa_id,        // autoridade do banco (tenant.js segue no legado)
       client_type: sess.client_type,
+      senha_temporaria: user.senha_temporaria === true,
     };
   }
 

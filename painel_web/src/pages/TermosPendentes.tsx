@@ -74,7 +74,7 @@ export const TermosPendentes: React.FC = () => {
         setIndice((i) => i + 1); // o efeito de [indice] zera o checkbox/modal
       } else {
         if (user) {
-          login({ ...user, termos_pendentes: false, termos_pendentes_count: 0 });
+          await login();
         }
         navigate('/', { replace: true });
       }
