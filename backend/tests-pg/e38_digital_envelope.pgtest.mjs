@@ -336,6 +336,10 @@ function registrar() {
     // Fonte 4: frete_documento_eventos
     const docId = randomUUID();
     await pool.query(
+      `INSERT INTO public.frete_documentos (id, frete_id, empresa_id, tipo, status) VALUES ($1,$2,$3,'canhoto','pendente')`,
+      [docId, F1, E1],
+    );
+    await pool.query(
       `INSERT INTO public.frete_documento_eventos
        (documento_id, frete_id, empresa_id, evento, actor_id, actor_role, source, reason, metadata, created_at)
        VALUES ($1,$2,$3,'uploaded',$4,'admin','api','upload doc','{}'::jsonb,now())`,
