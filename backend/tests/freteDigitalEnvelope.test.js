@@ -417,3 +417,141 @@ test('getAuditoriaUnificadaFrete: passes entity filter to SQL RPC before limit a
     p_entity_id: 'f-1',
   });
 });
+
+test('PATCH /fretes/:id finalization: requires freight.finish permission when setting status=finalizado', async () => {
+  const frete = { id: 'f-1', empresa_id: 'e-1', motorista_id: 'm-1', status: 'ativo', km_inicial: 100, km_final: 200, valor_frete: 1000 };
+  const supabaseMock = criarMockSupabase({ frete });
+
+  // 1) Caller with freight.manage=true BUT freight.finish=false -> 403
+  const controllerNoFinish = carregarController(supabaseMock, {
+    effective: { permissions: { 'freight.manage': true, 'freight.finish': false } },
+  });
+
+  let statusRes = 0;
+  let bodyRes = null;
+  const reqDeny = {
+    params: { id: 'f-1' },
+    body: { status: 'finalizado', km_final: 250 },
+    empresa_id: 'e-1',
+    user: { uid: 'u-admin-no-finish', role: 'admin', tipo: 'admin', is_super_admin: false },
+  };
+  const resDeny = {
+    status(s) { statusRes = s; return { json(b) { bodyRes = b; } }; },
+  };
+
+  await controllerNoFinish.update(reqDeny, resDeny);
+  assert.equal(statusRes, 403);
+  assert.equal(bodyRes.permission, 'freight.finish');
+
+  // 2) Caller with freight.manage=true AND freight.finish=true -> 200 (seals envelope)
+  const controllerAllow = carregarController(supabaseMock, {
+    effective: { permissions: { 'freight.manage': true, 'freight.finish': true } },
+  });
+
+  let statusResAllow = 0;
+  let bodyResAllow = null;
+  const reqAllow = {
+    params: { id: 'f-1' },
+    body: { status: 'finalizado', km_final: 250 },
+    empresa_id: 'e-1',
+    user: { uid: 'u-admin-finish', role: 'admin', tipo: 'admin', is_super_admin: false },
+  };
+  const resAllow = {
+    status(s) { statusResAllow = s; return { json(b) { bodyResAllow = b; } }; },
+  };
+
+  await controllerAllow.update(reqAllow, resAllow);
+  assert.equal(statusResAllow, 200);
+  assert.equal(bodyResAllow.status, 'finalizado');
+
+  // 3) Super admin without explicit permission -> 200 (authority preserved)
+  const controllerSuper = carregarController(supabaseMock, {
+    effective: { permissions: {}, isSuperAdmin: true },
+  });
+
+  let statusResSuper = 0;
+  let bodyResSuper = null;
+  const reqSuper = {
+    params: { id: 'f-1' },
+    body: { status: 'finalizado', km_final: 250 },
+    empresa_id: 'e-1',
+    user: { uid: 'u-super', role: 'admin', tipo: 'admin', is_super_admin: true },
+  };
+  const resSuper = {
+    status(s) { statusResSuper = s; return { json(b) { bodyResSuper = b; } }; },
+  };
+
+  await controllerSuper.update(reqSuper, resSuper);
+  assert.equal(statusResSuper, 200);
+});
+
+test('getAuditoriaUnificadaFrete: redacts domain fields when caller lacks specific domain permissions', async () => {
+  const frete = { id: 'f-1', empresa_id: 'e-1', motorista_id: 'm-1', status: 'finalizado' };
+  const auditEvents = [
+    {
+      event_id: 'lancamento_eventos:le-1',
+      entity_id: 'f-1',
+      source_kind: 'lancamento_eventos',
+      metadata: { frete_id: 'f-1', valor: 450, cost: 450, from_status: 'pendente', to_status: 'approved' },
+    },
+    {
+      event_id: 'frete_documento_eventos:fde-1',
+      entity_id: 'f-1',
+      source_kind: 'frete_documento_eventos',
+      metadata: { frete_id: 'f-1', storage_path: 'secret/path.pdf', signed_url: 'https://secret.url' },
+    },
+    {
+      event_id: 'maintenance_events:me-1',
+      entity_id: 'f-1',
+      source_kind: 'maintenance_events',
+      metadata: { status: 'completed', cost: 1200, supplier: 'Auto Peças X', parts: ['filtro'] },
+    },
+  ];
+
+  const supabaseMock = criarMockSupabase({ frete, auditEvents });
+
+  // Caller with only freight.view (no finance, documents, or fleet view)
+  const controller = carregarController(supabaseMock, {
+    effective: {
+      permissions: {
+        'freight.view': true,
+        'finance.operational.view': false,
+        'documents.view': false,
+        'fleet.view': false,
+      },
+    },
+  });
+
+  let statusRes = 0;
+  let bodyRes = null;
+  const req = {
+    params: { id: 'f-1' },
+    query: {},
+    empresa_id: 'e-1',
+    user: { uid: 'u-viewer', role: 'operador', tipo: 'operador', is_super_admin: false },
+  };
+  const res = {
+    status(s) { statusRes = s; return { json(b) { bodyRes = b; } }; },
+  };
+
+  await controller.getAuditoriaUnificadaFrete(req, res);
+  assert.equal(statusRes, 200);
+  assert.equal(bodyRes.eventos.length, 3);
+
+  // Event 1: Financial values redacted
+  assert.equal(bodyRes.eventos[0].metadata.valor, undefined);
+  assert.equal(bodyRes.eventos[0].metadata.cost, undefined);
+  assert.equal(bodyRes.eventos[0].metadata.from_status, 'pendente');
+  assert.equal(bodyRes.eventos[0].metadata.to_status, 'approved');
+
+  // Event 2: Document storage paths redacted
+  assert.equal(bodyRes.eventos[1].metadata.storage_path, undefined);
+  assert.equal(bodyRes.eventos[1].metadata.signed_url, undefined);
+  assert.equal(bodyRes.eventos[1].metadata.frete_id, 'f-1');
+
+  // Event 3: Fleet cost and supplier details redacted
+  assert.equal(bodyRes.eventos[2].metadata.cost, undefined);
+  assert.equal(bodyRes.eventos[2].metadata.supplier, undefined);
+  assert.equal(bodyRes.eventos[2].metadata.parts, undefined);
+  assert.equal(bodyRes.eventos[2].metadata.status, 'completed');
+});

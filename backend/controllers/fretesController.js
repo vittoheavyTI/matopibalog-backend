@@ -629,6 +629,48 @@ exports.getEnvelopeDigital = async (req, res) => {
   }
 };
 
+function redigirEventosAuditoria(eventos, eff, isSuperAdmin) {
+  if (!Array.isArray(eventos) || isSuperAdmin) return eventos;
+  const { hasPermission } = require('../services/permissions/permissionResolver');
+  const hasFinanceView = hasPermission(eff, 'finance.operational.view');
+  const hasDocumentsView = hasPermission(eff, 'documents.view');
+  const hasFleetView = hasPermission(eff, 'fleet.view');
+
+  return eventos.map((ev) => {
+    const clone = { ...ev };
+    const meta = clone.metadata && typeof clone.metadata === 'object' ? { ...clone.metadata } : {};
+
+    // Finance authority redaction: sem finance.operational.view, nao expor valores/custos
+    if (!hasFinanceView) {
+      delete meta.valor;
+      delete meta.valor_frete;
+      delete meta.valor_tonelada_km;
+      delete meta.toneladas;
+      delete meta.amount;
+      delete meta.cost;
+      delete meta.financial_snapshot;
+    }
+
+    // Document authority redaction: sem documents.view, nao expor storage path / signed url
+    if (!hasDocumentsView && clone.source_kind === 'frete_documento_eventos') {
+      delete meta.storage_path;
+      delete meta.signed_url;
+      delete meta.path;
+      delete meta.file_path;
+    }
+
+    // Fleet authority redaction: sem fleet.view, nao expor custos ou detalhes avancados de frota
+    if (!hasFleetView && (clone.source_kind === 'maintenance_events' || clone.source_kind === 'odometer_events')) {
+      delete meta.cost;
+      delete meta.supplier;
+      delete meta.parts;
+    }
+
+    clone.metadata = meta;
+    return clone;
+  });
+}
+
 exports.getAuditoriaUnificadaFrete = async (req, res) => {
   try {
     const acesso = await carregarFreteAutorizado(req, req.params.id);
@@ -646,7 +688,11 @@ exports.getAuditoriaUnificadaFrete = async (req, res) => {
     });
     if (error) throw error;
 
-    return res.status(200).json({ frete_id: freteId, eventos: data || [] });
+    const isSuperAdmin = req.user?.is_super_admin === true;
+    const eff = isSuperAdmin ? null : await ensureEffective(req).catch(() => ({ permissions: {} }));
+    const eventosRedigidos = redigirEventosAuditoria(data || [], eff, isSuperAdmin);
+
+    return res.status(200).json({ frete_id: freteId, eventos: eventosRedigidos });
   } catch (error) {
     console.error('Erro ao buscar auditoria unificada do frete:', error);
     return res.status(500).json({ message: 'Erro ao buscar auditoria unificada do frete.' });
@@ -774,7 +820,7 @@ exports.update = async (req, res) => {
       }
     }
 
-    if (contemCampoFinanceiro(req.body || {})) {
+    if (req.body?.status !== 'finalizado' && contemCampoFinanceiro(req.body || {})) {
       return res.status(422).json({
         error: 'frete_financial_correction_endpoint_required',
         message: 'Use a correcao financeira auditada para alterar modalidade, valores, toneladas ou KM do frete.',
@@ -870,6 +916,17 @@ exports.update = async (req, res) => {
     if (!limite.ok) return res.status(422).json(respostaLimiteFrete(limite));
 
     if (allowedUpdate.status === 'finalizado') {
+      if (!isSuperAdmin) {
+        const { hasPermission } = require('../services/permissions/permissionResolver');
+        const eff = await ensureEffective(req);
+        if (!hasPermission(eff, 'freight.finish')) {
+          return res.status(403).json({
+            message: 'Permissão insuficiente para finalizar frete.',
+            permission: 'freight.finish',
+          });
+        }
+      }
+
       const camposPermitidosNoFechamento = new Set(['status', 'km_inicial', 'km_final', 'valor_frete']);
       const camposNaoAtomicos = Object.keys(allowedUpdate).filter((campo) => !camposPermitidosNoFechamento.has(campo));
       if (camposNaoAtomicos.length > 0) {

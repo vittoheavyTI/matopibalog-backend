@@ -239,3 +239,99 @@ CREATE TABLE IF NOT EXISTS public.vales (
   resolvido_em timestamptz NULL,
   client_request_id text NULL
 );
+
+-- ===========================================================================
+-- Tabelas pré-existentes de outros domínios da produção necessárias para testar
+-- a paridade estrita do read model listar_auditoria_unificada contra os 14 sources.
+-- ===========================================================================
+
+CREATE TABLE IF NOT EXISTS public.frete_documentos (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  empresa_id uuid NOT NULL REFERENCES public.empresas(id) ON DELETE CASCADE,
+  frete_id uuid NOT NULL REFERENCES public.fretes(id) ON DELETE CASCADE,
+  tipo text NOT NULL DEFAULT 'outro',
+  status text NOT NULL DEFAULT 'pendente',
+  storage_path text NOT NULL DEFAULT '',
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.frete_documento_eventos (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  documento_id uuid NOT NULL,
+  frete_id uuid NOT NULL,
+  empresa_id uuid NOT NULL REFERENCES public.empresas(id) ON DELETE CASCADE,
+  evento text NOT NULL,
+  actor_id uuid NULL,
+  actor_role text NULL,
+  source text NOT NULL DEFAULT 'api',
+  reason text NULL,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.partner_network_events (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  empresa_id uuid NOT NULL REFERENCES public.empresas(id) ON DELETE CASCADE,
+  entity_type text NOT NULL,
+  entity_id uuid NOT NULL,
+  action text NOT NULL,
+  actor_user_id uuid NULL,
+  actor_partner_user_id uuid NULL,
+  source text NOT NULL DEFAULT 'web',
+  reason text NULL,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  occurred_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.campaign_exceptions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  empresa_id uuid NOT NULL REFERENCES public.empresas(id) ON DELETE CASCADE,
+  campaign_id uuid NOT NULL,
+  plan_version_id uuid NULL,
+  planned_trip_id uuid NULL,
+  exception_type text NOT NULL,
+  severity text NOT NULL,
+  status text NOT NULL DEFAULT 'OPEN',
+  evidence jsonb NOT NULL DEFAULT '{}'::jsonb,
+  acknowledged_by uuid NULL,
+  resolved_by uuid NULL,
+  resolution_reason text NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.odometer_events (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  empresa_id uuid NOT NULL REFERENCES public.empresas(id) ON DELETE CASCADE,
+  asset_id uuid NOT NULL,
+  frete_id uuid NULL,
+  event_type text NOT NULL,
+  reading_km numeric(12,1) NOT NULL,
+  occurred_at timestamptz NOT NULL DEFAULT now(),
+  photo_path text NULL,
+  source text NOT NULL DEFAULT 'api',
+  recorded_by uuid NULL,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS public.maintenance_events (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  empresa_id uuid NOT NULL REFERENCES public.empresas(id) ON DELETE CASCADE,
+  asset_id uuid NOT NULL,
+  maintenance_type text NOT NULL,
+  category text NOT NULL,
+  status text NOT NULL DEFAULT 'open',
+  work_order text NULL,
+  supplier text NULL,
+  parts jsonb NOT NULL DEFAULT '[]'::jsonb,
+  cost numeric(12,2) NULL,
+  odometer_km numeric(12,1) NULL,
+  scheduled_at timestamptz NULL,
+  completed_at timestamptz NULL,
+  downtime_minutes integer NULL,
+  notes text NULL,
+  created_by uuid NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);

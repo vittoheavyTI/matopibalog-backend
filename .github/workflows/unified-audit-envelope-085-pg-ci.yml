@@ -6,15 +6,19 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "backend/migrations/085_unified_audit_digital_envelope.sql"
+      - "backend/migrations/086_e38_formal_envelope_enforcement.sql"
       - "backend/tests-pg/e38_digital_envelope.pgtest.mjs"
       - "backend/tests-pg/apply_schema.mjs"
+      - "backend/tests-pg/00_bootstrap_pre.sql"
       - ".github/workflows/unified-audit-envelope-085-pg-ci.yml"
   push:
     branches: [main]
     paths:
       - "backend/migrations/085_unified_audit_digital_envelope.sql"
+      - "backend/migrations/086_e38_formal_envelope_enforcement.sql"
       - "backend/tests-pg/e38_digital_envelope.pgtest.mjs"
       - "backend/tests-pg/apply_schema.mjs"
+      - "backend/tests-pg/00_bootstrap_pre.sql"
       - ".github/workflows/unified-audit-envelope-085-pg-ci.yml"
   workflow_dispatch:
 
