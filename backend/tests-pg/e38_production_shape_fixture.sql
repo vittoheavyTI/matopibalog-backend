@@ -105,3 +105,6 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE
   public.odometer_events,
   public.maintenance_events
 TO service_role;
+
+GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO service_role;
+REVOKE UPDATE, DELETE, TRUNCATE ON TABLE public.frete_envelopes_digitais FROM service_role;
