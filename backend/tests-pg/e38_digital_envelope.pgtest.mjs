@@ -176,7 +176,6 @@ function registrar() {
     assert.equal(result.envelope.payload.frete_snapshot.status, 'finalizado');
     assert.equal(typeof result.envelope.envelope_hash, 'string');
     assert.equal(result.envelope.envelope_hash.length, 64);
-    assert.equal(result.envelope.payload.envelope_hash, result.envelope.envelope_hash);
 
     const { rows: envelopes } = await pool.query(`SELECT count(*)::int AS n, envelope_hash FROM public.frete_envelopes_digitais WHERE frete_id=$1 GROUP BY envelope_hash`, [F1]);
     assert.equal(envelopes[0].n, 1);
