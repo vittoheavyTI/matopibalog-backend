@@ -4,7 +4,7 @@ const jwt = require('jsonwebtoken');
 const { criarEmpresaCompleta } = require('../services/empresaService');
 const notificacaoService = require('../services/notificacaoService');
 const planoLimiteService = require('../services/planoLimiteService');
-const { getTermosPendentes } = require('./termosController');
+const termsAuthorityService = require('../services/termsAuthorityService');
 const { iniciarTrialV2PorAceiteTermos } = require('../services/trialV2Service');
 const { gerarSenhaTemporaria } = require('../utils/senhaTemporaria');
 const { getAuthRuntime } = require('../services/auth/authRuntime');
@@ -649,7 +649,8 @@ exports.uploadFotoPerfil = async (req, res) => {
 
 exports.getMe = async (req, res) => {
   try {
-    const { data, error } = await supabase
+    const dbClient = req.supabaseClient || supabase;
+    const { data, error } = await dbClient
       .from('usuarios')
       .select('*, motoristas(*), empresas!usuarios_empresa_id_fkey(nome, tipo)')
       .eq('id', req.user.uid)
@@ -657,22 +658,38 @@ exports.getMe = async (req, res) => {
 
     if (error) throw error;
 
-    // LGPD (aditivo): sinaliza termos pendentes. Falha na consulta de termos
-    // NÃO pode derrubar /auth/me (login / restauração de sessão) → fallback false/0.
-    let termos_pendentes = false;
-    let termos_pendentes_count = 0;
-    let trial_v2 = null;
+    // R1B-A C1: Consulta autoritativa centralizada de termos obrigatórios.
+    // Fail-closed: se a autoridade de termos falhar / lançar erro / banco indisponível,
+    // DEVE retornar 503 com erro semântico de dependência (UNKNOWN authority não pode virar false).
+    const termsService = req.termsAuthorityService || termsAuthorityService;
+    let termosResult;
     try {
-      const { count } = await getTermosPendentes(
-        data.id,
-        data.tipo,
-        data.is_super_admin === true
-      );
-      termos_pendentes_count = count;
-      termos_pendentes = count > 0;
-      if (count === 0 && data.empresa_id && data.is_super_admin !== true) {
-        trial_v2 = await iniciarTrialV2PorAceiteTermos({
-          supabase,
+      termosResult = await termsService.verificarTermosObrigatoriosPendentes({
+        usuarioId: data.id,
+        role: data.tipo,
+        isSuperAdmin: data.is_super_admin === true,
+        supabaseClient: dbClient,
+      });
+    } catch (termosErr) {
+      console.error('[getMe] Falha autoritativa ao consultar termos pendentes:', termosErr.message || termosErr);
+      return res.status(503).json({
+        error: 'SessionDependencyUnavailable',
+        code: 'AUTH_DEPENDENCY_UNAVAILABLE',
+        message: 'Serviço de autenticação temporariamente indisponível. Tente novamente em instantes.',
+      });
+    }
+
+    const termos_pendentes = termosResult.temPendentes === true;
+    const termos_pendentes_count = termosResult.count || 0;
+
+    // Trial V2: Separado da autoridade de termos.
+    // Falha na inicialização do trial v2 é NÃO-FATAL e não bloqueia autenticação (/auth/me 200).
+    let trial_v2 = null;
+    if (termos_pendentes_count === 0 && data.empresa_id && data.is_super_admin !== true) {
+      try {
+        const trialFn = req.iniciarTrialV2PorAceiteTermos || iniciarTrialV2PorAceiteTermos;
+        trial_v2 = await trialFn({
+          supabase: dbClient,
           empresaId: data.empresa_id,
           usuario: {
             uid: data.id,
@@ -682,9 +699,9 @@ exports.getMe = async (req, res) => {
             is_super_admin: data.is_super_admin === true,
           },
         });
+      } catch (trialErr) {
+        console.error('[getMe] Falha não-fatal ao iniciar trial v2:', trialErr.message || trialErr);
       }
-    } catch (termosErr) {
-      console.error('[getMe] Falha ao calcular termos pendentes:', termosErr.message || termosErr);
     }
 
     // P2 — permissões efetivas V9 (templates+overrides). Aditivo e fail-safe:
@@ -694,7 +711,7 @@ exports.getMe = async (req, res) => {
     let permission_template = null;
     try {
       const { loadEffectivePermissions } = require('../services/permissions/permissionResolver');
-      const eff = await loadEffectivePermissions(supabase, {
+      const eff = await loadEffectivePermissions(dbClient, {
         uid: data.id,
         tipo: data.tipo,
         is_super_admin: data.is_super_admin === true,

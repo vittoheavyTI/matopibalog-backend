@@ -99,11 +99,89 @@ function aplicarGateSenhaTemporaria(req, res, next) {
 }
 
 /**
- * Factory do middleware. deps: { cfg (authConfig), sessionService }.
+ * R1B-A: Isenções estritas do gate de termos obrigatórios.
+ * Compartilha o contrato exato das 8 rotas de recuperação montadas em produção.
+ */
+function rotaIsentaTermosObrigatorios(req) {
+  const method = req.method ? req.method.toUpperCase() : '';
+  const rawPath = (req.originalUrl || req.url || req.path || '').split('?')[0].replace(/\/+$/, '');
+  const urlPath = rawPath || '/';
+
+  // 1. GET /auth/me
+  if (method === 'GET' && urlPath === '/auth/me') return true;
+  // 2. POST /auth/trocar-senha
+  if (method === 'POST' && urlPath === '/auth/trocar-senha') return true;
+  // 3. POST /auth/logout
+  if (method === 'POST' && urlPath === '/auth/logout') return true;
+  // 4. POST /auth/logout-all
+  if (method === 'POST' && urlPath === '/auth/logout-all') return true;
+  // 5. GET /auth/sessions
+  if (method === 'GET' && urlPath === '/auth/sessions') return true;
+  // 6. DELETE /auth/sessions/:id (posição exata de parâmetro)
+  if (method === 'DELETE' && /^\/auth\/sessions\/[^/]+$/.test(urlPath)) return true;
+  // 7. GET /termos/pendentes
+  if (method === 'GET' && urlPath === '/termos/pendentes') return true;
+  // 8. POST /termos/:id/aceitar (posição exata de parâmetro)
+  if (method === 'POST' && /^\/termos\/[^/]+\/aceitar$/.test(urlPath)) return true;
+
+  return false;
+}
+
+/**
+ * R1B-A: Gate autoritativo de termos obrigatórios pendentes.
+ * Bloqueia usuários com termos obrigatórios ativos não aceitos em rotas de negócio.
+ * Fail-closed: se a consulta de autoridade falhar/der erro → 503.
+ */
+async function aplicarGateTermosObrigatorios(req, res, next, { termsAuthorityService: injectedTermsService, supabase: supabaseParam } = {}) {
+  if (!req.user) return next();
+
+  // Super-admin é isento de termos obrigatórios de negócio
+  if (req.user.is_super_admin === true) {
+    return next();
+  }
+
+  // Rotas estritamente isentas para recuperação / autenticação / aceite
+  if (rotaIsentaTermosObrigatorios(req)) {
+    return next();
+  }
+
+  const termsService = injectedTermsService || require('../services/termsAuthorityService');
+  const usuarioId = req.user.uid || req.user.id || req.user.sub;
+  const role = req.user.role || req.user.tipo;
+
+  let resultado;
+  try {
+    resultado = await termsService.verificarTermosObrigatoriosPendentes({
+      usuarioId,
+      role,
+      isSuperAdmin: req.user.is_super_admin === true,
+      supabaseClient: supabaseParam,
+    });
+  } catch (err) {
+    return res.status(503).json({
+      error: 'SessionDependencyUnavailable',
+      code: 'AUTH_DEPENDENCY_UNAVAILABLE',
+      message: 'Serviço de autenticação temporariamente indisponível. Tente novamente em instantes.',
+    });
+  }
+
+  if (resultado && resultado.temPendentes === true) {
+    return res.status(403).json({
+      error: 'TermsAcceptanceRequired',
+      code: 'TERMS_ACCEPTANCE_REQUIRED',
+      message: 'Aceite dos termos obrigatórios pendente.',
+    });
+  }
+
+  return next();
+}
+
+/**
+ * Factory do middleware. deps: { cfg (authConfig), sessionService, supabase, termsAuthorityService }.
  * Retorna um middleware Express assíncrono que popula req.user (fonte confiável) e
  * req.authKind ('legacy'|'session').
  */
-function criarVerifyTokenSec1({ cfg, sessionService, supabase: supabaseParam }) {
+function criarVerifyTokenSec1({ cfg, sessionService, supabase: supabaseParam, termsAuthorityService: injectedTermsService }) {
   if (!cfg) throw new Error('cfg obrigatório');
   return async function verifyTokenSec1(req, res, next) {
     const token = lerToken(req);
@@ -128,7 +206,12 @@ function criarVerifyTokenSec1({ cfg, sessionService, supabase: supabaseParam }) 
       try {
         req.user = await sessionService.validarSessaoParaAcesso({ sid: verificado.sid, uid: verificado.uid || verificado.sub });
         req.authKind = 'session';
-        return aplicarGateSenhaTemporaria(req, res, next);
+        return aplicarGateSenhaTemporaria(req, res, () =>
+          aplicarGateTermosObrigatorios(req, res, next, {
+            termsAuthorityService: injectedTermsService,
+            supabase: supabaseParam,
+          })
+        );
       } catch (e) {
         const status = (e && e.httpStatus) || 401;
         const corpo = (e && typeof e.toPublic === 'function') ? e.toPublic() : { error: 'Token inválido ou expirado.' };
@@ -149,9 +232,9 @@ function criarVerifyTokenSec1({ cfg, sessionService, supabase: supabaseParam }) 
         return res.status(403).json({ error: 'Token inválido ou expirado.' });
       }
 
-      // R1A/C1: Para tokens legados no modo compatível, a autoridade de
-      // usuarios.senha_temporaria DEVE ser resolvida fail-closed do banco de dados
-      // antes de autorizar qualquer acesso comum de negócio.
+      // R1A/R1B-A: Para tokens legados no modo compatível, a autoridade de
+      // usuarios (role, is_super_admin, senha_temporaria) DEVE ser resolvida fail-closed
+      // do banco de dados antes de autorizar qualquer acesso comum de negócio.
       const uid = req.user && (req.user.uid || req.user.id || req.user.sub);
       if (!uid || typeof uid !== 'string' || uid.trim() === '') {
         const err = new SessionInvalid('uid ausente ou incoerente no token legado');
@@ -169,7 +252,7 @@ function criarVerifyTokenSec1({ cfg, sessionService, supabase: supabaseParam }) 
       try {
         const resposta = await client
           .from('usuarios')
-          .select('senha_temporaria')
+          .select('tipo, is_super_admin, senha_temporaria')
           .eq('id', uid)
           .maybeSingle();
         uDb = resposta && resposta.data;
@@ -189,8 +272,15 @@ function criarVerifyTokenSec1({ cfg, sessionService, supabase: supabaseParam }) 
         return res.status(err.httpStatus).json(err.toPublic());
       }
 
+      req.user.role = uDb.tipo || req.user.role;
+      req.user.is_super_admin = uDb.is_super_admin === true;
       req.user.senha_temporaria = uDb.senha_temporaria === true;
-      return aplicarGateSenhaTemporaria(req, res, next);
+      return aplicarGateSenhaTemporaria(req, res, () =>
+        aplicarGateTermosObrigatorios(req, res, next, {
+          termsAuthorityService: injectedTermsService,
+          supabase: supabaseParam,
+        })
+      );
     }
 
     // ── INVALID ────────────────────────────────────────────────────────────
@@ -198,4 +288,11 @@ function criarVerifyTokenSec1({ cfg, sessionService, supabase: supabaseParam }) 
   };
 }
 
-module.exports = { criarVerifyTokenSec1, classificarPorClaims, rotaIsentaSenhaTemporaria, aplicarGateSenhaTemporaria };
+module.exports = {
+  criarVerifyTokenSec1,
+  classificarPorClaims,
+  rotaIsentaSenhaTemporaria,
+  aplicarGateSenhaTemporaria,
+  rotaIsentaTermosObrigatorios,
+  aplicarGateTermosObrigatorios,
+};

@@ -134,7 +134,11 @@ test('R1A-12: Usuário após troca de senha (senha_temporaria=false) em endpoint
       senha_temporaria: false,
     }),
   };
-  const mw = criarVerifyTokenSec1({ cfg: cfgCompat, sessionService });
+  const mw = criarVerifyTokenSec1({
+    cfg: cfgCompat,
+    sessionService,
+    termsAuthorityService: { verificarTermosObrigatoriosPendentes: async () => ({ temPendentes: false, count: 0 }) },
+  });
   const token = assinarSessionToken({ uid: 'u-temp-1', sid: 's-1' });
 
   const r = await simularRequisicao(mw, { token, method: 'GET', url: '/fretes', originalUrl: '/fretes' });
@@ -173,7 +177,12 @@ test('R1A-13b: Token legado válido com senha_temporaria=false no banco → auto
       }),
     }),
   };
-  const mw = criarVerifyTokenSec1({ cfg: cfgCompat, sessionService: {}, supabase: mockSupabase });
+  const mw = criarVerifyTokenSec1({
+    cfg: cfgCompat,
+    sessionService: {},
+    supabase: mockSupabase,
+    termsAuthorityService: { verificarTermosObrigatoriosPendentes: async () => ({ temPendentes: false, count: 0 }) },
+  });
   const token = assinarLegacyToken({ uid: 'u-leg-ok' });
 
   const r = await simularRequisicao(mw, { token, method: 'GET', url: '/motoristas', originalUrl: '/motoristas' });
