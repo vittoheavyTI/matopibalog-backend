@@ -65,22 +65,24 @@ function rotaIsentaSenhaTemporaria(req) {
   const rawPath = (req.originalUrl || req.url || req.path || '').split('?')[0].replace(/\/+$/, '');
   const urlPath = rawPath || '/';
 
-  // Isenções mínimas explícitas para permitir resolução da condição de troca de senha:
+  // C2: Isenções mínimas explícitas estritas (contrato exato de rotas montadas em produção).
+  // Sem aliases genéricos de raiz (/me, /logout, etc.) e sem wildcards em 'aceitar'.
   // 1. GET /auth/me
-  if (method === 'GET' && (urlPath === '/auth/me' || urlPath === '/me')) return true;
+  if (method === 'GET' && urlPath === '/auth/me') return true;
   // 2. POST /auth/trocar-senha
-  if (method === 'POST' && (urlPath === '/auth/trocar-senha' || urlPath === '/trocar-senha')) return true;
+  if (method === 'POST' && urlPath === '/auth/trocar-senha') return true;
   // 3. POST /auth/logout
-  if (method === 'POST' && (urlPath === '/auth/logout' || urlPath === '/logout')) return true;
+  if (method === 'POST' && urlPath === '/auth/logout') return true;
   // 4. POST /auth/logout-all
-  if (method === 'POST' && (urlPath === '/auth/logout-all' || urlPath === '/logout-all')) return true;
+  if (method === 'POST' && urlPath === '/auth/logout-all') return true;
   // 5. GET /auth/sessions
-  if (method === 'GET' && (urlPath === '/auth/sessions' || urlPath === '/sessions')) return true;
+  if (method === 'GET' && urlPath === '/auth/sessions') return true;
   // 6. DELETE /auth/sessions/:id
-  if (method === 'DELETE' && (/^\/auth\/sessions\/[^/]+$/.test(urlPath) || /^\/sessions\/[^/]+$/.test(urlPath))) return true;
-  // 7. Termos necessários para sequência de onboarding
-  if (method === 'GET' && (urlPath === '/termos/pendentes' || urlPath === '/pendentes')) return true;
-  if (method === 'POST' && (/^\/termos\/[^/]+\/aceitar$/.test(urlPath) || /^\/[^/]+\/aceitar$/.test(urlPath))) return true;
+  if (method === 'DELETE' && /^\/auth\/sessions\/[^/]+$/.test(urlPath)) return true;
+  // 7. GET /termos/pendentes
+  if (method === 'GET' && urlPath === '/termos/pendentes') return true;
+  // 8. POST /termos/:id/aceitar
+  if (method === 'POST' && /^\/termos\/[^/]+\/aceitar$/.test(urlPath)) return true;
 
   return false;
 }
