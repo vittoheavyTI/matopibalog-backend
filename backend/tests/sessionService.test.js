@@ -175,3 +175,184 @@ test('revogacoes usam RPC transacional com auditoria e preservam ownership', asy
   await assert.rejects(() => svcAlheio.revogarUmaDoUsuario('u-1', 's-2'), (e) => e instanceof E.SessionForbidden && e.httpStatus === 403);
   assert.equal(chamadasAlheias.length, 0, 'sessao alheia nao pode chegar na RPC de revogacao');
 });
+
+// ── R1B-B: PER-CLIENT IDLE TESTS (WEB 30m vs NON-WEB GLOBAL) ─────────────────
+test('R1B-B: criarSessao web => idle 1800s; android => cfg.refreshIdleTtlSeconds', async () => {
+  let webArgs, androidArgs;
+  const customCfg = loadAuthConfig({
+    AUTH_SESSIONS_ENABLED: 'true', AUTH_REFRESH_ROTATION_ENABLED: 'true',
+    AUTH_REFRESH_TOKEN_PEPPER: 'pepper-teste', JWT_SECRET: 'jwt-teste',
+    AUTH_REFRESH_IDLE_TTL_SECONDS: '604800',
+  });
+  const supabase = {
+    rpc: async (name, args) => {
+      if (args.p_client_type === 'web') webArgs = args;
+      if (args.p_client_type === 'android') androidArgs = args;
+      return { data: [{ session_id: 's', refresh_family_id: 'f', refresh_token_id: 't' }], error: null };
+    },
+  };
+  const svc = criarSessionService({ supabase, cfg: customCfg });
+  const t0 = Date.now();
+  await svc.criarSessao({ usuario_id: 'u', client_type: 'web' });
+  await svc.criarSessao({ usuario_id: 'u', client_type: 'android' });
+
+  const webIdleMs = new Date(webArgs.p_idle_expires_at).getTime() - t0;
+  assert.ok(Math.abs(webIdleMs - 1800 * 1000) < 5000, `web idle deve ser ~1800s (foi ${webIdleMs / 1000}s)`);
+
+  const androidIdleMs = new Date(androidArgs.p_idle_expires_at).getTime() - t0;
+  assert.ok(Math.abs(androidIdleMs - 604800 * 1000) < 5000, `android idle deve ser ~604800s (foi ${androidIdleMs / 1000}s)`);
+});
+
+test('R1B-B: validarSessaoParaAcesso: sessão web antiga com stored idle futuro e last_activity > 30m => rejeitada', async () => {
+  const agora = Date.now();
+  const sessWebAntiga = {
+    data: {
+      id: 'sess-web-1', usuario_id: 'u-1', empresa_id: 'e-1', client_type: 'web',
+      revoked_at: null,
+      idle_expires_at: new Date(agora + 6 * 86400 * 1000).toISOString(),
+      absolute_expires_at: new Date(agora + 20 * 86400 * 1000).toISOString(),
+      last_activity_at: new Date(agora - 31 * 60 * 1000).toISOString(),
+    },
+    error: null,
+  };
+  const user = { data: { id: 'u-1', tipo: 'admin', status: 'ativo', is_super_admin: false, empresa_id: 'e-1' }, error: null };
+  const supabase = fakeSupabase({ tables: { auth_sessions: [sessWebAntiga], usuarios: [user] } });
+  const svc = criarSessionService({ supabase, cfg });
+  await assert.rejects(
+    () => svc.validarSessaoParaAcesso({ sid: 'sess-web-1', uid: 'u-1' }),
+    (e) => e instanceof E.SessionIdleExpired && e.httpStatus === 401
+  );
+});
+
+test('R1B-B: validarSessaoParaAcesso: sessão web ativa < 30m => permitida', async () => {
+  const agora = Date.now();
+  const sessWebAtiva = {
+    data: {
+      id: 'sess-web-2', usuario_id: 'u-1', empresa_id: 'e-1', client_type: 'web',
+      revoked_at: null,
+      idle_expires_at: new Date(agora + 1800 * 1000).toISOString(),
+      absolute_expires_at: new Date(agora + 20 * 86400 * 1000).toISOString(),
+      last_activity_at: new Date(agora - 5 * 60 * 1000).toISOString(),
+    },
+    error: null,
+  };
+  const user = { data: { id: 'u-1', tipo: 'admin', status: 'ativo', is_super_admin: false, empresa_id: 'e-1' }, error: null };
+  const supabase = fakeSupabase({
+    tables: {
+      auth_sessions: [sessWebAtiva, { data: [{ id: 'sess-web-2' }], error: null }],
+      usuarios: [user],
+    },
+  });
+  const svc = criarSessionService({ supabase, cfg });
+  const rq = await svc.validarSessaoParaAcesso({ sid: 'sess-web-2', uid: 'u-1' });
+  assert.equal(rq.uid, 'u-1');
+  assert.equal(rq.sid, 'sess-web-2');
+});
+
+test('R1B-B: atualizarAtividadeThrottled: web desliza ~1800s; android desliza global', async () => {
+  let updatePayloadWeb = null;
+  let updatePayloadAndroid = null;
+  const customCfg = loadAuthConfig({
+    AUTH_SESSIONS_ENABLED: 'true', AUTH_REFRESH_ROTATION_ENABLED: 'true',
+    AUTH_REFRESH_TOKEN_PEPPER: 'pepper-teste', JWT_SECRET: 'jwt-teste',
+    AUTH_REFRESH_IDLE_TTL_SECONDS: '604800',
+    AUTH_SESSION_ACTIVITY_THROTTLE_SECONDS: '60',
+  });
+  const mkSupabase = (capture) => ({
+    from() {
+      const b = {
+        update(payload) { capture(payload); return b; },
+        eq() { return b; }, is() { return b; }, lt() { return b; },
+        select() { return Promise.resolve({ data: [{ id: 's' }], error: null }); },
+      };
+      return b;
+    },
+  });
+  const t0 = Date.now();
+  const svcWeb = criarSessionService({ supabase: mkSupabase((p) => { updatePayloadWeb = p; }), cfg: customCfg });
+  const svcAndroid = criarSessionService({ supabase: mkSupabase((p) => { updatePayloadAndroid = p; }), cfg: customCfg });
+
+  await svcWeb.atualizarAtividadeThrottled({
+    id: 's-web', client_type: 'web',
+    last_activity_at: new Date(t0 - 120000).toISOString(),
+    absolute_expires_at: new Date(t0 + 30 * 86400 * 1000).toISOString(),
+  });
+  const webDeltaMs = new Date(updatePayloadWeb.idle_expires_at).getTime() - t0;
+  assert.ok(Math.abs(webDeltaMs - 1800 * 1000) < 5000, `web slide deve ser ~1800s (foi ${webDeltaMs / 1000}s)`);
+
+  await svcAndroid.atualizarAtividadeThrottled({
+    id: 's-and', client_type: 'android',
+    last_activity_at: new Date(t0 - 120000).toISOString(),
+    absolute_expires_at: new Date(t0 + 30 * 86400 * 1000).toISOString(),
+  });
+  const andDeltaMs = new Date(updatePayloadAndroid.idle_expires_at).getTime() - t0;
+  assert.ok(Math.abs(andDeltaMs - 604800 * 1000) < 5000, `android slide deve ser ~604800s (foi ${andDeltaMs / 1000}s)`);
+});
+
+test('R1B-B: listarSessoesDoUsuario projeta expira_em efetivo para web e preserva não-web', async () => {
+  const agora = Date.now();
+  const sessoes = [
+    {
+      id: 's-web-old', client_type: 'web', device_label: 'Chrome',
+      created_at: new Date(agora - 86400000).toISOString(),
+      last_activity_at: new Date(agora - 10 * 60 * 1000).toISOString(),
+      idle_expires_at: new Date(agora + 6 * 86400000).toISOString(),
+      absolute_expires_at: new Date(agora + 20 * 86400000).toISOString(),
+      revoked_at: null,
+    },
+    {
+      id: 's-and', client_type: 'android', device_label: 'Pixel',
+      created_at: new Date(agora - 86400000).toISOString(),
+      last_activity_at: new Date(agora - 2 * 3600000).toISOString(),
+      idle_expires_at: new Date(agora + 6 * 86400000).toISOString(),
+      absolute_expires_at: new Date(agora + 20 * 86400000).toISOString(),
+      revoked_at: null,
+    },
+  ];
+  const supabase = {
+    from: () => ({
+      select: () => ({
+        eq: () => ({
+          order: () => Promise.resolve({ data: sessoes, error: null }),
+        }),
+      }),
+    }),
+  };
+  const svc = criarSessionService({ supabase, cfg });
+  const lista = await svc.listarSessoesDoUsuario('u-1');
+
+  assert.equal(lista.length, 2);
+  const webItem = lista.find((x) => x.id === 's-web-old');
+  const andItem = lista.find((x) => x.id === 's-and');
+
+  const esperadoWebMs = new Date(agora - 10 * 60 * 1000 + 1800 * 1000).getTime();
+  assert.equal(new Date(webItem.expira_em).getTime(), esperadoWebMs, 'web deve refletir last_activity + 1800');
+  assert.equal(andItem.expira_em, sessoes[1].idle_expires_at, 'android deve preservar idle_expires_at');
+});
+
+test('R1B-B: rotacionarRefresh NÃO faz pré-leitura de auth_sessions/auth_refresh_tokens no Node', async () => {
+  const tabelasConsultadas = [];
+  const rpcsChamadas = [];
+  const supabase = {
+    from(table) {
+      tabelasConsultadas.push(table);
+      const b = {
+        select() { return b; }, eq() { return b; }, maybeSingle() { return Promise.resolve({ data: null, error: null }); },
+      };
+      return b;
+    },
+    rpc(name, args) {
+      rpcsChamadas.push({ name, args });
+      return Promise.resolve({
+        data: [{ resultado: 'ok', session_id: 's-1', usuario_id: 'u-1', empresa_id: null, client_type: 'web', novo_token_id: 't-2', nova_version: 2, novo_expires_at: new Date().toISOString() }],
+        error: null,
+      });
+    },
+  };
+  const svc = criarSessionService({ supabase, cfg });
+  await svc.rotacionarRefresh({ refreshToken: 'r1.teste-sem-pre-leitura' });
+
+  assert.equal(tabelasConsultadas.length, 0, 'nenhuma consulta a tabelas antes da RPC');
+  assert.equal(rpcsChamadas.length, 1, 'RPC invocada diretamente');
+  assert.equal(rpcsChamadas[0].name, 'rotacionar_refresh_token');
+});

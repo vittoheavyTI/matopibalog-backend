@@ -29,11 +29,34 @@ function menorDataIso(a, b) {
 }
 
 const STATUS_USUARIO_AUTENTICAVEL = new Set(['ativo']);
+const WEB_IDLE_TTL_SECONDS = 1800;
+
+function obterIdleTtlSegundosParaCliente(clientType, cfg) {
+  if (clientType === 'web') {
+    return cfg?.webIdleTtlSeconds ?? WEB_IDLE_TTL_SECONDS;
+  }
+  return cfg?.refreshIdleTtlSeconds;
+}
+
+function calcularPrazoEfetivoIdle(sess, cfg) {
+  if (!sess) return null;
+  if (sess.client_type === 'web') {
+    const webTtl = cfg?.webIdleTtlSeconds ?? WEB_IDLE_TTL_SECONDS;
+    if (!sess.last_activity_at) {
+      return sess.idle_expires_at || null;
+    }
+    const tAtividade = new Date(sess.last_activity_at).getTime();
+    if (Number.isNaN(tAtividade)) return null;
+    const deadlineAtividadeIso = new Date(tAtividade + webTtl * 1000).toISOString();
+    return sess.idle_expires_at ? menorDataIso(sess.idle_expires_at, deadlineAtividadeIso) : deadlineAtividadeIso;
+  }
+  return sess.idle_expires_at;
+}
 
 /**
  * Factory. deps: { supabase (service_role), cfg (authConfig validada), auditar(evento) }.
  * `auditar` é opcional (login/logout auditados fora da RPC); rotação/reuse já são
- * auditados atomicamente pela RPC 062.
+ * auditados atomicamente pela RPC 062/087.
  */
 function criarSessionService({ supabase, cfg, auditar = async () => {} }) {
   if (!supabase) throw new Error('supabase obrigatório');
@@ -55,7 +78,8 @@ function criarSessionService({ supabase, cfg, auditar = async () => {} }) {
     const refreshHash = crypto.hashRefreshToken(refreshToken, pepper);
     const familyId = crypto.gerarJti();
     const absoluteExpires = segundosDepois(cfg.refreshAbsoluteTtlSeconds);
-    const idleExpiresIso = menorDataIso(segundosDepois(cfg.refreshIdleTtlSeconds), absoluteExpires);
+    const ttlIdle = obterIdleTtlSegundosParaCliente(client_type, cfg);
+    const idleExpiresIso = menorDataIso(segundosDepois(ttlIdle), absoluteExpires);
     // O refresh expira junto com o teto absoluto; o idle é aplicado na sessão.
     const refreshExpires = absoluteExpires;
 
@@ -139,8 +163,12 @@ function criarSessionService({ supabase, cfg, auditar = async () => {} }) {
     if (uid && String(sess.usuario_id) !== String(uid)) throw new E.SessionInvalid('uid do token difere da sessão');
     const agora = Date.now();
     if (sess.revoked_at) throw new E.SessionRevoked();
-    if (new Date(sess.idle_expires_at).getTime() <= agora) throw new E.SessionIdleExpired();
     if (new Date(sess.absolute_expires_at).getTime() <= agora) throw new E.SessionAbsoluteExpired();
+
+    const prazoEfetivoIdle = calcularPrazoEfetivoIdle(sess, cfg);
+    if (!prazoEfetivoIdle || new Date(prazoEfetivoIdle).getTime() <= agora) {
+      throw new E.SessionIdleExpired();
+    }
 
     // Usuário ATUAL do banco (autoridade de papel/tenant), não os claims do token.
     let user, erroUser;
@@ -177,7 +205,8 @@ function criarSessionService({ supabase, cfg, auditar = async () => {} }) {
     const ultima = new Date(sess.last_activity_at).getTime();
     if (Date.now() - ultima < throttle * 1000) return { atualizado: false };
     const agoraIso = new Date().toISOString();
-    const novoIdleIso = menorDataIso(segundosDepois(cfg.refreshIdleTtlSeconds), sess.absolute_expires_at);
+    const ttlIdle = obterIdleTtlSegundosParaCliente(sess.client_type, cfg);
+    const novoIdleIso = menorDataIso(segundosDepois(ttlIdle), sess.absolute_expires_at);
     // Update condicional atômico: só vence uma escrita concorrente; não reativa
     // sessão revogada/expirada (WHERE revoked_at IS NULL e last_activity antiga).
     const corteIso = new Date(Date.now() - throttle * 1000).toISOString();
@@ -244,7 +273,7 @@ function criarSessionService({ supabase, cfg, auditar = async () => {} }) {
     return (data || []).map((s) => ({
       id: s.id, client_type: s.client_type, device_label: s.device_label,
       created_at: s.created_at, last_activity_at: s.last_activity_at,
-      expira_em: s.idle_expires_at, revogada: !!s.revoked_at,
+      expira_em: calcularPrazoEfetivoIdle(s, cfg), revogada: !!s.revoked_at,
     }));
   }
 
@@ -255,4 +284,4 @@ function criarSessionService({ supabase, cfg, auditar = async () => {} }) {
   };
 }
 
-module.exports = { criarSessionService, RefreshDelivery };
+module.exports = { criarSessionService, RefreshDelivery, calcularPrazoEfetivoIdle, WEB_IDLE_TTL_SECONDS };

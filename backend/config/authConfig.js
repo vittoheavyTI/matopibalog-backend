@@ -74,6 +74,7 @@ function parseListaOrigens(raw, def) {
 
 // Faixas seguras (mín/máx). grace casa com a RPC 062 (0..300).
 const DIA = 86400;
+const WEB_IDLE_TTL_SECONDS = 1800;
 const FAIXAS = {
   access:   { def: 600,        min: 60,   max: 3600 },        // 1min..1h
   idle:     { def: 1800,       min: 60,   max: 90 * DIA },    // 1min..90d
@@ -203,11 +204,14 @@ function loadAuthConfig(env = process.env) {
   // authMode derivado — controllers/middlewares consomem isto (não recalculam flags).
   const authMode = !sessionsEnabled ? 'legacy' : (requireSession ? 'strict' : 'compatible');
 
+  const webIdleTtlSeconds = WEB_IDLE_TTL_SECONDS;
+
   const cfg = {
     authMode,
     sessionsEnabled, rotationEnabled, requireSession, allowLegacy, legacyCutoff,
     accessTtlSeconds: accessTtl,
     refreshIdleTtlSeconds: idleTtl,
+    webIdleTtlSeconds,
     refreshAbsoluteTtlSeconds: absoluteTtl,
     refreshReuseGraceSeconds: graceSecs,
     sessionActivityThrottleSeconds: throttleSecs,
@@ -226,6 +230,7 @@ function loadAuthConfig(env = process.env) {
       return {
         authMode, sessionsEnabled, rotationEnabled, requireSession, allowLegacy,
         legacyCutoff, accessTtlSeconds: accessTtl, refreshIdleTtlSeconds: idleTtl,
+        webIdleTtlSeconds,
         refreshAbsoluteTtlSeconds: absoluteTtl, refreshReuseGraceSeconds: graceSecs,
         sessionActivityThrottleSeconds: throttleSecs, issuer, audience, webOrigins,
         refreshCookieSameSite,
@@ -250,4 +255,4 @@ function getAuthConfig() {
 // Somente para testes: limpa o cache do singleton.
 function _resetAuthConfigCache() { _cache = null; }
 
-module.exports = { loadAuthConfig, getAuthConfig, _resetAuthConfigCache, AuthConfigurationError, FAIXAS };
+module.exports = { loadAuthConfig, getAuthConfig, _resetAuthConfigCache, AuthConfigurationError, FAIXAS, WEB_IDLE_TTL_SECONDS };
