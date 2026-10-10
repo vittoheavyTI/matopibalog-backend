@@ -29,6 +29,7 @@ async function run(mw, token, { cookie = false } = {}) {
 }
 
 const svcOk = { validarSessaoParaAcesso: async ({ sid, uid }) => ({ uid, sid, role: 'motorista', is_super_admin: false, empresa_id: 'e-db', client_type: 'web' }) };
+const termsOk = { verificarTermosObrigatoriosPendentes: async () => ({ temPendentes: false, count: 0 }) };
 const svcThrow = (err) => ({ validarSessaoParaAcesso: async () => { throw err; }, _called: false });
 
 test('classificarPorClaims', () => {
@@ -55,7 +56,7 @@ test('legado em modo compatível → next, req.user legado', async () => {
       }),
     }),
   };
-  const mw = criarVerifyTokenSec1({ cfg: cfgCompat, sessionService: svcOk, supabase: mockSb });
+  const mw = criarVerifyTokenSec1({ cfg: cfgCompat, sessionService: svcOk, supabase: mockSb, termsAuthorityService: termsOk });
   const r = await run(mw, tokenLegacy());
   assert.equal(r.nextCalled, true); assert.equal(r.req.authKind, 'legacy'); assert.equal(r.req.user.uid, 'u-leg');
 });
@@ -74,7 +75,7 @@ test('legado com assinatura inválida → 403', async () => {
 });
 
 test('sessão válida → next, req.user do BANCO (role do serviço, não do token)', async () => {
-  const mw = criarVerifyTokenSec1({ cfg: cfgCompat, sessionService: svcOk });
+  const mw = criarVerifyTokenSec1({ cfg: cfgCompat, sessionService: svcOk, termsAuthorityService: termsOk });
   const r = await run(mw, tokenSession(cfgCompat));
   assert.equal(r.nextCalled, true); assert.equal(r.req.authKind, 'session');
   assert.equal(r.req.user.role, 'motorista'); // veio do serviço (banco), token dizia 'admin'
@@ -119,7 +120,7 @@ test('claims parciais (sid sem token_use / token_use sem sid) → 401 invalid', 
 });
 
 test('token de sessão via COOKIE também funciona', async () => {
-  const mw = criarVerifyTokenSec1({ cfg: cfgCompat, sessionService: svcOk });
+  const mw = criarVerifyTokenSec1({ cfg: cfgCompat, sessionService: svcOk, termsAuthorityService: termsOk });
   const r = await run(mw, tokenSession(cfgCompat), { cookie: true });
   assert.equal(r.nextCalled, true); assert.equal(r.req.authKind, 'session');
 });
