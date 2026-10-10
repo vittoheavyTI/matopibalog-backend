@@ -3,9 +3,36 @@ import { Navigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 
 export const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { user, loading, logout } = useAuth();
+  const { user, loading, logout, sessionValidationUnavailable, revalidarSessao } = useAuth();
 
   if (loading) return null;
+
+  if (sessionValidationUnavailable) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50" data-testid="session-validation-unavailable">
+        <div className="text-center max-w-sm px-4">
+          <h2 className="text-2xl font-bold text-amber-600 mb-2">Validação de Sessão Indisponível</h2>
+          <p className="text-gray-600 mb-6">Não foi possível validar sua sessão junto ao servidor. Por favor, tente novamente.</p>
+          <div className="flex flex-col gap-3">
+            <button
+              type="button"
+              onClick={() => revalidarSessao()}
+              className="inline-flex items-center justify-center rounded-lg bg-green-700 px-5 py-2.5 font-semibold text-white transition hover:bg-green-800 focus:outline-none focus:ring-2 focus:ring-green-600 focus:ring-offset-2 cursor-pointer"
+            >
+              Tentar novamente
+            </button>
+            <button
+              type="button"
+              onClick={() => logout('manual')}
+              className="inline-flex items-center justify-center rounded-lg bg-gray-200 px-5 py-2.5 font-semibold text-gray-700 transition hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2 cursor-pointer"
+            >
+              Sair e voltar ao login
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (!user) {
     return <Navigate to="/login" replace />;

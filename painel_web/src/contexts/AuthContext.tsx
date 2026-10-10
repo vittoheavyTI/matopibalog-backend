@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
-import api, { decodificarPayloadJwt } from '../api';
+import api from '../api';
 import { definirMotivoSessao, type MotivoSessao } from '../utils/sessionReason';
 import { OPERATIONAL_GROUP_CONTEXT_KEY, OPERATIONAL_UNIT_CONTEXT_KEY } from '../utils/operationalContextStorage';
 
@@ -28,46 +28,22 @@ export interface User {
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  login: (user: User) => void;
+  sessionValidationUnavailable: boolean;
+  revalidarSessao: () => Promise<void>;
+  login: (user?: User) => Promise<User | null>;
   logout: (motivo?: MotivoSessao) => void;
 }
 
 const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: true,
-  login: () => {},
+  sessionValidationUnavailable: false,
+  revalidarSessao: async () => {},
+  login: async () => null,
   logout: () => {},
 });
 
 export const useAuth = () => useContext(AuthContext);
-
-// Usuário MÍNIMO reconstruído do próprio JWT (localStorage), usado quando o
-// /auth/me falha por motivo TRANSITÓRIO (429/offline/5xx): preserva a sessão em
-// vez de jogar no login. Campos de gate (senha_temporaria/termos) ficam neutros e
-// são re-enriquecidos na próxima chamada bem-sucedida de /auth/me. Token expirado
-// (exp no passado) → null, para cair no login normalmente.
-function usuarioMinimoDoToken(): User | null {
-  try {
-    const t = localStorage.getItem('auth_token');
-    if (!t) return null;
-    const p = decodificarPayloadJwt(t);
-    if (!p || !p.uid) return null;
-    if (typeof p.exp === 'number' && p.exp * 1000 < Date.now()) return null;
-    return {
-      uid: p.uid,
-      email: p.email ?? '',
-      nome: p.email ?? '',
-      role: p.role ?? '',
-      status: 'ativo',
-      is_super_admin: p.is_super_admin ?? false,
-      senha_temporaria: false,
-      termos_pendentes: false,
-      termos_pendentes_count: 0,
-    };
-  } catch {
-    return null;
-  }
-}
 
 // Mapeia a resposta de /auth/me para o nosso User. Centralizado para que tanto a
 // restauração de sessão (montagem) quanto o enriquecimento pós-login usem o mesmo
@@ -87,62 +63,76 @@ const mapMeToUser = (data: any): User => ({
   effective_permissions: data.effective_permissions ?? undefined,
   permission_template: data.permission_template ?? null,
   driver_financial_visibility: data.driver_financial_visibility ?? null,
-  // Sem isto, ao recarregar a página a flag se perderia e o usuário
-  // com senha temporária burlaria a troca obrigatória (gate do ProtectedRoute).
   senha_temporaria: data.senha_temporaria ?? false,
   termos_pendentes: data.termos_pendentes ?? false,
   termos_pendentes_count: data.termos_pendentes_count ?? 0,
 });
 
+function isRecoverableFailure(err: any): boolean {
+  if (err?._sec1RefreshRecoverable === true) return true;
+  if (err?.config?._sec1RefreshRecoverable === true) return true;
+  if (err?.response?.config?._sec1RefreshRecoverable === true) return true;
+  return false;
+}
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [sessionValidationUnavailable, setSessionValidationUnavailable] = useState(false);
   const loadingRef = useRef(true);
   // Guarda contra reentrância: processa o encerramento por 'auth:unauthorized'
   // uma única vez. Rearmado a cada login para novos ciclos de sessão.
   const encerrandoRef = useRef(false);
 
-  // Verifica o cookie na montagem para restaurar a sessão
-  useEffect(() => {
-    // Preferir token salvo no localStorage (Bearer). Se não existir, não tenta API.
+  // R1A: Invariante PROTECTED_UI_REQUIRES_SUCCESSFUL_AUTHORITATIVE_/auth/me
+  // Valida e hidrata a sessão autoritativa com o backend.
+  const revalidarSessao = async () => {
     const token = localStorage.getItem('auth_token');
     if (!token) {
       loadingRef.current = false;
       setLoading(false);
       setUser(null);
+      setSessionValidationUnavailable(false);
       return;
     }
 
-    api.get('/auth/me')
-      .then((res) => {
-        setUser(mapMeToUser(res.data));
-      })
-      .catch((err) => {
-        const status = err?.response?.status;
-        const authFalhou = status === 401
-          || (status === 403 && err?.response?.data?.error === 'Token inválido ou expirado.');
-        if (authFalhou) {
-          // Token realmente inválido/expirado no servidor → limpa e desloga.
-          localStorage.removeItem('auth_token');
-          setUser(null);
-        } else {
-          // Transitório (429 rate limit / offline / 5xx): NÃO apaga o token válido
-          // (JWT dura 7 dias). Restaura um usuário mínimo do token para não jogar o
-          // usuário no login por causa de um pico de requisições; o /auth/me
-          // re-enriquece (nome/empresa/gate) na próxima chamada que passar.
-          setUser(usuarioMinimoDoToken());
-        }
-      })
-      .finally(() => {
-        loadingRef.current = false;
-        setLoading(false);
-      });
+    setLoading(true);
+    loadingRef.current = true;
+    try {
+      const res = await api.get('/auth/me');
+      setUser(mapMeToUser(res.data));
+      setSessionValidationUnavailable(false);
+    } catch (err: any) {
+      const status = err?.response?.status;
+      const recoverableRefresh = isRecoverableFailure(err);
+      const authFalhouDefinitivo = !recoverableRefresh && (
+        status === 401 ||
+        (status === 403 && err?.response?.data?.error === 'Token inválido ou expirado.')
+      );
+      if (authFalhouDefinitivo) {
+        // Token definitivamente inválido/expirado no servidor → limpa e desloga.
+        localStorage.removeItem('auth_token');
+        setUser(null);
+        setSessionValidationUnavailable(false);
+      } else {
+        // Falha transitória (429, 5xx, offline/rede, ou refresh recuperável _sec1RefreshRecoverable=true):
+        // NÃO apaga o token válido do localStorage, mas NUNCA constrói usuário
+        // local nem autoriza UI protegida. Seta estado explícito recuperável.
+        setUser(null);
+        setSessionValidationUnavailable(true);
+      }
+    } finally {
+      loadingRef.current = false;
+      setLoading(false);
+    }
+  };
+
+  // Verifica o cookie na montagem para restaurar a sessão
+  useEffect(() => {
+    revalidarSessao();
   }, []);
 
   // Reage a expiração de sessão detectada pelo interceptor do axios.
-  // O interceptor já registrou o motivo (expired/invalid) antes de disparar; aqui
-  // apenas limpamos token e estado (uma única vez) e deixamos o ProtectedRoute
-  // levar ao /login. NÃO gravamos motivo aqui para não sobrescrever o já definido.
   useEffect(() => {
     const handleUnauthorized = () => {
       if (loadingRef.current) return;
@@ -150,41 +140,57 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       encerrandoRef.current = true;
       try { localStorage.removeItem('auth_token'); } catch (e) { /* ignore */ }
       setUser(null);
+      setSessionValidationUnavailable(false);
     };
     window.addEventListener('auth:unauthorized', handleUnauthorized);
     return () => window.removeEventListener('auth:unauthorized', handleUnauthorized);
   }, []);
 
-  const login = (user: User) => {
-    // Novo ciclo de sessão: rearma o guarda de encerramento para que uma futura
-    // expiração volte a ser processada.
+  // R1A: Post-login hydration.
+  // Uma resposta de /auth/login sozinha NÃO torna rotas protegidas autorizadas se os
+  // campos autoritativos não tiverem sido hidratados com sucesso por /auth/me.
+  const login = async (_userParam?: User): Promise<User | null> => {
     encerrandoRef.current = false;
-    // Aplica imediatamente os dados vindos do /auth/login para não travar a navegação.
-    setUser(user);
-    // O /auth/login NÃO retorna termos_pendentes (apenas /auth/me calcula). Sem este
-    // refresh, o gate de termos só dispararia após um F5. Buscamos /auth/me em seguida
-    // para enriquecer o estado e acionar o ProtectedRoute sem recarregar a página.
-    // Se já viermos com termos_pendentes definido (ex.: limpeza pós-aceite), preserva.
-    api.get('/auth/me')
-      .then((res) => setUser((atual) => (atual ? mapMeToUser(res.data) : atual)))
-      .catch(() => { /* mantém o user do login; sem bloqueio de navegação */ });
+    setLoading(true);
+    try {
+      const res = await api.get('/auth/me');
+      const hydrated = mapMeToUser(res.data);
+      setUser(hydrated);
+      setSessionValidationUnavailable(false);
+      return hydrated;
+    } catch (err: any) {
+      const status = err?.response?.status;
+      const recoverableRefresh = isRecoverableFailure(err);
+      const authFalhouDefinitivo = !recoverableRefresh && (
+        status === 401 ||
+        (status === 403 && err?.response?.data?.error === 'Token inválido ou expirado.')
+      );
+      if (authFalhouDefinitivo) {
+        localStorage.removeItem('auth_token');
+        setUser(null);
+        setSessionValidationUnavailable(false);
+        throw err;
+      } else {
+        // Falha transitória pós-login (ou refresh recuperável):
+        // NÃO entra na aplicação nem constrói autoridade parcial.
+        // Preserva a credencial recém-emitida no localStorage e sinaliza validação indisponível.
+        setUser(null);
+        setSessionValidationUnavailable(true);
+        return null;
+      }
+    } finally {
+      loadingRef.current = false;
+      setLoading(false);
+    }
   };
 
-  // motivo: por que a sessão terminou. Padrão 'manual' (clique em Sair) → o Login
-  // NÃO mostra alerta de expiração. O watcher de inatividade chama logout('idle').
-  // Gravado ANTES de qualquer chamada de rede, para não ser trocado pelo
-  // registro "soft" do interceptor caso o /auth/logout falhe.
+  // motivo: por que a sessão terminou.
   const logout = async (motivo: MotivoSessao = 'manual') => {
     definirMotivoSessao(motivo);
     try {
       await api.post('/auth/logout');
     } catch {}
-    // Remove token stored locally
     try { localStorage.removeItem('auth_token'); } catch(e) {}
-    // Limpa cache per-session para a próxima conta começar sem dados da anterior.
-    // company E logo são POR EMPRESA (multi-tenant): sem limpar, a próxima conta no
-    // mesmo navegador poderia herdar a logo da anterior até a config hidratar. O
-    // Sidebar re-hidrata a logo da empresa logada em seguida (/configuracoes).
     ['matopibalog_company', 'choferlog_company',
      'matopibalog_logo', 'matopibalog_logo_scale', 'matopibalog_logo_y',
      'matopibalog_empresa_logo',
@@ -192,10 +198,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
      OPERATIONAL_UNIT_CONTEXT_KEY,
     ].forEach(k => localStorage.removeItem(k));
     setUser(null);
+    setSessionValidationUnavailable(false);
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout }}>
+    <AuthContext.Provider value={{ user, loading, sessionValidationUnavailable, revalidarSessao, login, logout }}>
       {!loading && children}
     </AuthContext.Provider>
   );

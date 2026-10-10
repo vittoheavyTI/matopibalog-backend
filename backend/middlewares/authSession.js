@@ -14,6 +14,7 @@
 
 const jwt = require('jsonwebtoken');
 const crypto = require('../services/auth/authCrypto');
+const { SessionDependencyUnavailable, SessionInvalid } = require('../services/auth/authErrors');
 
 /** Classificação por claims (payload NÃO-verificado — só para roteamento). */
 function classificarPorClaims(payload) {
@@ -47,12 +48,62 @@ function legadoAlemDoCutoff(cfg) {
   return !Number.isNaN(t) && Date.now() > t;
 }
 
+function getSupabase(injected) {
+  if (injected !== undefined) return injected;
+  if (process.env.SUPABASE_SERVICE_KEY && process.env.SUPABASE_URL) {
+    try {
+      return require('../config/supabase');
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function rotaIsentaSenhaTemporaria(req) {
+  const method = req.method ? req.method.toUpperCase() : '';
+  const rawPath = (req.originalUrl || req.url || req.path || '').split('?')[0].replace(/\/+$/, '');
+  const urlPath = rawPath || '/';
+
+  // C2: Isenções mínimas explícitas estritas (contrato exato de rotas montadas em produção).
+  // Sem aliases genéricos de raiz (/me, /logout, etc.) e sem wildcards em 'aceitar'.
+  // 1. GET /auth/me
+  if (method === 'GET' && urlPath === '/auth/me') return true;
+  // 2. POST /auth/trocar-senha
+  if (method === 'POST' && urlPath === '/auth/trocar-senha') return true;
+  // 3. POST /auth/logout
+  if (method === 'POST' && urlPath === '/auth/logout') return true;
+  // 4. POST /auth/logout-all
+  if (method === 'POST' && urlPath === '/auth/logout-all') return true;
+  // 5. GET /auth/sessions
+  if (method === 'GET' && urlPath === '/auth/sessions') return true;
+  // 6. DELETE /auth/sessions/:id
+  if (method === 'DELETE' && /^\/auth\/sessions\/[^/]+$/.test(urlPath)) return true;
+  // 7. GET /termos/pendentes
+  if (method === 'GET' && urlPath === '/termos/pendentes') return true;
+  // 8. POST /termos/:id/aceitar
+  if (method === 'POST' && /^\/termos\/[^/]+\/aceitar$/.test(urlPath)) return true;
+
+  return false;
+}
+
+function aplicarGateSenhaTemporaria(req, res, next) {
+  if (req.user && req.user.senha_temporaria === true && !rotaIsentaSenhaTemporaria(req)) {
+    return res.status(403).json({
+      error: 'PasswordChangeRequired',
+      code: 'PASSWORD_CHANGE_REQUIRED',
+      message: 'Troca de senha obrigatória pendente.',
+    });
+  }
+  return next();
+}
+
 /**
  * Factory do middleware. deps: { cfg (authConfig), sessionService }.
  * Retorna um middleware Express assíncrono que popula req.user (fonte confiável) e
  * req.authKind ('legacy'|'session').
  */
-function criarVerifyTokenSec1({ cfg, sessionService }) {
+function criarVerifyTokenSec1({ cfg, sessionService, supabase: supabaseParam }) {
   if (!cfg) throw new Error('cfg obrigatório');
   return async function verifyTokenSec1(req, res, next) {
     const token = lerToken(req);
@@ -77,7 +128,7 @@ function criarVerifyTokenSec1({ cfg, sessionService }) {
       try {
         req.user = await sessionService.validarSessaoParaAcesso({ sid: verificado.sid, uid: verificado.uid || verificado.sub });
         req.authKind = 'session';
-        return next();
+        return aplicarGateSenhaTemporaria(req, res, next);
       } catch (e) {
         const status = (e && e.httpStatus) || 401;
         const corpo = (e && typeof e.toPublic === 'function') ? e.toPublic() : { error: 'Token inválido ou expirado.' };
@@ -93,11 +144,53 @@ function criarVerifyTokenSec1({ cfg, sessionService }) {
       try {
         req.user = verificarLegacy(token, cfg);
         req.authKind = 'legacy';
-        return next();
       } catch {
         // Mantém o 403 do comportamento legado atual (o cliente trata como sessão expirada).
         return res.status(403).json({ error: 'Token inválido ou expirado.' });
       }
+
+      // R1A/C1: Para tokens legados no modo compatível, a autoridade de
+      // usuarios.senha_temporaria DEVE ser resolvida fail-closed do banco de dados
+      // antes de autorizar qualquer acesso comum de negócio.
+      const uid = req.user && (req.user.uid || req.user.id || req.user.sub);
+      if (!uid || typeof uid !== 'string' || uid.trim() === '') {
+        const err = new SessionInvalid('uid ausente ou incoerente no token legado');
+        return res.status(err.httpStatus).json(err.toPublic());
+      }
+
+      const client = getSupabase(supabaseParam);
+      if (!client) {
+        const err = new SessionDependencyUnavailable('cliente de autoridade indisponível para validação de legado');
+        return res.status(err.httpStatus).json(err.toPublic());
+      }
+
+      let uDb;
+      let dbError;
+      try {
+        const resposta = await client
+          .from('usuarios')
+          .select('senha_temporaria')
+          .eq('id', uid)
+          .maybeSingle();
+        uDb = resposta && resposta.data;
+        dbError = resposta && resposta.error;
+      } catch (errQuery) {
+        const err = new SessionDependencyUnavailable(errQuery && errQuery.message);
+        return res.status(err.httpStatus).json(err.toPublic());
+      }
+
+      if (dbError) {
+        const err = new SessionDependencyUnavailable(dbError.message || 'erro na consulta de autoridade');
+        return res.status(err.httpStatus).json(err.toPublic());
+      }
+
+      if (!uDb) {
+        const err = new SessionInvalid('usuario não encontrado na base de dados');
+        return res.status(err.httpStatus).json(err.toPublic());
+      }
+
+      req.user.senha_temporaria = uDb.senha_temporaria === true;
+      return aplicarGateSenhaTemporaria(req, res, next);
     }
 
     // ── INVALID ────────────────────────────────────────────────────────────
@@ -105,4 +198,4 @@ function criarVerifyTokenSec1({ cfg, sessionService }) {
   };
 }
 
-module.exports = { criarVerifyTokenSec1, classificarPorClaims };
+module.exports = { criarVerifyTokenSec1, classificarPorClaims, rotaIsentaSenhaTemporaria, aplicarGateSenhaTemporaria };

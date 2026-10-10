@@ -38,8 +38,8 @@ export const TrocarSenhaObrigatoria: React.FC = () => {
     setError('');
     try {
       await api.post('/auth/trocar-senha', { nova_senha: password });
-      // Atualiza o contexto: senha_temporaria=false libera o acesso ao painel.
-      login({ ...user, senha_temporaria: false });
+      // Atualiza o contexto: reidrata autoritativamente /auth/me do servidor
+      await login();
       navigate('/', { replace: true });
     } catch (err: any) {
       setError(err.response?.data?.message || 'Erro ao trocar a senha. Tente novamente.');
