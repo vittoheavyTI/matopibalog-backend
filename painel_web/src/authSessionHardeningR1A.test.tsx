@@ -140,7 +140,7 @@ describe('MATOPIBA LOG — AUTH SECURITY REMEDIATION R1A (Frontend Regression Ba
   });
 
   // 4. cold restore + canonical 401 => credential cleared + login.
-  test('4. cold restore + canonical 401 => credential cleared + login', async () => {
+  test('4. cold restore + canonical 401 => credential cleared + login (C1.5-B)', async () => {
     localStorage.setItem('auth_token', 'expired-or-revoked-token');
     mockApi.get.mockRejectedValueOnce({ response: { status: 401, data: { error: 'Unauthorized' } } });
 
@@ -161,6 +161,57 @@ describe('MATOPIBA LOG — AUTH SECURITY REMEDIATION R1A (Frontend Regression Ba
     expect(screen.queryByTestId('protected-shell')).not.toBeInTheDocument();
 
     // Credencial inválida/revogada DEVE ser removida do localStorage
+    expect(localStorage.getItem('auth_token')).toBeNull();
+  });
+
+  // C1.5-A: expired access / original /auth/me 401 + _sec1RefreshRecoverable=true
+  test('C1.5-A: cold restore + /auth/me 401 with _sec1RefreshRecoverable=true => token PRESERVED, user null, validation unavailable, protected shell not rendered', async () => {
+    localStorage.setItem('auth_token', 'valid-persisted-token');
+    mockApi.get.mockRejectedValueOnce({
+      response: { status: 401, data: { error: 'Unauthorized' } },
+      config: { _sec1RefreshRecoverable: true },
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <AuthProvider>
+          <Routes>
+            <Route path="/" element={<ProtectedRoute><div data-testid="protected-shell">PROTECTED SHELL CONTENT</div></ProtectedRoute>} />
+            <Route path="/login" element={<div>LOGIN SCREEN</div>} />
+          </Routes>
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+
+    const retryBanner = await screen.findByTestId('session-validation-unavailable');
+    expect(retryBanner).toBeInTheDocument();
+    expect(screen.queryByTestId('protected-shell')).not.toBeInTheDocument();
+
+    // Invariante TRANSIENT_REFRESH_FAILURE_PRESERVES_CREDENTIAL_AND_FAILS_CLOSED_UI
+    expect(localStorage.getItem('auth_token')).toBe('valid-persisted-token');
+  });
+
+  // C1.5-C: canonical invalid 403 without recoverable flag => token removed
+  test('C1.5-C: cold restore + canonical invalid 403 without recoverable flag => token removed', async () => {
+    localStorage.setItem('auth_token', 'invalid-token');
+    mockApi.get.mockRejectedValueOnce({
+      response: { status: 403, data: { error: 'Token inválido ou expirado.' } },
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <AuthProvider>
+          <Routes>
+            <Route path="/" element={<ProtectedRoute><div data-testid="protected-shell">PROTECTED SHELL CONTENT</div></ProtectedRoute>} />
+            <Route path="/login" element={<div data-testid="login-screen">LOGIN SCREEN</div>} />
+          </Routes>
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+
+    const loginScreen = await screen.findByTestId('login-screen');
+    expect(loginScreen).toBeInTheDocument();
+    expect(screen.queryByTestId('protected-shell')).not.toBeInTheDocument();
     expect(localStorage.getItem('auth_token')).toBeNull();
   });
 
@@ -287,5 +338,38 @@ describe('MATOPIBA LOG — AUTH SECURITY REMEDIATION R1A (Frontend Regression Ba
     expect(screen.queryByTestId('post-login-user')).not.toBeInTheDocument();
     // Validação indisponível deve estar ativa
     expect(screen.getByTestId('post-login-unavailable')).toBeInTheDocument();
+  });
+
+  // C1.5-D: recoverable post-login authority hydration failure (401 + _sec1RefreshRecoverable)
+  test('C1.5-D: recoverable post-login authority hydration failure => token preserved, no protected shell', async () => {
+    localStorage.setItem('auth_token', 'newly-issued-login-token');
+    mockApi.get.mockRejectedValueOnce({
+      response: { status: 401, data: { error: 'Unauthorized' } },
+      config: { _sec1RefreshRecoverable: true },
+    });
+
+    let loginOutcome: any = null;
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <AuthProvider>
+          <PostLoginTester onLoginResult={(val) => { loginOutcome = val; }} />
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+
+    const btnLogin = await screen.findByTestId('btn-login');
+
+    await act(async () => {
+      btnLogin.click();
+    });
+
+    // login() deve retornar null
+    expect(loginOutcome?.res).toBeNull();
+    // App protegido NÃO deve ter user hidratado
+    expect(screen.queryByTestId('post-login-user')).not.toBeInTheDocument();
+    // Validação indisponível deve estar ativa
+    expect(screen.getByTestId('post-login-unavailable')).toBeInTheDocument();
+    // Invariante: token recém-emitido NÃO deve ser descartado em falha recuperável
+    expect(localStorage.getItem('auth_token')).toBe('newly-issued-login-token');
   });
 });

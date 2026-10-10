@@ -180,6 +180,96 @@ test('R1A-13b: Token legado válido com senha_temporaria=false no banco → auto
   assert.equal(r.nextCalled, true);
 });
 
+test('C1.2-3: Token legado com cliente Supabase indisponível → fail-closed (503 SessionDependencyUnavailable)', async () => {
+  const mw = criarVerifyTokenSec1({ cfg: cfgCompat, sessionService: {}, supabase: null });
+  const token = assinarLegacyToken({ uid: 'u-leg-1' });
+
+  const r = await simularRequisicao(mw, { token, method: 'GET', url: '/motoristas', originalUrl: '/motoristas' });
+  assert.equal(r.nextCalled, false);
+  assert.equal(r.statusCode, 503);
+  assert.equal(r.body?.error, 'SessionDependencyUnavailable');
+});
+
+test('C1.2-4: Token legado quando consulta ao banco lança exceção → fail-closed (503 SessionDependencyUnavailable)', async () => {
+  const mockSupabase = {
+    from: () => ({
+      select: () => ({
+        eq: () => ({
+          maybeSingle: async () => { throw new Error('Database connection reset'); },
+        }),
+      }),
+    }),
+  };
+  const mw = criarVerifyTokenSec1({ cfg: cfgCompat, sessionService: {}, supabase: mockSupabase });
+  const token = assinarLegacyToken({ uid: 'u-leg-1' });
+
+  const r = await simularRequisicao(mw, { token, method: 'GET', url: '/motoristas', originalUrl: '/motoristas' });
+  assert.equal(r.nextCalled, false);
+  assert.equal(r.statusCode, 503);
+  assert.equal(r.body?.error, 'SessionDependencyUnavailable');
+});
+
+test('C1.2-5: Token legado quando consulta retorna erro → fail-closed (503 SessionDependencyUnavailable)', async () => {
+  const mockSupabase = {
+    from: () => ({
+      select: () => ({
+        eq: () => ({
+          maybeSingle: async () => ({ data: null, error: { message: 'Query timeout' } }),
+        }),
+      }),
+    }),
+  };
+  const mw = criarVerifyTokenSec1({ cfg: cfgCompat, sessionService: {}, supabase: mockSupabase });
+  const token = assinarLegacyToken({ uid: 'u-leg-1' });
+
+  const r = await simularRequisicao(mw, { token, method: 'GET', url: '/motoristas', originalUrl: '/motoristas' });
+  assert.equal(r.nextCalled, false);
+  assert.equal(r.statusCode, 503);
+  assert.equal(r.body?.error, 'SessionDependencyUnavailable');
+});
+
+test('C1.2-6: Token legado quando usuário não é encontrado na base → 401 SessionInvalid', async () => {
+  const mockSupabase = {
+    from: () => ({
+      select: () => ({
+        eq: () => ({
+          maybeSingle: async () => ({ data: null, error: null }),
+        }),
+      }),
+    }),
+  };
+  const mw = criarVerifyTokenSec1({ cfg: cfgCompat, sessionService: {}, supabase: mockSupabase });
+  const token = assinarLegacyToken({ uid: 'u-leg-nonexistent' });
+
+  const r = await simularRequisicao(mw, { token, method: 'GET', url: '/motoristas', originalUrl: '/motoristas' });
+  assert.equal(r.nextCalled, false);
+  assert.equal(r.statusCode, 401);
+  assert.equal(r.body?.error, 'SessionInvalid');
+});
+
+test('C1.2-7: Token legado com uid ausente ou incoerente → deny (401 SessionInvalid)', async () => {
+  const mockSupabase = {
+    from: () => ({
+      select: () => ({
+        eq: () => ({
+          maybeSingle: async () => ({ data: { senha_temporaria: false }, error: null }),
+        }),
+      }),
+    }),
+  };
+  const mw = criarVerifyTokenSec1({ cfg: cfgCompat, sessionService: {}, supabase: mockSupabase });
+  const tokenSemUid = jwt.sign(
+    { role: 'admin', is_super_admin: false },
+    SECRET,
+    { algorithm: 'HS256', expiresIn: '7d' }
+  );
+
+  const r = await simularRequisicao(mw, { token: tokenSemUid, method: 'GET', url: '/motoristas', originalUrl: '/motoristas' });
+  assert.equal(r.nextCalled, false);
+  assert.equal(r.statusCode, 401);
+  assert.equal(r.body?.error, 'SessionInvalid');
+});
+
 test('R1A-Exemptions: Demais rotas isentas (logout, logout-all, sessions, termos)', async () => {
   const sessionService = {
     validarSessaoParaAcesso: async () => ({

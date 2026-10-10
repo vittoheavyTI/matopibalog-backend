@@ -1,6 +1,6 @@
 const jwt = require('jsonwebtoken');
 const { getAuthRuntime } = require('../services/auth/authRuntime');
-const { criarVerifyTokenSec1, aplicarGateSenhaTemporaria } = require('./authSession');
+const { criarVerifyTokenSec1 } = require('./authSession');
 
 let verifyTokenSec1Memo = null;
 
@@ -46,7 +46,7 @@ function rejeitarTokenExterno(decoded, res) {
 }
 
 // Middleware 1: Verifica se o usuário está logado olhando o Cookie
-const verifyToken = async (req, res, next) => {
+const verifyToken = (req, res, next) => {
   const { cfg, sessionService } = getAuthRuntime();
   if (cfg.sessionsEnabled) {
     if (!verifyTokenSec1Memo) {
@@ -80,25 +80,7 @@ const verifyToken = async (req, res, next) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     if (rejeitarTokenExterno(decoded, res)) return undefined;
     req.user = decoded; // Salva os dados do usuário para a próxima rota
-
-    const uid = req.user.uid || req.user.id || req.user.sub;
-    if (uid && process.env.SUPABASE_SERVICE_KEY && process.env.SUPABASE_URL) {
-      try {
-        const supabase = require('../config/supabase');
-        if (supabase) {
-          const { data: uDb } = await supabase
-            .from('usuarios')
-            .select('senha_temporaria')
-            .eq('id', uid)
-            .maybeSingle();
-          if (uDb) {
-            req.user.senha_temporaria = uDb.senha_temporaria === true;
-          }
-        }
-      } catch {}
-    }
-
-    return aplicarGateSenhaTemporaria(req, res, next);
+    next();
   } catch (err) {
     return res.status(403).json({ error: 'Token inválido ou expirado.' });
   }

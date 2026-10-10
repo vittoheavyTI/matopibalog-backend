@@ -68,6 +68,13 @@ const mapMeToUser = (data: any): User => ({
   termos_pendentes_count: data.termos_pendentes_count ?? 0,
 });
 
+function isRecoverableFailure(err: any): boolean {
+  if (err?._sec1RefreshRecoverable === true) return true;
+  if (err?.config?._sec1RefreshRecoverable === true) return true;
+  if (err?.response?.config?._sec1RefreshRecoverable === true) return true;
+  return false;
+}
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -97,15 +104,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setSessionValidationUnavailable(false);
     } catch (err: any) {
       const status = err?.response?.status;
-      const authFalhou = status === 401
-        || (status === 403 && err?.response?.data?.error === 'Token inválido ou expirado.');
-      if (authFalhou) {
-        // Token realmente inválido/expirado no servidor → limpa e desloga.
+      const recoverableRefresh = isRecoverableFailure(err);
+      const authFalhouDefinitivo = !recoverableRefresh && (
+        status === 401 ||
+        (status === 403 && err?.response?.data?.error === 'Token inválido ou expirado.')
+      );
+      if (authFalhouDefinitivo) {
+        // Token definitivamente inválido/expirado no servidor → limpa e desloga.
         localStorage.removeItem('auth_token');
         setUser(null);
         setSessionValidationUnavailable(false);
       } else {
-        // Falha transitória (429, 5xx, offline/rede):
+        // Falha transitória (429, 5xx, offline/rede, ou refresh recuperável _sec1RefreshRecoverable=true):
         // NÃO apaga o token válido do localStorage, mas NUNCA constrói usuário
         // local nem autoriza UI protegida. Seta estado explícito recuperável.
         setUser(null);
@@ -150,15 +160,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return hydrated;
     } catch (err: any) {
       const status = err?.response?.status;
-      const authFalhou = status === 401
-        || (status === 403 && err?.response?.data?.error === 'Token inválido ou expirado.');
-      if (authFalhou) {
+      const recoverableRefresh = isRecoverableFailure(err);
+      const authFalhouDefinitivo = !recoverableRefresh && (
+        status === 401 ||
+        (status === 403 && err?.response?.data?.error === 'Token inválido ou expirado.')
+      );
+      if (authFalhouDefinitivo) {
         localStorage.removeItem('auth_token');
         setUser(null);
         setSessionValidationUnavailable(false);
         throw err;
       } else {
-        // Falha transitória pós-login: NÃO entra na aplicação nem constrói autoridade parcial.
+        // Falha transitória pós-login (ou refresh recuperável):
+        // NÃO entra na aplicação nem constrói autoridade parcial.
         // Preserva a credencial recém-emitida no localStorage e sinaliza validação indisponível.
         setUser(null);
         setSessionValidationUnavailable(true);

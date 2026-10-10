@@ -46,7 +46,16 @@ test('sem token → 401', async () => {
 });
 
 test('legado em modo compatível → next, req.user legado', async () => {
-  const mw = criarVerifyTokenSec1({ cfg: cfgCompat, sessionService: svcOk });
+  const mockSb = {
+    from: () => ({
+      select: () => ({
+        eq: () => ({
+          maybeSingle: async () => ({ data: { senha_temporaria: false }, error: null }),
+        }),
+      }),
+    }),
+  };
+  const mw = criarVerifyTokenSec1({ cfg: cfgCompat, sessionService: svcOk, supabase: mockSb });
   const r = await run(mw, tokenLegacy());
   assert.equal(r.nextCalled, true); assert.equal(r.req.authKind, 'legacy'); assert.equal(r.req.user.uid, 'u-leg');
 });
