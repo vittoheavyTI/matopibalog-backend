@@ -345,4 +345,84 @@ function registrar() {
     assert.equal((await sessRow(outra.session_id)).revoked_at, null, 'outro usuario permanece ativo');
     assert.equal((await pool.query(`SELECT count(*)::int c FROM public.auth_event_audit WHERE event='sessoes_usuario_revogadas' AND usuario_id=$1 AND motivo='role_alterada'`, [U1])).rows[0].c, 1);
   });
+
+  // ── R1B-B / MIGRATION 087: PER-CLIENT IDLE TESTS ─────────────────────────────
+  test('24. R1B-B: sessao web antiga (idle futuro, last_activity >30m) com refresh NAO usado => sessao_invalida', async () => {
+    const s = await criarSessao(pool, { clientType: 'web', idle: dias(6), abs: dias(30) });
+    await pool.query(`UPDATE public.auth_sessions SET last_activity_at = now() - interval '35 minutes' WHERE id=$1`, [s.session_id]);
+    const rot = await rotacionar(pool, s.token);
+    assert.equal(rot.resultado, 'sessao_invalida');
+    assert.equal(await ativos(s.session_id), 1, 'token original nao deve ser rotacionado nem revogado');
+  });
+
+  test('25. R1B-B: sessao web ativa (<30m) com refresh NAO usado => rotacao ok', async () => {
+    const s = await criarSessao(pool, { clientType: 'web', idle: dias(6), abs: dias(30) });
+    await pool.query(`UPDATE public.auth_sessions SET last_activity_at = now() - interval '10 minutes' WHERE id=$1`, [s.session_id]);
+    const rot = await rotacionar(pool, s.token);
+    assert.equal(rot.resultado, 'ok');
+    assert.equal(rot.client_type, 'web');
+  });
+
+  test('26. R1B-B: rotacao web bem-sucedida => idle_expires_at persistido <= now() + 30m e <= absolute_expires_at', async () => {
+    const abs = dias(30);
+    const s = await criarSessao(pool, { clientType: 'web', idle: min(20), abs });
+    const rot = await rotacionar(pool, s.token, { novoIdle: dias(7), novoExp: abs });
+    assert.equal(rot.resultado, 'ok');
+    const sessApos = await sessRow(s.session_id);
+    const idleApos = new Date(sessApos.idle_expires_at).getTime();
+    const agora = Date.now();
+    const teto30m = agora + 31 * 60000;
+    const piso30m = agora + 29 * 60000;
+    assert.ok(idleApos <= teto30m && idleApos >= piso30m, `idle_expires_at web deve ser ~30m (foi ${(idleApos - agora) / 60000}m)`);
+    assert.ok(idleApos <= new Date(abs).getTime(), 'idle_expires_at nao pode exceder teto absoluto');
+  });
+
+  test('27. R1B-B: sessao android >30m mas <7d com refresh NAO usado => rotacao tem sucesso', async () => {
+    const s = await criarSessao(pool, { clientType: 'android', idle: dias(7), abs: dias(30) });
+    await pool.query(`UPDATE public.auth_sessions SET last_activity_at = now() - interval '2 hours' WHERE id=$1`, [s.session_id]);
+    const rot = await rotacionar(pool, s.token, { novoIdle: dias(7) });
+    assert.equal(rot.resultado, 'ok');
+    assert.equal(rot.client_type, 'android');
+    const sessApos = await sessRow(s.session_id);
+    const idleApos = new Date(sessApos.idle_expires_at).getTime();
+    assert.ok(idleApos > Date.now() + 6 * 86400000, 'android deve preservar idle longo');
+  });
+
+  test('28. R1B-B: sessao ios e api preservam comportamento compativel nao-web', async () => {
+    for (const ct of ['ios', 'api']) {
+      const s = await criarSessao(pool, { clientType: ct, idle: dias(7), abs: dias(30) });
+      await pool.query(`UPDATE public.auth_sessions SET last_activity_at = now() - interval '45 minutes' WHERE id=$1`, [s.session_id]);
+      const rot = await rotacionar(pool, s.token, { novoIdle: dias(7) });
+      assert.equal(rot.resultado, 'ok', `clientType=${ct} deve suceder apos 45m`);
+      assert.equal(rot.client_type, ct);
+    }
+  });
+
+  test('29. R1B-B CRITICO: refresh web USADO com sessao inativa >30m reapresentado FORA da graca => reuse_detected (inatividade NAO suprime reuso)', async () => {
+    const s = await criarSessao(pool, { clientType: 'web', idle: dias(7), abs: dias(30) });
+    await rotacionar(pool, s.token, { grace: 10 });
+    await pool.query(`UPDATE public.auth_sessions SET last_activity_at = now() - interval '40 minutes' WHERE id=$1`, [s.session_id]);
+
+    const reuse = await reapresentarComIdade(s, 30, 10);
+    assert.equal(reuse.resultado, 'reuse_detected', 'deve detectar REUSE mesmo com sessao web inativa >30m');
+    const sessApos = await sessRow(s.session_id);
+    assert.ok(sessApos.revoked_at !== null, 'sessao deve ser revogada por reuse');
+    assert.equal(sessApos.revoke_reason, 'refresh_reuse_detected');
+    for (const t of await tokRows(s.session_id)) assert.ok(t.revoked_at !== null, 'todos tokens da familia revogados');
+    assert.ok((await auditos(s.session_id)).some(a => a.event === 'refresh_reuse' && a.resultado === 'reuse_detected'));
+  });
+
+  test('30. R1B-B: refresh web USADO reapresentado DENTRO da graca => refresh_already_rotated inalterado', async () => {
+    const s = await criarSessao(pool, { clientType: 'web', idle: min(25), abs: dias(30) });
+    await rotacionar(pool, s.token, { grace: 10 });
+    const col = await rotacionar(pool, s.token, { grace: 10 });
+    assert.equal(col.resultado, 'refresh_already_rotated');
+    assert.equal((await sessRow(s.session_id)).revoked_at, null, 'colisao dentro da janela nao revoga');
+  });
+
+  test('31. R1B-B: expiracao absoluta SEMPRE prevalece sobre idle web ativo', async () => {
+    const s = await criarSessao(pool, { clientType: 'web', idle: min(20), abs: min(-1) });
+    const rot = await rotacionar(pool, s.token);
+    assert.equal(rot.resultado, 'sessao_invalida', 'absoluta no passado rejeita mesmo com idle valido');
+  });
 }

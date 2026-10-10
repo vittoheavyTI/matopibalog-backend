@@ -25,8 +25,10 @@ test('defaults (só JWT_SECRET) → modo legado, sessões OFF, legado ON', () =>
   assert.equal(c.requireSession, false);
   assert.equal(c.allowLegacy, true);
   assert.equal(c.accessTtlSeconds, 600);
+  assert.equal(c.webIdleTtlSeconds, 1800);
   assert.equal(c.refreshReuseGraceSeconds, 10);
   assert.equal(c.refreshCookieSameSite, 'none');
+  assert.equal(c.summary().webIdleTtlSeconds, 1800);
 });
 
 // ── booleanos estritos ───────────────────────────────────────────────────────
