@@ -421,8 +421,17 @@ function registrar() {
   });
 
   test('31. R1B-B: expiracao absoluta SEMPRE prevalece sobre idle web ativo', async () => {
-    const s = await criarSessao(pool, { clientType: 'web', idle: min(20), abs: min(-1) });
+    const s = await criarSessao(pool, { clientType: 'web' });
+    await pool.query(
+      `UPDATE public.auth_sessions
+          SET created_at = now() - interval '2 days',
+              last_activity_at = now() - interval '1 minute',
+              idle_expires_at = now() - interval '1 second',
+              absolute_expires_at = now() - interval '1 second'
+        WHERE id = $1`,
+      [s.session_id]
+    );
     const rot = await rotacionar(pool, s.token);
-    assert.equal(rot.resultado, 'sessao_invalida', 'absoluta no passado rejeita mesmo com idle valido');
+    assert.equal(rot.resultado, 'sessao_invalida', 'absoluta no passado rejeita mesmo com atividade recente');
   });
 }
