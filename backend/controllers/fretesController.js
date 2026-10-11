@@ -12,6 +12,10 @@ const { revogarTrackingSeSemViagemAtiva } = require('../services/auth/trackingRe
 const { publicarStatusFrete } = require('../services/campaign/freightRealtimeSignal');
 const { ensureEffective } = require('../middlewares/requirePermission');
 const {
+  finalizarFreteComEnvelope,
+  normalizarErroEnvelope,
+} = require('../services/freteDigitalEnvelopeService');
+const {
   resolverEscopoOperacional,
   aplicarEscopoOperacionalQuery,
   escopoTemSelecaoInvalida,
@@ -29,7 +33,8 @@ const EXTENSAO_POR_MIME = {
 
 const acessoPermitidoAoFrete = (req, frete) => {
   if (req.user.is_super_admin === true) return true;
-  if (req.user.role === 'admin') {
+  const isInternal = req.user.role === 'admin' || (req.user.tipo && req.user.tipo !== 'motorista');
+  if (isInternal) {
     if (frete.empresa_id !== req.empresa_id) return false;
     if (req.operationalScope) return canAccessUnit(req.operationalScope, frete.unidade_operacional_id || null);
     return true;
@@ -184,6 +189,42 @@ const erroRpcCorrecaoFinanceira = (error) => {
   if (msg.includes('frete_financial_correction_field_not_allowed')) return 'frete_financial_correction_field_not_allowed';
   if (msg.includes('frete_operational_limit')) return 'frete_operational_limit';
   return null;
+};
+
+const responderErroEnvelope = (res, error) => {
+  const codigo = normalizarErroEnvelope(error);
+  if (!codigo) return false;
+  if (codigo === 'e38_frete_envelope_frete_not_found') {
+    res.status(404).json({ error: codigo, message: 'Frete nao encontrado.' });
+    return true;
+  }
+  if (codigo === 'E38_LEGACY_FINALIZED_WITHOUT_FORMAL_ENVELOPE') {
+    res.status(409).json({
+      error: codigo,
+      message: 'Este frete foi finalizado antes do envelope digital formal e permanece como legado sem snapshot formal.',
+    });
+    return true;
+  }
+  if (codigo === 'e38_frete_envelope_status_locked') {
+    res.status(409).json({ error: codigo, message: 'Frete cancelado nao pode ser finalizado.' });
+    return true;
+  }
+  if (codigo === 'e38_frete_envelope_request_id_conflict') {
+    res.status(409).json({
+      error: codigo,
+      message: 'Identificador de requisicao ja usado para outro fechamento.',
+    });
+    return true;
+  }
+  if (codigo === 'e38_frete_envelope_patch_field_not_allowed') {
+    res.status(422).json({
+      error: codigo,
+      message: 'Fechamento formal aceita apenas status, KM e valor final. Edite outros campos antes de finalizar.',
+    });
+    return true;
+  }
+  res.status(500).json({ error: codigo, message: 'Erro ao gerar envelope digital do frete.' });
+  return true;
 };
 
 const resolverActorUserIdAuditoria = async (uid) => {
@@ -392,7 +433,8 @@ exports.getById = async (req, res) => {
     // empresa; motorista só os próprios fretes.
     const isSuperAdmin = req.user.is_super_admin === true;
     if (!isSuperAdmin) {
-      if (req.user.role === 'admin') {
+      const isInternal = req.user.role === 'admin' || (req.user.tipo && req.user.tipo !== 'motorista');
+      if (isInternal) {
         req.operationalScope = await resolverEscopoOperacional(req, { empresaId: data.empresa_id });
         if (data.empresa_id !== req.empresa_id || !canAccessUnit(req.operationalScope, data.unidade_operacional_id || null)) {
           return res.status(403).json({ message: 'Acesso negado.' });
@@ -455,6 +497,205 @@ exports.getOdometroSignedUrl = async (req, res) => {
   } catch (error) {
     console.error('[fretesController:getOdometroSignedUrl] Erro:', error?.message || error);
     return res.status(500).json({ message: 'Erro ao gerar acesso temporário à foto.' });
+  }
+};
+
+async function carregarFreteAutorizado(req, id) {
+  const { data, error } = await supabase
+    .from('fretes')
+    .select('id, empresa_id, motorista_id, unidade_operacional_id, status')
+    .eq('id', id)
+    .single();
+  if (error || !data) return { status: 404, body: { message: 'Frete não encontrado.' } };
+
+  const isSuperAdmin = req.user.is_super_admin === true;
+  if (!isSuperAdmin) {
+    const isInternal = req.user.role === 'admin' || (req.user.tipo && req.user.tipo !== 'motorista');
+    if (isInternal) {
+      req.operationalScope = await resolverEscopoOperacional(req, { empresaId: data.empresa_id });
+      if (data.empresa_id !== req.empresa_id || !canAccessUnit(req.operationalScope, data.unidade_operacional_id || null)) {
+        return { status: 403, body: { message: 'Acesso negado.' } };
+      }
+    } else if (data.motorista_id !== req.user.uid) {
+      return { status: 403, body: { message: 'Acesso negado.' } };
+    }
+  }
+
+  return { frete: data };
+}
+
+function redactInternalFinancialFields(obj) {
+  if (!obj || typeof obj !== 'object') return obj;
+  const out = { ...obj };
+  const fields = ['valor_frete', 'valor_tonelada_km', 'toneladas', 'modalidade_calculo'];
+  for (const f of fields) delete out[f];
+  return out;
+}
+
+async function redigirEnvelopeSeAplicavel(req, envelope) {
+  if (!envelope) return envelope;
+  if (req.user?.is_super_admin === true) {
+    return envelope;
+  }
+
+  const isDriver = req.user?.tipo === 'motorista' || req.user?.role === 'motorista';
+
+  try {
+    const eff = await ensureEffective(req).catch(() => ({ permissions: {} }));
+    const hasFinanceView = Boolean(eff?.permissions && eff.permissions['finance.operational.view'] === true);
+
+    if (isDriver) {
+      const { redactFreteForDriver } = require('../services/permissions/driverFinancialRedaction');
+      const { data: mot } = await supabase.from('motoristas').select('percentual_comissao').eq('id', req.user.uid).maybeSingle().catch(() => ({ data: null }));
+      const visibility = eff?.driverFinancialVisibility || 'commission_only';
+      const pct = mot?.percentual_comissao ?? null;
+
+      const redactedSnapshot = redactFreteForDriver(envelope.frete_snapshot, visibility, pct);
+      const redactedFinancial = redactFreteForDriver(envelope.financial_snapshot, visibility, pct);
+
+      const clone = { ...envelope };
+      clone.frete_snapshot = redactedSnapshot;
+      clone.financial_snapshot = redactedFinancial;
+      if (clone.payload && typeof clone.payload === 'object') {
+        clone.payload = {
+          ...clone.payload,
+          frete_snapshot: redactedSnapshot,
+          financial_snapshot: redactedFinancial,
+        };
+      }
+      return clone;
+    }
+
+    // Usuário interno: se não possuir finance.operational.view, redige financeiro
+    if (!hasFinanceView) {
+      const redactedSnapshot = redactInternalFinancialFields(envelope.frete_snapshot);
+      const clone = { ...envelope };
+      clone.frete_snapshot = redactedSnapshot;
+      clone.financial_snapshot = {};
+      if (clone.payload && typeof clone.payload === 'object') {
+        clone.payload = {
+          ...clone.payload,
+          frete_snapshot: redactedSnapshot,
+          financial_snapshot: {},
+        };
+      }
+      return clone;
+    }
+
+    return envelope;
+  } catch (_) {
+    // Fail-closed fallback: redige tudo
+    const redactedSnapshot = redactInternalFinancialFields(envelope.frete_snapshot);
+    const clone = { ...envelope };
+    clone.frete_snapshot = redactedSnapshot;
+    clone.financial_snapshot = {};
+    if (clone.payload && typeof clone.payload === 'object') {
+      clone.payload = {
+        ...clone.payload,
+        frete_snapshot: redactedSnapshot,
+        financial_snapshot: {},
+      };
+    }
+    return clone;
+  }
+}
+
+exports.getEnvelopeDigital = async (req, res) => {
+  try {
+    const acesso = await carregarFreteAutorizado(req, req.params.id);
+    if (!acesso.frete) return res.status(acesso.status).json(acesso.body);
+
+    const { data, error } = await supabase
+      .from('frete_envelopes_digitais')
+      .select('id, empresa_id, frete_id, envelope_type, schema_version, status, source, request_id, actor_user_id, actor_auth_uid, actor_role, reason, correlation_id, sealed_at, frete_snapshot, financial_snapshot, audit_summary, metadata, payload')
+      .eq('frete_id', req.params.id)
+      .eq('envelope_type', 'formal_freight_closure')
+      .maybeSingle();
+    if (error) throw error;
+
+    if (!data) {
+      return res.status(200).json({
+        frete_id: req.params.id,
+        status: acesso.frete.status === 'finalizado' ? 'LEGACY_NO_FORMAL_ENVELOPE' : 'NO_FORMAL_ENVELOPE_YET',
+        envelope: null,
+      });
+    }
+
+    const envelopeFinal = await redigirEnvelopeSeAplicavel(req, data);
+    return res.status(200).json({ status: 'FORMAL_ENVELOPE_SEALED', envelope: envelopeFinal });
+  } catch (error) {
+    console.error('Erro ao buscar envelope digital do frete:', error);
+    return res.status(500).json({ message: 'Erro ao buscar envelope digital do frete.' });
+  }
+};
+
+function redigirEventosAuditoria(eventos, eff, isSuperAdmin) {
+  if (!Array.isArray(eventos) || isSuperAdmin) return eventos;
+  const { hasPermission } = require('../services/permissions/permissionResolver');
+  const hasFinanceView = hasPermission(eff, 'finance.operational.view');
+  const hasDocumentsView = hasPermission(eff, 'documents.view');
+  const hasFleetView = hasPermission(eff, 'fleet.view');
+
+  return eventos.map((ev) => {
+    const clone = { ...ev };
+    const meta = clone.metadata && typeof clone.metadata === 'object' ? { ...clone.metadata } : {};
+
+    // Finance authority redaction: sem finance.operational.view, nao expor valores/custos
+    if (!hasFinanceView) {
+      delete meta.valor;
+      delete meta.valor_frete;
+      delete meta.valor_tonelada_km;
+      delete meta.toneladas;
+      delete meta.amount;
+      delete meta.cost;
+      delete meta.financial_snapshot;
+    }
+
+    // Document authority redaction: sem documents.view, nao expor storage path / signed url
+    if (!hasDocumentsView && clone.source_kind === 'frete_documento_eventos') {
+      delete meta.storage_path;
+      delete meta.signed_url;
+      delete meta.path;
+      delete meta.file_path;
+    }
+
+    // Fleet authority redaction: sem fleet.view, nao expor custos ou detalhes avancados de frota
+    if (!hasFleetView && (clone.source_kind === 'maintenance_events' || clone.source_kind === 'odometer_events')) {
+      delete meta.cost;
+      delete meta.supplier;
+      delete meta.parts;
+    }
+
+    clone.metadata = meta;
+    return clone;
+  });
+}
+
+exports.getAuditoriaUnificadaFrete = async (req, res) => {
+  try {
+    const acesso = await carregarFreteAutorizado(req, req.params.id);
+    if (!acesso.frete) return res.status(acesso.status).json(acesso.body);
+
+    const limit = Number(req.query.limit || 100);
+    const freteId = String(req.params.id);
+    const { data, error } = await supabase.rpc('listar_auditoria_unificada', {
+      p_empresa_id: acesso.frete.empresa_id,
+      p_limit: Number.isFinite(limit) ? limit : 100,
+      p_before_occurred_at: req.query.before_occurred_at || null,
+      p_before_event_id: req.query.before_event_id || null,
+      p_entity_type: 'frete',
+      p_entity_id: freteId,
+    });
+    if (error) throw error;
+
+    const isSuperAdmin = req.user?.is_super_admin === true;
+    const eff = isSuperAdmin ? null : await ensureEffective(req).catch(() => ({ permissions: {} }));
+    const eventosRedigidos = redigirEventosAuditoria(data || [], eff, isSuperAdmin);
+
+    return res.status(200).json({ frete_id: freteId, eventos: eventosRedigidos });
+  } catch (error) {
+    console.error('Erro ao buscar auditoria unificada do frete:', error);
+    return res.status(500).json({ message: 'Erro ao buscar auditoria unificada do frete.' });
   }
 };
 
@@ -579,7 +820,7 @@ exports.update = async (req, res) => {
       }
     }
 
-    if (contemCampoFinanceiro(req.body || {})) {
+    if (req.body?.status !== 'finalizado' && contemCampoFinanceiro(req.body || {})) {
       return res.status(422).json({
         error: 'frete_financial_correction_endpoint_required',
         message: 'Use a correcao financeira auditada para alterar modalidade, valores, toneladas ou KM do frete.',
@@ -674,6 +915,37 @@ exports.update = async (req, res) => {
     });
     if (!limite.ok) return res.status(422).json(respostaLimiteFrete(limite));
 
+    if (allowedUpdate.status === 'finalizado') {
+      if (!isSuperAdmin) {
+        const { hasPermission } = require('../services/permissions/permissionResolver');
+        const eff = await ensureEffective(req);
+        if (!hasPermission(eff, 'freight.finish')) {
+          return res.status(403).json({
+            message: 'Permissão insuficiente para finalizar frete.',
+            permission: 'freight.finish',
+          });
+        }
+      }
+
+      const camposPermitidosNoFechamento = new Set(['status', 'km_inicial', 'km_final', 'valor_frete']);
+      const camposNaoAtomicos = Object.keys(allowedUpdate).filter((campo) => !camposPermitidosNoFechamento.has(campo));
+      if (camposNaoAtomicos.length > 0) {
+        return res.status(422).json({
+          error: 'frete_finalization_requires_dedicated_closure',
+          fields: camposNaoAtomicos,
+          message: 'Edite estes campos antes de finalizar. O fechamento formal grava status, KM, valor e envelope em uma unica transacao.',
+        });
+      }
+
+      const resultado = await finalizarFreteComEnvelope(supabase, req, {
+        freteId: id,
+        empresaId: checkData.empresa_id,
+        patch: allowedUpdate,
+        reason: 'formal freight closure via patch update',
+      });
+      return res.status(200).json(resultado?.frete || null);
+    }
+
     const { data, error } = await supabase
       .from('fretes')
       .update(allowedUpdate)
@@ -684,6 +956,7 @@ exports.update = async (req, res) => {
     if (error) throw error;
     res.status(200).json(data);
   } catch (error) {
+    if (responderErroEnvelope(res, error)) return;
     console.error('Erro ao atualizar frete:', error);
     res.status(500).json({ message: 'Erro ao atualizar frete.' });
   }
@@ -844,14 +1117,13 @@ exports.finalizar = async (req, res) => {
       updatePayload.valor_frete = calc;
     }
 
-    const { data, error } = await supabase
-      .from('fretes')
-      .update(updatePayload)
-      .eq('id', id)
-      .select()
-      .single();
-
-    if (error) throw error;
+    const resultado = await finalizarFreteComEnvelope(supabase, req, {
+      freteId: id,
+      empresaId: frete.empresa_id,
+      patch: updatePayload,
+      reason: 'formal freight closure via finalizar endpoint',
+    });
+    const data = resultado?.frete;
     notificacaoService.notificarViagemFinalizada(data, { actorId: req.user?.uid }).catch(() => {});
     // SEC-1: fim de viagem → se o motorista não tem mais viagem ativa, revoga suas
     // credenciais de tracking (best-effort; a validação já rejeita canonicamente).
@@ -860,6 +1132,7 @@ exports.finalizar = async (req, res) => {
     publicarStatusFrete(data);
     res.status(200).json(data);
   } catch (error) {
+    if (responderErroEnvelope(res, error)) return;
     console.error('Erro ao finalizar frete:', error);
     res.status(500).json({ message: 'Erro ao finalizar viagem.' });
   }

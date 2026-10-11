@@ -31,7 +31,14 @@ const criarController = (frete) => {
     };
     return b;
   };
-  const supabaseMock = { from(tabela) { return builder(tabela); } };
+  const supabaseMock = {
+    from(tabela) { return builder(tabela); },
+    async rpc(nome, params) {
+      assert.equal(nome, 'e38_finalize_frete_with_envelope');
+      capt.updatePayload = params.p_patch;
+      return { data: { frete: { ...frete, ...params.p_patch }, envelope: { id: 'env-1' } }, error: null };
+    },
+  };
   const originalLoad = Module._load;
   delete require.cache[controllerPath];
   try {

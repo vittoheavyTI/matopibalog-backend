@@ -54,10 +54,12 @@ router.post('/localizacao/credencial', trackingCredentialController.emitir);
 // reconferia role==='admin', que não negava ninguém interno (RBV9-INV-110).
 router.post('/:id/correcao-financeira', requirePermission('finance.operational.manage'), validate(correcaoFinanceiraFreteSchema), fretesController.corrigirFinanceiro);
 router.get('/:id', requirePermission('freight.view'), fretesController.getById);
+router.get('/:id/envelope-digital', requirePermission('freight.view'), fretesController.getEnvelopeDigital);
+router.get('/:id/auditoria-unificada', requirePermission('freight.view'), fretesController.getAuditoriaUnificadaFrete);
 router.post('/:id/odometro/inicial', upload.single('foto'), fretesController.uploadOdometroInicial);
 router.post('/:id/odometro/final', upload.single('foto'), fretesController.uploadOdometroFinal);
 router.get('/:id/odometro/:tipo/url', fretesController.getOdometroSignedUrl);
-router.post('/:id/finalizar', fretesController.finalizar);
+router.post('/:id/finalizar', requirePermission('freight.finish'), fretesController.finalizar);
 // Documentos fiscais do frete (CTe/MDF-e/NF-e e outros). Bucket privado,
 // acesso por empresa/frete. Sem DELETE no piloto.
 // P2.10 — leitura de documentos por documents.view (motorista tem por template e o

@@ -1,10 +1,13 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { Plus, X, Search, Filter, Truck, MapPin, Calendar, DollarSign, Gauge, Trash2, Edit, Check, AlertTriangle, ChevronLeft, ChevronDown, ChevronRight, Fuel, FileText, TrendingUp, Save, Unlock, Lock, Camera, Upload, Ban } from 'lucide-react';
+import { Plus, X, Search, Filter, Truck, MapPin, Calendar, DollarSign, Gauge, Trash2, Edit, Check, AlertTriangle, ChevronLeft, ChevronDown, ChevronRight, Fuel, FileText, TrendingUp, Save, Unlock, Lock, Camera, Upload, Ban, Download, ShieldCheck } from 'lucide-react';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { useLancamentosRealtime } from '../hooks/useLancamentosRealtime';
 import { format } from 'date-fns';
 import { formatCurrency } from '../utils';
 import api, { newClientRequestId } from '../api';
+import { desenharBrandingRelatorio } from '../utils/relatorioBranding';
 import { mensagemErro } from '../utils/mensagemErro';
 import { erroSanidadeTonKm, erroSanidadeValorFixo, TONELADAS_MAX } from '../utils/limitesFrete';
 import { freteTonKmIncompativelAtual, montarRecuperacaoInlineFrete, obterErroLimiteFrete, type InlineFreteRecovery } from '../utils/freteOperationalLimit';
@@ -116,6 +119,8 @@ export const GerenciamentoViagens: React.FC = () => {
   // download via signed URL de TTL curto.
   const [docsPorFrete, setDocsPorFrete] = useState<Record<string, any[]>>({});
   const [docsCarregando, setDocsCarregando] = useState<Set<string>>(new Set());
+  const [envelopesPorFrete, setEnvelopesPorFrete] = useState<Record<string, any>>({});
+  const [envelopesCarregando, setEnvelopesCarregando] = useState<Set<string>>(new Set());
   const [arquivoPreview, setArquivoPreview] = useState<ArquivoPreview | null>(null);
   const [tipoDocumentoNovoFrete, setTipoDocumentoNovoFrete] = useState<TipoDocumentoFrete>('cte');
   const [documentosNovoFrete, setDocumentosNovoFrete] = useState<DocumentoFretePendente[]>([]);
@@ -159,6 +164,82 @@ export const GerenciamentoViagens: React.FC = () => {
     if (doc.tipo === 'outro') form.append('nome_documento', doc.file.name);
     form.append('documento', doc.file);
     return api.post(`/fretes/${freteId}/documentos`, form, { timeout: 120000 }); // upload (ate ~10MB/conexao lenta): 120s, override do default de 30s
+  };
+
+  const carregarEnvelopeFrete = useCallback(async (freteId: string) => {
+    if (envelopesCarregando.has(freteId)) return null;
+    setEnvelopesCarregando(prev => new Set(prev).add(freteId));
+    try {
+      const { data } = await api.get(`/fretes/${freteId}/envelope-digital`);
+      setEnvelopesPorFrete(prev => ({ ...prev, [freteId]: data }));
+      return data;
+    } finally {
+      setEnvelopesCarregando(prev => {
+        const next = new Set(prev);
+        next.delete(freteId);
+        return next;
+      });
+    }
+  }, [envelopesCarregando]);
+
+  const baixarPdfEnvelope = async (freteId: string) => {
+    const resposta = envelopesPorFrete[freteId] || await carregarEnvelopeFrete(freteId);
+    const envelope = resposta?.envelope;
+    if (!envelope?.payload) {
+      alert(resposta?.status === 'LEGACY_NO_FORMAL_ENVELOPE'
+        ? 'Frete legado finalizado antes do envelope digital formal.'
+        : 'Este frete ainda não possui envelope digital formal.');
+      return;
+    }
+
+    const payload = envelope.payload;
+    const frete = payload.frete_snapshot || {};
+    const financeiro = payload.financial_snapshot || {};
+    const hash = envelope.envelope_hash || payload.envelope_hash || '-';
+    const doc = new jsPDF();
+    await desenharBrandingRelatorio(doc);
+    doc.setFontSize(14);
+    doc.text('Envelope Digital do Frete', 14, 32);
+    doc.setFontSize(9);
+    doc.text(`Envelope: ${envelope.id}`, 14, 39);
+    doc.text(`Selado em: ${gvFmt(envelope.sealed_at, 'dd/MM/yyyy HH:mm')}`, 14, 44);
+    doc.text(`Fonte: ${envelope.source} · Schema: ${envelope.schema_version}`, 14, 49);
+    doc.text(`Hash de integridade (SHA-256): ${hash}`, 14, 54);
+
+    autoTable(doc, {
+      startY: 60,
+      head: [['Campo', 'Valor persistido no envelope']],
+      body: [
+        ['Frete', envelope.frete_id],
+        ['Hash (SHA-256)', hash],
+        ['Origem', frete.origem || '-'],
+        ['Destino', frete.destino || '-'],
+        ['Status', frete.status || '-'],
+        ['Motorista', frete.motorista_id || '-'],
+        ['KM inicial', financeiro.km_inicial ?? '-'],
+        ['KM final', financeiro.km_final ?? '-'],
+        ['Modalidade', financeiro.modalidade_calculo || '-'],
+        ['Valor do frete', financeiro.valor_frete != null ? formatCurrency(Number(financeiro.valor_frete)) : '-'],
+        ['Quem recebeu', financeiro.quem_recebeu || '-'],
+        ['Motivo', payload.reason || envelope.reason || '-'],
+        ['Request ID', payload.request_id || envelope.request_id || '-'],
+        ['Correlation ID', payload.correlation_id || envelope.correlation_id || '-'],
+      ],
+      styles: { fontSize: 8, cellPadding: 2 },
+      headStyles: { fillColor: [30, 64, 175] },
+      columnStyles: { 0: { cellWidth: 42, fontStyle: 'bold' } },
+    });
+
+    const finalY = (doc as any).lastAutoTable?.finalY || 120;
+    autoTable(doc, {
+      startY: finalY + 8,
+      head: [['Resumo de auditoria', 'Valor']],
+      body: Object.entries(envelope.audit_summary || {}).map(([k, v]) => [k, String(v ?? '-')]),
+      styles: { fontSize: 8, cellPadding: 2 },
+      headStyles: { fillColor: [15, 118, 110] },
+    });
+
+    doc.save(`envelope-digital-frete-${String(freteId).slice(0, 8)}.pdf`);
   };
 
   const [formData, setFormData] = useState({
@@ -1616,6 +1697,41 @@ export const GerenciamentoViagens: React.FC = () => {
                         {itensFrete.length === 0
                           ? <p className="text-gray-400 text-sm text-center py-3">Nenhum lançamento financeiro vinculado a este frete.</p>
                           : itensFrete.map(renderLancamentoItem)}
+                        <div className="border border-slate-200 rounded-lg p-3 bg-slate-50/60">
+                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                            <div className="flex items-start gap-2">
+                              <ShieldCheck size={18} className="text-slate-600 mt-0.5" />
+                              <div>
+                                <p className="text-sm font-bold text-slate-800">Envelope digital</p>
+                                <p className="text-xs text-slate-500">
+                                  {envelopesPorFrete[f.id]?.status === 'FORMAL_ENVELOPE_SEALED'
+                                    ? `Selado em ${gvFmt(envelopesPorFrete[f.id]?.envelope?.sealed_at, 'dd/MM/yyyy HH:mm')}${envelopesPorFrete[f.id]?.envelope?.envelope_hash ? ` · SHA: ${envelopesPorFrete[f.id]?.envelope?.envelope_hash.slice(0, 8)}...` : ''}`
+                                    : envelopesPorFrete[f.id]?.status === 'LEGACY_NO_FORMAL_ENVELOPE'
+                                      ? 'Frete legado sem snapshot formal'
+                                      : 'Snapshot formal do fechamento, quando existente'}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={() => carregarEnvelopeFrete(f.id)}
+                                disabled={envelopesCarregando.has(f.id)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-slate-300 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-60"
+                              >
+                                <FileText size={14} /> Verificar
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => baixarPdfEnvelope(f.id)}
+                                disabled={envelopesCarregando.has(f.id)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-blue-600 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+                              >
+                                <Download size={14} /> PDF
+                              </button>
+                            </div>
+                          </div>
+                        </div>
                         {renderDocumentosFrete(f.id)}
                         <FreteEpodOcorrencias freteId={f.id} />
                         {(f.id === freteQuery && painelQuery === 'localizacao') && <FreteLocalizacao freteId={f.id} />}
