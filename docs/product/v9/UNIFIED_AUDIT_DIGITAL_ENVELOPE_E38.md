@@ -1,47 +1,62 @@
 # E3.8 — Auditoria Unificada + Envelope Digital
 
-Status neste PR: `E38_REENTRY_IMPLEMENTED_REVIEW_REQUIRED`.
+Status: `CLOSED` / `ATIVO_PROD`.
+`E38_UNIFIED_AUDIT=ATIVO_PROD`
+`E38_DIGITAL_ENVELOPE=ATIVO_PROD`
+`E38_TECHNICALLY_CLOSED=true`
 
-## Baseline
+## Baseline e Estado Final de Produção
 
-- `origin/main`: `f7a5f6cd64e76ca7098dc67751e8b865bfcd0a30` (inclui Auth R1A, R1B-A, R1B-B e promoção R1B-C strict auth)
-- Auth Strict Invariants: `authMode=strict`, `AUTH_REQUIRE_SESSION=true`, `AUTH_ALLOW_LEGACY_TOKENS=false`, `webIdleTtlSeconds=1800`
-- Migration 084: aplicada em produção (`20261008152836 084_erp_integration_hub_operational_core`)
-- Migration 085: aplicada em produção (`20261009125633 085_unified_audit_digital_envelope`)
-- Migration 087: aplicada em produção (`087_auth_sessions_per_client_idle`)
-- Migration 086: **NÃO aplicada** em produção (pendente de rollout pós-deploy)
-- PR #490: permanece `OPEN_DRAFT_HOLD`, intocado
-- PR #501: histórico preservado `OPEN_DRAFT`, intocado (reentrada limpa via nova branch `reentry/e3-8-unified-audit-envelope`)
+- `main` baseline / commit de merge: `f1d92f17a180401e5ebc814a23974294c5fc4f60`
+- PR #505: `MERGED=true`, `MERGE_SHA=f1d92f17a180401e5ebc814a23974294c5fc4f60`
+- Railway backend production deploy:
+  - `DEPLOYMENT_ID=4a93ab5f-e3cf-4eca-9ed5-650b26ca3915`
+  - `DEPLOYMENT_STATUS=SUCCESS`
+  - `DEPLOYED_SHA=f1d92f17a180401e5ebc814a23974294c5fc4f60`
+  - Backend: `ONLINE`
+- Auth Strict Invariants (preservados e ativos):
+  - `authMode=strict`, `AUTH_REQUIRE_SESSION=true`, `AUTH_ALLOW_LEGACY_TOKENS=false`, `webIdleTtlSeconds=1800`
+- Migration state em produção:
+  - 085: `APPLIED=true`, `REGISTERED=true`, `version=20261009125633`, `name=085_unified_audit_digital_envelope`
+  - 087: `APPLIED=true`, `REGISTERED=true`, `version=20261010172936`, `name=087_auth_sessions_per_client_idle`
+  - 086: `APPLIED=true`, `REGISTERED=true`, `version=20261011204500`, `name=086_e38_formal_envelope_enforcement`
+  - Statement canônico da migration 086: 2289 bytes, SHA-256 `24aa3763cf7f1050bc83f28c4ade627409fc112b04964922b23359bdaa9ea6b0`, Git blob `5d2b21ae94d4345becebbbd8c4dcfc0a064a68ec`, `statement_count=1`.
+  - Sequência real de rollout (intencional, sem renumeração): `085 -> 087 -> backend E3.8 deploy -> 086`.
+- PRs relacionados:
+  - PR #505: `MERGED`
+  - PR #501: `OPEN`, `DRAFT`, histórico/superado (intocado)
+  - PR #490: `OPEN`, `DRAFT`, `HOLD` (intocado)
 
 ## Decisão de Rollout Seguro em Duas Fases (Two-Phase Staged Rollout)
 
-Para evitar deadlocks entre banco e código (onde o banco pré-E3.8 não suporta envelope e a migration bloqueia finalizações antigas), a entrega é dividida em duas migrations:
+Para evitar deadlocks entre banco e código (onde o banco pré-E3.8 não suporta envelope e a migration bloqueia finalizações antigas), a entrega foi dividida em duas migrations:
 
-1. **Fase A — Migration `085_unified_audit_digital_envelope.sql` (Foundation / Backward-Compatible) — JÁ APLICADA EM PRODUÇÃO**:
+1. **Fase A — Migration `085_unified_audit_digital_envelope.sql` (Foundation / Backward-Compatible) — APLICADA E REGISTRADA EM PRODUÇÃO**:
    - Cria a tabela `frete_envelopes_digitais`.
    - Cria a RPC canônica `e38_finalize_frete_with_envelope`.
    - Cria a função de leitura `listar_auditoria_unificada`.
    - RLS, triggers append-only do envelope, índices e grants mínimos para `service_role`.
    - **NÃO instala constraint trigger na tabela fretes**. Finalizações legadas diretas continuavam funcionando.
 
-2. **Fase B — Migration `086_e38_formal_envelope_enforcement.sql` (Post-Deploy Enforcement) — PENDENTE**:
+2. **Fase B — Migration `086_e38_formal_envelope_enforcement.sql` (Post-Deploy Enforcement) — APLICADA E REGISTRADA EM PRODUÇÃO**:
    - Instala a função `e38_check_frete_finalizado_envelope()` e o constraint trigger `trg_e38_check_frete_finalizado_envelope` (`DEFERRABLE INITIALLY DEFERRED`) em `public.fretes`.
    - Revoga privilégios EXECUTE de `PUBLIC`, `anon` e `authenticated` nas funções auxiliares (`frete_envelopes_digitais_append_only`, `e38_jsonb_pick_existing`), concedendo exclusivamente a `service_role`.
    - Ativa a restrição estrita `NO_FINALIZED_WITHOUT_FORMAL_ENVELOPE=true`.
-   - **DEVE SER APLICADA SOMENTE APÓS O DEPLOY DO BACKEND E3.8 EM PRODUÇÃO**.
+   - Aplicada exclusivamente após o deploy do backend E3.8 sob gate específico de migration autorizado pelo OWNER.
 
-## Sequência Canônica de Rollout
+## Sequência Concluída de Rollout e Fechamento
 
-1. Migration `085` (Foundation) já aplicada e verificada em produção.
-2. Migration `087` (Auth Session Idle) já aplicada e verificada em produção.
-3. PR de reentrada E3.8 (`reentry/e3-8-unified-audit-envelope`) revisado e testado sobre a `main` atual.
-4. Ready + Merge do PR de reentrada em `main`.
-5. Auto-deploy normal do backend E3.8 em produção.
-6. Validação read-only pós-deploy (verificar que finalizações chamam a RPC canônica e produzem envelope).
-7. Gate humano separado (Gate 3) para autorização da migration `086` em produção.
-8. Aplicação da migration `086` (Enforcement) em produção pelo OWNER.
-9. Postcheck do enforcement e das ACLs de funções auxiliares.
-10. Smoke de produção final e fechamento da macrofrente E3.8.
+1. Migration `085` (Foundation) aplicada e registrada em produção (`version=20261009125633`).
+2. Migration `087` (Auth Session Idle) aplicada e registrada em produção (`version=20261010172936`).
+3. PR #505 reentrando E3.8 revisado, testado e aprovado com 11/11 CI checks verdes.
+4. Ready + Merge do PR #505 em `main` no commit `f1d92f17a180401e5ebc814a23974294c5fc4f60`.
+5. Auto-deploy do backend E3.8 no Railway (`4a93ab5f-e3cf-4eca-9ed5-650b26ca3915`, SUCCESS, ONLINE).
+6. Postcheck read-only pós-deploy confirmando saúde e integridade operacional.
+7. Gate 3 aprovado pelo OWNER para aplicação da migration 086.
+8. Migration `086` (Enforcement) aplicada e registrada em produção (`version=20261011204500`, SHA-256 `24aa3763cf7f1050bc83f28c4ade627409fc112b04964922b23359bdaa9ea6b0`).
+9. Postcheck do enforcement e das ACLs de funções auxiliares (service_role-only).
+10. Preservação dos 51 fretes históricos finalizados sem envelope formal (`LEGACY_NO_FORMAL_ENVELOPE`, sem backfill).
+11. Macrofrente E3.8 tecnicamente fechada em produção (`E38_TECHNICALLY_CLOSED=true`).
 
 ## Resolução dos Findings Wave 2
 
@@ -94,10 +109,41 @@ Para evitar deadlocks entre banco e código (onde o banco pré-E3.8 não suporta
 | 13 | `odometer_events` | Eventos de odômetro | Sim (`frete_id`) |
 | 14 | `maintenance_events` | Manutenção de frota | Não (Global / Veículo) |
 
-## Gates e Próximo Passo
+## Estado Final de Enforcement (Migration 086)
 
-O PR histórico #501 permanece intocado em **DRAFT**. A entrega prossegue pelo novo PR de reentrada `reentry/e3-8-unified-audit-envelope`.
+A migration `086_e38_formal_envelope_enforcement` está aplicada e registrada em produção (`version=20261011204500`, 2289 bytes, SHA-256 `24aa3763cf7f1050bc83f28c4ade627409fc112b04964922b23359bdaa9ea6b0`, Git blob `5d2b21ae94d4345becebbbd8c4dcfc0a064a68ec`, `statement_count=1`).
 
-- **Foundation 085**: JÁ APLICADA em produção.
-- **Backend E3.8**: Pronto para review, CI completo e merge na `main` atual (Strict Auth).
-- **Enforcement 086**: Pendente de gate humano (Gate 3) para aplicação em produção **SOMENTE APÓS** o deploy do backend E3.8.
+- **Constraint Trigger**: `trg_e38_check_frete_finalizado_envelope` em `public.fretes`
+  - `exists = true`
+  - `DEFERRABLE = true`
+  - `INITIALLY_DEFERRED = true`
+  - Restrição ativa: `NO_FINALIZED_WITHOUT_FORMAL_ENVELOPE = true`
+- **Função Verificadora**: `public.e38_check_frete_finalizado_envelope()`
+  - `SECURITY DEFINER = true`
+  - `search_path = public,pg_temp`
+  - ACL de execução: `PUBLIC=false`, `anon=false`, `authenticated=false`, `service_role=true`
+- **Funções Auxiliares**:
+  - `public.e38_jsonb_pick_existing(jsonb,text[])`: `PUBLIC=false`, `anon=false`, `authenticated=false`, `service_role=true`
+  - `public.frete_envelopes_digitais_append_only()`: `PUBLIC=false`, `anon=false`, `authenticated=false`, `service_role=true`
+- **RPC Canônica de Finalização**:
+  - `public.e38_finalize_frete_with_envelope(...)`: `PUBLIC=false`, `anon=false`, `authenticated=false`, `service_role=true`
+
+## Dados Históricos e Escopo Prospectivo
+
+- No postcheck de fechamento da macrofrente:
+  - Total de envelopes formais (`frete_envelopes_digitais`): **0**
+  - Fretes históricos finalizados sem envelope formal: **51**
+- **Preservação intencional**: Esses 51 registros históricos foram intencionalmente preservados sem backfill (`LEGACY_NO_FORMAL_ENVELOPE`). Não houve backfill histórico.
+- **Enforcement prospectivo**: O enforcement da 086 é estritamente prospectivo — qualquer `INSERT` com status já finalizado ou qualquer transição de status para `finalizado` exige exatamente um envelope formal emitido na mesma transação.
+
+## Status de Fechamento da Macrofrente E3.8
+
+- `E38_UNIFIED_AUDIT = ATIVO_PROD`
+- `E38_DIGITAL_ENVELOPE = ATIVO_PROD`
+- `MIGRATION_085 = APPLIED_REGISTERED`
+- `MIGRATION_086 = APPLIED_REGISTERED`
+- `MIGRATION_087 = APPLIED_REGISTERED`
+- `E38_TECHNICALLY_CLOSED = true`
+- `PR505 = MERGED` (`MERGE_SHA = f1d92f17a180401e5ebc814a23974294c5fc4f60`)
+- `PR501 = OPEN_DRAFT` (superado pelo PR #505, intocado)
+- `PR490 = OPEN_DRAFT_HOLD` (intocado)
