@@ -1,7 +1,7 @@
 # Matopiba Log — CONTEXT BRIDGE V9
 
 > **Handoff compacto.** Leia este arquivo primeiro ao retomar em outro chat/agente. Os detalhes estão nos documentos linkados no fim.
-> Atualizado: **2026-10-11** (E3.8 Auditoria Unificada + Envelope Digital reentrada em branch limpa sobre main strict auth f7a5f6c; 085 e 087 aplicadas em produção; 086 pendente; PR #501 e #490 permanecem hold).
+> Atualizado: **2026-10-11** (E3.8 Auditoria Unificada + Envelope Digital fechada tecnicamente em produção: PR #505 MERGED no commit f1d92f1, deploy Railway SUCCESS 4a93ab5f, migrations 085, 087 e 086 aplicadas e registradas; enforcement prospectivo ativo; PR #501 superado em draft e PR #490 permanece hold).
 
 ---
 
@@ -17,10 +17,10 @@
 
 | | |
 |---|---|
-| Current main baseline | **`f7a5f6cd64e76ca7098dc67751e8b865bfcd0a30`**. Inclui Wave de Auth (R1A temp-passwords, R1B-A mandatory-terms, R1B-B idle-session e R1B-C strict-auth promotion: `authMode=strict`, `AUTH_REQUIRE_SESSION=true`, `AUTH_ALLOW_LEGACY_TOKENS=false`, `webIdleTtlSeconds=1800`). |
-| Deploy produção | Railway `matopibalog-backend` deploy `a872720c-c6e7-4ea9-ba22-08d3833041d8` **SUCCESS** (commit `f7a5f6cd64e76ca7098dc67751e8b865bfcd0a30`, strict mode ativo, 1 réplica running). |
+| Current main baseline | **`f1d92f17a180401e5ebc814a23974294c5fc4f60`**. Inclui Wave de Auth (R1A, R1B-A, R1B-B, R1B-C strict auth: `authMode=strict`, `AUTH_REQUIRE_SESSION=true`, `AUTH_ALLOW_LEGACY_TOKENS=false`, `webIdleTtlSeconds=1800`) e E3.8 Auditoria Unificada + Envelope Digital (PR #505 MERGED). |
+| Deploy produção | Railway `matopibalog-backend` deploy `4a93ab5f-e3cf-4eca-9ed5-650b26ca3915` **SUCCESS** (commit `f1d92f17a180401e5ebc814a23974294c5fc4f60`, strict mode ativo, backend ONLINE, 1 réplica running). |
 | Health | **HTTP 200** `{"status":"UP"}` em `https://api.matopibalog.com.br/health` |
-| Banco | Supabase `rjahjogidyndphdxevom` · migrations `084`, `085` (`20261009125633 085_unified_audit_digital_envelope`), e `087` (`087_auth_sessions_per_client_idle`) aplicadas · `086` pendente pós-deploy backend |
+| Banco | Supabase `rjahjogidyndphdxevom` · migrations `084`, `085` (`20261009125633 085_unified_audit_digital_envelope`), `087` (`20261010172936 087_auth_sessions_per_client_idle`) e `086` (`20261011204500 086_e38_formal_envelope_enforcement`) todas APLICADAS e REGISTRADAS · Ordem intencional de rollout: 085 -> 087 -> backend deploy -> 086 · Enforcement prospectivo ativo (`NO_FINALIZED_WITHOUT_FORMAL_ENVELOPE=true`). 51 fretes históricos finalizados preservados sem envelope formal (sem backfill). |
 | Asaas | **DESARMADO**: sem `ASAAS_API_KEY`, provider=fake, production=false, allowlist vazia, outbox=false, `billing_outbox`=0. **Não reativar sem autorização.** |
 | Crons | 3 (faturas mensal, expirarTrials dry-run, inadimplência dry-run) — todos SUCCESS/inertes |
 
@@ -36,13 +36,13 @@ Matopiba vira **frota/operação-centric** (D-001): o eixo é o **veículo/compo
 
 ## Macrofrente atual
 
-**`CURRENT_MACROFRONT = E3.8_UNIFIED_AUDIT_DIGITAL_ENVELOPE`**.
+**`CURRENT_MACROFRONT = E3.8_UNIFIED_AUDIT_DIGITAL_ENVELOPE (CLOSED em produção)`**.
 
 **Product Stabilization Wave V1 = RECONCILED.** S1 PR #491 (`MERGE_SHA=f8cbd109`), S4 PR #492 (`MERGE_SHA=be9be5e`), DB-SEC-1 PR #494 (`MERGE_SHA=e31bfc3`), S2 PR #496 (`MERGE_SHA=d76838a`) e S3 PR #497 (`MERGE_SHA=1aeb5e6`) estão todos ancestrais de `origin/main`. Não há `BLOCKER`, `HIGH` ou `MEDIUM` real aberto na onda de estabilização.
 
 **PR #490 / ERP Hub permanece HOLD.** Estado lido sem tocar a branch: `OPEN`, `DRAFT`, `NOT_MERGED`, head `51961d3e46b066d59cbb6497aa470f079b0f3137`. Não marcar Ready, não mergear e não rebasear o #490.
 
-**E3.8 Reentrada limpa sobre main strict auth.** PR histórico #501 preservado intacto em DRAFT. A reentrada ocorre pela branch `reentry/e3-8-unified-audit-envelope` sobre a `main` atual (`f7a5f6cd64e76ca7098dc67751e8b865bfcd0a30`). A migration 085 já está aplicada em produção; a migration 087 foi aplicada na onda de auth; a migration 086 é enforcement pós-deploy backend E3.8 sob gate específico de migration. Ver [UNIFIED_AUDIT_DIGITAL_ENVELOPE_E38](./UNIFIED_AUDIT_DIGITAL_ENVELOPE_E38.md).
+**E3.8 Auditoria Unificada + Envelope Digital = CLOSED em produção.** A reentrada limpa foi concluída e mergeada via PR #505 (`MERGE_SHA=f1d92f17a180401e5ebc814a23974294c5fc4f60`) sobre a `main` strict auth. O PR histórico #501 permanece intacto em `OPEN / DRAFT` (superado, sem mutação). Deploy Railway `4a93ab5f-e3cf-4eca-9ed5-650b26ca3915` **SUCCESS** (backend ONLINE). Sequência de migrations em produção concluída: 085 Foundation (`20261009125633`), 087 Auth Session Idle (`20261010172936`) e 086 Enforcement (`20261011204500 086_e38_formal_envelope_enforcement`, statement canônico de 2289 bytes, SHA256 `24aa3763cf7f1050bc83f28c4ade627409fc112b04964922b23359bdaa9ea6b0`, Git blob `5d2b21ae94d4345becebbbd8c4dcfc0a064a68ec`). Enforcement prospectivo ativo: constraint trigger `trg_e38_check_frete_finalizado_envelope` (`DEFERRABLE INITIALLY DEFERRED`) em `public.fretes`, função `e38_check_frete_finalizado_envelope` e RPC `e38_finalize_frete_with_envelope` com ACL restrita a `service_role`. 51 fretes históricos finalizados sem envelope formal preservados (`LEGACY_NO_FORMAL_ENVELOPE`, sem backfill). Ver [UNIFIED_AUDIT_DIGITAL_ENVELOPE_E38](./UNIFIED_AUDIT_DIGITAL_ENVELOPE_E38.md).
 
 **Campaign-C = CLOSED em produção** (PR #469 `MERGE_SHA=95fcded985470d059519008562a99fdb8dac3fd1`; progresso operacional read-only + elegibilidade determinística + dispatch readiness; sem schema/dispatch real; `CAMPAIGN_PROGRESS=DONE`). **Route Intelligence V1 = CLOSED em produção** (PR #467 `MERGE_SHA=0fcf9a66fe286a7f4b80dc20878324bab532d8ce`; provider-agnostic, default disabled/manual-safe, sem schema/secret/provider real). **Campaign-B = CLOSED em produção** (takeover Claude 2026-08-24, PR #464 `MERGE_SHA=139105d523e9023b616f340a40d6697d7b0e4444`; migration **078 aplicada/rastreada uma vez** `20260824013400`, SHA256 `5DEA792CA98FE28D8A68320F80BCB92A93B240360F9A552A2F261993193543DB`, `campaign_trip_freights` criada, `PRODUCTION_BUSINESS_WRITES=0`; materialização reusa criador canônico de fretes, idempotente/reconciliável, sob entitlement∧campaign.manage∧scope∧tenant; sem dispatch). **Command Center V2 = CLOSED** (PR #465). P2/E1.3/E1.4A/E1.5A/Fleet final closure estão CLOSED em produção. **Mobile M1 = CLOSED técnico** no PR #458 (`MERGE_SHA=a257e0f6b50e1d7d9f6f64113df768cdc6f7339f`), com validações físicas/publicação Play ainda deferidas. **Systemic Quality = CLOSED em produção** no PR #459 (`MERGE_SHA=35b840281a711bc2a0264358662e548cc6ecc1fa`). **Commercial V2 = CLOSED** no PR #460 (`MERGE_SHA=4faa735b5b1760fb159fbf9436f7d8eef0665b0e`). **Operation Campaign-A = CLOSED técnico em produção** no PR #457 (`FINAL_HEAD=45079e8151cde514bc4577dccb656c14419df35e`, `MERGE_SHA=32d8fe3e8824d1a8bc5be89ad6f5cdf86ae5c316`), com 076/077 aplicadas e rastreadas uma vez.
 
@@ -96,7 +96,7 @@ Adequação de **CNAE/CNPJ/regime** do owner corre **em paralelo** e **NÃO bloq
 
 ## Próximo passo recomendado
 
-Próxima ação recomendada: concluir o PR da **E3.8 Auditoria Unificada + Envelope Digital** ate CI verde e parar no gate humano de migration 085. Nao aplicar migration, marcar Ready, mergear, deployar, criar envelopes reais ou fazer backfill sem autorizacao explicita.
+Macrofrente E3.8 concluída e fechada em produção (PR #505 MERGED, deploy Railway SUCCESS 4a93ab5f, migrations 085/087/086 aplicadas e registradas, enforcement prospectivo ativo). Próxima ação recomendada: alinhamento com o OWNER para definir a próxima macrofrente do roadmap (ex.: expansão Onda 4 / reporting / mobile release train M1).
 
 ## Hard stops permanentes
 
