@@ -42,6 +42,7 @@ export interface RelatorioFechamentoPayload {
     tipo_empresa?: string;
   };
   lancamentos: {
+    restricted?: boolean;
     despesas: Array<{
       id: string;
       descricao: string;
@@ -214,102 +215,118 @@ export async function gerarPdfFechamentoFrete(
 
   yPos = (doc as any).lastAutoTable?.finalY || 120;
 
-  // 5. Tabela 3: Lançamentos de Abastecimento (se houver)
-  const abs = lancamentos.abastecimentos || [];
-  if (abs.length > 0) {
-    const totalLitros = abs.reduce((s, a) => s + (Number(a.litros) || 0), 0);
-
+  // 5. Lançamentos Operacionais (Abastecimentos, Despesas e Vales)
+  if (lancamentos.restricted) {
     autoTable(doc, {
       startY: yPos + 4,
-      head: [['Abastecimento', 'Litros', 'ARLA', 'Quem Pagou', 'Status', 'Valor']],
-      body: abs.map((a) => [
-        a.posto || '-',
-        `${Number(a.litros || 0).toFixed(1)} L`,
-        a.arla_litros ? `${Number(a.arla_litros).toFixed(1)} L (${formatarMoeda(a.arla_valor)})` : '-',
-        a.quem_pagou === 'motorista' ? 'Motorista' : a.quem_pagou === 'proprietario' ? 'Proprietário' : (a.quem_pagou || '-'),
-        a.status || '-',
-        formatarMoeda(a.valor_total),
-      ]),
-      foot: [
-        [
-          'TOTAL ABASTECIMENTOS EFETIVADOS',
-          `${totalLitros.toFixed(1)} L`,
-          '-',
-          '-',
-          '-',
-          resumo.total_abastecimentos_efetivados != null
-            ? formatarMoeda(resumo.total_abastecimentos_efetivados)
-            : (resumo.restricted ? '[Restrito]' : '-'),
-        ],
+      head: [['Lançamentos Operacionais (Abastecimentos, Despesas e Vales)', 'Situação']],
+      body: [
+        ['Detalhamento de Lançamentos', 'Informações restritas para este perfil (permissão launch.view ausente)'],
       ],
-      theme: 'striped',
-      styles: { fontSize: 8, cellPadding: 1.8 },
-      headStyles: { fillColor: [37, 99, 235], textColor: 255 },
-      footStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: 'bold' },
+      theme: 'grid',
+      styles: { fontSize: 8, cellPadding: 2 },
+      headStyles: { fillColor: [51, 65, 85], textColor: 255, fontStyle: 'bold' },
+      columnStyles: { 0: { cellWidth: 65, fontStyle: 'bold', textColor: [30, 41, 59] } },
     });
     yPos = (doc as any).lastAutoTable?.finalY || yPos;
-  }
+  } else {
+    // 5. Tabela 3: Lançamentos de Abastecimento (se houver)
+    const abs = lancamentos.abastecimentos || [];
+    if (abs.length > 0) {
+      const totalLitros = abs.reduce((s, a) => s + (Number(a.litros) || 0), 0);
 
-  // 6. Tabela 4: Despesas Operacionais (se houver)
-  const desp = lancamentos.despesas || [];
-  if (desp.length > 0) {
-    autoTable(doc, {
-      startY: yPos + 4,
-      head: [['Despesa', 'Tipo', 'Quem Pagou', 'Status', 'Valor']],
-      body: desp.map((d) => [
-        d.descricao || '-',
-        d.tipo || '-',
-        d.quem_pagou === 'motorista' ? 'Motorista' : d.quem_pagou === 'proprietario' ? 'Proprietário' : (d.quem_pagou || '-'),
-        d.status || '-',
-        formatarMoeda(d.valor),
-      ]),
-      foot: [
-        [
-          'TOTAL DESPESAS EFETIVADAS',
-          '-',
-          '-',
-          '-',
-          resumo.total_despesas_efetivadas != null
-            ? formatarMoeda(resumo.total_despesas_efetivadas)
-            : (resumo.restricted ? '[Restrito]' : '-'),
+      autoTable(doc, {
+        startY: yPos + 4,
+        head: [['Abastecimento', 'Litros', 'ARLA', 'Quem Pagou', 'Status', 'Valor']],
+        body: abs.map((a) => [
+          a.posto || '-',
+          `${Number(a.litros || 0).toFixed(1)} L`,
+          a.arla_litros ? `${Number(a.arla_litros).toFixed(1)} L (${formatarMoeda(a.arla_valor)})` : '-',
+          a.quem_pagou === 'motorista' ? 'Motorista' : a.quem_pagou === 'proprietario' ? 'Proprietário' : (a.quem_pagou || '-'),
+          a.status || '-',
+          formatarMoeda(a.valor_total),
+        ]),
+        foot: [
+          [
+            'TOTAL ABASTECIMENTOS EFETIVADOS',
+            `${totalLitros.toFixed(1)} L`,
+            '-',
+            '-',
+            '-',
+            resumo.total_abastecimentos_efetivados != null
+              ? formatarMoeda(resumo.total_abastecimentos_efetivados)
+              : (resumo.restricted ? '[Restrito]' : '-'),
+          ],
         ],
-      ],
-      theme: 'striped',
-      styles: { fontSize: 8, cellPadding: 1.8 },
-      headStyles: { fillColor: [225, 29, 72], textColor: 255 },
-      footStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: 'bold' },
-    });
-    yPos = (doc as any).lastAutoTable?.finalY || yPos;
-  }
+        theme: 'striped',
+        styles: { fontSize: 8, cellPadding: 1.8 },
+        headStyles: { fillColor: [37, 99, 235], textColor: 255 },
+        footStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: 'bold' },
+      });
+      yPos = (doc as any).lastAutoTable?.finalY || yPos;
+    }
 
-  // 7. Tabela 5: Vales e Adiantamentos (se houver)
-  const vales = lancamentos.vales || [];
-  if (vales.length > 0) {
-    autoTable(doc, {
-      startY: yPos + 4,
-      head: [['Vale / Adiantamento', 'Quem Concedeu', 'Status', 'Valor']],
-      body: vales.map((v) => [
-        v.descricao || 'Vale viagem',
-        v.quem_pagou === 'proprietario' ? 'Proprietário' : v.quem_pagou === 'motorista' ? 'Motorista' : (v.quem_pagou || '-'),
-        v.status || '-',
-        formatarMoeda(v.valor),
-      ]),
-      foot: [
-        [
-          'TOTAL VALES EFETIVADOS',
-          '-',
-          '-',
-          resumo.total_vales_efetivados != null
-            ? formatarMoeda(resumo.total_vales_efetivados)
-            : (resumo.restricted ? '[Restrito]' : '-'),
+    // 6. Tabela 4: Despesas Operacionais (se houver)
+    const desp = lancamentos.despesas || [];
+    if (desp.length > 0) {
+      autoTable(doc, {
+        startY: yPos + 4,
+        head: [['Despesa', 'Tipo', 'Quem Pagou', 'Status', 'Valor']],
+        body: desp.map((d) => [
+          d.descricao || '-',
+          d.tipo || '-',
+          d.quem_pagou === 'motorista' ? 'Motorista' : d.quem_pagou === 'proprietario' ? 'Proprietário' : (d.quem_pagou || '-'),
+          d.status || '-',
+          formatarMoeda(d.valor),
+        ]),
+        foot: [
+          [
+            'TOTAL DESPESAS EFETIVADAS',
+            '-',
+            '-',
+            '-',
+            resumo.total_despesas_efetivadas != null
+              ? formatarMoeda(resumo.total_despesas_efetivadas)
+              : (resumo.restricted ? '[Restrito]' : '-'),
+          ],
         ],
-      ],
-      theme: 'striped',
-      styles: { fontSize: 8, cellPadding: 1.8 },
-      headStyles: { fillColor: [234, 88, 12], textColor: 255 },
-      footStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: 'bold' },
-    });
-    yPos = (doc as any).lastAutoTable?.finalY || yPos;
+        theme: 'striped',
+        styles: { fontSize: 8, cellPadding: 1.8 },
+        headStyles: { fillColor: [225, 29, 72], textColor: 255 },
+        footStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: 'bold' },
+      });
+      yPos = (doc as any).lastAutoTable?.finalY || yPos;
+    }
+
+    // 7. Tabela 5: Vales e Adiantamentos (se houver)
+    const vales = lancamentos.vales || [];
+    if (vales.length > 0) {
+      autoTable(doc, {
+        startY: yPos + 4,
+        head: [['Vale / Adiantamento', 'Quem Concedeu', 'Status', 'Valor']],
+        body: vales.map((v) => [
+          v.descricao || 'Vale viagem',
+          v.quem_pagou === 'proprietario' ? 'Proprietário' : v.quem_pagou === 'motorista' ? 'Motorista' : (v.quem_pagou || '-'),
+          v.status || '-',
+          formatarMoeda(v.valor),
+        ]),
+        foot: [
+          [
+            'TOTAL VALES EFETIVADOS',
+            '-',
+            '-',
+            resumo.total_vales_efetivados != null
+              ? formatarMoeda(resumo.total_vales_efetivados)
+              : (resumo.restricted ? '[Restrito]' : '-'),
+          ],
+        ],
+        theme: 'striped',
+        styles: { fontSize: 8, cellPadding: 1.8 },
+        headStyles: { fillColor: [234, 88, 12], textColor: 255 },
+        footStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: 'bold' },
+      });
+      yPos = (doc as any).lastAutoTable?.finalY || yPos;
+    }
   }
 
   // 8. Tabela 6: Documentos Fiscais e Comprovação Digital (ePOD)

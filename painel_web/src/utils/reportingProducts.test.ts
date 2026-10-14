@@ -399,4 +399,54 @@ function extrairTextoPdf(doc: any): string {
     expect(textoPdf).toContain('450,00');
     expect(textoPdf).toContain('530,00');
   });
+
+  it('gerador tolera lancamentos.restricted e documentos_fiscais.restricted sem crash e com mensagens honestas de restricao', async () => {
+    const payloadRestrito: RelatorioFechamentoPayload = {
+      frete: {
+        id: 'frete-restricted-cross-domain',
+        empresa_id: 'empresa-1',
+        motorista_id: 'mot-1',
+        origem: 'LEM / BA',
+        destino: 'Salvador / BA',
+        data: '2026-10-10',
+        status: 'finalizado',
+        valor_frete: null,
+      },
+      motorista: { id: 'mot-1', nome: 'Motorista Teste', placa: 'ABC1234' },
+      lancamentos: {
+        restricted: true,
+        despesas: [],
+        abastecimentos: [],
+        vales: [],
+      },
+      documentos_fiscais: {
+        restricted: true,
+        total: null,
+        tipos: [],
+      },
+      envelope: { status: 'LEGACY_NO_FORMAL_ENVELOPE' },
+      resumo_financeiro: {
+        restricted: true,
+        message: 'Informações financeiras restritas para o seu nível de acesso.',
+      },
+    };
+
+    const result = await gerarPdfFechamentoFrete(payloadRestrito, { autoSave: false });
+    expect(result.ok).toBe(true);
+    expect(result.doc).toBeDefined();
+
+    const textoPdf = extrairTextoPdf(result.doc);
+
+    // Lancamentos restricted table
+    expect(textoPdf).toContain('Lançamentos Operacionais');
+    expect(textoPdf).toContain('Informações restritas para este perfil');
+    expect(textoPdf).toContain('launch.view ausente');
+
+    // Documentos fiscais restricted
+    expect(textoPdf).toContain('Informações de documentos fiscais restritas');
+    expect(textoPdf).toContain('documents.view ausente');
+    expect(textoPdf).not.toContain('0 documento(s) fiscal(is) anexado(s)');
+    expect(textoPdf).not.toContain('Nenhum documento fiscal vinculado');
+  });
 });
+

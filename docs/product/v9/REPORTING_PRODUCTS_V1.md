@@ -50,10 +50,24 @@ Na passagem de correção da revisão independente (PR #507), foram sanadas as q
 
 #### HIGH-002 — Política de Visibilidade Financeira do Motorista (Fail-Closed)
 - Integração estrita com `backend/services/permissions/driverFinancialRedaction.js` e `resolverDriverFinancialVisibilityMode`:
-  - `commission_only`: expõe apenas comissão e percentual; omite valor bruto do frete, valor ton/km, resultado operacional da empresa e totais operacionais internos.
+  - `commission_only`: omite valor bruto do frete, valor ton/km, resultado operacional da empresa e decomposição interna de custos da transportadora; preserva os valores de acerto do motorista (valor da comissão, percentual, despesas pagas pelo motorista a reembolsar e saldo do motorista).
   - `commission_plus_base`: expõe valor base do frete e comissão; omite decomposição interna de despesas da transportadora/empresa e resultado operacional.
   - `full_freight_financial`: expõe projeção financeira autorizada completa.
-- **Fail-closed**: Em caso de falha de consulta de permissão/visibilidade, a projeção financeira é omitida por padrão (`restricted: true`, fail-closed seguro).
+- **Fail-closed**: Em caso de falha de consulta de autoridade (`ensureEffective`), a projeção financeira é omitida por padrão (`restricted: true`, fail-closed seguro).
+
+#### HIGH-003 — Autorização Multidomínio Campo a Campo (Cross-Domain Field-Level Authority)
+O endpoint consolidado `GET /fretes/:id/relatorio-fechamento` compõe múltiplas autoridades independentes campo a campo:
+1. `freight.view`: autoriza o acesso ao relatório de frete em si (linha de base da viagem). Não confere acesso implícito aos demais domínios.
+2. `launch.view`: autoriza a inspeção de linhas e detalhes operacionais de lançamentos (`despesas`, `abastecimentos`, `vales`).
+   - Se `launch.view=false`, o endpoint retorna `{ restricted: true, despesas: [], abastecimentos: [], vales: [] }`, suprimindo descrições, postos, litros, status e IDs operacionais.
+   - O gerador de PDF renderiza tabela explícita com o aviso `Informações restritas para este perfil (permissão launch.view ausente)`, sem emitir tabelas vazias que sugiram ausência de lançamentos.
+3. `documents.view`: autoriza os metadados dos documentos fiscais (`total`, `tipos`).
+   - O bypass incondicional por perfil (`|| isDriver`) foi removido; se `documents.view=false`, retorna `{ total: null, tipos: [], restricted: true }`.
+   - O gerador de PDF renderiza `Informações restritas para este perfil (permissão documents.view ausente)` em vez de falsos totais como "0 documentos".
+4. `finance.operational.view`: autoridade financeira independente desacoplada de `launch.view`.
+   - Um usuário com `finance.operational.view` pode visualizar indicadores financeiros agregados (`receita_realizada`, `custos_diretos`, `resultado_operacional`) mesmo quando linhas individuais de lançamentos estão ocultas.
+5. `EPOD_AUTHORITY_REVIEW=PASS`: os campos de comprovação digital de entrega (ePOD) utilizam o modelo canônico de posse e escopo do frete (`buscarFreteComAcesso`), expondo apenas dados de status e recebedor sem criar novo domínio de permissão desnecessário.
+6. **Fail-Closed Total**: Se a chamada a `ensureEffective` falhar por erro de rede ou serviço, todas as três autoridades cruzadas falham fechadas (`hasLaunchView=false`, `hasDocumentsView=false`, `hasFinanceView=false`), garantindo `UNKNOWN != ALLOW`.
 
 #### MEDIUM-001 — Gate Visual Estendido no Playwright
 - `painel_web/tests-e2e-visual/s4_reporting_products.visual.spec.ts` estendido para cobrir todos os 10 critérios exigidos nos três viewports (1440x900, 1024x768, 390x844):
@@ -75,8 +89,9 @@ Na passagem de correção da revisão independente (PR #507), foram sanadas as q
 
 ### 4. Bateria de Verificação Executada
 
-- **Testes Focados Backend**: 27/27 testes aprovados em `backend/tests/freteDigitalEnvelope.test.js` cobrindo cenários A a J (`node --test`).
-- **Testes Focados Frontend**: 13/13 testes aprovados em `painel_web/src/utils/reportingProducts.test.ts` (`vitest run`), comprovando que o gerador de PDF não recalcula linhas no cliente e não reconstrói totais restritos.
+- **Testes Focados Backend**: 35/35 testes aprovados em `backend/tests/freteDigitalEnvelope.test.js` cobrindo cenários A a J e CROSS-DOMAIN 1 a 8 (`node --test`).
+- **Testes Focados Frontend**: 14/14 testes aprovados em `painel_web/src/utils/reportingProducts.test.ts` (`vitest run`), comprovando tolerância a `lancamentos.restricted` e `documentos_fiscais.restricted` sem crash e sem recalcular linhas no cliente.
 - **Testes Visuais Playwright**: 3/3 cenários aprovados em `s4_reporting_products.visual.spec.ts` (Desktop 1440x900, Tablet 1024x768, Mobile 390x844) com zero violações de rede externa.
-- **Suíte Completa Backend**: 2.197/2.197 testes aprovados (`node --test`).
+- **Suíte Completa Backend**: Aprovada (`node --test`).
 - **Build Frontend**: `tsc -b && vite build` aprovado sem erros de tipagem nem falhas de empacotamento.
+

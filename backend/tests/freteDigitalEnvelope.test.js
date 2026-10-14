@@ -699,7 +699,7 @@ test('A — approved and finalized launches compose realized financial totals', 
   ];
   const supabaseMock = criarMockSupabase({ frete, despesas });
   const controller = carregarController(supabaseMock, {
-    effective: { permissions: { 'finance.operational.view': true, 'freight.view': true } },
+    effective: { permissions: { 'finance.operational.view': true, 'freight.view': true, 'launch.view': true } },
   });
 
   let bodyRes = null;
@@ -720,7 +720,7 @@ test('B — pending launch does NOT compose realized totals and is flagged infor
   ];
   const supabaseMock = criarMockSupabase({ frete, despesas });
   const controller = carregarController(supabaseMock, {
-    effective: { permissions: { 'finance.operational.view': true, 'freight.view': true } },
+    effective: { permissions: { 'finance.operational.view': true, 'freight.view': true, 'launch.view': true } },
   });
 
   let bodyRes = null;
@@ -743,7 +743,7 @@ test('C — rejected launch does NOT compose realized totals', async () => {
   ];
   const supabaseMock = criarMockSupabase({ frete, despesas });
   const controller = carregarController(supabaseMock, {
-    effective: { permissions: { 'finance.operational.view': true, 'freight.view': true } },
+    effective: { permissions: { 'finance.operational.view': true, 'freight.view': true, 'launch.view': true } },
   });
 
   let bodyRes = null;
@@ -762,7 +762,7 @@ test('D — cancelled launch does NOT compose realized totals', async () => {
   ];
   const supabaseMock = criarMockSupabase({ frete, despesas });
   const controller = carregarController(supabaseMock, {
-    effective: { permissions: { 'finance.operational.view': true, 'freight.view': true } },
+    effective: { permissions: { 'finance.operational.view': true, 'freight.view': true, 'launch.view': true } },
   });
 
   let bodyRes = null;
@@ -933,6 +933,10 @@ test('I — effective-permission lookup failure: financial output fails closed',
   assert.equal(bodyRes.frete.valor_frete, null);
   assert.equal(bodyRes.resumo_financeiro.restricted, true);
   assert.equal(bodyRes.documentos_fiscais.restricted, true);
+  assert.equal(bodyRes.lancamentos.restricted, true);
+  assert.deepEqual(bodyRes.lancamentos.despesas, []);
+  assert.deepEqual(bodyRes.lancamentos.abastecimentos, []);
+  assert.deepEqual(bodyRes.lancamentos.vales, []);
 });
 
 test('getRelatorioFechamento: operador without finance view has financial fields redacted', async () => {
@@ -1014,3 +1018,252 @@ test('J — wrong tenant access is denied with 403', async () => {
   await controller.getRelatorioFechamento(req, res);
   assert.equal(statusRes, 403);
 });
+
+test('CROSS-DOMAIN 1: freight.view=true, launch.view=false => report accessible, launch rows restricted', async () => {
+  const frete = { id: 'f-1', empresa_id: 'e-1', motorista_id: 'm-1', status: 'finalizado' };
+  const despesas = [{ id: 'd-1', descricao: 'Pedágio', tipo: 'pedagio', valor: 80, status: 'aprovado', quem_pagou: 'proprietario' }];
+  const abastecimentos = [{ id: 'a-1', posto: 'Posto Graal', litros: 150, valor_total: 900, status: 'aprovado', quem_pagou: 'proprietario' }];
+  const vales = [{ id: 'v-1', descricao: 'Vale', valor: 200, status: 'aprovado', quem_pagou: 'proprietario' }];
+  const supabaseMock = criarMockSupabase({ frete, despesas, abastecimentos, vales });
+  const controller = carregarController(supabaseMock, {
+    effective: { permissions: { 'freight.view': true, 'launch.view': false } },
+  });
+
+  let statusRes = 0;
+  let bodyRes = null;
+  const req = {
+    params: { id: 'f-1' },
+    empresa_id: 'e-1',
+    user: { uid: 'u-op', role: 'operador', tipo: 'operador' },
+  };
+  const res = {
+    status(s) { statusRes = s; return { json(b) { bodyRes = b; } }; },
+  };
+
+  await controller.getRelatorioFechamento(req, res);
+  assert.equal(statusRes, 200);
+  assert.equal(bodyRes.frete.id, 'f-1');
+  assert.equal(bodyRes.lancamentos.restricted, true);
+  assert.deepEqual(bodyRes.lancamentos.despesas, []);
+  assert.deepEqual(bodyRes.lancamentos.abastecimentos, []);
+  assert.deepEqual(bodyRes.lancamentos.vales, []);
+});
+
+test('CROSS-DOMAIN 2: freight.view=true, launch.view=true => authorized launch rows visible', async () => {
+  const frete = { id: 'f-1', empresa_id: 'e-1', motorista_id: 'm-1', status: 'finalizado' };
+  const despesas = [{ id: 'd-1', descricao: 'Pedágio', tipo: 'pedagio', valor: 80, status: 'aprovado', quem_pagou: 'proprietario' }];
+  const abastecimentos = [{ id: 'a-1', posto: 'Posto Graal', litros: 150, valor_total: 900, status: 'aprovado', quem_pagou: 'proprietario' }];
+  const vales = [{ id: 'v-1', descricao: 'Vale', valor: 200, status: 'aprovado', quem_pagou: 'proprietario' }];
+  const supabaseMock = criarMockSupabase({ frete, despesas, abastecimentos, vales });
+  const controller = carregarController(supabaseMock, {
+    effective: { permissions: { 'freight.view': true, 'launch.view': true } },
+  });
+
+  let statusRes = 0;
+  let bodyRes = null;
+  const req = {
+    params: { id: 'f-1' },
+    empresa_id: 'e-1',
+    user: { uid: 'u-op', role: 'operador', tipo: 'operador' },
+  };
+  const res = {
+    status(s) { statusRes = s; return { json(b) { bodyRes = b; } }; },
+  };
+
+  await controller.getRelatorioFechamento(req, res);
+  assert.equal(statusRes, 200);
+  assert.equal(bodyRes.lancamentos.restricted, undefined);
+  assert.equal(bodyRes.lancamentos.despesas.length, 1);
+  assert.equal(bodyRes.lancamentos.despesas[0].id, 'd-1');
+  assert.equal(bodyRes.lancamentos.abastecimentos.length, 1);
+  assert.equal(bodyRes.lancamentos.abastecimentos[0].posto, 'Posto Graal');
+  assert.equal(bodyRes.lancamentos.vales.length, 1);
+  assert.equal(bodyRes.lancamentos.vales[0].id, 'v-1');
+});
+
+test('CROSS-DOMAIN 3: motorista with launch.view=true => own contextual launch data preserved', async () => {
+  const frete = { id: 'f-1', empresa_id: 'e-1', motorista_id: 'm-1', status: 'finalizado' };
+  const despesas = [
+    { id: 'd-mot', descricao: 'Refeição', tipo: 'refeicao', valor: 60, status: 'aprovado', quem_pagou: 'motorista' },
+  ];
+  const supabaseMock = criarMockSupabase({ frete, despesas });
+  const controller = carregarController(supabaseMock, {
+    effective: {
+      permissions: { 'freight.view': true, 'launch.view': true },
+      driverFinancialVisibility: 'commission_only',
+    },
+  });
+
+  let statusRes = 0;
+  let bodyRes = null;
+  const req = {
+    params: { id: 'f-1' },
+    empresa_id: 'e-1',
+    user: { uid: 'm-1', role: 'motorista', tipo: 'motorista' },
+  };
+  const res = {
+    status(s) { statusRes = s; return { json(b) { bodyRes = b; } }; },
+  };
+
+  await controller.getRelatorioFechamento(req, res);
+  assert.equal(statusRes, 200);
+  assert.equal(bodyRes.lancamentos.restricted, undefined);
+  assert.equal(bodyRes.lancamentos.despesas.length, 1);
+  assert.equal(bodyRes.lancamentos.despesas[0].descricao, 'Refeição');
+  // Motorista sees their own paid amount
+  assert.equal(bodyRes.lancamentos.despesas[0].valor, 60);
+});
+
+test('CROSS-DOMAIN 4: motorista with launch.view=false => launch rows restricted despite role=motorista', async () => {
+  const frete = { id: 'f-1', empresa_id: 'e-1', motorista_id: 'm-1', status: 'finalizado' };
+  const despesas = [
+    { id: 'd-mot', descricao: 'Refeição', tipo: 'refeicao', valor: 60, status: 'aprovado', quem_pagou: 'motorista' },
+  ];
+  const supabaseMock = criarMockSupabase({ frete, despesas });
+  const controller = carregarController(supabaseMock, {
+    effective: {
+      permissions: { 'freight.view': true, 'launch.view': false },
+      driverFinancialVisibility: 'commission_only',
+    },
+  });
+
+  let statusRes = 0;
+  let bodyRes = null;
+  const req = {
+    params: { id: 'f-1' },
+    empresa_id: 'e-1',
+    user: { uid: 'm-1', role: 'motorista', tipo: 'motorista' },
+  };
+  const res = {
+    status(s) { statusRes = s; return { json(b) { bodyRes = b; } }; },
+  };
+
+  await controller.getRelatorioFechamento(req, res);
+  assert.equal(statusRes, 200);
+  assert.equal(bodyRes.lancamentos.restricted, true);
+  assert.deepEqual(bodyRes.lancamentos.despesas, []);
+  assert.deepEqual(bodyRes.lancamentos.abastecimentos, []);
+  assert.deepEqual(bodyRes.lancamentos.vales, []);
+});
+
+test('CROSS-DOMAIN 5: documents.view=true => document metadata available according to current report contract', async () => {
+  const frete = { id: 'f-1', empresa_id: 'e-1', motorista_id: 'm-1', status: 'finalizado' };
+  const documentos = [
+    { id: 'doc-1', tipo: 'cte', status: 'valido' },
+    { id: 'doc-2', tipo: 'mdfe', status: 'encerrado' },
+  ];
+  const supabaseMock = criarMockSupabase({ frete, documentos });
+  const controller = carregarController(supabaseMock, {
+    effective: { permissions: { 'freight.view': true, 'documents.view': true } },
+  });
+
+  let statusRes = 0;
+  let bodyRes = null;
+  const req = {
+    params: { id: 'f-1' },
+    empresa_id: 'e-1',
+    user: { uid: 'u-op', role: 'operador', tipo: 'operador' },
+  };
+  const res = {
+    status(s) { statusRes = s; return { json(b) { bodyRes = b; } }; },
+  };
+
+  await controller.getRelatorioFechamento(req, res);
+  assert.equal(statusRes, 200);
+  assert.equal(bodyRes.documentos_fiscais.restricted, undefined);
+  assert.equal(bodyRes.documentos_fiscais.total, 2);
+  assert.deepEqual(bodyRes.documentos_fiscais.tipos, [
+    { tipo: 'cte', status: 'valido' },
+    { tipo: 'mdfe', status: 'encerrado' },
+  ]);
+});
+
+test('CROSS-DOMAIN 6: motorista with documents.view=false => document metadata restricted', async () => {
+  const frete = { id: 'f-1', empresa_id: 'e-1', motorista_id: 'm-1', status: 'finalizado' };
+  const documentos = [{ id: 'doc-1', tipo: 'cte', status: 'valido' }];
+  const supabaseMock = criarMockSupabase({ frete, documentos });
+  const controller = carregarController(supabaseMock, {
+    effective: { permissions: { 'freight.view': true, 'documents.view': false } },
+  });
+
+  let statusRes = 0;
+  let bodyRes = null;
+  const req = {
+    params: { id: 'f-1' },
+    empresa_id: 'e-1',
+    user: { uid: 'm-1', role: 'motorista', tipo: 'motorista' },
+  };
+  const res = {
+    status(s) { statusRes = s; return { json(b) { bodyRes = b; } }; },
+  };
+
+  await controller.getRelatorioFechamento(req, res);
+  assert.equal(statusRes, 200);
+  assert.equal(bodyRes.documentos_fiscais.restricted, true);
+  assert.equal(bodyRes.documentos_fiscais.total, null);
+  assert.deepEqual(bodyRes.documentos_fiscais.tipos, []);
+});
+
+test('CROSS-DOMAIN 7: operator with documents.view=false => document metadata restricted', async () => {
+  const frete = { id: 'f-1', empresa_id: 'e-1', motorista_id: 'm-1', status: 'finalizado' };
+  const documentos = [{ id: 'doc-1', tipo: 'cte', status: 'valido' }];
+  const supabaseMock = criarMockSupabase({ frete, documentos });
+  const controller = carregarController(supabaseMock, {
+    effective: { permissions: { 'freight.view': true, 'documents.view': false } },
+  });
+
+  let statusRes = 0;
+  let bodyRes = null;
+  const req = {
+    params: { id: 'f-1' },
+    empresa_id: 'e-1',
+    user: { uid: 'u-op', role: 'operador', tipo: 'operador' },
+  };
+  const res = {
+    status(s) { statusRes = s; return { json(b) { bodyRes = b; } }; },
+  };
+
+  await controller.getRelatorioFechamento(req, res);
+  assert.equal(statusRes, 200);
+  assert.equal(bodyRes.documentos_fiscais.restricted, true);
+  assert.equal(bodyRes.documentos_fiscais.total, null);
+  assert.deepEqual(bodyRes.documentos_fiscais.tipos, []);
+});
+
+test('CROSS-DOMAIN 8: ensureEffective failure => launch + document + financial domains all fail closed', async () => {
+  const frete = { id: 'f-1', empresa_id: 'e-1', motorista_id: 'm-1', status: 'finalizado', valor_frete: 5000 };
+  const despesas = [{ id: 'd-1', descricao: 'Pedágio', tipo: 'pedagio', valor: 100, status: 'aprovado', quem_pagou: 'proprietario' }];
+  const documentos = [{ id: 'doc-1', tipo: 'cte', status: 'valido' }];
+  const supabaseMock = criarMockSupabase({ frete, despesas, documentos });
+  const controller = carregarController(supabaseMock, {
+    ensureEffectiveError: new Error('Permission registry connection timeout'),
+  });
+
+  let statusRes = 0;
+  let bodyRes = null;
+  const req = {
+    params: { id: 'f-1' },
+    empresa_id: 'e-1',
+    user: { uid: 'u-op', role: 'operador', tipo: 'operador' },
+  };
+  const res = {
+    status(s) { statusRes = s; return { json(b) { bodyRes = b; } }; },
+  };
+
+  await controller.getRelatorioFechamento(req, res);
+  assert.equal(statusRes, 200);
+  // All three cross-domains fail closed:
+  // 1. Finance
+  assert.equal(bodyRes.frete.valor_frete, null);
+  assert.equal(bodyRes.resumo_financeiro.restricted, true);
+  // 2. Documents
+  assert.equal(bodyRes.documentos_fiscais.restricted, true);
+  assert.equal(bodyRes.documentos_fiscais.total, null);
+  assert.deepEqual(bodyRes.documentos_fiscais.tipos, []);
+  // 3. Launches
+  assert.equal(bodyRes.lancamentos.restricted, true);
+  assert.deepEqual(bodyRes.lancamentos.despesas, []);
+  assert.deepEqual(bodyRes.lancamentos.abastecimentos, []);
+  assert.deepEqual(bodyRes.lancamentos.vales, []);
+});
+

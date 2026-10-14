@@ -669,17 +669,20 @@ exports.getRelatorioFechamento = async (req, res) => {
     let eff = null;
     let hasFinanceView = false;
     let hasDocumentsView = false;
+    let hasLaunchView = false;
     let driverVisibility = DRIVER_FINANCIAL_VISIBILITY.COMMISSION_ONLY;
 
     if (isSuperAdmin) {
       hasFinanceView = true;
       hasDocumentsView = true;
+      hasLaunchView = true;
       driverVisibility = DRIVER_FINANCIAL_VISIBILITY.FULL_FREIGHT_FINANCIAL;
     } else {
       try {
         eff = await ensureEffective(req);
         hasFinanceView = Boolean(eff?.permissions && eff.permissions['finance.operational.view'] === true);
         hasDocumentsView = Boolean(eff?.permissions && eff.permissions['documents.view'] === true);
+        hasLaunchView = Boolean(eff?.permissions && eff.permissions['launch.view'] === true);
         if (isDriver) {
           driverVisibility = eff?.driverFinancialVisibility || DRIVER_FINANCIAL_VISIBILITY.COMMISSION_ONLY;
         }
@@ -687,6 +690,7 @@ exports.getRelatorioFechamento = async (req, res) => {
         // FAIL CLOSED: na dúvida ou falha de autoridade, mínima projeção segura
         hasFinanceView = false;
         hasDocumentsView = false;
+        hasLaunchView = false;
         driverVisibility = DRIVER_FINANCIAL_VISIBILITY.COMMISSION_ONLY;
       }
     }
@@ -891,7 +895,7 @@ exports.getRelatorioFechamento = async (req, res) => {
         placa: motInfo?.placa_veiculo || '-',
         tipo_empresa: motEmpresaTipo || 'transportadora',
       },
-      lancamentos: {
+      lancamentos: (isSuperAdmin || hasLaunchView) ? {
         despesas: (despesasRaw || []).map((d) => ({
           id: d.id,
           descricao: d.descricao,
@@ -920,8 +924,13 @@ exports.getRelatorioFechamento = async (req, res) => {
           quem_pagou: v.quem_pagou,
           efetivado: lancamentoEfetivado(v),
         })),
+      } : {
+        restricted: true,
+        despesas: [],
+        abastecimentos: [],
+        vales: [],
       },
-      documentos_fiscais: (isSuperAdmin || hasDocumentsView || isDriver) ? {
+      documentos_fiscais: (isSuperAdmin || hasDocumentsView) ? {
         total: (docsRaw || []).length,
         tipos: (docsRaw || []).map((d) => ({ tipo: d.tipo, status: d.status })),
       } : {
