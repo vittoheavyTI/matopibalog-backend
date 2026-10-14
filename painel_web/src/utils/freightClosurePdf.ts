@@ -69,8 +69,9 @@ export interface RelatorioFechamentoPayload {
     }>;
   };
   documentos_fiscais: {
-    total: number;
+    total?: number | null;
     tipos: Array<{ tipo: string; status: string }>;
+    restricted?: boolean;
   };
   epod?: {
     id: string;
@@ -92,17 +93,31 @@ export interface RelatorioFechamentoPayload {
   resumo_financeiro: {
     restricted?: boolean;
     message?: string;
+    receita_realizada?: number | null;
     frete_bruto?: number | null;
-    total_despesas?: number;
-    total_abastecimentos?: number;
-    total_vales?: number;
-    gastos_motorista?: number;
-    gastos_proprietario?: number;
+    custos_diretos?: {
+      combustivel?: number;
+      pedagio?: number;
+      outras_despesas?: number;
+      comissao?: number;
+      total?: number;
+    } | null;
+    total_despesas_efetivadas?: number | null;
+    total_abastecimentos_efetivados?: number | null;
+    total_vales_efetivados?: number | null;
+    resultado_operacional?: number | null;
+    margem_percentual?: number | null;
     comissao_percentual?: number | null;
     comissao_valor?: number | null;
-    saldo_motorista?: number;
-    resultado_empresa?: number | null;
+    saldo_motorista?: number | null;
+    saldo_motorista_situacao?: string | null;
+    motorista_creditos?: number | null;
+    motorista_debitos?: number | null;
+    total_pendente?: number | null;
+    tem_pendentes?: boolean;
     is_autonomo?: boolean;
+    alertas?: string[];
+    dados_completos?: boolean;
   };
   gerado_em?: string;
 }
@@ -203,25 +218,28 @@ export async function gerarPdfFechamentoFrete(
   const abs = lancamentos.abastecimentos || [];
   if (abs.length > 0) {
     const totalLitros = abs.reduce((s, a) => s + (Number(a.litros) || 0), 0);
-    const totalValor = abs.reduce((s, a) => s + (Number(a.valor_total) || 0), 0);
 
     autoTable(doc, {
       startY: yPos + 4,
-      head: [['Abastecimento', 'Litros', 'ARLA', 'Quem Pagou', 'Valor']],
+      head: [['Abastecimento', 'Litros', 'ARLA', 'Quem Pagou', 'Status', 'Valor']],
       body: abs.map((a) => [
         a.posto || '-',
         `${Number(a.litros || 0).toFixed(1)} L`,
         a.arla_litros ? `${Number(a.arla_litros).toFixed(1)} L (${formatarMoeda(a.arla_valor)})` : '-',
         a.quem_pagou === 'motorista' ? 'Motorista' : a.quem_pagou === 'proprietario' ? 'Proprietário' : (a.quem_pagou || '-'),
+        a.status || '-',
         formatarMoeda(a.valor_total),
       ]),
       foot: [
         [
-          'TOTAL ABASTECIMENTOS',
+          'TOTAL ABASTECIMENTOS EFETIVADOS',
           `${totalLitros.toFixed(1)} L`,
           '-',
           '-',
-          resumo.restricted ? '[Restrito]' : formatarMoeda(totalValor),
+          '-',
+          resumo.total_abastecimentos_efetivados != null
+            ? formatarMoeda(resumo.total_abastecimentos_efetivados)
+            : (resumo.restricted ? '[Restrito]' : '-'),
         ],
       ],
       theme: 'striped',
@@ -235,8 +253,6 @@ export async function gerarPdfFechamentoFrete(
   // 6. Tabela 4: Despesas Operacionais (se houver)
   const desp = lancamentos.despesas || [];
   if (desp.length > 0) {
-    const totalDesp = desp.reduce((s, d) => s + (Number(d.valor) || 0), 0);
-
     autoTable(doc, {
       startY: yPos + 4,
       head: [['Despesa', 'Tipo', 'Quem Pagou', 'Status', 'Valor']],
@@ -249,11 +265,13 @@ export async function gerarPdfFechamentoFrete(
       ]),
       foot: [
         [
-          'TOTAL DESPESAS',
+          'TOTAL DESPESAS EFETIVADAS',
           '-',
           '-',
           '-',
-          resumo.restricted ? '[Restrito]' : formatarMoeda(totalDesp),
+          resumo.total_despesas_efetivadas != null
+            ? formatarMoeda(resumo.total_despesas_efetivadas)
+            : (resumo.restricted ? '[Restrito]' : '-'),
         ],
       ],
       theme: 'striped',
@@ -267,8 +285,6 @@ export async function gerarPdfFechamentoFrete(
   // 7. Tabela 5: Vales e Adiantamentos (se houver)
   const vales = lancamentos.vales || [];
   if (vales.length > 0) {
-    const totalVales = vales.reduce((s, v) => s + (Number(v.valor) || 0), 0);
-
     autoTable(doc, {
       startY: yPos + 4,
       head: [['Vale / Adiantamento', 'Quem Concedeu', 'Status', 'Valor']],
@@ -280,10 +296,12 @@ export async function gerarPdfFechamentoFrete(
       ]),
       foot: [
         [
-          'TOTAL VALES',
+          'TOTAL VALES EFETIVADOS',
           '-',
           '-',
-          resumo.restricted ? '[Restrito]' : formatarMoeda(totalVales),
+          resumo.total_vales_efetivados != null
+            ? formatarMoeda(resumo.total_vales_efetivados)
+            : (resumo.restricted ? '[Restrito]' : '-'),
         ],
       ],
       theme: 'striped',
@@ -295,7 +313,7 @@ export async function gerarPdfFechamentoFrete(
   }
 
   // 8. Tabela 6: Documentos Fiscais e Comprovação Digital (ePOD)
-  const docsTotal = data.documentos_fiscais?.total || 0;
+  const docsTotal = data.documentos_fiscais?.total ?? (data.documentos_fiscais?.restricted ? null : 0);
   const epod = data.epod;
 
   autoTable(doc, {
@@ -304,9 +322,11 @@ export async function gerarPdfFechamentoFrete(
     body: [
       [
         'Documentos Fiscais Vinculados',
-        docsTotal > 0
-          ? `${docsTotal} documento(s) fiscal(is) anexado(s) (${(data.documentos_fiscais.tipos || []).map(t => t.tipo.toUpperCase()).join(', ')})`
-          : 'Nenhum documento fiscal vinculado',
+        data.documentos_fiscais?.restricted
+          ? 'Informações de documentos fiscais restritas (documents.view ausente)'
+          : docsTotal && docsTotal > 0
+            ? `${docsTotal} documento(s) fiscal(is) anexado(s) (${(data.documentos_fiscais.tipos || []).map(t => t.tipo.toUpperCase()).join(', ')})`
+            : 'Nenhum documento fiscal vinculado',
       ],
       [
         'Comprovação de Entrega Digital (ePOD)',
@@ -336,47 +356,74 @@ export async function gerarPdfFechamentoFrete(
     autoTable(doc, {
       startY: yPos + 4,
       head: [['Resumo Financeiro da Viagem', 'Situação']],
-      body: [['Valores e Apuração', 'Informações financeiras restritas para o seu nível de acesso.']],
+      body: [['Valores e Apuração', resumo.message || 'Informações financeiras restritas para o seu nível de acesso.']],
       theme: 'grid',
       styles: { fontSize: 8, cellPadding: 2 },
       headStyles: { fillColor: [15, 118, 110], textColor: 255, fontStyle: 'bold' },
       columnStyles: { 0: { cellWidth: 65, fontStyle: 'bold' } },
     });
-  } else if (resumo.is_autonomo) {
-    autoTable(doc, {
-      startY: yPos + 4,
-      head: [['Resumo Financeiro (Motorista Autônomo)', 'Valor']],
-      body: [
-        ['Faturamento Bruto da Viagem', formatarMoeda(resumo.frete_bruto)],
-        ['Total de Despesas Operacionais', formatarMoeda(resumo.total_despesas)],
-        ['Total de Abastecimentos', formatarMoeda(resumo.total_abastecimentos)],
-        ['Total de Vales Concedidos', formatarMoeda(resumo.total_vales)],
-        ['SALDO FINAL DO MOTORISTA AUTÔNOMO', formatarMoeda(resumo.saldo_motorista)],
-      ],
-      theme: 'grid',
-      styles: { fontSize: 8.5, cellPadding: 2.2 },
-      headStyles: { fillColor: [15, 118, 110], textColor: 255, fontStyle: 'bold' },
-      columnStyles: { 0: { cellWidth: 70, fontStyle: 'bold', textColor: [30, 41, 59] } },
-    });
   } else {
+    const linhasResumo: Array<[string, string]> = [];
+
+    // Faturamento / Receita realizada
+    if (resumo.receita_realizada !== null && resumo.receita_realizada !== undefined) {
+      linhasResumo.push(['Receita Realizada (Frete)', formatarMoeda(resumo.receita_realizada)]);
+    } else if (resumo.frete_bruto !== null && resumo.frete_bruto !== undefined) {
+      linhasResumo.push(['Valor do Frete (Base)', formatarMoeda(resumo.frete_bruto)]);
+    } else {
+      linhasResumo.push(['Receita do Frete', '[Restrito]']);
+    }
+
+    // Comissão do motorista (se houver ou se aplicável)
+    if (resumo.is_autonomo) {
+      linhasResumo.push(['Comissão do Motorista', 'Não aplicável (Autônomo)']);
+    } else if (resumo.comissao_valor !== null && resumo.comissao_valor !== undefined) {
+      linhasResumo.push([
+        `Comissão do Motorista (${resumo.comissao_percentual ?? 0}%)`,
+        formatarMoeda(resumo.comissao_valor),
+      ]);
+    } else {
+      linhasResumo.push(['Comissão do Motorista', '[Restrito]']);
+    }
+
+    // Acerto do motorista (créditos, débitos, saldo)
+    if (resumo.saldo_motorista !== null && resumo.saldo_motorista !== undefined) {
+      if (resumo.motorista_creditos != null && resumo.motorista_debitos != null) {
+        linhasResumo.push(['Créditos do Motorista (Comissão + Reembolsos)', formatarMoeda(resumo.motorista_creditos)]);
+        linhasResumo.push(['Débitos do Motorista (Vales/Adiantamentos)', formatarMoeda(resumo.motorista_debitos)]);
+      }
+      linhasResumo.push([
+        'SALDO DO MOTORISTA (ACERTO)',
+        `${formatarMoeda(resumo.saldo_motorista)} (${resumo.saldo_motorista_situacao || 'Saldo'})`,
+      ]);
+    } else {
+      linhasResumo.push(['SALDO DO MOTORISTA', '[Restrito]']);
+    }
+
+    // Custos diretos e Resultado Operacional (somente se autorizados)
+    if (resumo.custos_diretos?.total !== null && resumo.custos_diretos?.total !== undefined) {
+      linhasResumo.push(['Total de Custos Diretos Operacionais', formatarMoeda(resumo.custos_diretos.total)]);
+    } else if (resumo.total_despesas_efetivadas != null && resumo.total_abastecimentos_efetivados != null) {
+      linhasResumo.push(['Despesas e Abastecimentos Efetivados', formatarMoeda(resumo.total_despesas_efetivadas + resumo.total_abastecimentos_efetivados)]);
+    }
+
+    if (resumo.resultado_operacional !== null && resumo.resultado_operacional !== undefined) {
+      const margemStr = resumo.margem_percentual != null ? ` (Margem: ${resumo.margem_percentual}%)` : '';
+      linhasResumo.push(['RESULTADO OPERACIONAL', `${formatarMoeda(resumo.resultado_operacional)}${margemStr}`]);
+    }
+
+    if (resumo.tem_pendentes && resumo.total_pendente) {
+      linhasResumo.push(['Lançamentos Pendentes (Informativo, não compõe saldo)', formatarMoeda(resumo.total_pendente)]);
+    }
+
     autoTable(doc, {
       startY: yPos + 4,
-      head: [['Resumo Financeiro e Acerto (Motorista Vinculado)', 'Valor']],
-      body: [
-        ['Faturamento Bruto da Viagem', formatarMoeda(resumo.frete_bruto)],
-        [
-          `Comissão do Motorista (${resumo.comissao_percentual ?? 0}%)`,
-          formatarMoeda(resumo.comissao_valor),
-        ],
-        ['Despesas/Abastecimentos pagos pelo Motorista (Reembolso)', formatarMoeda(resumo.gastos_motorista)],
-        ['Vales e Adiantamentos (Dedução)', formatarMoeda(resumo.total_vales)],
-        ['SALDO LÍQUIDO DO MOTORISTA', formatarMoeda(resumo.saldo_motorista)],
-        ['RESULTADO OPERACIONAL DA EMPRESA', formatarMoeda(resumo.resultado_empresa)],
-      ],
+      head: [['Resumo Financeiro e Apuração da Viagem', 'Valor']],
+      body: linhasResumo,
       theme: 'grid',
       styles: { fontSize: 8.5, cellPadding: 2.2 },
       headStyles: { fillColor: [15, 118, 110], textColor: 255, fontStyle: 'bold' },
-      columnStyles: { 0: { cellWidth: 70, fontStyle: 'bold', textColor: [30, 41, 59] } },
+      columnStyles: { 0: { cellWidth: 75, fontStyle: 'bold', textColor: [30, 41, 59] } },
     });
   }
 

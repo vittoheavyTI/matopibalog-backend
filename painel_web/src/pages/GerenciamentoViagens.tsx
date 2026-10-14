@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Plus, X, Search, Filter, Truck, MapPin, Calendar, DollarSign, Gauge, Trash2, Edit, Check, AlertTriangle, ChevronLeft, ChevronDown, ChevronRight, Fuel, FileText, TrendingUp, Save, Unlock, Lock, Camera, Upload, Ban, Download, ShieldCheck, CheckCircle2 } from 'lucide-react';
 import { useLancamentosRealtime } from '../hooks/useLancamentosRealtime';
@@ -79,6 +79,10 @@ export const GerenciamentoViagens: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const motoristaQuery = searchParams.get('motorista');
   const freteQuery = searchParams.get('frete');
+  const freteQueryIds = useMemo(() => {
+    if (!freteQuery) return [];
+    return freteQuery.split(',').map(s => s.trim()).filter(Boolean);
+  }, [freteQuery]);
   const painelQuery = searchParams.get('painel');
   // ?novoFrete=1 (vindo do botão "Adicionar Frete" do Dashboard) abre o modal "Novo Frete".
   const novoFreteQuery = searchParams.get('novoFrete');
@@ -120,6 +124,7 @@ export const GerenciamentoViagens: React.FC = () => {
   const [docsCarregando, setDocsCarregando] = useState<Set<string>>(new Set());
   const [envelopesPorFrete, setEnvelopesPorFrete] = useState<Record<string, any>>({});
   const [envelopesCarregando, setEnvelopesCarregando] = useState<Set<string>>(new Set());
+  const envelopesCarregandoRef = useRef<Set<string>>(new Set());
   const [relatorioFechamentoCarregando, setRelatorioFechamentoCarregando] = useState<Set<string>>(new Set());
   const [modalAvisoEnvelope, setModalAvisoEnvelope] = useState<{
     aberto: boolean;
@@ -127,6 +132,11 @@ export const GerenciamentoViagens: React.FC = () => {
     status: string;
     origem?: string;
     destino?: string;
+  } | null>(null);
+  const [modalErroReporting, setModalErroReporting] = useState<{
+    aberto: boolean;
+    titulo: string;
+    mensagem: string;
   } | null>(null);
   const [arquivoPreview, setArquivoPreview] = useState<ArquivoPreview | null>(null);
   const [tipoDocumentoNovoFrete, setTipoDocumentoNovoFrete] = useState<TipoDocumentoFrete>('cte');
@@ -174,20 +184,24 @@ export const GerenciamentoViagens: React.FC = () => {
   };
 
   const carregarEnvelopeFrete = useCallback(async (freteId: string) => {
-    if (envelopesCarregando.has(freteId)) return null;
+    if (envelopesCarregandoRef.current.has(freteId)) return null;
+    envelopesCarregandoRef.current.add(freteId);
     setEnvelopesCarregando(prev => new Set(prev).add(freteId));
     try {
       const { data } = await api.get(`/fretes/${freteId}/envelope-digital`);
       setEnvelopesPorFrete(prev => ({ ...prev, [freteId]: data }));
       return data;
+    } catch {
+      return null;
     } finally {
+      envelopesCarregandoRef.current.delete(freteId);
       setEnvelopesCarregando(prev => {
         const next = new Set(prev);
         next.delete(freteId);
         return next;
       });
     }
-  }, [envelopesCarregando]);
+  }, []);
 
   const baixarPdfEnvelope = async (freteId: string) => {
     try {
@@ -207,7 +221,11 @@ export const GerenciamentoViagens: React.FC = () => {
       await gerarPdfEnvelopeDigital(resposta);
     } catch (err: any) {
       console.error('Erro ao gerar PDF do envelope digital:', err);
-      alert('Erro ao gerar o PDF do envelope digital. Tente novamente.');
+      setModalErroReporting({
+        aberto: true,
+        titulo: 'Erro no Envelope Digital',
+        mensagem: 'Não foi possível gerar o PDF do envelope digital. Tente novamente mais tarde.',
+      });
     }
   };
 
@@ -219,7 +237,11 @@ export const GerenciamentoViagens: React.FC = () => {
       await gerarPdfFechamentoFrete(data);
     } catch (err: any) {
       console.error('Erro ao gerar relatório de fechamento:', err);
-      alert('Não foi possível gerar o relatório de fechamento deste frete.');
+      setModalErroReporting({
+        aberto: true,
+        titulo: 'Erro no Relatório de Fechamento',
+        mensagem: 'Não foi possível gerar o relatório de fechamento deste frete.',
+      });
     } finally {
       setRelatorioFechamentoCarregando(prev => {
         const next = new Set(prev);
@@ -294,7 +316,7 @@ export const GerenciamentoViagens: React.FC = () => {
         api.get('/abastecimentos?motorista_id=' + motId),
         api.get('/vales?motorista_id=' + motId)
       ]);
-      const fretesData = (resF.data || []).filter((f: any) => f.status !== 'finalizado' || f.id === freteQuery);
+      const fretesData = (resF.data || []).filter((f: any) => f.status !== 'finalizado' || freteQueryIds.includes(f.id));
       const despesasData = (resD.data || []).filter((d: any) => d.status !== 'finalizado');
       const abastData = (resA.data || []).filter((a: any) => a.status !== 'finalizado');
       const valesData = (resV.data || []).filter((v: any) => v.status !== 'finalizado');
@@ -418,16 +440,23 @@ export const GerenciamentoViagens: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (!freteQuery) return;
+    if (freteQueryIds.length === 0) return;
     let cancelado = false;
     queueMicrotask(() => {
       if (cancelado) return;
-      setFretesExpandidos(prev => new Set(prev).add(freteQuery));
-      if (!(freteQuery in docsPorFrete)) void carregarDocumentosFrete(freteQuery);
-      document.getElementById(`frete-${freteQuery}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setFretesExpandidos(prev => {
+        const next = new Set(prev);
+        freteQueryIds.forEach(id => next.add(id));
+        return next;
+      });
+      freteQueryIds.forEach(id => {
+        if (!(id in docsPorFrete)) void carregarDocumentosFrete(id);
+        if (!(id in envelopesPorFrete)) void carregarEnvelopeFrete(id);
+      });
+      document.getElementById(`frete-${freteQueryIds[0]}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
     return () => { cancelado = true; };
-  }, [freteQuery, fretes, docsPorFrete, carregarDocumentosFrete]);
+  }, [freteQueryIds, fretes, docsPorFrete, envelopesPorFrete, carregarDocumentosFrete, carregarEnvelopeFrete]);
 
   // Preview interno via signed URL curta. O backend continua sendo a autoridade do
   // path privado; abrir fora/salvar ficam dentro do modal.
@@ -455,8 +484,11 @@ export const GerenciamentoViagens: React.FC = () => {
       else next.add(freteId);
       return next;
     });
-    // Lazy-load dos documentos na primeira expansão.
-    if (!jaAberto && !(freteId in docsPorFrete)) carregarDocumentosFrete(freteId);
+    // Lazy-load dos documentos e do envelope na primeira expansão.
+    if (!jaAberto) {
+      if (!(freteId in docsPorFrete)) void carregarDocumentosFrete(freteId);
+      if (!(freteId in envelopesPorFrete)) void carregarEnvelopeFrete(freteId);
+    }
   };
 
   const rotuloTipoDoc = (t: string): string =>
@@ -1594,7 +1626,7 @@ export const GerenciamentoViagens: React.FC = () => {
                   loadData()×loadMotoristaData() no mount com ?motorista=<id>, que pode
                   deixar finalizados (da carga global não filtrada) no estado. Display-only. */}
               {[...mFretes]
-                .filter((f: any) => (f.status !== 'cancelado' && f.status !== 'finalizado') || f.id === freteQuery)
+                .filter((f: any) => (f.status !== 'cancelado' && f.status !== 'finalizado') || freteQueryIds.includes(f.id))
                 .sort((a: any, b: any) => {
                   const prioA = a.status === 'ativo' || a.status === 'pendente' ? 0 : 1;
                   const prioB = b.status === 'ativo' || b.status === 'pendente' ? 0 : 1;
@@ -1611,7 +1643,7 @@ export const GerenciamentoViagens: React.FC = () => {
                   .filter((i: any) => i.status === 'aprovado')
                   .reduce((acc: number, i: any) => acc + (parseFloat(i.valor ?? i.valorTotal) || 0), 0);
                 const aberto = fretesExpandidos.has(f.id);
-                const consultaFocada = f.id === freteQuery && (f.status === 'finalizado' || f.status === 'cancelado');
+                const consultaFocada = freteQueryIds.includes(f.id) && (f.status === 'finalizado' || f.status === 'cancelado');
                 const editandoFrete = editingItem?.id === f.id;
                 const litrosFrete = abastFrete.filter((a: any) => a.status === 'aprovado').reduce((acc: number, a: any) => acc + (parseFloat(a.litros) || 0), 0);
                 const distFrete = (f.kmFinal || 0) - (f.kmInicial || 0);
@@ -1633,7 +1665,13 @@ export const GerenciamentoViagens: React.FC = () => {
                           </div>
                         </div>
                       ) : (
-                        <button type="button" onClick={() => toggleFreteExpandido(f.id)} className="flex-1 text-left">
+                        <button
+                          type="button"
+                          id={`btn-expandir-frete-${f.id}`}
+                          data-testid={`btn-expandir-frete-${f.id}`}
+                          onClick={() => toggleFreteExpandido(f.id)}
+                          className="flex-1 text-left"
+                        >
                           <div className="flex items-center gap-2">
                             {aberto ? <ChevronDown size={16} className="text-blue-600 flex-shrink-0" /> : <ChevronRight size={16} className="text-blue-600 flex-shrink-0" />}
                             <p className="font-bold text-gray-800">{f.origem} ➔ {f.destino}</p>
@@ -1720,6 +1758,8 @@ export const GerenciamentoViagens: React.FC = () => {
                             <div className="flex flex-wrap items-center gap-2">
                               <button
                                 type="button"
+                                id={`btn-envelope-digital-${f.id}`}
+                                data-testid="btn-envelope-digital"
                                 onClick={() => baixarPdfEnvelope(f.id)}
                                 disabled={envelopesCarregando.has(f.id)}
                                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-emerald-300 bg-emerald-50 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 disabled:opacity-60 transition-colors shadow-xs"
@@ -1730,6 +1770,8 @@ export const GerenciamentoViagens: React.FC = () => {
                               </button>
                               <button
                                 type="button"
+                                id={`btn-relatorio-fechamento-${f.id}`}
+                                data-testid="btn-relatorio-fechamento"
                                 onClick={() => baixarPdfFechamento(f.id)}
                                 disabled={relatorioFechamentoCarregando.has(f.id)}
                                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-blue-300 bg-blue-50 text-xs font-semibold text-blue-800 hover:bg-blue-100 disabled:opacity-60 transition-colors shadow-xs"
@@ -2387,7 +2429,7 @@ export const GerenciamentoViagens: React.FC = () => {
         </div>
       )}
       {modalAvisoEnvelope && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+        <div id="modal-aviso-envelope" role="dialog" aria-modal="true" aria-labelledby="titulo-aviso-envelope" className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-150">
             <div className="p-6 flex flex-col items-center text-center space-y-3">
               <div className={`w-14 h-14 rounded-full flex items-center justify-center ${
@@ -2401,7 +2443,7 @@ export const GerenciamentoViagens: React.FC = () => {
                   <ShieldCheck size={28} />
                 )}
               </div>
-              <h3 className="text-lg font-bold text-gray-800">
+              <h3 id="titulo-aviso-envelope" className="text-lg font-bold text-gray-800">
                 {modalAvisoEnvelope.status === 'LEGACY_NO_FORMAL_ENVELOPE'
                   ? 'Envelope Digital Indisponível (Frete Legado)'
                   : 'Envelope Digital Formal Pendente'}
@@ -2429,6 +2471,7 @@ export const GerenciamentoViagens: React.FC = () => {
             <div className="p-4 bg-gray-50 border-t flex flex-col sm:flex-row items-center justify-end gap-2">
               <button
                 type="button"
+                id="btn-fechar-aviso-envelope"
                 onClick={() => setModalAvisoEnvelope(null)}
                 className="w-full sm:w-auto px-4 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-200 rounded-xl transition-all"
               >
@@ -2436,6 +2479,7 @@ export const GerenciamentoViagens: React.FC = () => {
               </button>
               <button
                 type="button"
+                id="btn-alternativa-fechamento"
                 onClick={() => {
                   const id = modalAvisoEnvelope.freteId;
                   setModalAvisoEnvelope(null);
@@ -2445,6 +2489,33 @@ export const GerenciamentoViagens: React.FC = () => {
               >
                 <Download size={15} />
                 Baixar Relatório de Fechamento
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {modalErroReporting && (
+        <div id="modal-erro-reporting" role="dialog" aria-modal="true" aria-labelledby="titulo-erro-reporting" className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="p-6 flex flex-col items-center text-center space-y-3">
+              <div className="w-14 h-14 rounded-full flex items-center justify-center bg-rose-100 text-rose-600">
+                <AlertTriangle size={28} />
+              </div>
+              <h3 id="titulo-erro-reporting" className="text-lg font-bold text-gray-800">
+                {modalErroReporting.titulo}
+              </h3>
+              <p className="text-sm text-gray-600 leading-relaxed">
+                {modalErroReporting.mensagem}
+              </p>
+            </div>
+            <div className="p-4 bg-gray-50 border-t flex items-center justify-end">
+              <button
+                type="button"
+                id="btn-fechar-erro-reporting"
+                onClick={() => setModalErroReporting(null)}
+                className="w-full sm:w-auto px-5 py-2.5 bg-gray-800 hover:bg-gray-900 text-white text-sm font-bold rounded-xl shadow-xs transition-all"
+              >
+                Entendi
               </button>
             </div>
           </div>

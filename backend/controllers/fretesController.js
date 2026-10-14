@@ -22,6 +22,15 @@ const {
   canAccessUnit,
   deriveUnitForWrite,
 } = require('../services/operationalScopeService');
+const { calcularRentabilidadeFrete } = require('../utils/rentabilidadeFrete');
+const { calcularAcertoMotoristas } = require('../utils/acertoMotorista');
+const {
+  STATUS_LANCAMENTO_EFETIVADO,
+  STATUS_LANCAMENTO_NAO_COMPOE,
+  lancamentoEfetivado,
+  lancamentoNaoCompoe,
+} = require('../utils/agregacaoFinanceiraFretes');
+const { DRIVER_FINANCIAL_VISIBILITY } = require('../services/permissions/permissionRegistry');
 
 const BUCKET_ODOMETRO = 'fretes-odometro';
 const SIGNED_URL_TTL_SECONDS = 300;
@@ -657,8 +666,30 @@ exports.getRelatorioFechamento = async (req, res) => {
 
     const isSuperAdmin = req.user?.is_super_admin === true;
     const isDriver = req.user?.tipo === 'motorista' || req.user?.role === 'motorista';
-    const eff = isSuperAdmin ? null : await ensureEffective(req).catch(() => ({ permissions: {} }));
-    const hasFinanceView = isSuperAdmin || Boolean(eff?.permissions && eff.permissions['finance.operational.view'] === true);
+    let eff = null;
+    let hasFinanceView = false;
+    let hasDocumentsView = false;
+    let driverVisibility = DRIVER_FINANCIAL_VISIBILITY.COMMISSION_ONLY;
+
+    if (isSuperAdmin) {
+      hasFinanceView = true;
+      hasDocumentsView = true;
+      driverVisibility = DRIVER_FINANCIAL_VISIBILITY.FULL_FREIGHT_FINANCIAL;
+    } else {
+      try {
+        eff = await ensureEffective(req);
+        hasFinanceView = Boolean(eff?.permissions && eff.permissions['finance.operational.view'] === true);
+        hasDocumentsView = Boolean(eff?.permissions && eff.permissions['documents.view'] === true);
+        if (isDriver) {
+          driverVisibility = eff?.driverFinancialVisibility || DRIVER_FINANCIAL_VISIBILITY.COMMISSION_ONLY;
+        }
+      } catch (err) {
+        // FAIL CLOSED: na dúvida ou falha de autoridade, mínima projeção segura
+        hasFinanceView = false;
+        hasDocumentsView = false;
+        driverVisibility = DRIVER_FINANCIAL_VISIBILITY.COMMISSION_ONLY;
+      }
+    }
 
     const { data: freteData, error: freteErr } = await supabase
       .from('fretes')
@@ -706,35 +737,49 @@ exports.getRelatorioFechamento = async (req, res) => {
       .maybeSingle()
       .catch(() => ({ data: null }));
 
-    const despesasValidas = (despesasRaw || []).filter((d) => d.status !== 'cancelado');
-    const abastecimentosValidos = (abastecimentosRaw || []).filter((a) => a.status !== 'cancelado');
-    const valesValidos = (valesRaw || []).filter((v) => v.status !== 'cancelado');
-
     const motInfo = freteData.motoristas;
     const motEmpresaTipo = Array.isArray(motInfo?.empresas) ? motInfo.empresas[0]?.tipo : motInfo?.empresas?.tipo;
     const isAutonomo = motEmpresaTipo === 'autonomo';
     const percentualComissao = Number(motInfo?.percentual_comissao || 0);
 
-    const valorFreteBruto = parseFloat(freteData.valor_frete) || 0;
-    const totalDespesas = despesasValidas.reduce((s, d) => s + (parseFloat(d.valor) || 0), 0);
-    const totalAbastecimentos = abastecimentosValidos.reduce((s, a) => s + (parseFloat(a.valor_total) || 0), 0);
-    const totalVales = valesValidos.reduce((s, v) => s + (parseFloat(v.valor) || 0), 0);
+    // ── CANONICAL PROFITABILITY & DIRECT COSTS ───────────────────────────
+    // Reutiliza calcularRentabilidadeFrete (rentabilidadeFrete.js).
+    // Custos diretos = combustivel + pedagio + outras + comissao (somente efetivados).
+    const rentabilidade = calcularRentabilidadeFrete(
+      freteData,
+      { abastecimentos: abastecimentosRaw || [], despesas: despesasRaw || [] },
+      motEmpresaTipo,
+      percentualComissao,
+    );
 
-    const despMotorista = despesasValidas.filter((d) => d.quem_pagou === 'motorista').reduce((s, d) => s + (parseFloat(d.valor) || 0), 0);
-    const abastMotorista = abastecimentosValidos.filter((a) => a.quem_pagou === 'motorista').reduce((s, a) => s + (parseFloat(a.valor_total) || 0), 0);
-    const despProprietario = despesasValidas.filter((d) => d.quem_pagou === 'proprietario').reduce((s, d) => s + (parseFloat(d.valor) || 0), 0);
-    const abastProprietario = abastecimentosValidos.filter((a) => a.quem_pagou === 'proprietario').reduce((s, a) => s + (parseFloat(a.valor_total) || 0), 0);
-    const valesProprietario = valesValidos.filter((v) => v.quem_pagou === 'proprietario').reduce((s, v) => s + (parseFloat(v.valor) || 0), 0);
+    // ── CANONICAL DRIVER SETTLEMENT (ACERTO) ─────────────────────────────
+    // Reutiliza calcularAcertoMotoristas (acertoMotorista.js).
+    const vincularLancamento = (l) => ({ frete_id: freteId, motorista_id: freteData.motorista_id, ...l });
+    const acertoRes = calcularAcertoMotoristas({
+      fretes: [freteData],
+      despesas: (despesasRaw || []).map(vincularLancamento),
+      abastecimentos: (abastecimentosRaw || []).map(vincularLancamento),
+      vales: (valesRaw || []).map(vincularLancamento),
+    });
+    const motAcerto = acertoRes?.motoristas?.find((m) => m.motorista_id === freteData.motorista_id) || acertoRes?.motoristas?.[0];
+    const saldoMotorista = motAcerto ? motAcerto.resumo.saldo_acerto : (acertoRes?.resumo?.saldo_acerto ?? 0);
+    const situacaoMotorista = motAcerto ? motAcerto.resumo.situacao : (acertoRes?.resumo?.situacao ?? 'Sem saldo');
+    const creditosMotorista = motAcerto ? motAcerto.resumo.total_creditos : (acertoRes?.resumo?.total_creditos ?? 0);
+    const debitosMotorista = motAcerto ? motAcerto.resumo.total_debitos : (acertoRes?.resumo?.total_debitos ?? 0);
 
-    const gastosMotorista = despMotorista + abastMotorista;
-    const gastosProprietario = despProprietario + abastProprietario;
-    const valorComissao = isAutonomo ? 0 : calcularComissao(valorFreteBruto, percentualComissao, motEmpresaTipo);
-    const saldoMotorista = isAutonomo
-      ? valorFreteBruto - (totalDespesas + totalAbastecimentos + totalVales)
-      : valorComissao + gastosMotorista - valesProprietario;
-    const resultadoEmpresa = isAutonomo
-      ? 0
-      : valorFreteBruto - valorComissao - gastosProprietario;
+    // Vales efetivados (informativo de rentabilidade / débito de acerto)
+    const valesEfetivados = (valesRaw || []).filter(lancamentoEfetivado);
+    const totalValesEfetivados = Math.round(valesEfetivados.reduce((s, v) => s + (Number(v.valor) || 0), 0) * 100) / 100;
+
+    // Resumo de pendências informativas (não compõem totais realizados)
+    const despesasPendentes = (despesasRaw || []).filter((d) => d.status === 'pendente');
+    const abastecimentosPendentes = (abastecimentosRaw || []).filter((a) => a.status === 'pendente');
+    const valesPendentes = (valesRaw || []).filter((v) => v.status === 'pendente');
+    const totalPendente = Math.round((
+      despesasPendentes.reduce((s, d) => s + (Number(d.valor) || 0), 0) +
+      abastecimentosPendentes.reduce((s, a) => s + (Number(a.valor_total) || 0), 0) +
+      valesPendentes.reduce((s, v) => s + (Number(v.valor) || 0), 0)
+    ) * 100) / 100;
 
     let envelopeStatus = 'NO_FORMAL_ENVELOPE_YET';
     if (envelopeRaw) {
@@ -744,17 +789,25 @@ exports.getRelatorioFechamento = async (req, res) => {
     }
 
     let resumoFinanceiro = {
-      frete_bruto: valorFreteBruto,
-      total_despesas: totalDespesas,
-      total_abastecimentos: totalAbastecimentos,
-      total_vales: totalVales,
-      gastos_motorista: gastosMotorista,
-      gastos_proprietario: gastosProprietario,
+      receita_realizada: rentabilidade.receita_realizada,
+      frete_bruto: Number(freteData.valor_frete) || 0,
+      custos_diretos: rentabilidade.custos,
+      total_despesas_efetivadas: rentabilidade.custos.pedagio + rentabilidade.custos.outras_despesas,
+      total_abastecimentos_efetivados: rentabilidade.custos.combustivel,
+      total_vales_efetivados: totalValesEfetivados,
+      resultado_operacional: rentabilidade.resultado_operacional,
+      margem_percentual: rentabilidade.margem_percentual,
       comissao_percentual: isAutonomo ? null : percentualComissao,
-      comissao_valor: isAutonomo ? null : valorComissao,
+      comissao_valor: rentabilidade.custos.comissao,
       saldo_motorista: saldoMotorista,
-      resultado_empresa: isAutonomo ? null : resultadoEmpresa,
+      saldo_motorista_situacao: situacaoMotorista,
+      motorista_creditos: creditosMotorista,
+      motorista_debitos: debitosMotorista,
+      total_pendente: totalPendente,
+      tem_pendentes: despesasPendentes.length > 0 || abastecimentosPendentes.length > 0 || valesPendentes.length > 0,
       is_autonomo: isAutonomo,
+      alertas: rentabilidade.alertas,
+      dados_completos: rentabilidade.dados_completos,
     };
 
     let freteLimpo = {
@@ -779,14 +832,32 @@ exports.getRelatorioFechamento = async (req, res) => {
       foto_odometro_final_presente: Boolean(freteData.foto_odometro_final_path),
     };
 
+    // ── FIELD-LEVEL FINANCIAL REDACTION POLICY ─────────────────────────
     if (isDriver) {
-      const visibility = eff?.driverFinancialVisibility || 'commission_only';
-      if (visibility === 'commission_only') {
+      if (driverVisibility === DRIVER_FINANCIAL_VISIBILITY.COMMISSION_ONLY) {
         freteLimpo.valor_frete = null;
         freteLimpo.valor_tonelada_km = null;
+        freteLimpo.toneladas = null;
+        resumoFinanceiro.receita_realizada = null;
         resumoFinanceiro.frete_bruto = null;
-        resumoFinanceiro.resultado_empresa = null;
+        resumoFinanceiro.resultado_operacional = null;
+        resumoFinanceiro.margem_percentual = null;
+        resumoFinanceiro.custos_diretos = null;
+        resumoFinanceiro.total_despesas_efetivadas = null;
+        resumoFinanceiro.total_abastecimentos_efetivados = null;
+        resumoFinanceiro.total_vales_efetivados = null;
+      } else if (driverVisibility === DRIVER_FINANCIAL_VISIBILITY.COMMISSION_PLUS_BASE) {
+        freteLimpo.valor_tonelada_km = null;
+        freteLimpo.toneladas = null;
+        // Não expõe resultado operacional nem decomposição de custos internos da empresa
+        resumoFinanceiro.resultado_operacional = null;
+        resumoFinanceiro.margem_percentual = null;
+        resumoFinanceiro.custos_diretos = null;
+        resumoFinanceiro.total_despesas_efetivadas = null;
+        resumoFinanceiro.total_abastecimentos_efetivados = null;
+        resumoFinanceiro.total_vales_efetivados = null;
       }
+      // FULL_FREIGHT_FINANCIAL mantém todos os campos autorizados
     } else if (!hasFinanceView) {
       freteLimpo.valor_frete = null;
       freteLimpo.valor_tonelada_km = null;
@@ -797,6 +868,21 @@ exports.getRelatorioFechamento = async (req, res) => {
       };
     }
 
+    // Regra de visibilidade de valores de lançamentos individuais
+    const permitirVerValorLancamento = (linha) => {
+      if (isSuperAdmin) return true;
+      if (!isDriver) return hasFinanceView;
+      if (driverVisibility === DRIVER_FINANCIAL_VISIBILITY.FULL_FREIGHT_FINANCIAL) return true;
+      // Em commission_only e commission_plus_base, o motorista só enxerga valores que ele mesmo pagou (crédito)
+      return linha.quem_pagou === 'motorista';
+    };
+
+    const permitirVerValorVale = (_vale) => {
+      if (isSuperAdmin) return true;
+      if (!isDriver) return hasFinanceView;
+      return true; // Vale do próprio motorista (débito de acerto)
+    };
+
     return res.status(200).json({
       frete: freteLimpo,
       motorista: {
@@ -806,35 +892,42 @@ exports.getRelatorioFechamento = async (req, res) => {
         tipo_empresa: motEmpresaTipo || 'transportadora',
       },
       lancamentos: {
-        despesas: despesasValidas.map((d) => ({
+        despesas: (despesasRaw || []).map((d) => ({
           id: d.id,
           descricao: d.descricao,
           tipo: d.tipo,
-          valor: hasFinanceView || isDriver ? d.valor : null,
+          valor: permitirVerValorLancamento(d) ? d.valor : null,
           status: d.status,
           quem_pagou: d.quem_pagou,
+          efetivado: lancamentoEfetivado(d),
         })),
-        abastecimentos: abastecimentosValidos.map((a) => ({
+        abastecimentos: (abastecimentosRaw || []).map((a) => ({
           id: a.id,
           posto: a.posto,
           litros: a.litros,
           arla_litros: a.arla_litros,
-          arla_valor: hasFinanceView || isDriver ? a.arla_valor : null,
-          valor_total: hasFinanceView || isDriver ? a.valor_total : null,
+          arla_valor: permitirVerValorLancamento(a) ? a.arla_valor : null,
+          valor_total: permitirVerValorLancamento(a) ? a.valor_total : null,
           status: a.status,
           quem_pagou: a.quem_pagou,
+          efetivado: lancamentoEfetivado(a),
         })),
-        vales: valesValidos.map((v) => ({
+        vales: (valesRaw || []).map((v) => ({
           id: v.id,
           descricao: v.descricao,
-          valor: hasFinanceView || isDriver ? v.valor : null,
+          valor: permitirVerValorVale(v) ? v.valor : null,
           status: v.status,
           quem_pagou: v.quem_pagou,
+          efetivado: lancamentoEfetivado(v),
         })),
       },
-      documentos_fiscais: {
+      documentos_fiscais: (isSuperAdmin || hasDocumentsView || isDriver) ? {
         total: (docsRaw || []).length,
         tipos: (docsRaw || []).map((d) => ({ tipo: d.tipo, status: d.status })),
+      } : {
+        total: null,
+        tipos: [],
+        restricted: true,
       },
       epod: epodRaw ? {
         id: epodRaw.id,
@@ -861,6 +954,7 @@ exports.getRelatorioFechamento = async (req, res) => {
     return res.status(500).json({ message: 'Erro ao gerar relatório de fechamento do frete.' });
   }
 };
+
 
 function redigirEventosAuditoria(eventos, eff, isSuperAdmin) {
   if (!Array.isArray(eventos) || isSuperAdmin) return eventos;

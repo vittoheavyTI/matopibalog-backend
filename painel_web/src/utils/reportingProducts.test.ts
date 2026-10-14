@@ -201,15 +201,13 @@ describe('freightClosurePdf', () => {
       resumo_financeiro: {
         restricted: false,
         frete_bruto: 13500,
-        total_despesas: 320,
-        total_abastecimentos: 1800,
-        total_vales: 500,
-        gastos_motorista: 320,
-        gastos_proprietario: 2300,
+        total_despesas_efetivadas: 320,
+        total_abastecimentos_efetivados: 1800,
+        total_vales_efetivados: 500,
         comissao_percentual: 12,
         comissao_valor: 1620,
         saldo_motorista: 1440,
-        resultado_empresa: 9260,
+        resultado_operacional: 9260,
         is_autonomo: true,
       },
       gerado_em: '2026-10-14T10:00:00Z',
@@ -248,15 +246,13 @@ describe('freightClosurePdf', () => {
       resumo_financeiro: {
         restricted: false,
         frete_bruto: 8000,
-        total_despesas: 0,
-        total_abastecimentos: 0,
-        total_vales: 0,
-        gastos_motorista: 0,
-        gastos_proprietario: 0,
+        total_despesas_efetivadas: 0,
+        total_abastecimentos_efetivados: 0,
+        total_vales_efetivados: 0,
         comissao_percentual: 10,
         comissao_valor: 800,
         saldo_motorista: 800,
-        resultado_empresa: 7200,
+        resultado_operacional: 7200,
         is_autonomo: false,
       },
       gerado_em: '2026-10-14T10:00:00Z',
@@ -265,5 +261,142 @@ describe('freightClosurePdf', () => {
     const result = await gerarPdfFechamentoFrete(payloadLegado, { autoSave: false });
     expect(result.ok).toBe(true);
     expect(result.doc).toBeDefined();
+  });
+
+function extrairTextoPdf(doc: any): string {
+  const pages = doc.internal?.pages || [];
+  return pages.map((p: any) => (Array.isArray(p) ? p.join('\n') : String(p))).join('\n');
+}
+
+  it('garante que lancamentos pendentes e rejeitados nao sao somados no rodape (rodape consome autoridade backend)', async () => {
+    const payload: RelatorioFechamentoPayload = {
+      frete: {
+        id: 'frete-contract-1',
+        empresa_id: 'empresa-1',
+        motorista_id: 'mot-1',
+        origem: 'LEM / BA',
+        destino: 'Salvador / BA',
+        data: '2026-10-10',
+        status: 'finalizado',
+      },
+      motorista: { id: 'mot-1', nome: 'Motorista Teste', placa: 'ABC1234' },
+      lancamentos: {
+        despesas: [
+          { id: 'd-1', descricao: 'Pedagio Aprovado', tipo: 'pedagio', valor: 100, status: 'aprovado', quem_pagou: 'proprietario' },
+          { id: 'd-2', descricao: 'Refeicao Pendente', tipo: 'refeicao', valor: 500, status: 'pendente', quem_pagou: 'motorista' },
+          { id: 'd-3', descricao: 'Manutencao Rejeitada', tipo: 'manutencao', valor: 300, status: 'rejeitado', quem_pagou: 'motorista' },
+          { id: 'd-4', descricao: 'Multa Cancelada', tipo: 'multa', valor: 400, status: 'cancelado', quem_pagou: 'proprietario' },
+        ],
+        abastecimentos: [],
+        vales: [],
+      },
+      documentos_fiscais: { total: 0, tipos: [] },
+      envelope: { status: 'LEGACY_NO_FORMAL_ENVELOPE' },
+      resumo_financeiro: {
+        restricted: false,
+        total_despesas_efetivadas: 100, // canonical backend authority
+      },
+    };
+
+    const result = await gerarPdfFechamentoFrete(payload, { autoSave: false });
+    expect(result.ok).toBe(true);
+
+    const textoPdf = extrairTextoPdf(result.doc);
+
+    // Must render footer with backend authority total (R$ 100,00)
+    expect(textoPdf).toContain('TOTAL DESPESAS EFETIVADAS');
+    expect(textoPdf).toContain('100,00');
+
+    // Must NOT recompute client-side sum of all rows (100 + 500 + 300 + 400 = 1300)
+    expect(textoPdf).not.toContain('1.300,00');
+  });
+
+  it('garante que valores restritos nao reaparecem atraves de recalculacao no PDF', async () => {
+    const payload: RelatorioFechamentoPayload = {
+      frete: {
+        id: 'frete-contract-2',
+        empresa_id: 'empresa-1',
+        motorista_id: 'mot-1',
+        origem: 'LEM / BA',
+        destino: 'Salvador / BA',
+        data: '2026-10-10',
+        status: 'finalizado',
+        valor_frete: null, // restricted
+      },
+      motorista: { id: 'mot-1', nome: 'Motorista Teste', placa: 'ABC1234' },
+      lancamentos: {
+        despesas: [
+          { id: 'd-1', descricao: 'Pedagio', tipo: 'pedagio', valor: null, status: 'aprovado', quem_pagou: 'proprietario' },
+        ],
+        abastecimentos: [],
+        vales: [],
+      },
+      documentos_fiscais: { total: 0, tipos: [] },
+      envelope: { status: 'LEGACY_NO_FORMAL_ENVELOPE' },
+      resumo_financeiro: {
+        restricted: true,
+        message: 'Informações financeiras restritas para o seu nível de acesso.',
+      },
+    };
+
+    const result = await gerarPdfFechamentoFrete(payload, { autoSave: false });
+    expect(result.ok).toBe(true);
+
+    const textoPdf = extrairTextoPdf(result.doc);
+    expect(textoPdf).toContain('[Restrito]');
+    expect(textoPdf).toContain('Informações financeiras restritas');
+  });
+
+  it('gerador nao reconstrói totais operacionais ocultos para motorista commission_only', async () => {
+    const payload: RelatorioFechamentoPayload = {
+      frete: {
+        id: 'frete-contract-3',
+        empresa_id: 'empresa-1',
+        motorista_id: 'mot-1',
+        origem: 'LEM / BA',
+        destino: 'Salvador / BA',
+        data: '2026-10-10',
+        status: 'finalizado',
+        valor_frete: null, // commission_only
+      },
+      motorista: { id: 'mot-1', nome: 'Motorista Teste', placa: 'ABC1234' },
+      lancamentos: {
+        despesas: [
+          { id: 'd-1', descricao: 'Pedagio Empresa', tipo: 'pedagio', valor: null, status: 'aprovado', quem_pagou: 'proprietario' },
+          { id: 'd-2', descricao: 'Refeicao', tipo: 'refeicao', valor: 80, status: 'aprovado', quem_pagou: 'motorista' },
+        ],
+        abastecimentos: [],
+        vales: [],
+      },
+      documentos_fiscais: { total: 0, tipos: [] },
+      envelope: { status: 'LEGACY_NO_FORMAL_ENVELOPE' },
+      resumo_financeiro: {
+        restricted: false,
+        receita_realizada: null,
+        frete_bruto: null,
+        resultado_operacional: null,
+        comissao_valor: 450,
+        comissao_percentual: 10,
+        saldo_motorista: 530,
+        saldo_motorista_situacao: 'A pagar ao motorista',
+        is_autonomo: false,
+      },
+    };
+
+    const result = await gerarPdfFechamentoFrete(payload, { autoSave: false });
+    expect(result.ok).toBe(true);
+
+    const textoPdf = extrairTextoPdf(result.doc);
+
+    // Receita is marked [Restrito]
+    expect(textoPdf).toContain('Receita do Frete');
+    expect(textoPdf).toContain('[Restrito]');
+
+    // Operational result must NOT exist
+    expect(textoPdf).not.toContain('RESULTADO OPERACIONAL');
+
+    // Commission and driver settlement are displayed
+    expect(textoPdf).toContain('450,00');
+    expect(textoPdf).toContain('530,00');
   });
 });

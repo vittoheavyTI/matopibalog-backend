@@ -103,7 +103,7 @@ export const CENARIOS: Cenario[] = [
   },
 ];
 
-function json(route: Route, body: unknown, status = 200) {
+export function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 }
 
@@ -126,7 +126,11 @@ export type SentinelaRede = {
 export async function instalarApiFake(
   page: Page,
   cenario: Cenario,
-  opcoes: { permissoes?: Record<string, boolean>; superAdmin?: boolean } = {},
+  opcoes: {
+    permissoes?: Record<string, boolean>;
+    superAdmin?: boolean;
+    interceptadores?: Array<(route: Route, url: URL) => boolean | Promise<boolean>>;
+  } = {},
 ): Promise<SentinelaRede> {
   // §15 — EXTERNAL_NETWORK_REQUESTS_ALLOWED=0, PROVADO em vez de presumido.
   //
@@ -156,6 +160,13 @@ export async function instalarApiFake(
 
     // Recursos do próprio preview (HTML, JS, CSS) seguem normalmente.
     if (!url.pathname.startsWith('/api/')) return route.continue();
+
+    if (opcoes.interceptadores) {
+      for (const intercept of opcoes.interceptadores) {
+        const tratou = await intercept(route, url);
+        if (tratou) return;
+      }
+    }
 
     const p = url.pathname;
 

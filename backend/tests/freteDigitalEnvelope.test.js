@@ -116,7 +116,7 @@ function criarMockSupabase({ frete, envelope = null, auditEvents = [], onRpc = n
   };
 }
 
-function carregarController(supabaseMock, { effective = { permissions: { 'finance.operational.view': true } } } = {}) {
+function carregarController(supabaseMock, { effective = { permissions: { 'finance.operational.view': true } }, ensureEffectiveError = null } = {}) {
   const originalLoad = Module._load;
   delete require.cache[controllerPath];
   try {
@@ -126,7 +126,10 @@ function carregarController(supabaseMock, { effective = { permissions: { 'financ
       if (request === '../middlewares/requirePermission') {
         return {
           requirePermission: () => (req, res, next) => next(),
-          ensureEffective: async () => effective,
+          ensureEffective: async () => {
+            if (ensureEffectiveError) throw ensureEffectiveError;
+            return effective;
+          },
         };
       }
       return originalLoad.call(this, request, parent, isMain);
@@ -597,7 +600,7 @@ test('getEnvelopeDigital: returns envelope_hash, motorista_nome and placa in res
   assert.equal(bodyRes.placa, 'ABC-1234');
 });
 
-test('getRelatorioFechamento: admin with finance.operational.view gets full operational closure report', async () => {
+test('getRelatorioFechamento: admin with finance.operational.view and documents.view gets full operational closure report', async () => {
   const frete = {
     id: 'f-1',
     empresa_id: 'e-1',
@@ -647,7 +650,7 @@ test('getRelatorioFechamento: admin with finance.operational.view gets full oper
   });
 
   const controller = carregarController(supabaseMock, {
-    effective: { permissions: { 'finance.operational.view': true, 'freight.view': true } },
+    effective: { permissions: { 'finance.operational.view': true, 'freight.view': true, 'documents.view': true } },
   });
 
   let statusRes = 0;
@@ -673,17 +676,263 @@ test('getRelatorioFechamento: admin with finance.operational.view gets full oper
   assert.equal(bodyRes.documentos_fiscais.total, 1);
   assert.equal(bodyRes.epod.recebedor_nome, 'Carlos Recebedor');
 
-  // Financial calculations check:
-  // frete_bruto = 4800, comissao 10% = 480
-  // gastos_motorista = 100
-  // gastos_proprietario = 200 + 1800 = 2000
-  // vales = 300
+  // Canonical calculations check (calcularRentabilidadeFrete + calcularAcertoMotoristas):
+  // frete_bruto / receita = 4800
+  // custos_diretos = combustivel (1800) + pedagio (200) + refeicao (100) + comissao 10% (480) = 2580
+  // resultado_operacional = 4800 - 2580 = 2220
   // saldo_motorista = comissao (480) + gastos_motorista (100) - vales (300) = 280
-  // resultado_empresa = 4800 - 480 - 2000 = 2320
   assert.equal(bodyRes.resumo_financeiro.frete_bruto, 4800);
+  assert.equal(bodyRes.resumo_financeiro.receita_realizada, 4800);
   assert.equal(bodyRes.resumo_financeiro.comissao_valor, 480);
   assert.equal(bodyRes.resumo_financeiro.saldo_motorista, 280);
-  assert.equal(bodyRes.resumo_financeiro.resultado_empresa, 2320);
+  assert.equal(bodyRes.resumo_financeiro.resultado_operacional, 2220);
+  assert.equal(bodyRes.resumo_financeiro.total_despesas_efetivadas, 300);
+  assert.equal(bodyRes.resumo_financeiro.total_abastecimentos_efetivados, 1800);
+  assert.equal(bodyRes.resumo_financeiro.total_vales_efetivados, 300);
+});
+
+test('A — approved and finalized launches compose realized financial totals', async () => {
+  const frete = { id: 'f-1', empresa_id: 'e-1', motorista_id: 'm-1', status: 'finalizado', valor_frete: 3000 };
+  const despesas = [
+    { id: 'd-aprov', descricao: 'Aprovado', tipo: 'pedagio', valor: 150, status: 'aprovado', quem_pagou: 'proprietario' },
+    { id: 'd-fin', descricao: 'Finalizado', tipo: 'manutencao', valor: 250, status: 'finalizado', quem_pagou: 'proprietario' },
+  ];
+  const supabaseMock = criarMockSupabase({ frete, despesas });
+  const controller = carregarController(supabaseMock, {
+    effective: { permissions: { 'finance.operational.view': true, 'freight.view': true } },
+  });
+
+  let bodyRes = null;
+  const req = { params: { id: 'f-1' }, empresa_id: 'e-1', user: { uid: 'u-1', role: 'admin', tipo: 'admin' } };
+  const res = { status: () => ({ json: (b) => { bodyRes = b; } }) };
+
+  await controller.getRelatorioFechamento(req, res);
+  assert.equal(bodyRes.resumo_financeiro.total_despesas_efetivadas, 400);
+  assert.equal(bodyRes.lancamentos.despesas[0].efetivado, true);
+  assert.equal(bodyRes.lancamentos.despesas[1].efetivado, true);
+});
+
+test('B — pending launch does NOT compose realized totals and is flagged informatively', async () => {
+  const frete = { id: 'f-1', empresa_id: 'e-1', motorista_id: 'm-1', status: 'finalizado', valor_frete: 3000 };
+  const despesas = [
+    { id: 'd-aprov', descricao: 'Aprovada', tipo: 'pedagio', valor: 100, status: 'aprovado', quem_pagou: 'proprietario' },
+    { id: 'd-pend', descricao: 'Pendente', tipo: 'hospedagem', valor: 500, status: 'pendente', quem_pagou: 'proprietario' },
+  ];
+  const supabaseMock = criarMockSupabase({ frete, despesas });
+  const controller = carregarController(supabaseMock, {
+    effective: { permissions: { 'finance.operational.view': true, 'freight.view': true } },
+  });
+
+  let bodyRes = null;
+  const req = { params: { id: 'f-1' }, empresa_id: 'e-1', user: { uid: 'u-1', role: 'admin', tipo: 'admin' } };
+  const res = { status: () => ({ json: (b) => { bodyRes = b; } }) };
+
+  await controller.getRelatorioFechamento(req, res);
+  // Realized total has only 100
+  assert.equal(bodyRes.resumo_financeiro.total_despesas_efetivadas, 100);
+  // Pending total flags 500
+  assert.equal(bodyRes.resumo_financeiro.total_pendente, 500);
+  assert.equal(bodyRes.resumo_financeiro.tem_pendentes, true);
+  assert.equal(bodyRes.lancamentos.despesas[1].efetivado, false);
+});
+
+test('C — rejected launch does NOT compose realized totals', async () => {
+  const frete = { id: 'f-1', empresa_id: 'e-1', motorista_id: 'm-1', status: 'finalizado', valor_frete: 3000 };
+  const despesas = [
+    { id: 'd-rej', descricao: 'Rejeitada', tipo: 'pedagio', valor: 300, status: 'rejeitado', quem_pagou: 'proprietario' },
+  ];
+  const supabaseMock = criarMockSupabase({ frete, despesas });
+  const controller = carregarController(supabaseMock, {
+    effective: { permissions: { 'finance.operational.view': true, 'freight.view': true } },
+  });
+
+  let bodyRes = null;
+  const req = { params: { id: 'f-1' }, empresa_id: 'e-1', user: { uid: 'u-1', role: 'admin', tipo: 'admin' } };
+  const res = { status: () => ({ json: (b) => { bodyRes = b; } }) };
+
+  await controller.getRelatorioFechamento(req, res);
+  assert.equal(bodyRes.resumo_financeiro.total_despesas_efetivadas, 0);
+  assert.equal(bodyRes.lancamentos.despesas[0].efetivado, false);
+});
+
+test('D — cancelled launch does NOT compose realized totals', async () => {
+  const frete = { id: 'f-1', empresa_id: 'e-1', motorista_id: 'm-1', status: 'finalizado', valor_frete: 3000 };
+  const despesas = [
+    { id: 'd-canc', descricao: 'Cancelada', tipo: 'pedagio', valor: 400, status: 'cancelado', quem_pagou: 'proprietario' },
+  ];
+  const supabaseMock = criarMockSupabase({ frete, despesas });
+  const controller = carregarController(supabaseMock, {
+    effective: { permissions: { 'finance.operational.view': true, 'freight.view': true } },
+  });
+
+  let bodyRes = null;
+  const req = { params: { id: 'f-1' }, empresa_id: 'e-1', user: { uid: 'u-1', role: 'admin', tipo: 'admin' } };
+  const res = { status: () => ({ json: (b) => { bodyRes = b; } }) };
+
+  await controller.getRelatorioFechamento(req, res);
+  assert.equal(bodyRes.resumo_financeiro.total_despesas_efetivadas, 0);
+  assert.equal(bodyRes.lancamentos.despesas[0].efetivado, false);
+});
+
+test('E — canonical profitability parity: driver-paid effective expense still affects operational result', async () => {
+  const frete = { id: 'f-1', empresa_id: 'e-1', motorista_id: 'm-1', status: 'finalizado', valor_frete: 5000 };
+  // Without driver expense: receita = 5000, comissao 10% = 500 -> resultado = 4500
+  // With driver expense 200 (refeicao): direct cost increases by 200 -> resultado = 4300
+  const despesas = [
+    { id: 'd-mot', descricao: 'Refeição motorista', tipo: 'refeicao', valor: 200, status: 'aprovado', quem_pagou: 'motorista' },
+  ];
+  const supabaseMock = criarMockSupabase({ frete, despesas });
+  const controller = carregarController(supabaseMock, {
+    effective: { permissions: { 'finance.operational.view': true, 'freight.view': true } },
+  });
+
+  let bodyRes = null;
+  const req = { params: { id: 'f-1' }, empresa_id: 'e-1', user: { uid: 'u-1', role: 'admin', tipo: 'admin' } };
+  const res = { status: () => ({ json: (b) => { bodyRes = b; } }) };
+
+  await controller.getRelatorioFechamento(req, res);
+  // Direct cost includes driver expense: 5000 - 500 (comissao) - 200 (despesa) = 4300
+  assert.equal(bodyRes.resumo_financeiro.resultado_operacional, 4300);
+  assert.equal(bodyRes.resumo_financeiro.total_despesas_efetivadas, 200);
+});
+
+test('F — driver commission_only: no gross/base/company result/internal breakdown leak', async () => {
+  const frete = { id: 'f-1', empresa_id: 'e-1', motorista_id: 'm-1', status: 'finalizado', valor_frete: 5000, valor_tonelada_km: 0.20, toneladas: 30 };
+  const despesas = [
+    { id: 'd-prop', descricao: 'Pedágio Empresa', tipo: 'pedagio', valor: 350, status: 'aprovado', quem_pagou: 'proprietario' },
+    { id: 'd-mot', descricao: 'Borracharia', tipo: 'manutencao', valor: 120, status: 'aprovado', quem_pagou: 'motorista' },
+  ];
+  const supabaseMock = criarMockSupabase({ frete, despesas });
+  const controller = carregarController(supabaseMock, {
+    effective: {
+      permissions: { 'freight.view': true, 'launch.view': true },
+      driverFinancialVisibility: 'commission_only',
+    },
+  });
+
+  let bodyRes = null;
+  const req = {
+    params: { id: 'f-1' },
+    empresa_id: 'e-1',
+    user: { uid: 'm-1', role: 'motorista', tipo: 'motorista' },
+  };
+  const res = { status: () => ({ json: (b) => { bodyRes = b; } }) };
+
+  await controller.getRelatorioFechamento(req, res);
+
+  // Redacted from freight
+  assert.equal(bodyRes.frete.valor_frete, null);
+  assert.equal(bodyRes.frete.valor_tonelada_km, null);
+  assert.equal(bodyRes.frete.toneladas, null);
+
+  // Redacted from summary
+  assert.equal(bodyRes.resumo_financeiro.frete_bruto, null);
+  assert.equal(bodyRes.resumo_financeiro.receita_realizada, null);
+  assert.equal(bodyRes.resumo_financeiro.resultado_operacional, null);
+  assert.equal(bodyRes.resumo_financeiro.margem_percentual, null);
+  assert.equal(bodyRes.resumo_financeiro.custos_diretos, null);
+  assert.equal(bodyRes.resumo_financeiro.total_despesas_efetivadas, null);
+
+  // Driver commission and settlement remain visible
+  assert.equal(bodyRes.resumo_financeiro.comissao_valor, 500);
+  assert.equal(bodyRes.resumo_financeiro.comissao_percentual, 10);
+  assert.equal(bodyRes.resumo_financeiro.saldo_motorista, 620); // 500 comissao + 120 reembolso
+
+  // Individual launch values: proprietor paid is redacted; driver paid is visible
+  assert.equal(bodyRes.lancamentos.despesas[0].valor, null);
+  assert.equal(bodyRes.lancamentos.despesas[1].valor, 120);
+});
+
+test('G — driver commission_plus_base: base + commission allowed, full company breakdown still denied', async () => {
+  const frete = { id: 'f-1', empresa_id: 'e-1', motorista_id: 'm-1', status: 'finalizado', valor_frete: 5000, valor_tonelada_km: 0.20, toneladas: 30 };
+  const despesas = [
+    { id: 'd-prop', descricao: 'Pedágio Empresa', tipo: 'pedagio', valor: 350, status: 'aprovado', quem_pagou: 'proprietario' },
+    { id: 'd-mot', descricao: 'Borracharia', tipo: 'manutencao', valor: 120, status: 'aprovado', quem_pagou: 'motorista' },
+  ];
+  const supabaseMock = criarMockSupabase({ frete, despesas });
+  const controller = carregarController(supabaseMock, {
+    effective: {
+      permissions: { 'freight.view': true, 'launch.view': true },
+      driverFinancialVisibility: 'commission_plus_base',
+    },
+  });
+
+  let bodyRes = null;
+  const req = {
+    params: { id: 'f-1' },
+    empresa_id: 'e-1',
+    user: { uid: 'm-1', role: 'motorista', tipo: 'motorista' },
+  };
+  const res = { status: () => ({ json: (b) => { bodyRes = b; } }) };
+
+  await controller.getRelatorioFechamento(req, res);
+
+  // Base is allowed
+  assert.equal(bodyRes.frete.valor_frete, 5000);
+  assert.equal(bodyRes.resumo_financeiro.frete_bruto, 5000);
+  assert.equal(bodyRes.resumo_financeiro.comissao_valor, 500);
+
+  // Internal breakdown / operational result is DENIED
+  assert.equal(bodyRes.resumo_financeiro.resultado_operacional, null);
+  assert.equal(bodyRes.resumo_financeiro.margem_percentual, null);
+  assert.equal(bodyRes.resumo_financeiro.custos_diretos, null);
+  assert.equal(bodyRes.resumo_financeiro.total_despesas_efetivadas, null);
+  assert.equal(bodyRes.lancamentos.despesas[0].valor, null); // proprietor expense hidden
+  assert.equal(bodyRes.lancamentos.despesas[1].valor, 120); // driver expense visible
+});
+
+test('H — driver full_freight_financial: full authorized projection', async () => {
+  const frete = { id: 'f-1', empresa_id: 'e-1', motorista_id: 'm-1', status: 'finalizado', valor_frete: 5000, valor_tonelada_km: 0.20, toneladas: 30 };
+  const despesas = [
+    { id: 'd-prop', descricao: 'Pedágio Empresa', tipo: 'pedagio', valor: 350, status: 'aprovado', quem_pagou: 'proprietario' },
+  ];
+  const supabaseMock = criarMockSupabase({ frete, despesas });
+  const controller = carregarController(supabaseMock, {
+    effective: {
+      permissions: { 'freight.view': true, 'launch.view': true, 'finance.operational.view': true },
+      driverFinancialVisibility: 'full_freight_financial',
+    },
+  });
+
+  let bodyRes = null;
+  const req = {
+    params: { id: 'f-1' },
+    empresa_id: 'e-1',
+    user: { uid: 'm-1', role: 'motorista', tipo: 'motorista' },
+  };
+  const res = { status: () => ({ json: (b) => { bodyRes = b; } }) };
+
+  await controller.getRelatorioFechamento(req, res);
+
+  assert.equal(bodyRes.frete.valor_frete, 5000);
+  assert.equal(bodyRes.resumo_financeiro.frete_bruto, 5000);
+  assert.equal(bodyRes.resumo_financeiro.resultado_operacional, 4150); // 5000 - 500 (comissao) - 350 (pedagio)
+  assert.equal(bodyRes.lancamentos.despesas[0].valor, 350);
+});
+
+test('I — effective-permission lookup failure: financial output fails closed', async () => {
+  const frete = { id: 'f-1', empresa_id: 'e-1', motorista_id: 'm-1', status: 'finalizado', valor_frete: 5000 };
+  const supabaseMock = criarMockSupabase({ frete });
+  const controller = carregarController(supabaseMock, {
+    ensureEffectiveError: new Error('Permission service temporarily unavailable'),
+  });
+
+  let statusRes = 0;
+  let bodyRes = null;
+  const req = {
+    params: { id: 'f-1' },
+    empresa_id: 'e-1',
+    user: { uid: 'u-op', role: 'operador', tipo: 'operador' },
+  };
+  const res = { status: (s) => { statusRes = s; return { json: (b) => { bodyRes = b; } }; } };
+
+  await controller.getRelatorioFechamento(req, res);
+
+  assert.equal(statusRes, 200);
+  // Fails closed to minimum projection: no financial visibility
+  assert.equal(bodyRes.frete.valor_frete, null);
+  assert.equal(bodyRes.resumo_financeiro.restricted, true);
+  assert.equal(bodyRes.documentos_fiscais.restricted, true);
 });
 
 test('getRelatorioFechamento: operador without finance view has financial fields redacted', async () => {
@@ -744,7 +993,7 @@ test('getRelatorioFechamento: legacy finalized frete returns LEGACY_NO_FORMAL_EN
   assert.equal(bodyRes.envelope.detalhes, null);
 });
 
-test('getRelatorioFechamento: wrong tenant access is denied with 403', async () => {
+test('J — wrong tenant access is denied with 403', async () => {
   const frete = { id: 'f-1', empresa_id: 'e-other', motorista_id: 'm-1', status: 'finalizado' };
   const supabaseMock = criarMockSupabase({ frete });
   const controller = carregarController(supabaseMock, {
