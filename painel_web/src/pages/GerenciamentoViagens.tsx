@@ -1,13 +1,12 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { Plus, X, Search, Filter, Truck, MapPin, Calendar, DollarSign, Gauge, Trash2, Edit, Check, AlertTriangle, ChevronLeft, ChevronDown, ChevronRight, Fuel, FileText, TrendingUp, Save, Unlock, Lock, Camera, Upload, Ban, Download, ShieldCheck } from 'lucide-react';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
+import { Plus, X, Search, Filter, Truck, MapPin, Calendar, DollarSign, Gauge, Trash2, Edit, Check, AlertTriangle, ChevronLeft, ChevronDown, ChevronRight, Fuel, FileText, TrendingUp, Save, Unlock, Lock, Camera, Upload, Ban, Download, ShieldCheck, CheckCircle2 } from 'lucide-react';
 import { useLancamentosRealtime } from '../hooks/useLancamentosRealtime';
 import { format } from 'date-fns';
 import { formatCurrency } from '../utils';
 import api, { newClientRequestId } from '../api';
-import { desenharBrandingRelatorio } from '../utils/relatorioBranding';
+import { gerarPdfEnvelopeDigital } from '../utils/formalEnvelopePdf';
+import { gerarPdfFechamentoFrete } from '../utils/freightClosurePdf';
 import { mensagemErro } from '../utils/mensagemErro';
 import { erroSanidadeTonKm, erroSanidadeValorFixo, TONELADAS_MAX } from '../utils/limitesFrete';
 import { freteTonKmIncompativelAtual, montarRecuperacaoInlineFrete, obterErroLimiteFrete, type InlineFreteRecovery } from '../utils/freteOperationalLimit';
@@ -121,6 +120,14 @@ export const GerenciamentoViagens: React.FC = () => {
   const [docsCarregando, setDocsCarregando] = useState<Set<string>>(new Set());
   const [envelopesPorFrete, setEnvelopesPorFrete] = useState<Record<string, any>>({});
   const [envelopesCarregando, setEnvelopesCarregando] = useState<Set<string>>(new Set());
+  const [relatorioFechamentoCarregando, setRelatorioFechamentoCarregando] = useState<Set<string>>(new Set());
+  const [modalAvisoEnvelope, setModalAvisoEnvelope] = useState<{
+    aberto: boolean;
+    freteId: string;
+    status: string;
+    origem?: string;
+    destino?: string;
+  } | null>(null);
   const [arquivoPreview, setArquivoPreview] = useState<ArquivoPreview | null>(null);
   const [tipoDocumentoNovoFrete, setTipoDocumentoNovoFrete] = useState<TipoDocumentoFrete>('cte');
   const [documentosNovoFrete, setDocumentosNovoFrete] = useState<DocumentoFretePendente[]>([]);
@@ -183,63 +190,43 @@ export const GerenciamentoViagens: React.FC = () => {
   }, [envelopesCarregando]);
 
   const baixarPdfEnvelope = async (freteId: string) => {
-    const resposta = envelopesPorFrete[freteId] || await carregarEnvelopeFrete(freteId);
-    const envelope = resposta?.envelope;
-    if (!envelope?.payload) {
-      alert(resposta?.status === 'LEGACY_NO_FORMAL_ENVELOPE'
-        ? 'Frete legado finalizado antes do envelope digital formal.'
-        : 'Este frete ainda não possui envelope digital formal.');
-      return;
+    try {
+      const resposta = envelopesPorFrete[freteId] || await carregarEnvelopeFrete(freteId);
+      if (!resposta?.envelope || resposta?.status !== 'FORMAL_ENVELOPE_SEALED') {
+        const freteItem = fretes.find((fr: any) => fr.id === freteId);
+        setModalAvisoEnvelope({
+          aberto: true,
+          freteId,
+          status: resposta?.status || (freteItem?.status === 'finalizado' ? 'LEGACY_NO_FORMAL_ENVELOPE' : 'NO_FORMAL_ENVELOPE_YET'),
+          origem: freteItem?.origem,
+          destino: freteItem?.destino,
+        });
+        return;
+      }
+
+      await gerarPdfEnvelopeDigital(resposta);
+    } catch (err: any) {
+      console.error('Erro ao gerar PDF do envelope digital:', err);
+      alert('Erro ao gerar o PDF do envelope digital. Tente novamente.');
     }
+  };
 
-    const payload = envelope.payload;
-    const frete = payload.frete_snapshot || {};
-    const financeiro = payload.financial_snapshot || {};
-    const hash = envelope.envelope_hash || payload.envelope_hash || '-';
-    const doc = new jsPDF();
-    await desenharBrandingRelatorio(doc);
-    doc.setFontSize(14);
-    doc.text('Envelope Digital do Frete', 14, 32);
-    doc.setFontSize(9);
-    doc.text(`Envelope: ${envelope.id}`, 14, 39);
-    doc.text(`Selado em: ${gvFmt(envelope.sealed_at, 'dd/MM/yyyy HH:mm')}`, 14, 44);
-    doc.text(`Fonte: ${envelope.source} · Schema: ${envelope.schema_version}`, 14, 49);
-    doc.text(`Hash de integridade (SHA-256): ${hash}`, 14, 54);
-
-    autoTable(doc, {
-      startY: 60,
-      head: [['Campo', 'Valor persistido no envelope']],
-      body: [
-        ['Frete', envelope.frete_id],
-        ['Hash (SHA-256)', hash],
-        ['Origem', frete.origem || '-'],
-        ['Destino', frete.destino || '-'],
-        ['Status', frete.status || '-'],
-        ['Motorista', frete.motorista_id || '-'],
-        ['KM inicial', financeiro.km_inicial ?? '-'],
-        ['KM final', financeiro.km_final ?? '-'],
-        ['Modalidade', financeiro.modalidade_calculo || '-'],
-        ['Valor do frete', financeiro.valor_frete != null ? formatCurrency(Number(financeiro.valor_frete)) : '-'],
-        ['Quem recebeu', financeiro.quem_recebeu || '-'],
-        ['Motivo', payload.reason || envelope.reason || '-'],
-        ['Request ID', payload.request_id || envelope.request_id || '-'],
-        ['Correlation ID', payload.correlation_id || envelope.correlation_id || '-'],
-      ],
-      styles: { fontSize: 8, cellPadding: 2 },
-      headStyles: { fillColor: [30, 64, 175] },
-      columnStyles: { 0: { cellWidth: 42, fontStyle: 'bold' } },
-    });
-
-    const finalY = (doc as any).lastAutoTable?.finalY || 120;
-    autoTable(doc, {
-      startY: finalY + 8,
-      head: [['Resumo de auditoria', 'Valor']],
-      body: Object.entries(envelope.audit_summary || {}).map(([k, v]) => [k, String(v ?? '-')]),
-      styles: { fontSize: 8, cellPadding: 2 },
-      headStyles: { fillColor: [15, 118, 110] },
-    });
-
-    doc.save(`envelope-digital-frete-${String(freteId).slice(0, 8)}.pdf`);
+  const baixarPdfFechamento = async (freteId: string) => {
+    if (relatorioFechamentoCarregando.has(freteId)) return;
+    setRelatorioFechamentoCarregando(prev => new Set(prev).add(freteId));
+    try {
+      const { data } = await api.get(`/fretes/${freteId}/relatorio-fechamento`);
+      await gerarPdfFechamentoFrete(data);
+    } catch (err: any) {
+      console.error('Erro ao gerar relatório de fechamento:', err);
+      alert('Não foi possível gerar o relatório de fechamento deste frete.');
+    } finally {
+      setRelatorioFechamentoCarregando(prev => {
+        const next = new Set(prev);
+        next.delete(freteId);
+        return next;
+      });
+    }
   };
 
   const [formData, setFormData] = useState({
@@ -1697,37 +1684,59 @@ export const GerenciamentoViagens: React.FC = () => {
                         {itensFrete.length === 0
                           ? <p className="text-gray-400 text-sm text-center py-3">Nenhum lançamento financeiro vinculado a este frete.</p>
                           : itensFrete.map(renderLancamentoItem)}
-                        <div className="border border-slate-200 rounded-lg p-3 bg-slate-50/60">
-                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                            <div className="flex items-start gap-2">
-                              <ShieldCheck size={18} className="text-slate-600 mt-0.5" />
+                        <div className="border border-slate-200 rounded-lg p-3 bg-slate-50/70">
+                          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                            <div className="flex items-start gap-2.5">
+                              <ShieldCheck size={20} className={
+                                envelopesPorFrete[f.id]?.status === 'FORMAL_ENVELOPE_SEALED'
+                                  ? 'text-emerald-600 mt-0.5 shrink-0'
+                                  : envelopesPorFrete[f.id]?.status === 'LEGACY_NO_FORMAL_ENVELOPE'
+                                    ? 'text-amber-500 mt-0.5 shrink-0'
+                                    : 'text-slate-400 mt-0.5 shrink-0'
+                              } />
                               <div>
-                                <p className="text-sm font-bold text-slate-800">Envelope digital</p>
-                                <p className="text-xs text-slate-500">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <p className="text-sm font-bold text-slate-800">Produtos de Fechamento e Relatórios</p>
+                                  {envelopesPorFrete[f.id]?.status === 'FORMAL_ENVELOPE_SEALED' && (
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                      <CheckCircle2 size={10} /> Selo Formal E3.8 Ativo
+                                    </span>
+                                  )}
+                                  {envelopesPorFrete[f.id]?.status === 'LEGACY_NO_FORMAL_ENVELOPE' && (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                                      Legado (sem envelope formal)
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-xs text-slate-500 mt-0.5">
                                   {envelopesPorFrete[f.id]?.status === 'FORMAL_ENVELOPE_SEALED'
-                                    ? `Selado em ${gvFmt(envelopesPorFrete[f.id]?.envelope?.sealed_at, 'dd/MM/yyyy HH:mm')}${envelopesPorFrete[f.id]?.envelope?.envelope_hash ? ` · SHA: ${envelopesPorFrete[f.id]?.envelope?.envelope_hash.slice(0, 8)}...` : ''}`
+                                    ? `Selado em ${gvFmt(envelopesPorFrete[f.id]?.envelope?.sealed_at, 'dd/MM/yyyy HH:mm')}${envelopesPorFrete[f.id]?.envelope?.envelope_hash ? ` · SHA: ${envelopesPorFrete[f.id]?.envelope?.envelope_hash.slice(0, 10)}...` : ''}`
                                     : envelopesPorFrete[f.id]?.status === 'LEGACY_NO_FORMAL_ENVELOPE'
-                                      ? 'Frete legado sem snapshot formal'
-                                      : 'Snapshot formal do fechamento, quando existente'}
+                                      ? 'Viagem finalizada anteriormente à vigência do envelope formal'
+                                      : 'Envelope formal é gerado no momento do encerramento da viagem'}
                                 </p>
                               </div>
                             </div>
-                            <div className="flex flex-wrap gap-2">
-                              <button
-                                type="button"
-                                onClick={() => carregarEnvelopeFrete(f.id)}
-                                disabled={envelopesCarregando.has(f.id)}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-slate-300 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-60"
-                              >
-                                <FileText size={14} /> Verificar
-                              </button>
+                            <div className="flex flex-wrap items-center gap-2">
                               <button
                                 type="button"
                                 onClick={() => baixarPdfEnvelope(f.id)}
                                 disabled={envelopesCarregando.has(f.id)}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-blue-600 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-emerald-300 bg-emerald-50 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 disabled:opacity-60 transition-colors shadow-xs"
+                                title="Baixar Envelope Digital Formal (Selo de Integridade E3.8)"
                               >
-                                <Download size={14} /> PDF
+                                <ShieldCheck size={14} className="text-emerald-700" />
+                                {envelopesCarregando.has(f.id) ? 'Carregando...' : 'Envelope Digital'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => baixarPdfFechamento(f.id)}
+                                disabled={relatorioFechamentoCarregando.has(f.id)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-blue-300 bg-blue-50 text-xs font-semibold text-blue-800 hover:bg-blue-100 disabled:opacity-60 transition-colors shadow-xs"
+                                title="Baixar Relatório Operacional de Fechamento de Frete"
+                              >
+                                <Download size={14} className="text-blue-700" />
+                                {relatorioFechamentoCarregando.has(f.id) ? 'Gerando...' : 'Relatório de Fechamento'}
                               </button>
                             </div>
                           </div>
@@ -2372,6 +2381,70 @@ export const GerenciamentoViagens: React.FC = () => {
               <button onClick={() => setDeleteTarget(null)} disabled={isDeleting} className="px-5 py-2.5 font-bold text-gray-600 hover:bg-gray-200 rounded-xl transition-all">Voltar</button>
               <button onClick={handleDelete} disabled={isDeleting} className="px-6 py-2.5 bg-red-600 text-white font-bold rounded-xl shadow hover:bg-red-700 transition-all active:scale-95 flex items-center disabled:opacity-50">
                 <Trash2 size={18} className="mr-2" />{isDeleting ? 'Cancelando...' : 'Sim, Cancelar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {modalAvisoEnvelope && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="p-6 flex flex-col items-center text-center space-y-3">
+              <div className={`w-14 h-14 rounded-full flex items-center justify-center ${
+                modalAvisoEnvelope.status === 'LEGACY_NO_FORMAL_ENVELOPE'
+                  ? 'bg-amber-100 text-amber-600'
+                  : 'bg-blue-100 text-blue-600'
+              }`}>
+                {modalAvisoEnvelope.status === 'LEGACY_NO_FORMAL_ENVELOPE' ? (
+                  <AlertTriangle size={28} />
+                ) : (
+                  <ShieldCheck size={28} />
+                )}
+              </div>
+              <h3 className="text-lg font-bold text-gray-800">
+                {modalAvisoEnvelope.status === 'LEGACY_NO_FORMAL_ENVELOPE'
+                  ? 'Envelope Digital Indisponível (Frete Legado)'
+                  : 'Envelope Digital Formal Pendente'}
+              </h3>
+              {modalAvisoEnvelope.origem && modalAvisoEnvelope.destino && (
+                <p className="text-xs font-semibold text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
+                  {modalAvisoEnvelope.origem} → {modalAvisoEnvelope.destino}
+                </p>
+              )}
+              <p className="text-sm text-gray-600 leading-relaxed">
+                {modalAvisoEnvelope.status === 'LEGACY_NO_FORMAL_ENVELOPE'
+                  ? 'Este frete foi encerrado anteriormente à vigência da chancela digital E3.8. Em conformidade com a política de governança, envelopes formais não são fabricados retroativamente.'
+                  : 'O Envelope Digital Formal e seu selo criptográfico são gerados de forma imutável no encerramento da viagem. Para viagens em andamento, você pode gerar o Relatório de Fechamento Operacional.'}
+              </p>
+              <div className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-left">
+                <p className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                  <CheckCircle2 size={14} className="text-emerald-600" />
+                  Alternativa autorizada:
+                </p>
+                <p className="text-xs text-slate-600 mt-1">
+                  O <strong>Relatório de Fechamento de Frete</strong> consolida todos os dados operacionais, lançamentos e documentos disponíveis para este frete.
+                </p>
+              </div>
+            </div>
+            <div className="p-4 bg-gray-50 border-t flex flex-col sm:flex-row items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setModalAvisoEnvelope(null)}
+                className="w-full sm:w-auto px-4 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-200 rounded-xl transition-all"
+              >
+                Fechar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const id = modalAvisoEnvelope.freteId;
+                  setModalAvisoEnvelope(null);
+                  baixarPdfFechamento(id);
+                }}
+                className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white text-sm font-bold rounded-xl shadow-xs hover:bg-blue-700 transition-all flex items-center justify-center gap-1.5"
+              >
+                <Download size={15} />
+                Baixar Relatório de Fechamento
               </button>
             </div>
           </div>

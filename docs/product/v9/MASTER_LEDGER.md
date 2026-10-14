@@ -224,7 +224,7 @@ _Evidência coletada em 2026-08-19 (ver [FORENSIC_BASELINE](./FORENSIC_BASELINE.
 | ID | Item | Status | B W A D P | Evidência / Obs |
 |----|------|--------|-----------|-----------------|
 | RBV9-INV-090 | Relatórios PDF com branding/logo + filtros padronizados | IMPL_VAL | ✓ ✓ — ✓ ✓ | PR #366, `relatorioBranding.ts` |
-| RBV9-INV-091 | Produtos de relatório-alvo (Envelope, fechamento, espelho, histórico veículo/manutenção, consumo) | PARTIAL | ✓ ✓ ✓ ✓ ~ | **Systemic Quality PR #459 CLOSED**: corrigida consistência de relatórios operacionais schema-free para impedir corte silencioso por limite antes do filtro canônico (`rentabilidade` exclui cancelados antes do limite; `acerto-motoristas` busca finalizados antes do limite). Envelope/fechamento/relatórios Campaign continuam ROADMAP e dependem de Campaign-B/Envelope. |
+| RBV9-INV-091 | Produtos de relatório-alvo (Envelope, fechamento, espelho, histórico veículo/manutenção, consumo) | PARTIAL | ✓ ✓ ✓ ✓ ~ | **Systemic Quality PR #459 CLOSED**; **REPORTING_PRODUCTS_V1 (Draft PR)**: entregues formal Digital Envelope PDF (`public.frete_envelopes_digitais`, integridade SHA-256 selada, honesto com fretes históricos `LEGACY_NO_FORMAL_ENVELOPE`) e formal Freight Closure PDF (`GET /fretes/:id/relatorio-fechamento` consolidado operacional, auditoria ePOD/docs, apuração comissões e redaction financeira de campo sob `finance.operational.view`). Status: `IMPLEMENTED_IN_DRAFT_PR`, `CI_VALIDATED`, aguardando revisão de Draft PR. |
 
 ## NOTIFICATIONS
 

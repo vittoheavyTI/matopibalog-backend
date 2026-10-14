@@ -52,7 +52,7 @@ test('hash canonicalization: determinism and tamper detection', () => {
   assert.notEqual(hash1, hashModified);
 });
 
-function criarMockSupabase({ frete, envelope = null, auditEvents = [], onRpc = null } = {}) {
+function criarMockSupabase({ frete, envelope = null, auditEvents = [], onRpc = null, despesas = [], abastecimentos = [], vales = [], documentos = [], epod = null } = {}) {
   const builder = (tabela) => {
     const b = {
       _tabela: tabela,
@@ -60,15 +60,30 @@ function criarMockSupabase({ frete, envelope = null, auditEvents = [], onRpc = n
       eq(col, val) { return b; },
       maybeSingle() {
         if (tabela === 'frete_envelopes_digitais') return Promise.resolve({ data: envelope, error: null });
-        if (tabela === 'motoristas') return Promise.resolve({ data: { percentual_comissao: 10 }, error: null });
+        if (tabela === 'motoristas') return Promise.resolve({ data: { placa_veiculo: 'ABC-1234', percentual_comissao: 10, usuarios: { nome: 'João Motorista' }, empresas: { tipo: 'transportadora' } }, error: null });
+        if (tabela === 'frete_epod') return Promise.resolve({ data: epod, error: null });
         return Promise.resolve({ data: null, error: null });
       },
       single() {
-        if (tabela === 'fretes') return Promise.resolve({ data: frete, error: null });
-        if (tabela === 'motoristas') return Promise.resolve({ data: { percentual_comissao: 10, empresas: { tipo: 'transportadora' } }, error: null });
+        if (tabela === 'fretes') {
+          return Promise.resolve({
+            data: {
+              ...frete,
+              motoristas: { placa_veiculo: 'ABC-1234', percentual_comissao: 10, usuarios: { nome: 'João Motorista' }, empresas: { tipo: 'transportadora' } },
+            },
+            error: null,
+          });
+        }
+        if (tabela === 'motoristas') return Promise.resolve({ data: { placa_veiculo: 'ABC-1234', percentual_comissao: 10, usuarios: { nome: 'João Motorista' }, empresas: { tipo: 'transportadora' } }, error: null });
         return Promise.resolve({ data: null, error: null });
       },
-      then(resolve) { resolve({ count: 0, error: null }); },
+      then(resolve) {
+        if (tabela === 'despesas') resolve({ data: despesas, error: null });
+        else if (tabela === 'abastecimentos') resolve({ data: abastecimentos, error: null });
+        else if (tabela === 'vales') resolve({ data: vales, error: null });
+        else if (tabela === 'frete_documentos') resolve({ data: documentos, error: null });
+        else resolve({ count: 0, error: null });
+      },
     };
     return b;
   };
@@ -554,4 +569,199 @@ test('getAuditoriaUnificadaFrete: redacts domain fields when caller lacks specif
   assert.equal(bodyRes.eventos[2].metadata.supplier, undefined);
   assert.equal(bodyRes.eventos[2].metadata.parts, undefined);
   assert.equal(bodyRes.eventos[2].metadata.status, 'completed');
+});
+
+test('getEnvelopeDigital: returns envelope_hash, motorista_nome and placa in response', async () => {
+  const frete = { id: 'f-1', empresa_id: 'e-1', motorista_id: 'm-1', status: 'finalizado' };
+  const supabaseMock = criarMockSupabase({ frete, envelope: sampleEnvelope });
+  const controller = carregarController(supabaseMock, {
+    effective: { permissions: { 'finance.operational.view': true, 'freight.view': true } },
+  });
+
+  let statusRes = 0;
+  let bodyRes = null;
+  const req = {
+    params: { id: 'f-1' },
+    empresa_id: 'e-1',
+    user: { uid: 'u-admin', role: 'admin', tipo: 'admin' },
+  };
+  const res = {
+    status(s) { statusRes = s; return { json(b) { bodyRes = b; } }; },
+  };
+
+  await controller.getEnvelopeDigital(req, res);
+  assert.equal(statusRes, 200);
+  assert.equal(bodyRes.status, 'FORMAL_ENVELOPE_SEALED');
+  assert.equal(bodyRes.envelope.envelope_hash, 'b'.repeat(64));
+  assert.equal(bodyRes.motorista_nome, 'João Motorista');
+  assert.equal(bodyRes.placa, 'ABC-1234');
+});
+
+test('getRelatorioFechamento: admin with finance.operational.view gets full operational closure report', async () => {
+  const frete = {
+    id: 'f-1',
+    empresa_id: 'e-1',
+    motorista_id: 'm-1',
+    status: 'finalizado',
+    data: '2026-10-10',
+    origem: 'LEM',
+    destino: 'Salvador',
+    km_inicial: 1000,
+    km_final: 1800,
+    modalidade_calculo: 'tonelada_km',
+    toneladas: 40,
+    valor_tonelada_km: 0.15,
+    valor_frete: 4800,
+    quem_recebeu: 'proprietario',
+    foto_odometro_inicial_path: 'path/inicial.jpg',
+    foto_odometro_final_path: 'path/final.jpg',
+  };
+  const despesas = [
+    { id: 'd-1', descricao: 'Pedágio', tipo: 'pedagio', valor: 200, status: 'aprovado', quem_pagou: 'proprietario' },
+    { id: 'd-2', descricao: 'Alimentação', tipo: 'refeicao', valor: 100, status: 'aprovado', quem_pagou: 'motorista' },
+  ];
+  const abastecimentos = [
+    { id: 'a-1', posto: 'Posto Estrela', litros: 300, arla_litros: 20, arla_valor: 60, valor_total: 1800, status: 'aprovado', quem_pagou: 'proprietario' },
+  ];
+  const vales = [
+    { id: 'v-1', descricao: 'Adiantamento', valor: 300, status: 'aprovado', quem_pagou: 'proprietario' },
+  ];
+  const documentos = [
+    { id: 'doc-1', tipo: 'cte', status: 'ativo' },
+  ];
+  const epod = {
+    id: 'epod-1',
+    status: 'aprovado',
+    entregue_em: '2026-10-12T14:00:00Z',
+    recebedor_nome: 'Carlos Recebedor',
+  };
+
+  const supabaseMock = criarMockSupabase({
+    frete,
+    envelope: sampleEnvelope,
+    despesas,
+    abastecimentos,
+    vales,
+    documentos,
+    epod,
+  });
+
+  const controller = carregarController(supabaseMock, {
+    effective: { permissions: { 'finance.operational.view': true, 'freight.view': true } },
+  });
+
+  let statusRes = 0;
+  let bodyRes = null;
+  const req = {
+    params: { id: 'f-1' },
+    empresa_id: 'e-1',
+    user: { uid: 'u-admin', role: 'admin', tipo: 'admin' },
+  };
+  const res = {
+    status(s) { statusRes = s; return { json(b) { bodyRes = b; } }; },
+  };
+
+  await controller.getRelatorioFechamento(req, res);
+  assert.equal(statusRes, 200);
+  assert.equal(bodyRes.frete.id, 'f-1');
+  assert.equal(bodyRes.frete.distancia_km, 800);
+  assert.equal(bodyRes.frete.valor_frete, 4800);
+  assert.equal(bodyRes.motorista.nome, 'João Motorista');
+  assert.equal(bodyRes.motorista.placa, 'ABC-1234');
+  assert.equal(bodyRes.envelope.status, 'FORMAL_ENVELOPE_SEALED');
+  assert.equal(bodyRes.envelope.detalhes.envelope_hash, 'b'.repeat(64));
+  assert.equal(bodyRes.documentos_fiscais.total, 1);
+  assert.equal(bodyRes.epod.recebedor_nome, 'Carlos Recebedor');
+
+  // Financial calculations check:
+  // frete_bruto = 4800, comissao 10% = 480
+  // gastos_motorista = 100
+  // gastos_proprietario = 200 + 1800 = 2000
+  // vales = 300
+  // saldo_motorista = comissao (480) + gastos_motorista (100) - vales (300) = 280
+  // resultado_empresa = 4800 - 480 - 2000 = 2320
+  assert.equal(bodyRes.resumo_financeiro.frete_bruto, 4800);
+  assert.equal(bodyRes.resumo_financeiro.comissao_valor, 480);
+  assert.equal(bodyRes.resumo_financeiro.saldo_motorista, 280);
+  assert.equal(bodyRes.resumo_financeiro.resultado_empresa, 2320);
+});
+
+test('getRelatorioFechamento: operador without finance view has financial fields redacted', async () => {
+  const frete = {
+    id: 'f-1',
+    empresa_id: 'e-1',
+    motorista_id: 'm-1',
+    status: 'finalizado',
+    valor_frete: 4800,
+    km_inicial: 1000,
+    km_final: 1800,
+  };
+  const supabaseMock = criarMockSupabase({ frete, envelope: sampleEnvelope });
+  const controller = carregarController(supabaseMock, {
+    effective: { permissions: { 'freight.view': true, 'finance.operational.view': false } },
+  });
+
+  let statusRes = 0;
+  let bodyRes = null;
+  const req = {
+    params: { id: 'f-1' },
+    empresa_id: 'e-1',
+    user: { uid: 'u-op', role: 'operador', tipo: 'operador' },
+  };
+  const res = {
+    status(s) { statusRes = s; return { json(b) { bodyRes = b; } }; },
+  };
+
+  await controller.getRelatorioFechamento(req, res);
+  assert.equal(statusRes, 200);
+  assert.equal(bodyRes.frete.id, 'f-1');
+  assert.equal(bodyRes.frete.distancia_km, 800);
+  assert.equal(bodyRes.frete.valor_frete, null);
+  assert.equal(bodyRes.resumo_financeiro.restricted, true);
+});
+
+test('getRelatorioFechamento: legacy finalized frete returns LEGACY_NO_FORMAL_ENVELOPE', async () => {
+  const frete = { id: 'f-legacy', empresa_id: 'e-1', motorista_id: 'm-1', status: 'finalizado' };
+  const supabaseMock = criarMockSupabase({ frete, envelope: null });
+  const controller = carregarController(supabaseMock, {
+    effective: { permissions: { 'freight.view': true, 'finance.operational.view': true } },
+  });
+
+  let statusRes = 0;
+  let bodyRes = null;
+  const req = {
+    params: { id: 'f-legacy' },
+    empresa_id: 'e-1',
+    user: { uid: 'u-admin', role: 'admin', tipo: 'admin' },
+  };
+  const res = {
+    status(s) { statusRes = s; return { json(b) { bodyRes = b; } }; },
+  };
+
+  await controller.getRelatorioFechamento(req, res);
+  assert.equal(statusRes, 200);
+  assert.equal(bodyRes.envelope.status, 'LEGACY_NO_FORMAL_ENVELOPE');
+  assert.equal(bodyRes.envelope.detalhes, null);
+});
+
+test('getRelatorioFechamento: wrong tenant access is denied with 403', async () => {
+  const frete = { id: 'f-1', empresa_id: 'e-other', motorista_id: 'm-1', status: 'finalizado' };
+  const supabaseMock = criarMockSupabase({ frete });
+  const controller = carregarController(supabaseMock, {
+    effective: { permissions: { 'freight.view': true } },
+  });
+
+  let statusRes = 0;
+  let bodyRes = null;
+  const req = {
+    params: { id: 'f-1' },
+    empresa_id: 'e-1',
+    user: { uid: 'u-admin', role: 'admin', tipo: 'admin', is_super_admin: false },
+  };
+  const res = {
+    status(s) { statusRes = s; return { json(b) { bodyRes = b; } }; },
+  };
+
+  await controller.getRelatorioFechamento(req, res);
+  assert.equal(statusRes, 403);
 });

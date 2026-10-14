@@ -36,7 +36,9 @@ Matopiba vira **frota/operação-centric** (D-001): o eixo é o **veículo/compo
 
 ## Macrofrente atual
 
-**`CURRENT_MACROFRONT = E3.8_UNIFIED_AUDIT_DIGITAL_ENVELOPE (CLOSED em produção)`**.
+**`CURRENT_MACROFRONT = REPORTING_PRODUCTS_V1 (IMPLEMENTED_IN_DRAFT_PR)`**.
+
+**REPORTING_PRODUCTS_V1 = IMPLEMENTED_IN_DRAFT_PR.** Entregues os dois primeiros produtos de relatórios formais sobre o Envelope Digital E3.8: (1) **Formal Digital Envelope PDF** (leitura canônica de `public.frete_envelopes_digitais`, hash SHA-256 e recusa honesta `LEGACY_NO_FORMAL_ENVELOPE` para fretes históricos sem forjar documento); (2) **Formal Freight Closure PDF** (relatório operacional consolidado via `GET /fretes/:id/relatorio-fechamento` com status de envelope, apuração de comissões autônomo vs próprio e redaction de campos financeiros sob `finance.operational.view`). Zero migration, schema inalterado, zero escrita em produção. Ver [REPORTING_PRODUCTS_V1](./REPORTING_PRODUCTS_V1.md).
 
 **Product Stabilization Wave V1 = RECONCILED.** S1 PR #491 (`MERGE_SHA=f8cbd109`), S4 PR #492 (`MERGE_SHA=be9be5e`), DB-SEC-1 PR #494 (`MERGE_SHA=e31bfc3`), S2 PR #496 (`MERGE_SHA=d76838a`) e S3 PR #497 (`MERGE_SHA=1aeb5e6`) estão todos ancestrais de `origin/main`. Não há `BLOCKER`, `HIGH` ou `MEDIUM` real aberto na onda de estabilização.
 
@@ -96,7 +98,7 @@ Adequação de **CNAE/CNPJ/regime** do owner corre **em paralelo** e **NÃO bloq
 
 ## Próximo passo recomendado
 
-Macrofrente E3.8 concluída e fechada em produção (PR #505 MERGED, deploy Railway SUCCESS 4a93ab5f, migrations 085/087/086 aplicadas e registradas, enforcement prospectivo ativo). Próxima ação recomendada: alinhamento com o OWNER para definir a próxima macrofrente do roadmap (ex.: expansão Onda 4 / reporting / mobile release train M1).
+Revisão humana independente do Draft PR de REPORTING_PRODUCTS_V1 pelo OWNER (`OWNER_VISUAL_VALIDATION=PENDING`). Manter PR #501 e PR #490 em seus respectivos estados (HOLD/DRAFT). Zero escrita em produção, zero migration.
 
 ## Hard stops permanentes
 
