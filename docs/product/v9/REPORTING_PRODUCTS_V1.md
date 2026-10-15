@@ -1,14 +1,21 @@
 # MATOPIBA LOG — REPORTING PRODUCTS V1
 ## FORMAL DIGITAL ENVELOPE PDF & FREIGHT CLOSURE REPORT
 
-**Macrofront**: `REPORTING_PRODUCTS_V1`  
-**Objetivo**: Avançar o macrorequisito RBV9-INV-091 após o fechamento técnico do E3.8 com reconciliação estrita de autoridades financeiras e visibilidade de motorista.  
-**Status da Onda**: `REPORTING_PRODUCTS_V1_CORRECTED_DRAFT_REVIEW_REQUIRED` (Draft PR #507 atualizado, aguardando revisão independente)  
-**Produção Writes**: 0 (zero)  
-**Database Mutations**: 0 (zero)  
-**Migrations Criadas**: 0 (zero)  
-**Manual Deployments**: 0 (zero)  
-**Merges**: 0 (zero)  
+- **Macrofront**: `REPORTING_PRODUCTS_V1`
+- **Objetivo**: Avançar o macrorequisito RBV9-INV-091 após o fechamento técnico do E3.8 com reconciliação estrita de autoridades financeiras e visibilidade de motorista.
+- **Status da Macrofrente**: `ATIVO_PROD`
+- **Fechamento Técnico**: `REPORTING_PRODUCTS_V1_TECHNICALLY_CLOSED = true`
+- **Aceitação Visual do Owner**: `REPORTING_PRODUCTS_V1_OWNER_VISUAL = PASS`
+- **PR #507**: `CLOSED / MERGED` (`MERGED_AT=2026-10-15T04:48:30Z`)
+- **Authorized PR Head**: `81ed7f47b660ba1c17872063032060d60d194b18`
+- **Merge Commit SHA**: `1a45765dbe4ecb475b77c7d616f24a73297f5b08`
+- **Main CI**: `4/4 SUCCESS` (no commit `1a45765dbe4ecb475b77c7d616f24a73297f5b08`)
+- **Deploy Automático Railway**: ID `9f53f49c-2177-4af8-9137-4fcb6c005e43` (`SUCCESS`, commit `1a45765`, branch `main`, backend `ONLINE`, 1/1 réplicas)
+- **Produção Writes**: 0 (zero)
+- **Database Mutations**: 0 (zero)
+- **Migrations Criadas**: 0 (zero)
+- **Manual Deployments**: 0 (zero)
+- **Merges**: 1 (PR #507 em `main`)
 
 ---
 
@@ -89,9 +96,74 @@ O endpoint consolidado `GET /fretes/:id/relatorio-fechamento` compõe múltiplas
 
 ### 4. Bateria de Verificação Executada
 
-- **Testes Focados Backend**: 35/35 testes aprovados em `backend/tests/freteDigitalEnvelope.test.js` cobrindo cenários A a J e CROSS-DOMAIN 1 a 8 (`node --test`).
-- **Testes Focados Frontend**: 14/14 testes aprovados em `painel_web/src/utils/reportingProducts.test.ts` (`vitest run`), comprovando tolerância a `lancamentos.restricted` e `documentos_fiscais.restricted` sem crash e sem recalcular linhas no cliente.
-- **Testes Visuais Playwright**: 3/3 cenários aprovados em `s4_reporting_products.visual.spec.ts` (Desktop 1440x900, Tablet 1024x768, Mobile 390x844) com zero violações de rede externa.
-- **Suíte Completa Backend**: Aprovada (`node --test`).
-- **Build Frontend**: `tsc -b && vite build` aprovado sem erros de tipagem nem falhas de empacotamento.
+- **Testes Focados Backend**: 35/35 PASS em `backend/tests/freteDigitalEnvelope.test.js` cobrindo cenários A a J e CROSS-DOMAIN 1 a 8 (`node --test`).
+- **Testes Focados Frontend**: 18/18 PASS em `painel_web/src/utils/reportingProducts.test.ts` (`vitest run`), comprovando formatação, layout, tolerância a `lancamentos.restricted` e `documentos_fiscais.restricted` sem crash e sem recalcular linhas no cliente.
+- **Suíte Completa Backend**: 2205/2205 PASS (`node --test`).
+- **Suíte Completa Frontend**: 325/325 PASS (`vitest run`).
+- **Build Frontend**: PASS (`tsc -b && vite build` aprovado sem erros de tipagem nem falhas de empacotamento).
+- **Testes Visuais Playwright**: 3/3 cenários PASS em `s4_reporting_products.visual.spec.ts` (Desktop 1440x900, Tablet 1024x768, Mobile 390x844) com zero violações de rede externa (`EXTERNAL_NETWORK_REQUESTS_ALLOWED=0`).
 
+---
+
+### 5. Evidência Remota de Merge, CI e Deploy em Produção
+
+- **PR #507**:
+  - `STATE = CLOSED / MERGED`
+  - `MERGED_AT = 2026-10-15T04:48:30Z`
+  - `AUTHORIZED_PR_HEAD = 81ed7f47b660ba1c17872063032060d60d194b18`
+  - `MERGE_SHA = 1a45765dbe4ecb475b77c7d616f24a73297f5b08`
+- **Main CI (Commit 1a45765dbe4ecb475b77c7d616f24a73297f5b08)**: `4/4 SUCCESS`
+  - Backend CI: SUCCESS (Run ID: 38683407271)
+  - Frontend CI: SUCCESS (Run ID: 38683407286)
+  - SEC-1 Browser E2E: SUCCESS (Run ID: 38683407275)
+  - Deploy to GitHub Pages: SUCCESS (Run ID: 38683407326)
+- **Deploy Automático Railway**:
+  - `DEPLOYMENT_ID = 9f53f49c-2177-4af8-9137-4fcb6c005e43`
+  - `commitHash = 1a45765dbe4ecb475b77c7d616f24a73297f5b08`
+  - `branch = main`
+  - `status = SUCCESS`
+  - `backend state = ONLINE`
+  - `replicas = 1/1 running`
+  - `warnings = 0`, `criticals = 0`, `recent failures = 0`
+  - *Nota de governança*: O merge disparou o deploy automático normal da Railway. Não houve deploy manual (`MANUAL_DEPLOYMENTS=0`).
+  - *Invariantes de Auth no boot*:
+    - `authMode = strict`
+    - `sessionsEnabled = true`
+    - `rotationEnabled = true`
+    - `requireSession = true`
+    - `allowLegacy = false`
+    - `legacyCutoff = null`
+- **Estado de Schema / Migrations**:
+  - `SCHEMA_CHANGE = false`
+  - `MIGRATION_CREATED = false`
+  - O PR #507 não introduziu migrações.
+  - Catálogo de migrações em produção preservado no topo:
+    - `20261011204500` — `086_e38_formal_envelope_enforcement`
+    - `20261010172936` — `087_auth_sessions_per_client_idle`
+    - `20261009125633` — `085_unified_audit_digital_envelope`
+
+---
+
+### 6. Aceitação Visual do Owner (OWNER_VISUAL_VALIDATION = PASS)
+
+A validação visual pelo OWNER foi concluída com aprovação (`PASS`) após ciclos iterativos de correção e verificação:
+1. **User scroll ownership**: rolagem da página preservada sob controle do usuário sem saltos forçados.
+2. **Persistência de estado de accordions**: accordions de viagens mantêm seu estado de expansão/recolhimento após interações.
+3. **Responsividade desktop e mobile**: comportamento íntegro e legível nos viewports testados (desktop, tablet e mobile).
+4. **Ausência de artefatos visuais de dados**: zero ocorrências de `undefined`, `null` ou `NaN` visíveis na interface.
+5. **Dados de cabeçalho do motorista**: exibição correta e formatada das informações de motorista e veículo.
+6. **Relatório financeiro interno completo**: apuração com decomposição correta para perfis autorizados (`finance.operational.view`).
+7. **Envelope formal monopágina**: formatação concisa em página única para o envelope formal selado.
+8. **Relatório operacional em fretes legados**: sucesso na geração do relatório de fechamento para fretes anteriores a E3.8.
+9. **Indisponibilidade determinística de envelope formal em legados**: exibição clara do diálogo orientador `LEGACY_NO_FORMAL_ENVELOPE` sem simulação de selo.
+10. **Tratamento de erro determinístico de API**: diálogo `#modal-erro-reporting` acionado em falhas sem uso de `alert()` nativo.
+
+---
+
+### 7. Relação com RBV9-INV-091
+
+A macrofrente `REPORTING_PRODUCTS_V1` conclui com sucesso a primeira fatia de produtos de relatório formal:
+- **Formal Digital Envelope PDF**: `ATIVO_PROD`
+- **Freight Closure Report PDF**: `ATIVO_PROD`
+
+O macrorequisito **RBV9-INV-091** no MASTER_LEDGER permanece como **PARTIAL**, pois o escopo completo daquele item de inventário abrange relatórios adicionais futuros (espelho, histórico veículo/manutenção, consumo).
