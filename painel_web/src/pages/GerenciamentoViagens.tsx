@@ -125,7 +125,9 @@ export const GerenciamentoViagens: React.FC = () => {
   const [envelopesPorFrete, setEnvelopesPorFrete] = useState<Record<string, any>>({});
   const [envelopesCarregando, setEnvelopesCarregando] = useState<Set<string>>(new Set());
   const envelopesCarregandoRef = useRef<Set<string>>(new Set());
+  const freteScrolledRef = useRef<string | null>(null);
   const [relatorioFechamentoCarregando, setRelatorioFechamentoCarregando] = useState<Set<string>>(new Set());
+
   const [modalAvisoEnvelope, setModalAvisoEnvelope] = useState<{
     aberto: boolean;
     freteId: string;
@@ -417,15 +419,19 @@ export const GerenciamentoViagens: React.FC = () => {
   });
 
   // Default do accordion: ao trocar de motorista / recarregar dados, fretes
-  // ativos/pendentes abrem; demais (ex.: cancelado) e o grupo legado iniciam fechados.
+  // ativos/pendentes e os fretes explicitamente focados via URL (?frete=) abrem.
   useEffect(() => {
     if (filterMot === 'todos') return;
     const abertosPorPadrao = fretes
-      .filter(f => f.status === 'ativo' || f.status === 'pendente')
+      .filter(f => f.status === 'ativo' || f.status === 'pendente' || freteQueryIds.includes(f.id))
       .map(f => f.id as string);
+    freteQueryIds.forEach(id => {
+      if (!abertosPorPadrao.includes(id)) abertosPorPadrao.push(id);
+    });
     setFretesExpandidos(new Set(abertosPorPadrao));
     setSemFreteExpandido(false);
-  }, [filterMot, fretes]);
+  }, [filterMot, fretes, freteQueryIds]);
+
 
   const carregarDocumentosFrete = useCallback(async (freteId: string) => {
     setDocsCarregando(prev => new Set(prev).add(freteId));
@@ -439,6 +445,8 @@ export const GerenciamentoViagens: React.FC = () => {
     }
   }, []);
 
+  // Expansão e pré-carregamento dos fretes em foco na URL.
+  // Separado da rolagem visual para não re-disparar scrollIntoView a cada atualização de dados.
   useEffect(() => {
     if (freteQueryIds.length === 0) return;
     let cancelado = false;
@@ -453,10 +461,31 @@ export const GerenciamentoViagens: React.FC = () => {
         if (!(id in docsPorFrete)) void carregarDocumentosFrete(id);
         if (!(id in envelopesPorFrete)) void carregarEnvelopeFrete(id);
       });
-      document.getElementById(`frete-${freteQueryIds[0]}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
     return () => { cancelado = true; };
-  }, [freteQueryIds, fretes, docsPorFrete, envelopesPorFrete, carregarDocumentosFrete, carregarEnvelopeFrete]);
+  }, [freteQuery, carregarDocumentosFrete, carregarEnvelopeFrete]);
+
+  // Rolagem visual ONE-SHOT para o primeiro frete em foco na URL.
+  // Após a primeira rolagem bem-sucedida, o scroll pertence inteiramente ao usuário.
+  // Nenhuma re-renderização, SSE, refetch ou carregamento subsequente forçará a tela de volta.
+  useEffect(() => {
+    const targetScrollId = freteQueryIds[0] || null;
+    if (!targetScrollId) {
+      freteScrolledRef.current = null;
+      return;
+    }
+
+    if (freteScrolledRef.current === targetScrollId) {
+      return;
+    }
+
+    const elem = document.getElementById(`frete-${targetScrollId}`);
+    if (elem) {
+      elem.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      freteScrolledRef.current = targetScrollId;
+    }
+  }, [freteQueryIds, fretes]);
+
 
   // Preview interno via signed URL curta. O backend continua sendo a autoridade do
   // path privado; abrir fora/salvar ficam dentro do modal.

@@ -144,8 +144,22 @@ export async function gerarPdfFechamentoFrete(
     return { ok: false, error: 'Dados do frete ausentes para gerar o relatório.' };
   }
 
-  const frete = data.frete;
-  const motorista = data.motorista || { nome: 'Não informado', placa: '-' };
+  const frete = data.frete || ({} as any);
+  const motoristaRaw = data.motorista || ({} as any);
+  const motNome = motoristaRaw.nome || (frete as any).motorista_nome || (frete as any).motoristas?.nome;
+  const motPlaca = motoristaRaw.placa || (frete as any).placa;
+  const motorista = {
+    ...motoristaRaw,
+    nome: motNome && motNome !== 'undefined' && motNome !== 'null' ? motNome : 'Não informado',
+    placa: motPlaca && motPlaca !== 'undefined' && motPlaca !== 'null' ? motPlaca : '-',
+  };
+  const kmIni = frete.km_inicial ?? (frete as any).kmInicial ?? null;
+  const kmFim = frete.km_final ?? (frete as any).kmFinal ?? null;
+  const distKm = frete.distancia_km ?? (
+    Number.isFinite(Number(kmFim)) && Number.isFinite(Number(kmIni))
+      ? Number(kmFim) - Number(kmIni)
+      : ((frete as any).km_rodados ?? null)
+  );
   const lancamentos = data.lancamentos || { despesas: [], abastecimentos: [], vales: [] };
   const resumo = data.resumo_financeiro || {};
   const dataEmissao = data.gerado_em ? new Date(data.gerado_em) : new Date();
@@ -179,10 +193,10 @@ export async function gerarPdfFechamentoFrete(
     startY: 47,
     head: [['Identificação da Viagem', 'Dados']],
     body: [
-      ['Frete ID', frete.id],
+      ['Frete ID', frete.id && frete.id !== 'undefined' ? frete.id : '-'],
       ['Data de Cadastro', formatarData(frete.data)],
-      ['Origem e Destino', `${frete.origem || '-'}  ➔  ${frete.destino || '-'}`],
-      ['Motorista', `${motorista.nome} (Placa: ${motorista.placa || '-'})`],
+      ['Origem e Destino', `${frete.origem || '-'} para ${frete.destino || '-'}`],
+      ['Motorista', `${motorista.nome} (Placa: ${motorista.placa})`],
       ['Status Operacional', formatarStatusFrete(frete.status)],
       ['Modalidade de Cálculo', formatarModalidadeCalculo(frete.modalidade_calculo)],
       ['Carga Transportada', formatarToneladas(frete.toneladas)],
@@ -201,9 +215,9 @@ export async function gerarPdfFechamentoFrete(
     startY: yPos + 4,
     head: [['Quilometragem e Odômetro', 'Valores']],
     body: [
-      ['KM Inicial', formatarKm(frete.km_inicial)],
-      ['KM Final', formatarKm(frete.km_final)],
-      ['Distância Total', formatarKm(frete.distancia_km)],
+      ['KM Inicial', formatarKm(kmIni)],
+      ['KM Final', formatarKm(kmFim)],
+      ['Distância Total', formatarKm(distKm)],
       ['Foto Odômetro Inicial', frete.foto_odometro_inicial_presente ? 'Anexada' : 'Pendente / Não enviada'],
       ['Foto Odômetro Final', frete.foto_odometro_final_presente ? 'Anexada' : 'Pendente / Não enviada'],
     ],
@@ -214,6 +228,7 @@ export async function gerarPdfFechamentoFrete(
   });
 
   yPos = (doc as any).lastAutoTable?.finalY || 120;
+
 
   // 5. Lançamentos Operacionais (Abastecimentos, Despesas e Vales)
   if (lancamentos.restricted) {
@@ -348,17 +363,26 @@ export async function gerarPdfFechamentoFrete(
       [
         'Comprovação de Entrega Digital (ePOD)',
         epod
-          ? `Status: ${epod.status} | Recebido por: ${epod.recebedor_nome || 'Não informado'} em ${formatarDataHora(epod.entregue_em)}`
+          ? `Status: ${epod.status || '-'} | Recebido por: ${epod.recebedor_nome && epod.recebedor_nome !== 'undefined' ? epod.recebedor_nome : 'Não informado'}${epod.entregue_em ? ` em ${formatarDataHora(epod.entregue_em)}` : ''}`
           : 'Nenhum registro de ePOD associado a esta viagem',
       ],
       [
         'Selo Digital de Fechamento Formal',
         data.envelope?.status === 'FORMAL_ENVELOPE_SEALED'
-          ? `Selado formalmente em ${formatarDataHora(data.envelope.detalhes?.sealed_at)} (Hash: ${data.envelope.detalhes?.envelope_hash?.slice(0, 16)}...)`
+          ? (() => {
+              const sealedAt = data.envelope.detalhes?.sealed_at;
+              const sealedAtStr = sealedAt ? ` em ${formatarDataHora(sealedAt)}` : '';
+              const rawHash = data.envelope.detalhes?.envelope_hash;
+              const hashStr = rawHash && typeof rawHash === 'string' && rawHash !== 'undefined' && rawHash !== 'null'
+                ? ` (Hash: ${rawHash.slice(0, 16)}...)`
+                : ' (Hash: Não disponível)';
+              return `Selado formalmente${sealedAtStr}${hashStr}`;
+            })()
           : data.envelope?.status === 'LEGACY_NO_FORMAL_ENVELOPE'
             ? 'Frete legado sem envelope formal'
             : 'Pendente de encerramento formal',
       ],
+
     ],
     theme: 'grid',
     styles: { fontSize: 8, cellPadding: 2 },

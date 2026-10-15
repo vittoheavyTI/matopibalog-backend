@@ -60,39 +60,93 @@ const ENVELOPE_LEGADO_MOCK = {
 const RELATORIO_FECHAMENTO_FORMAL_MOCK = {
   frete: {
     id: 'frete-formal-1',
+    empresa_id: 'emp-1',
+    motorista_id: 'mot-1',
     origem: 'Balsas - MA',
     destino: 'Itaqui - MA',
-    motorista_nome: 'João da Silva',
-    motorista_telefone: '11999999999',
-    placa: 'BRA2E19',
-    status: 'finalizado',
+    data: '2026-03-10',
+    km_inicial: 1000,
+    km_final: 1750,
+    distancia_km: 750,
     modalidade_calculo: 'valor_fixo',
     valor_frete: 12500,
-    km_rodados: 750,
+    toneladas: 48.5,
+    valor_tonelada_km: null,
+    status: 'finalizado',
+    quem_recebeu: 'Porto de Itaqui',
+    foto_odometro_inicial_presente: true,
+    foto_odometro_final_presente: true,
   },
-  financeiro: {
-    valor_frete_bruto: 12500,
-    valor_comissao: 1500,
-    resultado_operacional: 9800,
-    total_despesas_efetivadas: 400,
-    total_abastecimentos_efetivadas: 800,
-    total_vales_efetivadas: 0,
-    saldo_motorista: 1500,
-    tem_pendentes: false,
-    total_pendente: 0,
-    despesas: [],
-    abastecimentos: [],
+  motorista: {
+    id: 'mot-1',
+    nome: 'João da Silva',
+    placa: 'BRA2E19',
+    tipo_empresa: 'vinculado',
+  },
+  lancamentos: {
+    despesas: [
+      { id: 'desp-1', descricao: 'Pedágio BR-135', tipo: 'pedagio', valor: 250, status: 'aprovado', quem_pagou: 'empresa' },
+      { id: 'desp-2', descricao: 'Alimentação', tipo: 'refeicao', valor: 150, status: 'aprovado', quem_pagou: 'motorista' },
+    ],
+    abastecimentos: [
+      { id: 'abast-1', posto: 'Posto Rota do Sol', litros: 250, arla_litros: 20, arla_valor: 80, valor_total: 800, status: 'aprovado', quem_pagou: 'empresa' },
+    ],
     vales: [],
   },
-  documentos_fiscais: { total: 0, tipos: [] },
-  epod: { status: 'ENTREGUE' },
+  documentos_fiscais: {
+    total: 2,
+    tipos: [
+      { tipo: 'cte', status: 'autorizado' },
+      { tipo: 'mdfe', status: 'autorizado' },
+    ],
+  },
+  epod: {
+    id: 'epod-1',
+    status: 'ENTREGUE',
+    entregue_em: '2026-03-10T15:00:00Z',
+    recebedor_nome: 'Carlos Mendes',
+  },
   envelope: {
     status: 'FORMAL_ENVELOPE_SEALED',
-    envelope_id: 'env-formal-1',
-    envelope_hash: 'abc123canonicalhash789xyz456',
-    sealed_at: '2026-03-10T18:00:00Z',
+    detalhes: {
+      id: 'env-formal-1',
+      envelope_type: 'formal_freight_closure',
+      schema_version: '1.0.0',
+      sealed_at: '2026-03-10T15:00:00Z',
+      envelope_hash: 'abc123canonicalhash789xyz456',
+      reason: 'Encerramento regular de frete e consolidação probatória E3.8',
+    },
   },
+  resumo_financeiro: {
+    receita_realizada: 12500,
+    frete_bruto: 12500,
+    resultado_operacional: 9800,
+    margem_percentual: 78.4,
+    custos_diretos: {
+      combustivel: 800,
+      pedagio: 250,
+      outras_despesas: 150,
+      comissao: 1500,
+      total: 2700,
+    },
+    total_despesas_efetivadas: 400,
+    total_abastecimentos_efetivados: 800,
+    total_vales_efetivados: 0,
+    comissao_percentual: 12,
+    comissao_valor: 1500,
+    saldo_motorista: 1650,
+    saldo_motorista_situacao: 'credito_motorista',
+    motorista_creditos: 1650,
+    motorista_debitos: 0,
+    total_pendente: 0,
+    tem_pendentes: false,
+    is_autonomo: false,
+    alertas: [],
+    dados_completos: true,
+  },
+  gerado_em: '2026-03-10T15:00:00Z',
 };
+
 
 async function assertElementHorizontalFit(locator: Locator, maxViewportWidth: number) {
   await locator.scrollIntoViewIfNeeded();
@@ -183,6 +237,26 @@ test.describe('Reporting Products V1 — Verificação Visual, Responsiva e Supe
 
       // 5. Formal envelope state is verified
       await expect(page.locator('#frete-frete-formal-1')).toContainText('Selo Formal E3.8 Ativo');
+
+      // REGRESSION ASSERTION (DEFECT 1): USER_SCROLL_PERSISTS_AFTER_INITIAL_DEEPLINK_FOCUS=true
+      // Deep-link focaliza uma única vez o frete. Subsequentemente, o scroll pertence
+      // inteiramente ao usuário e nenhuma atualização/refetch deve forçar re-scroll.
+      const maxScroll = await page.evaluate(() => document.documentElement.scrollHeight - window.innerHeight);
+      if (maxScroll > 20) {
+        const targetScroll = Math.min(250, maxScroll);
+        await page.evaluate((top) => window.scrollTo({ top, behavior: 'instant' }), targetScroll);
+        const scrollPosInicial = await page.evaluate(() => window.scrollY);
+        expect(scrollPosInicial).toBeGreaterThan(0);
+
+        // Espera determinística por possíveis efeitos/atualizações assíncronas
+        await page.waitForTimeout(600);
+        const scrollPosAposEspera = await page.evaluate(() => window.scrollY);
+        expect(
+          Math.abs(scrollPosAposEspera - scrollPosInicial),
+          `USER_SCROLL_PERSISTS_AFTER_INITIAL_DEEPLINK_FOCUS=true em ${vp.nome} (esperava perto de ${scrollPosInicial}, obteve ${scrollPosAposEspera})`
+        ).toBeLessThanOrEqual(15);
+      }
+
 
       // 7. Loading / disabled state for report action (deterministic via delayed promise)
       await btnFechamentoFormal.click();

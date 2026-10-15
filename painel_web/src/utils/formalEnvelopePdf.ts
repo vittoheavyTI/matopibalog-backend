@@ -69,7 +69,10 @@ export async function gerarPdfEnvelopeDigital(
   const frete = envelope.frete_snapshot || payload.frete_snapshot || {};
   const financeiro = envelope.financial_snapshot || payload.financial_snapshot || {};
   const auditSummary = envelope.audit_summary || payload.audit_summary || {};
-  const hash = envelope.envelope_hash || payload.envelope_hash || '-';
+  const rawHash = envelope.envelope_hash || payload.envelope_hash;
+  const hash = rawHash && typeof rawHash === 'string' && rawHash !== 'undefined' && rawHash !== 'null'
+    ? rawHash
+    : 'Não disponível';
   const sealedDate = envelope.sealed_at || payload.sealed_at || null;
 
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
@@ -102,26 +105,35 @@ export async function gerarPdfEnvelopeDigital(
   doc.text(hash, 18, boxY + 10);
 
   doc.setFontSize(6.5).setFont('helvetica', 'normal').setTextColor(100, 116, 139);
+  const envId = envelope.id && envelope.id !== 'undefined' ? envelope.id : '-';
+  const sealedDataStr = sealedDate ? formatarDataHora(sealedDate) : 'Não disponível';
   doc.text(
-    `Envelope ID: ${envelope.id}   |   Selado formalmente em: ${formatarDataHora(sealedDate)}`,
+    `Envelope ID: ${envId}   |   Selado formalmente em: ${sealedDataStr}`,
     18,
     boxY + 14
   );
 
   // 4. Tabela 1: Identificação do Frete e Rota
-  const motoristaExibicao = data.motorista_nome
-    ? `${data.motorista_nome} (ID: ${String(frete.motorista_id || '-').slice(0, 8)}...)`
-    : (frete.motorista_id || '-');
+  const motoristaNome = data.motorista_nome || (data as any).motorista?.nome || frete.motorista_nome;
+  const motoristaId = frete.motorista_id || (data as any).motorista?.id;
+  const motoristaExibicao = motoristaNome && motoristaNome !== 'undefined'
+    ? `${motoristaNome}${motoristaId && motoristaId !== 'undefined' ? ` (ID: ${String(motoristaId).slice(0, 8)}...)` : ''}`
+    : (motoristaId && motoristaId !== 'undefined' ? String(motoristaId) : 'Não informado');
+  const placaExibicao = (data.placa && data.placa !== 'undefined')
+    ? data.placa
+    : ((data as any).motorista?.placa && (data as any).motorista?.placa !== 'undefined'
+      ? (data as any).motorista.placa
+      : (frete.placa && frete.placa !== 'undefined' ? frete.placa : '-'));
 
   autoTable(doc, {
     startY: boxY + boxHeight + 4,
     head: [['Identificação e Rota', 'Registro Selado']],
     body: [
-      ['Identificador do Frete', envelope.frete_id],
+      ['Identificador do Frete', envelope.frete_id && envelope.frete_id !== 'undefined' ? envelope.frete_id : (frete.id || '-')],
       ['Data de Cadastro', formatarData(frete.data)],
-      ['Rota Operacional', `${frete.origem || '-'}  ➔  ${frete.destino || '-'}`],
+      ['Rota Operacional', `${frete.origem || '-'} para ${frete.destino || '-'}`],
       ['Motorista Designado', motoristaExibicao],
-      ['Placa do Veículo', data.placa || '-'],
+      ['Placa do Veículo', placaExibicao],
       ['Status no Fechamento', formatarStatusFrete(frete.status || 'finalizado')],
     ],
     theme: 'grid',
@@ -129,6 +141,7 @@ export async function gerarPdfEnvelopeDigital(
     headStyles: { fillColor: [30, 58, 138], textColor: 255, fontStyle: 'bold' },
     columnStyles: { 0: { cellWidth: 50, fontStyle: 'bold', textColor: [30, 41, 59] } },
   });
+
 
   // 5. Tabela 2: Quilometragem e Odômetro
   const kmIni = frete.km_inicial ?? financeiro.km_inicial;

@@ -448,5 +448,130 @@ function extrairTextoPdf(doc: any): string {
     expect(textoPdf).not.toContain('0 documento(s) fiscal(is) anexado(s)');
     expect(textoPdf).not.toContain('Nenhum documento fiscal vinculado');
   });
+
+  it('DEFECT 3 & 4 REGRESSION: renderiza rota com "para" sem mojibake e trata hash nulo/undefined sem concatenar "undefined..."', async () => {
+    // 1. Envelope Digital Formal com hash ausente/undefined
+    const payloadEnvDefensivo = {
+      status: 'FORMAL_ENVELOPE_SEALED',
+      envelope: {
+        id: 'env-defensive-1',
+        frete_id: 'frete-defensive-1',
+        sealed_at: '2026-03-10T15:00:00Z',
+        envelope_hash: undefined, // Simula ausência de hash
+        frete_snapshot: {
+          origem: 'Balsas - MA',
+          destino: 'Itaqui - MA',
+          data: '2026-03-10',
+          km_inicial: 1000,
+          km_final: 1750,
+        },
+      },
+      motorista_nome: 'João da Silva',
+      placa: 'BRA2E19',
+    };
+
+    const resEnv = await gerarPdfEnvelopeDigital(payloadEnvDefensivo as any, { autoSave: false });
+    expect(resEnv.ok).toBe(true);
+    expect(resEnv.doc).toBeDefined();
+    const textoEnv = extrairTextoPdf(resEnv.doc);
+
+    // Rota segura com "para", sem mojibake ou ➔
+    expect(textoEnv).toContain('Balsas - MA para Itaqui - MA');
+    expect(textoEnv).not.toContain('➔');
+    expect(textoEnv).not.toContain('undefined');
+    expect(textoEnv).not.toContain('NaN');
+    expect(textoEnv).toContain('Não disponível');
+
+    // 2. Fechamento de Frete com envelope_hash ausente/undefined
+    const payloadFechDefensivo: RelatorioFechamentoPayload = {
+      frete: {
+        id: 'frete-defensive-1',
+        empresa_id: 'emp-1',
+        motorista_id: 'mot-1',
+        origem: 'Balsas - MA',
+        destino: 'Itaqui - MA',
+        data: '2026-03-10',
+        km_inicial: 1000,
+        km_final: 1750,
+        distancia_km: 750,
+        modalidade_calculo: 'valor_fixo',
+        valor_frete: 12500,
+        status: 'finalizado',
+      },
+      motorista: {
+        id: 'mot-1',
+        nome: 'João da Silva',
+        placa: 'BRA2E19',
+      },
+      lancamentos: { despesas: [], abastecimentos: [], vales: [] },
+      documentos_fiscais: { total: 0, tipos: [] },
+      envelope: {
+        status: 'FORMAL_ENVELOPE_SEALED',
+        detalhes: {
+          id: 'env-defensive-1',
+          envelope_type: 'formal_freight_closure',
+          schema_version: '1.0.0',
+          sealed_at: '2026-03-10T15:00:00Z',
+          envelope_hash: undefined as any, // ausência de hash
+          reason: 'teste',
+        },
+      },
+      resumo_financeiro: {
+        restricted: false,
+        frete_bruto: 12500,
+        resultado_operacional: 9800,
+      },
+      gerado_em: '2026-03-10T15:00:00Z',
+    };
+
+    const resFech = await gerarPdfFechamentoFrete(payloadFechDefensivo, { autoSave: false });
+    expect(resFech.ok).toBe(true);
+    expect(resFech.doc).toBeDefined();
+    const textoFech = extrairTextoPdf(resFech.doc);
+
+    // Rota com "para"
+    expect(textoFech).toContain('Balsas - MA para Itaqui - MA');
+    expect(textoFech).not.toContain('➔');
+
+    // Defesa contra "Hash: undefined..."
+    expect(textoFech).not.toContain('undefined');
+    expect(textoFech).not.toContain('Hash: undefined');
+    expect(textoFech).not.toContain('NaN');
+    expect(textoFech).toContain('Hash: Não disponível');
+  });
+
+  it('DEFECT 2 REGRESSION: preenche motorista, placa e km mesmo com fallbacks parciais do frete', async () => {
+    const payloadFallback = {
+      frete: {
+        id: 'frete-fallback-1',
+        origem: 'Balsas - MA',
+        destino: 'Itaqui - MA',
+        data: '2026-03-10',
+        motorista_nome: 'João da Silva',
+        placa: 'BRA2E19',
+        kmInicial: 1000,
+        kmFinal: 1750,
+        status: 'finalizado',
+      },
+      // motorista ausente no nível raiz — deve fazer fallback gracioso
+      lancamentos: { despesas: [], abastecimentos: [], vales: [] },
+      documentos_fiscais: { total: 0, tipos: [] },
+      envelope: { status: 'LEGACY_NO_FORMAL_ENVELOPE' },
+      resumo_financeiro: { restricted: false },
+    };
+
+    const res = await gerarPdfFechamentoFrete(payloadFallback as any, { autoSave: false });
+    expect(res.ok).toBe(true);
+    const texto = extrairTextoPdf(res.doc);
+
+    expect(texto).toContain('João da Silva');
+    expect(texto).toContain('BRA2E19');
+    expect(texto).toContain('1.000 km');
+    expect(texto).toContain('1.750 km');
+    expect(texto).toContain('750 km');
+    expect(texto).not.toContain('undefined');
+    expect(texto).not.toContain('NaN');
+  });
 });
+
 

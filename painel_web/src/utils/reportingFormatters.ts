@@ -74,11 +74,13 @@ export function formatarStatusEnvelope(status: string | null | undefined): strin
 }
 
 export function resumirHashIntegridade(hash: string | null | undefined, prefixLen = 8): string {
-  if (!hash) return '-';
+  if (!hash || hash === 'undefined' || hash === 'null') return '-';
   const str = String(hash).trim();
+  if (!str || str === 'undefined' || str === 'null') return '-';
   if (str.length <= prefixLen * 2) return str;
   return `${str.slice(0, prefixLen)}...${str.slice(-5)}`;
 }
+
 
 export function sanitizarNomeArquivo(nome: string): string {
   return nome
