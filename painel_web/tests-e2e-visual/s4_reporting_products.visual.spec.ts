@@ -4,7 +4,7 @@ import { CENARIOS, VIEWPORTS, instalarApiFake, json } from './fixtures';
 const CENARIO_PADRAO = CENARIOS.find((c) => c.nome === 'plano-ativo-contrato-pendente')!;
 
 const MOTORISTAS_MOCK = [
-  { id: 'mot-1', nome: 'João da Silva', telefone: '11999999999', status: 'ativo' },
+  { id: 'mot-1', nome: 'João da Silva', telefone: '11999999999', status: 'ativo', placa: 'BRA2E19', comissao: 12, empresaTipo: 'vinculado' },
 ];
 
 const FRETES_MOCK = [
@@ -36,6 +36,20 @@ const FRETES_MOCK = [
     placa: 'XYZ9876',
     data: '2026-02-15',
   },
+  {
+    id: 'frete-erro-3',
+    motorista_id: 'mot-1',
+    motoristas: { nome: 'João da Silva' },
+    origem: 'Balsas - MA',
+    destino: 'Caxias - MA',
+    valor_frete: 5000,
+    km_inicial: 5000,
+    km_final: 5400,
+    modalidade_calculo: 'valor_fixo',
+    status: 'finalizado',
+    placa: 'BRA2E19',
+    data: '2026-01-20',
+  },
 ];
 
 const ENVELOPE_FORMAL_MOCK = {
@@ -55,6 +69,43 @@ const ENVELOPE_FORMAL_MOCK = {
 const ENVELOPE_LEGADO_MOCK = {
   status: 'LEGACY_NO_FORMAL_ENVELOPE',
   envelope: null,
+};
+
+const RELATORIO_FECHAMENTO_LEGADO_MOCK = {
+  frete: {
+    id: 'frete-legado-2',
+    empresa_id: 'emp-1',
+    motorista_id: 'mot-1',
+    origem: 'Uruçuí - PI',
+    destino: 'Santos - SP',
+    data: '2026-02-15',
+    km_inicial: 2000,
+    km_final: 4200,
+    distancia_km: 2200,
+    modalidade_calculo: 'valor_fixo',
+    valor_frete: 18000,
+    status: 'finalizado',
+  },
+  motorista: {
+    id: 'mot-1',
+    nome: 'João da Silva',
+    placa: 'XYZ9876',
+    tipo_empresa: 'vinculado',
+  },
+  lancamentos: { despesas: [], abastecimentos: [], vales: [] },
+  documentos_fiscais: { total: 0, tipos: [] },
+  envelope: {
+    status: 'LEGACY_NO_FORMAL_ENVELOPE',
+  },
+  resumo_financeiro: {
+    frete_bruto: 18000,
+    resultado_operacional: 14000,
+    comissao_percentual: 12,
+    comissao_valor: 2160,
+    saldo_motorista: 2160,
+    is_autonomo: false,
+  },
+  gerado_em: '2026-02-15T10:00:00Z',
 };
 
 const RELATORIO_FECHAMENTO_FORMAL_MOCK = {
@@ -179,7 +230,7 @@ test.describe('Reporting Products V1 — Verificação Visual, Responsiva e Supe
           json(route, []);
           return true;
         }
-        if (p.includes('/fretes/frete-formal-1/documentos') || p.includes('/fretes/frete-legado-2/documentos')) {
+        if (p.includes('/fretes/frete-formal-1/documentos') || p.includes('/fretes/frete-legado-2/documentos') || p.includes('/fretes/frete-erro-3/documentos')) {
           json(route, []);
           return true;
         }
@@ -187,7 +238,7 @@ test.describe('Reporting Products V1 — Verificação Visual, Responsiva e Supe
           json(route, ENVELOPE_FORMAL_MOCK);
           return true;
         }
-        if (p.endsWith('/fretes/frete-legado-2/envelope-digital')) {
+        if (p.endsWith('/fretes/frete-legado-2/envelope-digital') || p.endsWith('/fretes/frete-erro-3/envelope-digital')) {
           json(route, ENVELOPE_LEGADO_MOCK);
           return true;
         }
@@ -197,6 +248,10 @@ test.describe('Reporting Products V1 — Verificação Visual, Responsiva e Supe
           return true;
         }
         if (p.endsWith('/fretes/frete-legado-2/relatorio-fechamento')) {
+          json(route, RELATORIO_FECHAMENTO_LEGADO_MOCK);
+          return true;
+        }
+        if (p.endsWith('/fretes/frete-erro-3/relatorio-fechamento')) {
           json(route, { error: 'Falha simulada no backend para teste de erro em tela' }, 500);
           return true;
         }
@@ -208,39 +263,75 @@ test.describe('Reporting Products V1 — Verificação Visual, Responsiva e Supe
       });
 
       await page.setViewportSize({ width: vp.width, height: vp.height });
-      await page.goto('/relatorios/viagens?motorista=mot-1&frete=frete-formal-1,frete-legado-2', {
+      await page.goto('/relatorios/viagens?motorista=mot-1&frete=frete-formal-1,frete-legado-2,frete-erro-3', {
         waitUntil: 'domcontentloaded',
       });
 
-      // 1. Finalized freight rows/accordions rendered and expanded
+      // Selected driver banner: NO undefined%, null%, NaN%, truthful plate and commission
+      const driverBanner = page.locator('#selected-motorista-banner');
+      await expect(driverBanner).toBeVisible({ timeout: 15_000 });
+      await expect(driverBanner).toContainText('João da Silva');
+      await expect(driverBanner).toContainText('Placa: BRA2E19');
+      await expect(driverBanner).toContainText('Comissão: 12%');
+
+      const bodyHtml = await page.content();
+      expect(bodyHtml, 'NO_VISIBLE_UNDEFINED=true').not.toContain('undefined%');
+      expect(bodyHtml).not.toContain('null%');
+      expect(bodyHtml).not.toContain('NaN%');
+
+      // 1. Finalized freight rows/accordions rendered
       const freteFormal = page.locator('#frete-frete-formal-1');
       const freteLegado = page.locator('#frete-frete-legado-2');
+      const freteErro = page.locator('#frete-frete-erro-3');
       await expect(freteFormal).toBeVisible({ timeout: 15_000 });
       await expect(freteLegado).toBeVisible({ timeout: 15_000 });
+      await expect(freteErro).toBeVisible({ timeout: 15_000 });
 
-      // 2 & 3. Envelope Digital and Relatório de Fechamento buttons visible on both fretes
+      // 2 & 3. Envelope Digital and Relatório de Fechamento buttons visible on fretes
       const btnEnvFormal = page.locator('#btn-envelope-digital-frete-formal-1');
       const btnFechamentoFormal = page.locator('#btn-relatorio-fechamento-frete-formal-1');
       const btnEnvLegado = page.locator('#btn-envelope-digital-frete-legado-2');
       const btnFechamentoLegado = page.locator('#btn-relatorio-fechamento-frete-legado-2');
+      const btnFechamentoErro = page.locator('#btn-relatorio-fechamento-frete-erro-3');
 
       await expect(btnEnvFormal).toBeVisible();
       await expect(btnFechamentoFormal).toBeVisible();
       await expect(btnEnvLegado).toBeVisible();
       await expect(btnFechamentoLegado).toBeVisible();
+      await expect(btnFechamentoErro).toBeVisible();
 
       // 4. Buttons remain inside viewport bounding box
       await assertElementHorizontalFit(btnEnvFormal, vp.width);
       await assertElementHorizontalFit(btnFechamentoFormal, vp.width);
       await assertElementHorizontalFit(btnEnvLegado, vp.width);
       await assertElementHorizontalFit(btnFechamentoLegado, vp.width);
+      await assertElementHorizontalFit(btnFechamentoErro, vp.width);
 
       // 5. Formal envelope state is verified
       await expect(page.locator('#frete-frete-formal-1')).toContainText('Selo Formal E3.8 Ativo');
 
-      // REGRESSION ASSERTION (DEFECT 1): USER_SCROLL_PERSISTS_AFTER_INITIAL_DEEPLINK_FOCUS=true
-      // Deep-link focaliza uma única vez o frete. Subsequentemente, o scroll pertence
-      // inteiramente ao usuário e nenhuma atualização/refetch deve forçar re-scroll.
+      // REGRESSION ASSERTION (DEFECT 1): ACCORDION STATE PERSISTENCE
+      // A. Deep-linked fretes initialize open (btnEnvFormal is visible)
+      // B. Manually close freight formal 1
+      const btnExpandirFormal = page.locator('#btn-expandir-frete-frete-formal-1');
+      await btnExpandirFormal.click();
+      await expect(btnEnvFormal).toBeHidden();
+
+      // C. Wait through async freight / envelope / documents updates
+      await page.waitForTimeout(600);
+      // USER_ACCORDION_CLOSE_PERSISTS=true: Freight remains CLOSED
+      await expect(btnEnvFormal).toBeHidden();
+
+      // D. Manually reopen freight formal 1
+      await btnExpandirFormal.click();
+      await expect(btnEnvFormal).toBeVisible();
+
+      // E. Wait through another async refresh
+      await page.waitForTimeout(600);
+      // USER_ACCORDION_REOPEN_PERSISTS=true: Freight remains OPEN
+      await expect(btnEnvFormal).toBeVisible();
+
+      // REGRESSION ASSERTION: USER_SCROLL_PERSISTS_AFTER_INITIAL_DEEPLINK_FOCUS=true
       const maxScroll = await page.evaluate(() => document.documentElement.scrollHeight - window.innerHeight);
       if (maxScroll > 20) {
         const targetScroll = Math.min(250, maxScroll);
@@ -248,24 +339,22 @@ test.describe('Reporting Products V1 — Verificação Visual, Responsiva e Supe
         const scrollPosInicial = await page.evaluate(() => window.scrollY);
         expect(scrollPosInicial).toBeGreaterThan(0);
 
-        // Espera determinística por possíveis efeitos/atualizações assíncronas
         await page.waitForTimeout(600);
         const scrollPosAposEspera = await page.evaluate(() => window.scrollY);
         expect(
           Math.abs(scrollPosAposEspera - scrollPosInicial),
-          `USER_SCROLL_PERSISTS_AFTER_INITIAL_DEEPLINK_FOCUS=true em ${vp.nome} (esperava perto de ${scrollPosInicial}, obteve ${scrollPosAposEspera})`
+          `USER_SCROLL_PERSISTS_AFTER_INITIAL_DEEPLINK_FOCUS=true em ${vp.nome}`
         ).toBeLessThanOrEqual(15);
       }
 
-
-      // 7. Loading / disabled state for report action (deterministic via delayed promise)
+      // 7. Loading / disabled state for formal report action (FORMAL_REPORT_FULL_INTERNAL=true)
       await btnFechamentoFormal.click();
       await expect(btnFechamentoFormal).toBeDisabled();
       await expect(btnFechamentoFormal).toContainText('Gerando...');
       resolverRelatorio!();
       await expect(btnFechamentoFormal).toBeEnabled({ timeout: 10_000 });
 
-      // 6. LEGACY_NO_FORMAL_ENVELOPE state & modal dialog (no fabricated PDF path)
+      // 6. LEGACY_NO_FORMAL_ENVELOPE state & modal dialog (LEGACY_ENVELOPE_MODAL=true)
       await expect(page.locator('#frete-frete-legado-2')).toContainText('Legado (sem envelope formal)');
       await btnEnvLegado.click();
 
@@ -274,7 +363,7 @@ test.describe('Reporting Products V1 — Verificação Visual, Responsiva e Supe
       await expect(modalAviso).toContainText('Envelope Digital Indisponível (Frete Legado)');
       await expect(modalAviso).toContainText('política de governança, envelopes formais não são fabricados retroativamente');
 
-      // 9. Modal itself and CTAs have no horizontal overflow and remain inside viewport
+      // Modal horizontal overflow check
       const modalDialog = page.locator('#modal-aviso-envelope > div');
       await assertElementHorizontalFit(modalDialog, vp.width);
       const btnFecharAviso = page.locator('#btn-fechar-aviso-envelope');
@@ -288,8 +377,12 @@ test.describe('Reporting Products V1 — Verificação Visual, Responsiva e Supe
       await btnFecharAviso.click();
       await expect(modalAviso).toBeHidden();
 
-      // 8. API failure state is user-visible (in-app modal, no native alert)
+      // 8. Legacy operational closure report succeeds (LEGACY_REPORT_SUCCESS=true)
       await btnFechamentoLegado.click();
+      await expect(btnFechamentoLegado).toBeEnabled({ timeout: 10_000 });
+
+      // 9. API failure state is user-visible on dedicated error scenario (ERROR_MODAL_SEPARATE_SCENARIO=true)
+      await btnFechamentoErro.click();
       const modalErro = page.locator('#modal-erro-reporting');
       await expect(modalErro).toBeVisible();
       await expect(modalErro).toContainText('Erro no Relatório de Fechamento');

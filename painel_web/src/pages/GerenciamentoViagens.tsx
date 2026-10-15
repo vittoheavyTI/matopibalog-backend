@@ -126,6 +126,7 @@ export const GerenciamentoViagens: React.FC = () => {
   const [envelopesCarregando, setEnvelopesCarregando] = useState<Set<string>>(new Set());
   const envelopesCarregandoRef = useRef<Set<string>>(new Set());
   const freteScrolledRef = useRef<string | null>(null);
+  const accordionInitKeyRef = useRef<string | null>(null);
   const [relatorioFechamentoCarregando, setRelatorioFechamentoCarregando] = useState<Set<string>>(new Set());
 
   const [modalAvisoEnvelope, setModalAvisoEnvelope] = useState<{
@@ -292,11 +293,11 @@ export const GerenciamentoViagens: React.FC = () => {
       setFretes(fretesData);
       setMotoristas(motsData.map((m: any) => ({
         uid: m.id,
-        nome: m.usuarios?.nome,
-        placa: m.placa_veiculo,
-        comissao: m.percentual_comissao,
-        status: m.usuarios?.status,
-        empresaTipo: m.empresa_tipo
+        nome: m.usuarios?.nome || m.nome,
+        placa: m.placa_veiculo || m.placa,
+        comissao: m.percentual_comissao ?? m.comissao ?? m.percentualComissao,
+        status: m.usuarios?.status || m.status,
+        empresaTipo: m.empresa_tipo || m.empresaTipo
       })));
     } catch (err) {
       if (import.meta.env.DEV) console.error('[Fretes] carregar falhou');
@@ -418,21 +419,6 @@ export const GerenciamentoViagens: React.FC = () => {
     }, 350);
   });
 
-  // Default do accordion: ao trocar de motorista / recarregar dados, fretes
-  // ativos/pendentes e os fretes explicitamente focados via URL (?frete=) abrem.
-  useEffect(() => {
-    if (filterMot === 'todos') return;
-    const abertosPorPadrao = fretes
-      .filter(f => f.status === 'ativo' || f.status === 'pendente' || freteQueryIds.includes(f.id))
-      .map(f => f.id as string);
-    freteQueryIds.forEach(id => {
-      if (!abertosPorPadrao.includes(id)) abertosPorPadrao.push(id);
-    });
-    setFretesExpandidos(new Set(abertosPorPadrao));
-    setSemFreteExpandido(false);
-  }, [filterMot, fretes, freteQueryIds]);
-
-
   const carregarDocumentosFrete = useCallback(async (freteId: string) => {
     setDocsCarregando(prev => new Set(prev).add(freteId));
     try {
@@ -445,25 +431,35 @@ export const GerenciamentoViagens: React.FC = () => {
     }
   }, []);
 
-  // Expansão e pré-carregamento dos fretes em foco na URL.
-  // Separado da rolagem visual para não re-disparar scrollIntoView a cada atualização de dados.
+  // Inicialização ONE-SHOT dos accordions para o contexto atual de navegação.
+  // Ao entrar em um novo motorista / URL (?frete=), os fretes padrão (ativos, pendentes
+  // e em foco na URL) abrem uma única vez. A partir desse momento, as decisões manuais
+  // do usuário (fechar/abrir) são estritamente autoritativas e NUNCA serão sobrescritas
+  // por refetch de dados, SSE, polling, carregamento de documentos/envelopes ou re-renderizações.
   useEffect(() => {
-    if (freteQueryIds.length === 0) return;
-    let cancelado = false;
-    queueMicrotask(() => {
-      if (cancelado) return;
-      setFretesExpandidos(prev => {
-        const next = new Set(prev);
-        freteQueryIds.forEach(id => next.add(id));
-        return next;
+    if (filterMot === 'todos') {
+      accordionInitKeyRef.current = null;
+      return;
+    }
+    const navKey = `${filterMot}::${freteQueryIds.slice().sort().join(',')}`;
+    if (fretes.length > 0 && accordionInitKeyRef.current !== navKey) {
+      accordionInitKeyRef.current = navKey;
+      const abertosPorPadrao = fretes
+        .filter(f => f.status === 'ativo' || f.status === 'pendente' || freteQueryIds.includes(f.id))
+        .map(f => f.id as string);
+      freteQueryIds.forEach(id => {
+        if (!abertosPorPadrao.includes(id)) abertosPorPadrao.push(id);
       });
+      setFretesExpandidos(new Set(abertosPorPadrao));
+      setSemFreteExpandido(false);
+
+      // Pré-carregamento determinístico de documentos e envelopes dos fretes em foco
       freteQueryIds.forEach(id => {
         if (!(id in docsPorFrete)) void carregarDocumentosFrete(id);
         if (!(id in envelopesPorFrete)) void carregarEnvelopeFrete(id);
       });
-    });
-    return () => { cancelado = true; };
-  }, [freteQuery, carregarDocumentosFrete, carregarEnvelopeFrete]);
+    }
+  }, [filterMot, fretes, freteQueryIds, docsPorFrete, envelopesPorFrete, carregarDocumentosFrete, carregarEnvelopeFrete]);
 
   // Rolagem visual ONE-SHOT para o primeiro frete em foco na URL.
   // Após a primeira rolagem bem-sucedida, o scroll pertence inteiramente ao usuário.
@@ -1572,7 +1568,7 @@ export const GerenciamentoViagens: React.FC = () => {
       </button>
 
       {selectedMotorista && (
-        <div className="bg-blue-600 p-4 rounded-xl shadow-lg flex flex-wrap justify-between items-center gap-3 text-white">
+        <div id="selected-motorista-banner" className="bg-blue-600 p-4 rounded-xl shadow-lg flex flex-wrap justify-between items-center gap-3 text-white">
           <div className="flex items-center space-x-3">
             <div className="bg-white w-10 h-10 rounded-lg flex items-center justify-center text-blue-600 font-bold text-lg">
               {selectedMotorista.nome?.charAt(0) || '?'}
@@ -1580,8 +1576,17 @@ export const GerenciamentoViagens: React.FC = () => {
             <div>
               <h2 className="text-xl font-bold">{selectedMotorista.nome}</h2>
               <p className="text-blue-100 text-sm">
-                Placa: {selectedMotorista.placa}
-                {isAutonomo ? ' | Motorista Autônomo' : ` | Comissão: ${selectedMotorista.comissao}%`}
+                Placa: {selectedMotorista.placa && selectedMotorista.placa !== 'undefined' && selectedMotorista.placa !== 'null' ? selectedMotorista.placa : 'Não informada'}
+                {isAutonomo
+                  ? ' | Motorista Autônomo'
+                  : (() => {
+                      const com = selectedMotorista.comissao;
+                      if (com != null && com !== '' && com !== 'undefined' && com !== 'null' && !Number.isNaN(Number(com))) {
+                        return ` | Comissão: ${com}%`;
+                      }
+                      return ' | Comissão: Não informada';
+                    })()
+                }
               </p>
             </div>
           </div>
@@ -1880,7 +1885,7 @@ export const GerenciamentoViagens: React.FC = () => {
                   <span className="font-bold text-gray-800 text-right whitespace-nowrap tabular-nums min-w-[96px]">{formatCurrency(opTotalFretes)}</span>
                 </div>
                 <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-sm border-b border-gray-50 pb-1">
-                  <span className="text-gray-600 min-w-0">Porcentagem Motorista ({selectedMotorista?.comissao || 0}%):</span>
+                  <span className="text-gray-600 min-w-0">Porcentagem Motorista ({selectedMotorista?.comissao != null && !Number.isNaN(Number(selectedMotorista.comissao)) ? `${selectedMotorista.comissao}%` : 'Não informada'}):</span>
                   <span className="font-bold text-blue-600 text-right whitespace-nowrap tabular-nums min-w-[96px]">+{formatCurrency(opComissao)}</span>
                 </div>
                 <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-sm border-b border-gray-50 pb-1">
@@ -2293,7 +2298,7 @@ export const GerenciamentoViagens: React.FC = () => {
                     </div>
                     {!isAutonomo && (
                       <div className="flex justify-between text-sm">
-                        <span className="text-gray-600">Comissão ({selectedMotorista?.comissao || 0}%):</span>
+                        <span className="text-gray-600">Comissão ({selectedMotorista?.comissao != null && !Number.isNaN(Number(selectedMotorista.comissao)) ? `${selectedMotorista.comissao}%` : 'Não informada'}):</span>
                         <span className="font-bold text-blue-600">{formatCurrency(opComissao)}</span>
                       </div>
                     )}

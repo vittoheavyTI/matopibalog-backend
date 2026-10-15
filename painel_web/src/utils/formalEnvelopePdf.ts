@@ -92,17 +92,17 @@ export async function gerarPdfEnvelopeDigital(
   );
 
   // 3. Bloco de Destaque da Chave de Integridade (Hash SHA-256)
-  const boxY = 43;
-  const boxHeight = 16;
+  const boxY = 41;
+  const boxHeight = 15;
   doc.setFillColor(248, 250, 252);
   doc.setDrawColor(203, 213, 225);
   doc.roundedRect(14, boxY, 182, boxHeight, 2, 2, 'FD');
 
-  doc.setFontSize(8).setFont('helvetica', 'bold').setTextColor(30, 41, 59);
-  doc.text('CHAVE DE INTEGRIDADE CRIPTOGRÁFICA (SHA-256):', 18, boxY + 5);
+  doc.setFontSize(7.5).setFont('helvetica', 'bold').setTextColor(30, 41, 59);
+  doc.text('CHAVE DE INTEGRIDADE CRIPTOGRÁFICA (SHA-256):', 18, boxY + 4.5);
 
-  doc.setFontSize(8).setFont('courier', 'bold').setTextColor(15, 118, 110);
-  doc.text(hash, 18, boxY + 10);
+  doc.setFontSize(7.5).setFont('courier', 'bold').setTextColor(15, 118, 110);
+  doc.text(hash, 18, boxY + 9);
 
   doc.setFontSize(6.5).setFont('helvetica', 'normal').setTextColor(100, 116, 139);
   const envId = envelope.id && envelope.id !== 'undefined' ? envelope.id : '-';
@@ -110,7 +110,7 @@ export async function gerarPdfEnvelopeDigital(
   doc.text(
     `Envelope ID: ${envId}   |   Selado formalmente em: ${sealedDataStr}`,
     18,
-    boxY + 14
+    boxY + 13
   );
 
   // 4. Tabela 1: Identificação do Frete e Rota
@@ -126,7 +126,7 @@ export async function gerarPdfEnvelopeDigital(
       : (frete.placa && frete.placa !== 'undefined' ? frete.placa : '-'));
 
   autoTable(doc, {
-    startY: boxY + boxHeight + 4,
+    startY: boxY + boxHeight + 3,
     head: [['Identificação e Rota', 'Registro Selado']],
     body: [
       ['Identificador do Frete', envelope.frete_id && envelope.frete_id !== 'undefined' ? envelope.frete_id : (frete.id || '-')],
@@ -137,11 +137,11 @@ export async function gerarPdfEnvelopeDigital(
       ['Status no Fechamento', formatarStatusFrete(frete.status || 'finalizado')],
     ],
     theme: 'grid',
-    styles: { fontSize: 8, cellPadding: 2 },
+    styles: { fontSize: 7.5, cellPadding: 1.5 },
     headStyles: { fillColor: [30, 58, 138], textColor: 255, fontStyle: 'bold' },
     columnStyles: { 0: { cellWidth: 50, fontStyle: 'bold', textColor: [30, 41, 59] } },
+    margin: { bottom: 15, left: 14, right: 14 },
   });
-
 
   // 5. Tabela 2: Quilometragem e Odômetro
   const kmIni = frete.km_inicial ?? financeiro.km_inicial;
@@ -153,7 +153,7 @@ export async function gerarPdfEnvelopeDigital(
   const yAposTab1 = (doc as any).lastAutoTable?.finalY || 105;
 
   autoTable(doc, {
-    startY: yAposTab1 + 4,
+    startY: yAposTab1 + 3,
     head: [['Registro Operacional de KM', 'Valor no Fechamento']],
     body: [
       ['KM Inicial', formatarKm(kmIni)],
@@ -169,13 +169,14 @@ export async function gerarPdfEnvelopeDigital(
       ],
     ],
     theme: 'grid',
-    styles: { fontSize: 8, cellPadding: 2 },
+    styles: { fontSize: 7.5, cellPadding: 1.5 },
     headStyles: { fillColor: [51, 65, 85], textColor: 255, fontStyle: 'bold' },
     columnStyles: { 0: { cellWidth: 50, fontStyle: 'bold', textColor: [30, 41, 59] } },
+    margin: { bottom: 15, left: 14, right: 14 },
   });
 
   // 6. Tabela 3: Snapshot Comercial e Financeiro
-  const yAposTab2 = (doc as any).lastAutoTable?.finalY || 150;
+  const yAposTab2 = (doc as any).lastAutoTable?.finalY || 145;
 
   const modalidade = financeiro.modalidade_calculo || frete.modalidade_calculo;
   const valorFrete = financeiro.valor_frete ?? frete.valor_frete;
@@ -202,7 +203,7 @@ export async function gerarPdfEnvelopeDigital(
       : (quemRecebeu || '-');
 
   autoTable(doc, {
-    startY: yAposTab2 + 4,
+    startY: yAposTab2 + 3,
     head: [['Snapshot Comercial e Financeiro (Selado)', 'Condição Formal']],
     body: [
       ['Modalidade de Cálculo', formatarModalidadeCalculo(modalidade)],
@@ -212,42 +213,63 @@ export async function gerarPdfEnvelopeDigital(
       ['Quem Recebeu o Frete', quemRecebeuTxt],
     ],
     theme: 'grid',
-    styles: { fontSize: 8, cellPadding: 2 },
+    styles: { fontSize: 7.5, cellPadding: 1.5 },
     headStyles: { fillColor: [15, 118, 110], textColor: 255, fontStyle: 'bold' },
     columnStyles: { 0: { cellWidth: 50, fontStyle: 'bold', textColor: [30, 41, 59] } },
+    margin: { bottom: 15, left: 14, right: 14 },
   });
 
   // 7. Tabela 4: Metadados de Auditoria e Encerramento
-  const yAposTab3 = (doc as any).lastAutoTable?.finalY || 195;
+  const yAposTab3 = (doc as any).lastAutoTable?.finalY || 185;
+
+  const linhasAuditoria: Array<[string, string]> = [
+    ['Motivo Declarado', payload.reason || envelope.reason || 'Encerramento formal de frete'],
+    ['Fonte de Finalização', envelope.source || 'backend_finalization'],
+    ['Versão do Schema', envelope.schema_version || 'e38.freight_closure.v1'],
+  ];
+
+  const reqId = payload.request_id || envelope.request_id || (envelope as any).client_request_id || auditSummary.client_request_id;
+  if (reqId && reqId !== '-' && reqId !== 'undefined') {
+    linhasAuditoria.push(['Identificador de Requisição', String(reqId)]);
+  }
+
+  const corrId = payload.correlation_id || envelope.correlation_id;
+  if (corrId && corrId !== '-' && corrId !== 'undefined') {
+    linhasAuditoria.push(['Correlação de Auditoria', String(corrId)]);
+  }
+
+  if (auditSummary.lancamento_eventos_count != null && String(auditSummary.lancamento_eventos_count) !== '-') {
+    linhasAuditoria.push([
+      'Eventos de Lançamento no Fechamento',
+      String(auditSummary.lancamento_eventos_count),
+    ]);
+  }
+
+  if (auditSummary.fretes_financeiro_auditoria_count != null && String(auditSummary.fretes_financeiro_auditoria_count) !== '-') {
+    linhasAuditoria.push([
+      'Eventos Financeiros Auditados',
+      String(auditSummary.fretes_financeiro_auditoria_count),
+    ]);
+  }
+
+  if (auditSummary.historical_completeness && auditSummary.historical_completeness !== '-' && auditSummary.historical_completeness !== 'undefined') {
+    linhasAuditoria.push([
+      'Classificação de Integridade',
+      auditSummary.historical_completeness === 'formal_snapshot'
+        ? 'Snapshot Formal Nativo E3.8'
+        : String(auditSummary.historical_completeness),
+    ]);
+  }
 
   autoTable(doc, {
-    startY: yAposTab3 + 4,
+    startY: yAposTab3 + 3,
     head: [['Governança e Auditoria do Fechamento', 'Referência do Sistema']],
-    body: [
-      ['Motivo Declarado', payload.reason || envelope.reason || '-'],
-      ['Fonte de Finalização', envelope.source || 'backend_finalization'],
-      ['Versão do Schema', envelope.schema_version || 'e38.freight_closure.v1'],
-      ['Identificador de Requisição', payload.request_id || envelope.request_id || '-'],
-      ['Correlação de Auditoria', payload.correlation_id || envelope.correlation_id || '-'],
-      [
-        'Eventos de Lançamento no Fechamento',
-        String(auditSummary.lancamento_eventos_count ?? '-'),
-      ],
-      [
-        'Eventos Financeiros Auditados',
-        String(auditSummary.fretes_financeiro_auditoria_count ?? '-'),
-      ],
-      [
-        'Classificação de Integridade',
-        auditSummary.historical_completeness === 'formal_snapshot'
-          ? 'Snapshot Formal Nativo E3.8'
-          : (auditSummary.historical_completeness || '-'),
-      ],
-    ],
+    body: linhasAuditoria,
     theme: 'grid',
-    styles: { fontSize: 8, cellPadding: 2 },
+    styles: { fontSize: 7.5, cellPadding: 1.5 },
     headStyles: { fillColor: [71, 85, 105], textColor: 255, fontStyle: 'bold' },
     columnStyles: { 0: { cellWidth: 50, fontStyle: 'bold', textColor: [30, 41, 59] } },
+    margin: { bottom: 15, left: 14, right: 14 },
   });
 
   // 8. Rodapé em todas as páginas com numeração "Página X de Y" e declaração legal

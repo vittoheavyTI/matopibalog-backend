@@ -161,7 +161,20 @@ export async function gerarPdfFechamentoFrete(
       : ((frete as any).km_rodados ?? null)
   );
   const lancamentos = data.lancamentos || { despesas: [], abastecimentos: [], vales: [] };
-  const resumo = data.resumo_financeiro || {};
+  const resumoRaw: any = data.resumo_financeiro || (data as any).financeiro || {};
+  const resumo = {
+    ...resumoRaw,
+    receita_realizada: resumoRaw.receita_realizada ?? resumoRaw.valor_frete_bruto ?? null,
+    frete_bruto: resumoRaw.frete_bruto ?? resumoRaw.valor_frete_bruto ?? null,
+    comissao_valor: resumoRaw.comissao_valor ?? resumoRaw.valor_comissao ?? null,
+    comissao_percentual: resumoRaw.comissao_percentual ?? resumoRaw.percentual_comissao ?? null,
+    resultado_operacional: resumoRaw.resultado_operacional ?? null,
+    saldo_motorista: resumoRaw.saldo_motorista ?? null,
+    saldo_motorista_situacao: resumoRaw.saldo_motorista_situacao ?? (resumoRaw.saldo_motorista != null ? 'A pagar ao motorista' : null),
+    total_despesas_efetivadas: resumoRaw.total_despesas_efetivadas ?? null,
+    total_abastecimentos_efetivados: resumoRaw.total_abastecimentos_efetivados ?? resumoRaw.total_abastecimentos_efetivadas ?? null,
+    total_vales_efetivados: resumoRaw.total_vales_efetivados ?? resumoRaw.total_vales_efetivadas ?? null,
+  };
   const dataEmissao = data.gerado_em ? new Date(data.gerado_em) : new Date();
 
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
@@ -419,8 +432,11 @@ export async function gerarPdfFechamentoFrete(
     if (resumo.is_autonomo) {
       linhasResumo.push(['Comissão do Motorista', 'Não aplicável (Autônomo)']);
     } else if (resumo.comissao_valor !== null && resumo.comissao_valor !== undefined) {
+      const percStr = resumo.comissao_percentual != null && !Number.isNaN(Number(resumo.comissao_percentual))
+        ? ` (${resumo.comissao_percentual}%)`
+        : '';
       linhasResumo.push([
-        `Comissão do Motorista (${resumo.comissao_percentual ?? 0}%)`,
+        `Comissão do Motorista${percStr}`,
         formatarMoeda(resumo.comissao_valor),
       ]);
     } else {

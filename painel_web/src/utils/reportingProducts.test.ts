@@ -135,6 +135,7 @@ describe('formalEnvelopePdf', () => {
     expect(result.ok).toBe(true);
     expect(result.doc).toBeDefined();
     expect(result.filename).toContain('envelope-digital');
+    expect((result.doc as any)?.internal?.getNumberOfPages()).toBe(1);
   });
 });
 
@@ -571,6 +572,93 @@ function extrairTextoPdf(doc: any): string {
     expect(texto).toContain('750 km');
     expect(texto).not.toContain('undefined');
     expect(texto).not.toContain('NaN');
+  });
+
+  it('DEFECT 3 REGRESSION: relatorio full-internal exibe receita, resultado e saldo do motorista sem [Restrito]', async () => {
+    const payloadFullInternal: any = {
+      frete: {
+        id: 'frete-formal-1',
+        empresa_id: 'emp-1',
+        motorista_id: 'mot-1',
+        origem: 'Balsas - MA',
+        destino: 'Itaqui - MA',
+        data: '2026-03-10',
+        km_inicial: 1000,
+        km_final: 1750,
+        distancia_km: 750,
+        modalidade_calculo: 'valor_fixo',
+        valor_frete: 12500,
+        status: 'finalizado',
+      },
+      motorista: { id: 'mot-1', nome: 'João da Silva', placa: 'BRA2E19' },
+      lancamentos: {
+        despesas: [{ id: 'd-1', descricao: 'Pedágio', tipo: 'pedagio', valor: 250, status: 'aprovado', quem_pagou: 'empresa' }],
+        abastecimentos: [{ id: 'a-1', posto: 'Posto Sol', litros: 200, valor_total: 800, status: 'aprovado', quem_pagou: 'empresa' }],
+        vales: [],
+      },
+      documentos_fiscais: { total: 1, tipos: [{ tipo: 'cte', status: 'autorizado' }] },
+      envelope: { status: 'FORMAL_ENVELOPE_SEALED' },
+      resumo_financeiro: {
+        receita_realizada: 12500,
+        frete_bruto: 12500,
+        resultado_operacional: 9800,
+        total_despesas_efetivadas: 250,
+        total_abastecimentos_efetivados: 800,
+        total_vales_efetivados: 0,
+        comissao_percentual: 12,
+        comissao_valor: 1500,
+        saldo_motorista: 1650,
+        saldo_motorista_situacao: 'credito_motorista',
+        is_autonomo: false,
+      },
+      gerado_em: '2026-03-10T15:00:00Z',
+    };
+
+    const res = await gerarPdfFechamentoFrete(payloadFullInternal, { autoSave: false });
+    expect(res.ok).toBe(true);
+    const texto = extrairTextoPdf(res.doc);
+
+    expect(texto).toContain('Receita Realizada');
+    expect(texto).toContain('12.500,00');
+    expect(texto).toContain('Comissão do Motorista');
+    expect(texto).toContain('1.500,00');
+    expect(texto).toContain('SALDO DO MOTORISTA');
+    expect(texto).toContain('1.650,00');
+    expect(texto).toContain('RESULTADO OPERACIONAL');
+    expect(texto).toContain('9.800,00');
+    expect(texto).not.toContain('[Restrito]');
+  });
+
+  it('DEFECT 2 & 3 REGRESSION: suporta fixture com financeiro e nunca renderiza undefined%, null% ou NaN%', async () => {
+    const payloadFinanceiroAlt: any = {
+      frete: {
+        id: 'frete-sem-comissao',
+        origem: 'Barreiras / BA',
+        destino: 'Santos / SP',
+        data: '2026-10-12',
+        status: 'finalizado',
+        valor_frete: 10000,
+      },
+      motorista: { id: 'mot-1', nome: 'Carlos Eduardo', placa: 'XYZ9876' },
+      lancamentos: { despesas: [], abastecimentos: [], vales: [] },
+      documentos_fiscais: { total: 0, tipos: [] },
+      envelope: { status: 'FORMAL_ENVELOPE_SEALED' },
+      financeiro: {
+        frete_bruto: 10000,
+        resultado_operacional: 8000,
+        comissao_percentual: undefined, // Simula comissão ausente
+        comissao_valor: 1000,
+      },
+    };
+
+    const res = await gerarPdfFechamentoFrete(payloadFinanceiroAlt, { autoSave: false });
+    expect(res.ok).toBe(true);
+    const texto = extrairTextoPdf(res.doc);
+    expect(texto).not.toContain('undefined%');
+    expect(texto).not.toContain('null%');
+    expect(texto).not.toContain('NaN%');
+    expect(texto).toContain('10.000,00');
+    expect(texto).toContain('8.000,00');
   });
 });
 
