@@ -1,13 +1,12 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { Plus, X, Search, Filter, Truck, MapPin, Calendar, DollarSign, Gauge, Trash2, Edit, Check, AlertTriangle, ChevronLeft, ChevronDown, ChevronRight, Fuel, FileText, TrendingUp, Save, Unlock, Lock, Camera, Upload, Ban, Download, ShieldCheck } from 'lucide-react';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
+import { Plus, X, Search, Filter, Truck, MapPin, Calendar, DollarSign, Gauge, Trash2, Edit, Check, AlertTriangle, ChevronLeft, ChevronDown, ChevronRight, Fuel, FileText, TrendingUp, Save, Unlock, Lock, Camera, Upload, Ban, Download, ShieldCheck, CheckCircle2 } from 'lucide-react';
 import { useLancamentosRealtime } from '../hooks/useLancamentosRealtime';
 import { format } from 'date-fns';
 import { formatCurrency } from '../utils';
 import api, { newClientRequestId } from '../api';
-import { desenharBrandingRelatorio } from '../utils/relatorioBranding';
+import { gerarPdfEnvelopeDigital } from '../utils/formalEnvelopePdf';
+import { gerarPdfFechamentoFrete } from '../utils/freightClosurePdf';
 import { mensagemErro } from '../utils/mensagemErro';
 import { erroSanidadeTonKm, erroSanidadeValorFixo, TONELADAS_MAX } from '../utils/limitesFrete';
 import { freteTonKmIncompativelAtual, montarRecuperacaoInlineFrete, obterErroLimiteFrete, type InlineFreteRecovery } from '../utils/freteOperationalLimit';
@@ -80,6 +79,10 @@ export const GerenciamentoViagens: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const motoristaQuery = searchParams.get('motorista');
   const freteQuery = searchParams.get('frete');
+  const freteQueryIds = useMemo(() => {
+    if (!freteQuery) return [];
+    return freteQuery.split(',').map(s => s.trim()).filter(Boolean);
+  }, [freteQuery]);
   const painelQuery = searchParams.get('painel');
   // ?novoFrete=1 (vindo do botão "Adicionar Frete" do Dashboard) abre o modal "Novo Frete".
   const novoFreteQuery = searchParams.get('novoFrete');
@@ -121,6 +124,23 @@ export const GerenciamentoViagens: React.FC = () => {
   const [docsCarregando, setDocsCarregando] = useState<Set<string>>(new Set());
   const [envelopesPorFrete, setEnvelopesPorFrete] = useState<Record<string, any>>({});
   const [envelopesCarregando, setEnvelopesCarregando] = useState<Set<string>>(new Set());
+  const envelopesCarregandoRef = useRef<Set<string>>(new Set());
+  const freteScrolledRef = useRef<string | null>(null);
+  const accordionInitKeyRef = useRef<string | null>(null);
+  const [relatorioFechamentoCarregando, setRelatorioFechamentoCarregando] = useState<Set<string>>(new Set());
+
+  const [modalAvisoEnvelope, setModalAvisoEnvelope] = useState<{
+    aberto: boolean;
+    freteId: string;
+    status: string;
+    origem?: string;
+    destino?: string;
+  } | null>(null);
+  const [modalErroReporting, setModalErroReporting] = useState<{
+    aberto: boolean;
+    titulo: string;
+    mensagem: string;
+  } | null>(null);
   const [arquivoPreview, setArquivoPreview] = useState<ArquivoPreview | null>(null);
   const [tipoDocumentoNovoFrete, setTipoDocumentoNovoFrete] = useState<TipoDocumentoFrete>('cte');
   const [documentosNovoFrete, setDocumentosNovoFrete] = useState<DocumentoFretePendente[]>([]);
@@ -167,79 +187,71 @@ export const GerenciamentoViagens: React.FC = () => {
   };
 
   const carregarEnvelopeFrete = useCallback(async (freteId: string) => {
-    if (envelopesCarregando.has(freteId)) return null;
+    if (envelopesCarregandoRef.current.has(freteId)) return null;
+    envelopesCarregandoRef.current.add(freteId);
     setEnvelopesCarregando(prev => new Set(prev).add(freteId));
     try {
       const { data } = await api.get(`/fretes/${freteId}/envelope-digital`);
       setEnvelopesPorFrete(prev => ({ ...prev, [freteId]: data }));
       return data;
+    } catch {
+      return null;
     } finally {
+      envelopesCarregandoRef.current.delete(freteId);
       setEnvelopesCarregando(prev => {
         const next = new Set(prev);
         next.delete(freteId);
         return next;
       });
     }
-  }, [envelopesCarregando]);
+  }, []);
 
   const baixarPdfEnvelope = async (freteId: string) => {
-    const resposta = envelopesPorFrete[freteId] || await carregarEnvelopeFrete(freteId);
-    const envelope = resposta?.envelope;
-    if (!envelope?.payload) {
-      alert(resposta?.status === 'LEGACY_NO_FORMAL_ENVELOPE'
-        ? 'Frete legado finalizado antes do envelope digital formal.'
-        : 'Este frete ainda não possui envelope digital formal.');
-      return;
+    try {
+      const resposta = envelopesPorFrete[freteId] || await carregarEnvelopeFrete(freteId);
+      if (!resposta?.envelope || resposta?.status !== 'FORMAL_ENVELOPE_SEALED') {
+        const freteItem = fretes.find((fr: any) => fr.id === freteId);
+        setModalAvisoEnvelope({
+          aberto: true,
+          freteId,
+          status: resposta?.status || (freteItem?.status === 'finalizado' ? 'LEGACY_NO_FORMAL_ENVELOPE' : 'NO_FORMAL_ENVELOPE_YET'),
+          origem: freteItem?.origem,
+          destino: freteItem?.destino,
+        });
+        return;
+      }
+
+      await gerarPdfEnvelopeDigital(resposta);
+    } catch (err: any) {
+      console.error('Erro ao gerar PDF do envelope digital:', err);
+      setModalErroReporting({
+        aberto: true,
+        titulo: 'Erro no Envelope Digital',
+        mensagem: 'Não foi possível gerar o PDF do envelope digital. Tente novamente mais tarde.',
+      });
     }
+  };
 
-    const payload = envelope.payload;
-    const frete = payload.frete_snapshot || {};
-    const financeiro = payload.financial_snapshot || {};
-    const hash = envelope.envelope_hash || payload.envelope_hash || '-';
-    const doc = new jsPDF();
-    await desenharBrandingRelatorio(doc);
-    doc.setFontSize(14);
-    doc.text('Envelope Digital do Frete', 14, 32);
-    doc.setFontSize(9);
-    doc.text(`Envelope: ${envelope.id}`, 14, 39);
-    doc.text(`Selado em: ${gvFmt(envelope.sealed_at, 'dd/MM/yyyy HH:mm')}`, 14, 44);
-    doc.text(`Fonte: ${envelope.source} · Schema: ${envelope.schema_version}`, 14, 49);
-    doc.text(`Hash de integridade (SHA-256): ${hash}`, 14, 54);
-
-    autoTable(doc, {
-      startY: 60,
-      head: [['Campo', 'Valor persistido no envelope']],
-      body: [
-        ['Frete', envelope.frete_id],
-        ['Hash (SHA-256)', hash],
-        ['Origem', frete.origem || '-'],
-        ['Destino', frete.destino || '-'],
-        ['Status', frete.status || '-'],
-        ['Motorista', frete.motorista_id || '-'],
-        ['KM inicial', financeiro.km_inicial ?? '-'],
-        ['KM final', financeiro.km_final ?? '-'],
-        ['Modalidade', financeiro.modalidade_calculo || '-'],
-        ['Valor do frete', financeiro.valor_frete != null ? formatCurrency(Number(financeiro.valor_frete)) : '-'],
-        ['Quem recebeu', financeiro.quem_recebeu || '-'],
-        ['Motivo', payload.reason || envelope.reason || '-'],
-        ['Request ID', payload.request_id || envelope.request_id || '-'],
-        ['Correlation ID', payload.correlation_id || envelope.correlation_id || '-'],
-      ],
-      styles: { fontSize: 8, cellPadding: 2 },
-      headStyles: { fillColor: [30, 64, 175] },
-      columnStyles: { 0: { cellWidth: 42, fontStyle: 'bold' } },
-    });
-
-    const finalY = (doc as any).lastAutoTable?.finalY || 120;
-    autoTable(doc, {
-      startY: finalY + 8,
-      head: [['Resumo de auditoria', 'Valor']],
-      body: Object.entries(envelope.audit_summary || {}).map(([k, v]) => [k, String(v ?? '-')]),
-      styles: { fontSize: 8, cellPadding: 2 },
-      headStyles: { fillColor: [15, 118, 110] },
-    });
-
-    doc.save(`envelope-digital-frete-${String(freteId).slice(0, 8)}.pdf`);
+  const baixarPdfFechamento = async (freteId: string) => {
+    if (relatorioFechamentoCarregando.has(freteId)) return;
+    setRelatorioFechamentoCarregando(prev => new Set(prev).add(freteId));
+    try {
+      const { data } = await api.get(`/fretes/${freteId}/relatorio-fechamento`);
+      await gerarPdfFechamentoFrete(data);
+    } catch (err: any) {
+      console.error('Erro ao gerar relatório de fechamento:', err);
+      setModalErroReporting({
+        aberto: true,
+        titulo: 'Erro no Relatório de Fechamento',
+        mensagem: 'Não foi possível gerar o relatório de fechamento deste frete.',
+      });
+    } finally {
+      setRelatorioFechamentoCarregando(prev => {
+        const next = new Set(prev);
+        next.delete(freteId);
+        return next;
+      });
+    }
   };
 
   const [formData, setFormData] = useState({
@@ -281,11 +293,11 @@ export const GerenciamentoViagens: React.FC = () => {
       setFretes(fretesData);
       setMotoristas(motsData.map((m: any) => ({
         uid: m.id,
-        nome: m.usuarios?.nome,
-        placa: m.placa_veiculo,
-        comissao: m.percentual_comissao,
-        status: m.usuarios?.status,
-        empresaTipo: m.empresa_tipo
+        nome: m.usuarios?.nome || m.nome,
+        placa: m.placa_veiculo || m.placa,
+        comissao: m.percentual_comissao ?? m.comissao ?? m.percentualComissao,
+        status: m.usuarios?.status || m.status,
+        empresaTipo: m.empresa_tipo || m.empresaTipo
       })));
     } catch (err) {
       if (import.meta.env.DEV) console.error('[Fretes] carregar falhou');
@@ -307,7 +319,7 @@ export const GerenciamentoViagens: React.FC = () => {
         api.get('/abastecimentos?motorista_id=' + motId),
         api.get('/vales?motorista_id=' + motId)
       ]);
-      const fretesData = (resF.data || []).filter((f: any) => f.status !== 'finalizado' || f.id === freteQuery);
+      const fretesData = (resF.data || []).filter((f: any) => f.status !== 'finalizado' || freteQueryIds.includes(f.id));
       const despesasData = (resD.data || []).filter((d: any) => d.status !== 'finalizado');
       const abastData = (resA.data || []).filter((a: any) => a.status !== 'finalizado');
       const valesData = (resV.data || []).filter((v: any) => v.status !== 'finalizado');
@@ -407,17 +419,6 @@ export const GerenciamentoViagens: React.FC = () => {
     }, 350);
   });
 
-  // Default do accordion: ao trocar de motorista / recarregar dados, fretes
-  // ativos/pendentes abrem; demais (ex.: cancelado) e o grupo legado iniciam fechados.
-  useEffect(() => {
-    if (filterMot === 'todos') return;
-    const abertosPorPadrao = fretes
-      .filter(f => f.status === 'ativo' || f.status === 'pendente')
-      .map(f => f.id as string);
-    setFretesExpandidos(new Set(abertosPorPadrao));
-    setSemFreteExpandido(false);
-  }, [filterMot, fretes]);
-
   const carregarDocumentosFrete = useCallback(async (freteId: string) => {
     setDocsCarregando(prev => new Set(prev).add(freteId));
     try {
@@ -430,17 +431,57 @@ export const GerenciamentoViagens: React.FC = () => {
     }
   }, []);
 
+  // Inicialização ONE-SHOT dos accordions para o contexto atual de navegação.
+  // Ao entrar em um novo motorista / URL (?frete=), os fretes padrão (ativos, pendentes
+  // e em foco na URL) abrem uma única vez. A partir desse momento, as decisões manuais
+  // do usuário (fechar/abrir) são estritamente autoritativas e NUNCA serão sobrescritas
+  // por refetch de dados, SSE, polling, carregamento de documentos/envelopes ou re-renderizações.
   useEffect(() => {
-    if (!freteQuery) return;
-    let cancelado = false;
-    queueMicrotask(() => {
-      if (cancelado) return;
-      setFretesExpandidos(prev => new Set(prev).add(freteQuery));
-      if (!(freteQuery in docsPorFrete)) void carregarDocumentosFrete(freteQuery);
-      document.getElementById(`frete-${freteQuery}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
-    return () => { cancelado = true; };
-  }, [freteQuery, fretes, docsPorFrete, carregarDocumentosFrete]);
+    if (filterMot === 'todos') {
+      accordionInitKeyRef.current = null;
+      return;
+    }
+    const navKey = `${filterMot}::${freteQueryIds.slice().sort().join(',')}`;
+    if (fretes.length > 0 && accordionInitKeyRef.current !== navKey) {
+      accordionInitKeyRef.current = navKey;
+      const abertosPorPadrao = fretes
+        .filter(f => f.status === 'ativo' || f.status === 'pendente' || freteQueryIds.includes(f.id))
+        .map(f => f.id as string);
+      freteQueryIds.forEach(id => {
+        if (!abertosPorPadrao.includes(id)) abertosPorPadrao.push(id);
+      });
+      setFretesExpandidos(new Set(abertosPorPadrao));
+      setSemFreteExpandido(false);
+
+      // Pré-carregamento determinístico de documentos e envelopes dos fretes em foco
+      freteQueryIds.forEach(id => {
+        if (!(id in docsPorFrete)) void carregarDocumentosFrete(id);
+        if (!(id in envelopesPorFrete)) void carregarEnvelopeFrete(id);
+      });
+    }
+  }, [filterMot, fretes, freteQueryIds, docsPorFrete, envelopesPorFrete, carregarDocumentosFrete, carregarEnvelopeFrete]);
+
+  // Rolagem visual ONE-SHOT para o primeiro frete em foco na URL.
+  // Após a primeira rolagem bem-sucedida, o scroll pertence inteiramente ao usuário.
+  // Nenhuma re-renderização, SSE, refetch ou carregamento subsequente forçará a tela de volta.
+  useEffect(() => {
+    const targetScrollId = freteQueryIds[0] || null;
+    if (!targetScrollId) {
+      freteScrolledRef.current = null;
+      return;
+    }
+
+    if (freteScrolledRef.current === targetScrollId) {
+      return;
+    }
+
+    const elem = document.getElementById(`frete-${targetScrollId}`);
+    if (elem) {
+      elem.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      freteScrolledRef.current = targetScrollId;
+    }
+  }, [freteQueryIds, fretes]);
+
 
   // Preview interno via signed URL curta. O backend continua sendo a autoridade do
   // path privado; abrir fora/salvar ficam dentro do modal.
@@ -468,8 +509,11 @@ export const GerenciamentoViagens: React.FC = () => {
       else next.add(freteId);
       return next;
     });
-    // Lazy-load dos documentos na primeira expansão.
-    if (!jaAberto && !(freteId in docsPorFrete)) carregarDocumentosFrete(freteId);
+    // Lazy-load dos documentos e do envelope na primeira expansão.
+    if (!jaAberto) {
+      if (!(freteId in docsPorFrete)) void carregarDocumentosFrete(freteId);
+      if (!(freteId in envelopesPorFrete)) void carregarEnvelopeFrete(freteId);
+    }
   };
 
   const rotuloTipoDoc = (t: string): string =>
@@ -1524,7 +1568,7 @@ export const GerenciamentoViagens: React.FC = () => {
       </button>
 
       {selectedMotorista && (
-        <div className="bg-blue-600 p-4 rounded-xl shadow-lg flex flex-wrap justify-between items-center gap-3 text-white">
+        <div id="selected-motorista-banner" className="bg-blue-600 p-4 rounded-xl shadow-lg flex flex-wrap justify-between items-center gap-3 text-white">
           <div className="flex items-center space-x-3">
             <div className="bg-white w-10 h-10 rounded-lg flex items-center justify-center text-blue-600 font-bold text-lg">
               {selectedMotorista.nome?.charAt(0) || '?'}
@@ -1532,8 +1576,17 @@ export const GerenciamentoViagens: React.FC = () => {
             <div>
               <h2 className="text-xl font-bold">{selectedMotorista.nome}</h2>
               <p className="text-blue-100 text-sm">
-                Placa: {selectedMotorista.placa}
-                {isAutonomo ? ' | Motorista Autônomo' : ` | Comissão: ${selectedMotorista.comissao}%`}
+                Placa: {selectedMotorista.placa && selectedMotorista.placa !== 'undefined' && selectedMotorista.placa !== 'null' ? selectedMotorista.placa : 'Não informada'}
+                {isAutonomo
+                  ? ' | Motorista Autônomo'
+                  : (() => {
+                      const com = selectedMotorista.comissao;
+                      if (com != null && com !== '' && com !== 'undefined' && com !== 'null' && !Number.isNaN(Number(com))) {
+                        return ` | Comissão: ${com}%`;
+                      }
+                      return ' | Comissão: Não informada';
+                    })()
+                }
               </p>
             </div>
           </div>
@@ -1607,7 +1660,7 @@ export const GerenciamentoViagens: React.FC = () => {
                   loadData()×loadMotoristaData() no mount com ?motorista=<id>, que pode
                   deixar finalizados (da carga global não filtrada) no estado. Display-only. */}
               {[...mFretes]
-                .filter((f: any) => (f.status !== 'cancelado' && f.status !== 'finalizado') || f.id === freteQuery)
+                .filter((f: any) => (f.status !== 'cancelado' && f.status !== 'finalizado') || freteQueryIds.includes(f.id))
                 .sort((a: any, b: any) => {
                   const prioA = a.status === 'ativo' || a.status === 'pendente' ? 0 : 1;
                   const prioB = b.status === 'ativo' || b.status === 'pendente' ? 0 : 1;
@@ -1624,7 +1677,7 @@ export const GerenciamentoViagens: React.FC = () => {
                   .filter((i: any) => i.status === 'aprovado')
                   .reduce((acc: number, i: any) => acc + (parseFloat(i.valor ?? i.valorTotal) || 0), 0);
                 const aberto = fretesExpandidos.has(f.id);
-                const consultaFocada = f.id === freteQuery && (f.status === 'finalizado' || f.status === 'cancelado');
+                const consultaFocada = freteQueryIds.includes(f.id) && (f.status === 'finalizado' || f.status === 'cancelado');
                 const editandoFrete = editingItem?.id === f.id;
                 const litrosFrete = abastFrete.filter((a: any) => a.status === 'aprovado').reduce((acc: number, a: any) => acc + (parseFloat(a.litros) || 0), 0);
                 const distFrete = (f.kmFinal || 0) - (f.kmInicial || 0);
@@ -1646,7 +1699,13 @@ export const GerenciamentoViagens: React.FC = () => {
                           </div>
                         </div>
                       ) : (
-                        <button type="button" onClick={() => toggleFreteExpandido(f.id)} className="flex-1 text-left">
+                        <button
+                          type="button"
+                          id={`btn-expandir-frete-${f.id}`}
+                          data-testid={`btn-expandir-frete-${f.id}`}
+                          onClick={() => toggleFreteExpandido(f.id)}
+                          className="flex-1 text-left"
+                        >
                           <div className="flex items-center gap-2">
                             {aberto ? <ChevronDown size={16} className="text-blue-600 flex-shrink-0" /> : <ChevronRight size={16} className="text-blue-600 flex-shrink-0" />}
                             <p className="font-bold text-gray-800">{f.origem} ➔ {f.destino}</p>
@@ -1697,37 +1756,63 @@ export const GerenciamentoViagens: React.FC = () => {
                         {itensFrete.length === 0
                           ? <p className="text-gray-400 text-sm text-center py-3">Nenhum lançamento financeiro vinculado a este frete.</p>
                           : itensFrete.map(renderLancamentoItem)}
-                        <div className="border border-slate-200 rounded-lg p-3 bg-slate-50/60">
-                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                            <div className="flex items-start gap-2">
-                              <ShieldCheck size={18} className="text-slate-600 mt-0.5" />
+                        <div className="border border-slate-200 rounded-lg p-3 bg-slate-50/70">
+                          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                            <div className="flex items-start gap-2.5">
+                              <ShieldCheck size={20} className={
+                                envelopesPorFrete[f.id]?.status === 'FORMAL_ENVELOPE_SEALED'
+                                  ? 'text-emerald-600 mt-0.5 shrink-0'
+                                  : envelopesPorFrete[f.id]?.status === 'LEGACY_NO_FORMAL_ENVELOPE'
+                                    ? 'text-amber-500 mt-0.5 shrink-0'
+                                    : 'text-slate-400 mt-0.5 shrink-0'
+                              } />
                               <div>
-                                <p className="text-sm font-bold text-slate-800">Envelope digital</p>
-                                <p className="text-xs text-slate-500">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <p className="text-sm font-bold text-slate-800">Produtos de Fechamento e Relatórios</p>
+                                  {envelopesPorFrete[f.id]?.status === 'FORMAL_ENVELOPE_SEALED' && (
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                      <CheckCircle2 size={10} /> Selo Formal E3.8 Ativo
+                                    </span>
+                                  )}
+                                  {envelopesPorFrete[f.id]?.status === 'LEGACY_NO_FORMAL_ENVELOPE' && (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                                      Legado (sem envelope formal)
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-xs text-slate-500 mt-0.5">
                                   {envelopesPorFrete[f.id]?.status === 'FORMAL_ENVELOPE_SEALED'
-                                    ? `Selado em ${gvFmt(envelopesPorFrete[f.id]?.envelope?.sealed_at, 'dd/MM/yyyy HH:mm')}${envelopesPorFrete[f.id]?.envelope?.envelope_hash ? ` · SHA: ${envelopesPorFrete[f.id]?.envelope?.envelope_hash.slice(0, 8)}...` : ''}`
+                                    ? `Selado em ${gvFmt(envelopesPorFrete[f.id]?.envelope?.sealed_at, 'dd/MM/yyyy HH:mm')}${envelopesPorFrete[f.id]?.envelope?.envelope_hash ? ` · SHA: ${envelopesPorFrete[f.id]?.envelope?.envelope_hash.slice(0, 10)}...` : ''}`
                                     : envelopesPorFrete[f.id]?.status === 'LEGACY_NO_FORMAL_ENVELOPE'
-                                      ? 'Frete legado sem snapshot formal'
-                                      : 'Snapshot formal do fechamento, quando existente'}
+                                      ? 'Viagem finalizada anteriormente à vigência do envelope formal'
+                                      : 'Envelope formal é gerado no momento do encerramento da viagem'}
                                 </p>
                               </div>
                             </div>
-                            <div className="flex flex-wrap gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
                               <button
                                 type="button"
-                                onClick={() => carregarEnvelopeFrete(f.id)}
+                                id={`btn-envelope-digital-${f.id}`}
+                                data-testid="btn-envelope-digital"
+                                onClick={() => baixarPdfEnvelope(f.id)}
                                 disabled={envelopesCarregando.has(f.id)}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-slate-300 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-60"
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-emerald-300 bg-emerald-50 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 disabled:opacity-60 transition-colors shadow-xs"
+                                title="Baixar Envelope Digital Formal (Selo de Integridade E3.8)"
                               >
-                                <FileText size={14} /> Verificar
+                                <ShieldCheck size={14} className="text-emerald-700" />
+                                {envelopesCarregando.has(f.id) ? 'Carregando...' : 'Envelope Digital'}
                               </button>
                               <button
                                 type="button"
-                                onClick={() => baixarPdfEnvelope(f.id)}
-                                disabled={envelopesCarregando.has(f.id)}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-blue-600 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+                                id={`btn-relatorio-fechamento-${f.id}`}
+                                data-testid="btn-relatorio-fechamento"
+                                onClick={() => baixarPdfFechamento(f.id)}
+                                disabled={relatorioFechamentoCarregando.has(f.id)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-blue-300 bg-blue-50 text-xs font-semibold text-blue-800 hover:bg-blue-100 disabled:opacity-60 transition-colors shadow-xs"
+                                title="Baixar Relatório Operacional de Fechamento de Frete"
                               >
-                                <Download size={14} /> PDF
+                                <Download size={14} className="text-blue-700" />
+                                {relatorioFechamentoCarregando.has(f.id) ? 'Gerando...' : 'Relatório de Fechamento'}
                               </button>
                             </div>
                           </div>
@@ -1800,7 +1885,7 @@ export const GerenciamentoViagens: React.FC = () => {
                   <span className="font-bold text-gray-800 text-right whitespace-nowrap tabular-nums min-w-[96px]">{formatCurrency(opTotalFretes)}</span>
                 </div>
                 <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-sm border-b border-gray-50 pb-1">
-                  <span className="text-gray-600 min-w-0">Porcentagem Motorista ({selectedMotorista?.comissao || 0}%):</span>
+                  <span className="text-gray-600 min-w-0">Porcentagem Motorista ({selectedMotorista?.comissao != null && !Number.isNaN(Number(selectedMotorista.comissao)) ? `${selectedMotorista.comissao}%` : 'Não informada'}):</span>
                   <span className="font-bold text-blue-600 text-right whitespace-nowrap tabular-nums min-w-[96px]">+{formatCurrency(opComissao)}</span>
                 </div>
                 <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-sm border-b border-gray-50 pb-1">
@@ -2213,7 +2298,7 @@ export const GerenciamentoViagens: React.FC = () => {
                     </div>
                     {!isAutonomo && (
                       <div className="flex justify-between text-sm">
-                        <span className="text-gray-600">Comissão ({selectedMotorista?.comissao || 0}%):</span>
+                        <span className="text-gray-600">Comissão ({selectedMotorista?.comissao != null && !Number.isNaN(Number(selectedMotorista.comissao)) ? `${selectedMotorista.comissao}%` : 'Não informada'}):</span>
                         <span className="font-bold text-blue-600">{formatCurrency(opComissao)}</span>
                       </div>
                     )}
@@ -2372,6 +2457,99 @@ export const GerenciamentoViagens: React.FC = () => {
               <button onClick={() => setDeleteTarget(null)} disabled={isDeleting} className="px-5 py-2.5 font-bold text-gray-600 hover:bg-gray-200 rounded-xl transition-all">Voltar</button>
               <button onClick={handleDelete} disabled={isDeleting} className="px-6 py-2.5 bg-red-600 text-white font-bold rounded-xl shadow hover:bg-red-700 transition-all active:scale-95 flex items-center disabled:opacity-50">
                 <Trash2 size={18} className="mr-2" />{isDeleting ? 'Cancelando...' : 'Sim, Cancelar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {modalAvisoEnvelope && (
+        <div id="modal-aviso-envelope" role="dialog" aria-modal="true" aria-labelledby="titulo-aviso-envelope" className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="p-6 flex flex-col items-center text-center space-y-3">
+              <div className={`w-14 h-14 rounded-full flex items-center justify-center ${
+                modalAvisoEnvelope.status === 'LEGACY_NO_FORMAL_ENVELOPE'
+                  ? 'bg-amber-100 text-amber-600'
+                  : 'bg-blue-100 text-blue-600'
+              }`}>
+                {modalAvisoEnvelope.status === 'LEGACY_NO_FORMAL_ENVELOPE' ? (
+                  <AlertTriangle size={28} />
+                ) : (
+                  <ShieldCheck size={28} />
+                )}
+              </div>
+              <h3 id="titulo-aviso-envelope" className="text-lg font-bold text-gray-800">
+                {modalAvisoEnvelope.status === 'LEGACY_NO_FORMAL_ENVELOPE'
+                  ? 'Envelope Digital Indisponível (Frete Legado)'
+                  : 'Envelope Digital Formal Pendente'}
+              </h3>
+              {modalAvisoEnvelope.origem && modalAvisoEnvelope.destino && (
+                <p className="text-xs font-semibold text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
+                  {modalAvisoEnvelope.origem} → {modalAvisoEnvelope.destino}
+                </p>
+              )}
+              <p className="text-sm text-gray-600 leading-relaxed">
+                {modalAvisoEnvelope.status === 'LEGACY_NO_FORMAL_ENVELOPE'
+                  ? 'Este frete foi encerrado anteriormente à vigência da chancela digital E3.8. Em conformidade com a política de governança, envelopes formais não são fabricados retroativamente.'
+                  : 'O Envelope Digital Formal e seu selo criptográfico são gerados de forma imutável no encerramento da viagem. Para viagens em andamento, você pode gerar o Relatório de Fechamento Operacional.'}
+              </p>
+              <div className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-left">
+                <p className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                  <CheckCircle2 size={14} className="text-emerald-600" />
+                  Alternativa autorizada:
+                </p>
+                <p className="text-xs text-slate-600 mt-1">
+                  O <strong>Relatório de Fechamento de Frete</strong> consolida todos os dados operacionais, lançamentos e documentos disponíveis para este frete.
+                </p>
+              </div>
+            </div>
+            <div className="p-4 bg-gray-50 border-t flex flex-col sm:flex-row items-center justify-end gap-2">
+              <button
+                type="button"
+                id="btn-fechar-aviso-envelope"
+                onClick={() => setModalAvisoEnvelope(null)}
+                className="w-full sm:w-auto px-4 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-200 rounded-xl transition-all"
+              >
+                Fechar
+              </button>
+              <button
+                type="button"
+                id="btn-alternativa-fechamento"
+                onClick={() => {
+                  const id = modalAvisoEnvelope.freteId;
+                  setModalAvisoEnvelope(null);
+                  baixarPdfFechamento(id);
+                }}
+                className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white text-sm font-bold rounded-xl shadow-xs hover:bg-blue-700 transition-all flex items-center justify-center gap-1.5"
+              >
+                <Download size={15} />
+                Baixar Relatório de Fechamento
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {modalErroReporting && (
+        <div id="modal-erro-reporting" role="dialog" aria-modal="true" aria-labelledby="titulo-erro-reporting" className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="p-6 flex flex-col items-center text-center space-y-3">
+              <div className="w-14 h-14 rounded-full flex items-center justify-center bg-rose-100 text-rose-600">
+                <AlertTriangle size={28} />
+              </div>
+              <h3 id="titulo-erro-reporting" className="text-lg font-bold text-gray-800">
+                {modalErroReporting.titulo}
+              </h3>
+              <p className="text-sm text-gray-600 leading-relaxed">
+                {modalErroReporting.mensagem}
+              </p>
+            </div>
+            <div className="p-4 bg-gray-50 border-t flex items-center justify-end">
+              <button
+                type="button"
+                id="btn-fechar-erro-reporting"
+                onClick={() => setModalErroReporting(null)}
+                className="w-full sm:w-auto px-5 py-2.5 bg-gray-800 hover:bg-gray-900 text-white text-sm font-bold rounded-xl shadow-xs transition-all"
+              >
+                Entendi
               </button>
             </div>
           </div>

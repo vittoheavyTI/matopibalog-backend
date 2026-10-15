@@ -22,6 +22,15 @@ const {
   canAccessUnit,
   deriveUnitForWrite,
 } = require('../services/operationalScopeService');
+const { calcularRentabilidadeFrete } = require('../utils/rentabilidadeFrete');
+const { calcularAcertoMotoristas } = require('../utils/acertoMotorista');
+const {
+  STATUS_LANCAMENTO_EFETIVADO,
+  STATUS_LANCAMENTO_NAO_COMPOE,
+  lancamentoEfetivado,
+  lancamentoNaoCompoe,
+} = require('../utils/agregacaoFinanceiraFretes');
+const { DRIVER_FINANCIAL_VISIBILITY } = require('../services/permissions/permissionRegistry');
 
 const BUCKET_ODOMETRO = 'fretes-odometro';
 const SIGNED_URL_TTL_SECONDS = 300;
@@ -607,27 +616,354 @@ exports.getEnvelopeDigital = async (req, res) => {
 
     const { data, error } = await supabase
       .from('frete_envelopes_digitais')
-      .select('id, empresa_id, frete_id, envelope_type, schema_version, status, source, request_id, actor_user_id, actor_auth_uid, actor_role, reason, correlation_id, sealed_at, frete_snapshot, financial_snapshot, audit_summary, metadata, payload')
+      .select('id, empresa_id, frete_id, envelope_type, schema_version, status, source, request_id, actor_user_id, actor_auth_uid, actor_role, reason, correlation_id, sealed_at, frete_snapshot, financial_snapshot, audit_summary, metadata, envelope_hash, payload')
       .eq('frete_id', req.params.id)
       .eq('envelope_type', 'formal_freight_closure')
       .maybeSingle();
     if (error) throw error;
+
+    let motoristaNome = null;
+    let motoristaPlaca = null;
+    if (acesso.frete.motorista_id) {
+      const { data: mot } = await supabase
+        .from('motoristas')
+        .select('placa_veiculo, usuarios(nome)')
+        .eq('id', acesso.frete.motorista_id)
+        .maybeSingle()
+        .catch(() => ({ data: null }));
+      motoristaNome = mot?.usuarios?.nome || null;
+      motoristaPlaca = mot?.placa_veiculo || null;
+    }
 
     if (!data) {
       return res.status(200).json({
         frete_id: req.params.id,
         status: acesso.frete.status === 'finalizado' ? 'LEGACY_NO_FORMAL_ENVELOPE' : 'NO_FORMAL_ENVELOPE_YET',
         envelope: null,
+        motorista_nome: motoristaNome,
+        placa: motoristaPlaca,
       });
     }
 
     const envelopeFinal = await redigirEnvelopeSeAplicavel(req, data);
-    return res.status(200).json({ status: 'FORMAL_ENVELOPE_SEALED', envelope: envelopeFinal });
+    return res.status(200).json({
+      status: 'FORMAL_ENVELOPE_SEALED',
+      envelope: envelopeFinal,
+      motorista_nome: motoristaNome,
+      placa: motoristaPlaca,
+    });
   } catch (error) {
     console.error('Erro ao buscar envelope digital do frete:', error);
     return res.status(500).json({ message: 'Erro ao buscar envelope digital do frete.' });
   }
 };
+
+exports.getRelatorioFechamento = async (req, res) => {
+  try {
+    const freteId = req.params.id;
+    const acesso = await carregarFreteAutorizado(req, freteId);
+    if (!acesso.frete) return res.status(acesso.status).json(acesso.body);
+
+    const isSuperAdmin = req.user?.is_super_admin === true;
+    const isDriver = req.user?.tipo === 'motorista' || req.user?.role === 'motorista';
+    let eff = null;
+    let hasFinanceView = false;
+    let hasDocumentsView = false;
+    let hasLaunchView = false;
+    let driverVisibility = DRIVER_FINANCIAL_VISIBILITY.COMMISSION_ONLY;
+
+    if (isSuperAdmin) {
+      hasFinanceView = true;
+      hasDocumentsView = true;
+      hasLaunchView = true;
+      driverVisibility = DRIVER_FINANCIAL_VISIBILITY.FULL_FREIGHT_FINANCIAL;
+    } else {
+      try {
+        eff = await ensureEffective(req);
+        hasFinanceView = Boolean(eff?.permissions && eff.permissions['finance.operational.view'] === true);
+        hasDocumentsView = Boolean(eff?.permissions && eff.permissions['documents.view'] === true);
+        hasLaunchView = Boolean(eff?.permissions && eff.permissions['launch.view'] === true);
+        if (isDriver) {
+          driverVisibility = eff?.driverFinancialVisibility || DRIVER_FINANCIAL_VISIBILITY.COMMISSION_ONLY;
+        }
+      } catch (err) {
+        // FAIL CLOSED: na dúvida ou falha de autoridade, mínima projeção segura
+        hasFinanceView = false;
+        hasDocumentsView = false;
+        hasLaunchView = false;
+        driverVisibility = DRIVER_FINANCIAL_VISIBILITY.COMMISSION_ONLY;
+      }
+    }
+
+    const { data: freteData, error: freteErr } = await supabase
+      .from('fretes')
+      .select('id, empresa_id, motorista_id, unidade_operacional_id, status, data, origem, destino, km_inicial, km_final, modalidade_calculo, toneladas, valor_tonelada_km, valor_frete, quem_recebeu, foto_odometro_inicial_path, foto_odometro_final_path, created_at, updated_at, motoristas(placa_veiculo, percentual_comissao, usuarios(nome), empresas(tipo))')
+      .eq('id', freteId)
+      .single();
+    if (freteErr || !freteData) return res.status(404).json({ message: 'Frete não encontrado.' });
+
+    const { data: despesasRaw, error: despErr } = await supabase
+      .from('despesas')
+      .select('id, descricao, tipo, valor, status, quem_pagou, created_at')
+      .eq('frete_id', freteId);
+    if (despErr) throw despErr;
+
+    const { data: abastecimentosRaw, error: abastErr } = await supabase
+      .from('abastecimentos')
+      .select('id, posto, litros, arla_litros, arla_valor, valor_total, status, quem_pagou, created_at')
+      .eq('frete_id', freteId);
+    if (abastErr) throw abastErr;
+
+    const { data: valesRaw, error: valesErr } = await supabase
+      .from('vales')
+      .select('id, descricao, valor, status, quem_pagou, created_at')
+      .eq('frete_id', freteId);
+    if (valesErr) throw valesErr;
+
+    const { data: docsRaw, error: docsErr } = await supabase
+      .from('frete_documentos')
+      .select('id, tipo, status, created_at')
+      .eq('frete_id', freteId);
+    if (docsErr) throw docsErr;
+
+    const { data: epodRaw } = await supabase
+      .from('frete_epod')
+      .select('id, status, entregue_em, recebedor_nome, documento_recebedor, created_at')
+      .eq('frete_id', freteId)
+      .maybeSingle()
+      .catch(() => ({ data: null }));
+
+    const { data: envelopeRaw } = await supabase
+      .from('frete_envelopes_digitais')
+      .select('id, envelope_type, schema_version, status, sealed_at, envelope_hash, reason')
+      .eq('frete_id', freteId)
+      .eq('envelope_type', 'formal_freight_closure')
+      .maybeSingle()
+      .catch(() => ({ data: null }));
+
+    const motInfo = freteData.motoristas;
+    const motEmpresaTipo = Array.isArray(motInfo?.empresas) ? motInfo.empresas[0]?.tipo : motInfo?.empresas?.tipo;
+    const isAutonomo = motEmpresaTipo === 'autonomo';
+    const percentualComissao = Number(motInfo?.percentual_comissao || 0);
+
+    // ── CANONICAL PROFITABILITY & DIRECT COSTS ───────────────────────────
+    // Reutiliza calcularRentabilidadeFrete (rentabilidadeFrete.js).
+    // Custos diretos = combustivel + pedagio + outras + comissao (somente efetivados).
+    const rentabilidade = calcularRentabilidadeFrete(
+      freteData,
+      { abastecimentos: abastecimentosRaw || [], despesas: despesasRaw || [] },
+      motEmpresaTipo,
+      percentualComissao,
+    );
+
+    // ── CANONICAL DRIVER SETTLEMENT (ACERTO) ─────────────────────────────
+    // Reutiliza calcularAcertoMotoristas (acertoMotorista.js).
+    const vincularLancamento = (l) => ({ frete_id: freteId, motorista_id: freteData.motorista_id, ...l });
+    const acertoRes = calcularAcertoMotoristas({
+      fretes: [freteData],
+      despesas: (despesasRaw || []).map(vincularLancamento),
+      abastecimentos: (abastecimentosRaw || []).map(vincularLancamento),
+      vales: (valesRaw || []).map(vincularLancamento),
+    });
+    const motAcerto = acertoRes?.motoristas?.find((m) => m.motorista_id === freteData.motorista_id) || acertoRes?.motoristas?.[0];
+    const saldoMotorista = motAcerto ? motAcerto.resumo.saldo_acerto : (acertoRes?.resumo?.saldo_acerto ?? 0);
+    const situacaoMotorista = motAcerto ? motAcerto.resumo.situacao : (acertoRes?.resumo?.situacao ?? 'Sem saldo');
+    const creditosMotorista = motAcerto ? motAcerto.resumo.total_creditos : (acertoRes?.resumo?.total_creditos ?? 0);
+    const debitosMotorista = motAcerto ? motAcerto.resumo.total_debitos : (acertoRes?.resumo?.total_debitos ?? 0);
+
+    // Vales efetivados (informativo de rentabilidade / débito de acerto)
+    const valesEfetivados = (valesRaw || []).filter(lancamentoEfetivado);
+    const totalValesEfetivados = Math.round(valesEfetivados.reduce((s, v) => s + (Number(v.valor) || 0), 0) * 100) / 100;
+
+    // Resumo de pendências informativas (não compõem totais realizados)
+    const despesasPendentes = (despesasRaw || []).filter((d) => d.status === 'pendente');
+    const abastecimentosPendentes = (abastecimentosRaw || []).filter((a) => a.status === 'pendente');
+    const valesPendentes = (valesRaw || []).filter((v) => v.status === 'pendente');
+    const totalPendente = Math.round((
+      despesasPendentes.reduce((s, d) => s + (Number(d.valor) || 0), 0) +
+      abastecimentosPendentes.reduce((s, a) => s + (Number(a.valor_total) || 0), 0) +
+      valesPendentes.reduce((s, v) => s + (Number(v.valor) || 0), 0)
+    ) * 100) / 100;
+
+    let envelopeStatus = 'NO_FORMAL_ENVELOPE_YET';
+    if (envelopeRaw) {
+      envelopeStatus = 'FORMAL_ENVELOPE_SEALED';
+    } else if (freteData.status === 'finalizado') {
+      envelopeStatus = 'LEGACY_NO_FORMAL_ENVELOPE';
+    }
+
+    let resumoFinanceiro = {
+      receita_realizada: rentabilidade.receita_realizada,
+      frete_bruto: Number(freteData.valor_frete) || 0,
+      custos_diretos: rentabilidade.custos,
+      total_despesas_efetivadas: rentabilidade.custos.pedagio + rentabilidade.custos.outras_despesas,
+      total_abastecimentos_efetivados: rentabilidade.custos.combustivel,
+      total_vales_efetivados: totalValesEfetivados,
+      resultado_operacional: rentabilidade.resultado_operacional,
+      margem_percentual: rentabilidade.margem_percentual,
+      comissao_percentual: isAutonomo ? null : percentualComissao,
+      comissao_valor: rentabilidade.custos.comissao,
+      saldo_motorista: saldoMotorista,
+      saldo_motorista_situacao: situacaoMotorista,
+      motorista_creditos: creditosMotorista,
+      motorista_debitos: debitosMotorista,
+      total_pendente: totalPendente,
+      tem_pendentes: despesasPendentes.length > 0 || abastecimentosPendentes.length > 0 || valesPendentes.length > 0,
+      is_autonomo: isAutonomo,
+      alertas: rentabilidade.alertas,
+      dados_completos: rentabilidade.dados_completos,
+    };
+
+    let freteLimpo = {
+      id: freteData.id,
+      empresa_id: freteData.empresa_id,
+      motorista_id: freteData.motorista_id,
+      status: freteData.status,
+      data: freteData.data,
+      origem: freteData.origem,
+      destino: freteData.destino,
+      km_inicial: freteData.km_inicial,
+      km_final: freteData.km_final,
+      distancia_km: Number.isFinite(Number(freteData.km_final)) && Number.isFinite(Number(freteData.km_inicial))
+        ? Number(freteData.km_final) - Number(freteData.km_inicial)
+        : null,
+      modalidade_calculo: freteData.modalidade_calculo,
+      toneladas: freteData.toneladas,
+      valor_tonelada_km: freteData.valor_tonelada_km,
+      valor_frete: freteData.valor_frete,
+      quem_recebeu: freteData.quem_recebeu,
+      foto_odometro_inicial_presente: Boolean(freteData.foto_odometro_inicial_path),
+      foto_odometro_final_presente: Boolean(freteData.foto_odometro_final_path),
+    };
+
+    // ── FIELD-LEVEL FINANCIAL REDACTION POLICY ─────────────────────────
+    if (isDriver) {
+      if (driverVisibility === DRIVER_FINANCIAL_VISIBILITY.COMMISSION_ONLY) {
+        freteLimpo.valor_frete = null;
+        freteLimpo.valor_tonelada_km = null;
+        freteLimpo.toneladas = null;
+        resumoFinanceiro.receita_realizada = null;
+        resumoFinanceiro.frete_bruto = null;
+        resumoFinanceiro.resultado_operacional = null;
+        resumoFinanceiro.margem_percentual = null;
+        resumoFinanceiro.custos_diretos = null;
+        resumoFinanceiro.total_despesas_efetivadas = null;
+        resumoFinanceiro.total_abastecimentos_efetivados = null;
+        resumoFinanceiro.total_vales_efetivados = null;
+      } else if (driverVisibility === DRIVER_FINANCIAL_VISIBILITY.COMMISSION_PLUS_BASE) {
+        freteLimpo.valor_tonelada_km = null;
+        freteLimpo.toneladas = null;
+        // Não expõe resultado operacional nem decomposição de custos internos da empresa
+        resumoFinanceiro.resultado_operacional = null;
+        resumoFinanceiro.margem_percentual = null;
+        resumoFinanceiro.custos_diretos = null;
+        resumoFinanceiro.total_despesas_efetivadas = null;
+        resumoFinanceiro.total_abastecimentos_efetivados = null;
+        resumoFinanceiro.total_vales_efetivados = null;
+      }
+      // FULL_FREIGHT_FINANCIAL mantém todos os campos autorizados
+    } else if (!hasFinanceView) {
+      freteLimpo.valor_frete = null;
+      freteLimpo.valor_tonelada_km = null;
+      freteLimpo.toneladas = null;
+      resumoFinanceiro = {
+        restricted: true,
+        message: 'Informações financeiras restritas para o seu perfil.',
+      };
+    }
+
+    // Regra de visibilidade de valores de lançamentos individuais
+    const permitirVerValorLancamento = (linha) => {
+      if (isSuperAdmin) return true;
+      if (!isDriver) return hasFinanceView;
+      if (driverVisibility === DRIVER_FINANCIAL_VISIBILITY.FULL_FREIGHT_FINANCIAL) return true;
+      // Em commission_only e commission_plus_base, o motorista só enxerga valores que ele mesmo pagou (crédito)
+      return linha.quem_pagou === 'motorista';
+    };
+
+    const permitirVerValorVale = (_vale) => {
+      if (isSuperAdmin) return true;
+      if (!isDriver) return hasFinanceView;
+      return true; // Vale do próprio motorista (débito de acerto)
+    };
+
+    return res.status(200).json({
+      frete: freteLimpo,
+      motorista: {
+        id: freteData.motorista_id,
+        nome: motInfo?.usuarios?.nome || 'Não informado',
+        placa: motInfo?.placa_veiculo || '-',
+        tipo_empresa: motEmpresaTipo || 'transportadora',
+      },
+      lancamentos: (isSuperAdmin || hasLaunchView) ? {
+        despesas: (despesasRaw || []).map((d) => ({
+          id: d.id,
+          descricao: d.descricao,
+          tipo: d.tipo,
+          valor: permitirVerValorLancamento(d) ? d.valor : null,
+          status: d.status,
+          quem_pagou: d.quem_pagou,
+          efetivado: lancamentoEfetivado(d),
+        })),
+        abastecimentos: (abastecimentosRaw || []).map((a) => ({
+          id: a.id,
+          posto: a.posto,
+          litros: a.litros,
+          arla_litros: a.arla_litros,
+          arla_valor: permitirVerValorLancamento(a) ? a.arla_valor : null,
+          valor_total: permitirVerValorLancamento(a) ? a.valor_total : null,
+          status: a.status,
+          quem_pagou: a.quem_pagou,
+          efetivado: lancamentoEfetivado(a),
+        })),
+        vales: (valesRaw || []).map((v) => ({
+          id: v.id,
+          descricao: v.descricao,
+          valor: permitirVerValorVale(v) ? v.valor : null,
+          status: v.status,
+          quem_pagou: v.quem_pagou,
+          efetivado: lancamentoEfetivado(v),
+        })),
+      } : {
+        restricted: true,
+        despesas: [],
+        abastecimentos: [],
+        vales: [],
+      },
+      documentos_fiscais: (isSuperAdmin || hasDocumentsView) ? {
+        total: (docsRaw || []).length,
+        tipos: (docsRaw || []).map((d) => ({ tipo: d.tipo, status: d.status })),
+      } : {
+        total: null,
+        tipos: [],
+        restricted: true,
+      },
+      epod: epodRaw ? {
+        id: epodRaw.id,
+        status: epodRaw.status,
+        entregue_em: epodRaw.entregue_em,
+        recebedor_nome: epodRaw.recebedor_nome,
+      } : null,
+      envelope: {
+        status: envelopeStatus,
+        detalhes: envelopeRaw ? {
+          id: envelopeRaw.id,
+          envelope_type: envelopeRaw.envelope_type,
+          schema_version: envelopeRaw.schema_version,
+          sealed_at: envelopeRaw.sealed_at,
+          envelope_hash: envelopeRaw.envelope_hash,
+          reason: envelopeRaw.reason,
+        } : null,
+      },
+      resumo_financeiro: resumoFinanceiro,
+      gerado_em: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error('Erro ao gerar relatório de fechamento do frete:', error);
+    return res.status(500).json({ message: 'Erro ao gerar relatório de fechamento do frete.' });
+  }
+};
+
 
 function redigirEventosAuditoria(eventos, eff, isSuperAdmin) {
   if (!Array.isArray(eventos) || isSuperAdmin) return eventos;

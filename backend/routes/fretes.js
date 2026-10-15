@@ -55,6 +55,7 @@ router.post('/localizacao/credencial', trackingCredentialController.emitir);
 router.post('/:id/correcao-financeira', requirePermission('finance.operational.manage'), validate(correcaoFinanceiraFreteSchema), fretesController.corrigirFinanceiro);
 router.get('/:id', requirePermission('freight.view'), fretesController.getById);
 router.get('/:id/envelope-digital', requirePermission('freight.view'), fretesController.getEnvelopeDigital);
+router.get('/:id/relatorio-fechamento', requirePermission('freight.view'), fretesController.getRelatorioFechamento);
 router.get('/:id/auditoria-unificada', requirePermission('freight.view'), fretesController.getAuditoriaUnificadaFrete);
 router.post('/:id/odometro/inicial', upload.single('foto'), fretesController.uploadOdometroInicial);
 router.post('/:id/odometro/final', upload.single('foto'), fretesController.uploadOdometroFinal);
