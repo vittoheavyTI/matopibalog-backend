@@ -1,7 +1,7 @@
 # Matopiba Log — CONTEXT BRIDGE V9
 
 > **Handoff compacto.** Leia este arquivo primeiro ao retomar em outro chat/agente. Os detalhes estão nos documentos linkados no fim.
-> Atualizado: **2026-10-11** (E3.8 Auditoria Unificada + Envelope Digital fechada tecnicamente em produção: PR #505 MERGED no commit f1d92f1, deploy Railway SUCCESS 4a93ab5f, migrations 085, 087 e 086 aplicadas e registradas; enforcement prospectivo ativo; PR #501 superado em draft e PR #490 permanece hold).
+> Atualizado: **2026-10-15** (REPORTING_PRODUCTS_V1 fechada tecnicamente e ativa em produção: PR #507 MERGED no commit 1a45765dbe4ecb475b77c7d616f24a73297f5b08, deploy automático Railway SUCCESS 9f53f49c-2177-4af8-9137-4fcb6c005e43, Main CI 4/4 SUCCESS, validação visual do owner PASS; E3.8 preservada; PR #501 superado em draft e PR #490 permanece hold).
 
 ---
 
@@ -17,10 +17,10 @@
 
 | | |
 |---|---|
-| Current main baseline | **`f1d92f17a180401e5ebc814a23974294c5fc4f60`**. Inclui Wave de Auth (R1A, R1B-A, R1B-B, R1B-C strict auth: `authMode=strict`, `AUTH_REQUIRE_SESSION=true`, `AUTH_ALLOW_LEGACY_TOKENS=false`, `webIdleTtlSeconds=1800`) e E3.8 Auditoria Unificada + Envelope Digital (PR #505 MERGED). |
-| Deploy produção | Railway `matopibalog-backend` deploy `4a93ab5f-e3cf-4eca-9ed5-650b26ca3915` **SUCCESS** (commit `f1d92f17a180401e5ebc814a23974294c5fc4f60`, strict mode ativo, backend ONLINE, 1 réplica running). |
+| Current main baseline | **`1a45765dbe4ecb475b77c7d616f24a73297f5b08`**. Inclui Wave de Auth (strict auth), E3.8 Auditoria Unificada + Envelope Digital (PR #505 MERGED) e REPORTING_PRODUCTS_V1 (PR #507 MERGED). |
+| Deploy produção | Railway `matopibalog-backend` deploy `9f53f49c-2177-4af8-9137-4fcb6c005e43` **SUCCESS** (commit `1a45765dbe4ecb475b77c7d616f24a73297f5b08`, deploy automático normal pós-merge, branch `main`, strict mode ativo, backend ONLINE, 1 réplica running, warnings: 0, criticals: 0, recent failures: 0). |
 | Health | **HTTP 200** `{"status":"UP"}` em `https://api.matopibalog.com.br/health` |
-| Banco | Supabase `rjahjogidyndphdxevom` · migrations `084`, `085` (`20261009125633 085_unified_audit_digital_envelope`), `087` (`20261010172936 087_auth_sessions_per_client_idle`) e `086` (`20261011204500 086_e38_formal_envelope_enforcement`) todas APLICADAS e REGISTRADAS · Ordem intencional de rollout: 085 -> 087 -> backend deploy -> 086 · Enforcement prospectivo ativo (`NO_FINALIZED_WITHOUT_FORMAL_ENVELOPE=true`). 51 fretes históricos finalizados preservados sem envelope formal (sem backfill). |
+| Banco | Supabase `rjahjogidyndphdxevom` · migrations `084`, `085` (`20261009125633 085_unified_audit_digital_envelope`), `087` (`20261010172936 087_auth_sessions_per_client_idle`) e `086` (`20261011204500 086_e38_formal_envelope_enforcement`) todas APLICADAS e REGISTRADAS · Ordem intencional de rollout: 085 -> 087 -> backend deploy -> 086 · Enforcement prospectivo ativo (`NO_FINALIZED_WITHOUT_FORMAL_ENVELOPE=true`). 51 fretes históricos finalizados preservados sem envelope formal (sem backfill). REPORTING_PRODUCTS_V1 não introduziu nova migração (`SCHEMA_CHANGE=false`, `MIGRATION_CREATED=false`). |
 | Asaas | **DESARMADO**: sem `ASAAS_API_KEY`, provider=fake, production=false, allowlist vazia, outbox=false, `billing_outbox`=0. **Não reativar sem autorização.** |
 | Crons | 3 (faturas mensal, expirarTrials dry-run, inadimplência dry-run) — todos SUCCESS/inertes |
 
@@ -36,9 +36,9 @@ Matopiba vira **frota/operação-centric** (D-001): o eixo é o **veículo/compo
 
 ## Macrofrente atual
 
-**`CURRENT_MACROFRONT = REPORTING_PRODUCTS_V1 (IMPLEMENTED_IN_DRAFT_PR)`**.
+**`CURRENT_MACROFRONT = REPORTING_PRODUCTS_V1 (ATIVO_PROD / CLOSED)`**.
 
-**REPORTING_PRODUCTS_V1 = IMPLEMENTED_IN_DRAFT_PR.** Entregues os dois primeiros produtos de relatórios formais sobre o Envelope Digital E3.8: (1) **Formal Digital Envelope PDF** (leitura canônica de `public.frete_envelopes_digitais`, hash SHA-256 e recusa honesta `LEGACY_NO_FORMAL_ENVELOPE` para fretes históricos sem forjar documento); (2) **Formal Freight Closure PDF** (relatório operacional consolidado via `GET /fretes/:id/relatorio-fechamento` com status de envelope, apuração de comissões autônomo vs próprio e redaction de campos financeiros sob `finance.operational.view`). Zero migration, schema inalterado, zero escrita em produção. Ver [REPORTING_PRODUCTS_V1](./REPORTING_PRODUCTS_V1.md).
+**REPORTING_PRODUCTS_V1 = ATIVO_PROD / CLOSED.** Fechada tecnicamente (`REPORTING_PRODUCTS_V1_TECHNICALLY_CLOSED=true`) e com validação visual do owner aprovada (**PASS**). Mergeada em `main` via PR #507 (`MERGE_SHA=1a45765dbe4ecb475b77c7d616f24a73297f5b08`, `AUTHORIZED_PR_HEAD=81ed7f47b660ba1c17872063032060d60d194b18`, `MERGED_AT=2026-10-15T04:48:30Z`). Main CI 4/4 SUCCESS no merge SHA. Deploy automático normal no Railway `9f53f49c-2177-4af8-9137-4fcb6c005e43` SUCCESS (backend ONLINE, 1/1 réplicas, warnings: 0, criticals: 0, authMode strict). GitHub Pages publicado com sucesso. Entregues os dois primeiros produtos de relatórios formais sobre o Envelope Digital E3.8: (1) **Formal Digital Envelope PDF** (leitura canônica de `public.frete_envelopes_digitais`, hash SHA-256 e recusa honesta `LEGACY_NO_FORMAL_ENVELOPE` para fretes históricos sem forjar documento); (2) **Formal Freight Closure PDF** (relatório operacional consolidado via `GET /fretes/:id/relatorio-fechamento` com status de envelope, apuração de comissões autônomo vs próprio e autorização desacoplada campo a campo sob `finance.operational.view`, `launch.view` e `documents.view`). Zero migration, schema inalterado (`SCHEMA_CHANGE=false`, `MIGRATION_CREATED=false`), zero escrita em produção. RBV9-INV-091 permanece PARTIAL para futuros produtos de relatório. Ver [REPORTING_PRODUCTS_V1](./REPORTING_PRODUCTS_V1.md).
 
 **Product Stabilization Wave V1 = RECONCILED.** S1 PR #491 (`MERGE_SHA=f8cbd109`), S4 PR #492 (`MERGE_SHA=be9be5e`), DB-SEC-1 PR #494 (`MERGE_SHA=e31bfc3`), S2 PR #496 (`MERGE_SHA=d76838a`) e S3 PR #497 (`MERGE_SHA=1aeb5e6`) estão todos ancestrais de `origin/main`. Não há `BLOCKER`, `HIGH` ou `MEDIUM` real aberto na onda de estabilização.
 
@@ -98,7 +98,7 @@ Adequação de **CNAE/CNPJ/regime** do owner corre **em paralelo** e **NÃO bloq
 
 ## Próximo passo recomendado
 
-Revisão humana independente do Draft PR de REPORTING_PRODUCTS_V1 pelo OWNER (`OWNER_VISUAL_VALIDATION=PENDING`). Manter PR #501 e PR #490 em seus respectivos estados (HOLD/DRAFT). Zero escrita em produção, zero migration.
+Planejamento e alinhamento da próxima macrofrente (recomendado: análise de priorização para PILOT_READY_V1). Manter PR #501 (superado/open draft) e PR #490 (hold) em seus respectivos estados. Zero escrita em produção, zero migration.
 
 ## Hard stops permanentes
 
