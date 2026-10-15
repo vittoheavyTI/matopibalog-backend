@@ -32,7 +32,7 @@ Autorização efetiva em todo o sistema = **ENTITLEMENT (plano) AND PERMISSION (
 | **PARTNER_NETWORK** | Rede privada (Lite/Cliente); snapshots compartilhados sem acesso a tenant | SHIPPER, ORG_SCOPE | **NEW (0)** |
 | **ERP_INTEGRATION** | Modelo canônico + outbox + adapters + external_id + retry + reconcile | FREIGHT_EXECUTION, FINANCE | **NEW (0)** (integração custom parcial) |
 | **AUDIT** | Eventos unificados (entity/action/actor/source/metadata) + Envelope Digital | todos | fragmentado; unificação ROADMAP |
-| **REPORTING** | PDFs como produto (Envelope, fechamento, espelho, histórico) | AUDIT, FLEET, FINANCE | branding vivo; produtos-alvo ROADMAP |
+| **REPORTING** | PDFs como produto (Envelope, fechamento, espelho, histórico) | AUDIT, FLEET, FINANCE | Envelope + fechamento ATIVO_PROD; espelho/histórico/consumo PARTIAL / ROADMAP |
 | **NOTIFICATIONS** | Interno + push + realtime | IDENTITY | vivo |
 
 **Regras de boundary chave:** (1) Financeiro operacional do cliente **nunca** se mistura com financeiro SaaS (D-035). (2) Parceiro/embarcador **nunca** acessa o tenant do outro; compartilhamento é por **snapshot** (D-026). (3) ERP acoplado só via **modelo canônico** + adapter (D-023). (4) Route/Signature/Payment/Identity externos entram por **provider abstraction** (D-032/D-034/D-031). Nenhuma migration é escrita nesta macrofrente.

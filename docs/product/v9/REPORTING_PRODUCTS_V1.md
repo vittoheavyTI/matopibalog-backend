@@ -96,11 +96,12 @@ O endpoint consolidado `GET /fretes/:id/relatorio-fechamento` compõe múltiplas
 
 ### 4. Bateria de Verificação Executada
 
-- **Testes Focados Backend**: 35/35 testes aprovados em `backend/tests/freteDigitalEnvelope.test.js` cobrindo cenários A a J e CROSS-DOMAIN 1 a 8 (`node --test`).
-- **Testes Focados Frontend**: 14/14 testes aprovados em `painel_web/src/utils/reportingProducts.test.ts` (`vitest run`), comprovando tolerância a `lancamentos.restricted` e `documentos_fiscais.restricted` sem crash e sem recalcular linhas no cliente.
-- **Testes Visuais Playwright**: 3/3 cenários aprovados em `s4_reporting_products.visual.spec.ts` (Desktop 1440x900, Tablet 1024x768, Mobile 390x844) com zero violações de rede externa.
-- **Suíte Completa Backend**: Aprovada (`node --test`).
-- **Build Frontend**: `tsc -b && vite build` aprovado sem erros de tipagem nem falhas de empacotamento.
+- **Testes Focados Backend**: 35/35 PASS em `backend/tests/freteDigitalEnvelope.test.js` cobrindo cenários A a J e CROSS-DOMAIN 1 a 8 (`node --test`).
+- **Testes Focados Frontend**: 18/18 PASS em `painel_web/src/utils/reportingProducts.test.ts` (`vitest run`), comprovando formatação, layout, tolerância a `lancamentos.restricted` e `documentos_fiscais.restricted` sem crash e sem recalcular linhas no cliente.
+- **Suíte Completa Backend**: 2205/2205 PASS (`node --test`).
+- **Suíte Completa Frontend**: 325/325 PASS (`vitest run`).
+- **Build Frontend**: PASS (`tsc -b && vite build` aprovado sem erros de tipagem nem falhas de empacotamento).
+- **Testes Visuais Playwright**: 3/3 cenários PASS em `s4_reporting_products.visual.spec.ts` (Desktop 1440x900, Tablet 1024x768, Mobile 390x844) com zero violações de rede externa (`EXTERNAL_NETWORK_REQUESTS_ALLOWED=0`).
 
 ---
 
