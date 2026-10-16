@@ -1,5 +1,6 @@
 'use strict';
 
+const crypto = require('node:crypto');
 const { calcularComissao } = require('../../utils/comissao');
 const { normalizarModalidade, calcularValorToneladaKm } = require('../../utils/calculoFrete');
 const { validarLimitesFrete } = require('../../utils/limitesFrete');
@@ -129,13 +130,76 @@ function buildFreightInsertPayload({
   };
 }
 
+const FREIGHT_INTENT_FIELDS = [
+  'motorista_id',
+  'empresa_id',
+  'origem',
+  'destino',
+  'km_inicial',
+  'valor_frete',
+  'modalidade_calculo',
+  'toneladas',
+  'valor_tonelada_km',
+  'quem_recebeu_solicitado',
+  'unidade_operacional_solicitada',
+  'odometro_obrigatorio',
+];
+
+const NUMERIC_INTENT_FIELDS = new Set([
+  'km_inicial',
+  'valor_frete',
+  'toneladas',
+  'valor_tonelada_km',
+]);
+
+function normalizedIntentValue(field, value) {
+  if (value === null || value === undefined || value === '') return null;
+  return NUMERIC_INTENT_FIELDS.has(field) ? Number(value) : value;
+}
+
+function buildFreightIntent({ body = {}, payload = {} } = {}) {
+  return {
+    motorista_id: payload.motorista_id,
+    empresa_id: payload.empresa_id,
+    origem: payload.origem,
+    destino: payload.destino,
+    km_inicial: payload.km_inicial,
+    valor_frete: payload.valor_frete,
+    modalidade_calculo: payload.modalidade_calculo,
+    toneladas: payload.toneladas,
+    valor_tonelada_km: payload.valor_tonelada_km,
+    // Estes campos representam o que o cliente pediu. Placa, unidade derivada,
+    // quem_recebeu resolvido e status sao snapshots do contexto de criacao e
+    // podem mudar depois sem transformar um retry legitimo em conflito.
+    quem_recebeu_solicitado: body.quem_recebeu,
+    unidade_operacional_solicitada: body.unidade_operacional_id,
+    odometro_obrigatorio: body.odometro_obrigatorio === true,
+  };
+}
+
+function freightIntentFingerprint(intent) {
+  const canonical = FREIGHT_INTENT_FIELDS.reduce((result, field) => {
+    result[field] = normalizedIntentValue(field, intent?.[field]);
+    return result;
+  }, {});
+  return crypto.createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
+}
+
 async function createFreight(supabase, {
   user,
   body = {},
   motoristaId,
   resolveOperationalUnit,
   forcedId = null,
+  clientRequestId = null,
+  authorizeReplay,
 } = {}) {
+  if (forcedId && clientRequestId) {
+    throw new FreightCreationError('Autoridades de idempotencia conflitantes.', {
+      status: 400,
+      code: 'conflicting_idempotency_authorities',
+    });
+  }
   const effectiveMotoristaId = motoristaId || (user?.role === 'admin' ? (body.motorista_id || user?.uid) : user?.uid);
   const isAtivo = await checkMotoristaStatus(supabase, effectiveMotoristaId);
   if (!isAtivo) {
@@ -158,6 +222,12 @@ async function createFreight(supabase, {
     unidadeOperacionalId,
     forcedId,
   });
+  const intent = buildFreightIntent({ body, payload });
+  const creationIntentHash = clientRequestId ? freightIntentFingerprint(intent) : null;
+  if (clientRequestId) {
+    payload.client_request_id = clientRequestId;
+    payload.creation_intent_hash = creationIntentHash;
+  }
 
   const { data, error } = await supabase
     .from('fretes')
@@ -166,6 +236,43 @@ async function createFreight(supabase, {
     .single();
 
   if (error) {
+    if (clientRequestId && error.code === '23505') {
+      const { data: existing, error: existingError } = await supabase
+        .from('fretes')
+        .select('*')
+        .eq('empresa_id', payload.empresa_id)
+        .eq('client_request_id', clientRequestId)
+        .maybeSingle();
+      if (existingError) {
+        throw new FreightCreationError('Erro ao conferir a requisição repetida.', {
+          status: 500,
+          code: 'freight_idempotency_lookup_failed',
+          dbError: existingError,
+        });
+      }
+      if (existing) {
+        if (typeof authorizeReplay !== 'function') {
+          throw new FreightCreationError('Autorizador de replay ausente.', {
+            status: 500,
+            code: 'freight_idempotency_authorizer_missing',
+          });
+        }
+        const replayAllowed = await authorizeReplay({ existing, payload, intent });
+        if (!replayAllowed) {
+          throw new FreightCreationError('Acesso ao frete repetido negado.', {
+            status: 403,
+            code: 'freight_idempotency_replay_forbidden',
+          });
+        }
+        if (existing.creation_intent_hash === creationIntentHash) {
+          return { data: existing, comissao, replay: true, payload };
+        }
+        throw new FreightCreationError('Identificador de requisição já usado para outro frete.', {
+          status: 409,
+          code: 'freight_idempotency_conflict',
+        });
+      }
+    }
     if (forcedId && error.code === '23505') {
       const { data: existing, error: existingError } = await supabase
         .from('fretes')
@@ -187,7 +294,9 @@ async function createFreight(supabase, {
 
 module.exports = {
   FreightCreationError,
+  buildFreightIntent,
   buildFreightInsertPayload,
   createFreight,
+  freightIntentFingerprint,
   respostaLimiteFrete,
 };

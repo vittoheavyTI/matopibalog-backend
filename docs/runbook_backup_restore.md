@@ -1,9 +1,11 @@
 # Runbook de Backup e Restore — Matopiba Log
 
-> **Data:** 2026-06-29
-> **Versão:** 1.1
-> **Status:** Restore do **banco** validado em 2026-06-29 (teste real em instância PostgreSQL 18
-> temporária). Backup do banco automatizado localmente. Storage e env vars seguem manuais.
+> **Revisão:** 2026-10-16
+> **Versão:** 1.2
+> **Status:** existe uma evidência **histórica** de restore do banco, executada em
+> 2026-06-29 numa instância PostgreSQL 18 temporária. O restore do estado atual,
+> Supabase Auth, Storage e configurações **não está certificado**. Backup do banco
+> é descrito como automatizado localmente; Storage e env vars seguem manuais.
 
 ---
 
@@ -42,8 +44,14 @@ não automatizados.
 
 | Bucket | Conteúdo | Risco se perdido |
 |--------|----------|------------------|
-| `comprovantes` | Fotos de despesas e abastecimentos | Evidência financeira irrecuperável. Auditorias comprometidas. |
-| `avatars` | Fotos de perfil de usuários | Substituível (baixo risco) |
+| `comprovantes` (público legado) | Fotos de despesas e abastecimentos; fotos de perfil ficam no prefixo `avatars/` deste mesmo bucket | Evidências financeiras e referências públicas ficam quebradas. |
+| `fretes-documentos` (privado) | Documentos fiscais e documentos da frota | Documentos operacionais ficam indisponíveis. |
+| `fretes-evidencias` (privado) | Evidências de ePOD e ocorrências | Comprovação de entrega e evidências operacionais ficam indisponíveis. |
+| `fretes-odometro` (privado) | Fotos inicial/final do odômetro | Evidência de KM e ativação/finalização ficam incompletas. |
+
+O inventário acima foi confirmado no código e nas migrations versionadas em
+2026-10-16. `avatars` é um **prefixo** dentro de `comprovantes`, não um bucket
+separado no contrato atual.
 
 ### 2.3 Configuração (crítico)
 
@@ -78,8 +86,8 @@ essas mudanças.
 
 | Item | Situação |
 |------|----------|
-| Aplicação | Manual no Supabase SQL Editor — **sem controle automatizado** (sem migration runner). |
-| Sincronização repo × produção | **Não garantida.** Trate o repositório como referência parcial, nunca como espelho fiel do banco. |
+| Aplicação | Há histórico rastreado no Supabase e SQLs versionados, mas a restauração deve comparar os dois antes de qualquer reaplicação. |
+| Sincronização repo × produção | Não presumir. Em leitura de 2026-10-16, as migrations 085, 086 e 087 estavam registradas; isto não substitui um inventário completo no momento do restore. |
 
 **No restore, NÃO confie na lista de arquivos.** Depois de restaurar o dump, valide o
 schema **contra o banco real** rodando as queries/checks do próprio runbook
@@ -178,17 +186,13 @@ Script PowerShell (`backup_matopiba.ps1`, fora do repo) + tarefa agendada do Win
 > 📋 **Rotina manual recorrente (checklist) + verificação mensal:** ver
 > [backup_storage_env_vars.md](backup_storage_env_vars.md). Os comandos detalhados ficam abaixo.
 
-**Bucket `comprovantes`:**
+Exportar separadamente os quatro buckets do inventário: `comprovantes`,
+`fretes-documentos`, `fretes-evidencias` e `fretes-odometro`. Preservar o caminho
+completo de cada objeto, MIME, tamanho e um checksum/manifesto fora do repositório.
 
-```bash
-# Via Supabase CLI
-supabase storage download comprovantes ./backup_comprovantes/
-
-# Ou manualmente via Dashboard
-# Supabase → Storage → comprovantes → Download All
-```
-
-Bucket `avatars` segue o mesmo padrão, mas o risco de perda é menor.
+Use o Dashboard ou uma ferramenta cuja sintaxe tenha sido confirmada com
+`supabase storage --help` na versão instalada. Não usar `upsert` durante a coleta.
+O prefixo `avatars/` é incluído no backup de `comprovantes`.
 
 ### 4.3 Variáveis de ambiente
 
@@ -283,25 +287,22 @@ Erros comuns:
 
 #### 5.3 Restaurar Storage
 
-```bash
-supabase storage cp --recursive backup_comprovantes/ dst://comprovantes/
-```
+Restaurar cada bucket com o **mesmo nome, privacidade e caminho de objeto**. Antes
+de enviar arquivos, recriar/verificar buckets, limites e policies em ambiente
+isolado. Confirmar a sintaxe da CLI instalada com `supabase storage --help` ou
+usar o Dashboard.
 
-**Verificar:** as URLs públicas no banco (coluna `foto_url`) apontam para o mesmo
-bucket name (`comprovantes`). Se o novo projeto tiver o mesmo nome de bucket,
-as URLs continuam válidas.
+**Verificar:** referências públicas de `comprovantes`; signed URLs dos três
+buckets privados; MIME, tamanho e checksum de uma amostra sintética; negação de
+acesso anônimo aos buckets privados. Um arquivo presente com ACL errada não conta
+como restore válido.
 
 #### 5.4 Aplicar migrations pendentes
 
-Migrations são aplicadas manualmente no Supabase SQL Editor.
-Verificar quais já estão no dump (rodar `SELECT * FROM termos LIMIT 1;` etc.).
-
-Migrations que precisam de aplicação manual (confirmar se já estão no dump):
-
-- 015: `ENABLE ROW LEVEL SECURITY` + helpers + policies
-- 016: `DROP POLICY IF EXISTS` para policies legadas
-- 017: policies de faturas
-- 018: `client_request_id`
+Não reaplicar uma lista fixa de migrations. Comparar o histórico do ambiente de
+origem, o histórico restaurado e os arquivos versionados. Em 2026-10-16 foi
+confirmado por leitura que 085, 086 e 087 estavam registradas em produção; essa
+fotografia envelhece e deve ser coletada novamente no incidente.
 
 Para verificar se uma migration já foi aplicada:
 
@@ -369,14 +370,16 @@ curl https://matopibalog-backend-production.up.railway.app/health
 | Policies corretas | `SELECT policyname, tablename FROM pg_policies WHERE schemaname='public'` |
 | Faturas com RLS | Confirmar `faturas_superadmin_all` + `faturas_empresa_select` existem |
 | `client_request_id` presente | `SELECT column_name FROM information_schema.columns WHERE table_name='despesas' AND column_name='client_request_id'` |
+| Migrations críticas rastreadas | Comparar o histórico restaurado com o inventário coletado na origem; conferir pelo menos 085, 086 e 087 no snapshot de 2026-10-16 |
 
 ### 6.3 Storage
 
 | Item | Como verificar |
 |------|----------------|
-| Bucket comprovantes existe | Supabase Dashboard → Storage |
-| Fotos acessíveis | `curl <foto_url>` de uma despesa → 200 |
-| Fotos de perfil acessíveis | `curl <avatar_url>` de um usuário → 200 |
+| Quatro buckets existem | `comprovantes`, `fretes-documentos`, `fretes-evidencias`, `fretes-odometro` no Dashboard/API administrativa |
+| Evidência pública acessível | URL de fixture sintética em `comprovantes` → 200 |
+| Buckets privados protegidos | acesso anônimo negado; signed URL autenticada e curta funciona |
+| Integridade dos objetos | manifesto de paths, tamanhos e checksums confere com a origem sintética |
 
 ### 6.4 Funcional
 
@@ -445,8 +448,9 @@ temporária e descartável** (criada com `initdb`/`pg_ctl`, sem tocar em produç
 - Erros residuais sobre `auth`/`authenticated` (objetos internos do Supabase) são esperados
   num Postgres comum e não comprometem os dados de aplicação.
 
-**Ainda não exercitado neste teste:** restore do **Storage** (`comprovantes`/`avatars`) e
-restauração da tabela `auth.users` (senhas) — ver riscos na seção 9.
+**Ainda não exercitado neste teste:** estado atual do banco, Storage
+(`comprovantes`, `fretes-documentos`, `fretes-evidencias`, `fretes-odometro`),
+policies/ACLs atuais e restauração de `auth.users` — ver riscos na seção 9.
 
 ---
 
@@ -455,7 +459,7 @@ restauração da tabela `auth.users` (senhas) — ver riscos na seção 9.
 | Risco | Mitigação |
 |-------|-----------|
 | Dump SQL não inclui usuários do Auth (auth.users) | O dump padrão do Supabase NÃO inclui a tabela `auth.users`. Se for necessário recriar identidades, exportar `auth.users` separadamente. Isto significa que senhas não são restauradas — todos os usuários precisarão resetar senha via "Esqueceu senha". |
-| Bucket comprovantes pode ter permissões diferentes | Verificar RLS do bucket Storage após restore. O dump do banco não inclui configurações de bucket. |
+| Buckets podem voltar com privacidade/policies diferentes | Validar anon-deny e signed URLs nos buckets privados; validar acesso público somente no legado `comprovantes`. |
 | Service role key do novo projeto é diferente | Atualizar no Railway. |
 | Domínios/CORS podem precisar de reconfiguração | Verificar configuração de autenticação no novo projeto Supabase. |
 | Migrations podem ter sido aplicadas parcialmente | Sempre verificar colunas/funções/policies antes de reaplicar. |
@@ -481,7 +485,7 @@ restauração da tabela `auth.users` (senhas) — ver riscos na seção 9.
 
 | Item | Prioridade |
 |------|-----------|
-| Backup automatizado do **Storage** (`comprovantes`/`avatars`) | Alta |
+| Backup automatizado dos quatro buckets de **Storage** | Alta |
 | GitHub Action semanal de backup (off-site, fora da máquina local) | Alta |
 | GitHub Action mensal de restore test | Média |
 | Migration runner automatizado | Média |

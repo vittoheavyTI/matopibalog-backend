@@ -6,6 +6,7 @@ import '../services/location_tracking_service.dart';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:uuid/uuid.dart';
 
 class _DocumentoPendente {
   final String tipo;
@@ -27,6 +28,10 @@ class AddFreteScreen extends StatefulWidget {
 }
 
 class _AddFreteScreenState extends State<AddFreteScreen> {
+  // Uma tela aberta representa uma intencao de criacao. O UUID permanece
+  // estavel durante retries, inclusive quando o servidor conclui o POST e a
+  // resposta se perde antes de chegar ao aparelho.
+  final String _clientRequestId = const Uuid().v4();
   final _origemCtrl = TextEditingController();
   final _destinoCtrl = TextEditingController();
   final _kmCtrl = TextEditingController();
@@ -100,6 +105,7 @@ class _AddFreteScreenState extends State<AddFreteScreen> {
     }
 
     final payload = <String, dynamic>{
+      'client_request_id': _clientRequestId,
       'origem': _origemCtrl.text.trim(),
       'destino': _destinoCtrl.text.trim(),
       'valor_frete': valorFrete,

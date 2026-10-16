@@ -1,0 +1,75 @@
+name: Freight Creation Idempotency 088 PG
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "backend/migrations/088_freight_creation_idempotency.sql"
+      - "backend/tests-pg/freight_creation_idempotency_088.pgtest.mjs"
+      - ".github/workflows/freight-creation-idempotency-088-pg-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "backend/migrations/088_freight_creation_idempotency.sql"
+      - "backend/tests-pg/freight_creation_idempotency_088.pgtest.mjs"
+      - ".github/workflows/freight-creation-idempotency-088-pg-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: freight-idempotency-088-pg-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  freight-idempotency-088-pg:
+    name: Postgres 17 - Freight Idempotency 088
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    defaults:
+      run:
+        working-directory: backend
+
+    env:
+      FREIGHT_IDEMPOTENCY_088_ADMIN_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+      FREIGHT_IDEMPOTENCY_088_PG: "1"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: backend/.nvmrc
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Show runtime versions
+        run: node --version && npm --version
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Run migration 088 PostgreSQL tests
+        run: node --test --test-concurrency=1 tests-pg/freight_creation_idempotency_088.pgtest.mjs

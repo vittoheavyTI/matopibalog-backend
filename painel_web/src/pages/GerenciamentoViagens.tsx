@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Plus, X, Search, Filter, Truck, MapPin, Calendar, DollarSign, Gauge, Trash2, Edit, Check, AlertTriangle, ChevronLeft, ChevronDown, ChevronRight, Fuel, FileText, TrendingUp, Save, Unlock, Lock, Camera, Upload, Ban, Download, ShieldCheck, CheckCircle2 } from 'lucide-react';
 import { useLancamentosRealtime } from '../hooks/useLancamentosRealtime';
+import { usePermissions } from '../hooks/usePermissions';
 import { format } from 'date-fns';
 import { formatCurrency } from '../utils';
 import api, { newClientRequestId } from '../api';
@@ -15,6 +16,11 @@ import {
   obterRequestIdFreteFinancialCorrection,
   type FreteFinancialCorrectionRequestState,
 } from '../utils/freteFinancialCorrectionRequest';
+import {
+  clearFreightCreationRequest,
+  getFreightCreationRequestId,
+  type FreightCreationRequestState,
+} from '../utils/freightCreationRequest';
 import { PlanoBloqueadoCard } from '../components/PlanoBloqueadoCard';
 import { EVENTO_NOTIFICACOES_NOVAS } from '../components/NotificacoesDropdown';
 import { FreteEpodOcorrencias } from '../components/FreteEpodOcorrencias';
@@ -60,6 +66,8 @@ const numeroIgual = (a: unknown, b: unknown): boolean => {
 };
 
 export const GerenciamentoViagens: React.FC = () => {
+  const { can } = usePermissions();
+  const canCreateFreight = can('freight.create');
   const [fretes, setFretes] = useState<any[]>([]);
   const [motoristas, setMotoristas] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -270,6 +278,7 @@ export const GerenciamentoViagens: React.FC = () => {
   });
   const [correcaoFinanceiraReason, setCorrecaoFinanceiraReason] = useState('');
   const correcaoFinanceiraRequestRef = useRef<FreteFinancialCorrectionRequestState | null>(null);
+  const freightCreationRequestRef = useRef<FreightCreationRequestState | null>(null);
 
   const [despesas, setDespesas] = useState<any[]>([]);
   const [abastecimentos, setAbastecimentos] = useState<any[]>([]);
@@ -573,6 +582,8 @@ export const GerenciamentoViagens: React.FC = () => {
   };
 
   const openNewModal = (motId?: string) => {
+    if (!canCreateFreight) return;
+    clearFreightCreationRequest(freightCreationRequestRef);
     setEditingFrete(null);
     setCorrecaoFinanceiraReason('');
     limparRequestIdFreteFinancialCorrection(correcaoFinanceiraRequestRef);
@@ -599,14 +610,14 @@ export const GerenciamentoViagens: React.FC = () => {
   // Abre o modal "Novo Frete" automaticamente quando o Dashboard navega com ?novoFrete=1.
   // Após abrir, remove o parâmetro (replace) preservando ?motorista — assim não reabre em loop.
   useEffect(() => {
-    if (novoFreteQuery === '1') {
+    if (novoFreteQuery === '1' && canCreateFreight) {
       openNewModal();
       const next = new URLSearchParams(searchParams);
       next.delete('novoFrete');
       setSearchParams(next, { replace: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [novoFreteQuery]);
+  }, [novoFreteQuery, canCreateFreight]);
 
   const openEditModal = (frete: any) => {
     setEditingFrete(frete);
@@ -789,10 +800,20 @@ export const GerenciamentoViagens: React.FC = () => {
         // inicial opcionais). Se o admin anexar a foto, ela é enviada abaixo e fica registrada,
         // sem prender o frete em 'pendente'.
         const { status: _statusOmitido, ...payloadCriacao } = payload;
-        const criado = await api.post('/fretes', {
+        const createPayload = {
           ...payloadCriacao,
           motorista_id: formData.motorista_id,
+        };
+        const clientRequestId = getFreightCreationRequestId(
+          freightCreationRequestRef,
+          createPayload,
+          newClientRequestId,
+        );
+        const criado = await api.post('/fretes', {
+          ...createPayload,
+          client_request_id: clientRequestId,
         });
+        clearFreightCreationRequest(freightCreationRequestRef);
         freteId = criado.data.id;
         freteResultante = criado.data;
       }
@@ -1318,9 +1339,11 @@ export const GerenciamentoViagens: React.FC = () => {
           <h2 className="text-2xl font-bold text-gray-800">Gerenciamento de Fretes</h2>
           <p className="text-gray-600 text-sm">Cadastro e acompanhamento de fretes</p>
         </div>
-        <button onClick={() => openNewModal()} className="flex items-center px-4 py-2 bg-green-700 text-white rounded-lg hover:bg-green-800 transition-all shadow-md active:scale-95 font-bold">
-          <Plus size={20} className="mr-2" /> Novo Frete
-        </button>
+        {canCreateFreight && (
+          <button onClick={() => openNewModal()} className="flex items-center px-4 py-2 bg-green-700 text-white rounded-lg hover:bg-green-800 transition-all shadow-md active:scale-95 font-bold">
+            <Plus size={20} className="mr-2" /> Novo Frete
+          </button>
+        )}
       </div>
 
       <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 space-y-4">

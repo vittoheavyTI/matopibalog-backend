@@ -372,11 +372,27 @@ exports.getAll = async (req, res) => {
   }
 };
 
+async function replayPermitidoNoContextoAtual(req, existing) {
+  if (req.user?.is_super_admin === true) return true;
+  const mesmoTenant = existing.empresa_id === req.empresa_id;
+  if (!mesmoTenant) return false;
+
+  const isInternal = req.user?.role === 'admin'
+    || (req.user?.tipo && req.user.tipo !== 'motorista');
+  if (!isInternal) return existing.motorista_id === req.user?.uid;
+
+  const scope = await resolverEscopoOperacional(req, { empresaId: existing.empresa_id });
+  if (escopoTemSelecaoInvalida(scope)) return false;
+  return canAccessUnit(scope, existing.unidade_operacional_id || null);
+}
+
 exports.create = async (req, res) => {
   try {
     const result = await createFreight(supabase, {
       user: req.user,
       body: req.body,
+      clientRequestId: req.body.client_request_id || null,
+      authorizeReplay: ({ existing }) => replayPermitidoNoContextoAtual(req, existing),
       resolveOperationalUnit: async ({ motorista }) => {
         if (req.user.role !== 'admin') return motorista.unidade_operacional_id || null;
         const scope = await resolverEscopoOperacional(req, { empresaId: motorista.empresa_id });
@@ -402,10 +418,12 @@ exports.create = async (req, res) => {
       },
     });
 
-    const { data, comissao } = result;
-    notificacaoService.notificarFreteCriado(data, { actorId: req.user?.uid })
-      .catch((e) => console.warn('[fretesController:create] notificarFreteCriado falhou:', e?.message || e));
-    res.status(201).json({ ...data, comissao_calculada: comissao });
+    const { data, comissao, replay } = result;
+    if (!replay) {
+      notificacaoService.notificarFreteCriado(data, { actorId: req.user?.uid })
+        .catch((e) => console.warn('[fretesController:create] notificarFreteCriado falhou:', e?.message || e));
+    }
+    res.status(201).json({ ...data, comissao_calculada: comissao, idempotent: replay === true });
   } catch (error) {
     if (error instanceof FreightCreationError) {
       if (error.details?.error === 'frete_operational_limit') return res.status(error.status).json(error.details);

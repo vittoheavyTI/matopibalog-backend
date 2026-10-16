@@ -38,6 +38,9 @@ const aplicarRegraModalidade = (data, ctx, { exigirValorFixo }) => {
 // modalidade valor_fixo, via superRefine); na modalidade tonelada_km ele é
 // calculado na finalização.
 const createFreteSchema = z.object({
+  // UUID estavel gerado pelo cliente para a intencao de criacao. A unicidade
+  // persistente por tenant converge retries sem depender de estado em memoria.
+  client_request_id: z.string().uuid('Identificador da requisição inválido.').optional(),
   origem: z.string().min(2, 'Origem é obrigatória.').max(200),
   destino: z.string().min(2, 'Destino é obrigatório.').max(200),
   km_inicial: vazioComoIndefinido(z.coerce.number({ invalid_type_error: 'KM inicial deve ser um número.' }).positive('KM inicial deve ser maior que zero.').optional()),
