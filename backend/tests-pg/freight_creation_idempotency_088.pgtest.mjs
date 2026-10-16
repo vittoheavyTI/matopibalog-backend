@@ -78,10 +78,12 @@ function validateHarnessTarget({ enabled, connectionString }) {
 }
 
 function isExpectedServerAddress(address) {
-  return address === EXPECTED_HOST
-    || /^10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$/.test(address)
-    || /^172\.(1[6-9]|2[0-9]|3[01])\.[0-9]{1,3}\.[0-9]{1,3}$/.test(address)
-    || /^192\.168\.[0-9]{1,3}\.[0-9]{1,3}$/.test(address);
+  const normalized = String(address || '').replace(/^::ffff:/i, '');
+  return normalized === EXPECTED_HOST
+    || address === '::1'
+    || /^10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$/.test(normalized)
+    || /^172\.(1[6-9]|2[0-9]|3[01])\.[0-9]{1,3}\.[0-9]{1,3}$/.test(normalized)
+    || /^192\.168\.[0-9]{1,3}\.[0-9]{1,3}$/.test(normalized);
 }
 
 function validateServerIdentity(row) {
@@ -96,7 +98,10 @@ function validateServerIdentity(row) {
   }
   if (!isExpectedServerAddress(row.server_address)
       || String(row.server_port) !== EXPECTED_PORT) {
-    refuse('SERVER_ENDPOINT_REJECTED', 'Connected server did not attest a private CI container endpoint');
+    refuse(
+      'SERVER_ENDPOINT_REJECTED',
+      `Connected server endpoint rejected: ${row.server_address}:${row.server_port}`,
+    );
   }
   if (row.in_recovery !== false) {
     refuse('SERVER_RECOVERY_REJECTED', 'Read replicas and recovery servers are not accepted');
@@ -305,6 +310,9 @@ test('guard recusa endpoints remotos Supabase e Railway antes de conectar', () =
 
 test('guard exige atestacao independente de servidor novo, local e vazio', () => {
   assert.doesNotThrow(() => validateServerIdentity(validServerIdentity()));
+  assert.doesNotThrow(() => validateServerIdentity(
+    validServerIdentity({ server_address: '::ffff:172.18.0.2' }),
+  ));
   for (const [overrides, expectedCode] of [
     [{ server_address: '8.8.8.8' }, 'SERVER_ENDPOINT_REJECTED'],
     [{ database_name: 'production' }, 'SERVER_DATABASE_REJECTED'],
