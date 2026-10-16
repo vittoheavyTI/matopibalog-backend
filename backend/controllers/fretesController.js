@@ -377,6 +377,7 @@ exports.create = async (req, res) => {
     const result = await createFreight(supabase, {
       user: req.user,
       body: req.body,
+      clientRequestId: req.body.client_request_id || null,
       resolveOperationalUnit: async ({ motorista }) => {
         if (req.user.role !== 'admin') return motorista.unidade_operacional_id || null;
         const scope = await resolverEscopoOperacional(req, { empresaId: motorista.empresa_id });
@@ -402,10 +403,12 @@ exports.create = async (req, res) => {
       },
     });
 
-    const { data, comissao } = result;
-    notificacaoService.notificarFreteCriado(data, { actorId: req.user?.uid })
-      .catch((e) => console.warn('[fretesController:create] notificarFreteCriado falhou:', e?.message || e));
-    res.status(201).json({ ...data, comissao_calculada: comissao });
+    const { data, comissao, replay } = result;
+    if (!replay) {
+      notificacaoService.notificarFreteCriado(data, { actorId: req.user?.uid })
+        .catch((e) => console.warn('[fretesController:create] notificarFreteCriado falhou:', e?.message || e));
+    }
+    res.status(201).json({ ...data, comissao_calculada: comissao, idempotent: replay === true });
   } catch (error) {
     if (error instanceof FreightCreationError) {
       if (error.details?.error === 'frete_operational_limit') return res.status(error.status).json(error.details);

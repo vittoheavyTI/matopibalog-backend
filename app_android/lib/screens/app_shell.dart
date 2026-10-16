@@ -228,8 +228,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             ListTile(
               leading: const Icon(Icons.local_shipping_outlined),
               title: const Text('Novo Frete'),
-              enabled: !finance.planoBloqueado,
-              onTap: finance.planoBloqueado ? null : () {
+              enabled: !finance.planoBloqueado && auth.can('freight.create'),
+              onTap: finance.planoBloqueado || !auth.can('freight.create') ? null : () {
                 AppLogger.action('menu_nav', params: {'destino': 'add_frete'});
                 _navegarPara(context, const AddFreteScreen());
               },

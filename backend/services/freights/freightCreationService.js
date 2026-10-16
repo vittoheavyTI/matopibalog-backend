@@ -1,5 +1,6 @@
 'use strict';
 
+const crypto = require('node:crypto');
 const { calcularComissao } = require('../../utils/comissao');
 const { normalizarModalidade, calcularValorToneladaKm } = require('../../utils/calculoFrete');
 const { validarLimitesFrete } = require('../../utils/limitesFrete');
@@ -129,12 +130,49 @@ function buildFreightInsertPayload({
   };
 }
 
+const FREIGHT_INTENT_FIELDS = [
+  'motorista_id',
+  'empresa_id',
+  'unidade_operacional_id',
+  'origem',
+  'destino',
+  'km_inicial',
+  'valor_frete',
+  'modalidade_calculo',
+  'toneladas',
+  'valor_tonelada_km',
+  'quem_recebeu',
+  'placa',
+  'status',
+];
+
+const NUMERIC_INTENT_FIELDS = new Set([
+  'km_inicial',
+  'valor_frete',
+  'toneladas',
+  'valor_tonelada_km',
+]);
+
+function normalizedIntentValue(field, value) {
+  if (value === null || value === undefined || value === '') return null;
+  return NUMERIC_INTENT_FIELDS.has(field) ? Number(value) : value;
+}
+
+function freightIntentFingerprint(payload) {
+  const canonical = FREIGHT_INTENT_FIELDS.reduce((result, field) => {
+    result[field] = normalizedIntentValue(field, payload?.[field]);
+    return result;
+  }, {});
+  return crypto.createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
+}
+
 async function createFreight(supabase, {
   user,
   body = {},
   motoristaId,
   resolveOperationalUnit,
   forcedId = null,
+  clientRequestId = null,
 } = {}) {
   const effectiveMotoristaId = motoristaId || (user?.role === 'admin' ? (body.motorista_id || user?.uid) : user?.uid);
   const isAtivo = await checkMotoristaStatus(supabase, effectiveMotoristaId);
@@ -158,6 +196,11 @@ async function createFreight(supabase, {
     unidadeOperacionalId,
     forcedId,
   });
+  const creationIntentHash = clientRequestId ? freightIntentFingerprint(payload) : null;
+  if (clientRequestId) {
+    payload.client_request_id = clientRequestId;
+    payload.creation_intent_hash = creationIntentHash;
+  }
 
   const { data, error } = await supabase
     .from('fretes')
@@ -166,6 +209,30 @@ async function createFreight(supabase, {
     .single();
 
   if (error) {
+    if (clientRequestId && error.code === '23505') {
+      const { data: existing, error: existingError } = await supabase
+        .from('fretes')
+        .select('*')
+        .eq('empresa_id', payload.empresa_id)
+        .eq('client_request_id', clientRequestId)
+        .maybeSingle();
+      if (existingError) {
+        throw new FreightCreationError('Erro ao conferir a requisição repetida.', {
+          status: 500,
+          code: 'freight_idempotency_lookup_failed',
+          dbError: existingError,
+        });
+      }
+      if (existing && existing.creation_intent_hash === creationIntentHash) {
+        return { data: existing, comissao, replay: true, payload };
+      }
+      if (existing) {
+        throw new FreightCreationError('Identificador de requisição já usado para outro frete.', {
+          status: 409,
+          code: 'freight_idempotency_conflict',
+        });
+      }
+    }
     if (forcedId && error.code === '23505') {
       const { data: existing, error: existingError } = await supabase
         .from('fretes')
@@ -189,5 +256,6 @@ module.exports = {
   FreightCreationError,
   buildFreightInsertPayload,
   createFreight,
+  freightIntentFingerprint,
   respostaLimiteFrete,
 };
