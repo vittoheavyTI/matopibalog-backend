@@ -119,7 +119,10 @@ function validateServerIdentity(row) {
   if (!Array.isArray(row.connectable_databases)
       || row.connectable_databases.length !== 1
       || row.connectable_databases[0] !== EXPECTED_ADMIN_DATABASE) {
-    refuse('SERVER_INVENTORY_REJECTED', 'PostgreSQL server contains unexpected connectable databases');
+    refuse(
+      'SERVER_INVENTORY_REJECTED',
+      `PostgreSQL server contains unexpected connectable databases: ${JSON.stringify(row.connectable_databases)}`,
+    );
   }
   if (row.data_directory !== EXPECTED_DATA_DIRECTORY) {
     refuse('SERVER_LAYOUT_REJECTED', 'PostgreSQL data directory is not the official disposable container layout');
