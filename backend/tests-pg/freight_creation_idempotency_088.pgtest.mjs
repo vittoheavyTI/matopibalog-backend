@@ -78,7 +78,9 @@ function validateHarnessTarget({ enabled, connectionString }) {
 }
 
 function isExpectedServerAddress(address) {
-  const normalized = String(address || '').replace(/^::ffff:/i, '');
+  const normalized = String(address || '')
+    .replace(/\/\d+$/, '')
+    .replace(/^::ffff:/i, '');
   return normalized === EXPECTED_HOST
     || address === '::1'
     || /^10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$/.test(normalized)
@@ -311,7 +313,7 @@ test('guard recusa endpoints remotos Supabase e Railway antes de conectar', () =
 test('guard exige atestacao independente de servidor novo, local e vazio', () => {
   assert.doesNotThrow(() => validateServerIdentity(validServerIdentity()));
   assert.doesNotThrow(() => validateServerIdentity(
-    validServerIdentity({ server_address: '::ffff:172.18.0.2' }),
+    validServerIdentity({ server_address: '::ffff:172.18.0.2/32' }),
   ));
   for (const [overrides, expectedCode] of [
     [{ server_address: '8.8.8.8' }, 'SERVER_ENDPOINT_REJECTED'],
