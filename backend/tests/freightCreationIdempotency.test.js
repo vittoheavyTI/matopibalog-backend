@@ -77,6 +77,7 @@ function createPersistentSupabase() {
 
   return {
     client: { from },
+    drivers,
     rows,
     metrics: {
       get insertAttempts() { return insertAttempts; },
@@ -92,10 +93,18 @@ const baseBody = (overrides = {}) => ({
   ...overrides,
 });
 
-const create = (db, { requestId = null, driver = 'driver-a', body = {} } = {}) => createFreight(db.client, {
+const create = (db, {
+  requestId = null,
+  driver = 'driver-a',
+  body = {},
+  forcedId = null,
+  authorizeReplay = ({ existing }) => existing.motorista_id === driver,
+} = {}) => createFreight(db.client, {
   user: { role: 'motorista', uid: driver },
   body: baseBody(body),
   clientRequestId: requestId,
+  forcedId,
+  authorizeReplay,
 });
 
 test('reprodução baseline: sem chave, resposta perdida + retry criam dois fretes', async () => {
@@ -137,6 +146,56 @@ test('reuso da chave com payload diferente gera conflito', async () => {
   assert.equal(db.rows.size, 1);
 });
 
+test('mudancas posteriores em placa e unidade derivada nao geram falso conflito', async () => {
+  const db = createPersistentSupabase();
+  const first = await create(db, { requestId: REQUEST_A });
+  db.drivers['driver-a'].placa_veiculo = 'ZZZ9Z99';
+  db.drivers['driver-a'].unidade_operacional_id = 'unit-after';
+
+  const retry = await create(db, { requestId: REQUEST_A });
+  assert.equal(retry.replay, true);
+  assert.equal(retry.data.id, first.data.id);
+  assert.equal(db.rows.size, 1);
+});
+
+test('mudanca de unidade explicitamente solicitada continua sendo conflito de intencao', async () => {
+  const db = createPersistentSupabase();
+  await create(db, { requestId: REQUEST_A, body: { unidade_operacional_id: 'unit-request-a' } });
+  await assert.rejects(
+    create(db, { requestId: REQUEST_A, body: { unidade_operacional_id: 'unit-request-b' } }),
+    (error) => error instanceof FreightCreationError
+      && error.status === 409
+      && error.code === 'freight_idempotency_conflict',
+  );
+});
+
+test('replay falha fechado quando permissao, ownership ou scope atual negam acesso', async () => {
+  const db = createPersistentSupabase();
+  await create(db, { requestId: REQUEST_A });
+  await assert.rejects(
+    create(db, { requestId: REQUEST_A, authorizeReplay: async () => false }),
+    (error) => error instanceof FreightCreationError
+      && error.status === 403
+      && error.code === 'freight_idempotency_replay_forbidden',
+  );
+  assert.equal(db.rows.size, 1);
+});
+
+test('replay com chave falha fechado quando o chamador omite o autorizador', async () => {
+  const db = createPersistentSupabase();
+  await create(db, { requestId: REQUEST_A });
+  await assert.rejects(
+    createFreight(db.client, {
+      user: { role: 'motorista', uid: 'driver-a' },
+      body: baseBody(),
+      clientRequestId: REQUEST_A,
+    }),
+    (error) => error instanceof FreightCreationError
+      && error.status === 500
+      && error.code === 'freight_idempotency_authorizer_missing',
+  );
+});
+
 test('intenções distintas continuam criando fretes distintos', async () => {
   const db = createPersistentSupabase();
   await create(db, { requestId: REQUEST_A });
@@ -154,14 +213,50 @@ test('a mesma chave em tenants distintos permanece isolada e cria dois fretes', 
   assert.equal(b.data.empresa_id, 'tenant-b');
 });
 
+test('forcedId preexistente permanece idempotente no mesmo tenant', async () => {
+  const db = createPersistentSupabase();
+  const forcedId = 'campaign-freight-1';
+  const first = await create(db, { forcedId });
+  const retry = await create(db, { forcedId });
+  assert.equal(first.replay, false);
+  assert.equal(retry.replay, true);
+  assert.equal(retry.data.id, forcedId);
+  assert.equal(db.rows.size, 1);
+});
+
+test('forcedId nao devolve frete de outro tenant em uma colisao global', async () => {
+  const db = createPersistentSupabase();
+  const forcedId = 'campaign-freight-cross-tenant';
+  await create(db, { forcedId, driver: 'driver-a' });
+  await assert.rejects(
+    create(db, { forcedId, driver: 'driver-b' }),
+    (error) => error instanceof FreightCreationError
+      && error.status === 500
+      && error.code === 'freight_insert_failed',
+  );
+  assert.equal(db.rows.size, 1);
+});
+
+test('forcedId e client_request_id nao podem disputar autoridade na mesma criacao', async () => {
+  const db = createPersistentSupabase();
+  await assert.rejects(
+    create(db, { forcedId: 'campaign-freight-2', requestId: REQUEST_A }),
+    (error) => error instanceof FreightCreationError
+      && error.status === 400
+      && error.code === 'conflicting_idempotency_authorities',
+  );
+  assert.equal(db.rows.size, 0);
+});
+
 test('schema aceita UUID de intenção e rejeita chave inválida', () => {
   assert.equal(createFreteSchema.safeParse(baseBody({ client_request_id: REQUEST_A })).success, true);
   assert.equal(createFreteSchema.safeParse(baseBody({ client_request_id: 'chave-fraca' })).success, false);
 });
 
-test('controller envia uma única notificação para create + replay', async () => {
+test('controller notifica uma vez e revalida ownership e escopo no replay', async () => {
   const db = createPersistentSupabase();
   let notifications = 0;
+  let scopeAllowed = true;
   const controllerPath = require.resolve('../controllers/fretesController');
   const originalLoad = Module._load;
   delete require.cache[controllerPath];
@@ -171,10 +266,25 @@ test('controller envia uma única notificação para create + replay', async () 
       if (request === '../services/notificacaoService') {
         return { notificarFreteCriado: async () => { notifications += 1; } };
       }
+      if (request === '../services/operationalScopeService') {
+        return {
+          resolverEscopoOperacional: async () => ({ mode: 'SELECTED_UNIT' }),
+          aplicarEscopoOperacionalQuery: (query) => query,
+          escopoTemSelecaoInvalida: () => false,
+          canAccessUnit: () => scopeAllowed,
+          deriveUnitForWrite: ({ requestedUnitId, motoristaUnitId }) => ({
+            ok: true,
+            unidade_operacional_id: requestedUnitId || motoristaUnitId || null,
+          }),
+        };
+      }
       return originalLoad.call(this, request, parent, isMain);
     };
     const controller = require(controllerPath);
-    const call = async () => {
+    const call = async ({
+      body = baseBody({ client_request_id: REQUEST_A }),
+      user = { role: 'motorista', uid: 'driver-a', is_super_admin: false },
+    } = {}) => {
       const res = {
         statusCode: null,
         body: null,
@@ -182,8 +292,8 @@ test('controller envia uma única notificação para create + replay', async () 
         json(body) { this.body = body; return this; },
       };
       await controller.create({
-        body: baseBody({ client_request_id: REQUEST_A }),
-        user: { role: 'motorista', uid: 'driver-a', is_super_admin: false },
+        body,
+        user,
         empresa_id: 'tenant-a',
       }, res);
       return res;
@@ -197,6 +307,25 @@ test('controller envia uma única notificação para create + replay', async () 
     assert.equal(retry.body.idempotent, true);
     assert.equal(notifications, 1);
     assert.equal(db.rows.size, 1);
+
+    const existing = [...db.rows.values()][0];
+    existing.motorista_id = 'driver-b';
+    const ownershipDenied = await call();
+    assert.equal(ownershipDenied.statusCode, 403);
+    assert.equal(notifications, 1);
+    existing.motorista_id = 'driver-a';
+
+    const adminCall = () => call({
+      body: baseBody({ client_request_id: REQUEST_B, motorista_id: 'driver-a' }),
+      user: { role: 'admin', uid: 'admin-a', is_super_admin: false },
+    });
+    const adminFirst = await adminCall();
+    assert.equal(adminFirst.statusCode, 201);
+    scopeAllowed = false;
+    const scopeDenied = await adminCall();
+    assert.equal(scopeDenied.statusCode, 403);
+    assert.equal(notifications, 2);
+    assert.equal(db.rows.size, 2);
   } finally {
     Module._load = originalLoad;
     delete require.cache[controllerPath];
