@@ -247,7 +247,11 @@ test('088: migration, NULL, concorrencia, tenant, drift, reapply e rollback reai
           ADD CONSTRAINT fretes_creation_intent_pair_check
           CHECK (client_request_id IS NULL OR creation_intent_hash IS NULL) NOT VALID;
       `);
-      await expectPgError(c1.query(migrationSql), 'P0001', /088 drift: unexpected.*constraint/i);
+      await expectPgError(
+        c1.query(migrationSql),
+        'P0001',
+        /088 drift: unexpected fretes_creation_intent_pair_check/i,
+      );
       await c1.query('ALTER TABLE public.fretes DROP CONSTRAINT fretes_creation_intent_pair_check');
       await c1.query(migrationSql);
 
