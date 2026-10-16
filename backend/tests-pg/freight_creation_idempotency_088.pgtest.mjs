@@ -147,14 +147,16 @@ async function attestDisposableServer(admin) {
            current_setting('data_directory') AS data_directory,
            extract(epoch FROM (clock_timestamp() - pg_postmaster_start_time())) AS server_age_seconds,
            r.rolsuper AS is_superuser,
-           ARRAY(
-             SELECT datname
+           COALESCE((
+             SELECT jsonb_agg(datname ORDER BY datname)
                FROM pg_database
               WHERE datallowconn
                 AND NOT datistemplate
-              ORDER BY datname
-           ) AS connectable_databases,
-           ARRAY(SELECT extname FROM pg_extension ORDER BY extname) AS installed_extensions,
+           ), '[]'::jsonb) AS connectable_databases,
+           COALESCE((
+             SELECT jsonb_agg(extname ORDER BY extname)
+               FROM pg_extension
+           ), '[]'::jsonb) AS installed_extensions,
            (
              SELECT count(*)::integer
                FROM pg_class c
