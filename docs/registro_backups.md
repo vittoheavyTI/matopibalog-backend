@@ -8,7 +8,7 @@ Este arquivo é **versionado no Git**. Por isso, registre **apenas metadados**:
 
 - ✅ Nome do arquivo de backup
 - ✅ Data/hora do backup
-- ✅ Item protegido (banco / comprovantes / avatars / env vars / migrations)
+- ✅ Item protegido (banco / bucket de Storage / env vars / migrations)
 - ✅ Tamanho aproximado
 - ✅ Referência **genérica** ao cofre (ex.: "Bitwarden — pasta Matopiba")
 
@@ -29,7 +29,9 @@ Este arquivo é **versionado no Git**. Por isso, registre **apenas metadados**:
 | 2026-06-29 22:17 | Banco (dados) | `matopibalog_data_2026-06-29.sql` | ~424 KB | Pasta local de backups (fora do repo) | ✅ |
 | 2026-06-29 22:17 | Banco (dump custom) | `matopibalog_full_2026-06-29.dump` | ~460 KB | Pasta local de backups (fora do repo) | ✅ |
 | _(preencher)_ | Storage `comprovantes` | `backup_comprovantes_AAAA-MM-DD.zip` | — | — | ☐ |
-| _(preencher)_ | Storage `avatars` (se existir) | `backup_avatars_AAAA-MM-DD.zip` | — | — | ☐ |
+| _(preencher)_ | Storage `fretes-documentos` | `backup_fretes-documentos_AAAA-MM-DD.zip` | — | — | ☐ |
+| _(preencher)_ | Storage `fretes-evidencias` | `backup_fretes-evidencias_AAAA-MM-DD.zip` | — | — | ☐ |
+| _(preencher)_ | Storage `fretes-odometro` | `backup_fretes-odometro_AAAA-MM-DD.zip` | — | — | ☐ |
 | _(preencher)_ | Env vars Railway | `railway_envvars_AAAA-MM-DD.txt` | — | — | ☐ |
 | _(preencher)_ | Lista de migrations | `migrations_aplicadas_AAAA-MM-DD.txt` | — | — | ☐ |
 
@@ -50,7 +52,9 @@ Marque só depois de conferir de verdade:
 - [ ] Dump do banco **existe** (arquivo foi gerado)
 - [ ] Dump **não está vazio** (tamanho > 0, abre e tem `CREATE TABLE`/`INSERT`)
 - [ ] Storage `comprovantes` **foi baixado** (pasta/zip com as imagens)
-- [ ] Storage `avatars` baixado **ou** confirmado que o bucket não existe
+- [ ] Prefixo `avatars/` confirmado dentro do backup de `comprovantes`
+- [ ] Storage `fretes-documentos`, `fretes-evidencias` e `fretes-odometro` baixado
+- [ ] Manifesto de paths/tamanhos/checksums gerado fora do repositório
 - [ ] Env vars do Railway **copiadas para o cofre** (não para o repo)
 - [ ] Lista de migrations aplicadas **gerada a partir do banco real** (não dos arquivos do repo)
 - [ ] **Nada** sensível foi colocado no Git (`git status` limpo de dumps/secrets)
@@ -73,7 +77,7 @@ policies). Salve essa saída como `migrations_aplicadas_AAAA-MM-DD.txt` no cofre
 descartável (não em produção) — 17 tabelas recuperadas, dados principais íntegros. Detalhes
 e ressalvas técnicas na seção 8 do runbook.
 
-Pendentes (itens separados, ainda manuais): backup do **Storage** (`comprovantes`/`avatars`)
+Pendentes (itens separados, ainda manuais): backup dos quatro buckets de **Storage**
 e exportação das **env vars do Railway** para o cofre. A rotina manual (checklist + verificação
 mensal) está em [backup_storage_env_vars.md](backup_storage_env_vars.md). A validação de restore
 em um **projeto Supabase separado** com Storage continua recomendada quando esses itens forem
