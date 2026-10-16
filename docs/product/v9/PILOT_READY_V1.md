@@ -81,63 +81,45 @@ devem ser adicionados sem reescrever o congelamento acima.
 
 `client_request_id` representa uma intenção de criação. Web e Flutter geram um
 UUID por formulário/tela e o reutilizam após timeout ou resposta perdida. O
-backend resolve motorista, tenant e unidade antes de construir a intenção.
+backend resolve motorista e tenant antes de construir a intenção.
 
-A intenção canônica contém motorista, empresa, unidade, origem, destino, KM
-inicial, valor/modalidade, tonelagem, recebedor, placa e status inicial. Seu hash
-é persistido e não muda quando o frete evolui. A constraint única é escopada por
-`(empresa_id, client_request_id)`:
+A intenção canônica contém motorista, empresa, origem, destino, KM inicial,
+valor/modalidade, tonelagem, recebedor solicitado, unidade explicitamente
+solicitada e a opção de odômetro. Placa, unidade apenas derivada do motorista,
+recebedor resolvido e status são snapshots mutáveis do contexto e não entram no
+hash. Assim, uma alteração posterior nesses atributos não cria falso conflito,
+enquanto uma unidade explicitamente solicitada diferente continua sendo outra
+intenção. O hash é persistido e não muda quando o frete evolui. A constraint
+única é escopada por `(empresa_id, client_request_id)`:
 
 - mesma chave + mesmo hash no mesmo tenant: retorna o frete existente;
 - mesma chave + hash diferente no mesmo tenant: 409;
 - mesma chave em tenants diferentes: intenções independentes, sem leitura cruzada;
 - chaves diferentes: fretes diferentes;
 - corrida: a unicidade do banco escolhe uma linha; o perdedor relê no próprio tenant;
-- replay: não emite nova notificação.
+- replay: não emite nova notificação e só devolve a linha depois de revalidar
+  permission na rota, tenant, ownership e scope operacional atuais.
 
 O campo permanece opcional durante a janela de compatibilidade com clientes
 antigos. Os clientes do piloto sempre o enviam. Chamadores legados sem chave
 mantêm a semântica anterior e não recebem garantia de retry.
 
-## 5. OWNER_SCHEMA_GATE — proposta integral, não aplicada
+## 5. OWNER_SCHEMA_GATE — aprovado para criação e teste isolado
 
-### Decisão necessária
+### Decisão registrada
 
-Aprovar a migration aditiva abaixo antes de merge/deploy da correção de
-idempotência. Nenhum SQL foi executado em produção.
+O OWNER aprovou em 2026-10-16 a criação da migration 088 e sua validação somente
+em PostgreSQL isolado. A decisão não autoriza merge, deploy, configuração real ou
+aplicação em produção. Nenhum SQL desta migration foi executado em produção.
 
-### SQL proposto
+### SQL final
 
-```sql
--- 088_freight_creation_idempotency.sql (PROPOSTA; NAO APLICADA)
-ALTER TABLE public.fretes
-  ADD COLUMN IF NOT EXISTS client_request_id uuid,
-  ADD COLUMN IF NOT EXISTS creation_intent_hash text;
-
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint
-    WHERE conname = 'fretes_creation_intent_pair_check'
-      AND conrelid = 'public.fretes'::regclass
-  ) THEN
-    ALTER TABLE public.fretes
-      ADD CONSTRAINT fretes_creation_intent_pair_check
-      CHECK (
-        (client_request_id IS NULL AND creation_intent_hash IS NULL)
-        OR
-        (client_request_id IS NOT NULL AND creation_intent_hash ~ '^[0-9a-f]{64}$')
-      ) NOT VALID;
-  END IF;
-END $$;
-
-CREATE UNIQUE INDEX IF NOT EXISTS ux_fretes_empresa_client_request
-  ON public.fretes (empresa_id, client_request_id)
-  WHERE client_request_id IS NOT NULL;
-
-ALTER TABLE public.fretes
-  VALIDATE CONSTRAINT fretes_creation_intent_pair_check;
-```
+O conteúdo integral e executável está em
+[`backend/migrations/088_freight_creation_idempotency.sql`](../../../backend/migrations/088_freight_creation_idempotency.sql).
+A constraint foi corrigida para exigir explicitamente `creation_intent_hash IS
+NOT NULL`; isso fecha a semântica SQL em que uma expressão `CHECK` avaliada como
+`UNKNOWN` seria aceita. A migration também falha fechado quando encontra drift de
+tipo/default/nullability, definição da constraint ou estrutura do índice.
 
 ### Impacto e compatibilidade
 
@@ -172,10 +154,10 @@ ALTER TABLE public.fretes
 Depois que clientes gravarem chaves, preferir rollback do código mantendo as
 colunas aditivas; remover dados/colunas exigiria novo gate e janela própria.
 
-### Recomendação
+### Estado do gate
 
-Aprovar a migration aditiva e seus testes isolados. Não aprovar merge/deploy
-antes de o teste PG real comprovar a unicidade e a constraint.
+`APPROVED_FOR_ISOLATED_VALIDATION`. Merge/deploy e produção continuam bloqueados
+até a prova PostgreSQL real e o CI do HEAD exato ficarem verdes.
 
 ## 6. Recuperação e continuidade
 
@@ -217,31 +199,31 @@ Classificação usada: `PASS_EXECUTED`, `PASS_CI_VERIFIED`, `DOCUMENTED_ONLY`,
 
 Evidência executada nesta branch:
 
-- Backend focal: 27/27 (`PASS_EXECUTED`), incluindo reprodução original, retry
+- Backend focal: 34/34 (`PASS_EXECUTED`), incluindo reprodução original, retry
   sequencial, concorrência, conflito de payload, intenções distintas, isolamento
-  por tenant, schema e notificação única.
-- Backend completo: 2213/2213 (`PASS_EXECUTED`).
+  por tenant, autorização atual do replay, compatibilidade `forcedId`, schema e
+  notificação única.
+- Backend completo: 2220/2220 (`PASS_EXECUTED`).
 - Web focal: 2/2 (`PASS_EXECUTED`); suíte completa: 327/327
   (`PASS_EXECUTED`); build TypeScript/Vite concluído (`PASS_EXECUTED`).
 - Flutter focal: 3/3 (`PASS_EXECUTED`); suíte completa: 145/145
   (`PASS_EXECUTED`); `flutter analyze --no-pub` sem issues.
-- Banco real isolado e restore sintético: `BLOCKED_BY_ENVIRONMENT`, pendentes do
-  `OWNER_SCHEMA_GATE` e de um PostgreSQL isolado (`psql`, Docker e URLs de teste
-  não estavam disponíveis).
+- Banco da migration 088: prova PostgreSQL 17 dedicada no workflow
+  `Freight Creation Idempotency 088 PG`; o resultado do HEAD exato é registrado
+  na Draft PR. Restore sintético completo permanece `BLOCKED_BY_ENVIRONMENT`.
 - Validação visual e aparelho físico: `NOT_EXECUTED`, reservados aos gates do OWNER.
 
 ## 9. Gates e limites
 
-- `OWNER_SCHEMA_GATE`: **PENDENTE**, proposta na seção 5.
+- `OWNER_SCHEMA_GATE`: **APROVADO PARA TESTE ISOLADO**, sem autorização de produção.
 - `OWNER_VISUAL_GATE`: pendente para a ação web/Flutter.
-- `OWNER_MOBILE_DEVICE_GATE`: pendente; nenhum APK release foi gerado/distribuído.
+- `OWNER_MOBILE_DEVICE_GATE`: pendente; nenhum APK foi publicado/distribuído.
 - `OWNER_PRODUCTION_GATE`: pendente; zero mutações/deploys.
 - `OWNER_MERGE_GATE`: pendente; a PR deve permanecer Draft.
 - `OWNER_PILOT_GO_LIVE_GATE`: pendente; nenhum piloto real iniciado.
 
 ## 10. Critério de encerramento
 
-Estado máximo antes do gate de schema: `BLOCKED_BY_OWNER_GATE`. Depois da aprovação,
-aplicação em ambiente isolado e CI verde do HEAD exato, o estado pode avançar para
-`CI_VALIDATED_PENDING_OWNER_VISUAL`. `ATIVO_PROD` e `OPERATIONAL_PILOT_READY` não
-se aplicam a esta Draft PR.
+Depois da aplicação em ambiente isolado e CI verde do HEAD exato, o estado pode
+avançar para `CI_VALIDATED_PENDING_OWNER_VISUAL`. `ATIVO_PROD` e
+`OPERATIONAL_PILOT_READY` não se aplicam a esta Draft PR.
