@@ -176,17 +176,27 @@ test('PA-037 usa Auth, PostgREST, Storage e RLS oficiais em Supabase CLI descart
       assert.ifError(error);
       createdUsers.push(data.user.id);
     }
-    await db.query(`
-      INSERT INTO public.usuarios(id,empresa_id,tipo,status)
-      VALUES ($1,$3,'motorista','ativo'),($2,$4,'motorista','ativo');
-      INSERT INTO public.motoristas(id,empresa_id,placa_veiculo,percentual_comissao)
-      VALUES ($1,$3,'AAA1A11',10),($2,$4,'BBB2B22',10);
-      INSERT INTO public.fretes(id,motorista_id,empresa_id,origem,destino,status)
-      VALUES ($5,$1,$3,'A','B','ativo'),($6,$2,$4,'C','D','ativo');
-      INSERT INTO public.frete_documentos(frete_id,empresa_id,tipo,storage_path)
-      VALUES ($5,$3,'cte','tenant-a/a.pdf'),($6,$4,'cte','tenant-b/b.pdf');
-      NOTIFY pgrst, 'reload schema';
-    `, [createdUsers[0], createdUsers[1], ids.tenantA, ids.tenantB, ids.freightA, ids.freightB]);
+    await db.query(
+      `INSERT INTO public.usuarios(id,empresa_id,tipo,status)
+       VALUES ($1,$2,'motorista','ativo'),($3,$4,'motorista','ativo')`,
+      [createdUsers[0], ids.tenantA, createdUsers[1], ids.tenantB],
+    );
+    await db.query(
+      `INSERT INTO public.motoristas(id,empresa_id,placa_veiculo,percentual_comissao)
+       VALUES ($1,$2,'AAA1A11',10),($3,$4,'BBB2B22',10)`,
+      [createdUsers[0], ids.tenantA, createdUsers[1], ids.tenantB],
+    );
+    await db.query(
+      `INSERT INTO public.fretes(id,motorista_id,empresa_id,origem,destino,status)
+       VALUES ($1,$2,$3,'A','B','ativo'),($4,$5,$6,'C','D','ativo')`,
+      [ids.freightA, createdUsers[0], ids.tenantA, ids.freightB, createdUsers[1], ids.tenantB],
+    );
+    await db.query(
+      `INSERT INTO public.frete_documentos(frete_id,empresa_id,tipo,storage_path)
+       VALUES ($1,$2,'cte','tenant-a/a.pdf'),($3,$4,'cte','tenant-b/b.pdf')`,
+      [ids.freightA, ids.tenantA, ids.freightB, ids.tenantB],
+    );
+    await db.query("NOTIFY pgrst, 'reload schema'");
     await new Promise((resolve) => setTimeout(resolve, 1000));
 
     await t.test('Auth real emite sessoes distintas', async () => {
