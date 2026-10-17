@@ -1733,7 +1733,7 @@ class ApiService {
   static Future<Map<String, dynamic>> createFrete(
       Map<String, dynamic> data) async {
     try {
-      final response = await http
+      final response = await _httpClient
           .post(
             Uri.parse('$_baseUrl/fretes'),
             headers: await _getHeaders(),
@@ -1756,10 +1756,19 @@ class ApiService {
           msg = '${primeiro['mensagem']} (campo: ${primeiro['campo'] ?? '?'})';
         }
       }
-      return {'ok': false, 'message': msg};
+      return {
+        'ok': false,
+        'status': response.statusCode,
+        'message': msg,
+      };
     } catch (e) {
       AppLogger.error('ApiService', 'POST /fretes exception', e);
-      return {'ok': false, 'message': _mensagemErroRede(e)};
+      return {
+        'ok': false,
+        'status': 0,
+        'ambiguous': true,
+        'message': _mensagemErroRede(e),
+      };
     }
   }
 

@@ -583,7 +583,6 @@ export const GerenciamentoViagens: React.FC = () => {
 
   const openNewModal = (motId?: string) => {
     if (!canCreateFreight) return;
-    clearFreightCreationRequest(freightCreationRequestRef);
     setEditingFrete(null);
     setCorrecaoFinanceiraReason('');
     limparRequestIdFreteFinancialCorrection(correcaoFinanceiraRequestRef);
@@ -867,6 +866,14 @@ export const GerenciamentoViagens: React.FC = () => {
         limparRequestIdFreteFinancialCorrection(correcaoFinanceiraRequestRef);
         if (filterMot !== 'todos') { await loadMotoristaData(filterMot); } else { await loadData(); }
         alert(data.message || 'Este frete foi alterado por outra operacao. Atualize os dados e tente novamente.');
+        return;
+      }
+      if (!editingFrete && (!err.response || err.code === 'ECONNABORTED')) {
+        alert(
+          'O resultado da criação ainda é incerto. O servidor pode ter concluído o frete. ' +
+          'Mantenha os mesmos dados e clique em Salvar novamente: a mesma chave será reutilizada ' +
+          'para consultar ou concluir a intenção sem duplicar o frete.',
+        );
         return;
       }
       // PR-G2: mostra o(s) campo(s) inválido(s) que o backend devolve em errors[], em vez de

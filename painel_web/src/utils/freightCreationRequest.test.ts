@@ -27,4 +27,17 @@ describe('freight creation request identity', () => {
     clearFreightCreationRequest(ref);
     expect(getFreightCreationRequestId(ref, { origem: 'B' }, newId)).toBe('request-3');
   });
+
+  it('reuses the pending key after the modal or route is remounted', () => {
+    const firstMount = { current: null as FreightCreationRequestState | null };
+    const secondMount = { current: null as FreightCreationRequestState | null };
+    let sequence = 0;
+    const newId = () => `request-${++sequence}`;
+    const payload = { origem: 'A', destino: 'B', valor_frete: 100 };
+
+    expect(getFreightCreationRequestId(firstMount, payload, newId)).toBe('request-1');
+    expect(getFreightCreationRequestId(secondMount, payload, newId)).toBe('request-1');
+    expect(sequence).toBe(1);
+    clearFreightCreationRequest(secondMount);
+  });
 });

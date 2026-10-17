@@ -2,11 +2,11 @@ import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 import '../services/app_logger.dart';
 import '../services/document_scanner_service.dart';
+import '../services/freight_creation_intent_memory.dart';
 import '../services/location_tracking_service.dart';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:uuid/uuid.dart';
 
 class _DocumentoPendente {
   final String tipo;
@@ -28,10 +28,6 @@ class AddFreteScreen extends StatefulWidget {
 }
 
 class _AddFreteScreenState extends State<AddFreteScreen> {
-  // Uma tela aberta representa uma intencao de criacao. O UUID permanece
-  // estavel durante retries, inclusive quando o servidor conclui o POST e a
-  // resposta se perde antes de chegar ao aparelho.
-  final String _clientRequestId = const Uuid().v4();
   final _origemCtrl = TextEditingController();
   final _destinoCtrl = TextEditingController();
   final _kmCtrl = TextEditingController();
@@ -105,7 +101,6 @@ class _AddFreteScreenState extends State<AddFreteScreen> {
     }
 
     final payload = <String, dynamic>{
-      'client_request_id': _clientRequestId,
       'origem': _origemCtrl.text.trim(),
       'destino': _destinoCtrl.text.trim(),
       'valor_frete': valorFrete,
@@ -113,6 +108,7 @@ class _AddFreteScreenState extends State<AddFreteScreen> {
       'odometro_obrigatorio': true,
     };
     payload['km_inicial'] = kmInicial;
+    payload['client_request_id'] = FreightCreationIntentMemory.obtain(payload);
 
     try {
       String freteId;
@@ -124,8 +120,9 @@ class _AddFreteScreenState extends State<AddFreteScreen> {
         final resultado = await ApiService.createFrete(payload);
         if (!mounted) return;
         if (resultado['ok'] != true) {
-          final msg =
-              resultado['message'] as String? ?? 'Erro ao salvar frete.';
+          final msg = resultado['ambiguous'] == true
+              ? 'O resultado da criação ainda é incerto. O servidor pode ter concluído o frete. Mantenha os mesmos dados e toque em Salvar novamente para reconciliar sem duplicar.'
+              : resultado['message'] as String? ?? 'Erro ao salvar frete.';
           AppLogger.warning('AddFrete', msg);
           ScaffoldMessenger.of(context)
               .showSnackBar(SnackBar(content: Text(msg)));
@@ -182,6 +179,7 @@ class _AddFreteScreenState extends State<AddFreteScreen> {
       }
 
       AppLogger.action('frete_save_ok');
+      FreightCreationIntentMemory.clear();
       final messenger = ScaffoldMessenger.of(context);
       Navigator.pop(context, true);
       if (documentosComFalha > 0) {
