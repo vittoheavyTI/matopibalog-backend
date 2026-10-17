@@ -202,7 +202,10 @@ test('PA-037 usa Auth, PostgREST, Storage e RLS oficiais em Supabase CLI descart
     await t.test('Auth real emite sessoes distintas', async (authTest) => {
       const sessions = [];
       for (const credential of credentials) {
-        const { data, error } = await anon.auth.signInWithPassword(credential);
+        const authClient = createClient(API_URL, ANON_KEY, {
+          auth: { persistSession: false, autoRefreshToken: false },
+        });
+        const { data, error } = await authClient.auth.signInWithPassword(credential);
         assert.ifError(error);
         assert.ok(data.session?.access_token);
         sessions.push(data.session.access_token);
