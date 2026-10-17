@@ -3,6 +3,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Plus, X, Search, Filter, Truck, MapPin, Calendar, DollarSign, Gauge, Trash2, Edit, Check, AlertTriangle, ChevronLeft, ChevronDown, ChevronRight, Fuel, FileText, TrendingUp, Save, Unlock, Lock, Camera, Upload, Ban, Download, ShieldCheck, CheckCircle2 } from 'lucide-react';
 import { useLancamentosRealtime } from '../hooks/useLancamentosRealtime';
 import { usePermissions } from '../hooks/usePermissions';
+import { useAuth } from '../contexts/AuthContext';
 import { format } from 'date-fns';
 import { formatCurrency } from '../utils';
 import api, { newClientRequestId } from '../api';
@@ -17,8 +18,10 @@ import {
   type FreteFinancialCorrectionRequestState,
 } from '../utils/freteFinancialCorrectionRequest';
 import {
-  clearFreightCreationRequest,
-  getFreightCreationRequestId,
+  completeFreightCreationRequest,
+  getFreightCreationRequest,
+  markFreightCreationAmbiguous,
+  markFreightCreationCreated,
   type FreightCreationRequestState,
 } from '../utils/freightCreationRequest';
 import { PlanoBloqueadoCard } from '../components/PlanoBloqueadoCard';
@@ -67,6 +70,7 @@ const numeroIgual = (a: unknown, b: unknown): boolean => {
 
 export const GerenciamentoViagens: React.FC = () => {
   const { can } = usePermissions();
+  const { user } = useAuth();
   const canCreateFreight = can('freight.create');
   const [fretes, setFretes] = useState<any[]>([]);
   const [motoristas, setMotoristas] = useState<any[]>([]);
@@ -583,7 +587,6 @@ export const GerenciamentoViagens: React.FC = () => {
 
   const openNewModal = (motId?: string) => {
     if (!canCreateFreight) return;
-    clearFreightCreationRequest(freightCreationRequestRef);
     setEditingFrete(null);
     setCorrecaoFinanceiraReason('');
     limparRequestIdFreteFinancialCorrection(correcaoFinanceiraRequestRef);
@@ -666,6 +669,7 @@ export const GerenciamentoViagens: React.FC = () => {
   };
 
   const handleSave = async () => {
+    let currentCreationIntent: FreightCreationRequestState | null = null;
     // Validação client-side dos obrigatórios (paridade com o modal do Dashboard). Bloqueia antes
     // de chamar o backend. Motorista só é exigido na CRIAÇÃO — na edição vem do frete e o campo é
     // oculto. KM, data, status e quem_recebeu seguem opcionais.
@@ -804,18 +808,28 @@ export const GerenciamentoViagens: React.FC = () => {
           ...payloadCriacao,
           motorista_id: formData.motorista_id,
         };
-        const clientRequestId = getFreightCreationRequestId(
+        currentCreationIntent = await getFreightCreationRequest(
           freightCreationRequestRef,
           createPayload,
+          { tenantId: user?.empresa_id, userId: user?.uid },
           newClientRequestId,
         );
-        const criado = await api.post('/fretes', {
-          ...createPayload,
-          client_request_id: clientRequestId,
-        });
-        clearFreightCreationRequest(freightCreationRequestRef);
-        freteId = criado.data.id;
-        freteResultante = criado.data;
+        if (currentCreationIntent.confirmedFreightId) {
+          freteId = currentCreationIntent.confirmedFreightId;
+          freteResultante = { id: freteId };
+        } else {
+          const criado = await api.post('/fretes', {
+            ...createPayload,
+            client_request_id: currentCreationIntent.clientRequestId,
+          });
+          freteId = criado.data.id;
+          freteResultante = criado.data;
+          currentCreationIntent = markFreightCreationCreated(
+            currentCreationIntent,
+            freteId,
+          );
+          freightCreationRequestRef.current = currentCreationIntent;
+        }
       }
       if (fotoInicial) {
         try {
@@ -854,6 +868,12 @@ export const GerenciamentoViagens: React.FC = () => {
       if (!editingFrete && documentosNovoFrete.length > documentosComFalha) {
         await carregarDocumentosFrete(freteId);
       }
+      if (!editingFrete && currentCreationIntent) {
+        completeFreightCreationRequest(
+          freightCreationRequestRef,
+          currentCreationIntent,
+        );
+      }
       setShowModal(false);
       selecionarFotoInicial(null);
       setDocumentosNovoFrete([]);
@@ -867,6 +887,22 @@ export const GerenciamentoViagens: React.FC = () => {
         limparRequestIdFreteFinancialCorrection(correcaoFinanceiraRequestRef);
         if (filterMot !== 'todos') { await loadMotoristaData(filterMot); } else { await loadData(); }
         alert(data.message || 'Este frete foi alterado por outra operacao. Atualize os dados e tente novamente.');
+        return;
+      }
+      if (!editingFrete && currentCreationIntent &&
+          (!err.response || err.code === 'ECONNABORTED' || err.response?.status >= 500)) {
+        try {
+          currentCreationIntent = markFreightCreationAmbiguous(currentCreationIntent);
+        } catch (intentError: any) {
+          alert(intentError?.message || 'Nao foi possivel preservar a identidade da tentativa. Nenhum novo frete sera enviado ate a reconciliacao.');
+          return;
+        }
+        freightCreationRequestRef.current = currentCreationIntent;
+        alert(
+          'O resultado da criação ainda é incerto. O servidor pode ter concluído o frete. ' +
+          'Mantenha os mesmos dados e clique em Salvar novamente: a mesma chave será reutilizada ' +
+          'para consultar ou concluir a intenção sem duplicar o frete.',
+        );
         return;
       }
       // PR-G2: mostra o(s) campo(s) inválido(s) que o backend devolve em errors[], em vez de
@@ -890,6 +926,13 @@ export const GerenciamentoViagens: React.FC = () => {
       setReenviandoFotoInicial(true);
       await enviarFotoOdometro(alvo.frete.id, 'inicial', alvo.foto);
       if (filterMot !== 'todos') { await loadMotoristaData(filterMot); } else { await loadData(); }
+      const recoveredIntent = freightCreationRequestRef.current;
+      if (recoveredIntent && recoveredIntent.confirmedFreightId === alvo.frete.id) {
+        completeFreightCreationRequest(
+          freightCreationRequestRef,
+          recoveredIntent,
+        );
+      }
       setFreteFotoPendente(null);
       selecionarFotoInicial(null);
       alert('Foto do odômetro inicial enviada. O frete foi ativado.');

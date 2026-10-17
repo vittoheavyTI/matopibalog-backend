@@ -158,6 +158,7 @@ class ApiService {
   static SessionPersistence _sessionPersistence = SessionPersistence.memoryOnly;
   static Future<AuthRefreshResult>? _refreshInFlight;
   static http.Client _httpClient = http.Client();
+  static bool _allowInvalidEnvironmentForTesting = false;
 
   // Timeouts de rede. Sem eles, requisições em conexões lentas (4G/5G fraco) ou
   // com o backend "frio" (cold start do Railway) ficavam penduradas
@@ -243,6 +244,7 @@ class ApiService {
   @visibleForTesting
   static void setHttpClientForTesting(http.Client client) {
     _httpClient = client;
+    _allowInvalidEnvironmentForTesting = true;
   }
 
   @visibleForTesting
@@ -257,6 +259,7 @@ class ApiService {
     _refreshInFlight = null;
     _sessionPersistence = SessionPersistence.memoryOnly;
     _httpClient = http.Client();
+    _allowInvalidEnvironmentForTesting = false;
   }
 
   static String get baseUrl => _baseUrl;
@@ -1561,7 +1564,8 @@ class ApiService {
 
   /// Ofertas de despacho do PRÓPRIO motorista (identidade do token). [status] opcional
   /// filtra por PENDING/ACCEPTED/DECLINED/EXPIRED/LOST/CANCELLED.
-  static Future<List<dynamic>> getMinhasOfertasDispatch({String? status}) async {
+  static Future<List<dynamic>> getMinhasOfertasDispatch(
+      {String? status}) async {
     try {
       final params = <String, String>{};
       if (status != null) params['status'] = status;
@@ -1569,7 +1573,8 @@ class ApiService {
         '$_baseUrl/dispatch/my-offers',
       ).replace(queryParameters: params.isEmpty ? null : params);
       final response = await _getAutenticado(uri);
-      AppLogger.api('ApiService', 'GET /dispatch/my-offers', response.statusCode);
+      AppLogger.api(
+          'ApiService', 'GET /dispatch/my-offers', response.statusCode);
       if (response.statusCode == 200) {
         final body = jsonDecode(response.body);
         final itens = body is Map ? body['itens'] : null;
@@ -1590,7 +1595,8 @@ class ApiService {
 
   /// Aceita uma oferta de despacho própria. Primeiro aceite válido vence — um 409 aqui
   /// significa que outro motorista aceitou primeiro (ou a oferta expirou/foi cancelada).
-  static Future<Map<String, dynamic>> aceitarOfertaDispatch(String offerId) async {
+  static Future<Map<String, dynamic>> aceitarOfertaDispatch(
+      String offerId) async {
     final response = await _postJsonAutenticado(
       Uri.parse('$_baseUrl/dispatch/offers/$offerId/accept'),
       retryAfterAuthResponse: true,
@@ -1732,8 +1738,18 @@ class ApiService {
 
   static Future<Map<String, dynamic>> createFrete(
       Map<String, dynamic> data) async {
+    if (!Config.canCreateFreight && !_allowInvalidEnvironmentForTesting) {
+      return {
+        'ok': false,
+        'status': 0,
+        'ambiguous': false,
+        'environment_blocked': true,
+        'message': Config.validation.error ??
+            'Ambiente nao autorizado para criar fretes.',
+      };
+    }
     try {
-      final response = await http
+      final response = await _httpClient
           .post(
             Uri.parse('$_baseUrl/fretes'),
             headers: await _getHeaders(),
@@ -1756,10 +1772,20 @@ class ApiService {
           msg = '${primeiro['mensagem']} (campo: ${primeiro['campo'] ?? '?'})';
         }
       }
-      return {'ok': false, 'message': msg};
+      return {
+        'ok': false,
+        'status': response.statusCode,
+        'ambiguous': response.statusCode >= 500,
+        'message': msg,
+      };
     } catch (e) {
       AppLogger.error('ApiService', 'POST /fretes exception', e);
-      return {'ok': false, 'message': _mensagemErroRede(e)};
+      return {
+        'ok': false,
+        'status': 0,
+        'ambiguous': true,
+        'message': _mensagemErroRede(e),
+      };
     }
   }
 

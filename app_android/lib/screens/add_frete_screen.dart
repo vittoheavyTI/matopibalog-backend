@@ -2,11 +2,14 @@ import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 import '../services/app_logger.dart';
 import '../services/document_scanner_service.dart';
+import '../services/freight_creation_intent_memory.dart';
 import '../services/location_tracking_service.dart';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:uuid/uuid.dart';
+import 'package:provider/provider.dart';
+import '../config.dart';
+import '../providers/auth_provider.dart';
 
 class _DocumentoPendente {
   final String tipo;
@@ -28,10 +31,6 @@ class AddFreteScreen extends StatefulWidget {
 }
 
 class _AddFreteScreenState extends State<AddFreteScreen> {
-  // Uma tela aberta representa uma intencao de criacao. O UUID permanece
-  // estavel durante retries, inclusive quando o servidor conclui o POST e a
-  // resposta se perde antes de chegar ao aparelho.
-  final String _clientRequestId = const Uuid().v4();
   final _origemCtrl = TextEditingController();
   final _destinoCtrl = TextEditingController();
   final _kmCtrl = TextEditingController();
@@ -51,6 +50,17 @@ class _AddFreteScreenState extends State<AddFreteScreen> {
   }
 
   Future<void> _salvar() async {
+    if (!Config.canCreateFreight) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            Config.validation.error ??
+                'Criacao bloqueada: ambiente operacional nao autorizado.',
+          ),
+        ),
+      );
+      return;
+    }
     if (_origemCtrl.text.isEmpty ||
         _destinoCtrl.text.isEmpty ||
         _valorCtrl.text.isEmpty) {
@@ -105,7 +115,6 @@ class _AddFreteScreenState extends State<AddFreteScreen> {
     }
 
     final payload = <String, dynamic>{
-      'client_request_id': _clientRequestId,
       'origem': _origemCtrl.text.trim(),
       'destino': _destinoCtrl.text.trim(),
       'valor_frete': valorFrete,
@@ -113,19 +122,35 @@ class _AddFreteScreenState extends State<AddFreteScreen> {
       'odometro_obrigatorio': true,
     };
     payload['km_inicial'] = kmInicial;
-
+    final auth = context.read<AuthProvider>();
     try {
+      var creationIntent = await FreightCreationIntentMemory.obtain(
+        payload,
+        tenantId: auth.empresaId,
+        userId: auth.uid,
+      );
+      payload['client_request_id'] = creationIntent.clientRequestId;
       String freteId;
       if (_fretePendenteId != null) {
         // Retentativa: o frete já foi criado numa tentativa anterior cujo upload
         // falhou. Reenvia SÓ a foto para o mesmo id — nunca cria outro frete.
         freteId = _fretePendenteId!;
+      } else if (creationIntent.confirmedFreightId != null) {
+        // O POST ja foi confirmado antes da tela/processo ser reconstruido.
+        // Retoma os efeitos seguintes usando o mesmo frete, sem novo POST.
+        freteId = creationIntent.confirmedFreightId!;
       } else {
         final resultado = await ApiService.createFrete(payload);
         if (!mounted) return;
         if (resultado['ok'] != true) {
-          final msg =
-              resultado['message'] as String? ?? 'Erro ao salvar frete.';
+          if (resultado['ambiguous'] == true) {
+            creationIntent =
+                await FreightCreationIntentMemory.markAmbiguous(creationIntent);
+            if (!mounted) return;
+          }
+          final msg = resultado['ambiguous'] == true
+              ? 'O resultado da criação ainda é incerto. O servidor pode ter concluído o frete. Mantenha os mesmos dados e toque em Salvar novamente para reconciliar sem duplicar.'
+              : resultado['message'] as String? ?? 'Erro ao salvar frete.';
           AppLogger.warning('AddFrete', msg);
           ScaffoldMessenger.of(context)
               .showSnackBar(SnackBar(content: Text(msg)));
@@ -135,6 +160,10 @@ class _AddFreteScreenState extends State<AddFreteScreen> {
         if (freteId.isEmpty) {
           throw StateError('Backend não retornou o identificador do frete.');
         }
+        creationIntent = await FreightCreationIntentMemory.markCreated(
+          creationIntent,
+          freteId,
+        );
       }
 
       final rastreamentoOk = await _prepararRastreamentoAntesDoInicio();
@@ -182,6 +211,8 @@ class _AddFreteScreenState extends State<AddFreteScreen> {
       }
 
       AppLogger.action('frete_save_ok');
+      await FreightCreationIntentMemory.complete(creationIntent);
+      if (!mounted) return;
       final messenger = ScaffoldMessenger.of(context);
       Navigator.pop(context, true);
       if (documentosComFalha > 0) {
@@ -198,6 +229,12 @@ class _AddFreteScreenState extends State<AddFreteScreen> {
           const SnackBar(content: Text('Frete registrado com sucesso!')),
         );
       }
+    } on FreightCreationIntentSafetyException catch (e) {
+      AppLogger.warning('AddFrete', e.message);
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
+      }
     } catch (e) {
       AppLogger.error('AddFrete', 'erro_conexao', e);
       if (mounted) {
@@ -210,7 +247,9 @@ class _AddFreteScreenState extends State<AddFreteScreen> {
   }
 
   Future<bool> _prepararRastreamentoAntesDoInicio() async {
+    // dart format off
     final result = await LocationTrackingService.prepareForTripStart(requestPermission: false);
+    // dart format on
     if (result == LocationTrackingStartResult.started) return true;
     if (!mounted) return false;
     final msg = _mensagemRastreamento(result);
@@ -327,8 +366,9 @@ class _AddFreteScreenState extends State<AddFreteScreen> {
     if (resultado.cancelado) return;
     if (!resultado.ok || resultado.caminhos.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(resultado.mensagem ??
-            'Não foi possível escanear. Anexe um arquivo.')),
+        SnackBar(
+            content: Text(resultado.mensagem ??
+                'Não foi possível escanear. Anexe um arquivo.')),
       );
       return;
     }

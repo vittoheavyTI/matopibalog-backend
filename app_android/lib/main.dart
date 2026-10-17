@@ -13,6 +13,7 @@ import 'services/offline_sync.dart';
 import 'services/push_service.dart';
 import 'services/location_tracking_service.dart';
 import 'widgets/app_update_gate.dart';
+import 'config.dart';
 
 /// Navigator global — permite ao PushService abrir a tela de Notificações ao
 /// tocar num push, mesmo fora da árvore de widgets.
@@ -89,7 +90,9 @@ class MatopibaLogApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Matopiba Log',
+      title: Config.showNonProductionMarker
+          ? 'Matopiba Log ${Config.environmentLabel}'
+          : 'Matopiba Log',
       navigatorKey: rootNavigatorKey,
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
@@ -118,7 +121,8 @@ class MatopibaLogApp extends StatelessWidget {
         textButtonTheme: TextButtonThemeData(
           style: TextButton.styleFrom(
             foregroundColor: const Color(0xFF1B5E20),
-            textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+            textStyle:
+                const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
           ),
         ),
         inputDecorationTheme: InputDecorationTheme(
@@ -164,7 +168,8 @@ class MatopibaLogApp extends StatelessWidget {
         textButtonTheme: TextButtonThemeData(
           style: TextButton.styleFrom(
             foregroundColor: Colors.white,
-            textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+            textStyle:
+                const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
           ),
         ),
         inputDecorationTheme: InputDecorationTheme(
@@ -185,6 +190,16 @@ class MatopibaLogApp extends StatelessWidget {
         ),
       ),
       themeMode: context.watch<ThemeProvider>().themeMode,
+      builder: (context, child) {
+        if (child == null) return const SizedBox.shrink();
+        if (!Config.showNonProductionMarker) return child;
+        return Banner(
+          message: Config.environmentLabel,
+          location: BannerLocation.topEnd,
+          color: const Color(0xFFC62828),
+          child: child,
+        );
+      },
       // Gate de versão (MOBILE-M1-008): envolve o home para que uma atualização
       // OBRIGATÓRIA bloqueie o app mesmo antes do login. Recommended/optional
       // apenas avisam. Fallback seguro: falha de rede não bloqueia.
@@ -242,7 +257,8 @@ class _SplashBody extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Image.asset('assets/LOGOMARCA.png', height: 120, fit: BoxFit.contain),
+            Image.asset('assets/LOGOMARCA.png',
+                height: 120, fit: BoxFit.contain),
             const SizedBox(height: 32),
             const CircularProgressIndicator(),
           ],

@@ -17,6 +17,7 @@ if (googleServicesJson.exists()) {
 }
 
 android {
+    val homologationBuild = System.getenv("MATOPIBA_HOMOLOGATION_BUILD") == "1"
     // namespace mantido no pacote de codigo original para nao mover MainActivity.kt
     // agora (a renomeacao do pacote de codigo faz parte do rebranding chofer->matopiba).
     // O applicationId (identidade do app / Firebase) ja e o definitivo abaixo.
@@ -42,7 +43,16 @@ android {
         // Application ID definitivo de producao (reverse-DNS do dominio
         // matopibalog.com.br). O Firebase e registrado contra este id e o
         // google-services.json deve casar com ele.
-        applicationId = "br.com.matopibalog.app"
+        applicationId = if (homologationBuild) {
+            "br.com.matopibalog.app.homologation"
+        } else {
+            "br.com.matopibalog.app"
+        }
+        manifestPlaceholders["appLabel"] = if (homologationBuild) {
+            "Matopiba Log Homologacao"
+        } else {
+            "Matopiba Log"
+        }
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion

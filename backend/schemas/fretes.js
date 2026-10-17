@@ -51,6 +51,7 @@ const createFreteSchema = z.object({
   valor_tonelada_km: vazioComoIndefinido(z.coerce.number({ invalid_type_error: 'Valor por tonelada/km deve ser um número.' }).positive('Valor por tonelada/km deve ser maior que zero.').optional()),
   quem_recebeu: z.enum(['proprietario', 'motorista']).optional(),
   motorista_id: z.string().uuid('ID do motorista inválido.').optional(),
+  unidade_operacional_id: z.string().uuid('ID da unidade operacional inválido.').optional(),
   odometro_obrigatorio: z.boolean().optional(),
 }).superRefine((data, ctx) => aplicarRegraModalidade(data, ctx, { exigirValorFixo: true }));
 

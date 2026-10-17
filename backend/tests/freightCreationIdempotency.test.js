@@ -251,6 +251,12 @@ test('forcedId e client_request_id nao podem disputar autoridade na mesma criaca
 test('schema aceita UUID de intenção e rejeita chave inválida', () => {
   assert.equal(createFreteSchema.safeParse(baseBody({ client_request_id: REQUEST_A })).success, true);
   assert.equal(createFreteSchema.safeParse(baseBody({ client_request_id: 'chave-fraca' })).success, false);
+  const scoped = createFreteSchema.safeParse(baseBody({
+    unidade_operacional_id: '30000000-0000-4000-8000-000000000001',
+  }));
+  assert.equal(scoped.success, true);
+  assert.equal(scoped.data.unidade_operacional_id, '30000000-0000-4000-8000-000000000001');
+  assert.equal(createFreteSchema.safeParse(baseBody({ unidade_operacional_id: 'unidade-invalida' })).success, false);
 });
 
 test('controller notifica uma vez e revalida ownership e escopo no replay', async () => {

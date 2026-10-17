@@ -35,6 +35,7 @@ class AuthProvider extends ChangeNotifier {
     'user_nome',
     'user_role',
     'user_uid',
+    'user_empresa_id',
     'user_empresa_tipo',
   ];
 
@@ -46,6 +47,7 @@ class AuthProvider extends ChangeNotifier {
   String _error = '';
   String _fotoUrl = '';
   String _empresaTipo = '';
+  String _empresaId = '';
   bool _senhaTemporaria = false;
   bool _termosPendentes = false;
   int _termosPendentesCount = 0;
@@ -66,6 +68,7 @@ class AuthProvider extends ChangeNotifier {
   String get error => _error;
   String get fotoUrl => _fotoUrl;
   String get empresaTipo => _empresaTipo;
+  String get empresaId => _empresaId;
   bool get isAutonomo => _empresaTipo == 'autonomo';
   bool get senhaTemporaria => _senhaTemporaria;
   bool get termosPendentes => _termosPendentes;
@@ -90,11 +93,11 @@ class AuthProvider extends ChangeNotifier {
   /// (compat com backend/APK antigos).
   void _aplicarPermissoesEfetivas(Map<String, dynamic> profile) {
     final eff = profile['effective_permissions'];
-    _effectivePermissions = (eff is Map)
-        ? eff.map((k, v) => MapEntry(k.toString(), v))
-        : const {};
+    _effectivePermissions =
+        (eff is Map) ? eff.map((k, v) => MapEntry(k.toString(), v)) : const {};
     final vis = profile['driver_financial_visibility'];
-    _driverFinancialVisibility = (vis is String && vis.isNotEmpty) ? vis : 'commission_only';
+    _driverFinancialVisibility =
+        (vis is String && vis.isNotEmpty) ? vis : 'commission_only';
   }
 
   Future<void> tryAutoLogin() async {
@@ -130,6 +133,7 @@ class AuthProvider extends ChangeNotifier {
     _role = prefs.getString('user_role') ?? '';
     _uid = prefs.getString('user_uid') ?? '';
     _empresaTipo = prefs.getString('user_empresa_tipo') ?? '';
+    _empresaId = prefs.getString('user_empresa_id') ?? '';
 
     final resultado = await ApiService.getMeDetalhado();
     final profile = resultado.profile;
@@ -139,6 +143,7 @@ class AuthProvider extends ChangeNotifier {
       // Restaura empresaTipo do perfil (fonte mais confiável que SharedPreferences)
       _empresaTipo =
           (profile['empresas'] as Map?)?['tipo'] as String? ?? _empresaTipo;
+      _empresaId = profile['empresa_id']?.toString() ?? _empresaId;
       // Restaura senha_temporaria do perfil: sem isso, ao reabrir o app com token
       // salvo o flag seria false e o motorista pularia a tela de troca de senha.
       _senhaTemporaria = profile['senha_temporaria'] == true;
@@ -301,6 +306,7 @@ class AuthProvider extends ChangeNotifier {
     _uid = res['user']['uid'];
     _fotoUrl = res['user']['foto_url'] ?? '';
     _empresaTipo = res['user']['empresa_tipo'] as String? ?? '';
+    _empresaId = res['user']['empresa_id']?.toString() ?? '';
     _senhaTemporaria = res['user']['senha_temporaria'] == true;
 
     await ApiService.setSessionTokens(
@@ -316,6 +322,7 @@ class AuthProvider extends ChangeNotifier {
       await prefs.setString('user_nome', _nome);
       await prefs.setString('user_uid', _uid);
       await prefs.setString('user_empresa_tipo', _empresaTipo);
+      await prefs.setString('user_empresa_id', _empresaId);
     } else {
       await prefs.remove('token'); // legado em texto claro
       for (final k in _prefKeysSessao) {
@@ -333,6 +340,7 @@ class AuthProvider extends ChangeNotifier {
       _termosPendentesCount =
           (profile['termos_pendentes_count'] as num?)?.toInt() ?? 0;
       _aplicarPermissoesEfetivas(profile);
+      _empresaId = profile['empresa_id']?.toString() ?? _empresaId;
     }
 
     _status = AuthStatus.authenticated;
@@ -384,6 +392,7 @@ class AuthProvider extends ChangeNotifier {
     _role = '';
     _uid = '';
     _empresaTipo = '';
+    _empresaId = '';
     _senhaTemporaria = false;
     _termosPendentes = false;
     _termosPendentesCount = 0;
