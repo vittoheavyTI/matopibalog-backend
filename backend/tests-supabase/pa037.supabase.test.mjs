@@ -199,7 +199,7 @@ test('PA-037 usa Auth, PostgREST, Storage e RLS oficiais em Supabase CLI descart
     await db.query("NOTIFY pgrst, 'reload schema'");
     await new Promise((resolve) => setTimeout(resolve, 1000));
 
-    await t.test('Auth real emite sessoes distintas', async () => {
+    await t.test('Auth real emite sessoes distintas', async (authTest) => {
       const sessions = [];
       for (const credential of credentials) {
         const { data, error } = await anon.auth.signInWithPassword(credential);
@@ -210,7 +210,7 @@ test('PA-037 usa Auth, PostgREST, Storage e RLS oficiais em Supabase CLI descart
       const clientA = authenticatedClient(sessions[0]);
       const clientB = authenticatedClient(sessions[1]);
 
-      await t.test('PostgREST aplica as policies reais 015 e 026 por tenant', async () => {
+      await authTest.test('PostgREST aplica as policies reais 015 e 026 por tenant', async () => {
         const { data: anonymousFreights, error: anonymousError } = await anon.from('fretes').select('id');
         assert.ifError(anonymousError);
         assert.deepEqual(anonymousFreights, []);
@@ -228,7 +228,7 @@ test('PA-037 usa Auth, PostgREST, Storage e RLS oficiais em Supabase CLI descart
         assert.deepEqual(documentsA.map((row) => row.storage_path), ['tenant-a/a.pdf']);
       });
 
-      await t.test('Storage real preserva bucket publico e bloqueia buckets privados', async () => {
+      await authTest.test('Storage real preserva bucket publico e bloqueia buckets privados', async () => {
         for (const bucket of createdBuckets) {
           const { error } = await service.storage.createBucket(bucket, {
             public: bucket === 'comprovantes',
