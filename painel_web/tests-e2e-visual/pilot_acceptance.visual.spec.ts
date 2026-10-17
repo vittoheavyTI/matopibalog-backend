@@ -54,13 +54,12 @@ test('PA-022/047/054: resposta perdida mantém a mesma intenção após reabrir 
 
   await page.getByRole('button', { name: 'Novo Frete' }).click();
   await preencherFrete(page);
-  let mensagemAviso = '';
-  page.once('dialog', async (dialog) => {
-    mensagemAviso = dialog.message();
-    await dialog.accept();
-  });
-  await page.getByRole('button', { name: 'Salvar', exact: true }).click();
-  expect(mensagemAviso).toContain('resultado da criação ainda é incerto');
+  const dialogPromise = page.waitForEvent('dialog');
+  const submitPromise = page.getByRole('button', { name: 'Salvar', exact: true }).click();
+  const dialog = await dialogPromise;
+  expect(dialog.message()).toContain('resultado da criação ainda é incerto');
+  await dialog.accept();
+  await submitPromise;
 
   await page.locator('.fixed.inset-0').locator('button').first().click();
   await page.getByRole('button', { name: 'Novo Frete' }).click();
