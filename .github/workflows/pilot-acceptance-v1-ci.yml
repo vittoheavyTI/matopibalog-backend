@@ -103,7 +103,49 @@ jobs:
           cache: npm
           cache-dependency-path: backend/package-lock.json
       - run: npm ci --no-audit --no-fund
-      - run: node --test --test-concurrency=1 tests-pg/pilot_acceptance_api_e2e.pgtest.mjs
+      - run: >-
+          node --test --test-concurrency=1
+          tests-pg/pilot_acceptance_api_e2e.pgtest.mjs
+          tests-pg/pilot_acceptance_canonical_route.pgtest.mjs
+
+  supabase-isolated:
+    name: Supabase CLI isolated Auth, PostgREST, Storage and RLS
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: backend/.nvmrc
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Start pinned official Supabase services
+        run: >-
+          npx --yes supabase@2.121.0 start
+          --workdir tests-supabase
+          --exclude studio,imgproxy,realtime,mailpit,postgres-meta,edge-runtime,logflare,vector,supavisor
+      - name: Export ephemeral local identity
+        shell: bash
+        run: |
+          eval "$(npx --yes supabase@2.121.0 status --workdir tests-supabase -o env)"
+          {
+            echo "PA037_SUPABASE_API_URL=$API_URL"
+            echo "PA037_SUPABASE_DB_URL=$DB_URL"
+            echo "PA037_SUPABASE_ANON_KEY=$ANON_KEY"
+            echo "PA037_SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY"
+            echo "PA037_ISOLATED_SUPABASE=1"
+          } >> "$GITHUB_ENV"
+      - name: Exercise official Auth, PostgREST, Storage and repository RLS
+        run: node --test --test-concurrency=1 tests-supabase/pa037.supabase.test.mjs
+      - name: Destroy local Supabase volumes
+        if: always()
+        run: npx --yes supabase@2.121.0 stop --workdir tests-supabase --no-backup
 
   frontend:
     name: Frontend tests, build and pilot browser
@@ -210,6 +252,14 @@ jobs:
             echo "::error::Railway production target was accepted"
             exit 1
           fi
+          if dart run tool/verify_build_environment.dart APP_ENV=homologation API_BASE_URL=https://api.homologacao.example HOMOLOGATION_BACKEND_VERIFIED=true REQUIRE_WRITES=true; then
+            echo "::error::Build declaration enabled writes without runtime identity attestation"
+            exit 1
+          fi
+          if dart run tool/verify_build_environment.dart APP_ENV=homologation API_BASE_URL=https://api.matopibalog.com.br HOMOLOGATION_BACKEND_VERIFIED=true REQUIRE_WRITES=true; then
+            echo "::error::Custom production domain enabled homologation writes"
+            exit 1
+          fi
           dart run tool/verify_build_environment.dart APP_ENV=homologation API_BASE_URL=https://homologacao.invalid HOMOLOGATION_BACKEND_VERIFIED=false
       - name: Build safe homologation APK (test-signed, writes blocked)
         env:
@@ -226,10 +276,14 @@ jobs:
           AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)
           "$AAPT" dump badging "$APK" | grep -F "package: name='br.com.matopibalog.app.homologation'"
           "$AAPT" dump badging "$APK" | grep -F "application-label:'Matopiba Log Homologacao'"
-          if grep -aF "matopibalog-backend-production.up.railway.app" "$APK"; then
-            echo "::error::Production Railway endpoint found in homologation APK"
-            exit 1
-          fi
+          for PRODUCTION_ENDPOINT in \
+            "matopibalog-backend-production.up.railway.app" \
+            "api.matopibalog.com.br"; do
+            if grep -aF "$PRODUCTION_ENDPOINT" "$APK"; then
+              echo "::error::Production endpoint found in homologation APK: $PRODUCTION_ENDPOINT"
+              exit 1
+            fi
+          done
           sha256sum "$APK" | tee build/app/outputs/flutter-apk/app-release.apk.sha256
       - uses: actions/upload-artifact@v4
         with:
