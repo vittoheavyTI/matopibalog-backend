@@ -281,9 +281,9 @@ A autenticação desse teste é `SYNTHETIC_TEST_AUTH`, declarada e limitada ao p
 | INT-025 | PASS | Workflow compila apenas identidade de homologação | Workflow dedicado |
 | INT-026 | PASS | Manifesto, label e banner `HOMOLOGACAO` | Sem aceite humano |
 | INT-027 | PASS | Registro contém somente hashes/UUID; scan de diff/APK | Sem credencial comercial |
-| INT-028 | PENDING_CI | Regressões forcedId/comissão/E3.8/SEC-1 no HEAD final | Depende do CI final |
+| INT-028 | PASS | CI: backend completo, migration 088, frontend e SEC-1 verdes | Sem produção |
 
-Resumo provisório antes do CI final: `PASS=27`, `FAIL=0`, `BLOCKED=0`, `PENDING_CI=1`.
+Resumo após o CI de implementação: `PASS=28`, `FAIL=0`, `BLOCKED=0`, `NOT_EXECUTED=0`.
 
 ## PA-037 — Storage/RLS
 
@@ -302,13 +302,15 @@ Quando um endpoint isolado for aprovado, gerar novo APK com o mesmo application 
 Validação local no executor Windows:
 
 - backend completo: 2.220/2.220;
-- migration 088 focal sem PostgreSQL local: guard 15/15; execução real reservada ao serviço PostgreSQL 17 do CI;
-- API E2E: guard negativo aprovado; execução HTTP+PostgreSQL real reservada ao serviço PostgreSQL 17 do CI;
+- migration 088 focal local: guard 15/15; execução real aprovada no serviço PostgreSQL 17 descartável do CI;
+- API E2E: guard negativo local aprovado e 7/7 testes HTTP+PostgreSQL 17 reais aprovados no CI;
 - web focal: 5/5;
 - Playwright piloto: 2/2, com reload completo e rede externa bloqueada;
 - build web: aprovado; o Node 20.18 local emitiu aviso de versão mínima do Vite, enquanto o CI usa a versão de `.nvmrc`;
 - Flutter: 153/153 e `flutter analyze` sem achados;
 - frontend completo local: 324/330 na execução conjunta por seis timeouts em três arquivos sob saturação do executor; os mesmos três arquivos passaram 24/24 isoladamente com timeout ampliado. A execução Linux do CI permanece autoridade da regressão completa.
+
+O HEAD de implementação `3019f41dd8c0d2acc579e7d7b68018f479e6c076` passou os seis jobs do workflow `Pilot Acceptance V1`, run `38996432587`: backend completo, migration 088/PostgreSQL 17, API E2E/PostgreSQL 17, frontend+Playwright, SEC-1/PostgreSQL 16 e Flutter+APK. O APK gerado foi validado como `br.com.matopibalog.app.homologation`, `versionCode=1`, `versionName=1.0.0`, label `Matopiba Log Homologacao` e SHA-256 `e87015e5b481a7e7d1e166b95aa830397a0e25d56694f8c4d368345a129f6dfb`.
 
 Arquivos alterados ficam limitados ao workflow desta macrofrente, ao novo harness PostgreSQL, à configuração/identidade e continuidade Flutter, à continuidade web, aos testes correspondentes e a este documento. Migration 088 e código de autenticação/negócio do backend não foram modificados.
 
@@ -316,8 +318,9 @@ Commits de implementação:
 
 - `61893b4` — `fix(pilot): harden apk and freight intent continuity`;
 - `61d76c0` — `test(pilot): add real HTTP PostgreSQL acceptance E2E`.
+- `3019f41` — `docs(pilot): record hardening closure evidence`.
 
-O resultado do CI do HEAD publicado será registrado após o push, sem reescrever a evidência histórica acima.
+Artefatos sanitizados do run `38996432587`: `pilot-acceptance-browser-evidence` e `pilot-acceptance-homologation-safe-apk`, ambos com retenção de 14 dias.
 
 ## Gates preservados
 
