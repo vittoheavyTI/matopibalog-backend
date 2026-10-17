@@ -62,7 +62,23 @@ void main() {
       isolationVerified: true,
     );
     expect(operational.valid, isTrue);
-    expect(operational.writesAllowed, isTrue);
+    expect(operational.writesAllowed, isFalse);
+    expect(operational.error, contains('identidade do backend'));
+  });
+
+  test('dominio customizado e flag de build nao habilitam escrita sem atestacao runtime', () {
+    for (final endpoint in [
+      'https://api.homologacao.example',
+      'https://api.matopibalog.com.br',
+    ]) {
+      final validation = Config.validateValues(
+        environment: 'homologation',
+        endpoint: endpoint,
+        isolationVerified: true,
+      );
+      expect(validation.valid, isTrue);
+      expect(validation.writesAllowed, isFalse);
+    }
   });
 
   test('reinicio do processo recupera a mesma chave no secure storage',
@@ -160,6 +176,159 @@ void main() {
     expect(serialized, isNot(contains('origem')));
     expect(serialized, isNot(contains('tenant-a')));
     expect(serialized, isNot(contains('user-a')));
+  });
+
+  test('RET-011/012 oito pendencias sao preservadas e a nona falha fechada',
+      () async {
+    for (var index = 0; index < 8; index++) {
+      final intent = await FreightCreationIntentMemory.obtain(
+        {'origem': 'route-$index'},
+        tenantId: 'tenant-a',
+        userId: 'user-a',
+        newId: () => 'request-$index',
+      );
+      await FreightCreationIntentMemory.markAmbiguous(intent);
+    }
+    await expectLater(
+      FreightCreationIntentMemory.obtain(
+        {'origem': 'route-9'},
+        tenantId: 'tenant-a',
+        userId: 'user-a',
+        newId: () => 'request-9',
+      ),
+      throwsA(isA<FreightCreationIntentSafetyException>().having(
+        (error) => error.code,
+        'code',
+        'capacity_requires_reconciliation',
+      )),
+    );
+    expect(jsonDecode(secureValues.values.single), hasLength(8));
+  });
+
+  test('RET-013/014 expiracao preserva identidade preparada ou ambigua',
+      () async {
+    final prepared = await FreightCreationIntentMemory.obtain(
+      {'origem': 'A'},
+      tenantId: 'tenant-a',
+      userId: 'user-a',
+      newId: () => 'request-1',
+      nowMs: 100,
+    );
+    await FreightCreationIntentMemory.markAmbiguous(prepared);
+    final recovered = await FreightCreationIntentMemory.obtain(
+      {'origem': 'A'},
+      tenantId: 'tenant-a',
+      userId: 'user-a',
+      newId: () => 'unsafe-new-id',
+      nowMs: 100 + const Duration(hours: 73).inMilliseconds,
+    );
+    expect(recovered.clientRequestId, 'request-1');
+    expect(recovered.status, 'ambiguous');
+    expect(recovered.retentionState, 'expired_requires_reconciliation');
+  });
+
+  test('RET-015/019 confirmado expirado retoma upload sem novo POST', () async {
+    final intent = await FreightCreationIntentMemory.obtain(
+      {'origem': 'A'},
+      tenantId: 'tenant-a',
+      userId: 'user-a',
+      newId: () => 'request-1',
+      nowMs: 100,
+    );
+    await FreightCreationIntentMemory.markCreated(intent, 'freight-1');
+    final recovered = await FreightCreationIntentMemory.obtain(
+      {'origem': 'A'},
+      tenantId: 'tenant-a',
+      userId: 'user-a',
+      newId: () => 'unsafe-new-id',
+      nowMs: 100 + const Duration(hours: 73).inMilliseconds,
+    );
+    expect(recovered.confirmedFreightId, 'freight-1');
+    expect(recovered.clientRequestId, 'request-1');
+  });
+
+  test('RET-016/017 storage indisponivel ou corrompido bloqueia nova chave',
+      () async {
+    var generated = false;
+    FreightCreationIntentMemory.setStorageForTesting(
+      read: (_) async => throw StateError('keystore unavailable'),
+      write: (_, __) async {},
+      delete: (_) async {},
+    );
+    await expectLater(
+      FreightCreationIntentMemory.obtain(
+        {'origem': 'A'},
+        tenantId: 'tenant-a',
+        userId: 'user-a',
+        newId: () { generated = true; return 'unsafe'; },
+      ),
+      throwsA(isA<FreightCreationIntentSafetyException>().having(
+        (error) => error.code, 'code', 'storage_unavailable')),
+    );
+    expect(generated, isFalse);
+
+    FreightCreationIntentMemory.setStorageForTesting(
+      read: (_) async => '{broken',
+      write: (_, __) async {},
+      delete: (_) async {},
+    );
+    await expectLater(
+      FreightCreationIntentMemory.obtain(
+        {'origem': 'A'},
+        tenantId: 'tenant-a',
+        userId: 'user-a',
+        newId: () { generated = true; return 'unsafe'; },
+      ),
+      throwsA(isA<FreightCreationIntentSafetyException>().having(
+        (error) => error.code, 'code', 'storage_corrupted')),
+    );
+    expect(generated, isFalse);
+  });
+
+  test('RET-018/025 falha de gravacao ocorre antes de liberar identidade',
+      () async {
+    FreightCreationIntentMemory.setStorageForTesting(
+      read: (_) async => null,
+      write: (_, __) async => throw StateError('write failed'),
+      delete: (_) async {},
+    );
+    await expectLater(
+      FreightCreationIntentMemory.obtain(
+        {'origem': 'A'},
+        tenantId: 'tenant-a',
+        userId: 'user-a',
+        newId: () => 'request-1',
+      ),
+      throwsA(isA<FreightCreationIntentSafetyException>().having(
+        (error) => error.code, 'code', 'storage_write_failed')),
+    );
+  });
+
+  test('RET-020..024 escopos, dois payloads e limpeza individual permanecem isolados',
+      () async {
+    final a = await FreightCreationIntentMemory.obtain(
+      {'origem': 'A'}, tenantId: 'tenant-a', userId: 'user-a', newId: () => 'a');
+    final b = await FreightCreationIntentMemory.obtain(
+      {'origem': 'B'}, tenantId: 'tenant-a', userId: 'user-a', newId: () => 'b');
+    final userB = await FreightCreationIntentMemory.obtain(
+      {'origem': 'A'}, tenantId: 'tenant-a', userId: 'user-b', newId: () => 'user-b');
+    final tenantB = await FreightCreationIntentMemory.obtain(
+      {'origem': 'A'}, tenantId: 'tenant-b', userId: 'user-a', newId: () => 'tenant-b');
+    await FreightCreationIntentMemory.complete(b);
+    final loggedBackIn = await FreightCreationIntentMemory.obtain(
+      {'origem': 'A'}, tenantId: 'tenant-a', userId: 'user-a', newId: () => 'never');
+    expect(loggedBackIn.clientRequestId, a.clientRequestId);
+    expect({a.clientRequestId, userB.clientRequestId, tenantB.clientRequestId}, hasLength(3));
+    expect(secureValues.values.join(), isNot(contains('origem')));
+  });
+
+  test('RET-026 mensagem de bloqueio orienta reconciliacao', () {
+    const error = FreightCreationIntentSafetyException(
+      'capacity_requires_reconciliation',
+      'Existem oito tentativas pendentes. Reconcilie antes de continuar; nenhuma pendencia foi descartada.',
+    );
+    expect(error.message, contains('Reconcilie'));
+    expect(error.message, contains('nenhuma pendencia foi descartada'));
   });
 
   test('ApiService preserva 401/403/409 e classifica 500 como ambiguo',

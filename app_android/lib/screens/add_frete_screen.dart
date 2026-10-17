@@ -123,14 +123,13 @@ class _AddFreteScreenState extends State<AddFreteScreen> {
     };
     payload['km_inicial'] = kmInicial;
     final auth = context.read<AuthProvider>();
-    var creationIntent = await FreightCreationIntentMemory.obtain(
-      payload,
-      tenantId: auth.empresaId,
-      userId: auth.uid,
-    );
-    payload['client_request_id'] = creationIntent.clientRequestId;
-
     try {
+      var creationIntent = await FreightCreationIntentMemory.obtain(
+        payload,
+        tenantId: auth.empresaId,
+        userId: auth.uid,
+      );
+      payload['client_request_id'] = creationIntent.clientRequestId;
       String freteId;
       if (_fretePendenteId != null) {
         // Retentativa: o frete já foi criado numa tentativa anterior cujo upload
@@ -229,6 +228,12 @@ class _AddFreteScreenState extends State<AddFreteScreen> {
         messenger.showSnackBar(
           const SnackBar(content: Text('Frete registrado com sucesso!')),
         );
+      }
+    } on FreightCreationIntentSafetyException catch (e) {
+      AppLogger.warning('AddFrete', e.message);
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
       }
     } catch (e) {
       AppLogger.error('AddFrete', 'erro_conexao', e);

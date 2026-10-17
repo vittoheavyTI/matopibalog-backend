@@ -394,6 +394,15 @@ exports.create = async (req, res) => {
       clientRequestId: req.body.client_request_id || null,
       authorizeReplay: ({ existing }) => replayPermitidoNoContextoAtual(req, existing),
       resolveOperationalUnit: async ({ motorista }) => {
+        const requestTenantId = req.empresa_id || req.user?.empresa_id || null;
+        if (req.user?.is_super_admin !== true
+            && requestTenantId
+            && motorista.empresa_id !== requestTenantId) {
+          throw new FreightCreationError('Motorista fora da empresa autorizada.', {
+            status: 403,
+            code: 'cross_tenant_driver_forbidden',
+          });
+        }
         if (req.user.role !== 'admin') return motorista.unidade_operacional_id || null;
         const scope = await resolverEscopoOperacional(req, { empresaId: motorista.empresa_id });
         if (escopoTemSelecaoInvalida(scope)) {

@@ -6,6 +6,7 @@ export type FreightCreationRequestState = {
   expiresAt: number;
   status: 'prepared' | 'ambiguous' | 'created';
   confirmedFreightId?: string;
+  retentionState?: 'expired_requires_reconciliation';
 };
 
 type MutableRef<T> = { current: T };
@@ -15,7 +16,18 @@ type StorageLike = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 const STORAGE_KEY = 'matopibalog_pending_freight_intents_v1';
 const MAX_PENDING = 8;
 const TTL_MS = 72 * 60 * 60 * 1000;
-let volatileRecords: FreightCreationRequestState[] = [];
+export class FreightCreationIntentSafetyError extends Error {
+  readonly code: 'storage_unavailable' | 'storage_corrupted' | 'storage_write_failed' | 'capacity_requires_reconciliation';
+
+  constructor(
+    code: 'storage_unavailable' | 'storage_corrupted' | 'storage_write_failed' | 'capacity_requires_reconciliation',
+    message: string,
+  ) {
+    super(message);
+    this.name = 'FreightCreationIntentSafetyError';
+    this.code = code;
+  }
+}
 
 const canonicalize = (value: unknown): unknown => {
   if (Array.isArray(value)) return value.map(canonicalize);
@@ -56,28 +68,70 @@ const browserStorage = (): StorageLike | null => {
   }
 };
 
-function loadRecords(storage: StorageLike | null, now: number) {
-  let parsed: FreightCreationRequestState[] = volatileRecords;
-  if (storage) {
-    try {
-      const raw = storage.getItem(STORAGE_KEY);
-      parsed = raw ? JSON.parse(raw) : [];
-    } catch {
-      parsed = [];
-    }
+const isRecord = (value: unknown): value is FreightCreationRequestState => {
+  if (!value || typeof value !== 'object') return false;
+  const record = value as Partial<FreightCreationRequestState>;
+  return typeof record.clientRequestId === 'string'
+    && typeof record.fingerprint === 'string'
+    && typeof record.scopeHash === 'string'
+    && typeof record.createdAt === 'number'
+    && typeof record.expiresAt === 'number'
+    && ['prepared', 'ambiguous', 'created'].includes(record.status || '')
+    && (record.confirmedFreightId === undefined || typeof record.confirmedFreightId === 'string');
+};
+
+function loadRecords(storage: StorageLike | null) {
+  if (!storage) {
+    throw new FreightCreationIntentSafetyError(
+      'storage_unavailable',
+      'Nao foi possivel acessar o registro seguro das tentativas. Nenhum novo frete foi enviado. Restaure o armazenamento e tente novamente.',
+    );
   }
-  const valid = Array.isArray(parsed)
-    ? parsed.filter((record) => record && record.expiresAt > now)
-    : [];
-  volatileRecords = valid;
-  return valid;
+  let raw: string | null;
+  try {
+    raw = storage.getItem(STORAGE_KEY);
+  } catch {
+    throw new FreightCreationIntentSafetyError(
+      'storage_unavailable',
+      'Nao foi possivel acessar o registro seguro das tentativas. Nenhum novo frete foi enviado. Restaure o armazenamento e tente novamente.',
+    );
+  }
+  try {
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed) || !parsed.every(isRecord)) {
+      throw new Error('invalid intent ledger');
+    }
+    return parsed;
+  } catch (error) {
+    throw new FreightCreationIntentSafetyError(
+      'storage_corrupted',
+      'O registro das tentativas anteriores esta indisponivel ou corrompido. Nenhum novo frete foi enviado; reconcilie as pendencias antes de continuar.',
+    );
+  }
 }
 
 function saveRecords(storage: StorageLike | null, records: FreightCreationRequestState[]) {
-  volatileRecords = records.slice(-MAX_PENDING);
-  if (!storage) return;
-  if (volatileRecords.length === 0) storage.removeItem(STORAGE_KEY);
-  else storage.setItem(STORAGE_KEY, JSON.stringify(volatileRecords));
+  if (!storage) {
+    throw new FreightCreationIntentSafetyError(
+      'storage_unavailable',
+      'Nao foi possivel acessar o registro seguro das tentativas. Nenhum novo frete foi enviado. Restaure o armazenamento e tente novamente.',
+    );
+  }
+  if (records.length > MAX_PENDING) {
+    throw new FreightCreationIntentSafetyError(
+      'capacity_requires_reconciliation',
+      'Existem oito tentativas pendentes. Reconcilie ou conclua uma delas antes de criar outro frete; nenhuma pendencia foi descartada.',
+    );
+  }
+  try {
+    if (records.length === 0) storage.removeItem(STORAGE_KEY);
+    else storage.setItem(STORAGE_KEY, JSON.stringify(records));
+  } catch {
+    throw new FreightCreationIntentSafetyError(
+      'storage_write_failed',
+      'Nao foi possivel preservar a identidade desta tentativa. Nenhum novo frete foi enviado. Libere o armazenamento e tente novamente.',
+    );
+  }
 }
 
 export async function getFreightCreationRequest(
@@ -93,16 +147,57 @@ export async function getFreightCreationRequest(
     fingerprintPayload(payload),
     fingerprintScope(scope),
   ]);
-  if (ref.current?.fingerprint === fingerprint && ref.current.scopeHash === scopeHash) {
-    return ref.current;
+  const records = loadRecords(storage);
+  const currentPersisted = ref.current
+    ? records.find((record) =>
+        record.clientRequestId === ref.current?.clientRequestId
+        && record.scopeHash === ref.current.scopeHash
+        && record.fingerprint === ref.current.fingerprint)
+    : undefined;
+  if (ref.current && !currentPersisted) {
+    throw new FreightCreationIntentSafetyError(
+      'storage_corrupted',
+      'A identidade desta tentativa nao esta mais no registro persistente. Nenhum novo frete foi enviado; reconcilie a pendencia antes de continuar.',
+    );
   }
-  const records = loadRecords(storage, now);
+  if (ref.current?.fingerprint === fingerprint && ref.current.scopeHash === scopeHash) {
+    const persisted = currentPersisted!;
+    if (persisted.expiresAt > now) {
+      ref.current = persisted;
+      return persisted;
+    }
+    const retained = {
+      ...persisted,
+      retentionState: 'expired_requires_reconciliation' as const,
+    };
+    saveRecords(storage, records.map((record) =>
+      record.clientRequestId === retained.clientRequestId && record.scopeHash === retained.scopeHash
+        ? retained
+        : record));
+    ref.current = retained;
+    return retained;
+  }
   const existing = records.find(
     (record) => record.fingerprint === fingerprint && record.scopeHash === scopeHash,
   );
   if (existing) {
-    ref.current = existing;
-    return existing;
+    const retained = existing.expiresAt <= now
+      ? { ...existing, retentionState: 'expired_requires_reconciliation' as const }
+      : existing;
+    if (retained !== existing) {
+      saveRecords(storage, records.map((record) =>
+        record.clientRequestId === existing.clientRequestId && record.scopeHash === existing.scopeHash
+          ? retained
+          : record));
+    }
+    ref.current = retained;
+    return retained;
+  }
+  if (records.length >= MAX_PENDING) {
+    throw new FreightCreationIntentSafetyError(
+      'capacity_requires_reconciliation',
+      'Existem oito tentativas pendentes. Reconcilie ou conclua uma delas antes de criar outro frete; nenhuma pendencia foi descartada.',
+    );
   }
   const created: FreightCreationRequestState = {
     clientRequestId: newId(),
@@ -122,7 +217,7 @@ function updateRecord(
   patch: Partial<FreightCreationRequestState>,
   storage: StorageLike | null = browserStorage(),
 ) {
-  const records = loadRecords(storage, Date.now());
+  const records = loadRecords(storage);
   const updated = { ...state, ...patch };
   saveRecords(storage, records.map((record) =>
     record.clientRequestId === state.clientRequestId && record.scopeHash === state.scopeHash
@@ -147,12 +242,12 @@ export function completeFreightCreationRequest(
   state: FreightCreationRequestState,
   storage: StorageLike | null = browserStorage(),
 ): void {
-  const records = loadRecords(storage, Date.now()).filter((record) =>
+  const records = loadRecords(storage).filter((record) =>
     record.clientRequestId !== state.clientRequestId || record.scopeHash !== state.scopeHash);
   saveRecords(storage, records);
   if (ref.current?.clientRequestId === state.clientRequestId) ref.current = null;
 }
 
 export function resetFreightCreationRequestsForTesting(): void {
-  volatileRecords = [];
+  // O ledger e sempre lido do adapter persistente; nao existe fallback volatil.
 }

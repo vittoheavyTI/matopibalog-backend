@@ -13,6 +13,7 @@ class FreightCreationIntent {
   final int expiresAtMs;
   final String status;
   final String? confirmedFreightId;
+  final String? retentionState;
 
   const FreightCreationIntent({
     required this.clientRequestId,
@@ -22,6 +23,7 @@ class FreightCreationIntent {
     required this.expiresAtMs,
     required this.status,
     this.confirmedFreightId,
+    this.retentionState,
   });
 
   Map<String, dynamic> toJson() => {
@@ -33,6 +35,7 @@ class FreightCreationIntent {
         'status': status,
         if (confirmedFreightId != null)
           'confirmedFreightId': confirmedFreightId,
+        if (retentionState != null) 'retentionState': retentionState,
       };
 
   factory FreightCreationIntent.fromJson(Map<String, dynamic> json) =>
@@ -44,11 +47,13 @@ class FreightCreationIntent {
         expiresAtMs: json['expiresAtMs'] as int,
         status: json['status'] as String,
         confirmedFreightId: json['confirmedFreightId'] as String?,
+        retentionState: json['retentionState'] as String?,
       );
 
   FreightCreationIntent copyWith({
     String? status,
     String? confirmedFreightId,
+    String? retentionState,
   }) =>
       FreightCreationIntent(
         clientRequestId: clientRequestId,
@@ -58,14 +63,26 @@ class FreightCreationIntent {
         expiresAtMs: expiresAtMs,
         status: status ?? this.status,
         confirmedFreightId: confirmedFreightId ?? this.confirmedFreightId,
+        retentionState: retentionState ?? this.retentionState,
       );
+}
+
+class FreightCreationIntentSafetyException implements Exception {
+  final String code;
+  final String message;
+
+  const FreightCreationIntentSafetyException(this.code, this.message);
+
+  @override
+  String toString() => message;
 }
 
 /// Registro minimo de intencoes pendentes no armazenamento seguro do aparelho.
 ///
 /// Persiste somente UUID, hashes opacos, timestamps, estado e a referencia do
 /// frete confirmado. Payload, rota, valores, documentos e tokens nunca entram
-/// no registro. A chave e escopada a tenant+usuario e expira em 72 horas.
+/// no registro. A chave e escopada a tenant+usuario. Apos 72 horas a entrada
+/// permanece retida e passa a exigir reconciliacao; nunca e descartada em silencio.
 class FreightCreationIntentMemory {
   static const _storageKey = 'pending_freight_creation_intents_v1';
   static const _ttl = Duration(hours: 72);
@@ -106,36 +123,58 @@ class FreightCreationIntentMemory {
   static String _payloadFingerprint(Map<String, dynamic> payload) =>
       _hash(jsonEncode(_canonicalize(payload)));
 
-  static Future<List<FreightCreationIntent>> _load(int nowMs) async {
+  static Future<List<FreightCreationIntent>> _load() async {
+    String? raw;
     try {
-      final raw = await _read(_storageKey);
+      raw = await _read(_storageKey);
+    } catch (_) {
+      throw const FreightCreationIntentSafetyException(
+        'storage_unavailable',
+        'Nao foi possivel acessar o registro seguro das tentativas. Nenhum novo frete foi enviado. Restaure o armazenamento e tente novamente.',
+      );
+    }
+    try {
       if (raw == null || raw.isEmpty) return [];
       final decoded = jsonDecode(raw);
-      if (decoded is! List) return [];
+      if (decoded is! List || decoded.any((item) => item is! Map)) {
+        throw const FormatException('invalid intent ledger');
+      }
       return decoded
-          .whereType<Map>()
           .map((item) => FreightCreationIntent.fromJson(
-                Map<String, dynamic>.from(item),
+                Map<String, dynamic>.from(item as Map),
               ))
-          .where((intent) => intent.expiresAtMs > nowMs)
           .toList();
     } catch (_) {
-      return [];
+      throw const FreightCreationIntentSafetyException(
+        'storage_corrupted',
+        'O registro das tentativas anteriores esta indisponivel ou corrompido. Nenhum novo frete foi enviado; reconcilie as pendencias antes de continuar.',
+      );
     }
   }
 
   static Future<void> _save(List<FreightCreationIntent> records) async {
-    final retained = records.length <= _maxPending
-        ? records
-        : records.sublist(records.length - _maxPending);
-    if (retained.isEmpty) {
-      await _delete(_storageKey);
-      return;
+    if (records.length > _maxPending) {
+      throw const FreightCreationIntentSafetyException(
+        'capacity_requires_reconciliation',
+        'Existem oito tentativas pendentes. Reconcilie ou conclua uma delas antes de criar outro frete; nenhuma pendencia foi descartada.',
+      );
     }
-    await _write(
-      _storageKey,
-      jsonEncode(retained.map((intent) => intent.toJson()).toList()),
-    );
+    try {
+      if (records.isEmpty) {
+        await _delete(_storageKey);
+        return;
+      }
+      await _write(
+        _storageKey,
+        jsonEncode(records.map((intent) => intent.toJson()).toList()),
+      );
+    } catch (error) {
+      if (error is FreightCreationIntentSafetyException) rethrow;
+      throw const FreightCreationIntentSafetyException(
+        'storage_write_failed',
+        'Nao foi possivel preservar a identidade desta tentativa. Nenhum novo frete foi enviado. Libere o armazenamento e tente novamente.',
+      );
+    }
   }
 
   static Future<FreightCreationIntent> obtain(
@@ -148,11 +187,27 @@ class FreightCreationIntentMemory {
     final now = nowMs ?? DateTime.now().millisecondsSinceEpoch;
     final fingerprint = _payloadFingerprint(payload);
     final scope = _scopeHash(tenantId: tenantId, userId: userId);
-    final records = await _load(now);
+    final records = await _load();
     for (final intent in records) {
       if (intent.fingerprint == fingerprint && intent.scopeHash == scope) {
-        return intent;
+        if (intent.expiresAtMs > now) return intent;
+        final retained = intent.copyWith(
+          retentionState: 'expired_requires_reconciliation',
+        );
+        await _save(records
+            .map((record) => record.clientRequestId == intent.clientRequestId &&
+                    record.scopeHash == intent.scopeHash
+                ? retained
+                : record)
+            .toList());
+        return retained;
       }
+    }
+    if (records.length >= _maxPending) {
+      throw const FreightCreationIntentSafetyException(
+        'capacity_requires_reconciliation',
+        'Existem oito tentativas pendentes. Reconcilie ou conclua uma delas antes de criar outro frete; nenhuma pendencia foi descartada.',
+      );
     }
     final intent = FreightCreationIntent(
       clientRequestId: (newId ?? const Uuid().v4)(),
@@ -171,8 +226,7 @@ class FreightCreationIntentMemory {
     required String status,
     String? confirmedFreightId,
   }) async {
-    final now = DateTime.now().millisecondsSinceEpoch;
-    final records = await _load(now);
+    final records = await _load();
     final updated = intent.copyWith(
       status: status,
       confirmedFreightId: confirmedFreightId,
@@ -198,7 +252,7 @@ class FreightCreationIntentMemory {
       _update(intent, status: 'created', confirmedFreightId: freightId);
 
   static Future<void> complete(FreightCreationIntent intent) async {
-    final records = await _load(DateTime.now().millisecondsSinceEpoch);
+    final records = await _load();
     await _save(records
         .where((record) =>
             record.clientRequestId != intent.clientRequestId ||

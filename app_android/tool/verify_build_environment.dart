@@ -14,6 +14,8 @@ void main(List<String> args) {
   final endpoint = values['API_BASE_URL'] ?? '';
   final isolationVerified =
       (values['HOMOLOGATION_BACKEND_VERIFIED'] ?? '').toLowerCase() == 'true';
+  final requireWrites =
+      (values['REQUIRE_WRITES'] ?? '').toLowerCase() == 'true';
   final validation = Config.validateValues(
     environment: environment,
     endpoint: endpoint,
@@ -25,6 +27,11 @@ void main(List<String> args) {
     return;
   }
   if (environment == 'homologation' && !validation.writesAllowed) {
+    if (requireWrites) {
+      stderr.writeln('BUILD_ENV_REJECTED: ${validation.error}');
+      exitCode = 2;
+      return;
+    }
     stdout.writeln(
       'BUILD_ENV_SAFE_READONLY: homologation artifact will block writes; '
       '${validation.error}',

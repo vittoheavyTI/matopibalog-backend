@@ -74,6 +74,13 @@ class Config {
         error: 'Backend de homologacao isolado ainda nao foi atestado.',
       );
     }
+    if (environment == 'homologation') {
+      return const BuildEnvironmentValidation(
+        valid: true,
+        writesAllowed: false,
+        error: 'A declaracao de build nao comprova a identidade do backend. Escritas exigem atestacao em runtime da origem, banco, Auth e Storage isolados.',
+      );
+    }
     return const BuildEnvironmentValidation(valid: true, writesAllowed: true);
   }
 

@@ -891,7 +891,12 @@ export const GerenciamentoViagens: React.FC = () => {
       }
       if (!editingFrete && currentCreationIntent &&
           (!err.response || err.code === 'ECONNABORTED' || err.response?.status >= 500)) {
-        currentCreationIntent = markFreightCreationAmbiguous(currentCreationIntent);
+        try {
+          currentCreationIntent = markFreightCreationAmbiguous(currentCreationIntent);
+        } catch (intentError: any) {
+          alert(intentError?.message || 'Nao foi possivel preservar a identidade da tentativa. Nenhum novo frete sera enviado ate a reconciliacao.');
+          return;
+        }
         freightCreationRequestRef.current = currentCreationIntent;
         alert(
           'O resultado da criação ainda é incerto. O servidor pode ter concluído o frete. ' +
