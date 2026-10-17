@@ -240,12 +240,19 @@ test('POST /fretes percorre router, middlewares, controller e servico de produca
       fs.readFile(new URL('../migrations/088_freight_creation_idempotency.sql', import.meta.url), 'utf8'));
     await pool.query(migration);
     await pool.query(
-      `INSERT INTO empresas(id,tipo,status) VALUES ($1,'transportadora','ativo'),($2,'transportadora','ativo');
-       INSERT INTO usuarios(id,empresa_id,tipo,status) VALUES
-         ($3,$1,'admin','ativo'),($4,$1,'motorista','ativo'),($5,$2,'motorista','ativo');
-       INSERT INTO motoristas(id,placa_veiculo,percentual_comissao,empresa_id)
-       VALUES ($4,'AAA1A11',10,$1),($5,'BBB2B22',12,$2)`,
-      [ids.tenantA, ids.tenantB, ids.adminA, ids.driverA, ids.driverB],
+      `INSERT INTO empresas(id,tipo,status)
+       VALUES ($1,'transportadora','ativo'),($2,'transportadora','ativo')`,
+      [ids.tenantA, ids.tenantB],
+    );
+    await pool.query(
+      `INSERT INTO usuarios(id,empresa_id,tipo,status)
+       VALUES ($1,$2,'admin','ativo'),($3,$2,'motorista','ativo'),($4,$5,'motorista','ativo')`,
+      [ids.adminA, ids.tenantA, ids.driverA, ids.driverB, ids.tenantB],
+    );
+    await pool.query(
+      `INSERT INTO motoristas(id,placa_veiculo,percentual_comissao,empresa_id)
+       VALUES ($1,'AAA1A11',10,$2),($3,'BBB2B22',12,$4)`,
+      [ids.driverA, ids.tenantA, ids.driverB, ids.tenantB],
     );
 
     const adapter = new PgSupabaseAdapter(pool);
