@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../config.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/finance_provider.dart';
@@ -83,7 +84,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Future<void> _onboardLocationPermissionIfNeeded() async {
     if (_verificouOnboardingLocalizacao || !mounted) return;
     _verificouOnboardingLocalizacao = true;
-    final deveMostrar = await LocationTrackingService.shouldShowPermissionOnboarding();
+    final deveMostrar =
+        await LocationTrackingService.shouldShowPermissionOnboarding();
     if (!mounted || !deveMostrar) return;
     final continuar = await showDialog<bool>(
       context: context,
@@ -110,7 +112,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       await LocationTrackingService.markPermissionOnboardingShown();
       return;
     }
-    final result = await LocationTrackingService.requestPermissionFromOnboarding();
+    final result =
+        await LocationTrackingService.requestPermissionFromOnboarding();
     if (!mounted) return;
     if (result == LocationTrackingStartResult.deniedForever ||
         result == LocationTrackingStartResult.approximateOnly) {
@@ -133,10 +136,13 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   Future<void> _navegarPara(BuildContext context, Widget tela) async {
     Navigator.of(context).pop();
-    final alterou = await Navigator.of(context).push(MaterialPageRoute(builder: (_) => tela));
+    final alterou = await Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => tela));
     // Só recarrega se a tela sinalizou alteração (pop(context, true)).
     // Perfil/Histórico/Notificações não alteram dados → não disparam reload.
-    if (alterou == true && context.mounted) context.read<FinanceProvider>().loadData();
+    if (alterou == true && context.mounted) {
+      context.read<FinanceProvider>().loadData();
+    }
   }
 
   /// Abre uma tela de lançamento (Despesa/Abastecimento/Vale) garantindo que o
@@ -194,7 +200,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               textColor: Colors.white,
               label: Text(
                 _naoLidas > 99 ? '99+' : '$_naoLidas',
-                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                style:
+                    const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
               ),
               child: const Icon(Icons.notifications),
             ),
@@ -207,13 +214,17 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           children: [
             UserAccountsDrawerHeader(
               decoration: const BoxDecoration(color: Color(0xFF1B5E20)),
-              accountName: Text(auth.nome, style: const TextStyle(fontWeight: FontWeight.bold)),
+              accountName: Text(auth.nome,
+                  style: const TextStyle(fontWeight: FontWeight.bold)),
               accountEmail: const Text('Matopiba Log'),
               currentAccountPicture: CircleAvatar(
                 backgroundColor: const Color(0xFF827717),
-                backgroundImage: auth.fotoUrl.isNotEmpty ? NetworkImage(auth.fotoUrl) : null,
+                backgroundImage:
+                    auth.fotoUrl.isNotEmpty ? NetworkImage(auth.fotoUrl) : null,
                 child: auth.fotoUrl.isEmpty
-                    ? Text(inicial, style: const TextStyle(color: Colors.white, fontSize: 22))
+                    ? Text(inicial,
+                        style:
+                            const TextStyle(color: Colors.white, fontSize: 22))
                     : null,
               ),
             ),
@@ -228,29 +239,46 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             ListTile(
               leading: const Icon(Icons.local_shipping_outlined),
               title: const Text('Novo Frete'),
-              enabled: !finance.planoBloqueado && auth.can('freight.create'),
-              onTap: finance.planoBloqueado || !auth.can('freight.create') ? null : () {
-                AppLogger.action('menu_nav', params: {'destino': 'add_frete'});
-                _navegarPara(context, const AddFreteScreen());
-              },
+              enabled: Config.canCreateFreight &&
+                  !finance.planoBloqueado &&
+                  auth.can('freight.create'),
+              onTap: !Config.canCreateFreight ||
+                      finance.planoBloqueado ||
+                      !auth.can('freight.create')
+                  ? null
+                  : () {
+                      AppLogger.action('menu_nav',
+                          params: {'destino': 'add_frete'});
+                      _navegarPara(context, const AddFreteScreen());
+                    },
             ),
             ListTile(
               leading: const Icon(Icons.receipt_outlined),
               title: const Text('Nova Despesa'),
               enabled: !finance.planoBloqueado,
-              onTap: finance.planoBloqueado ? null : () {
-                AppLogger.action('menu_nav', params: {'destino': 'add_despesa'});
-                _novoLancamentoComFrete(context, (freteId) => AddDespesaScreen(freteId: freteId));
-              },
+              onTap: finance.planoBloqueado
+                  ? null
+                  : () {
+                      AppLogger.action('menu_nav',
+                          params: {'destino': 'add_despesa'});
+                      _novoLancamentoComFrete(context,
+                          (freteId) => AddDespesaScreen(freteId: freteId));
+                    },
             ),
             ListTile(
               leading: const Icon(Icons.local_gas_station_outlined),
               title: const Text('Novo Abastecimento'),
               enabled: !finance.planoBloqueado,
-              onTap: finance.planoBloqueado ? null : () {
-                AppLogger.action('menu_nav', params: {'destino': 'add_abastecimento'});
-                _novoLancamentoComFrete(context, (freteId) => AddAbastecimentoScreen(freteId: freteId));
-              },
+              onTap: finance.planoBloqueado
+                  ? null
+                  : () {
+                      AppLogger.action('menu_nav',
+                          params: {'destino': 'add_abastecimento'});
+                      _novoLancamentoComFrete(
+                          context,
+                          (freteId) =>
+                              AddAbastecimentoScreen(freteId: freteId));
+                    },
             ),
             // Vale: oculto para autônomo (ele é proprietário, não faz sentido pedir vale)
             if (!auth.isAutonomo)
@@ -258,10 +286,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                 leading: const Icon(Icons.payments_outlined),
                 title: const Text('Novo Vale'),
                 enabled: !finance.planoBloqueado,
-                onTap: finance.planoBloqueado ? null : () {
-                  AppLogger.action('menu_nav', params: {'destino': 'add_vale'});
-                  _novoLancamentoComFrete(context, (freteId) => AddValeScreen(freteId: freteId));
-                },
+                onTap: finance.planoBloqueado
+                    ? null
+                    : () {
+                        AppLogger.action('menu_nav',
+                            params: {'destino': 'add_vale'});
+                        _novoLancamentoComFrete(context,
+                            (freteId) => AddValeScreen(freteId: freteId));
+                      },
               ),
             ListTile(
               leading: const Icon(Icons.history),
@@ -278,7 +310,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               leading: const Icon(Icons.local_shipping_outlined),
               title: const Text('Ofertas de viagem'),
               onTap: () {
-                AppLogger.action('menu_nav', params: {'destino': 'dispatch_ofertas'});
+                AppLogger.action('menu_nav',
+                    params: {'destino': 'dispatch_ofertas'});
                 _navegarPara(context, const DispatchOfertasScreen());
               },
             ),
@@ -290,7 +323,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                 leading: const Icon(Icons.receipt_long_outlined),
                 title: const Text('Minhas Faturas'),
                 onTap: () {
-                  AppLogger.action('menu_nav', params: {'destino': 'minhas_faturas'});
+                  AppLogger.action('menu_nav',
+                      params: {'destino': 'minhas_faturas'});
                   _navegarPara(context, const MinhasFaturasScreen());
                 },
               ),
@@ -319,13 +353,15 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               leading: const Icon(Icons.workspace_premium_outlined),
               title: const Text('Minha conta'),
               onTap: () {
-                AppLogger.action('menu_nav', params: {'destino': 'situacao_comercial'});
+                AppLogger.action('menu_nav',
+                    params: {'destino': 'situacao_comercial'});
                 _navegarPara(context, const SituacaoComercialScreen());
               },
             ),
             const Divider(),
             ListTile(
-              leading: Icon(isDark ? Icons.wb_sunny_outlined : Icons.dark_mode_outlined),
+              leading: Icon(
+                  isDark ? Icons.wb_sunny_outlined : Icons.dark_mode_outlined),
               title: Text(isDark ? 'Modo Claro' : 'Modo Escuro'),
               onTap: () {
                 Navigator.of(context).pop();

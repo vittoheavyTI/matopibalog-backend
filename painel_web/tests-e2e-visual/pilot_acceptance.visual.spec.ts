@@ -31,7 +31,7 @@ test('PA-005: ação de criação não aparece sem freight.create efetivo', asyn
   rede.assertSemRedeExterna();
 });
 
-test('PA-022/047/054: resposta perdida mantém a mesma intenção após reabrir o modal', async ({ page }, testInfo) => {
+test('PA-022/047/054: resposta perdida mantém a mesma intenção após reload e reabrir o modal', async ({ page }, testInfo) => {
   const chaves: string[] = [];
   let tentativas = 0;
   const interceptadores = [async (route: Route, url: URL) => {
@@ -62,6 +62,8 @@ test('PA-022/047/054: resposta perdida mantém a mesma intenção após reabrir 
   await submitPromise;
 
   await page.locator('.fixed.inset-0').locator('button').first().click();
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await expect(page.getByText('Gerenciamento de Fretes')).toBeVisible();
   await page.getByRole('button', { name: 'Novo Frete' }).click();
   await preencherFrete(page);
   await page.getByRole('button', { name: 'Salvar', exact: true }).click();

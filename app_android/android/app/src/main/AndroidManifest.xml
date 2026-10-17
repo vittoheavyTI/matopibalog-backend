@@ -8,7 +8,7 @@
     <!-- Android 13+ exige permissao em runtime para exibir notificacoes (push). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <application
-        android:label="Matopiba Log"
+        android:label="${appLabel}"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:allowBackup="true"

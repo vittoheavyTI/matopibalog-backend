@@ -35,6 +35,7 @@ dependencies:
   pdf: ^3.11.1
   printing: ^5.13.4
   uuid: ^4.3.3
+  crypto: ^3.0.3
   intl: ^0.18.1
   # Abre invoice_url (página de cobrança Asaas) e bank_slip_url (boleto) no
   # navegador externo, a partir da tela Minhas Faturas. Só launchUrl externo —
