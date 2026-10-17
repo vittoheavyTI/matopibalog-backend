@@ -153,6 +153,8 @@ const ids = {
   driverB: '10000000-0000-4000-8000-000000000003',
   requestA: '20000000-0000-4000-8000-000000000001',
   requestB: '20000000-0000-4000-8000-000000000002',
+  unitAllowed: '30000000-0000-4000-8000-000000000001',
+  unitForbidden: '30000000-0000-4000-8000-000000000002',
 };
 
 const baseBody = (driver = ids.driverA, overrides = {}) => ({
@@ -231,8 +233,15 @@ test('POST /fretes percorre router, middlewares, controller e servico de produca
       CREATE TABLE contratos_comerciais (
         id uuid PRIMARY KEY DEFAULT gen_random_uuid(), empresa_id uuid, status text, obrigatorio boolean
       );
-      CREATE TABLE unidades_operacionais (id uuid PRIMARY KEY, empresa_id uuid);
-      CREATE TABLE usuario_operacional_memberships (id uuid PRIMARY KEY, usuario_id uuid);
+      CREATE TABLE unidades_operacionais (
+        id uuid PRIMARY KEY, empresa_id uuid, grupo_id uuid, nome text, codigo text,
+        tipo text, status text, is_default boolean
+      );
+      CREATE TABLE usuario_operacional_memberships (
+        id uuid PRIMARY KEY, usuario_id uuid, empresa_id uuid, grupo_id uuid,
+        unidade_operacional_id uuid, regiao_operacional_id uuid,
+        scope_level text, papel text, status text
+      );
       CREATE TABLE regiao_operacional_unidades (regiao_id uuid, empresa_id uuid, unidade_operacional_id uuid, status text);
       CREATE TABLE grupo_empresarial_empresas (grupo_id uuid, empresa_id uuid, status text);
     `);
@@ -240,8 +249,8 @@ test('POST /fretes percorre router, middlewares, controller e servico de produca
       fs.readFile(new URL('../migrations/088_freight_creation_idempotency.sql', import.meta.url), 'utf8'));
     await pool.query(migration);
     await pool.query(
-      `INSERT INTO empresas(id,tipo,status)
-       VALUES ($1,'transportadora','ativo'),($2,'transportadora','ativo')`,
+      `INSERT INTO empresas(id,tipo,status,operational_scope_mode)
+       VALUES ($1,'transportadora','ativo','enforced'),($2,'transportadora','ativo','legacy')`,
       [ids.tenantA, ids.tenantB],
     );
     await pool.query(
@@ -253,6 +262,18 @@ test('POST /fretes percorre router, middlewares, controller e servico de produca
       `INSERT INTO motoristas(id,placa_veiculo,percentual_comissao,empresa_id)
        VALUES ($1,'AAA1A11',10,$2),($3,'BBB2B22',12,$4)`,
       [ids.driverA, ids.tenantA, ids.driverB, ids.tenantB],
+    );
+    await pool.query(
+      `INSERT INTO unidades_operacionais(id,empresa_id,nome,codigo,tipo,status,is_default)
+       VALUES ($1,$3,'Permitida','PA037-A','filial','ativo',true),
+              ($2,$3,'Fora do escopo','PA037-B','filial','ativo',false)`,
+      [ids.unitAllowed, ids.unitForbidden, ids.tenantA],
+    );
+    await pool.query(
+      `INSERT INTO usuario_operacional_memberships
+         (id,usuario_id,empresa_id,unidade_operacional_id,scope_level,papel,status)
+       VALUES ($1,$2,$3,$4,'LOCAL','admin','ativo')`,
+      [randomUUID(), ids.adminA, ids.tenantA, ids.unitAllowed],
     );
 
     const adapter = new PgSupabaseAdapter(pool);
@@ -308,11 +329,12 @@ test('POST /fretes percorre router, middlewares, controller e servico de produca
     });
     await t.test('API-006 unidade solicitada fora do escopo e rejeitada', async () => {
       const response = await post(baseUrl, adminToken, baseBody(ids.driverA, {
-        unidade_operacional_id: '30000000-0000-4000-8000-000000000001',
+        unidade_operacional_id: ids.unitForbidden,
       }));
       assert.equal(response.status, 403);
     });
     await t.test('API-007/008/012/016 persiste, replays e notifica uma vez', async () => {
+      const notificationsBefore = notifications.count;
       const body = baseBody(ids.driverA, { client_request_id: ids.requestA });
       const first = await post(baseUrl, adminToken, body);
       const replay = await post(baseUrl, adminToken, body);
@@ -320,7 +342,7 @@ test('POST /fretes percorre router, middlewares, controller e servico de produca
       assert.equal(replay.status, 201);
       assert.equal(replay.body.id, first.body.id);
       assert.equal(replay.body.idempotent, true);
-      assert.equal(notifications.count, 1);
+      assert.equal(notifications.count, notificationsBefore + 1);
       const audit = await pool.query(
         'SELECT empresa_id,client_request_id FROM fretes WHERE id=$1', [first.body.id],
       );
