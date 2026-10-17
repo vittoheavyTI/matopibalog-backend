@@ -30,6 +30,7 @@ class FinanceProvider extends ChangeNotifier {
   List<dynamic> _abastecimentos = [];
   List<dynamic> _vales = [];
   Map<String, dynamic> _planoStatus = {};
+  Map<String, dynamic> _contratacaoStatus = {};
 
   double get totalFretes => _totalFretes;
   double get emAndamento => _emAndamento;
@@ -52,6 +53,11 @@ class FinanceProvider extends ChangeNotifier {
   List<dynamic> get vales => _vales;
   String get statusPlano => (_planoStatus['status'] ?? '').toString();
   bool get planoBloqueado => _planoStatus['trial_expirado'] == true || const ['suspenso', 'expirado', 'bloqueado'].contains(statusPlano);
+  // Contrato comercial OBRIGATÓRIO pendente de assinatura (gate do backend). Bloqueia
+  // escritas operacionais até o dono assinar. Fail-open: sem dado → não bloqueia.
+  bool get contratoObrigatorioPendente => _contratacaoStatus['pendencia_obrigatoria'] == true;
+  // Operação bloqueada por QUALQUER motivo (plano/fatura ou contrato pendente).
+  bool get operacaoBloqueada => planoBloqueado || contratoObrigatorioPendente;
   String get responsavelRegularizacao => ((_planoStatus['regularizacao'] as Map?)?['responsavel'] ?? '').toString();
   String get suporteEmail => ((_planoStatus['regularizacao'] as Map?)?['suporte_email'] ?? '').toString();
   String get suporteWhatsapp => ((_planoStatus['regularizacao'] as Map?)?['suporte_whatsapp'] ?? '').toString();
@@ -138,6 +144,7 @@ class FinanceProvider extends ChangeNotifier {
         ApiService.getList('abastecimentos'),
         ApiService.getList('vales'),
         ApiService.getPlanoStatus(),
+        ApiService.getContratacaoStatus(),
       ]);
       cronometro.stop();
 
@@ -147,6 +154,7 @@ class FinanceProvider extends ChangeNotifier {
       final abastecimentos = results[3] as List<dynamic>;
       final vales          = results[4] as List<dynamic>;
       final planoStatus    = results[5] as Map<String, dynamic>?;
+      final contratacao    = results[6] as Map<String, dynamic>?;
 
       // Cálculo de percentual/tipo de empresa só depois das respostas chegarem
       if (profile != null) {
@@ -160,6 +168,7 @@ class FinanceProvider extends ChangeNotifier {
       _abastecimentos = abastecimentos;
       _vales = vales;
       _planoStatus = planoStatus ?? {};
+      _contratacaoStatus = contratacao ?? {};
       await LocationTrackingService.reconcileWithFretes(fretes);
 
       // Fretes cancelados continuam VISÍVEIS nas listas (_fretes, Home, Histórico,
