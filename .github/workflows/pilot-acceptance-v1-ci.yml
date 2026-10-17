@@ -69,6 +69,42 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: node --test --test-concurrency=1 tests-pg/freight_creation_idempotency_088.pgtest.mjs
 
+  api-e2e:
+    name: Freight API E2E with PostgreSQL 17
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      PILOT_API_E2E_ADMIN_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+      PILOT_API_E2E_PG: "1"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: backend/.nvmrc
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: node --test --test-concurrency=1 tests-pg/pilot_acceptance_api_e2e.pgtest.mjs
+
   frontend:
     name: Frontend tests, build and pilot browser
     runs-on: ubuntu-latest
@@ -142,7 +178,7 @@ jobs:
         working-directory: painel_web
 
   flutter:
-    name: Flutter analyze, test and release APK
+    name: Flutter analyze, test and safe homologation APK
     runs-on: ubuntu-latest
     timeout-minutes: 35
     defaults:
@@ -163,10 +199,43 @@ jobs:
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
-      - run: flutter build apk --release
+      - name: Build environment negative guards
+        shell: bash
+        run: |
+          if dart run tool/verify_build_environment.dart; then
+            echo "::error::Missing build configuration was accepted"
+            exit 1
+          fi
+          if dart run tool/verify_build_environment.dart APP_ENV=homologation API_BASE_URL=https://example-production.up.railway.app HOMOLOGATION_BACKEND_VERIFIED=true; then
+            echo "::error::Railway production target was accepted"
+            exit 1
+          fi
+          dart run tool/verify_build_environment.dart APP_ENV=homologation API_BASE_URL=https://homologacao.invalid HOMOLOGATION_BACKEND_VERIFIED=false
+      - name: Build safe homologation APK (test-signed, writes blocked)
+        env:
+          MATOPIBA_HOMOLOGATION_BUILD: "1"
+        run: >-
+          flutter build apk --release
+          --dart-define=APP_ENV=homologation
+          --dart-define=API_BASE_URL=https://homologacao.invalid
+          --dart-define=HOMOLOGATION_BACKEND_VERIFIED=false
+      - name: Verify APK identity and production endpoint absence
+        shell: bash
+        run: |
+          APK=build/app/outputs/flutter-apk/app-release.apk
+          AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)
+          "$AAPT" dump badging "$APK" | grep -F "package: name='br.com.matopibalog.app.homologation'"
+          "$AAPT" dump badging "$APK" | grep -F "application-label:'Matopiba Log Homologacao'"
+          if grep -aF "matopibalog-backend-production.up.railway.app" "$APK"; then
+            echo "::error::Production Railway endpoint found in homologation APK"
+            exit 1
+          fi
+          sha256sum "$APK" | tee build/app/outputs/flutter-apk/app-release.apk.sha256
       - uses: actions/upload-artifact@v4
         with:
-          name: pilot-acceptance-release-apk
-          path: app_android/build/app/outputs/flutter-apk/app-release.apk
+          name: pilot-acceptance-homologation-safe-apk
+          path: |
+            app_android/build/app/outputs/flutter-apk/app-release.apk
+            app_android/build/app/outputs/flutter-apk/app-release.apk.sha256
           if-no-files-found: error
           retention-days: 14
