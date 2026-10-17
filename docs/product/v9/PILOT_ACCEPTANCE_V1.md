@@ -205,3 +205,133 @@ Usar o artefato CI `pilot-acceptance-release-apk`; não usar build debug:
 - Os checks do HEAD da Draft PR são o gate técnico final desta frente.
 
 Próxima ação segura: revisar a Draft PR, baixar os artefatos sanitizados e o APK release, executar os roteiros humanos em ambiente isolado e manter qualquer operação de produção bloqueada até os gates independentes de recovery, migration, deploy, visual, dispositivo, merge e go-live.
+
+# PILOT_ACCEPTANCE_V1_HARDENING_CLOSURE
+
+## Escopo e achados reproduzidos
+
+Esta revisão parte do HEAD `175c7811554e86a99e1a2b0fee8ab690a61c005c` da Draft PR #510. As quatro hipóteses foram verificadas contra o código, sem usar o relatório anterior como autoridade:
+
+- `PAV1-REVIEW-HIGH-02=CONFIRMED`: `Config.apiBaseUrl` continha o endpoint Railway de produção e o workflow gerava um APK release com a identidade comercial e assinatura debug.
+- `PAV1-REVIEW-HIGH-03=CONFIRMED`: web e Flutter mantinham uma única intenção somente em memória, sem persistência entre reinícios, sem escopo de ator/tenant e sem suporte a múltiplas pendências.
+- `PAV1-REVIEW-GAP-04=CONFIRMED`: não havia servidor HTTP real exercitando o serviço canônico sobre PostgreSQL real.
+- `PAV1-REVIEW-GAP-05=CONFIRMED`: não existe Supabase Auth/RLS/Storage isolado disponível. Docker e Supabase CLI não estão disponíveis no executor local, e o CI desta frente possui PostgreSQL comum, não a pilha Storage oficial.
+
+A migration 088, matemática financeira, comissões, E3.8, SEC-1, RLS e grants não foram alterados.
+
+## Segurança do APK de homologação
+
+A configuração Flutter agora usa exclusivamente `--dart-define`, sem endpoint default. `APP_ENV`, `API_BASE_URL` HTTPS e a atestação `HOMOLOGATION_BACKEND_VERIFIED` formam o contrato. Em homologação, qualquer host `.up.railway.app` é recusado. Sem backend de staging aprovado, o artefato usa `https://homologacao.invalid` e `HOMOLOGATION_BACKEND_VERIFIED=false`; ele é instalável para inspeção de UI, mas bloqueia toda criação de frete.
+
+O workflow executa um preflight negativo, compila com `MATOPIBA_HOMOLOGATION_BUILD=1`, verifica o manifesto do APK e procura o endpoint Railway anterior no arquivo final. A identidade Android passa a ser `br.com.matopibalog.app.homologation`, o nome apresentado é `Matopiba Log Homologacao` e um banner visível mostra `HOMOLOGACAO`. O application ID comercial permanece como default dos builds de produção fora desse fluxo. `versionCode=1` e `versionName=1.0.0` permanecem inalterados.
+
+A assinatura release continua sendo a chave debug do projeto: `APK_SIGNING_TYPE=TEST_DEBUG_KEY`. Isso atende somente ao artefato de homologação e não constitui assinatura comercial, publicação ou prontidão de loja. `google-services.json` não integra o repositório; o build mantém o fallback já existente sem Firebase/push. As permissões Android e as integrações de câmera, scanner, localização e notificações não foram ampliadas.
+
+## Continuidade mínima e escopada da intenção
+
+Web e Flutter passaram de uma única entrada em memória para um registro de até oito intenções, com expiração de 72 horas e limpeza individual. Cada registro contém somente:
+
+- UUID da requisição;
+- SHA-256 do payload canônico;
+- SHA-256 do par tenant+usuário;
+- timestamps;
+- estado `prepared|ambiguous|created`;
+- ID do frete confirmado, quando aplicável.
+
+Não são persistidos rota, valor, placa, unidade, documentos, fotos, token, permissões ou payload bruto. A web usa armazenamento da origem para sobreviver a reload/encerramento da aba; o Flutter usa `flutter_secure_storage`. Logout mantém apenas os metadados opacos e a sessão seguinte só os encontra se tenant e usuário atuais produzirem o mesmo scope hash. A expiração remove registros antigos.
+
+Uma intenção de conteúdo diferente cria outra entrada sem substituir a anterior. Sucesso remove somente a intenção correspondente. Após o servidor confirmar a criação, o ID do frete permanece até foto/documentos e efeitos seguintes terminarem; um retry após falha de upload reusa esse frete e não repete `POST /fretes`. 401/403/409 permanecem rejeições definitivas; falha de transporte, timeout e HTTP 5xx preservam a intenção como resultado ambíguo. O backend continua revalidando permissão, tenant, ownership e escopo em cada replay.
+
+## API E2E isolada
+
+`backend/tests-pg/pilot_acceptance_api_e2e.pgtest.mjs` sobe um servidor Express real em porta efêmera, usa o serviço canônico `createFreight`, envia HTTP real com `fetch` e persiste em PostgreSQL 17 real. O adaptador de teste implementa somente a superfície Supabase usada pelo serviço e não entra no código de produção.
+
+O harness falha fechado antes de conectar quando falta habilitação, o host é remoto, o banco administrativo não é `postgres`, a porta/usuário divergem ou existem opções na URL. Depois da conexão ele exige PostgreSQL 17 recém-iniciado, superusuário esperado, endereço privado, layout oficial do container, um único banco conectável e zero relações de usuário. Só então cria um banco aleatório no namespace `pilot_api_e2e_<nonce>`; o cleanup remove somente esse banco validado.
+
+A autenticação desse teste é `SYNTHETIC_TEST_AUTH`, declarada e limitada ao processo efêmero. Portanto ele prova HTTP, validação, serviço, concorrência, persistência, tenant, permissão e idempotência, mas não prova Supabase Auth nem SEC-1 real. SEC-1 continua no workflow separado com PostgreSQL 16.
+
+## Matriz INT-001 a INT-028
+
+| Caso | Resultado | Nível e evidência | Limitação |
+| --- | --- | --- | --- |
+| INT-001 | PASS | API_E2E_PG: insert confirmado e retry convergem | Auth sintética |
+| INT-002 | PASS | Playwright: primeiro POST abortado após envio | API interceptada |
+| INT-003 | PASS | Playwright: modal fecha e reabre | API interceptada |
+| INT-004 | PASS | Unit web: novo ref/rota recupera registro | Componente |
+| INT-005 | PASS | Playwright: reload completo preserva UUID | API interceptada |
+| INT-006 | PASS | Unit web: reconstrução com storage persistido | Processo real do browser não reiniciado no CI |
+| INT-007 | PASS | Flutter host: reconstrução recupera intenção | Sem emulador |
+| INT-008 | PASS | Flutter host: nova leitura do secure storage | Sem reinício físico |
+| INT-009 | PASS | Web/Flutter unit: intenção B não substitui A | Cliente |
+| INT-010 | PASS | Web/Flutter unit: duas pendências distintas | Cliente |
+| INT-011 | PASS | Web/Flutter unit: concluir B preserva A | Cliente |
+| INT-012 | PASS | Web/Flutter unit: usuário B recebe scope distinto | Identidade sintética |
+| INT-013 | PASS | Web/Flutter unit + API_E2E_PG tenant B | Auth sintética no E2E |
+| INT-014 | PASS | Backend/SEC-1 regressão + preservação escopada | Não é Supabase Auth E2E |
+| INT-015 | PASS | API_E2E_PG revoga `freight.create` e recebe 403 | Auth sintética |
+| INT-016 | PASS | Serviço/backend existente: derivados não entram no hash | Regressão focal |
+| INT-017 | PASS | API_E2E_PG: mesma chave/payload divergente retorna 409 | Auth sintética |
+| INT-018 | PASS | Unit: payload distinto cria entrada distinta; igual reutiliza | Sem botão de descarte inseguro |
+| INT-019 | PASS | Flutter: ID confirmado persiste após criação | Falha de upload simulada por contrato |
+| INT-020 | PASS | Flutter/web: retry com ID confirmado pula novo POST | Host/componente |
+| INT-021 | PASS | Flutter: 401/403/409 definitivos; 500 ambíguo | Cliente HTTP |
+| INT-022 | PASS | Web/Flutter: rede mantém UUID e não cria outro automaticamente | Host/Playwright |
+| INT-023 | PASS | CI inspeciona APK e recusa endpoint Railway anterior | Artefato de CI |
+| INT-024 | PASS | Preflight sem configuração retorna erro | Build guard |
+| INT-025 | PASS | Workflow compila apenas identidade de homologação | Workflow dedicado |
+| INT-026 | PASS | Manifesto, label e banner `HOMOLOGACAO` | Sem aceite humano |
+| INT-027 | PASS | Registro contém somente hashes/UUID; scan de diff/APK | Sem credencial comercial |
+| INT-028 | PENDING_CI | Regressões forcedId/comissão/E3.8/SEC-1 no HEAD final | Depende do CI final |
+
+Resumo provisório antes do CI final: `PASS=27`, `FAIL=0`, `BLOCKED=0`, `PENDING_CI=1`.
+
+## PA-037 — Storage/RLS
+
+`PA-037=BLOCKED_BY_ENVIRONMENT`.
+
+Foram preservados os testes existentes de contrato, MIME, signed URL, metadata, falha parcial e cleanup do objeto recém-enviado. Não foram executados bucket público/privado, policies de `storage.objects`, negativa anônima/cross-tenant nem expiração real de signed URL em uma pilha Supabase isolada. PostgreSQL comum ou simulação do SDK não foram apresentados como prova de Storage/RLS.
+
+## Roteiro humano revisado
+
+O owner não deve instalar o APK anterior da primeira certificação. O único artefato elegível para inspeção é `pilot-acceptance-homologation-safe-apk`, identificado pelo application ID de homologação, label próprio, banner vermelho e backend deliberadamente indisponível. Sem endpoint isolado atestado, login e operações reais permanecem `BLOCKED_BY_STAGING_ENDPOINT`.
+
+Quando um endpoint isolado for aprovado, gerar novo APK com o mesmo application ID de homologação, URL HTTPS e `HOMOLOGATION_BACKEND_VERIFIED=true`; verificar login, expiração/revogação, duas intenções ambíguas, reinício do processo/aparelho, upload inicial, retry somente do upload, câmera/scanner e ausência de dados cross-tenant. Aceite físico continua decisão exclusiva do owner.
+
+## Validação e change set do fechamento
+
+Validação local no executor Windows:
+
+- backend completo: 2.220/2.220;
+- migration 088 focal sem PostgreSQL local: guard 15/15; execução real reservada ao serviço PostgreSQL 17 do CI;
+- API E2E: guard negativo aprovado; execução HTTP+PostgreSQL real reservada ao serviço PostgreSQL 17 do CI;
+- web focal: 5/5;
+- Playwright piloto: 2/2, com reload completo e rede externa bloqueada;
+- build web: aprovado; o Node 20.18 local emitiu aviso de versão mínima do Vite, enquanto o CI usa a versão de `.nvmrc`;
+- Flutter: 153/153 e `flutter analyze` sem achados;
+- frontend completo local: 324/330 na execução conjunta por seis timeouts em três arquivos sob saturação do executor; os mesmos três arquivos passaram 24/24 isoladamente com timeout ampliado. A execução Linux do CI permanece autoridade da regressão completa.
+
+Arquivos alterados ficam limitados ao workflow desta macrofrente, ao novo harness PostgreSQL, à configuração/identidade e continuidade Flutter, à continuidade web, aos testes correspondentes e a este documento. Migration 088 e código de autenticação/negócio do backend não foram modificados.
+
+Commits de implementação:
+
+- `61893b4` — `fix(pilot): harden apk and freight intent continuity`;
+- `61d76c0` — `test(pilot): add real HTTP PostgreSQL acceptance E2E`.
+
+O resultado do CI do HEAD publicado será registrado após o push, sem reescrever a evidência histórica acima.
+
+## Gates preservados
+
+`OWNER_VISUAL_GATE=PENDING`
+
+`OWNER_MOBILE_DEVICE_GATE=PENDING`
+
+`OWNER_MIGRATION_088_GATE=PENDING`
+
+`OWNER_MERGE_GATE=PENDING`
+
+`OWNER_PRODUCTION_DEPLOY_GATE=PENDING`
+
+`OWNER_PILOT_GO_LIVE_GATE=PENDING`
+`RECOVERY_STATUS=BLOCKED_BY_RECOVERY`
+
+Nenhum APK foi distribuído, nenhum serviço foi criado e nenhuma operação de produção foi executada.
