@@ -42,6 +42,13 @@ function quoteDatabase(name) {
   return `"${name}"`;
 }
 
+function isExpectedServerAddress(value) {
+  const address = String(value || '').replace(/^::ffff:/, '').replace(/\/\d+$/, '');
+  return address === '127.0.0.1' || address === '::1'
+    || /^10\./.test(address) || /^192\.168\./.test(address)
+    || /^172\.(1[6-9]|2\d|3[01])\./.test(address);
+}
+
 async function attest(admin) {
   const result = await admin.query(`
     SELECT current_database() database_name, current_user user_name,
@@ -52,9 +59,8 @@ async function attest(admin) {
            (SELECT count(*)::int FROM pg_database WHERE datallowconn AND NOT datistemplate) database_count
   `);
   const row = result.rows[0];
-  const address = String(row.server_address || '').replace(/^::ffff:/, '').replace(/\/\d+$/, '');
   if (row.database_name !== 'postgres' || row.user_name !== 'postgres'
-      || address !== '127.0.0.1' || String(row.server_port) !== '5432'
+      || !isExpectedServerAddress(row.server_address) || String(row.server_port) !== '5432'
       || Math.floor(Number(row.server_version_num) / 10000) !== 17
       || row.data_directory !== '/var/lib/postgresql/data'
       || Number(row.server_age) > 15 * 60 || row.database_count !== 1) {
@@ -173,6 +179,8 @@ test('guard da rota canonica recusa ausencia, banco inesperado e endpoints remot
   assert.throws(() => validateTarget(undefined, 'postgres://postgres:postgres@127.0.0.1:5432/postgres'), { code: 'HARNESS_DISABLED' });
   assert.throws(() => validateTarget('1', 'postgres://postgres:postgres@127.0.0.1:5432/production'), { code: 'DATABASE_REJECTED' });
   assert.throws(() => validateTarget('1', 'postgres://postgres:secret@db.example.supabase.co:5432/postgres'), { code: 'REMOTE_TARGET_REJECTED' });
+  assert.equal(isExpectedServerAddress('172.18.0.2'), true);
+  assert.equal(isExpectedServerAddress('203.0.113.10'), false);
 });
 
 if (!REQUESTED) {

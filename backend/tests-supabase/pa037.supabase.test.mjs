@@ -146,7 +146,9 @@ test('PA-037 usa Auth, PostgREST, Storage e RLS oficiais em Supabase CLI descart
     `);
     assert.equal(identity.rows[0].database_name, 'postgres');
     assert.equal(identity.rows[0].user_name, 'postgres');
-    assert.equal(String(identity.rows[0].server_port), '54322');
+    // DB_URL reaches the CLI port mapping on 54322; PostgreSQL itself listens
+    // on 5432 inside the disposable container.
+    assert.equal(String(identity.rows[0].server_port), '5432');
     assert.equal(Math.floor(Number(identity.rows[0].server_version_num) / 10000), 17);
 
     await db.query(schemaSql);
